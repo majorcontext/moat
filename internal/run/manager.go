@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/docker"
+	"github.com/andybons/agentops/internal/proxy"
 )
 
 // Default container image for agents
@@ -58,12 +61,51 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		cmd = []string{"/bin/bash"}
 	}
 
+	// Start proxy server for this run if grants are specified
+	var proxyServer *proxy.Server
+	var proxyEnv []string
+	if len(opts.Grants) > 0 {
+		p := proxy.NewProxy()
+
+		// Load credentials for granted providers
+		store, err := credential.NewFileStore(
+			credential.DefaultStoreDir(),
+			credential.DefaultEncryptionKey(),
+		)
+		if err == nil {
+			for _, grant := range opts.Grants {
+				provider := credential.Provider(strings.Split(grant, ":")[0])
+				if cred, err := store.Get(provider); err == nil {
+					// Map provider to host
+					switch provider {
+					case credential.ProviderGitHub:
+						p.SetCredential("api.github.com", "Bearer "+cred.Token)
+						p.SetCredential("github.com", "Bearer "+cred.Token)
+					}
+				}
+			}
+		}
+
+		proxyServer = proxy.NewServer(p)
+		if err := proxyServer.Start(); err != nil {
+			return nil, fmt.Errorf("starting proxy: %w", err)
+		}
+
+		proxyEnv = []string{
+			"HTTP_PROXY=http://" + proxyServer.Addr(),
+			"HTTPS_PROXY=http://" + proxyServer.Addr(),
+			"http_proxy=http://" + proxyServer.Addr(),
+			"https_proxy=http://" + proxyServer.Addr(),
+		}
+	}
+
 	// Create Docker container
 	containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
 		Name:       r.ID,
 		Image:      defaultImage,
 		Cmd:        cmd,
 		WorkingDir: "/workspace",
+		Env:        proxyEnv,
 		Mounts: []docker.MountConfig{
 			{
 				Source:   opts.Workspace,
@@ -73,6 +115,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		},
 	})
 	if err != nil {
+		// Clean up proxy server if container creation fails
+		if proxyServer != nil {
+			proxyServer.Stop(context.Background())
+		}
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
