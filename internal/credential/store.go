@@ -127,7 +127,11 @@ func (s *FileStore) List() ([]Credential, error) {
 
 // DefaultStoreDir returns the default credential store directory.
 func DefaultStoreDir() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fall back to current directory if home is unavailable
+		return filepath.Join(".", ".agentops", "credentials")
+	}
 	return filepath.Join(home, ".agentops", "credentials")
 }
 

@@ -4,6 +4,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,9 +13,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// GitHub OAuth App Client ID - users should register their own app
-// For development, this can be a test app or placeholder
-const defaultGitHubClientID = "Ov23liYourClientID"
+// getGitHubClientID returns the GitHub OAuth client ID from environment or default.
+func getGitHubClientID() string {
+	if id := os.Getenv("AGENTOPS_GITHUB_CLIENT_ID"); id != "" {
+		return id
+	}
+	// Placeholder for development - users must set AGENTOPS_GITHUB_CLIENT_ID
+	return "Ov23liYourClientID"
+}
 
 var grantCmd = &cobra.Command{
 	Use:   "grant <provider>",
@@ -60,7 +66,7 @@ func grantGitHub(scopes []string) error {
 	}
 
 	auth := &credential.GitHubDeviceAuth{
-		ClientID: defaultGitHubClientID,
+		ClientID: getGitHubClientID(),
 		Scopes:   scopes,
 	}
 
