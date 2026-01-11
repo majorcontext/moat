@@ -30,3 +30,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Claude Code local settings (user-specific permissions)
+.claude/*.local.json
+
+# Conductor
+.conductor/
+
+# Built binary
+agent
