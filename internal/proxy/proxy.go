@@ -19,8 +19,8 @@ type RequestLogger func(method, url string, statusCode int, duration time.Durati
 type Proxy struct {
 	credentials map[string]string // host -> auth header value
 	mu          sync.RWMutex
-	ca          *CA            // Optional CA for TLS interception
-	logger      RequestLogger  // Optional request logger
+	ca          *CA           // Optional CA for TLS interception
+	logger      RequestLogger // Optional request logger
 }
 
 // NewProxy creates a new auth proxy.

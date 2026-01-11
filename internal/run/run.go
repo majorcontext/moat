@@ -30,7 +30,7 @@ type Run struct {
 	Grants      []string
 	State       State
 	ContainerID string
-	ProxyServer *proxy.Server   // Auth proxy for credential injection
+	ProxyServer *proxy.Server     // Auth proxy for credential injection
 	Store       *storage.RunStore // Run data storage
 	CreatedAt   time.Time
 	StartedAt   time.Time
@@ -43,9 +43,9 @@ type Options struct {
 	Agent     string
 	Workspace string
 	Grants    []string
-	Cmd       []string         // Command to run (default: /bin/bash)
-	Config    *config.Config   // Optional agent.yaml config
-	Env       []string         // Additional environment variables (KEY=VALUE)
+	Cmd       []string       // Command to run (default: /bin/bash)
+	Config    *config.Config // Optional agent.yaml config
+	Env       []string       // Additional environment variables (KEY=VALUE)
 }
 
 // generateID creates a unique run identifier.
