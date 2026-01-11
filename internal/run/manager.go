@@ -13,6 +13,7 @@ import (
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/docker"
 	"github.com/andybons/agentops/internal/proxy"
+	"github.com/andybons/agentops/internal/storage"
 )
 
 // Default container image for agents
@@ -164,6 +165,26 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
 
+	// Create run storage
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		// Clean up container and proxy if storage creation fails
+		m.docker.RemoveContainer(ctx, containerID)
+		if proxyServer != nil {
+			proxyServer.Stop(context.Background())
+		}
+		return nil, fmt.Errorf("creating run storage: %w", err)
+	}
+	r.Store = store
+
+	// Save initial metadata
+	store.SaveMetadata(storage.Metadata{
+		Agent:     opts.Agent,
+		Workspace: opts.Workspace,
+		Grants:    opts.Grants,
+		CreatedAt: r.CreatedAt,
+	})
+
 	m.mu.Lock()
 	m.runs[r.ID] = r
 	m.mu.Unlock()
@@ -201,7 +222,7 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	return nil
 }
 
-// streamLogs streams container logs to stdout.
+// streamLogs streams container logs to stdout and storage.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.docker.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
@@ -209,7 +230,16 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 		return
 	}
 	defer logs.Close()
-	io.Copy(os.Stdout, logs)
+
+	// Write to both stdout and storage
+	var dest io.Writer = os.Stdout
+	if r.Store != nil {
+		if lw, err := r.Store.LogWriter(); err == nil {
+			dest = io.MultiWriter(os.Stdout, lw)
+			defer lw.Close()
+		}
+	}
+	io.Copy(dest, logs)
 }
 
 // Stop terminates a running run.

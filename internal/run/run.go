@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/andybons/agentops/internal/proxy"
+	"github.com/andybons/agentops/internal/storage"
 )
 
 // State represents the current state of a run.
@@ -28,7 +29,8 @@ type Run struct {
 	Grants      []string
 	State       State
 	ContainerID string
-	ProxyServer *proxy.Server // Auth proxy for credential injection
+	ProxyServer *proxy.Server   // Auth proxy for credential injection
+	Store       *storage.RunStore // Run data storage
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	StoppedAt   time.Time
