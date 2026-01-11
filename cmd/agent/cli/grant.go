@@ -23,14 +23,39 @@ func getGitHubClientID() string {
 }
 
 var grantCmd = &cobra.Command{
-	Use:   "grant <provider>",
+	Use:   "grant <provider>[:<scopes>]",
 	Short: "Grant a credential for use in runs",
 	Long: `Grant a credential that can be used by agent runs.
 
+Credentials are stored securely and injected into agent containers when
+requested via the --grant flag on 'agent run'.
+
+Supported providers:
+  github    GitHub OAuth (uses device flow for authentication)
+
+Scope format:
+  provider              Use default scopes
+  provider:scope        Single scope
+  provider:s1,s2,s3     Multiple scopes (comma-separated)
+
+GitHub scopes (see https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps):
+  repo                  Full control of private repositories (default)
+  read:user             Read user profile data
+  user:email            Access user email addresses
+  workflow              Update GitHub Action workflows
+
 Examples:
-  agent grant github                    # GitHub with default scopes
-  agent grant github:repo               # GitHub with repo scope only
-  agent grant github:repo,read:user     # GitHub with multiple scopes`,
+  # Grant GitHub access with default scopes (repo)
+  agent grant github
+
+  # Grant GitHub access with repo scope only
+  agent grant github:repo
+
+  # Grant GitHub access with multiple scopes
+  agent grant github:repo,read:user,user:email
+
+  # Use the credential in a run
+  agent run claude-code . --grant github`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }

@@ -22,13 +22,38 @@ var (
 var runCmd = &cobra.Command{
 	Use:   "run <agent> [path] [-- command]",
 	Short: "Run an agent in an isolated environment",
-	Long: `Run an agent in an isolated, ephemeral workspace.
+	Long: `Run an agent in an isolated container with workspace mounting,
+credential injection, and full observability.
+
+The agent runs in a Docker container with your workspace mounted at /workspace.
+If an agent.yaml exists in the workspace, its settings are used as defaults.
+
+Arguments:
+  <agent>      Name of the agent to run (e.g., claude-code, test)
+  [path]       Path to workspace directory (default: current directory)
+  [-- cmd]     Optional command to run instead of agent's default
 
 Examples:
+  # Run an agent on the current directory
   agent run claude-code .
-  agent run claude-code ./my-repo --grant github,aws:s3.read
-  agent run test . -- ls -la
-  agent run test . -- echo "Hello from container"`,
+
+  # Run on a specific repository
+  agent run claude-code ./my-project
+
+  # Run with GitHub credentials
+  agent run claude-code . --grant github
+
+  # Run with multiple grants
+  agent run claude-code . --grant github --grant aws:s3.read
+
+  # Run with environment variables
+  agent run test . -e DEBUG=true -e API_KEY=xxx
+
+  # Run a custom command in the container
+  agent run test . -- npm test
+
+  # Run multiple commands
+  agent run test . -- sh -c "npm install && npm test"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runAgent,
 }
