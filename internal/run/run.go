@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/storage"
 )
@@ -42,7 +43,8 @@ type Options struct {
 	Agent     string
 	Workspace string
 	Grants    []string
-	Cmd       []string // Command to run (default: /bin/bash)
+	Cmd       []string       // Command to run (default: /bin/bash)
+	Config    *config.Config // Optional agent.yaml config
 }
 
 // generateID creates a unique run identifier.

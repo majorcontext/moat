@@ -12,12 +12,10 @@ import (
 
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/docker"
+	"github.com/andybons/agentops/internal/image"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/storage"
 )
-
-// Default container image for agents
-const defaultImage = "ubuntu:22.04"
 
 // Manager handles run lifecycle operations.
 type Manager struct {
@@ -168,7 +166,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Create Docker container
 	containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
 		Name:       r.ID,
-		Image:      defaultImage,
+		Image:      image.Resolve(opts.Config),
 		Cmd:        cmd,
 		WorkingDir: "/workspace",
 		Env:        proxyEnv,

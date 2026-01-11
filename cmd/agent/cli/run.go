@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/run"
 	"github.com/spf13/cobra"
@@ -74,6 +75,22 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("workspace path %q is not a directory", absPath)
 	}
 
+	// Load agent.yaml if present
+	cfg, err := config.Load(absPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Apply config defaults
+	if cfg != nil {
+		if agentName == "" && cfg.Agent != "" {
+			agentName = cfg.Agent
+		}
+		if len(grants) == 0 && len(cfg.Grants) > 0 {
+			grants = cfg.Grants
+		}
+	}
+
 	log.Debug("preparing run",
 		"agent", agentName,
 		"workspace", absPath,
@@ -113,6 +130,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Workspace: absPath,
 		Grants:    grants,
 		Cmd:       containerCmd,
+		Config:    cfg,
 	}
 
 	// Create run
