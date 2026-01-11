@@ -2,11 +2,13 @@
 package credential
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -17,8 +19,37 @@ const (
 
 // GitHubDeviceAuth handles GitHub device flow authentication.
 type GitHubDeviceAuth struct {
-	ClientID string
-	Scopes   []string
+	ClientID   string
+	Scopes     []string
+	HTTPClient *http.Client // Optional; uses http.DefaultClient if nil
+
+	// DeviceCodeURL and TokenURL allow overriding endpoints for testing.
+	DeviceCodeURL string
+	TokenURL      string
+}
+
+// httpClient returns the HTTP client to use for requests.
+func (g *GitHubDeviceAuth) httpClient() *http.Client {
+	if g.HTTPClient != nil {
+		return g.HTTPClient
+	}
+	return http.DefaultClient
+}
+
+// deviceCodeURL returns the device code endpoint URL.
+func (g *GitHubDeviceAuth) deviceCodeURL() string {
+	if g.DeviceCodeURL != "" {
+		return g.DeviceCodeURL
+	}
+	return githubDeviceCodeURL
+}
+
+// tokenURL returns the token endpoint URL.
+func (g *GitHubDeviceAuth) tokenURL() string {
+	if g.TokenURL != "" {
+		return g.TokenURL
+	}
+	return githubTokenURL
 }
 
 // DeviceCodeResponse is the response from the device code endpoint.
@@ -42,28 +73,32 @@ type TokenResponse struct {
 func (g *GitHubDeviceAuth) RequestDeviceCode(ctx context.Context) (*DeviceCodeResponse, error) {
 	scope := "repo"
 	if len(g.Scopes) > 0 {
-		scope = ""
-		for i, s := range g.Scopes {
-			if i > 0 {
-				scope += " "
-			}
-			scope += s
-		}
+		scope = strings.Join(g.Scopes, " ")
 	}
 
-	body := fmt.Sprintf("client_id=%s&scope=%s", g.ClientID, scope)
-	req, err := http.NewRequestWithContext(ctx, "POST", githubDeviceCodeURL, bytes.NewBufferString(body))
+	// Use url.Values for proper URL encoding
+	data := url.Values{}
+	data.Set("client_id", g.ClientID)
+	data.Set("scope", scope)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", g.deviceCodeURL(), strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("requesting device code: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Check HTTP status code before decoding
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("device code request failed with status %d: %s", resp.StatusCode, string(body))
+	}
 
 	var result DeviceCodeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -102,19 +137,30 @@ func (g *GitHubDeviceAuth) PollForToken(ctx context.Context, deviceCode string, 
 }
 
 func (g *GitHubDeviceAuth) checkToken(ctx context.Context, deviceCode string) (*TokenResponse, error) {
-	body := fmt.Sprintf("client_id=%s&device_code=%s&grant_type=urn:ietf:params:oauth:grant-type:device_code", g.ClientID, deviceCode)
-	req, err := http.NewRequestWithContext(ctx, "POST", githubTokenURL, bytes.NewBufferString(body))
+	// Use url.Values for proper URL encoding
+	data := url.Values{}
+	data.Set("client_id", g.ClientID)
+	data.Set("device_code", deviceCode)
+	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+
+	req, err := http.NewRequestWithContext(ctx, "POST", g.tokenURL(), strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	// Check HTTP status code before decoding
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(body))
+	}
 
 	var result TokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
