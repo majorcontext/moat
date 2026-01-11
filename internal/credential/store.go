@@ -139,5 +139,5 @@ func DefaultStoreDir() string {
 // In production, this should use a proper key derivation or keychain.
 func DefaultEncryptionKey() []byte {
 	// For now, use a fixed key. TODO: Use system keychain.
-	return []byte("agentops-default-key-32bytes!!")
+	return []byte("agentops-default-key-32-bytes!!!")
 }

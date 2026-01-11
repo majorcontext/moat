@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -64,8 +65,29 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy server for this run if grants are specified
 	var proxyServer *proxy.Server
 	var proxyEnv []string
+	var caCertPath string
+	var mounts []docker.MountConfig
+
+	// Always mount workspace
+	mounts = append(mounts, docker.MountConfig{
+		Source:   opts.Workspace,
+		Target:   "/workspace",
+		ReadOnly: false,
+	})
+
 	if len(opts.Grants) > 0 {
 		p := proxy.NewProxy()
+
+		// Create CA for TLS interception
+		caDir := filepath.Join(credential.DefaultStoreDir(), "ca")
+		ca, err := proxy.NewCA(caDir)
+		if err != nil {
+			return nil, fmt.Errorf("creating CA: %w", err)
+		}
+		p.SetCA(ca)
+
+		// Write CA cert to temp file for mounting in container
+		caCertPath = filepath.Join(caDir, "ca.crt")
 
 		// Load credentials for granted providers
 		store, err := credential.NewFileStore(
@@ -99,6 +121,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"http_proxy=http://" + proxyHost,
 			"https_proxy=http://" + proxyHost,
 		}
+
+		// Mount CA cert for container to trust
+		mounts = append(mounts, docker.MountConfig{
+			Source:   caCertPath,
+			Target:   "/etc/ssl/certs/agentops-ca.pem",
+			ReadOnly: true,
+		})
+
+		// Set env vars for tools that support custom CA bundles
+		// SSL_CERT_FILE is used by many tools (curl, wget, etc)
+		proxyEnv = append(proxyEnv, "SSL_CERT_FILE=/etc/ssl/certs/agentops-ca.pem")
+		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE=/etc/ssl/certs/agentops-ca.pem")
+		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/agentops-ca.pem")
 	}
 
 	// Configure extra hosts to enable host.docker.internal resolution
@@ -116,13 +151,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		WorkingDir: "/workspace",
 		Env:        proxyEnv,
 		ExtraHosts: extraHosts,
-		Mounts: []docker.MountConfig{
-			{
-				Source:   opts.Workspace,
-				Target:   "/workspace",
-				ReadOnly: false,
-			},
-		},
+		Mounts:     mounts,
 	})
 	if err != nil {
 		// Clean up proxy server if container creation fails
