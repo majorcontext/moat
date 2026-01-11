@@ -238,6 +238,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 
 	select {
 	case err := <-done:
+		// Stop the proxy server if one was created
+		if r.ProxyServer != nil {
+			if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
+			}
+		}
+
 		m.mu.Lock()
 		r.State = StateStopped
 		r.StoppedAt = time.Now()
