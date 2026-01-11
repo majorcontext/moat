@@ -110,13 +110,22 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-	// Tunnel data bidirectionally
+	// Tunnel data bidirectionally with proper cleanup
+	// Use sync.Once to ensure both connections are closed when either direction finishes
+	var closeOnce sync.Once
+	closeConns := func() {
+		closeOnce.Do(func() {
+			clientConn.Close()
+			targetConn.Close()
+		})
+	}
+
 	go func() {
 		io.Copy(targetConn, clientConn)
-		targetConn.Close()
+		closeConns()
 	}()
 	go func() {
 		io.Copy(clientConn, targetConn)
-		clientConn.Close()
+		closeConns()
 	}()
 }

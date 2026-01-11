@@ -91,12 +91,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
+		// Use host.docker.internal to allow container to reach host's proxy
+		proxyHost := "host.docker.internal:" + proxyServer.Port()
 		proxyEnv = []string{
-			"HTTP_PROXY=http://" + proxyServer.Addr(),
-			"HTTPS_PROXY=http://" + proxyServer.Addr(),
-			"http_proxy=http://" + proxyServer.Addr(),
-			"https_proxy=http://" + proxyServer.Addr(),
+			"HTTP_PROXY=http://" + proxyHost,
+			"HTTPS_PROXY=http://" + proxyHost,
+			"http_proxy=http://" + proxyHost,
+			"https_proxy=http://" + proxyHost,
 		}
+	}
+
+	// Configure extra hosts to enable host.docker.internal resolution
+	// This works on Docker 20.10+ with host-gateway
+	var extraHosts []string
+	if proxyServer != nil {
+		extraHosts = []string{"host.docker.internal:host-gateway"}
 	}
 
 	// Create Docker container
@@ -106,6 +115,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Cmd:        cmd,
 		WorkingDir: "/workspace",
 		Env:        proxyEnv,
+		ExtraHosts: extraHosts,
 		Mounts: []docker.MountConfig{
 			{
 				Source:   opts.Workspace,

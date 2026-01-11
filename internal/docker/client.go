@@ -48,6 +48,7 @@ type ContainerConfig struct {
 	WorkingDir string
 	Env        []string
 	Mounts     []MountConfig
+	ExtraHosts []string // host:ip mappings (e.g., "host.docker.internal:host-gateway")
 }
 
 // MountConfig describes a volume mount.
@@ -87,6 +88,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		&container.HostConfig{
 			Mounts:      mounts,
 			NetworkMode: "bridge",
+			ExtraHosts:  cfg.ExtraHosts,
 		},
 		nil, // network config
 		nil, // platform

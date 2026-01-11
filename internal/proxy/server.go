@@ -23,8 +23,9 @@ func NewServer(proxy *Proxy) *Server {
 }
 
 // Start starts the proxy server on an available port.
+// Binds to 0.0.0.0 to allow connections from Docker containers.
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return fmt.Errorf("creating listener: %w", err)
 	}
@@ -40,9 +41,15 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Addr returns the proxy server address.
+// Addr returns the proxy server address (host:port).
 func (s *Server) Addr() string {
 	return s.addr
+}
+
+// Port returns just the port number the proxy is listening on.
+func (s *Server) Port() string {
+	_, port, _ := net.SplitHostPort(s.addr)
+	return port
 }
 
 // Stop stops the proxy server.
