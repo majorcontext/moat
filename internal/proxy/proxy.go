@@ -7,7 +7,11 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
+
+// RequestLogger is called for each proxied request.
+type RequestLogger func(method, url string, statusCode int, duration time.Duration, err error)
 
 // Proxy is an HTTP proxy that injects credentials.
 // When CA is set, it performs TLS interception for HTTPS requests
@@ -15,7 +19,8 @@ import (
 type Proxy struct {
 	credentials map[string]string // host -> auth header value
 	mu          sync.RWMutex
-	ca          *CA // Optional CA for TLS interception
+	ca          *CA            // Optional CA for TLS interception
+	logger      RequestLogger  // Optional request logger
 }
 
 // NewProxy creates a new auth proxy.
@@ -28,6 +33,11 @@ func NewProxy() *Proxy {
 // SetCA sets the CA for TLS interception.
 func (p *Proxy) SetCA(ca *CA) {
 	p.ca = ca
+}
+
+// SetLogger sets the request logger.
+func (p *Proxy) SetLogger(logger RequestLogger) {
+	p.logger = logger
 }
 
 // SetCredential sets the credential for a host.
@@ -80,6 +90,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	// Create outgoing request
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
 	if err != nil {
@@ -106,6 +118,20 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Forward request
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
+	duration := time.Since(start)
+
+	// Log the request
+	if p.logger != nil {
+		statusCode := 0
+		var errMsg error
+		if err != nil {
+			errMsg = err
+		} else {
+			statusCode = resp.StatusCode
+		}
+		p.logger(r.Method, r.URL.String(), statusCode, duration, errMsg)
+	}
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -247,7 +273,22 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.Header.Del("Proxy-Authorization")
 
 		// Forward to real server
+		start := time.Now()
 		resp, err := transport.RoundTrip(req)
+		duration := time.Since(start)
+
+		// Log the request
+		if p.logger != nil {
+			statusCode := 0
+			var errMsg error
+			if err != nil {
+				errMsg = err
+			} else {
+				statusCode = resp.StatusCode
+			}
+			p.logger(req.Method, req.URL.String(), statusCode, duration, errMsg)
+		}
+
 		if err != nil {
 			// Send error response to client
 			errResp := &http.Response{

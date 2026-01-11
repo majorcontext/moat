@@ -221,3 +221,53 @@ func (s *RunStore) ReadSpans() ([]Span, error) {
 	}
 	return spans, scanner.Err()
 }
+
+// NetworkRequest represents a logged HTTP request.
+type NetworkRequest struct {
+	Timestamp  time.Time `json:"ts"`
+	Method     string    `json:"method"`
+	URL        string    `json:"url"`
+	StatusCode int       `json:"status_code"`
+	Duration   int64     `json:"duration_ms"`
+	Error      string    `json:"error,omitempty"`
+}
+
+// WriteNetworkRequest appends a network request to the log.
+func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "network.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, _ := json.Marshal(req)
+	f.Write(data)
+	f.Write([]byte("\n"))
+	return nil
+}
+
+// ReadNetworkRequests reads all network requests.
+func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
+	f, err := os.Open(filepath.Join(s.dir, "network.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var reqs []NetworkRequest
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var req NetworkRequest
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+			continue
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs, nil
+}

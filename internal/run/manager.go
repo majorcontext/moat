@@ -110,6 +110,27 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 
 		proxyServer = proxy.NewServer(p)
+
+		// Set up request logging if storage is available
+		// Note: r.Store will be created later, so we need to capture the pointer
+		p.SetLogger(func(method, url string, statusCode int, duration time.Duration, reqErr error) {
+			if r.Store == nil {
+				return
+			}
+			errStr := ""
+			if reqErr != nil {
+				errStr = reqErr.Error()
+			}
+			r.Store.WriteNetworkRequest(storage.NetworkRequest{
+				Timestamp:  time.Now().UTC(),
+				Method:     method,
+				URL:        url,
+				StatusCode: statusCode,
+				Duration:   duration.Milliseconds(),
+				Error:      errStr,
+			})
+		})
+
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
