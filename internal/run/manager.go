@@ -123,6 +123,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	r.ContainerID = containerID
+	r.ProxyServer = proxyServer
 
 	m.mu.Lock()
 	m.runs[r.ID] = r
@@ -192,6 +193,13 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	if err := m.docker.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	// Stop the proxy server if one was created
+	if r.ProxyServer != nil {
+		if err := r.ProxyServer.Stop(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		}
 	}
 
 	m.mu.Lock()
@@ -287,6 +295,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
+	// Stop the proxy server if one was created and still running
+	if r.ProxyServer != nil {
+		if err := r.ProxyServer.Stop(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		}
+	}
+
 	m.mu.Lock()
 	delete(m.runs, runID)
 	m.mu.Unlock()
@@ -296,5 +311,14 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 // Close releases manager resources.
 func (m *Manager) Close() error {
+	// Stop all proxy servers
+	m.mu.RLock()
+	for _, r := range m.runs {
+		if r.ProxyServer != nil {
+			r.ProxyServer.Stop(context.Background())
+		}
+	}
+	m.mu.RUnlock()
+
 	return m.docker.Close()
 }

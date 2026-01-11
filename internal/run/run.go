@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"time"
+
+	"github.com/andybons/agentops/internal/proxy"
 )
 
 // State represents the current state of a run.
@@ -26,6 +28,7 @@ type Run struct {
 	Grants      []string
 	State       State
 	ContainerID string
+	ProxyServer *proxy.Server // Auth proxy for credential injection
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	StoppedAt   time.Time
