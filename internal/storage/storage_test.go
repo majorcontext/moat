@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNewRunStore(t *testing.T) {
@@ -148,5 +149,46 @@ func TestReadLogsWithOffset(t *testing.T) {
 	}
 	if entries[0].Line != "line 5" {
 		t.Errorf("Line = %q, want %q", entries[0].Line, "line 5")
+	}
+}
+
+func TestTraceSpans(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run-traces")
+
+	span1 := Span{
+		TraceID:   "trace-123",
+		SpanID:    "span-1",
+		Name:      "http.request",
+		StartTime: time.Now(),
+		EndTime:   time.Now().Add(100 * time.Millisecond),
+		Attributes: map[string]interface{}{
+			"http.method": "GET",
+			"http.url":    "https://api.github.com/user",
+		},
+	}
+	if err := s.WriteSpan(span1); err != nil {
+		t.Fatalf("WriteSpan: %v", err)
+	}
+
+	span2 := Span{
+		TraceID:   "trace-123",
+		SpanID:    "span-2",
+		ParentID:  "span-1",
+		Name:      "dns.lookup",
+		StartTime: time.Now(),
+		EndTime:   time.Now().Add(10 * time.Millisecond),
+	}
+	s.WriteSpan(span2)
+
+	spans, err := s.ReadSpans()
+	if err != nil {
+		t.Fatalf("ReadSpans: %v", err)
+	}
+	if len(spans) != 2 {
+		t.Fatalf("got %d spans, want 2", len(spans))
+	}
+	if spans[0].Name != "http.request" {
+		t.Errorf("Name = %q, want %q", spans[0].Name, "http.request")
 	}
 }

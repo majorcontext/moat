@@ -163,3 +163,61 @@ func (s *RunStore) ReadLogs(offset, limit int) ([]LogEntry, error) {
 	}
 	return entries, scanner.Err()
 }
+
+// Span represents a trace span (OpenTelemetry-compatible).
+type Span struct {
+	TraceID    string                 `json:"trace_id"`
+	SpanID     string                 `json:"span_id"`
+	ParentID   string                 `json:"parent_id,omitempty"`
+	Name       string                 `json:"name"`
+	Kind       string                 `json:"kind,omitempty"` // client, server, internal
+	StartTime  time.Time              `json:"start_time"`
+	EndTime    time.Time              `json:"end_time"`
+	Attributes map[string]interface{} `json:"attributes,omitempty"`
+	Status     string                 `json:"status,omitempty"` // ok, error
+	StatusMsg  string                 `json:"status_msg,omitempty"`
+}
+
+// WriteSpan appends a span to the trace file.
+func (s *RunStore) WriteSpan(span Span) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "traces.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return fmt.Errorf("opening trace file: %w", err)
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(span)
+	if err != nil {
+		return fmt.Errorf("marshaling span: %w", err)
+	}
+	f.Write(data)
+	f.Write([]byte("\n"))
+	return nil
+}
+
+// ReadSpans reads all spans from the trace file.
+func (s *RunStore) ReadSpans() ([]Span, error) {
+	f, err := os.Open(filepath.Join(s.dir, "traces.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("opening trace file: %w", err)
+	}
+	defer f.Close()
+
+	var spans []Span
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var span Span
+		if err := json.Unmarshal(scanner.Bytes(), &span); err != nil {
+			continue
+		}
+		spans = append(spans, span)
+	}
+	return spans, scanner.Err()
+}
