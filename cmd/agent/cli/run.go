@@ -16,6 +16,7 @@ import (
 
 var (
 	grants []string
+	runEnv []string
 )
 
 var runCmd = &cobra.Command{
@@ -35,6 +36,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
+	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -131,6 +133,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Grants:    grants,
 		Cmd:       containerCmd,
 		Config:    cfg,
+		Env:       runEnv,
 	}
 
 	// Create run

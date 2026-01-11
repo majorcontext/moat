@@ -163,6 +163,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		extraHosts = []string{"host.docker.internal:host-gateway"}
 	}
 
+	// Add config env vars
+	if opts.Config != nil {
+		for k, v := range opts.Config.Env {
+			proxyEnv = append(proxyEnv, k+"="+v)
+		}
+	}
+
+	// Add explicit env vars (highest priority - can override config)
+	proxyEnv = append(proxyEnv, opts.Env...)
+
 	// Create Docker container
 	containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
 		Name:       r.ID,

@@ -43,8 +43,9 @@ type Options struct {
 	Agent     string
 	Workspace string
 	Grants    []string
-	Cmd       []string       // Command to run (default: /bin/bash)
-	Config    *config.Config // Optional agent.yaml config
+	Cmd       []string         // Command to run (default: /bin/bash)
+	Config    *config.Config   // Optional agent.yaml config
+	Env       []string         // Additional environment variables (KEY=VALUE)
 }
 
 // generateID creates a unique run identifier.
