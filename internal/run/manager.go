@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/docker"
 	"github.com/andybons/agentops/internal/image"
@@ -73,6 +74,26 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Target:   "/workspace",
 		ReadOnly: false,
 	})
+
+	// Add mounts from config
+	if opts.Config != nil {
+		for _, mountStr := range opts.Config.Mounts {
+			m, err := config.ParseMount(mountStr)
+			if err != nil {
+				return nil, fmt.Errorf("parsing mount %q: %w", mountStr, err)
+			}
+			// Resolve relative paths against workspace
+			source := m.Source
+			if !filepath.IsAbs(source) {
+				source = filepath.Join(opts.Workspace, source)
+			}
+			mounts = append(mounts, docker.MountConfig{
+				Source:   source,
+				Target:   m.Target,
+				ReadOnly: m.ReadOnly,
+			})
+		}
+	}
 
 	if len(opts.Grants) > 0 {
 		p := proxy.NewProxy()
