@@ -124,3 +124,16 @@ func (s *FileStore) List() ([]Credential, error) {
 
 	return creds, nil
 }
+
+// DefaultStoreDir returns the default credential store directory.
+func DefaultStoreDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agentops", "credentials")
+}
+
+// DefaultEncryptionKey returns a key derived from the user's environment.
+// In production, this should use a proper key derivation or keychain.
+func DefaultEncryptionKey() []byte {
+	// For now, use a fixed key. TODO: Use system keychain.
+	return []byte("agentops-default-key-32bytes!!")
+}

@@ -38,4 +38,4 @@ go.work.sum
 .conductor/
 
 # Built binary
-agent
+/agent
