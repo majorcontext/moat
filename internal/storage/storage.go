@@ -3,9 +3,13 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -78,4 +82,84 @@ func DefaultBaseDir() string {
 		return filepath.Join(".", ".agentops", "runs")
 	}
 	return filepath.Join(homeDir, ".agentops", "runs")
+}
+
+// LogEntry represents a single log line with timestamp.
+type LogEntry struct {
+	Timestamp time.Time `json:"ts"`
+	Line      string    `json:"line"`
+}
+
+// LogWriter wraps writes to add timestamps.
+type LogWriter struct {
+	file *os.File
+	mu   sync.Mutex
+}
+
+// Write implements io.Writer, adding timestamps to each line.
+func (w *LogWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	lines := bufio.NewScanner(strings.NewReader(string(p)))
+	for lines.Scan() {
+		entry := LogEntry{
+			Timestamp: time.Now().UTC(),
+			Line:      lines.Text(),
+		}
+		data, _ := json.Marshal(entry)
+		w.file.Write(data)
+		w.file.Write([]byte("\n"))
+	}
+	return len(p), nil
+}
+
+// Close closes the underlying file.
+func (w *LogWriter) Close() error {
+	return w.file.Close()
+}
+
+// LogWriter returns a writer that timestamps log entries.
+func (s *RunStore) LogWriter() (*LogWriter, error) {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "logs.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("opening log file: %w", err)
+	}
+	return &LogWriter{file: f}, nil
+}
+
+// ReadLogs reads log entries with offset and limit.
+func (s *RunStore) ReadLogs(offset, limit int) ([]LogEntry, error) {
+	f, err := os.Open(filepath.Join(s.dir, "logs.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("opening log file: %w", err)
+	}
+	defer f.Close()
+
+	var entries []LogEntry
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		if lineNum < offset {
+			lineNum++
+			continue
+		}
+		if len(entries) >= limit {
+			break
+		}
+		var entry LogEntry
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue // Skip malformed entries
+		}
+		entries = append(entries, entry)
+		lineNum++
+	}
+	return entries, scanner.Err()
 }

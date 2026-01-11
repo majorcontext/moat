@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,5 +99,54 @@ func TestLoadMetadataPreservesAllFields(t *testing.T) {
 	}
 	if loaded.Error != meta.Error {
 		t.Errorf("Error = %q, want %q", loaded.Error, meta.Error)
+	}
+}
+
+func TestLogWriter(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run-logs")
+
+	w, err := s.LogWriter()
+	if err != nil {
+		t.Fatalf("LogWriter: %v", err)
+	}
+
+	w.Write([]byte("hello world\n"))
+	w.Write([]byte("second line\n"))
+	w.Close()
+
+	// Read back
+	entries, err := s.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].Line != "hello world" {
+		t.Errorf("Line = %q, want %q", entries[0].Line, "hello world")
+	}
+	if entries[0].Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestReadLogsWithOffset(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run-logs-offset")
+
+	w, _ := s.LogWriter()
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(w, "line %d\n", i)
+	}
+	w.Close()
+
+	// Read with offset
+	entries, _ := s.ReadLogs(5, 3)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	if entries[0].Line != "line 5" {
+		t.Errorf("Line = %q, want %q", entries[0].Line, "line 5")
 	}
 }
