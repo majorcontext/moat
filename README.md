@@ -52,22 +52,64 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it.
 
 ## Quick Start
 
+### Example: Run an AI agent that can push to GitHub
+
+Suppose you want to let an AI coding agent work on your repo and push changes—but you don't want to paste your GitHub token into the agent's environment where it could be logged, leaked, or exfiltrated.
+
+**1. Grant GitHub access (one-time setup)**
+
 ```bash
-# Grant GitHub credentials (stored securely, injected automatically)
-agent grant github
+$ agent grant github
 
-# Run an agent on the current directory
-agent run claude-code .
+To authorize, visit: https://github.com/login/device
+Enter code: ABCD-1234
 
-# Run with a custom command
-agent run test-agent . -- npm test
-
-# View logs from a run
-agent logs run-abc123
-
-# View network requests
-agent trace run-abc123
+Waiting for authorization...
+GitHub credential saved successfully
 ```
+
+This uses GitHub's device flow—you visit the URL, enter the code, and approve access. Your token is stored locally and never exposed to the agent.
+
+**2. Run the agent in an isolated container**
+
+```bash
+$ agent run my-agent ./my-project --grant github
+```
+
+What happens:
+- Your `./my-project` directory is mounted into a Docker container at `/workspace`
+- A TLS-intercepting proxy starts and injects your GitHub token into API requests
+- The agent runs with full GitHub access, but the token never appears in its environment
+
+**3. The agent works normally—credentials are invisible**
+
+Inside the container, the agent just uses `git push` or calls the GitHub API. The proxy transparently adds `Authorization: Bearer <token>` to matching requests. The agent's logs, environment variables, and process memory never contain the raw token.
+
+**4. Review what happened**
+
+```bash
+# See container output
+$ agent logs
+
+# See all GitHub API calls the agent made
+$ agent trace --network
+```
+
+Sample network trace output:
+```
+[10:23:41.127] POST https://github.com/git-receive-pack 200 (1203ms)
+[10:23:44.512] GET https://api.github.com/user 200 (89ms)
+[10:23:45.891] POST https://api.github.com/repos/you/my-project/pulls 201 (142ms)
+```
+
+### Why this matters
+
+| Without AgentOps | With AgentOps |
+|------------------|---------------|
+| Token in env vars—visible to agent | Token injected at network layer—invisible |
+| Agent could log/exfiltrate credentials | Credentials never in agent's memory |
+| No record of API calls | Full network trace for auditing |
+| Runs on your machine | Isolated container with mounted workspace |
 
 ## Configuration
 
@@ -108,7 +150,7 @@ Run an agent in an isolated container.
 agent run <agent> [path] [flags] [-- command]
 
 # Examples
-agent run claude-code .                    # Run on current directory
+agent run my-agent .                       # Run on current directory
 agent run test . --grant github            # Run with GitHub credentials
 agent run test . -e DEBUG=true             # Run with environment variable
 agent run test . -- pytest -v              # Run custom command

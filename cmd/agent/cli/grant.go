@@ -52,7 +52,7 @@ Examples:
   agent grant github:repo,read:user,user:email
 
   # Use the credential in a run
-  agent run claude-code . --grant github`,
+  agent run my-agent . --grant github`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }

@@ -65,6 +65,13 @@ golangci-lint run
 - Users shouldn't have to search docs to understand what went wrong
 - Include actionable steps: what env var to set, what command to run, where to find more info
 
+## Documentation
+
+- Use generic placeholder names in examples (e.g., `my-agent`, `my-project`) rather than product-specific names that imply dependencies
+- Examples should tell a story: explain the problem being solved, show what happens at each step, and include sample output
+- When showing CLI commands, include the expected output so users know what to expect
+- **Documentation must match actual behavior.** When writing or updating docs, verify claims against the code. Check output formats, confirm flows work as described, and test sample commands. Inaccurate docs erode trust.
+
 ## Git Commits
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) format: `type(scope): description`

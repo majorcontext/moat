@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 The core abstraction is a run — a sealed, ephemeral workspace containing
 code, dependencies, tools, credentials, and observability.
 
-Core promise: agent run claude-code . just works — zero Docker knowledge,
+Core promise: agent run my-agent . just works — zero Docker knowledge,
 zero secret copying, full visibility.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		log.Init(verbose, jsonOut)

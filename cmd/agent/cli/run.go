@@ -29,31 +29,31 @@ The agent runs in a Docker container with your workspace mounted at /workspace.
 If an agent.yaml exists in the workspace, its settings are used as defaults.
 
 Arguments:
-  <agent>      Name of the agent to run (e.g., claude-code, test)
+  <agent>      Name of the agent to run (a label for this run)
   [path]       Path to workspace directory (default: current directory)
   [-- cmd]     Optional command to run instead of agent's default
 
 Examples:
   # Run an agent on the current directory
-  agent run claude-code .
+  agent run my-agent .
 
   # Run on a specific repository
-  agent run claude-code ./my-project
+  agent run my-agent ./my-project
 
   # Run with GitHub credentials
-  agent run claude-code . --grant github
+  agent run my-agent . --grant github
 
   # Run with multiple grants
-  agent run claude-code . --grant github --grant aws:s3.read
+  agent run my-agent . --grant github --grant aws:s3.read
 
   # Run with environment variables
-  agent run test . -e DEBUG=true -e API_KEY=xxx
+  agent run my-agent . -e DEBUG=true -e API_KEY=xxx
 
   # Run a custom command in the container
-  agent run test . -- npm test
+  agent run my-agent . -- npm test
 
   # Run multiple commands
-  agent run test . -- sh -c "npm install && npm test"`,
+  agent run my-agent . -- sh -c "npm install && npm test"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runAgent,
 }
