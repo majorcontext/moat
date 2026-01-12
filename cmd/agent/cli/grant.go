@@ -13,13 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// getGitHubClientID returns the GitHub OAuth client ID from environment or default.
+// getGitHubClientID returns the GitHub OAuth client ID from environment.
+// Returns empty string if not configured.
 func getGitHubClientID() string {
-	if id := os.Getenv("AGENTOPS_GITHUB_CLIENT_ID"); id != "" {
-		return id
-	}
-	// Placeholder for development - users must set AGENTOPS_GITHUB_CLIENT_ID
-	return "Ov23liYourClientID"
+	return os.Getenv("AGENTOPS_GITHUB_CLIENT_ID")
 }
 
 var grantCmd = &cobra.Command{
@@ -86,12 +83,29 @@ func runGrant(cmd *cobra.Command, args []string) error {
 }
 
 func grantGitHub(scopes []string) error {
+	clientID := getGitHubClientID()
+	if clientID == "" {
+		return fmt.Errorf(`GitHub OAuth App not configured
+
+To use 'agent grant github', set the AGENTOPS_GITHUB_CLIENT_ID environment variable:
+
+  export AGENTOPS_GITHUB_CLIENT_ID="your-client-id"
+
+To create a GitHub OAuth App:
+  1. Go to https://github.com/settings/developers
+  2. Click "New OAuth App"
+  3. Enable "Device Flow" in the app settings
+  4. Copy the Client ID
+
+See README.md for detailed setup instructions.`)
+	}
+
 	if len(scopes) == 0 {
 		scopes = []string{"repo"}
 	}
 
 	auth := &credential.GitHubDeviceAuth{
-		ClientID: getGitHubClientID(),
+		ClientID: clientID,
 		Scopes:   scopes,
 	}
 
