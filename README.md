@@ -120,19 +120,33 @@ agent revoke <provider>
 View logs from a run.
 
 ```bash
-agent logs <run-id> [flags]
+agent logs [run-id] [flags]
+
+# Examples
+agent logs                      # Logs from most recent run
+agent logs run-abc123           # Logs from specific run
+agent logs -f                   # Follow logs (like tail -f)
+agent logs -n 50                # Show last 50 lines
 
 # Flags
 --follow, -f    Follow log output
---tail, -n      Number of lines to show (default: 100)
+--lines, -n     Number of lines to show (default: 100)
 ```
 
 ### `agent trace`
 
-View network requests from a run.
+View trace spans and network requests from a run.
 
 ```bash
-agent trace <run-id>
+agent trace [run-id] [flags]
+
+# Examples
+agent trace                     # Traces from most recent run
+agent trace run-abc123          # Traces from specific run
+agent trace --network           # Show network requests
+
+# Flags
+--network       Show network requests instead of traces
 ```
 
 ### `agent list`
@@ -148,7 +162,9 @@ agent list
 Stop a running agent.
 
 ```bash
-agent stop <run-id>
+agent stop [run-id]
+
+# If no run-id provided, stops the most recent running run
 ```
 
 ### `agent destroy`
@@ -156,7 +172,9 @@ agent stop <run-id>
 Remove a stopped run and its resources.
 
 ```bash
-agent destroy <run-id>
+agent destroy [run-id]
+
+# The run must be stopped before it can be destroyed
 ```
 
 ## How It Works
