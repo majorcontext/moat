@@ -30,6 +30,12 @@ golangci-lint run
 - Follow standard Go conventions and `go fmt` formatting
 - Use `go vet` to catch common issues
 
+## Error Messages
+
+- Good error messages are documentation - when config is missing or something fails, tell users exactly what to set and how
+- Users shouldn't have to search docs to understand what went wrong
+- Include actionable steps: what env var to set, what command to run, where to find more info
+
 ## Git Commits
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) format: `type(scope): description`
