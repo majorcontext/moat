@@ -12,6 +12,7 @@ import (
 
 // Config represents an agent.yaml manifest.
 type Config struct {
+	Name    string            `yaml:"name,omitempty"`
 	Agent   string            `yaml:"agent"`
 	Version string            `yaml:"version,omitempty"`
 	Runtime Runtime           `yaml:"runtime,omitempty"`
