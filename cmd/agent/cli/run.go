@@ -18,6 +18,7 @@ var (
 	grants      []string
 	runEnv      []string
 	runtimeFlag string
+	nameFlag    string
 )
 
 var runCmd = &cobra.Command{
@@ -64,6 +65,7 @@ func init() {
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
 	runCmd.Flags().StringVar(&runtimeFlag, "runtime", "", "runtime language:version (e.g., python:3.11, node:20, go:1.22)")
+	runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from agent.yaml or random)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -122,6 +124,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		cfg.Runtime = *rt
 	}
 
+	// Determine agent name: --name flag > config.Name > random
+	agentInstanceName := nameFlag
+	if agentInstanceName == "" && cfg != nil && cfg.Name != "" {
+		agentInstanceName = cfg.Name
+	}
+	// Random name generation happens in manager.Create if still empty
+
 	// Apply config defaults
 	if cfg != nil {
 		if agentName == "" && cfg.Agent != "" {
@@ -167,6 +176,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	defer manager.Close()
 
 	opts := run.Options{
+		Name:      agentInstanceName,
 		Agent:     agentName,
 		Workspace: absPath,
 		Grants:    grants,
