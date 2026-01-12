@@ -70,13 +70,17 @@ GitHub credential saved successfully
 
 **2. Run a command that calls the GitHub API**
 
-```bash
-$ agent run my-agent . --grant github -- \
-    sh -c 'apt-get update -qq && apt-get install -qq -y curl >/dev/null && curl -s https://api.github.com/user'
+First, create an `agent.yaml` to use a Node.js base image (which includes curl):
+
+```yaml
+runtime:
+  node: 20
 ```
 
-Output:
-```json
+Then run:
+
+```bash
+$ agent run my-agent . --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -85,6 +89,16 @@ Output:
 ```
 
 The `curl` command has no authentication flags—AgentOps injected the `Authorization` header automatically.
+
+<details>
+<summary>Without agent.yaml (uses minimal Ubuntu image)</summary>
+
+```bash
+$ agent run my-agent . --grant github -- \
+    sh -c 'apt-get update -qq && apt-get install -qq -y curl >/dev/null && curl -s https://api.github.com/user'
+```
+
+</details>
 
 **3. Verify the token was never exposed**
 
