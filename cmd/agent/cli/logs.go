@@ -61,7 +61,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading logs: %w", err)
 	}
 
-	log.Info("Logs for %s", runID)
+	log.Info("displaying logs", "runID", runID)
 	for _, entry := range entries {
 		ts := entry.Timestamp.Format("15:04:05.000")
 		fmt.Printf("[%s] %s\n", ts, entry.Line)

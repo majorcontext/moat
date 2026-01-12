@@ -70,7 +70,7 @@ func showSpans(store *storage.RunStore, runID string) error {
 		return nil
 	}
 
-	log.Info("Trace spans for %s", runID)
+	log.Info("displaying trace spans", "runID", runID)
 	if len(spans) == 0 {
 		fmt.Println("No spans recorded")
 		return nil
@@ -103,7 +103,7 @@ func showNetworkRequests(store *storage.RunStore, runID string) error {
 		return nil
 	}
 
-	log.Info("Network requests for %s", runID)
+	log.Info("displaying network requests", "runID", runID)
 	if len(reqs) == 0 {
 		fmt.Println("No network requests recorded")
 		return nil
