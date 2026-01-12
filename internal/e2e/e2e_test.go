@@ -152,30 +152,45 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 
 	workspace := createTestWorkspaceWithRuntime(t, "python", "3.11")
 
-	// Use Python's urllib with explicit proxy configuration.
-	// We configure the proxy handler explicitly rather than relying on env vars
-	// because passing a custom ssl context to urlopen can bypass env var handling.
+	// Use Python's http.client with explicit CONNECT tunnel through the proxy.
+	// This gives us full control over the proxy interaction and ensures requests
+	// go through our TLS-intercepting proxy.
 	pythonScript := `
 import ssl
-import urllib.request
 import os
+from http.client import HTTPConnection, HTTPSConnection
+from urllib.parse import urlparse
 
-# Load our CA cert for TLS verification through the proxy
-ctx = ssl.create_default_context()
+# Parse proxy URL from environment
+proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
+if not proxy_url:
+    raise Exception('HTTPS_PROXY not set')
+
+proxy = urlparse(proxy_url)
+proxy_host = proxy.hostname
+proxy_port = proxy.port or 8080
+
+# Load our CA cert for TLS verification
 ca_file = os.environ.get('SSL_CERT_FILE', '/etc/ssl/certs/agentops-ca.pem')
+ctx = ssl.create_default_context()
 ctx.load_verify_locations(ca_file)
 
-# Configure proxy handler explicitly using the HTTPS_PROXY env var
-proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
-if proxy_url:
-    proxy_handler = urllib.request.ProxyHandler({'https': proxy_url})
-    https_handler = urllib.request.HTTPSHandler(context=ctx)
-    opener = urllib.request.build_opener(proxy_handler, https_handler)
-    urllib.request.install_opener(opener)
+# Connect to proxy and establish CONNECT tunnel
+conn = HTTPConnection(proxy_host, proxy_port)
+conn.set_tunnel('api.github.com', 443)
+conn.connect()
 
-# Make the request - it will now go through the proxy with our CA cert
-req = urllib.request.urlopen('https://api.github.com/zen')
-print(req.read().decode())
+# Wrap the socket with TLS using our CA
+sock = ctx.wrap_socket(conn.sock, server_hostname='api.github.com')
+
+# Create HTTPS connection using the tunneled socket
+https_conn = HTTPSConnection('api.github.com')
+https_conn.sock = sock
+
+# Make the request
+https_conn.request('GET', '/zen')
+response = https_conn.getresponse()
+print(response.read().decode())
 `
 	r, err := mgr.Create(ctx, run.Options{
 		Agent:     "e2e-test-network-capture",
