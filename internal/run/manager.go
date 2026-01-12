@@ -24,11 +24,12 @@ import (
 
 // Manager handles run lifecycle operations.
 type Manager struct {
-	runtime    container.Runtime
-	runs       map[string]*Run
-	runsByName map[string]*Run // index by name for collision detection
-	routes     *routing.RouteTable
-	mu         sync.RWMutex
+	runtime        container.Runtime
+	runs           map[string]*Run
+	runsByName     map[string]*Run // index by name for collision detection
+	routes         *routing.RouteTable
+	proxyLifecycle *routing.Lifecycle
+	mu             sync.RWMutex
 }
 
 // NewManager creates a new run manager.
@@ -39,16 +40,21 @@ func NewManager() (*Manager, error) {
 	}
 
 	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
-	routes, err := routing.NewRouteTable(proxyDir)
+
+	globalCfg, _ := config.LoadGlobal()
+	proxyPort := globalCfg.Proxy.Port
+
+	lifecycle, err := routing.NewLifecycle(proxyDir, proxyPort)
 	if err != nil {
-		return nil, fmt.Errorf("initializing route table: %w", err)
+		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
 	return &Manager{
-		runtime:    rt,
-		runs:       make(map[string]*Run),
-		runsByName: make(map[string]*Run),
-		routes:     routes,
+		runtime:        rt,
+		runs:           make(map[string]*Run),
+		runsByName:     make(map[string]*Run),
+		routes:         lifecycle.Routes(),
+		proxyLifecycle: lifecycle,
 	}, nil
 }
 
@@ -317,6 +323,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
 
+	// Ensure proxy is running if we have ports to expose
+	if len(ports) > 0 {
+		if err := m.proxyLifecycle.EnsureRunning(); err != nil {
+			// Clean up container
+			_ = m.runtime.RemoveContainer(ctx, containerID)
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("starting routing proxy: %w", err)
+		}
+	}
+
 	// Create run storage
 	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 	if err != nil {
@@ -566,6 +584,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if r.Name != "" {
 		if err := m.routes.Remove(r.Name); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: removing routes: %v\n", err)
+		}
+	}
+
+	// Check if we should stop the routing proxy (no more agents with ports)
+	if m.proxyLifecycle.ShouldStop() {
+		if err := m.proxyLifecycle.Stop(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping routing proxy: %v\n", err)
 		}
 	}
 
