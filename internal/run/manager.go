@@ -6,14 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
+	"github.com/andybons/agentops/internal/container"
 	"github.com/andybons/agentops/internal/credential"
-	"github.com/andybons/agentops/internal/docker"
 	"github.com/andybons/agentops/internal/image"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/storage"
@@ -21,28 +20,21 @@ import (
 
 // Manager handles run lifecycle operations.
 type Manager struct {
-	docker *docker.Client
-	runs   map[string]*Run
-	mu     sync.RWMutex
+	runtime container.Runtime
+	runs    map[string]*Run
+	mu      sync.RWMutex
 }
 
 // NewManager creates a new run manager.
 func NewManager() (*Manager, error) {
-	dockerClient, err := docker.NewClient()
+	rt, err := container.NewRuntime()
 	if err != nil {
-		return nil, fmt.Errorf("initializing docker: %w", err)
-	}
-
-	// Verify Docker is accessible
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := dockerClient.Ping(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("initializing container runtime: %w", err)
 	}
 
 	return &Manager{
-		docker: dockerClient,
-		runs:   make(map[string]*Run),
+		runtime: rt,
+		runs:    make(map[string]*Run),
 	}, nil
 }
 
@@ -67,10 +59,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	var proxyServer *proxy.Server
 	var proxyEnv []string
 	var caCertPath string
-	var mounts []docker.MountConfig
+	var mounts []container.MountConfig
 
 	// Always mount workspace
-	mounts = append(mounts, docker.MountConfig{
+	mounts = append(mounts, container.MountConfig{
 		Source:   opts.Workspace,
 		Target:   "/workspace",
 		ReadOnly: false,
@@ -79,19 +71,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Add mounts from config
 	if opts.Config != nil {
 		for _, mountStr := range opts.Config.Mounts {
-			m, err := config.ParseMount(mountStr)
+			mount, err := config.ParseMount(mountStr)
 			if err != nil {
 				return nil, fmt.Errorf("parsing mount %q: %w", mountStr, err)
 			}
 			// Resolve relative paths against workspace
-			source := m.Source
+			source := mount.Source
 			if !filepath.IsAbs(source) {
 				source = filepath.Join(opts.Workspace, source)
 			}
-			mounts = append(mounts, docker.MountConfig{
+			mounts = append(mounts, container.MountConfig{
 				Source:   source,
-				Target:   m.Target,
-				ReadOnly: m.ReadOnly,
+				Target:   mount.Target,
+				ReadOnly: mount.ReadOnly,
 			})
 		}
 	}
@@ -156,17 +148,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
-		// Determine proxy host based on OS:
-		// - Linux: use host network mode and 127.0.0.1 directly
-		// - macOS/Windows: use bridge network with host.docker.internal
-		var proxyHost string
-		if runtime.GOOS == "linux" {
-			// On Linux, we use --network=host so container can reach localhost
-			proxyHost = "127.0.0.1:" + proxyServer.Port()
-		} else {
-			// On macOS/Windows, Docker Desktop handles host.docker.internal
-			proxyHost = "host.docker.internal:" + proxyServer.Port()
-		}
+		// Determine proxy host based on runtime's host address
+		proxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
 
 		proxyEnv = []string{
 			"HTTP_PROXY=http://" + proxyHost,
@@ -176,7 +159,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 
 		// Mount CA cert for container to trust
-		mounts = append(mounts, docker.MountConfig{
+		mounts = append(mounts, container.MountConfig{
 			Source:   caCertPath,
 			Target:   "/etc/ssl/certs/agentops-ca.pem",
 			ReadOnly: true,
@@ -189,17 +172,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/agentops-ca.pem")
 	}
 
-	// Configure network mode and extra hosts based on OS
+	// Configure network mode and extra hosts based on runtime capabilities
 	var networkMode string
 	var extraHosts []string
 	if proxyServer != nil {
-		if runtime.GOOS == "linux" {
-			// Linux: use host network so container can reach 127.0.0.1
+		if m.runtime.SupportsHostNetwork() {
+			// Docker on Linux: use host network so container can reach 127.0.0.1
 			networkMode = "host"
 		} else {
-			// macOS/Windows: use bridge with host.docker.internal mapping
+			// Docker on macOS/Windows or Apple container: use bridge
 			networkMode = "bridge"
-			extraHosts = []string{"host.docker.internal:host-gateway"}
+			// Only Docker needs the extra host mapping
+			if m.runtime.Type() == container.RuntimeDocker {
+				extraHosts = []string{"host.docker.internal:host-gateway"}
+			}
 		}
 	}
 
@@ -213,8 +199,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Add explicit env vars (highest priority - can override config)
 	proxyEnv = append(proxyEnv, opts.Env...)
 
-	// Create Docker container
-	containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
+	// Create container
+	containerID, err := m.runtime.CreateContainer(ctx, container.ContainerConfig{
 		Name:        r.ID,
 		Image:       image.Resolve(opts.Config),
 		Cmd:         cmd,
@@ -239,7 +225,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 	if err != nil {
 		// Clean up container and proxy if storage creation fails
-		_ = m.docker.RemoveContainer(ctx, containerID)
+		_ = m.runtime.RemoveContainer(ctx, containerID)
 		if proxyServer != nil {
 			_ = proxyServer.Stop(context.Background())
 		}
@@ -273,7 +259,7 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	r.State = StateStarting
 	m.mu.Unlock()
 
-	if err := m.docker.StartContainer(ctx, r.ContainerID); err != nil {
+	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
 		m.mu.Lock()
 		r.State = StateFailed
 		r.Error = err.Error()
@@ -294,7 +280,7 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 
 // streamLogs streams container logs to stdout and storage.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
-	logs, err := m.docker.ContainerLogs(ctx, r.ContainerID)
+	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting logs: %v\n", err)
 		return
@@ -329,7 +315,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.State = StateStopping
 	m.mu.Unlock()
 
-	if err := m.docker.StopContainer(ctx, r.ContainerID); err != nil {
+	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
@@ -363,7 +349,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 	// Wait for container to exit or context cancellation
 	done := make(chan error, 1)
 	go func() {
-		exitCode, err := m.docker.WaitContainer(ctx, containerID)
+		exitCode, err := m.runtime.WaitContainer(ctx, containerID)
 		if err != nil {
 			done <- err
 			return
@@ -437,7 +423,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	m.mu.Unlock()
 
 	// Remove container
-	if err := m.docker.RemoveContainer(ctx, r.ContainerID); err != nil {
+	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
@@ -466,5 +452,5 @@ func (m *Manager) Close() error {
 	}
 	m.mu.RUnlock()
 
-	return m.docker.Close()
+	return m.runtime.Close()
 }
