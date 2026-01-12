@@ -104,6 +104,12 @@ func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
 	args = append(args, "--dns", "8.8.8.8")
 	args = append(args, "--dns", "8.8.4.4")
 
+	// Port bindings
+	for containerPort, hostIP := range cfg.PortBindings {
+		// Format: hostIP::containerPort (empty middle = random host port)
+		args = append(args, "--publish", fmt.Sprintf("%s::%d", hostIP, containerPort))
+	}
+
 	// Environment variables
 	for _, env := range cfg.Env {
 		args = append(args, "--env", env)
@@ -265,12 +271,58 @@ func (r *AppleRuntime) ContainerLogsAll(ctx context.Context, containerID string)
 }
 
 // GetPortBindings returns the actual host ports assigned to container ports.
-// Apple containers don't support port publishing in the same way Docker does,
-// so this returns an empty map.
 func (r *AppleRuntime) GetPortBindings(ctx context.Context, containerID string) (map[int]int, error) {
-	// Apple containers don't have Docker-style port bindings.
-	// Container ports are accessed via the container's IP directly.
-	return make(map[int]int), nil
+	cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("inspecting container: %w", err)
+	}
+
+	// Parse the JSON output to find port mappings
+	// Apple container inspect format may vary - try common structures
+	var info []struct {
+		Ports []struct {
+			ContainerPort int `json:"container_port"`
+			HostPort      int `json:"host_port"`
+		} `json:"ports"`
+		PortBindings map[string][]struct {
+			HostPort string `json:"HostPort"`
+		} `json:"port_bindings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+		// If parsing fails, return empty map - container may not have port bindings
+		return make(map[int]int), nil
+	}
+
+	result := make(map[int]int)
+	if len(info) > 0 {
+		// Try "ports" format first
+		for _, p := range info[0].Ports {
+			if p.ContainerPort > 0 && p.HostPort > 0 {
+				result[p.ContainerPort] = p.HostPort
+			}
+		}
+		// Try "port_bindings" format if "ports" was empty
+		if len(result) == 0 && info[0].PortBindings != nil {
+			for portKey, bindings := range info[0].PortBindings {
+				if len(bindings) == 0 {
+					continue
+				}
+				// portKey format is "3000/tcp"
+				var containerPort int
+				fmt.Sscanf(portKey, "%d", &containerPort)
+				if containerPort > 0 {
+					hostPort, _ := strconv.Atoi(bindings[0].HostPort)
+					if hostPort > 0 {
+						result[containerPort] = hostPort
+					}
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 // GetHostAddress returns the gateway IP for containers to reach the host.
