@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	grants []string
-	runEnv []string
+	grants      []string
+	runEnv      []string
+	runtimeFlag string
 )
 
 var runCmd = &cobra.Command{
@@ -34,11 +35,14 @@ Arguments:
   [-- cmd]     Optional command to run instead of agent's default
 
 Examples:
-  # Run an agent on the current directory
-  agent run my-agent .
+  # Run an agent with a Python runtime
+  agent run my-agent . --runtime python:3.11
 
-  # Run on a specific repository
-  agent run my-agent ./my-project
+  # Run with Node.js runtime and custom command
+  agent run my-agent . --runtime node:20 -- npm test
+
+  # Run with Go runtime
+  agent run my-agent . --runtime go:1.22
 
   # Run with GitHub credentials
   agent run my-agent . --grant github
@@ -48,9 +52,6 @@ Examples:
 
   # Run with environment variables
   agent run my-agent . -e DEBUG=true -e API_KEY=xxx
-
-  # Run a custom command in the container
-  agent run my-agent . -- npm test
 
   # Run multiple commands
   agent run my-agent . -- sh -c "npm install && npm test"`,
@@ -62,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
+	runCmd.Flags().StringVar(&runtimeFlag, "runtime", "", "runtime language:version (e.g., python:3.11, node:20, go:1.22)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -106,6 +108,18 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(absPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Handle --runtime flag (overrides agent.yaml runtime)
+	if runtimeFlag != "" {
+		rt, rtErr := config.ParseRuntime(runtimeFlag)
+		if rtErr != nil {
+			return rtErr
+		}
+		if cfg == nil {
+			cfg = config.DefaultConfig()
+		}
+		cfg.Runtime = *rt
 	}
 
 	// Apply config defaults

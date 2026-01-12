@@ -70,17 +70,8 @@ GitHub credential saved successfully
 
 **2. Run a command that calls the GitHub API**
 
-First, create an `agent.yaml` to use a Node.js base image (which includes curl):
-
-```yaml
-runtime:
-  node: 20
-```
-
-Then run:
-
 ```bash
-$ agent run my-agent . --grant github -- curl -s https://api.github.com/user
+$ agent run my-agent . --runtime node:20 --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -90,23 +81,15 @@ $ agent run my-agent . --grant github -- curl -s https://api.github.com/user
 
 The `curl` command has no authentication flags—AgentOps injected the `Authorization` header automatically.
 
-<details>
-<summary>Without agent.yaml (uses minimal Ubuntu image)</summary>
-
-```bash
-$ agent run my-agent . --grant github -- \
-    sh -c 'apt-get update -qq && apt-get install -qq -y curl >/dev/null && curl -s https://api.github.com/user'
-```
-
-</details>
+The `--runtime node:20` flag selects the Node.js 20 Docker image (which includes curl). You can also use `--runtime python:3.11` or `--runtime go:1.22`.
 
 **3. Verify the token was never exposed**
 
 ```bash
-$ agent run my-agent . --grant github -- env | grep -i token
+$ agent run my-agent . --runtime node:20 --grant github -- env | grep -i token
 ```
 
-Output: *(nothing)*
+Output: _(nothing)_
 
 The token isn't in the environment. It's injected at the network layer by a TLS-intercepting proxy.
 
@@ -117,6 +100,7 @@ $ agent trace --network
 ```
 
 Output:
+
 ```
 [10:23:44.512] GET https://api.github.com/user 200 (89ms)
 ```
@@ -125,12 +109,12 @@ Every HTTP request through the proxy is logged—useful for auditing what an age
 
 ### Why this matters
 
-| Traditional approach | With AgentOps |
-|---------------------|---------------|
-| `GITHUB_TOKEN=xxx` in env | Token never in container's environment |
-| Agent could log/exfiltrate token | Token injected at network layer only |
-| No visibility into API calls | Full network trace for auditing |
-| Runs directly on your machine | Isolated Docker container |
+| Traditional approach             | With AgentOps                          |
+| -------------------------------- | -------------------------------------- |
+| `GITHUB_TOKEN=xxx` in env        | Token never in container's environment |
+| Agent could log/exfiltrate token | Token injected at network layer only   |
+| No visibility into API calls     | Full network trace for auditing        |
+| Runs directly on your machine    | Isolated Docker container              |
 
 ## Configuration
 
@@ -142,7 +126,7 @@ version: 1.0.0
 
 # Runtime determines the base image
 runtime:
-  node: 20        # Uses node:20
+  node: 20 # Uses node:20
   # python: 3.11  # Uses python:3.11
   # go: 1.22      # Uses golang:1.22
 
@@ -171,13 +155,16 @@ Run an agent in an isolated container.
 agent run <agent> [path] [flags] [-- command]
 
 # Examples
-agent run my-agent .                       # Run on current directory
-agent run test . --grant github            # Run with GitHub credentials
-agent run test . -e DEBUG=true             # Run with environment variable
-agent run test . -- pytest -v              # Run custom command
+agent run my-agent . --runtime python:3.11     # Run with Python 3.11
+agent run my-agent . --runtime node:20         # Run with Node.js 20
+agent run test . --grant github                # Run with GitHub credentials
+agent run test . -e DEBUG=true                 # Run with environment variable
+agent run test . -- pytest -v                  # Run custom command
 ```
 
 **Flags:**
+
+- `--runtime` - Runtime language:version (e.g., `python:3.11`, `node:20`, `go:1.22`)
 - `--grant, -g` - Grant credential access (e.g., `github`, `github:repo,user`)
 - `--env, -e` - Set environment variable (can be repeated)
 
@@ -277,18 +264,21 @@ When you run `agent grant github`, your GitHub token is stored securely. During 
 
 ### Image Selection
 
-AgentOps selects the container base image based on your `agent.yaml` runtime config:
+AgentOps selects the container base image based on the `--runtime` flag or `agent.yaml` runtime config:
 
-| Runtime | Image |
-|---------|-------|
-| `node: 20` | `node:20` |
-| `python: 3.11` | `python:3.11` |
-| `go: 1.22` | `golang:1.22` |
-| Multiple or none | `ubuntu:22.04` |
+| Runtime                                           | Image          |
+| ------------------------------------------------- | -------------- |
+| `--runtime node:20` or `runtime.node: 20`         | `node:20`      |
+| `--runtime python:3.11` or `runtime.python: 3.11` | `python:3.11`  |
+| `--runtime go:1.22` or `runtime.go: 1.22`         | `golang:1.22`  |
+| Multiple or none                                  | `ubuntu:22.04` |
+
+The `--runtime` flag overrides `agent.yaml` settings.
 
 ### Observability
 
 Every run captures:
+
 - **Logs** - Timestamped container output (`~/.agentops/runs/<id>/logs.jsonl`)
 - **Network** - All HTTP/HTTPS requests (`~/.agentops/runs/<id>/network.jsonl`)
 - **Traces** - OpenTelemetry-compatible spans (`~/.agentops/runs/<id>/traces.jsonl`)
