@@ -158,6 +158,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	pythonScript := `
 import ssl
 import os
+import sys
 from http.client import HTTPConnection, HTTPSConnection
 from urllib.parse import urlparse
 
@@ -165,6 +166,7 @@ from urllib.parse import urlparse
 proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
 if not proxy_url:
     raise Exception('HTTPS_PROXY not set')
+print(f'Using proxy: {proxy_url}', file=sys.stderr)
 
 proxy = urlparse(proxy_url)
 proxy_host = proxy.hostname
@@ -174,23 +176,31 @@ proxy_port = proxy.port or 8080
 ca_file = os.environ.get('SSL_CERT_FILE', '/etc/ssl/certs/agentops-ca.pem')
 ctx = ssl.create_default_context()
 ctx.load_verify_locations(ca_file)
+print(f'Loaded CA from: {ca_file}', file=sys.stderr)
 
 # Connect to proxy and establish CONNECT tunnel
+print(f'Connecting to proxy {proxy_host}:{proxy_port}...', file=sys.stderr)
 conn = HTTPConnection(proxy_host, proxy_port)
 conn.set_tunnel('api.github.com', 443)
 conn.connect()
+print('CONNECT tunnel established', file=sys.stderr)
 
 # Wrap the socket with TLS using our CA
+print('Starting TLS handshake...', file=sys.stderr)
 sock = ctx.wrap_socket(conn.sock, server_hostname='api.github.com')
+print('TLS handshake complete', file=sys.stderr)
 
 # Create HTTPS connection using the tunneled socket
 https_conn = HTTPSConnection('api.github.com')
 https_conn.sock = sock
 
-# Make the request
-https_conn.request('GET', '/zen')
+# Make the request with User-Agent (required by GitHub)
+print('Sending GET /zen...', file=sys.stderr)
+https_conn.request('GET', '/zen', headers={'User-Agent': 'AgentOps-E2E-Test/1.0'})
 response = https_conn.getresponse()
-print(response.read().decode())
+print(f'Response status: {response.status}', file=sys.stderr)
+body = response.read().decode()
+print(body)
 `
 	r, err := mgr.Create(ctx, run.Options{
 		Agent:     "e2e-test-network-capture",
