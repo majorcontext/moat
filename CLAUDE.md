@@ -4,7 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AgentOps is a Go project. The codebase is currently in early development.
+AgentOps runs AI agents in isolated Docker containers with credential injection and full observability. Key features:
+
+- **Isolated Execution** - Each agent runs in its own Docker container with workspace mounting
+- **Credential Injection** - Transparent auth header injection via TLS-intercepting proxy (agent never sees raw tokens)
+- **Smart Image Selection** - Automatically selects container images based on `agent.yaml` runtime config
+- **Full Observability** - Captures logs, network requests, and traces for every run
+- **Declarative Config** - Configure agents via `agent.yaml` manifests
+
+## Architecture
+
+```
+cmd/agent/           CLI entry point (Cobra commands)
+internal/
+  config/            agent.yaml parsing, mount string parsing
+  credential/        Secure credential storage, GitHub OAuth device flow
+  docker/            Docker client wrapper for container lifecycle
+  image/             Runtime-based image selection (node/python/go → base image)
+  log/               Structured logging (slog wrapper)
+  proxy/             TLS-intercepting proxy for credential injection
+  run/               Run lifecycle management (create/start/stop/destroy)
+  storage/           Per-run storage for logs, traces, network requests
+```
+
+### Key Flows
+
+**Credential Injection:** `agent grant github` → OAuth device flow → token stored encrypted → `agent run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
+
+**Image Selection:** `agent.yaml` runtime field → `image.Resolve()` → node:X / python:X / golang:X / ubuntu:22.04
+
+**Observability:** Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
 ## Development Commands
 
