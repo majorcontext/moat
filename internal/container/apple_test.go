@@ -16,7 +16,7 @@ func TestBuildRunArgs(t *testing.T) {
 			cfg: Config{
 				Image: "ubuntu:22.04",
 			},
-			want: []string{"run", "--detach", "ubuntu:22.04"},
+			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
 		{
 			name: "with name",
@@ -24,7 +24,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Name:  "my-container",
 				Image: "python:3.11",
 			},
-			want: []string{"run", "--detach", "--name", "my-container", "python:3.11"},
+			want: []string{"run", "--detach", "--name", "my-container", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11"},
 		},
 		{
 			name: "with working directory",
@@ -32,7 +32,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image:      "node:20",
 				WorkingDir: "/workspace",
 			},
-			want: []string{"run", "--detach", "--workdir", "/workspace", "node:20"},
+			want: []string{"run", "--detach", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
 		},
 		{
 			name: "with environment variables",
@@ -40,7 +40,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image: "python:3.11",
 				Env:   []string{"DEBUG=true", "API_KEY=secret"},
 			},
-			want: []string{"run", "--detach", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
+			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
 		},
 		{
 			name: "with volume mount",
@@ -50,7 +50,7 @@ func TestBuildRunArgs(t *testing.T) {
 					{Source: "/home/user/project", Target: "/workspace"},
 				},
 			},
-			want: []string{"run", "--detach", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
+			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
 		},
 		{
 			name: "with read-only volume mount",
@@ -60,7 +60,7 @@ func TestBuildRunArgs(t *testing.T) {
 					{Source: "/home/user/data", Target: "/data", ReadOnly: true},
 				},
 			},
-			want: []string{"run", "--detach", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
+			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
 		},
 		{
 			name: "with command",
@@ -68,7 +68,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image: "python:3.11",
 				Cmd:   []string{"python", "-c", "print('hello')"},
 			},
-			want: []string{"run", "--detach", "python:3.11", "python", "-c", "print('hello')"},
+			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11", "python", "-c", "print('hello')"},
 		},
 		{
 			name: "full config",
@@ -87,6 +87,7 @@ func TestBuildRunArgs(t *testing.T) {
 				"run", "--detach",
 				"--name", "test-agent",
 				"--workdir", "/workspace",
+				"--dns", "8.8.8.8", "--dns", "8.8.4.4",
 				"--env", "DEBUG=true",
 				"--volume", "/home/user/project:/workspace",
 				"--volume", "/home/user/cache:/cache:ro",
