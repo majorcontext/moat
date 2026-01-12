@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
+	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/run"
 	"github.com/andybons/agentops/internal/storage"
 )
@@ -143,6 +144,24 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 func TestNetworkRequestsAreCaptured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+
+	// Set up a test credential for GitHub so the proxy does TLS interception.
+	// Without credentials, the proxy does transparent tunneling and doesn't log requests.
+	credStore, err := credential.NewFileStore(
+		credential.DefaultStoreDir(),
+		credential.DefaultEncryptionKey(),
+	)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	testCred := credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "test-token-for-e2e-logging", // Token value doesn't matter for logging
+	}
+	if err := credStore.Save(testCred); err != nil {
+		t.Fatalf("Save credential: %v", err)
+	}
+	defer credStore.Delete(credential.ProviderGitHub) // Clean up after test
 
 	mgr, err := run.NewManager()
 	if err != nil {

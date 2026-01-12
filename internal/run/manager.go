@@ -134,9 +134,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Set up request logging if storage is available
 		// Note: r.Store will be created later, so we need to capture the pointer
 		p.SetLogger(func(method, url string, statusCode int, duration time.Duration, reqErr error) {
-			fmt.Printf("[PROXY DEBUG] Logger called: %s %s -> %d\n", method, url, statusCode)
 			if r.Store == nil {
-				fmt.Println("[PROXY DEBUG] r.Store is nil, skipping log")
 				return
 			}
 			errStr := ""
@@ -144,7 +142,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				errStr = reqErr.Error()
 			}
 			// Best-effort logging; errors are non-fatal
-			err := r.Store.WriteNetworkRequest(storage.NetworkRequest{
+			_ = r.Store.WriteNetworkRequest(storage.NetworkRequest{
 				Timestamp:  time.Now().UTC(),
 				Method:     method,
 				URL:        url,
@@ -152,11 +150,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				Duration:   duration.Milliseconds(),
 				Error:      errStr,
 			})
-			if err != nil {
-				fmt.Printf("[PROXY DEBUG] WriteNetworkRequest error: %v\n", err)
-			} else {
-				fmt.Printf("[PROXY DEBUG] WriteNetworkRequest success: %s\n", r.Store.Dir())
-			}
 		})
 
 		if err := proxyServer.Start(); err != nil {
