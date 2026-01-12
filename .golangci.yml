@@ -1,0 +1,124 @@
+# golangci-lint configuration
+# Opinionated defaults focused on catching real bugs
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    # Essential - catch real bugs
+    - errcheck      # Unchecked errors are bugs waiting to happen
+    - govet         # Official Go vet checks
+    - staticcheck   # High-quality static analysis (includes SA* checks)
+    - gosec         # Security-focused checks
+    - ineffassign   # Detects unused assignments
+    - typecheck     # Type checking
+
+    # Code quality
+    - gofmt         # Formatting (canonical)
+    - goimports     # Import organization
+    - revive        # Fast, configurable linter (replaces golint)
+    - misspell      # Catches typos in comments/strings
+    - unconvert     # Unnecessary type conversions
+    - unparam       # Unused function parameters
+    - gosimple      # Simplification suggestions (S* checks)
+    - unused        # Unused code detection
+    - bodyclose     # HTTP response body must be closed
+    - noctx         # HTTP requests should use context
+    - prealloc      # Slice preallocation for performance
+
+linters-settings:
+  errcheck:
+    # Check type assertions
+    check-type-assertions: true
+    # Check assignments from blank identifier
+    check-blank: false
+    # Don't require checking errors on fmt.Print* functions
+    exclude-functions:
+      - fmt.Print
+      - fmt.Println
+      - fmt.Printf
+      - fmt.Fprint
+      - fmt.Fprintln
+      - fmt.Fprintf
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # Too noisy for minimal benefit
+
+  staticcheck:
+    checks: ["all"]
+
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (overlaps with errcheck)
+      - G304  # File path from variable (we do this intentionally for workspaces)
+      - G306  # WriteFile permissions >0600 (acceptable for non-sensitive data)
+      - G505  # sha1 import (used for X.509 subject key IDs per RFC 5280)
+      - G401  # sha1 usage (used for X.509 subject key IDs per RFC 5280)
+      - G101  # Hardcoded credentials (false positive on URL constants)
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+        disabled: true  # Allow multi-line helpful error messages
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+        disabled: true  # We don't require package comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unreachable-code
+
+  misspell:
+    locale: US
+
+  unparam:
+    check-exported: false  # Only check unexported functions
+
+issues:
+  # Don't limit the number of issues
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-dirs:
+    - vendor
+
+  exclude-rules:
+    # Test files are more permissive
+    - path: _test\.go
+      linters:
+        - errcheck  # Unchecked errors OK in tests
+        - unparam   # Unused parameters OK in tests
+        - govet     # Shadow warnings OK in tests
+        - noctx     # Context-less HTTP OK in tests
+
+    # Allow dot imports in test files (for testify, etc.)
+    - path: _test\.go
+      linters:
+        - revive
+      text: "dot-imports"
+
+    # E2E tests can have longer functions
+    - path: e2e/
+      linters:
+        - revive
+      text: "function-length"
