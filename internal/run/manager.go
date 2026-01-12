@@ -277,6 +277,23 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Build AGENTOPS_* environment variables for host injection
+	if len(ports) > 0 {
+		globalCfg, _ := config.LoadGlobal()
+		proxyPort := globalCfg.Proxy.Port
+
+		baseHost := fmt.Sprintf("%s.localhost:%d", agentName, proxyPort)
+		proxyEnv = append(proxyEnv, "AGENTOPS_HOST="+baseHost)
+		proxyEnv = append(proxyEnv, "AGENTOPS_URL=http://"+baseHost)
+
+		for serviceName := range ports {
+			upperName := strings.ToUpper(serviceName)
+			serviceHost := fmt.Sprintf("%s.%s.localhost:%d", serviceName, agentName, proxyPort)
+			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_HOST_%s=%s", upperName, serviceHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_URL_%s=http://%s", upperName, serviceHost))
+		}
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -345,6 +362,30 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 		r.Error = err.Error()
 		m.mu.Unlock()
 		return err
+	}
+
+	// Get actual port bindings after container starts
+	if len(r.Ports) > 0 {
+		bindings, err := m.runtime.GetPortBindings(ctx, r.ContainerID)
+		if err != nil {
+			// Log but don't fail - container is running
+			fmt.Fprintf(os.Stderr, "Warning: getting port bindings: %v\n", err)
+		} else {
+			r.HostPorts = make(map[string]int)
+			services := make(map[string]string)
+			for serviceName, containerPort := range r.Ports {
+				if hostPort, ok := bindings[containerPort]; ok {
+					r.HostPorts[serviceName] = hostPort
+					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
+				}
+			}
+			// Register routes
+			if len(services) > 0 {
+				if err := m.routes.Add(r.Name, services); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: registering routes: %v\n", err)
+				}
+			}
+		}
 	}
 
 	m.mu.Lock()
