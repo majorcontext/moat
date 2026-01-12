@@ -264,6 +264,15 @@ func (r *AppleRuntime) ContainerLogsAll(ctx context.Context, containerID string)
 	return cmd.Output()
 }
 
+// GetPortBindings returns the actual host ports assigned to container ports.
+// Apple containers don't support port publishing in the same way Docker does,
+// so this returns an empty map.
+func (r *AppleRuntime) GetPortBindings(ctx context.Context, containerID string) (map[int]int, error) {
+	// Apple containers don't have Docker-style port bindings.
+	// Container ports are accessed via the container's IP directly.
+	return make(map[int]int), nil
+}
+
 // GetHostAddress returns the gateway IP for containers to reach the host.
 func (r *AppleRuntime) GetHostAddress() string {
 	return r.hostAddress
