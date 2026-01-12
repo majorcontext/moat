@@ -562,8 +562,16 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Unregister routes for this agent
+	if r.Name != "" {
+		if err := m.routes.Remove(r.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing routes: %v\n", err)
+		}
+	}
+
 	m.mu.Lock()
 	delete(m.runs, runID)
+	delete(m.runsByName, r.Name)
 	m.mu.Unlock()
 
 	return nil
