@@ -42,7 +42,7 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 }
 
 // CreateContainer creates a new Docker container.
-func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
+func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Pull image if not present
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
 		return "", err

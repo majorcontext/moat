@@ -52,7 +52,7 @@ func (r *AppleRuntime) Ping(ctx context.Context) error {
 
 // CreateContainer creates a new Apple container.
 // Note: Apple's container CLI combines create+start in "run --detach".
-func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
+func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Ensure image is available
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
 		return "", err
@@ -85,7 +85,7 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg ContainerConfig)
 }
 
 // buildRunArgs constructs the arguments for 'container run'.
-func (r *AppleRuntime) buildRunArgs(cfg ContainerConfig) []string {
+func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
 	args := []string{"run", "--detach"}
 
 	// Container name
@@ -331,7 +331,7 @@ func (c *combinedReadCloser) Close() error {
 }
 
 // BuildRunArgs is exported for testing.
-func BuildRunArgs(cfg ContainerConfig) []string {
+func BuildRunArgs(cfg Config) []string {
 	r := &AppleRuntime{}
 	return r.buildRunArgs(cfg)
 }

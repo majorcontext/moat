@@ -200,7 +200,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	proxyEnv = append(proxyEnv, opts.Env...)
 
 	// Create container
-	containerID, err := m.runtime.CreateContainer(ctx, container.ContainerConfig{
+	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:        r.ID,
 		Image:       image.Resolve(opts.Config),
 		Cmd:         cmd,

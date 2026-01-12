@@ -55,6 +55,7 @@ linters-settings:
   gosec:
     excludes:
       - G104  # Audit errors not checked (overlaps with errcheck)
+      - G204  # Subprocess with variable args (safe: binary from LookPath, args are internal)
       - G304  # File path from variable (we do this intentionally for workspaces)
       - G306  # WriteFile permissions >0600 (acceptable for non-sensitive data)
       - G505  # sha1 import (used for X.509 subject key IDs per RFC 5280)

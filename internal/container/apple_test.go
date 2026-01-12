@@ -8,19 +8,19 @@ import (
 func TestBuildRunArgs(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  ContainerConfig
+		cfg  Config
 		want []string
 	}{
 		{
 			name: "basic image only",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image: "ubuntu:22.04",
 			},
 			want: []string{"run", "--detach", "ubuntu:22.04"},
 		},
 		{
 			name: "with name",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Name:  "my-container",
 				Image: "python:3.11",
 			},
@@ -28,7 +28,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "with working directory",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image:      "node:20",
 				WorkingDir: "/workspace",
 			},
@@ -36,7 +36,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "with environment variables",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image: "python:3.11",
 				Env:   []string{"DEBUG=true", "API_KEY=secret"},
 			},
@@ -44,7 +44,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "with volume mount",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image: "ubuntu:22.04",
 				Mounts: []MountConfig{
 					{Source: "/home/user/project", Target: "/workspace"},
@@ -54,7 +54,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "with read-only volume mount",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image: "ubuntu:22.04",
 				Mounts: []MountConfig{
 					{Source: "/home/user/data", Target: "/data", ReadOnly: true},
@@ -64,7 +64,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "with command",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Image: "python:3.11",
 				Cmd:   []string{"python", "-c", "print('hello')"},
 			},
@@ -72,7 +72,7 @@ func TestBuildRunArgs(t *testing.T) {
 		},
 		{
 			name: "full config",
-			cfg: ContainerConfig{
+			cfg: Config{
 				Name:       "test-agent",
 				Image:      "python:3.11",
 				WorkingDir: "/workspace",

@@ -25,7 +25,7 @@ type Runtime interface {
 
 	// CreateContainer creates a new container without starting it.
 	// Returns the container ID.
-	CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error)
+	CreateContainer(ctx context.Context, cfg Config) (string, error)
 
 	// StartContainer starts an existing container.
 	StartContainer(ctx context.Context, id string) error
@@ -56,8 +56,8 @@ type Runtime interface {
 	Close() error
 }
 
-// ContainerConfig holds configuration for creating a container.
-type ContainerConfig struct {
+// Config holds configuration for creating a container.
+type Config struct {
 	Name        string
 	Image       string
 	Cmd         []string
