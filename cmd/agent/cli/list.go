@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/andybons/agentops/internal/run"
@@ -40,13 +41,21 @@ func listRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tAGENT\tSTATE\tCREATED")
+	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tSERVICES")
 	for _, r := range runs {
+		services := ""
+		if len(r.Ports) > 0 {
+			names := make([]string, 0, len(r.Ports))
+			for name := range r.Ports {
+				names = append(names, name)
+			}
+			services = strings.Join(names, ", ")
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			r.Name,
 			r.ID,
-			r.Agent,
 			r.State,
-			r.CreatedAt.Format("2006-01-02 15:04:05"),
+			services,
 		)
 	}
 	return w.Flush()

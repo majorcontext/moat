@@ -201,7 +201,21 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("run started", "id", r.ID)
-	fmt.Printf("Run %s started\n", r.ID)
+	fmt.Printf("\nStarting agent %q...\n", r.Name)
+	fmt.Printf("Run ID: %s\n", r.ID)
+
+	if len(r.Ports) > 0 {
+		globalCfg, _ := config.LoadGlobal()
+		proxyPort := globalCfg.Proxy.Port
+
+		fmt.Println("\nServices:")
+		for serviceName, containerPort := range r.Ports {
+			url := fmt.Sprintf("http://%s.%s.localhost:%d", serviceName, r.Name, proxyPort)
+			fmt.Printf("  %s: %s → :%d\n", serviceName, url, containerPort)
+		}
+		fmt.Printf("\nProxy listening on :%d\n", proxyPort)
+	}
+	fmt.Println()
 
 	// Wait for completion or interrupt
 	if err := manager.Wait(ctx, r.ID); err != nil {
