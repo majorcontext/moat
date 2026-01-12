@@ -16,13 +16,15 @@ type Lifecycle struct {
 }
 
 // NewLifecycle creates a lifecycle manager for the proxy.
+// If desiredPort is 0, a random available port will be used.
+// If desiredPort is negative, the default port (8080) will be used.
 func NewLifecycle(dir string, desiredPort int) (*Lifecycle, error) {
 	routes, err := NewRouteTable(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	if desiredPort == 0 {
+	if desiredPort < 0 {
 		desiredPort = 8080
 	}
 
@@ -42,8 +44,8 @@ func (lc *Lifecycle) EnsureRunning() error {
 	}
 
 	if lock != nil && lock.IsAlive() {
-		// Proxy already running
-		if lc.port != 8080 && lock.Port != lc.port {
+		// Proxy already running - check for port mismatch only if specific port requested
+		if lc.port > 0 && lock.Port != lc.port {
 			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset AGENTOPS_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
 		}
 		lc.port = lock.Port
