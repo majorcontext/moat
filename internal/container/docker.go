@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	goruntime "runtime"
+	"strconv"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 )
 
 // DockerRuntime implements Runtime using Docker.
@@ -65,19 +67,37 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		networkMode = "bridge"
 	}
 
+	// Build port bindings
+	var exposedPorts nat.PortSet
+	var portBindings nat.PortMap
+	if len(cfg.PortBindings) > 0 {
+		exposedPorts = make(nat.PortSet)
+		portBindings = make(nat.PortMap)
+		for containerPort, hostIP := range cfg.PortBindings {
+			port := nat.Port(fmt.Sprintf("%d/tcp", containerPort))
+			exposedPorts[port] = struct{}{}
+			portBindings[port] = []nat.PortBinding{{
+				HostIP:   hostIP,
+				HostPort: "", // Let Docker assign random port
+			}}
+		}
+	}
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
-			Image:      cfg.Image,
-			Cmd:        cfg.Cmd,
-			WorkingDir: cfg.WorkingDir,
-			Env:        cfg.Env,
-			Tty:        true,
-			OpenStdin:  true,
+			Image:        cfg.Image,
+			Cmd:          cfg.Cmd,
+			WorkingDir:   cfg.WorkingDir,
+			Env:          cfg.Env,
+			Tty:          true,
+			OpenStdin:    true,
+			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
-			Mounts:      mounts,
-			NetworkMode: networkMode,
-			ExtraHosts:  cfg.ExtraHosts,
+			Mounts:       mounts,
+			NetworkMode:  networkMode,
+			ExtraHosts:   cfg.ExtraHosts,
+			PortBindings: portBindings,
 		},
 		nil, // network config
 		nil, // platform
@@ -96,6 +116,28 @@ func (r *DockerRuntime) StartContainer(ctx context.Context, containerID string) 
 		return fmt.Errorf("starting container: %w", err)
 	}
 	return nil
+}
+
+// GetPortBindings returns the actual host ports assigned to container ports.
+func (r *DockerRuntime) GetPortBindings(ctx context.Context, containerID string) (map[int]int, error) {
+	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting container: %w", err)
+	}
+
+	result := make(map[int]int)
+	for port, bindings := range inspect.NetworkSettings.Ports {
+		if len(bindings) == 0 {
+			continue
+		}
+		containerPort := port.Int()
+		hostPort, err := strconv.Atoi(bindings[0].HostPort)
+		if err != nil {
+			continue
+		}
+		result[containerPort] = hostPort
+	}
+	return result, nil
 }
 
 // StopContainer stops a running container.
