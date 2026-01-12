@@ -23,9 +23,10 @@ func NewServer(proxy *Proxy) *Server {
 }
 
 // Start starts the proxy server on an available port.
-// Binds to 0.0.0.0 to allow connections from Docker containers.
+// Binds to localhost only to prevent credential exposure to other hosts on
+// the network. Docker containers can still connect via host.docker.internal.
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("creating listener: %w", err)
 	}
