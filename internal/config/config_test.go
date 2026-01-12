@@ -83,6 +83,37 @@ mounts:
 	}
 }
 
+func TestLoadConfigWithName(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+name: myapp
+agent: test-agent
+ports:
+  web: 3000
+  api: 8080
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Name != "myapp" {
+		t.Errorf("Name = %q, want %q", cfg.Name, "myapp")
+	}
+	if len(cfg.Ports) != 2 {
+		t.Fatalf("Ports = %d, want 2", len(cfg.Ports))
+	}
+	if cfg.Ports["web"] != 3000 {
+		t.Errorf("Ports[web] = %d, want 3000", cfg.Ports["web"])
+	}
+	if cfg.Ports["api"] != 8080 {
+		t.Errorf("Ports[api] = %d, want 8080", cfg.Ports["api"])
+	}
+}
+
 func TestParseRuntime(t *testing.T) {
 	tests := []struct {
 		input   string
