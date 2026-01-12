@@ -25,9 +25,12 @@ const (
 // Run represents an agent execution environment.
 type Run struct {
 	ID          string
+	Name        string            // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Agent       string
 	Workspace   string
 	Grants      []string
+	Ports       map[string]int    // service name -> container port
+	HostPorts   map[string]int    // service name -> host port (after binding)
 	State       State
 	ContainerID string
 	ProxyServer *proxy.Server     // Auth proxy for credential injection
@@ -40,6 +43,7 @@ type Run struct {
 
 // Options configures a new run.
 type Options struct {
+	Name      string         // Optional explicit name (--name flag)
 	Agent     string
 	Workspace string
 	Grants    []string
