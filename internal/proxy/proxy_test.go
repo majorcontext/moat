@@ -72,6 +72,107 @@ func TestProxy_InjectsAuthHeader(t *testing.T) {
 	}
 }
 
+func TestProxy_AuthTokenRequired(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetAuthToken("secret-token-123")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	// Request without auth should fail
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("status = %d, want %d (Proxy Auth Required)", resp.StatusCode, http.StatusProxyAuthRequired)
+	}
+}
+
+func TestProxy_AuthTokenValidBasicAuth(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetAuthToken("secret-token-123")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	// Request with valid Basic auth (username:token format) should succeed
+	proxyURL := mustParseURL(proxyServer.URL)
+	proxyURL.User = url.UserPassword("agentops", "secret-token-123")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "backend response" {
+		t.Errorf("body = %q, want %q", string(body), "backend response")
+	}
+}
+
+func TestProxy_AuthTokenInvalidToken(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetAuthToken("secret-token-123")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	// Request with wrong token should fail
+	proxyURL := mustParseURL(proxyServer.URL)
+	proxyURL.User = url.UserPassword("agentops", "wrong-token")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("status = %d, want %d (Proxy Auth Required)", resp.StatusCode, http.StatusProxyAuthRequired)
+	}
+}
+
 func mustParseURL(s string) *url.URL {
 	u, err := url.Parse(s)
 	if err != nil {

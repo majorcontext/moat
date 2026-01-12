@@ -24,7 +24,9 @@ cd agentops
 go build -o agent ./cmd/agent
 ```
 
-**Requirements:** Docker must be installed and running.
+**Requirements:** A container runtime must be available:
+- **macOS:** Apple containers (macOS 15+, Apple Silicon) or Docker Desktop
+- **Linux:** Docker
 
 ## Setup
 
@@ -253,14 +255,28 @@ agent destroy [run-id]
 
 ## How It Works
 
+### Container Runtimes
+
+AgentOps automatically detects and uses the best available container runtime:
+
+| Platform | Runtime | Notes |
+| -------- | ------- | ----- |
+| macOS (Apple Silicon, 15+) | Apple containers | Native virtualization, fastest startup |
+| macOS (Intel or older) | Docker Desktop | Requires Docker Desktop installed |
+| Linux | Docker | Native Docker, supports host network mode |
+
+The runtime is selected automatically—no configuration needed.
+
 ### Credential Injection
 
 When you run `agent grant github`, your GitHub token is stored securely. During runs with `--grant github`, AgentOps:
 
-1. Starts a TLS-intercepting proxy
-2. Routes container traffic through the proxy
+1. Starts a TLS-intercepting proxy on the host
+2. Routes container traffic through the proxy via `HTTP_PROXY`/`HTTPS_PROXY` environment variables
 3. Automatically adds `Authorization: Bearer <token>` headers to GitHub API requests
-4. The agent never sees the raw token
+4. The agent never sees the raw token—it's injected at the network layer
+
+**Security:** The proxy binds to localhost only (Docker) or uses authenticated access with a per-run cryptographic token (Apple containers). Credentials are never exposed to the network.
 
 ### Image Selection
 

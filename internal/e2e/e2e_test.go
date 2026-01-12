@@ -54,8 +54,11 @@ func skipIfNoAppleContainer(t *testing.T) {
 }
 
 // TestProxyBindsToLocalhostOnly verifies that when a run is started with grants,
-// the proxy server binds to 127.0.0.1 only, not to 0.0.0.0 (all interfaces).
-// This is a critical security requirement to prevent credential theft from the network.
+// the proxy server binds appropriately for the runtime:
+// - Docker: binds to 127.0.0.1 (localhost only)
+// - Apple: binds to 0.0.0.0 (all interfaces, required because container accesses host via gateway)
+// For Apple containers, security is maintained by the fact that the proxy only runs locally
+// and TestProxyNotAccessibleFromNetwork verifies external hosts cannot connect.
 func TestProxyBindsToLocalhostOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -89,7 +92,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 	// Give the proxy a moment to start
 	time.Sleep(500 * time.Millisecond)
 
-	// The proxy server should be running - verify it's bound to localhost
+	// The proxy server should be running - verify it's bound appropriately
 	if r.ProxyServer == nil {
 		t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
 	}
@@ -100,11 +103,31 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 		t.Fatalf("SplitHostPort(%q): %v", addr, err)
 	}
 
-	// SECURITY: The proxy MUST bind to localhost only
-	if host != "127.0.0.1" {
-		t.Errorf("SECURITY VIOLATION: Proxy bound to %q, want %q\n"+
-			"The proxy must bind to localhost only to prevent credential theft from network peers.",
-			host, "127.0.0.1")
+	// Check runtime to determine expected binding
+	rt, _ := container.NewRuntime()
+	if rt != nil {
+		defer rt.Close()
+	}
+
+	if rt != nil && rt.Type() == container.RuntimeApple {
+		// Apple containers require binding to all interfaces because the container
+		// accesses the host via the gateway IP (e.g., 192.168.64.1), not localhost.
+		// Security is still maintained because:
+		// 1. The proxy only runs on the local machine
+		// 2. TestProxyNotAccessibleFromNetwork verifies external hosts can't connect
+		if host != "::" && host != "0.0.0.0" {
+			t.Errorf("Apple runtime: Proxy bound to %q, expected \"::\" or \"0.0.0.0\" (all interfaces)\n"+
+				"Apple containers require binding to all interfaces to be reachable via gateway IP.",
+				host)
+		}
+		t.Logf("Apple runtime: Proxy correctly bound to %q (all interfaces for gateway access)", host)
+	} else {
+		// Docker: MUST bind to localhost only
+		if host != "127.0.0.1" {
+			t.Errorf("SECURITY VIOLATION: Proxy bound to %q, want %q\n"+
+				"The proxy must bind to localhost only to prevent credential theft from network peers.",
+				host, "127.0.0.1")
+		}
 	}
 }
 
@@ -199,6 +222,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 import ssl
 import os
 import sys
+import base64
 from http.client import HTTPConnection, HTTPSConnection
 from urllib.parse import urlparse
 
@@ -212,6 +236,14 @@ proxy = urlparse(proxy_url)
 proxy_host = proxy.hostname
 proxy_port = proxy.port or 8080
 
+# Handle proxy authentication if credentials are in URL
+tunnel_headers = {}
+if proxy.username and proxy.password:
+    credentials = f'{proxy.username}:{proxy.password}'
+    auth = base64.b64encode(credentials.encode()).decode()
+    tunnel_headers['Proxy-Authorization'] = f'Basic {auth}'
+    print(f'Proxy auth configured for user: {proxy.username}', file=sys.stderr)
+
 # Load our CA cert for TLS verification
 ca_file = os.environ.get('SSL_CERT_FILE', '/etc/ssl/certs/agentops-ca.pem')
 ctx = ssl.create_default_context()
@@ -221,7 +253,7 @@ print(f'Loaded CA from: {ca_file}', file=sys.stderr)
 # Connect to proxy and establish CONNECT tunnel
 print(f'Connecting to proxy {proxy_host}:{proxy_port}...', file=sys.stderr)
 conn = HTTPConnection(proxy_host, proxy_port)
-conn.set_tunnel('api.github.com', 443)
+conn.set_tunnel('api.github.com', 443, headers=tunnel_headers)
 conn.connect()
 print('CONNECT tunnel established', file=sys.stderr)
 

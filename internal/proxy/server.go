@@ -14,20 +14,30 @@ type Server struct {
 	server   *http.Server
 	listener net.Listener
 	addr     string
+	bindAddr string // Address to bind to (default: 127.0.0.1)
 }
 
 // NewServer creates a new proxy server.
 func NewServer(proxy *Proxy) *Server {
 	return &Server{
-		proxy: proxy,
+		proxy:    proxy,
+		bindAddr: "127.0.0.1", // Default: localhost only for security
 	}
 }
 
+// SetBindAddr sets the address to bind to. Use "0.0.0.0" to bind to all
+// interfaces (needed for Apple containers which access host via gateway IP).
+// Must be called before Start().
+func (s *Server) SetBindAddr(addr string) {
+	s.bindAddr = addr
+}
+
 // Start starts the proxy server on an available port.
-// Binds to localhost only to prevent credential exposure to other hosts on
-// the network. Docker containers can still connect via host.docker.internal.
+// By default binds to localhost only to prevent credential exposure to other
+// hosts on the network. Use SetBindAddr("0.0.0.0") before Start() to bind to
+// all interfaces (needed for Apple containers).
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", s.bindAddr+":0")
 	if err != nil {
 		return fmt.Errorf("creating listener: %w", err)
 	}

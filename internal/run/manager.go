@@ -2,6 +2,8 @@ package run
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -119,6 +121,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		proxyServer = proxy.NewServer(p)
 
+		// Apple containers access the host via gateway IP, so the proxy must
+		// bind to all interfaces. Docker can use localhost since it has
+		// host.docker.internal or host network mode.
+		// When binding to all interfaces, we require authentication to prevent
+		// unauthorized network access to credentials.
+		var proxyAuthToken string
+		if m.runtime.Type() == container.RuntimeApple {
+			proxyServer.SetBindAddr("0.0.0.0")
+
+			// Generate a secure random token for proxy authentication
+			tokenBytes := make([]byte, 32)
+			if _, err := rand.Read(tokenBytes); err != nil {
+				return nil, fmt.Errorf("generating proxy auth token: %w", err)
+			}
+			proxyAuthToken = hex.EncodeToString(tokenBytes)
+			p.SetAuthToken(proxyAuthToken)
+		}
+
 		// Set up request logging if storage is available
 		// Note: r.Store will be created later, so we need to capture the pointer
 		p.SetLogger(func(method, url string, statusCode int, duration time.Duration, reqErr error) {
@@ -144,14 +164,22 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
-		// Determine proxy host based on runtime's host address
+		// Determine proxy URL based on runtime's host address
+		// Include authentication credentials in URL when token is set (Apple containers)
 		proxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		var proxyURL string
+		if proxyAuthToken != "" {
+			// Include auth credentials in URL: http://agentops:token@host:port
+			proxyURL = "http://agentops:" + proxyAuthToken + "@" + proxyHost
+		} else {
+			proxyURL = "http://" + proxyHost
+		}
 
 		proxyEnv = []string{
-			"HTTP_PROXY=http://" + proxyHost,
-			"HTTPS_PROXY=http://" + proxyHost,
-			"http_proxy=http://" + proxyHost,
-			"https_proxy=http://" + proxyHost,
+			"HTTP_PROXY=" + proxyURL,
+			"HTTPS_PROXY=" + proxyURL,
+			"http_proxy=" + proxyURL,
+			"https_proxy=" + proxyURL,
 		}
 
 		// Mount CA directory for container to trust
@@ -278,7 +306,9 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	return nil
 }
 
-// streamLogs streams container logs to stdout and storage.
+// streamLogs streams container logs to stdout for real-time feedback.
+// Note: Final log capture to storage is handled by Wait() using ContainerLogsAll
+// to ensure complete logs are captured even for fast-exiting containers.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
@@ -287,15 +317,9 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	}
 	defer logs.Close()
 
-	// Write to both stdout and storage
-	var dest io.Writer = os.Stdout
-	if r.Store != nil {
-		if lw, err := r.Store.LogWriter(); err == nil {
-			dest = io.MultiWriter(os.Stdout, lw)
-			defer lw.Close()
-		}
-	}
-	_, _ = io.Copy(dest, logs)
+	// Stream to stdout only for real-time feedback
+	// Storage is handled by Wait() after container exits
+	_, _ = io.Copy(os.Stdout, logs)
 }
 
 // Stop terminates a running run.
@@ -363,6 +387,17 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 
 	select {
 	case err := <-done:
+		// Capture all logs after container exits to ensure we don't miss any
+		// (the streaming goroutine may not have captured everything for fast containers)
+		if r.Store != nil {
+			if allLogs, logErr := m.runtime.ContainerLogsAll(context.Background(), containerID); logErr == nil && len(allLogs) > 0 {
+				if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+					_, _ = lw.Write(allLogs)
+					lw.Close()
+				}
+			}
+		}
+
 		// Stop the proxy server if one was created
 		if r.ProxyServer != nil {
 			if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {

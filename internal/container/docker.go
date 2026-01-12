@@ -127,13 +127,27 @@ func (r *DockerRuntime) RemoveContainer(ctx context.Context, containerID string)
 	return nil
 }
 
-// ContainerLogs returns the logs from a container.
+// ContainerLogs returns the logs from a container (follows output).
 func (r *DockerRuntime) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
 	return r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 	})
+}
+
+// ContainerLogsAll returns all logs from a container (does not follow).
+func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string) ([]byte, error) {
+	reader, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getting container logs: %w", err)
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
 }
 
 // GetHostAddress returns the address for containers to reach the host.

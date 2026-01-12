@@ -228,7 +228,7 @@ func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) 
 	return nil
 }
 
-// ContainerLogs returns a reader for the container's logs.
+// ContainerLogs returns a reader for the container's logs (follows output).
 func (r *AppleRuntime) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "logs", "--follow", containerID)
 
@@ -256,6 +256,12 @@ func (r *AppleRuntime) ContainerLogs(ctx context.Context, containerID string) (i
 		stdout:  stdout,
 		stderr:  stderr,
 	}, nil
+}
+
+// ContainerLogsAll returns all logs from a container (does not follow).
+func (r *AppleRuntime) ContainerLogsAll(ctx context.Context, containerID string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, r.containerBin, "logs", containerID)
+	return cmd.Output()
 }
 
 // GetHostAddress returns the gateway IP for containers to reach the host.

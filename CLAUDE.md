@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AgentOps runs AI agents in isolated Docker containers with credential injection and full observability. Key features:
+AgentOps runs AI agents in isolated containers with credential injection and full observability. Key features:
 
-- **Isolated Execution** - Each agent runs in its own Docker container with workspace mounting
+- **Isolated Execution** - Each agent runs in its own container (Docker or Apple containers) with workspace mounting
 - **Credential Injection** - Transparent auth header injection via TLS-intercepting proxy (agent never sees raw tokens)
 - **Smart Image Selection** - Automatically selects container images based on `agent.yaml` runtime config
 - **Full Observability** - Captures logs, network requests, and traces for every run
 - **Declarative Config** - Configure agents via `agent.yaml` manifests
+- **Multi-Runtime Support** - Automatically uses Apple containers (macOS 15+) or Docker
 
 ## Architecture
 
@@ -18,8 +19,8 @@ AgentOps runs AI agents in isolated Docker containers with credential injection 
 cmd/agent/           CLI entry point (Cobra commands)
 internal/
   config/            agent.yaml parsing, mount string parsing
+  container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage, GitHub OAuth device flow
-  docker/            Docker client wrapper for container lifecycle
   image/             Runtime-based image selection (node/python/go → base image)
   log/               Structured logging (slog wrapper)
   proxy/             TLS-intercepting proxy for credential injection
@@ -35,17 +36,31 @@ internal/
 
 **Observability:** Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
+**Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
+
+### Proxy Security Model
+
+The credential-injecting proxy has different security configurations per runtime:
+
+- **Docker:** Proxy binds to `127.0.0.1` (localhost only). Containers reach it via `host.docker.internal` or host network mode.
+- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://agentops:token@host:port` URL format.
+
+See `internal/proxy/proxy.go` for the security model documentation.
+
 ## Development Commands
 
 ```bash
 # Build
 go build ./...
 
-# Run tests
+# Run unit tests
 go test ./...
 
 # Run a single test
 go test -run TestName ./path/to/package
+
+# Run E2E tests (requires container runtime)
+go test -tags=e2e -v ./internal/e2e/
 
 # Run tests with coverage
 go test -coverprofile=coverage.out ./...

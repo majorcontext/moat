@@ -39,8 +39,12 @@ type Runtime interface {
 	// RemoveContainer removes a container.
 	RemoveContainer(ctx context.Context, id string) error
 
-	// ContainerLogs returns a reader for the container's logs.
+	// ContainerLogs returns a reader for the container's logs (follows output).
 	ContainerLogs(ctx context.Context, id string) (io.ReadCloser, error)
+
+	// ContainerLogsAll returns all logs from a container (does not follow).
+	// Use this after the container has exited to ensure all logs are captured.
+	ContainerLogsAll(ctx context.Context, id string) ([]byte, error)
 
 	// GetHostAddress returns the address containers use to reach the host.
 	// For Docker on Linux, this is "127.0.0.1" (with host network mode).
