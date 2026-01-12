@@ -52,9 +52,9 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it.
 
 ## Quick Start
 
-### Example: Run an AI agent that can push to GitHub
+### Example: Call the GitHub API without exposing your token
 
-Suppose you want to let an AI coding agent work on your repo and push changes—but you don't want to paste your GitHub token into the agent's environment where it could be logged, leaked, or exfiltrated.
+This example runs a container that calls the GitHub API. The container has no access to your token—AgentOps injects it at the network layer.
 
 **1. Grant GitHub access (one-time setup)**
 
@@ -68,48 +68,55 @@ Waiting for authorization...
 GitHub credential saved successfully
 ```
 
-This uses GitHub's device flow—you visit the URL, enter the code, and approve access. Your token is stored locally and never exposed to the agent.
-
-**2. Run the agent in an isolated container**
+**2. Run a command that calls the GitHub API**
 
 ```bash
-$ agent run my-agent ./my-project --grant github
+$ agent run my-agent . --grant github -- \
+    sh -c 'apt-get update -qq && apt-get install -qq -y curl >/dev/null && curl -s https://api.github.com/user'
 ```
 
-What happens:
-- Your `./my-project` directory is mounted into a Docker container at `/workspace`
-- A TLS-intercepting proxy starts and injects your GitHub token into API requests
-- The agent runs with full GitHub access, but the token never appears in its environment
+Output:
+```json
+{
+  "login": "your-username",
+  "id": 1234567,
+  "name": "Your Name"
+}
+```
 
-**3. The agent works normally—credentials are invisible**
+The `curl` command has no authentication flags—AgentOps injected the `Authorization` header automatically.
 
-Inside the container, the agent just uses `git push` or calls the GitHub API. The proxy transparently adds `Authorization: Bearer <token>` to matching requests. The agent's logs, environment variables, and process memory never contain the raw token.
-
-**4. Review what happened**
+**3. Verify the token was never exposed**
 
 ```bash
-# See container output
-$ agent logs
+$ agent run my-agent . --grant github -- env | grep -i token
+```
 
-# See all GitHub API calls the agent made
+Output: *(nothing)*
+
+The token isn't in the environment. It's injected at the network layer by a TLS-intercepting proxy.
+
+**4. See every API call that was made**
+
+```bash
 $ agent trace --network
 ```
 
-Sample network trace output:
+Output:
 ```
-[10:23:41.127] POST https://github.com/git-receive-pack 200 (1203ms)
 [10:23:44.512] GET https://api.github.com/user 200 (89ms)
-[10:23:45.891] POST https://api.github.com/repos/you/my-project/pulls 201 (142ms)
 ```
+
+Every HTTP request through the proxy is logged—useful for auditing what an agent did.
 
 ### Why this matters
 
-| Without AgentOps | With AgentOps |
-|------------------|---------------|
-| Token in env vars—visible to agent | Token injected at network layer—invisible |
-| Agent could log/exfiltrate credentials | Credentials never in agent's memory |
-| No record of API calls | Full network trace for auditing |
-| Runs on your machine | Isolated container with mounted workspace |
+| Traditional approach | With AgentOps |
+|---------------------|---------------|
+| `GITHUB_TOKEN=xxx` in env | Token never in container's environment |
+| Agent could log/exfiltrate token | Token injected at network layer only |
+| No visibility into API calls | Full network trace for auditing |
+| Runs directly on your machine | Isolated Docker container |
 
 ## Configuration
 
