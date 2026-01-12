@@ -26,6 +26,30 @@ go build -o agent ./cmd/agent
 
 **Requirements:** Docker must be installed and running.
 
+## Setup
+
+### GitHub OAuth App (for credential injection)
+
+To use `agent grant github`, you need a GitHub OAuth App configured for device flow:
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click **New OAuth App**
+3. Fill in the details:
+   - **Application name:** AgentOps (or your preferred name)
+   - **Homepage URL:** `https://github.com/andybons/agentops`
+   - **Authorization callback URL:** `https://github.com/andybons/agentops` (not used for device flow)
+4. Click **Register application**
+5. Copy the **Client ID**
+6. Enable device flow: Check **Enable Device Flow** in the app settings
+
+Set the environment variable:
+
+```bash
+export AGENTOPS_GITHUB_CLIENT_ID="your-client-id-here"
+```
+
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it.
+
 ## Quick Start
 
 ```bash
