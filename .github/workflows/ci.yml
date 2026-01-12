@@ -64,10 +64,6 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
-    # E2E tests require special Docker networking (host.docker.internal)
-    # that doesn't work reliably in GitHub Actions. Run locally with:
-    #   go test -tags=e2e ./internal/e2e/
-    if: false
     steps:
       - uses: actions/checkout@v4
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -155,8 +156,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
-		// Use host.docker.internal to allow container to reach host's proxy
-		proxyHost := "host.docker.internal:" + proxyServer.Port()
+		// Determine proxy host based on OS:
+		// - Linux: use host network mode and 127.0.0.1 directly
+		// - macOS/Windows: use bridge network with host.docker.internal
+		var proxyHost string
+		if runtime.GOOS == "linux" {
+			// On Linux, we use --network=host so container can reach localhost
+			proxyHost = "127.0.0.1:" + proxyServer.Port()
+		} else {
+			// On macOS/Windows, Docker Desktop handles host.docker.internal
+			proxyHost = "host.docker.internal:" + proxyServer.Port()
+		}
+
 		proxyEnv = []string{
 			"HTTP_PROXY=http://" + proxyHost,
 			"HTTPS_PROXY=http://" + proxyHost,
@@ -178,11 +189,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/agentops-ca.pem")
 	}
 
-	// Configure extra hosts to enable host.docker.internal resolution
-	// This works on Docker 20.10+ with host-gateway
+	// Configure network mode and extra hosts based on OS
+	var networkMode string
 	var extraHosts []string
 	if proxyServer != nil {
-		extraHosts = []string{"host.docker.internal:host-gateway"}
+		if runtime.GOOS == "linux" {
+			// Linux: use host network so container can reach 127.0.0.1
+			networkMode = "host"
+		} else {
+			// macOS/Windows: use bridge with host.docker.internal mapping
+			networkMode = "bridge"
+			extraHosts = []string{"host.docker.internal:host-gateway"}
+		}
 	}
 
 	// Add config env vars
@@ -197,13 +215,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Create Docker container
 	containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
-		Name:       r.ID,
-		Image:      image.Resolve(opts.Config),
-		Cmd:        cmd,
-		WorkingDir: "/workspace",
-		Env:        proxyEnv,
-		ExtraHosts: extraHosts,
-		Mounts:     mounts,
+		Name:        r.ID,
+		Image:       image.Resolve(opts.Config),
+		Cmd:         cmd,
+		WorkingDir:  "/workspace",
+		Env:         proxyEnv,
+		ExtraHosts:  extraHosts,
+		NetworkMode: networkMode,
+		Mounts:      mounts,
 	})
 	if err != nil {
 		// Clean up proxy server if container creation fails

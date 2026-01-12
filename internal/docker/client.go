@@ -42,13 +42,14 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // ContainerConfig holds configuration for creating a container.
 type ContainerConfig struct {
-	Name       string
-	Image      string
-	Cmd        []string
-	WorkingDir string
-	Env        []string
-	Mounts     []MountConfig
-	ExtraHosts []string // host:ip mappings (e.g., "host.docker.internal:host-gateway")
+	Name        string
+	Image       string
+	Cmd         []string
+	WorkingDir  string
+	Env         []string
+	Mounts      []MountConfig
+	ExtraHosts  []string // host:ip mappings (e.g., "host.docker.internal:host-gateway")
+	NetworkMode string   // "bridge" (default), "host", "none", or custom network name
 }
 
 // MountConfig describes a volume mount.
@@ -76,6 +77,12 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		}
 	}
 
+	// Default to bridge network if not specified
+	networkMode := container.NetworkMode(cfg.NetworkMode)
+	if cfg.NetworkMode == "" {
+		networkMode = "bridge"
+	}
+
 	resp, err := c.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:      cfg.Image,
@@ -87,7 +94,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		},
 		&container.HostConfig{
 			Mounts:      mounts,
-			NetworkMode: "bridge",
+			NetworkMode: networkMode,
 			ExtraHosts:  cfg.ExtraHosts,
 		},
 		nil, // network config
