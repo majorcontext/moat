@@ -13,23 +13,44 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
+	"github.com/andybons/agentops/internal/container"
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/run"
 	"github.com/andybons/agentops/internal/storage"
 )
 
 func TestMain(m *testing.M) {
-	// Check if Docker is available
-	if err := exec.Command("docker", "version").Run(); err != nil {
-		os.Stderr.WriteString("Skipping e2e tests: Docker not available\n")
+	// Check if any container runtime is available
+	dockerAvailable := exec.Command("docker", "version").Run() == nil
+	appleAvailable := runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" &&
+		exec.Command("container", "list", "--quiet").Run() == nil
+
+	if !dockerAvailable && !appleAvailable {
+		os.Stderr.WriteString("Skipping e2e tests: No container runtime available (need Docker or Apple container)\n")
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+// skipIfNoAppleContainer skips the test if Apple container is not available.
+// Apple container requires macOS 26+ on Apple Silicon.
+func skipIfNoAppleContainer(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("Skipping: not on macOS")
+	}
+	if runtime.GOARCH != "arm64" {
+		t.Skip("Skipping: not on Apple Silicon")
+	}
+	if err := exec.Command("container", "list", "--quiet").Run(); err != nil {
+		t.Skip("Skipping: Apple container CLI not available")
+	}
 }
 
 // TestProxyBindsToLocalhostOnly verifies that when a run is started with grants,
@@ -568,16 +589,184 @@ version: 1.0.0
 
 // createTestWorkspaceWithRuntime creates a temporary directory with an agent.yaml
 // file that specifies a runtime.
-func createTestWorkspaceWithRuntime(t *testing.T, runtime, version string) string {
+func createTestWorkspaceWithRuntime(t *testing.T, rt, version string) string {
 	t.Helper()
 
 	dir := t.TempDir()
 
 	// Create agent.yaml with runtime
-	yaml := "agent: e2e-test\nversion: 1.0.0\nruntime:\n  " + runtime + ": " + version + "\n"
+	yaml := "agent: e2e-test\nversion: 1.0.0\nruntime:\n  " + rt + ": " + version + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatalf("WriteFile agent.yaml: %v", err)
 	}
 
 	return dir
+}
+
+// =============================================================================
+// Apple Container Tests (macOS only, skipped in CI)
+// =============================================================================
+
+// TestAppleContainerRuntime verifies that the Apple container backend works correctly.
+// This test only runs on macOS with Apple Silicon and the Apple container CLI installed.
+// It will be skipped in CI since CI uses Linux runners.
+func TestAppleContainerRuntime(t *testing.T) {
+	skipIfNoAppleContainer(t)
+
+	// Verify that NewRuntime() selects Apple container on this system
+	rt, err := container.NewRuntime()
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	defer rt.Close()
+
+	if rt.Type() != container.RuntimeApple {
+		t.Errorf("Expected RuntimeApple on macOS with Apple container, got %v", rt.Type())
+	}
+
+	// Verify host address is the gateway IP (not host.docker.internal)
+	hostAddr := rt.GetHostAddress()
+	if strings.HasPrefix(hostAddr, "host.docker") {
+		t.Errorf("Expected gateway IP for Apple container, got %q", hostAddr)
+	}
+
+	// Verify it doesn't support host network mode
+	if rt.SupportsHostNetwork() {
+		t.Error("Apple container should not support host network mode")
+	}
+}
+
+// TestAppleContainerBasicRun verifies that a simple container run works with Apple container.
+// This test only runs on macOS with Apple Silicon and the Apple container CLI installed.
+func TestAppleContainerBasicRun(t *testing.T) {
+	skipIfNoAppleContainer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+	testOutput := "apple-container-e2e-test-output"
+
+	r, err := mgr.Create(ctx, run.Options{
+		Agent:     "e2e-apple-test",
+		Workspace: workspace,
+		Cmd:       []string{"echo", testOutput},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	// Give storage a moment to flush
+	time.Sleep(100 * time.Millisecond)
+
+	// Read logs to verify the container ran successfully
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, testOutput) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Container output not captured\nExpected: %q\nLogs: %v", testOutput, logs)
+	}
+}
+
+// TestAppleContainerWithProxy verifies that the proxy works correctly with Apple container.
+// This tests the gateway IP networking path that's different from Docker.
+func TestAppleContainerWithProxy(t *testing.T) {
+	skipIfNoAppleContainer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	// Create a run with grants to activate the proxy
+	r, err := mgr.Create(ctx, run.Options{
+		Agent:     "e2e-apple-proxy-test",
+		Workspace: workspace,
+		Grants:    []string{"github"},
+		Cmd:       []string{"sh", "-c", "echo HTTP_PROXY=$HTTP_PROXY"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer mgr.Stop(context.Background(), r.ID)
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Logf("Wait returned error (may be expected): %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify proxy was started
+	if r.ProxyServer == nil {
+		t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
+	}
+
+	// Read logs to verify HTTP_PROXY was set with gateway IP
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	// The proxy URL should use the gateway IP (e.g., 192.168.64.1), not host.docker.internal
+	foundProxy := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "HTTP_PROXY=") {
+			foundProxy = true
+			if strings.Contains(entry.Line, "host.docker.internal") {
+				t.Errorf("Apple container should use gateway IP, not host.docker.internal: %s", entry.Line)
+			}
+			t.Logf("Proxy config: %s", entry.Line)
+			break
+		}
+	}
+
+	if !foundProxy {
+		t.Errorf("HTTP_PROXY not found in logs: %v", logs)
+	}
 }
