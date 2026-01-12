@@ -147,6 +147,76 @@ mounts:
   - ./cache:/cache
 ```
 
+## Hostname-Based Service Routing
+
+Expose container services with predictable, OAuth-friendly hostnames. Multiple agents can run simultaneously, each with their own namespace.
+
+### Configuration
+
+In `agent.yaml`, define the agent name and ports to expose:
+
+```yaml
+name: myapp
+runtime:
+  node: 20
+ports:
+  web: 3000
+  api: 8080
+```
+
+### Usage
+
+```bash
+# Start with configured name from agent.yaml
+agent run my-agent ./project
+
+# Override name with --name flag
+agent run --name myapp my-agent ./project
+```
+
+If no name is specified (in config or flag), a random name is generated (e.g., `fluffy-chicken`).
+
+### Accessing Services
+
+Services are available via hostname routing:
+
+```
+http://web.myapp.localhost:8080  → container port 3000
+http://api.myapp.localhost:8080  → container port 8080
+http://myapp.localhost:8080      → default service (first in config)
+```
+
+The proxy binds to port 8080 by default. Configure globally in `~/.agentops/config.yaml`:
+
+```yaml
+proxy:
+  port: 8080
+```
+
+Or via environment variable: `AGENTOPS_PROXY_PORT=9000`
+
+### Environment Variables
+
+Inside the container, these environment variables are automatically set for OAuth callbacks and CORS configuration:
+
+```bash
+AGENTOPS_HOST=myapp.localhost:8080
+AGENTOPS_URL=http://myapp.localhost:8080
+AGENTOPS_HOST_WEB=web.myapp.localhost:8080
+AGENTOPS_URL_WEB=http://web.myapp.localhost:8080
+AGENTOPS_HOST_API=api.myapp.localhost:8080
+AGENTOPS_URL_API=http://api.myapp.localhost:8080
+```
+
+### Listing Running Agents
+
+```bash
+$ agent list
+NAME            RUN ID           STATE     SERVICES
+myapp           run-a1b2c3d4     running   web, api
+fluffy-chicken  run-e5f6a1b2     running   web
+```
+
 ## Commands
 
 ### `agent run`
@@ -162,6 +232,7 @@ agent run my-agent . --runtime node:20         # Run with Node.js 20
 agent run test . --grant github                # Run with GitHub credentials
 agent run test . -e DEBUG=true                 # Run with environment variable
 agent run test . -- pytest -v                  # Run custom command
+agent run test . --name myapp                  # Run with specific agent name
 ```
 
 **Flags:**
@@ -169,6 +240,7 @@ agent run test . -- pytest -v                  # Run custom command
 - `--runtime` - Runtime language:version (e.g., `python:3.11`, `node:20`, `go:1.22`)
 - `--grant, -g` - Grant credential access (e.g., `github`, `github:repo,user`)
 - `--env, -e` - Set environment variable (can be repeated)
+- `--name` - Name for this agent instance (for hostname routing)
 
 ### `agent grant`
 
