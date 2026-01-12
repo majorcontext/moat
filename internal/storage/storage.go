@@ -15,13 +15,15 @@ import (
 
 // Metadata holds information about an agent run.
 type Metadata struct {
-	Agent     string    `json:"agent"`
-	Workspace string    `json:"workspace"`
-	Grants    []string  `json:"grants,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	StoppedAt time.Time `json:"stopped_at,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Agent     string         `json:"agent"`
+	Name      string         `json:"name,omitempty"`
+	Workspace string         `json:"workspace"`
+	Grants    []string       `json:"grants,omitempty"`
+	Ports     map[string]int `json:"ports,omitempty"`
+	CreatedAt time.Time      `json:"created_at,omitempty"`
+	StartedAt time.Time      `json:"started_at,omitempty"`
+	StoppedAt time.Time      `json:"stopped_at,omitempty"`
+	Error     string         `json:"error,omitempty"`
 }
 
 // RunStore manages storage for a single agent run.
