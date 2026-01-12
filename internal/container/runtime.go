@@ -46,6 +46,10 @@ type Runtime interface {
 	// Use this after the container has exited to ensure all logs are captured.
 	ContainerLogsAll(ctx context.Context, id string) ([]byte, error)
 
+	// GetPortBindings returns the actual host ports mapped to container ports.
+	// Call after container is started. Returns map[containerPort]hostPort.
+	GetPortBindings(ctx context.Context, id string) (map[int]int, error)
+
 	// GetHostAddress returns the address containers use to reach the host.
 	// For Docker on Linux, this is "127.0.0.1" (with host network mode).
 	// For Docker on macOS/Windows, this is "host.docker.internal".
@@ -62,14 +66,15 @@ type Runtime interface {
 
 // Config holds configuration for creating a container.
 type Config struct {
-	Name        string
-	Image       string
-	Cmd         []string
-	WorkingDir  string
-	Env         []string
-	Mounts      []MountConfig
-	ExtraHosts  []string // host:ip mappings (Docker-specific)
-	NetworkMode string   // "bridge", "host", "none" (Docker-specific)
+	Name         string
+	Image        string
+	Cmd          []string
+	WorkingDir   string
+	Env          []string
+	Mounts       []MountConfig
+	ExtraHosts   []string       // host:ip mappings (Docker-specific)
+	NetworkMode  string         // "bridge", "host", "none" (Docker-specific)
+	PortBindings map[int]string // container port -> host bind address (e.g., 3000 -> "127.0.0.1")
 }
 
 // MountConfig describes a volume mount.
