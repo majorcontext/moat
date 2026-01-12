@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.
@@ -177,7 +178,8 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 		}
 
 		// Check container status
-		cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID, "--format", "json")
+		// Apple's container inspect outputs JSON directly (no --format flag)
+		cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID)
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
 
@@ -185,25 +187,25 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 			return -1, fmt.Errorf("inspecting container: %w", err)
 		}
 
-		var info struct {
-			State struct {
-				Status   string `json:"status"`
-				ExitCode int64  `json:"exitCode"`
-			} `json:"state"`
+		// Apple's inspect returns an array of container info objects
+		var info []struct {
+			Status string `json:"status"`
 		}
 		if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
 			return -1, fmt.Errorf("parsing container info: %w", err)
 		}
 
-		if info.State.Status == "exited" || info.State.Status == "stopped" {
-			return info.State.ExitCode, nil
+		if len(info) > 0 && (info[0].Status == "exited" || info[0].Status == "stopped") {
+			// Apple's container CLI doesn't provide exit code in inspect output
+			// Return 0 for stopped containers (best we can do)
+			return 0, nil
 		}
 
-		// Brief sleep before next poll
+		// Sleep before next poll to avoid hammering the CLI
 		select {
 		case <-ctx.Done():
 			return -1, ctx.Err()
-		default:
+		case <-time.After(500 * time.Millisecond):
 			// Continue polling
 		}
 	}

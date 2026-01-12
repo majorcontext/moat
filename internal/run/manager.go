@@ -58,7 +58,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy server for this run if grants are specified
 	var proxyServer *proxy.Server
 	var proxyEnv []string
-	var caCertPath string
 	var mounts []container.MountConfig
 
 	// Always mount workspace
@@ -98,9 +97,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("creating CA: %w", err)
 		}
 		p.SetCA(ca)
-
-		// Write CA cert to temp file for mounting in container
-		caCertPath = filepath.Join(caDir, "ca.crt")
 
 		// Load credentials for granted providers
 		store, err := credential.NewFileStore(
@@ -158,18 +154,22 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"https_proxy=http://" + proxyHost,
 		}
 
-		// Mount CA cert for container to trust
+		// Mount CA directory for container to trust
+		// We mount the directory (not just the file) because Apple container
+		// only supports directory mounts, not individual file mounts.
 		mounts = append(mounts, container.MountConfig{
-			Source:   caCertPath,
-			Target:   "/etc/ssl/certs/agentops-ca.pem",
+			Source:   caDir,
+			Target:   "/etc/ssl/certs/agentops-ca",
 			ReadOnly: true,
 		})
 
 		// Set env vars for tools that support custom CA bundles
 		// SSL_CERT_FILE is used by many tools (curl, wget, etc)
-		proxyEnv = append(proxyEnv, "SSL_CERT_FILE=/etc/ssl/certs/agentops-ca.pem")
-		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE=/etc/ssl/certs/agentops-ca.pem")
-		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/agentops-ca.pem")
+		// The CA cert is at ca.crt within the mounted directory
+		caCertInContainer := "/etc/ssl/certs/agentops-ca/ca.crt"
+		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
+		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
+		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
 	}
 
 	// Configure network mode and extra hosts based on runtime capabilities
