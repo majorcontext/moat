@@ -149,7 +149,7 @@ func (c *Client) ContainerLogs(ctx context.Context, containerID string) (io.Read
 
 // ensureImage pulls an image if it doesn't exist locally.
 func (c *Client) ensureImage(ctx context.Context, imageName string) error {
-	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
+	_, err := c.cli.ImageInspect(ctx, imageName)
 	if err == nil {
 		return nil // Image exists
 	}
@@ -162,6 +162,6 @@ func (c *Client) ensureImage(ctx context.Context, imageName string) error {
 	defer reader.Close()
 
 	// Drain the reader to complete the pull
-	io.Copy(os.Stdout, reader)
+	_, _ = io.Copy(os.Stdout, reader)
 	return nil
 }

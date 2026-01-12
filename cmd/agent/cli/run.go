@@ -182,7 +182,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	// Wait for completion or interrupt
 	if err := manager.Wait(ctx, r.ID); err != nil {
 		if ctx.Err() != nil {
-			// Context was cancelled (signal received)
+			// Context was canceled (signal received)
 			log.Info("run stopped by user", "id", r.ID)
 			fmt.Printf("\nRun %s stopped\n", r.ID)
 			return nil

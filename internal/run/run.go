@@ -51,6 +51,9 @@ type Options struct {
 // generateID creates a unique run identifier.
 func generateID() string {
 	b := make([]byte, 6)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if crypto/rand fails (extremely unlikely)
+		return "run-" + hex.EncodeToString([]byte(time.Now().Format("150405.000")))
+	}
 	return "run-" + hex.EncodeToString(b)
 }

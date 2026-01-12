@@ -93,7 +93,7 @@ func findLatestRun(baseDir string) (string, error) {
 		name    string
 		modTime time.Time
 	}
-	var runs []runInfo
+	runs := make([]runInfo, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue

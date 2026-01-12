@@ -108,8 +108,12 @@ func (w *LogWriter) Write(p []byte) (n int, err error) {
 			Line:      lines.Text(),
 		}
 		data, _ := json.Marshal(entry)
-		w.file.Write(data)
-		w.file.Write([]byte("\n"))
+		if _, err := w.file.Write(data); err != nil {
+			return 0, err
+		}
+		if _, err := w.file.Write([]byte("\n")); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }
@@ -194,8 +198,12 @@ func (s *RunStore) WriteSpan(span Span) error {
 	if err != nil {
 		return fmt.Errorf("marshaling span: %w", err)
 	}
-	f.Write(data)
-	f.Write([]byte("\n"))
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("writing span: %w", err)
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("writing newline: %w", err)
+	}
 	return nil
 }
 
@@ -244,8 +252,12 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 	}
 	defer f.Close()
 	data, _ := json.Marshal(req)
-	f.Write(data)
-	f.Write([]byte("\n"))
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return err
+	}
 	return nil
 }
 

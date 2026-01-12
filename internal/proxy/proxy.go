@@ -145,7 +145,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body) // Best-effort copy to response writer
 }
 
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +187,7 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
 	// Tunnel data bidirectionally with proper cleanup
 	var closeOnce sync.Once
@@ -199,11 +199,11 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		io.Copy(targetConn, clientConn)
+		_, _ = io.Copy(targetConn, clientConn)
 		closeConns()
 	}()
 	go func() {
-		io.Copy(clientConn, targetConn)
+		_, _ = io.Copy(clientConn, targetConn)
 		closeConns()
 	}()
 }
@@ -225,7 +225,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	defer clientConn.Close()
 
 	// Send 200 OK to client
-	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
 	// Generate certificate for this host
 	cert, err := p.ca.GenerateCert(host)
@@ -236,6 +236,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	// Wrap client connection with TLS (we're the "server" to the client)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
+		MinVersion:   tls.VersionTLS12,
 	}
 	tlsClientConn := tls.Server(clientConn, tlsConfig)
 	if err := tlsClientConn.Handshake(); err != nil {
@@ -246,6 +247,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	// Create HTTPS client to talk to the real server
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
 			// Use system CA pool for connecting to real servers
 		},
 	}
@@ -297,12 +299,12 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 				ProtoMinor: 1,
 				Header:     make(http.Header),
 			}
-			errResp.Write(tlsClientConn)
+			_ = errResp.Write(tlsClientConn)
 			continue
 		}
 
 		// Send response back to client
-		resp.Write(tlsClientConn)
+		_ = resp.Write(tlsClientConn)
 		resp.Body.Close()
 
 		// Check if connection should be closed

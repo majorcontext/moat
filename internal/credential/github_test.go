@@ -228,7 +228,7 @@ func TestGitHubDeviceAuth_RequestDeviceCode(t *testing.T) {
 
 		_, err := auth.RequestDeviceCode(ctx)
 		if err == nil {
-			t.Fatal("expected error for cancelled context")
+			t.Fatal("expected error for canceled context")
 		}
 	})
 }

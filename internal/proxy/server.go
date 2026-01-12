@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 )
 
 // Server wraps a Proxy in an HTTP server.
@@ -35,10 +36,13 @@ func (s *Server) Start() error {
 	s.addr = listener.Addr().String()
 
 	s.server = &http.Server{
-		Handler: s.proxy,
+		Handler:           s.proxy,
+		ReadHeaderTimeout: 60 * time.Second, // Prevent Slowloris attacks
 	}
 
-	go s.server.Serve(listener)
+	go func() {
+		_ = s.server.Serve(listener) // Serve blocks until Shutdown is called
+	}()
 	return nil
 }
 

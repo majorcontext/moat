@@ -109,7 +109,7 @@ func (s *FileStore) List() ([]Credential, error) {
 		return nil, fmt.Errorf("reading credential dir: %w", err)
 	}
 
-	var creds []Credential
+	creds := make([]Credential, 0, len(entries))
 	for _, entry := range entries {
 		if filepath.Ext(entry.Name()) != ".enc" {
 			continue

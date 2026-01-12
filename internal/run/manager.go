@@ -140,7 +140,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			if reqErr != nil {
 				errStr = reqErr.Error()
 			}
-			r.Store.WriteNetworkRequest(storage.NetworkRequest{
+			// Best-effort logging; errors are non-fatal
+			_ = r.Store.WriteNetworkRequest(storage.NetworkRequest{
 				Timestamp:  time.Now().UTC(),
 				Method:     method,
 				URL:        url,
@@ -207,7 +208,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	if err != nil {
 		// Clean up proxy server if container creation fails
 		if proxyServer != nil {
-			proxyServer.Stop(context.Background())
+			_ = proxyServer.Stop(context.Background())
 		}
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
@@ -219,16 +220,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 	if err != nil {
 		// Clean up container and proxy if storage creation fails
-		m.docker.RemoveContainer(ctx, containerID)
+		_ = m.docker.RemoveContainer(ctx, containerID)
 		if proxyServer != nil {
-			proxyServer.Stop(context.Background())
+			_ = proxyServer.Stop(context.Background())
 		}
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
 
-	// Save initial metadata
-	store.SaveMetadata(storage.Metadata{
+	// Save initial metadata (best-effort; non-fatal if it fails)
+	_ = store.SaveMetadata(storage.Metadata{
 		Agent:     opts.Agent,
 		Workspace: opts.Workspace,
 		Grants:    opts.Grants,
@@ -289,7 +290,7 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 			defer lw.Close()
 		}
 	}
-	io.Copy(dest, logs)
+	_, _ = io.Copy(dest, logs)
 }
 
 // Stop terminates a running run.
@@ -441,7 +442,7 @@ func (m *Manager) Close() error {
 	m.mu.RLock()
 	for _, r := range m.runs {
 		if r.ProxyServer != nil {
-			r.ProxyServer.Stop(context.Background())
+			_ = r.ProxyServer.Stop(context.Background())
 		}
 	}
 	m.mu.RUnlock()
