@@ -16,15 +16,19 @@ import (
 	"github.com/andybons/agentops/internal/container"
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/image"
+	"github.com/andybons/agentops/internal/name"
 	"github.com/andybons/agentops/internal/proxy"
+	"github.com/andybons/agentops/internal/routing"
 	"github.com/andybons/agentops/internal/storage"
 )
 
 // Manager handles run lifecycle operations.
 type Manager struct {
-	runtime container.Runtime
-	runs    map[string]*Run
-	mu      sync.RWMutex
+	runtime    container.Runtime
+	runs       map[string]*Run
+	runsByName map[string]*Run // index by name for collision detection
+	routes     *routing.RouteTable
+	mu         sync.RWMutex
 }
 
 // NewManager creates a new run manager.
@@ -34,19 +38,56 @@ func NewManager() (*Manager, error) {
 		return nil, fmt.Errorf("initializing container runtime: %w", err)
 	}
 
+	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	routes, err := routing.NewRouteTable(proxyDir)
+	if err != nil {
+		return nil, fmt.Errorf("initializing route table: %w", err)
+	}
+
 	return &Manager{
-		runtime: rt,
-		runs:    make(map[string]*Run),
+		runtime:    rt,
+		runs:       make(map[string]*Run),
+		runsByName: make(map[string]*Run),
+		routes:     routes,
 	}, nil
 }
 
 // Create initializes a new run without starting it.
 func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
+	// Resolve agent name
+	agentName := opts.Name
+	if agentName == "" {
+		// Generate random name
+		for i := 0; i < 3; i++ {
+			agentName = name.Generate()
+			if !m.routes.AgentExists(agentName) {
+				break
+			}
+		}
+		// If still colliding after 3 tries, append random suffix
+		if m.routes.AgentExists(agentName) {
+			agentName = agentName + "-" + generateID()[4:8]
+		}
+	} else {
+		// Check for collision with explicit name
+		if m.routes.AgentExists(agentName) {
+			return nil, fmt.Errorf("agent %q is already running. Use --name to specify a different name, or stop the existing agent first", agentName)
+		}
+	}
+
+	// Get ports from config
+	var ports map[string]int
+	if opts.Config != nil && len(opts.Config.Ports) > 0 {
+		ports = opts.Config.Ports
+	}
+
 	r := &Run{
 		ID:        generateID(),
+		Name:      agentName,
 		Agent:     opts.Agent,
 		Workspace: opts.Workspace,
 		Grants:    opts.Grants,
+		Ports:     ports,
 		State:     StateCreated,
 		CreatedAt: time.Now(),
 	}
@@ -227,16 +268,26 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Add explicit env vars (highest priority - can override config)
 	proxyEnv = append(proxyEnv, opts.Env...)
 
+	// Build port bindings for exposed services
+	var portBindings map[int]string
+	if len(ports) > 0 {
+		portBindings = make(map[int]string)
+		for _, containerPort := range ports {
+			portBindings[containerPort] = "127.0.0.1"
+		}
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
-		Name:        r.ID,
-		Image:       image.Resolve(opts.Config),
-		Cmd:         cmd,
-		WorkingDir:  "/workspace",
-		Env:         proxyEnv,
-		ExtraHosts:  extraHosts,
-		NetworkMode: networkMode,
-		Mounts:      mounts,
+		Name:         r.ID,
+		Image:        image.Resolve(opts.Config),
+		Cmd:          cmd,
+		WorkingDir:   "/workspace",
+		Env:          proxyEnv,
+		ExtraHosts:   extraHosts,
+		NetworkMode:  networkMode,
+		Mounts:       mounts,
+		PortBindings: portBindings,
 	})
 	if err != nil {
 		// Clean up proxy server if container creation fails
@@ -271,6 +322,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	m.mu.Lock()
 	m.runs[r.ID] = r
+	m.runsByName[r.Name] = r
 	m.mu.Unlock()
 
 	return r, nil
