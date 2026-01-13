@@ -496,6 +496,9 @@ Every run captures:
 
 ### Tamper-Proof Audit Logging
 
+> **Status:** Audit infrastructure is complete. Integration with `agent run` is in progress.
+> See [docs/plans/audit-integration-guide.md](docs/plans/audit-integration-guide.md) for the implementation plan.
+
 AgentOps provides cryptographic verification that audit logs haven't been tampered with:
 
 1. **Hash Chain** - Each log entry includes a SHA-256 hash of its contents plus the previous entry's hash, creating an immutable chain
