@@ -38,14 +38,18 @@ func NewCollector(store *Store) *Collector {
 // StartTCP starts the collector listening on TCP with token authentication.
 // Returns the port number the server is listening on.
 func (c *Collector) StartTCP(authToken string) (string, error) {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	// Bind to all interfaces - required for Apple containers which access host via gateway IP.
+	// Security is maintained via token authentication (see authToken parameter).
+	listener, err := net.Listen("tcp", "0.0.0.0:0") //nolint:gosec // G102: intentional for Apple container support
 	if err != nil {
 		return "", err
 	}
 	c.listener = listener
 	c.authToken = authToken
 
-	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
+	// Type assertion is safe: net.Listen("tcp", ...) always returns a *net.TCPListener
+	// whose Addr() method returns *net.TCPAddr.
+	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port) //nolint:errcheck // type assertion guaranteed to succeed
 
 	c.wg.Add(1)
 	go c.acceptLoop()
@@ -102,8 +106,10 @@ func (c *Collector) handleConnection(conn net.Conn) {
 
 	// If auth token is set (TCP mode), require authentication
 	if c.authToken != "" {
-		// Set read deadline to prevent slow-loris attacks during authentication
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		// Set read deadline to prevent slow-loris attacks during authentication.
+		// Error is safe to ignore: SetReadDeadline only fails if the connection
+		// is already closed, in which case subsequent reads will fail anyway.
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 		token := make([]byte, len(c.authToken))
 		if _, err := io.ReadFull(conn, token); err != nil {
@@ -113,8 +119,9 @@ func (c *Collector) handleConnection(conn net.Conn) {
 			return // Wrong token - close connection
 		}
 
-		// Clear deadline for subsequent message reads
-		conn.SetReadDeadline(time.Time{})
+		// Clear deadline for subsequent message reads.
+		// Error is safe to ignore: same rationale as above.
+		_ = conn.SetReadDeadline(time.Time{})
 	}
 
 	scanner := bufio.NewScanner(conn)

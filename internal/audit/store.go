@@ -185,7 +185,7 @@ func scanEntry(row *sql.Row) (*Entry, error) {
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
 	// before writing, so any value read from the database is valid JSON.
-	json.Unmarshal([]byte(dataStr), &e.Data)
+	_ = json.Unmarshal([]byte(dataStr), &e.Data) //nolint:errcheck // documented safe above
 	return &e, nil
 }
 
@@ -202,7 +202,7 @@ func scanEntryRows(rows *sql.Rows) (*Entry, error) {
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
 	// before writing, so any value read from the database is valid JSON.
-	json.Unmarshal([]byte(dataStr), &e.Data)
+	_ = json.Unmarshal([]byte(dataStr), &e.Data) //nolint:errcheck // documented safe above
 	return &e, nil
 }
 
