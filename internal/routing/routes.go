@@ -53,10 +53,24 @@ func (rt *RouteTable) Remove(agent string) error {
 	return rt.save()
 }
 
+// reload reads routes from disk into memory.
+func (rt *RouteTable) reload() {
+	path := filepath.Join(rt.dir, "routes.json")
+	if data, err := os.ReadFile(path); err == nil {
+		var routes map[string]map[string]string
+		if err := json.Unmarshal(data, &routes); err == nil {
+			rt.routes = routes
+		}
+	}
+}
+
 // Lookup returns the host:port for an agent's service.
+// It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) Lookup(agent, service string) (string, bool) {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
 
 	services, ok := rt.routes[agent]
 	if !ok {
@@ -67,9 +81,12 @@ func (rt *RouteTable) Lookup(agent, service string) (string, bool) {
 }
 
 // LookupDefault returns the first service's address for an agent.
+// It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) LookupDefault(agent string) (string, bool) {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
 
 	services, ok := rt.routes[agent]
 	if !ok || len(services) == 0 {
@@ -83,17 +100,24 @@ func (rt *RouteTable) LookupDefault(agent string) (string, bool) {
 }
 
 // AgentExists returns true if the agent has registered routes.
+// It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) AgentExists(agent string) bool {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
+
 	_, ok := rt.routes[agent]
 	return ok
 }
 
 // Agents returns all registered agent names.
+// It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) Agents() []string {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
 
 	agents := make([]string, 0, len(rt.routes))
 	for agent := range rt.routes {
