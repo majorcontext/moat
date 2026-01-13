@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,9 +15,9 @@ func TestLoadConfig(t *testing.T) {
 agent: claude-code
 version: 1.0.46
 
-runtime:
-  node: 20
-  python: 3.11
+dependencies:
+  - node@20
+  - python@3.11
 
 grants:
   - github:repo
@@ -37,8 +38,8 @@ env:
 	if cfg.Version != "1.0.46" {
 		t.Errorf("Version = %q, want %q", cfg.Version, "1.0.46")
 	}
-	if cfg.Runtime.Node != "20" {
-		t.Errorf("Runtime.Node = %q, want %q", cfg.Runtime.Node, "20")
+	if len(cfg.Dependencies) != 2 {
+		t.Errorf("Dependencies = %d, want 2", len(cfg.Dependencies))
 	}
 	if len(cfg.Grants) != 2 {
 		t.Errorf("Grants = %d, want 2", len(cfg.Grants))
@@ -114,65 +115,50 @@ ports:
 	}
 }
 
-func TestParseRuntime(t *testing.T) {
-	tests := []struct {
-		input   string
-		want    Runtime
-		wantErr bool
-	}{
-		{
-			input: "python:3.11",
-			want:  Runtime{Python: "3.11"},
-		},
-		{
-			input: "node:20",
-			want:  Runtime{Node: "20"},
-		},
-		{
-			input: "go:1.22",
-			want:  Runtime{Go: "1.22"},
-		},
-		{
-			input: "node:20.10.0",
-			want:  Runtime{Node: "20.10.0"},
-		},
-		{
-			input:   "python",
-			wantErr: true, // missing version
-		},
-		{
-			input:   "ruby:3.0",
-			wantErr: true, // unsupported language
-		},
-		{
-			input:   ":3.11",
-			wantErr: true, // missing language
-		},
-		{
-			input:   "python:",
-			wantErr: true, // missing version
-		},
-		{
-			input:   "",
-			wantErr: true, // empty
-		},
-	}
+func TestLoadConfigWithDependencies(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
 
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got, err := ParseRuntime(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ParseRuntime(%q) = %v, want error", tt.input, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ParseRuntime(%q) error: %v", tt.input, err)
-			}
-			if got.Python != tt.want.Python || got.Node != tt.want.Node || got.Go != tt.want.Go {
-				t.Errorf("ParseRuntime(%q) = %+v, want %+v", tt.input, *got, tt.want)
-			}
-		})
+	content := `
+name: myapp
+agent: test
+
+dependencies:
+  - node@20
+  - typescript
+  - protoc@25.1
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Dependencies) != 3 {
+		t.Fatalf("Dependencies = %d, want 3", len(cfg.Dependencies))
+	}
+	if cfg.Dependencies[0] != "node@20" {
+		t.Errorf("Dependencies[0] = %q, want %q", cfg.Dependencies[0], "node@20")
+	}
+}
+
+func TestLoadConfigRejectsRuntime(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+name: myapp
+agent: test
+runtime:
+  node: "20"
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when runtime field is present")
+	}
+	if !strings.Contains(err.Error(), "no longer supported") {
+		t.Errorf("error should mention 'no longer supported', got: %v", err)
 	}
 }

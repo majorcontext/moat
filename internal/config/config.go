@@ -5,29 +5,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents an agent.yaml manifest.
 type Config struct {
-	Name    string            `yaml:"name,omitempty"`
-	Agent   string            `yaml:"agent"`
-	Version string            `yaml:"version,omitempty"`
-	Runtime Runtime           `yaml:"runtime,omitempty"`
-	Grants  []string          `yaml:"grants,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty"`
-	Mounts  []string          `yaml:"mounts,omitempty"`
-	Ports   map[string]int    `yaml:"ports,omitempty"`
+	Name         string            `yaml:"name,omitempty"`
+	Agent        string            `yaml:"agent"`
+	Version      string            `yaml:"version,omitempty"`
+	Dependencies []string          `yaml:"dependencies,omitempty"`
+	Grants       []string          `yaml:"grants,omitempty"`
+	Env          map[string]string `yaml:"env,omitempty"`
+	Mounts       []string          `yaml:"mounts,omitempty"`
+	Ports        map[string]int    `yaml:"ports,omitempty"`
+
+	// Deprecated: use Dependencies instead
+	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
 }
 
-// Runtime specifies language runtime versions.
-type Runtime struct {
-	Node   string   `yaml:"node,omitempty"`
-	Python string   `yaml:"python,omitempty"`
-	Go     string   `yaml:"go,omitempty"`
-	System []string `yaml:"system,omitempty"` // System packages to install
+// deprecatedRuntime is kept only to detect and reject old configs.
+type deprecatedRuntime struct {
+	Node   string `yaml:"node,omitempty"`
+	Python string `yaml:"python,omitempty"`
+	Go     string `yaml:"go,omitempty"`
 }
 
 // Load reads agent.yaml from the given directory.
@@ -47,6 +48,12 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("parsing agent.yaml: %w", err)
 	}
 
+	// Reject deprecated runtime field
+	if cfg.Runtime != nil && (cfg.Runtime.Node != "" || cfg.Runtime.Python != "" || cfg.Runtime.Go != "") {
+		return nil, fmt.Errorf("'runtime' field is no longer supported\n\n  Replace this:\n    runtime:\n      node: %q\n\n  With this:\n    dependencies:\n      - node@%s",
+			cfg.Runtime.Node, cfg.Runtime.Node)
+	}
+
 	return &cfg, nil
 }
 
@@ -55,30 +62,4 @@ func DefaultConfig() *Config {
 	return &Config{
 		Env: make(map[string]string),
 	}
-}
-
-// ParseRuntime parses a runtime string in "language:version" format.
-// Supported languages: python, node, go.
-// Example: "python:3.11", "node:20", "go:1.22"
-func ParseRuntime(s string) (*Runtime, error) {
-	parts := strings.SplitN(s, ":", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return nil, fmt.Errorf("invalid runtime format %q, expected language:version (e.g., python:3.11)", s)
-	}
-
-	lang, version := parts[0], parts[1]
-	r := &Runtime{}
-
-	switch lang {
-	case "python":
-		r.Python = version
-	case "node":
-		r.Node = version
-	case "go":
-		r.Go = version
-	default:
-		return nil, fmt.Errorf("unsupported runtime %q, supported: python, node, go", lang)
-	}
-
-	return r, nil
 }
