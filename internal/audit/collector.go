@@ -14,6 +14,10 @@ import (
 	"github.com/andybons/agentops/internal/log"
 )
 
+// authTimeout is the deadline for completing token authentication.
+// Prevents slow-loris attacks where a client sends data very slowly.
+const authTimeout = 5 * time.Second
+
 // CollectorMessage is the wire format for log messages from agents.
 type CollectorMessage struct {
 	Type string `json:"type"`
@@ -111,7 +115,7 @@ func (c *Collector) handleConnection(conn net.Conn) {
 		// Set read deadline to prevent slow-loris attacks during authentication.
 		// Error is safe to ignore: SetReadDeadline only fails if the connection
 		// is already closed, in which case subsequent reads will fail anyway.
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(authTimeout))
 
 		token := make([]byte, len(c.authToken))
 		if _, err := io.ReadFull(conn, token); err != nil {

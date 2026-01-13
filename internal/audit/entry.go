@@ -18,6 +18,10 @@ const (
 	EntryCredential EntryType = "credential"
 )
 
+// FirstSequence is the sequence number of the first entry in a log.
+// Sequences are 1-indexed to distinguish "no previous entry" (seq=0) from the first entry.
+const FirstSequence uint64 = 1
+
 // ConsoleData holds console log entry data.
 type ConsoleData struct {
 	Line string `json:"line"`
