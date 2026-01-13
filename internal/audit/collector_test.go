@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -271,5 +272,90 @@ func TestCollector_UnixSocket_MultipleMessages(t *testing.T) {
 	}
 	if count != 10 {
 		t.Errorf("Count = %d, want 10", count)
+	}
+}
+
+func TestCollector_ConcurrentWrites(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "logs.db"))
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store)
+	token := "secret-token-12345678901234567890123456789012"
+
+	port, err := collector.StartTCP(token)
+	if err != nil {
+		t.Fatalf("StartTCP: %v", err)
+	}
+	defer collector.Stop()
+
+	// Launch multiple goroutines, each opening a connection and writing entries
+	const numClients = 5
+	const messagesPerClient = 20
+	var wg sync.WaitGroup
+
+	for i := 0; i < numClients; i++ {
+		wg.Add(1)
+		go func(clientID int) {
+			defer wg.Done()
+
+			conn, err := net.Dial("tcp", "127.0.0.1:"+port)
+			if err != nil {
+				t.Errorf("client %d: Dial: %v", clientID, err)
+				return
+			}
+			defer conn.Close()
+
+			// Send auth token
+			conn.Write([]byte(token))
+
+			// Send messages
+			for j := 0; j < messagesPerClient; j++ {
+				msg := CollectorMessage{
+					Type: string(EntryConsole),
+					Data: map[string]any{
+						"client": clientID,
+						"msg":    j,
+					},
+				}
+				if err := json.NewEncoder(conn).Encode(msg); err != nil {
+					t.Errorf("client %d: encode: %v", clientID, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	time.Sleep(200 * time.Millisecond) // Allow processing to complete
+
+	// Verify all entries were stored
+	expectedCount := uint64(numClients * messagesPerClient)
+	count, err := store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if count != expectedCount {
+		t.Errorf("Count = %d, want %d", count, expectedCount)
+	}
+
+	// Verify hash chain integrity
+	entries, err := store.Range(1, count)
+	if err != nil {
+		t.Fatalf("Range: %v", err)
+	}
+
+	var prevHash string
+	for i, entry := range entries {
+		if entry.PrevHash != prevHash {
+			t.Errorf("entry %d: broken hash chain", i+1)
+		}
+		if !entry.Verify() {
+			t.Errorf("entry %d: hash verification failed", i+1)
+		}
+		prevHash = entry.Hash
 	}
 }

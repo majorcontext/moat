@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"time"
+
+	"github.com/andybons/agentops/internal/log"
 )
 
 // EntryType identifies the kind of log entry.
@@ -66,8 +68,14 @@ func NewEntry(seq uint64, prevHash string, entryType EntryType, data any) *Entry
 }
 
 // newEntryWithTimestamp creates an entry with a specific timestamp (for testing).
+// Note: If data fails to marshal, it will be stored as null and logged as a warning.
+// Store.Append validates marshaling before calling this, so failures here are rare.
 func newEntryWithTimestamp(seq uint64, prevHash string, entryType EntryType, data any, ts time.Time) *Entry {
-	dataJSON, _ := json.Marshal(data)
+	dataJSON, err := json.Marshal(data)
+	if err != nil {
+		log.Warn("failed to marshal entry data", "type", entryType, "error", err)
+		dataJSON = []byte("null")
+	}
 	e := &Entry{
 		Sequence:  seq,
 		Timestamp: ts,
@@ -102,7 +110,12 @@ func (e *Entry) computeHash() string {
 	// after database round-trips where Data becomes map[string]any
 	dataBytes := e.dataJSON
 	if dataBytes == nil {
-		dataBytes, _ = json.Marshal(e.Data)
+		var err error
+		dataBytes, err = json.Marshal(e.Data)
+		if err != nil {
+			log.Warn("failed to marshal entry data for hash", "seq", e.Sequence, "error", err)
+			dataBytes = []byte("null")
+		}
 	}
 	h.Write(dataBytes)
 
@@ -128,6 +141,11 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	// Set dataJSON from the unmarshaled Data for hash verification
-	e.dataJSON, _ = json.Marshal(e.Data)
+	var err error
+	e.dataJSON, err = json.Marshal(e.Data)
+	if err != nil {
+		log.Warn("failed to marshal entry data after unmarshal", "seq", e.Sequence, "error", err)
+		e.dataJSON = []byte("null")
+	}
 	return nil
 }

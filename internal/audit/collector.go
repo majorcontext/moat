@@ -86,7 +86,11 @@ func (c *Collector) StartUnix(socketPath string) error {
 	c.listener = listener
 
 	// Set write-only permissions (0222) so agents can write logs but cannot
-	// read them back. This is part of the tamper-proof security model.
+	// read them back. This is part of the tamper-proof security model:
+	// - 0222 (world-writable) allows any process in the container to write
+	// - Container processes run as various UIDs, so owner-only (0200) won't work
+	// - Read permission is denied to prevent agents from verifying what was logged
+	// - The socket is bind-mounted into containers, not exposed to the host network
 	if err := os.Chmod(socketPath, 0222); err != nil {
 		listener.Close()
 		os.Remove(socketPath)
@@ -121,6 +125,12 @@ func (c *Collector) acceptLoop() {
 func (c *Collector) handleConnection(conn net.Conn) {
 	defer c.wg.Done()
 	defer conn.Close()
+
+	// Monitor for shutdown and close connection to unblock scanner
+	go func() {
+		<-c.done
+		conn.Close()
+	}()
 
 	// If auth token is set (TCP mode), require authentication
 	if c.authToken != "" {
