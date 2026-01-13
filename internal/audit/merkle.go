@@ -47,3 +47,58 @@ func NewInternalNode(left, right *MerkleNode) *MerkleNode {
 		Right: right,
 	}
 }
+
+// MerkleTree holds the root of a Merkle tree and leaf count.
+type MerkleTree struct {
+	Root *MerkleNode
+	size uint64
+}
+
+// Size returns the number of entries in the tree.
+func (t *MerkleTree) Size() uint64 {
+	return t.size
+}
+
+// RootHash returns the root hash, or empty string if tree is empty.
+func (t *MerkleTree) RootHash() string {
+	if t.Root == nil {
+		return ""
+	}
+	return t.Root.Hash
+}
+
+// BuildMerkleTree constructs a Merkle tree from entries.
+// Uses a bottom-up approach: create leaf nodes, then combine pairwise.
+func BuildMerkleTree(entries []*Entry) *MerkleTree {
+	if len(entries) == 0 {
+		return &MerkleTree{}
+	}
+
+	// Create leaf nodes
+	nodes := make([]*MerkleNode, len(entries))
+	for i, e := range entries {
+		nodes[i] = NewLeafNode(e.Sequence, e.Hash)
+	}
+
+	// Build tree bottom-up
+	for len(nodes) > 1 {
+		var nextLevel []*MerkleNode
+
+		for i := 0; i < len(nodes); i += 2 {
+			if i+1 < len(nodes) {
+				// Pair exists - create internal node
+				nextLevel = append(nextLevel, NewInternalNode(nodes[i], nodes[i+1]))
+			} else {
+				// Odd node - promote to next level
+				nextLevel = append(nextLevel, nodes[i])
+			}
+		}
+
+		nodes = nextLevel
+	}
+
+	return &MerkleTree{
+		Root: nodes[0],
+		size: uint64(len(entries)),
+	}
+}
