@@ -32,3 +32,18 @@ func NewLeafNode(seq uint64, entryHash string) *MerkleNode {
 		EntrySeq: seq,
 	}
 }
+
+// NewInternalNode creates an internal node from two children.
+// Uses domain separation: SHA-256(0x01 || left.hash || right.hash).
+func NewInternalNode(left, right *MerkleNode) *MerkleNode {
+	h := sha256.New()
+	h.Write([]byte{internalPrefix})
+	h.Write([]byte(left.Hash))
+	h.Write([]byte(right.Hash))
+
+	return &MerkleNode{
+		Hash:  hex.EncodeToString(h.Sum(nil)),
+		Left:  left,
+		Right: right,
+	}
+}

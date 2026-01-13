@@ -34,3 +34,36 @@ func TestMerkleNode_LeafHash_Deterministic(t *testing.T) {
 		t.Error("Same inputs should produce same hash")
 	}
 }
+
+func TestMerkleNode_InternalHash(t *testing.T) {
+	// An internal node's hash is SHA-256(0x01 || left.hash || right.hash)
+	left := NewLeafNode(1, "hash1")
+	right := NewLeafNode(2, "hash2")
+
+	node := NewInternalNode(left, right)
+
+	if node.Hash == "" {
+		t.Error("Hash should not be empty")
+	}
+	if node.Left != left {
+		t.Error("Left child should be set")
+	}
+	if node.Right != right {
+		t.Error("Right child should be set")
+	}
+	if node.EntrySeq != 0 {
+		t.Error("Internal node should have EntrySeq = 0")
+	}
+}
+
+func TestMerkleNode_InternalHash_OrderMatters(t *testing.T) {
+	left := NewLeafNode(1, "hash1")
+	right := NewLeafNode(2, "hash2")
+
+	node1 := NewInternalNode(left, right)
+	node2 := NewInternalNode(right, left) // Swapped
+
+	if node1.Hash == node2.Hash {
+		t.Error("Different child order should produce different hash")
+	}
+}
