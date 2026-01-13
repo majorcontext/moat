@@ -497,7 +497,7 @@ Every run captures:
 ### Tamper-Proof Audit Logging
 
 > **Status:** Audit infrastructure is complete. Integration with `agent run` is in progress.
-> See [docs/audit-integration-guide.md](docs/audit-integration-guide.md) for the implementation plan.
+> See [docs/plans/audit-integration-guide.md](docs/plans/audit-integration-guide.md) for the implementation plan.
 
 AgentOps provides cryptographic verification that audit logs haven't been tampered with:
 
