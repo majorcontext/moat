@@ -315,8 +315,9 @@ func TestIncrementalMerkleTree_MatchesBatchBuilder(t *testing.T) {
 
 		for i := 0; i < n; i++ {
 			hash := fmt.Sprintf("hash%d", i+1)
-			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: hash}
-			inc.Append(uint64(i+1), hash)
+			seq := uint64(i + 1) //nolint:gosec // i is bounded by test sizes
+			entries[i] = &Entry{Sequence: seq, Hash: hash}
+			inc.Append(seq, hash)
 		}
 
 		batch := BuildMerkleTree(entries)
@@ -335,8 +336,9 @@ func TestIncrementalMerkleTree_IncrementalEquivalence(t *testing.T) {
 
 	for i := 1; i <= 20; i++ {
 		hash := fmt.Sprintf("entry%d", i)
-		entries = append(entries, &Entry{Sequence: uint64(i), Hash: hash})
-		inc.Append(uint64(i), hash)
+		seq := uint64(i) //nolint:gosec // i is bounded by loop limit
+		entries = append(entries, &Entry{Sequence: seq, Hash: hash})
+		inc.Append(seq, hash)
 
 		batch := BuildMerkleTree(entries)
 		if inc.RootHash() != batch.RootHash() {
@@ -355,12 +357,13 @@ func BenchmarkMerkleRebuild_FullRebuild(b *testing.B) {
 
 	for _, n := range sizes {
 		entries := make([]*Entry, n)
-		for i := 0; i < n; i++ {
-			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: fmt.Sprintf("hash%d", i+1)}
+		for i := range n {
+			seq := uint64(i + 1) //nolint:gosec // i is bounded by n
+			entries[i] = &Entry{Sequence: seq, Hash: fmt.Sprintf("hash%d", i+1)}
 		}
 
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				// Simulate one append with full rebuild
 				tree := BuildMerkleTree(entries)
 				_ = tree.RootHash()
@@ -377,14 +380,16 @@ func BenchmarkMerkleRebuild_Incremental(b *testing.B) {
 	for _, n := range sizes {
 		// Pre-populate the tree
 		tree := NewIncrementalMerkleTree()
-		for i := 0; i < n; i++ {
-			tree.Append(uint64(i+1), fmt.Sprintf("hash%d", i+1))
+		for i := range n {
+			seq := uint64(i + 1) //nolint:gosec // i is bounded by n
+			tree.Append(seq, fmt.Sprintf("hash%d", i+1))
 		}
 
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				// Simulate one append
-				tree.Append(uint64(n+i+1), fmt.Sprintf("newhash%d", i))
+				seq := uint64(n + i + 1) //nolint:gosec // bounded by benchmark iterations
+				tree.Append(seq, fmt.Sprintf("newhash%d", i))
 				_ = tree.RootHash()
 			}
 		})
@@ -398,14 +403,16 @@ func BenchmarkMerkleAppend_Comparison(b *testing.B) {
 
 	b.Run("FullRebuild", func(b *testing.B) {
 		entries := make([]*Entry, n)
-		for i := 0; i < n; i++ {
-			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: fmt.Sprintf("hash%d", i+1)}
+		for i := range n {
+			seq := uint64(i + 1) //nolint:gosec // i is bounded by n
+			entries[i] = &Entry{Sequence: seq, Hash: fmt.Sprintf("hash%d", i+1)}
 		}
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			// Add one entry and rebuild entire tree
-			newEntries := append(entries, &Entry{Sequence: uint64(n + i + 1), Hash: fmt.Sprintf("new%d", i)})
+			seq := uint64(n + i + 1) //nolint:gosec // bounded by benchmark iterations
+			newEntries := append(entries, &Entry{Sequence: seq, Hash: fmt.Sprintf("new%d", i)})
 			tree := BuildMerkleTree(newEntries)
 			_ = tree.RootHash()
 		}
@@ -413,15 +420,16 @@ func BenchmarkMerkleAppend_Comparison(b *testing.B) {
 
 	b.Run("Incremental", func(b *testing.B) {
 		tree := NewIncrementalMerkleTree()
-		for i := 0; i < n; i++ {
-			tree.Append(uint64(i+1), fmt.Sprintf("hash%d", i+1))
+		for i := range n {
+			seq := uint64(i + 1) //nolint:gosec // i is bounded by n
+			tree.Append(seq, fmt.Sprintf("hash%d", i+1))
 		}
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			tree.Append(uint64(n+i+1), fmt.Sprintf("new%d", i))
+		for i := range b.N {
+			seq := uint64(n + i + 1) //nolint:gosec // bounded by benchmark iterations
+			tree.Append(seq, fmt.Sprintf("new%d", i))
 			_ = tree.RootHash()
 		}
 	})
 }
-
