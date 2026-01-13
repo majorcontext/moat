@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStore_OpenClose(t *testing.T) {
@@ -448,5 +449,53 @@ func TestStore_ProveEntry_NotFound(t *testing.T) {
 	_, err := store.ProveEntry(999)
 	if err == nil {
 		t.Error("Expected error for non-existent entry")
+	}
+}
+
+func TestStore_SaveRekorProof(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := OpenStore(filepath.Join(dir, "test.db"))
+	defer store.Close()
+
+	// Add an entry first
+	store.AppendConsole("test log")
+
+	proof := &RekorProof{
+		LogIndex:  12345,
+		LogID:     "c0d23d6ad406973f",
+		TreeSize:  98765432,
+		RootHash:  "abc123",
+		Hashes:    []string{"def456", "789abc"},
+		Timestamp: time.Now().UTC(),
+		EntryUUID: "entry-uuid-123",
+	}
+
+	err := store.SaveRekorProof(1, proof)
+	if err != nil {
+		t.Fatalf("SaveRekorProof: %v", err)
+	}
+}
+
+func TestStore_LoadRekorProofs(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := OpenStore(filepath.Join(dir, "test.db"))
+	defer store.Close()
+
+	store.AppendConsole("test 1")
+	store.AppendConsole("test 2")
+
+	proof1 := &RekorProof{LogIndex: 100, LogID: "id1", EntryUUID: "uuid1", Timestamp: time.Now().UTC()}
+	proof2 := &RekorProof{LogIndex: 200, LogID: "id2", EntryUUID: "uuid2", Timestamp: time.Now().UTC()}
+
+	store.SaveRekorProof(1, proof1)
+	store.SaveRekorProof(2, proof2)
+
+	proofs, err := store.LoadRekorProofs()
+	if err != nil {
+		t.Fatalf("LoadRekorProofs: %v", err)
+	}
+
+	if len(proofs) != 2 {
+		t.Errorf("got %d proofs, want 2", len(proofs))
 	}
 }

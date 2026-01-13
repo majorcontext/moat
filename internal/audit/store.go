@@ -71,6 +71,17 @@ func createTables(db *sql.DB) error {
 			signature  BLOB NOT NULL,
 			public_key BLOB NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS rekor_proofs (
+			seq        INTEGER PRIMARY KEY,
+			log_index  INTEGER NOT NULL,
+			log_id     TEXT NOT NULL,
+			tree_size  INTEGER NOT NULL,
+			root_hash  TEXT NOT NULL,
+			hashes     TEXT NOT NULL,
+			timestamp  TEXT NOT NULL,
+			entry_uuid TEXT NOT NULL
+		);
 	`)
 	return err
 }
@@ -321,6 +332,47 @@ func (s *Store) LoadAttestations() ([]*Attestation, error) {
 		attestations = append(attestations, &att)
 	}
 	return attestations, rows.Err()
+}
+
+// SaveRekorProof saves a Rekor inclusion proof for an entry.
+func (s *Store) SaveRekorProof(seq uint64, proof *RekorProof) error {
+	hashesJSON, _ := json.Marshal(proof.Hashes)
+	_, err := s.db.Exec(`
+		INSERT INTO rekor_proofs (seq, log_index, log_id, tree_size, root_hash, hashes, timestamp, entry_uuid)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, seq, proof.LogIndex, proof.LogID, proof.TreeSize, proof.RootHash,
+		string(hashesJSON), proof.Timestamp.Format(time.RFC3339Nano), proof.EntryUUID)
+	if err != nil {
+		return fmt.Errorf("saving rekor proof: %w", err)
+	}
+	return nil
+}
+
+// LoadRekorProofs returns all Rekor proofs in the store.
+func (s *Store) LoadRekorProofs() (map[uint64]*RekorProof, error) {
+	rows, err := s.db.Query(`
+		SELECT seq, log_index, log_id, tree_size, root_hash, hashes, timestamp, entry_uuid
+		FROM rekor_proofs ORDER BY seq
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("loading rekor proofs: %w", err)
+	}
+	defer rows.Close()
+
+	proofs := make(map[uint64]*RekorProof)
+	for rows.Next() {
+		var seq uint64
+		var proof RekorProof
+		var hashesJSON, tsStr string
+		if err := rows.Scan(&seq, &proof.LogIndex, &proof.LogID, &proof.TreeSize,
+			&proof.RootHash, &hashesJSON, &tsStr, &proof.EntryUUID); err != nil {
+			return nil, fmt.Errorf("scanning rekor proof: %w", err)
+		}
+		json.Unmarshal([]byte(hashesJSON), &proof.Hashes)
+		proof.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+		proofs[seq] = &proof
+	}
+	return proofs, rows.Err()
 }
 
 // VerifyChain verifies the integrity of the entire hash chain.
