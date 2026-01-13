@@ -30,7 +30,7 @@ func TestRouteTable(t *testing.T) {
 	}
 
 	// Lookup default (first service)
-	addr, ok = rt.LookupDefault("myapp")
+	_, ok = rt.LookupDefault("myapp")
 	if !ok {
 		t.Fatal("LookupDefault(myapp) not found")
 	}

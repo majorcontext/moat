@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ReverseProxy routes requests based on Host header to container services.
@@ -75,7 +76,7 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (rp *ReverseProxy) writeError(w http.ResponseWriter, code int, errType, detail string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":  errType,
 		"detail": detail,
 	})
@@ -105,10 +106,19 @@ func (ps *ProxyServer) Start(port int) error {
 	}
 
 	ps.listener = listener
-	ps.port = listener.Addr().(*net.TCPAddr).Port
-	ps.server = &http.Server{Handler: ps.rp}
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return fmt.Errorf("unexpected listener address type: %T", listener.Addr())
+	}
+	ps.port = tcpAddr.Port
+	ps.server = &http.Server{
+		Handler:           ps.rp,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
-	go ps.server.Serve(listener)
+	go func() {
+		_ = ps.server.Serve(listener) // Error handled by Shutdown
+	}()
 	return nil
 }
 

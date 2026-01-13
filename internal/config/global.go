@@ -36,7 +36,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 	if err == nil {
 		configPath := filepath.Join(homeDir, ".agentops", "config.yaml")
 		if data, err := os.ReadFile(configPath); err == nil {
-			yaml.Unmarshal(data, cfg)
+			_ = yaml.Unmarshal(data, cfg) // Ignore unmarshal errors, use defaults
 		}
 	}
 

@@ -2,7 +2,8 @@
 package name
 
 import (
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 )
 
 var adjectives = []string{
@@ -35,7 +36,9 @@ var animals = []string{
 
 // Generate returns a random name in adjective-animal format.
 func Generate() string {
-	adj := adjectives[rand.Intn(len(adjectives))]
-	animal := animals[rand.Intn(len(animals))]
+	adjIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(adjectives))))
+	animalIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(animals))))
+	adj := adjectives[adjIdx.Int64()]
+	animal := animals[animalIdx.Int64()]
 	return adj + "-" + animal
 }

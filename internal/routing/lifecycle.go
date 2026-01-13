@@ -55,7 +55,7 @@ func (lc *Lifecycle) EnsureRunning() error {
 
 	// Clean up stale lock if exists
 	if lock != nil {
-		RemoveProxyLock(lc.dir)
+		_ = RemoveProxyLock(lc.dir) // Best effort cleanup
 	}
 
 	// Start new proxy
@@ -72,7 +72,7 @@ func (lc *Lifecycle) EnsureRunning() error {
 		PID:  os.Getpid(),
 		Port: lc.port,
 	}); err != nil {
-		lc.server.Stop(context.Background())
+		_ = lc.server.Stop(context.Background()) // Best effort cleanup
 		return fmt.Errorf("saving proxy lock: %w", err)
 	}
 

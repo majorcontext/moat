@@ -332,13 +332,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Ensure proxy is running if we have ports to expose
 	if len(ports) > 0 {
-		if err := m.proxyLifecycle.EnsureRunning(); err != nil {
+		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
 			_ = m.runtime.RemoveContainer(ctx, containerID)
 			if proxyServer != nil {
 				_ = proxyServer.Stop(context.Background())
 			}
-			return nil, fmt.Errorf("starting routing proxy: %w", err)
+			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
 	}
 
