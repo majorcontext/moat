@@ -332,6 +332,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Ensure proxy is running if we have ports to expose
 	if len(ports) > 0 {
+		// Enable TLS on the routing proxy
+		if _, tlsErr := m.proxyLifecycle.EnableTLS(); tlsErr != nil {
+			// Clean up container
+			_ = m.runtime.RemoveContainer(ctx, containerID)
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
+		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
 			_ = m.runtime.RemoveContainer(ctx, containerID)
@@ -390,7 +399,16 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 
 	// Get actual port bindings after container starts
 	if len(r.Ports) > 0 {
-		bindings, err := m.runtime.GetPortBindings(ctx, r.ContainerID)
+		// Retry a few times - Docker may need a moment to set up port bindings
+		var bindings map[int]int
+		var err error
+		for i := 0; i < 5; i++ {
+			bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
+			if err != nil || len(bindings) >= len(r.Ports) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 		if err != nil {
 			// Log but don't fail - container is running
 			fmt.Fprintf(os.Stderr, "Warning: getting port bindings: %v\n", err)

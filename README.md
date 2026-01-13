@@ -190,12 +190,27 @@ agent run --name myapp ./project
 
 ### Accessing Services
 
-Services are available via hostname routing:
+Services are available via HTTPS hostname routing:
 
 ```
-http://web.myapp.localhost:8080  → container port 3000
-http://api.myapp.localhost:8080  → container port 8080
-http://myapp.localhost:8080      → default service (first in config)
+https://web.myapp.localhost:8080  → container port 3000
+https://api.myapp.localhost:8080  → container port 8080
+https://myapp.localhost:8080      → default service (first in config)
+```
+
+The proxy supports both HTTP and HTTPS on the same port, with HTTPS enabled by default using a locally-generated CA certificate.
+
+**Trusting the CA certificate** (to avoid browser/curl warnings):
+
+```bash
+# macOS
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.agentops/proxy/ca/ca.crt
+
+# Linux
+sudo cp ~/.agentops/proxy/ca/ca.crt /usr/local/share/ca-certificates/agentops.crt && sudo update-ca-certificates
+
+# Or use curl with --cacert
+curl --cacert ~/.agentops/proxy/ca/ca.crt https://web.myapp.localhost:8080
 ```
 
 The proxy binds to port 8080 by default. Configure globally in `~/.agentops/config.yaml`:
@@ -340,7 +355,7 @@ agent destroy [run-id]
 
 ### `agent proxy`
 
-Manage the hostname-based routing proxy. By default, the proxy starts automatically when needed and stops when the last agent exits. Use these commands to run it as a standalone daemon.
+Manage the hostname-based routing proxy. The proxy supports both HTTP and HTTPS on a single port, using auto-generated certificates signed by a local CA. By default, the proxy starts automatically when needed and stops when the last agent exits. Use these commands to run it as a standalone daemon.
 
 ```bash
 # Start proxy on default port (8080)
@@ -355,6 +370,8 @@ agent proxy status
 # Stop proxy
 agent proxy stop
 ```
+
+On first start, the proxy generates a CA certificate at `~/.agentops/proxy/ca/ca.crt`. Trust this certificate to avoid browser warnings (see "Accessing Services" above).
 
 Running the proxy separately is useful when you need privileged ports (like 80) since agents can then run without sudo.
 

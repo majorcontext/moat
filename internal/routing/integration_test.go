@@ -4,6 +4,8 @@ package routing
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,12 +28,16 @@ func TestFullRoutingFlow(t *testing.T) {
 	}))
 	defer apiBackend.Close()
 
-	// Start proxy lifecycle
+	// Start proxy lifecycle with TLS
 	lc, err := NewLifecycle(dir, 0)
 	if err != nil {
 		t.Fatalf("NewLifecycle: %v", err)
 	}
 	defer lc.Stop(context.Background())
+
+	if _, err := lc.EnableTLS(); err != nil {
+		t.Fatalf("EnableTLS: %v", err)
+	}
 
 	if err := lc.EnsureRunning(); err != nil {
 		t.Fatalf("EnsureRunning: %v", err)
@@ -47,42 +53,68 @@ func TestFullRoutingFlow(t *testing.T) {
 		t.Fatalf("Add routes: %v", err)
 	}
 
-	// Create HTTP client
-	client := &http.Client{Timeout: 5 * time.Second}
-	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", lc.Port())
+	// Create HTTP client (plain)
+	httpClient := &http.Client{Timeout: 5 * time.Second}
 
-	// Test web service
-	req, _ := http.NewRequest("GET", proxyURL+"/", nil)
+	// Create HTTPS client
+	certPool := x509.NewCertPool()
+	certPool.AppendCertsFromPEM(lc.CA().CertPEM())
+	httpsClient := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: certPool,
+			},
+		},
+	}
+
+	proxyAddr := fmt.Sprintf("127.0.0.1:%d", lc.Port())
+
+	// Test HTTP web service
+	req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
 	req.Host = "web.myapp.localhost"
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		t.Fatalf("Request to web service: %v", err)
+		t.Fatalf("HTTP request to web service: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if string(body) != "web service" {
-		t.Errorf("Web response = %q, want 'web service'", body)
+		t.Errorf("HTTP web response = %q, want 'web service'", body)
 	}
 
-	// Test api service
-	req, _ = http.NewRequest("GET", proxyURL+"/", nil)
-	req.Host = "api.myapp.localhost"
-	resp, err = client.Do(req)
+	// Test HTTPS web service
+	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
+	req.Host = "web.myapp.localhost"
+	resp, err = httpsClient.Do(req)
 	if err != nil {
-		t.Fatalf("Request to api service: %v", err)
+		t.Fatalf("HTTPS request to web service: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "web service" {
+		t.Errorf("HTTPS web response = %q, want 'web service'", body)
+	}
+
+	// Test HTTPS api service
+	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
+	req.Host = "api.myapp.localhost"
+	resp, err = httpsClient.Do(req)
+	if err != nil {
+		t.Fatalf("HTTPS request to api service: %v", err)
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if string(body) != "api service" {
-		t.Errorf("API response = %q, want 'api service'", body)
+		t.Errorf("HTTPS API response = %q, want 'api service'", body)
 	}
 
 	// Test default service (agent without service prefix)
-	req, _ = http.NewRequest("GET", proxyURL+"/", nil)
+	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
 	req.Host = "myapp.localhost"
-	resp, err = client.Do(req)
+	resp, err = httpsClient.Do(req)
 	if err != nil {
-		t.Fatalf("Request to default service: %v", err)
+		t.Fatalf("HTTPS request to default service: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -90,11 +122,11 @@ func TestFullRoutingFlow(t *testing.T) {
 	}
 
 	// Test unknown agent
-	req, _ = http.NewRequest("GET", proxyURL+"/", nil)
+	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
 	req.Host = "unknown.localhost"
-	resp, err = client.Do(req)
+	resp, err = httpsClient.Do(req)
 	if err != nil {
-		t.Fatalf("Request to unknown: %v", err)
+		t.Fatalf("HTTPS request to unknown: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
@@ -103,11 +135,11 @@ func TestFullRoutingFlow(t *testing.T) {
 
 	// Unregister and verify
 	routes.Remove("myapp")
-	req, _ = http.NewRequest("GET", proxyURL+"/", nil)
+	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
 	req.Host = "web.myapp.localhost"
-	resp, err = client.Do(req)
+	resp, err = httpsClient.Do(req)
 	if err != nil {
-		t.Fatalf("Request after remove: %v", err)
+		t.Fatalf("HTTPS request after remove: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {

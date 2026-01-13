@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -10,6 +11,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/agentops/internal/proxy"
 )
 
 // ReverseProxy routes requests based on Host header to container services.
@@ -84,10 +88,13 @@ func (rp *ReverseProxy) writeError(w http.ResponseWriter, code int, errType, det
 
 // ProxyServer wraps the reverse proxy with lifecycle management.
 type ProxyServer struct {
-	rp       *ReverseProxy
-	server   *http.Server
-	listener net.Listener
-	port     int
+	rp        *ReverseProxy
+	listener  net.Listener
+	mux       *muxListener
+	server    *http.Server
+	port      int
+	ca        *proxy.CA
+	tlsConfig *tls.Config
 }
 
 // NewProxyServer creates a new proxy server.
@@ -97,7 +104,31 @@ func NewProxyServer(routes *RouteTable) *ProxyServer {
 	}
 }
 
+// EnableTLS configures TLS support using the given CA.
+// Must be called before Start().
+func (ps *ProxyServer) EnableTLS(ca *proxy.CA) error {
+	if ps.tlsConfig != nil {
+		return fmt.Errorf("TLS already enabled")
+	}
+	if ps.listener != nil {
+		return fmt.Errorf("cannot enable TLS after Start()")
+	}
+
+	ps.ca = ca
+	ps.tlsConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		// Dynamically generate certificates based on SNI (Server Name Indication).
+		// This allows us to create valid certs for any hostname pattern like
+		// web.myapp.localhost without needing invalid multi-level wildcards.
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return ca.GenerateCert(hello.ServerName)
+		},
+	}
+	return nil
+}
+
 // Start starts the proxy server on the given port.
+// If TLS is enabled, the server handles both HTTP and HTTPS on the same port.
 func (ps *ProxyServer) Start(port int) error {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	listener, err := net.Listen("tcp", addr)
@@ -111,14 +142,24 @@ func (ps *ProxyServer) Start(port int) error {
 		return fmt.Errorf("unexpected listener address type: %T", listener.Addr())
 	}
 	ps.port = tcpAddr.Port
-	ps.server = &http.Server{
-		Handler:           ps.rp,
-		ReadHeaderTimeout: 10 * time.Second,
+
+	if ps.tlsConfig != nil {
+		// Use multiplexing listener for HTTP/HTTPS auto-detection
+		ps.mux = newMuxListener(listener, ps.tlsConfig, ps.rp)
+		go func() {
+			if err := ps.mux.serve(); err != nil && err != net.ErrClosed {
+				log.Debug("mux listener error", "error", err)
+			}
+		}()
+	} else {
+		// Plain HTTP only
+		ps.server = &http.Server{
+			Handler:           ps.rp,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() { _ = ps.server.Serve(listener) }()
 	}
 
-	go func() {
-		_ = ps.server.Serve(listener) // Error handled by Shutdown
-	}()
 	return nil
 }
 
@@ -129,8 +170,15 @@ func (ps *ProxyServer) Port() int {
 
 // Stop gracefully shuts down the proxy server.
 func (ps *ProxyServer) Stop(ctx context.Context) error {
-	if ps.server == nil {
+	if ps.listener == nil {
 		return nil
 	}
-	return ps.server.Shutdown(ctx)
+
+	// For non-TLS mode, use graceful shutdown
+	if ps.server != nil {
+		return ps.server.Shutdown(ctx)
+	}
+
+	// For TLS mode, close the listener (muxListener handles per-connection servers)
+	return ps.listener.Close()
 }

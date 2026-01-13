@@ -204,7 +204,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 		fmt.Println("Services:")
 		for serviceName, containerPort := range r.Ports {
-			url := fmt.Sprintf("http://%s.%s.localhost:%d", serviceName, r.Name, proxyPort)
+			url := fmt.Sprintf("https://%s.%s.localhost:%d", serviceName, r.Name, proxyPort)
 			fmt.Printf("  %s: %s (container :%d)\n", serviceName, url, containerPort)
 		}
 	}
