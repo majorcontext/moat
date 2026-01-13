@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"io"
@@ -133,6 +134,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // checkAuth validates the Proxy-Authorization header against the required token.
 // Accepts both Basic auth (from HTTP_PROXY=http://agentops:token@host) and Bearer format.
+// Uses constant-time comparison to prevent timing attacks.
 func (p *Proxy) checkAuth(r *http.Request) bool {
 	auth := r.Header.Get("Proxy-Authorization")
 	if auth == "" {
@@ -141,7 +143,7 @@ func (p *Proxy) checkAuth(r *http.Request) bool {
 
 	// Try Bearer format first: "Bearer <token>"
 	if strings.HasPrefix(auth, "Bearer ") {
-		return auth[7:] == p.authToken
+		return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(p.authToken)) == 1
 	}
 
 	// Try Basic format: "Basic <base64(username:password)>"
@@ -156,7 +158,7 @@ func (p *Proxy) checkAuth(r *http.Request) bool {
 		if len(parts) != 2 {
 			return false
 		}
-		return parts[1] == p.authToken
+		return subtle.ConstantTimeCompare([]byte(parts[1]), []byte(p.authToken)) == 1
 	}
 
 	return false

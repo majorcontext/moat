@@ -375,6 +375,77 @@ On first start, the proxy generates a CA certificate at `~/.agentops/proxy/ca/ca
 
 Running the proxy separately is useful when you need privileged ports (like 80) since agents can then run without sudo.
 
+### `agent audit`
+
+View the tamper-proof audit log for a run with cryptographic verification.
+
+```bash
+agent audit [run-id] [flags]
+
+# Examples
+agent audit                           # Audit most recent run
+agent audit run-abc123                # Audit specific run
+agent audit --export proof.json       # Export proof bundle for offline verification
+agent audit run-abc123 -e audit.json  # Export specific run's proof bundle
+
+# Flags
+--export, -e    Export proof bundle to JSON file
+```
+
+**Output:**
+
+```
+Auditing run: run-abc123
+===============================================================
+
+Log Integrity
+  [ok] Hash chain: 5 entries, no gaps, all hashes valid
+  [ok] Merkle tree: root matches computed root
+
+Local Signatures
+  [ok] 1 attestations, all signatures valid
+
+External Attestations (Sigstore/Rekor)
+  - No Rekor proofs found
+
+===============================================================
+VERDICT: [ok] INTACT - No tampering detected
+```
+
+### `agent verify-bundle`
+
+Verify an exported proof bundle offline.
+
+```bash
+agent verify-bundle <file>
+
+# Example
+agent verify-bundle proof.json
+```
+
+**Output:**
+
+```
+Proof Bundle Verification
+===============================================================
+Bundle Version: 1
+Created: 2026-01-13 10:24:00 UTC
+Entries: 5
+
+Log Integrity
+  [ok] Hash chain: 5 entries verified
+  [ok] Merkle root: 9c8d7e6fa1b2...
+
+Local Signatures
+  [ok] 1 attestation(s) verified
+
+External Attestations (Sigstore/Rekor)
+  - No Rekor proofs in bundle
+
+===============================================================
+VERDICT: [ok] VALID
+```
+
 ## How It Works
 
 ### Container Runtimes
@@ -421,6 +492,25 @@ Every run captures:
 - **Network** - All HTTP/HTTPS requests (`~/.agentops/runs/<id>/network.jsonl`)
 - **Traces** - OpenTelemetry-compatible spans (`~/.agentops/runs/<id>/traces.jsonl`)
 - **Metadata** - Run configuration (`~/.agentops/runs/<id>/metadata.json`)
+- **Audit Log** - Tamper-proof audit database (`~/.agentops/runs/<id>/audit.db`)
+
+### Tamper-Proof Audit Logging
+
+AgentOps provides cryptographic verification that audit logs haven't been tampered with:
+
+1. **Hash Chain** - Each log entry includes a SHA-256 hash of its contents plus the previous entry's hash, creating an immutable chain
+2. **Merkle Tree** - All entries are organized into a Merkle tree for efficient verification and inclusion proofs
+3. **Ed25519 Attestations** - The Merkle root can be signed with a per-run Ed25519 key for cryptographic proof of authenticity
+4. **Transparency Log Integration** - Supports Sigstore/Rekor for public timestamping and independent verification
+
+**Export proof bundles** for offline verification or sharing with auditors:
+
+```bash
+agent audit run-abc123 --export proof.json
+agent verify-bundle proof.json
+```
+
+The proof bundle contains entries, attestations, and inclusion proofs that can be verified without access to the original database.
 
 ## Development
 

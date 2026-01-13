@@ -39,3 +39,6 @@ go.work.sum
 
 # Built binary
 /agent
+
+# Git worktrees for isolated development
+.worktrees/
