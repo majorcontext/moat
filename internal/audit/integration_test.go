@@ -217,3 +217,67 @@ func TestIntegration_MerkleProofs(t *testing.T) {
 		t.Error("New proof should use new root")
 	}
 }
+
+func TestIntegration_AuditWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "logs.db")
+
+	// Create store and add entries
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	// Simulate a run with various entry types
+	// Use maps to ensure consistent JSON serialization (matches how Collector works)
+	for i := 0; i < 20; i++ {
+		store.Append(EntryConsole, map[string]any{"line": fmt.Sprintf("log line %d", i)})
+	}
+	store.Append(EntryNetwork, map[string]any{
+		"method":      "GET",
+		"url":         "https://api.github.com/user",
+		"status_code": 200,
+		"duration_ms": 150,
+	})
+	store.Append(EntryCredential, map[string]any{
+		"name":   "github",
+		"action": "injected",
+		"host":   "api.github.com",
+	})
+
+	// Create attestation at checkpoint
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+	att := &Attestation{
+		Sequence:  22,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		PublicKey: signer.PublicKey(),
+	}
+	att.Signature = signer.Sign([]byte(att.RootHash))
+	store.SaveAttestation(att)
+
+	store.Close()
+
+	// Audit the run
+	auditor, err := NewAuditor(dbPath)
+	if err != nil {
+		t.Fatalf("NewAuditor: %v", err)
+	}
+	defer auditor.Close()
+
+	result, err := auditor.Verify()
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// All checks should pass
+	if !result.Valid {
+		t.Errorf("Expected valid audit, got error: %s", result.Error)
+	}
+	if result.EntryCount != 22 {
+		t.Errorf("EntryCount = %d, want 22", result.EntryCount)
+	}
+	if result.AttestationCount != 1 {
+		t.Errorf("AttestationCount = %d, want 1", result.AttestationCount)
+	}
+}
