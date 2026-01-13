@@ -4,7 +4,7 @@
 python3 /workspace/web_server.py &
 python3 /workspace/api_server.py &
 
-echo "Servers started. Press Ctrl+C to stop.'
+echo "Servers started. Press Ctrl+C to stop."
 
 # Wait for any process to exit
 wait -n
