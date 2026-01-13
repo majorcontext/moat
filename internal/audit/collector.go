@@ -18,6 +18,10 @@ import (
 // Prevents slow-loris attacks where a client sends data very slowly.
 const authTimeout = 5 * time.Second
 
+// minTokenLength is the minimum acceptable auth token length.
+// Matches the proxy's guidance that tokens should be 32 bytes from crypto/rand.
+const minTokenLength = 32
+
 // CollectorMessage is the wire format for log messages from agents.
 type CollectorMessage struct {
 	Type string `json:"type"`
@@ -44,6 +48,10 @@ func NewCollector(store *Store) *Collector {
 // StartTCP starts the collector listening on TCP with token authentication.
 // Returns the port number the server is listening on.
 func (c *Collector) StartTCP(authToken string) (string, error) {
+	if len(authToken) < minTokenLength {
+		return "", fmt.Errorf("auth token too short: got %d bytes, need at least %d", len(authToken), minTokenLength)
+	}
+
 	// Bind to all interfaces - required for Apple containers which access host via gateway IP.
 	// Security is maintained via token authentication (see authToken parameter).
 	listener, err := net.Listen("tcp", "0.0.0.0:0") //nolint:gosec // G102: intentional for Apple container support

@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestCollector_TCP_RejectsShortToken(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "logs.db"))
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store)
+
+	// Token shorter than 32 bytes should be rejected
+	_, err = collector.StartTCP("short-token")
+	if err == nil {
+		t.Fatal("StartTCP should reject short token")
+	}
+	if got := err.Error(); got != "auth token too short: got 11 bytes, need at least 32" {
+		t.Errorf("unexpected error: %s", got)
+	}
+}
+
 func TestCollector_TCP_RequiresAuth(t *testing.T) {
 	dir := t.TempDir()
 	store, err := OpenStore(filepath.Join(dir, "logs.db"))
