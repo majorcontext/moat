@@ -79,7 +79,7 @@ func startProxy(cmd *cobra.Command, args []string) error {
 
 	// Clean up stale lock
 	if lock != nil {
-		routing.RemoveProxyLock(proxyDir)
+		_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
 	}
 
 	// Create route table
@@ -99,7 +99,7 @@ func startProxy(cmd *cobra.Command, args []string) error {
 		PID:  os.Getpid(),
 		Port: server.Port(),
 	}); err != nil {
-		server.Stop(context.Background())
+		_ = server.Stop(context.Background()) // Best effort cleanup
 		return fmt.Errorf("saving proxy lock: %w", err)
 	}
 
@@ -116,7 +116,7 @@ func startProxy(cmd *cobra.Command, args []string) error {
 	if err := server.Stop(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
 	}
-	routing.RemoveProxyLock(proxyDir)
+	_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
 
 	return nil
 }
@@ -136,7 +136,7 @@ func stopProxy(cmd *cobra.Command, args []string) error {
 
 	if !lock.IsAlive() {
 		// Clean up stale lock
-		routing.RemoveProxyLock(proxyDir)
+		_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
 		fmt.Println("Proxy is not running (cleaned up stale lock)")
 		return nil
 	}

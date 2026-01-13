@@ -312,7 +312,7 @@ func (r *AppleRuntime) GetPortBindings(ctx context.Context, containerID string) 
 				}
 				// portKey format is "3000/tcp"
 				var containerPort int
-				fmt.Sscanf(portKey, "%d", &containerPort)
+				_, _ = fmt.Sscanf(portKey, "%d", &containerPort)
 				if containerPort > 0 {
 					hostPort, _ := strconv.Atoi(bindings[0].HostPort)
 					if hostPort > 0 {

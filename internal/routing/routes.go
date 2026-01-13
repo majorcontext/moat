@@ -29,7 +29,7 @@ func NewRouteTable(dir string) (*RouteTable, error) {
 	// Load existing routes
 	path := filepath.Join(dir, "routes.json")
 	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &rt.routes)
+		_ = json.Unmarshal(data, &rt.routes) // Ignore unmarshal errors, start with empty routes
 	}
 
 	return rt, nil
