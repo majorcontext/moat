@@ -14,6 +14,14 @@ import (
 	"github.com/andybons/agentops/internal/log"
 )
 
+// authTimeout is the deadline for completing token authentication.
+// Prevents slow-loris attacks where a client sends data very slowly.
+const authTimeout = 5 * time.Second
+
+// minTokenLength is the minimum acceptable auth token length.
+// Matches the proxy's guidance that tokens should be 32 bytes from crypto/rand.
+const minTokenLength = 32
+
 // CollectorMessage is the wire format for log messages from agents.
 type CollectorMessage struct {
 	Type string `json:"type"`
@@ -40,6 +48,10 @@ func NewCollector(store *Store) *Collector {
 // StartTCP starts the collector listening on TCP with token authentication.
 // Returns the port number the server is listening on.
 func (c *Collector) StartTCP(authToken string) (string, error) {
+	if len(authToken) < minTokenLength {
+		return "", fmt.Errorf("auth token too short: got %d bytes, need at least %d", len(authToken), minTokenLength)
+	}
+
 	// Bind to all interfaces - required for Apple containers which access host via gateway IP.
 	// Security is maintained via token authentication (see authToken parameter).
 	listener, err := net.Listen("tcp", "0.0.0.0:0") //nolint:gosec // G102: intentional for Apple container support
@@ -49,9 +61,12 @@ func (c *Collector) StartTCP(authToken string) (string, error) {
 	c.listener = listener
 	c.authToken = authToken
 
-	// Type assertion is safe: net.Listen("tcp", ...) always returns a *net.TCPListener
-	// whose Addr() method returns *net.TCPAddr.
-	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port) //nolint:errcheck // type assertion guaranteed to succeed
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		listener.Close()
+		return "", fmt.Errorf("expected TCP listener, got %T", listener.Addr())
+	}
+	port := fmt.Sprintf("%d", tcpAddr.Port)
 
 	c.wg.Add(1)
 	go c.acceptLoop()
@@ -71,9 +86,14 @@ func (c *Collector) StartUnix(socketPath string) error {
 	c.listener = listener
 
 	// Set write-only permissions (0222) so agents can write logs but cannot
-	// read them back. This is part of the tamper-proof security model.
+	// read them back. This is part of the tamper-proof security model:
+	// - 0222 (world-writable) allows any process in the container to write
+	// - Container processes run as various UIDs, so owner-only (0200) won't work
+	// - Read permission is denied to prevent agents from verifying what was logged
+	// - The socket is bind-mounted into containers, not exposed to the host network
 	if err := os.Chmod(socketPath, 0222); err != nil {
 		listener.Close()
+		os.Remove(socketPath)
 		return fmt.Errorf("setting socket permissions: %w", err)
 	}
 
@@ -106,12 +126,18 @@ func (c *Collector) handleConnection(conn net.Conn) {
 	defer c.wg.Done()
 	defer conn.Close()
 
+	// Monitor for shutdown and close connection to unblock scanner
+	go func() {
+		<-c.done
+		conn.Close()
+	}()
+
 	// If auth token is set (TCP mode), require authentication
 	if c.authToken != "" {
 		// Set read deadline to prevent slow-loris attacks during authentication.
 		// Error is safe to ignore: SetReadDeadline only fails if the connection
 		// is already closed, in which case subsequent reads will fail anyway.
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(authTimeout))
 
 		token := make([]byte, len(c.authToken))
 		if _, err := io.ReadFull(conn, token); err != nil {

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andybons/agentops/internal/log"
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
 
@@ -29,6 +30,13 @@ func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
+	}
+
+	// Enable WAL mode for better concurrent read/write performance.
+	// WAL allows readers to not block writers and vice versa.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
 
 	// Create tables
@@ -174,14 +182,16 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 	s.merkleRoot = s.merkleTree.RootHash()
 
 	// Persist merkle root to metadata.
-	// Error is intentionally ignored: if this fails, the auditor will detect
-	// a mismatch between stored and computed roots during verification.
-	// This is a feature, not a bug - it ensures any persistence failure is
-	// surfaced as a verification failure rather than silently corrupting state.
-	_, _ = s.db.Exec(`
+	// If this fails, the auditor will detect a mismatch between stored and
+	// computed roots during verification. We log the error but don't fail
+	// the append - the entry is already committed and the in-memory tree
+	// is correct. Verification will catch any persistence issues.
+	if _, err := s.db.Exec(`
 		INSERT INTO metadata (key, value) VALUES ('merkle_root', ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, s.merkleRoot)
+	`, s.merkleRoot); err != nil {
+		log.Warn("failed to persist merkle root", "error", err)
+	}
 
 	return entry, nil
 }

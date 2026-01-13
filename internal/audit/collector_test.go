@@ -5,9 +5,30 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestCollector_TCP_RejectsShortToken(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "logs.db"))
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store)
+
+	// Token shorter than 32 bytes should be rejected
+	_, err = collector.StartTCP("short-token")
+	if err == nil {
+		t.Fatal("StartTCP should reject short token")
+	}
+	if got := err.Error(); got != "auth token too short: got 11 bytes, need at least 32" {
+		t.Errorf("unexpected error: %s", got)
+	}
+}
 
 func TestCollector_TCP_RequiresAuth(t *testing.T) {
 	dir := t.TempDir()
@@ -251,5 +272,97 @@ func TestCollector_UnixSocket_MultipleMessages(t *testing.T) {
 	}
 	if count != 10 {
 		t.Errorf("Count = %d, want 10", count)
+	}
+}
+
+func TestCollector_ConcurrentWrites(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "logs.db"))
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer store.Close()
+
+	collector := NewCollector(store)
+	token := "secret-token-12345678901234567890123456789012"
+
+	port, err := collector.StartTCP(token)
+	if err != nil {
+		t.Fatalf("StartTCP: %v", err)
+	}
+	defer collector.Stop()
+
+	// Launch multiple goroutines, each opening a connection and writing entries
+	const numClients = 5
+	const messagesPerClient = 20
+	var wg sync.WaitGroup
+
+	for i := 0; i < numClients; i++ {
+		wg.Add(1)
+		go func(clientID int) {
+			defer wg.Done()
+
+			conn, err := net.Dial("tcp", "127.0.0.1:"+port)
+			if err != nil {
+				t.Errorf("client %d: Dial: %v", clientID, err)
+				return
+			}
+			defer conn.Close()
+
+			// Send auth token
+			conn.Write([]byte(token))
+
+			// Send messages
+			for j := 0; j < messagesPerClient; j++ {
+				msg := CollectorMessage{
+					Type: string(EntryConsole),
+					Data: map[string]any{
+						"client": clientID,
+						"msg":    j,
+					},
+				}
+				if err := json.NewEncoder(conn).Encode(msg); err != nil {
+					t.Errorf("client %d: encode: %v", clientID, err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Poll for expected count with timeout (race detector can be slow)
+	expectedCount := uint64(numClients * messagesPerClient)
+	deadline := time.Now().Add(5 * time.Second)
+	var count uint64
+	for time.Now().Before(deadline) {
+		count, err = store.Count()
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if count >= expectedCount {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if count != expectedCount {
+		t.Errorf("Count = %d, want %d", count, expectedCount)
+	}
+
+	// Verify hash chain integrity
+	entries, err := store.Range(1, count)
+	if err != nil {
+		t.Fatalf("Range: %v", err)
+	}
+
+	var prevHash string
+	for i, entry := range entries {
+		if entry.PrevHash != prevHash {
+			t.Errorf("entry %d: broken hash chain", i+1)
+		}
+		if !entry.Verify() {
+			t.Errorf("entry %d: hash verification failed", i+1)
+		}
+		prevHash = entry.Hash
 	}
 }
