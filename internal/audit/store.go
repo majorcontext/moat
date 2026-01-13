@@ -368,7 +368,9 @@ func (s *Store) LoadRekorProofs() (map[uint64]*RekorProof, error) {
 			&proof.RootHash, &hashesJSON, &tsStr, &proof.EntryUUID); err != nil {
 			return nil, fmt.Errorf("scanning rekor proof: %w", err)
 		}
-		json.Unmarshal([]byte(hashesJSON), &proof.Hashes)
+		if err := json.Unmarshal([]byte(hashesJSON), &proof.Hashes); err != nil {
+			return nil, fmt.Errorf("unmarshaling rekor hashes: %w", err)
+		}
 		proof.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 		proofs[seq] = &proof
 	}
