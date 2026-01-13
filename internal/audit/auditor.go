@@ -4,15 +4,15 @@ import "fmt"
 
 // Result contains the results of verifying a run's integrity.
 type Result struct {
-	Valid             bool   `json:"valid"`
-	HashChainValid    bool   `json:"hash_chain_valid"`
-	MerkleRootValid   bool   `json:"merkle_root_valid"`
-	AttestationsValid bool   `json:"attestations_valid"`
-	RekorProofsPresent bool  `json:"rekor_proofs_present"` // Presence only; verification requires network
-	EntryCount        uint64 `json:"entry_count"`
-	AttestationCount  int    `json:"attestation_count"`
-	RekorProofCount   int    `json:"rekor_proof_count"`
-	Error             string `json:"error,omitempty"`
+	Valid              bool   `json:"valid"`
+	HashChainValid     bool   `json:"hash_chain_valid"`
+	MerkleRootValid    bool   `json:"merkle_root_valid"`
+	AttestationsValid  bool   `json:"attestations_valid"`
+	RekorProofsPresent bool   `json:"rekor_proofs_present"` // Presence only; verification requires network
+	EntryCount         uint64 `json:"entry_count"`
+	AttestationCount   int    `json:"attestation_count"`
+	RekorProofCount    int    `json:"rekor_proof_count"`
+	Error              string `json:"error,omitempty"`
 }
 
 // Auditor verifies the integrity of a run's audit logs.
