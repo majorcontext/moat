@@ -149,7 +149,21 @@ mounts:
 
 ## Hostname-Based Service Routing
 
-Expose container services with predictable, OAuth-friendly hostnames. Multiple agents can run simultaneously, each with their own namespace.
+Expose container services with predictable, OAuth-friendly hostnames. This is essential for local development with OAuth flows, webhooks, and multi-service architectures where you need stable URLs that work with callback configurations.
+
+Multiple agents can run simultaneously, each with their own namespace.
+
+### Agent Names
+
+Each running agent has a name used in its hostname:
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | `--name` flag | `agent run --name myapp` |
+| 2 | `name` in agent.yaml | `name: myapp` |
+| 3 | Auto-generated | `fluffy-chicken` |
+
+Names must be unique among running agents. If a name collision occurs, you'll be prompted to choose a different name.
 
 ### Configuration
 
@@ -173,8 +187,6 @@ agent run ./project
 # Override name with --name flag
 agent run --name myapp ./project
 ```
-
-If no name is specified (in config or flag), a random name is generated (e.g., `fluffy-chicken`).
 
 ### Accessing Services
 
