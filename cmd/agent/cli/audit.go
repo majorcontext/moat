@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var auditExportFile string
+
 var auditCmd = &cobra.Command{
 	Use:   "audit <run-id>",
 	Short: "Verify the integrity of a run's audit logs",
@@ -28,6 +30,7 @@ Example:
 
 func init() {
 	rootCmd.AddCommand(auditCmd)
+	auditCmd.Flags().StringVarP(&auditExportFile, "export", "e", "", "Export proof bundle to file (JSON)")
 }
 
 func runAudit(cmd *cobra.Command, args []string) error {
@@ -50,6 +53,25 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("opening audit log: %w", err)
 	}
 	defer auditor.Close()
+
+	// Export if requested
+	if auditExportFile != "" {
+		bundle, err := exportBundle(runID, dbPath)
+		if err != nil {
+			return fmt.Errorf("exporting bundle: %w", err)
+		}
+
+		data, err := json.MarshalIndent(bundle, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling bundle: %w", err)
+		}
+
+		if err := os.WriteFile(auditExportFile, data, 0644); err != nil {
+			return fmt.Errorf("writing bundle: %w", err)
+		}
+
+		fmt.Printf("Proof bundle exported to: %s\n", auditExportFile)
+	}
 
 	result, err := auditor.Verify()
 	if err != nil {
@@ -110,4 +132,14 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("VERDICT: [FAIL] TAMPERED - %s\n", result.Error)
 	// Return error so Cobra exits with code 1
 	return fmt.Errorf("tampering detected")
+}
+
+func exportBundle(runID, dbPath string) (*audit.ProofBundle, error) {
+	store, err := audit.OpenStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	return store.Export()
 }
