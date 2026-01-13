@@ -218,6 +218,80 @@ func TestIntegration_MerkleProofs(t *testing.T) {
 	}
 }
 
+func TestIntegration_RekorWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "logs.db")
+
+	// Create store and add entries
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	// Simulate a run with network requests (high-value events)
+	// Use maps to ensure consistent JSON serialization (matches how Collector works)
+	for i := 0; i < 10; i++ {
+		store.Append(EntryConsole, map[string]any{"line": fmt.Sprintf("log line %d", i)})
+	}
+	store.Append(EntryNetwork, map[string]any{
+		"method":      "GET",
+		"url":         "https://api.github.com/user",
+		"status_code": 200,
+		"duration_ms": 150,
+	})
+
+	// Create local attestation
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+	att := &Attestation{
+		Sequence:  11,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		PublicKey: signer.PublicKey(),
+	}
+	att.Signature = signer.Sign([]byte(att.RootHash))
+	store.SaveAttestation(att)
+
+	// Simulate Rekor proof (would come from actual Rekor submission)
+	rekorProof := &RekorProof{
+		LogIndex:  12345678,
+		LogID:     "c0d23d6ad406973f9ef8b320e5e4e4692e0e65e5419ad4e30c9a8b912a8a3b5c",
+		TreeSize:  98765432,
+		RootHash:  store.MerkleRoot(),
+		Hashes:    []string{"hash1", "hash2"},
+		Timestamp: time.Now().UTC(),
+		EntryUUID: "24296fb24b8ad77a8c6e7c4b2e5ac5d8e9f0a1b2c3d4e5f6",
+	}
+	store.SaveRekorProof(11, rekorProof)
+
+	store.Close()
+
+	// Audit the run
+	auditor, err := NewAuditor(dbPath)
+	if err != nil {
+		t.Fatalf("NewAuditor: %v", err)
+	}
+	defer auditor.Close()
+
+	result, err := auditor.Verify()
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// All checks should pass
+	if !result.Valid {
+		t.Errorf("Expected valid audit, got error: %s", result.Error)
+	}
+	if result.EntryCount != 11 {
+		t.Errorf("EntryCount = %d, want 11", result.EntryCount)
+	}
+	if result.AttestationCount != 1 {
+		t.Errorf("AttestationCount = %d, want 1", result.AttestationCount)
+	}
+	if result.RekorProofCount != 1 {
+		t.Errorf("RekorProofCount = %d, want 1", result.RekorProofCount)
+	}
+}
+
 func TestIntegration_AuditWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "logs.db")
