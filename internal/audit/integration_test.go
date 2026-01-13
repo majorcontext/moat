@@ -44,7 +44,9 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	// Write console logs
 	for i := 0; i < 5; i++ {
 		msg := CollectorMessage{Type: "console", Data: map[string]any{"line": i}}
-		json.NewEncoder(conn).Encode(msg)
+		if err := json.NewEncoder(conn).Encode(msg); err != nil {
+			t.Fatalf("Encode console message %d: %v", i, err)
+		}
 	}
 
 	// Write network request
@@ -57,7 +59,9 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 			"duration_ms": 150,
 		},
 	}
-	json.NewEncoder(conn).Encode(msg)
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		t.Fatalf("Encode network message: %v", err)
+	}
 
 	// Write credential event
 	msg = CollectorMessage{
@@ -68,7 +72,9 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 			"host":   "api.github.com",
 		},
 	}
-	json.NewEncoder(conn).Encode(msg)
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		t.Fatalf("Encode credential message: %v", err)
+	}
 
 	conn.Close()
 	time.Sleep(100 * time.Millisecond)
@@ -113,7 +119,9 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	}
 
 	// 9. Add more entries after reopen
-	store2.AppendConsole("after reopen")
+	if _, err := store2.AppendConsole("after reopen"); err != nil {
+		t.Fatalf("AppendConsole after reopen: %v", err)
+	}
 
 	count2, err := store2.Count()
 	if err != nil {
