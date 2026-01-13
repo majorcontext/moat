@@ -24,9 +24,13 @@ func NewSigner(keyPath string) (*Signer, error) {
 			return nil, fmt.Errorf("invalid key file format")
 		}
 		privateKey := ed25519.PrivateKey(block.Bytes)
+		publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid public key type")
+		}
 		return &Signer{
 			privateKey: privateKey,
-			publicKey:  privateKey.Public().(ed25519.PublicKey),
+			publicKey:  publicKey,
 		}, nil
 	}
 

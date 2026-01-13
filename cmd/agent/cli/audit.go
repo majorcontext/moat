@@ -41,7 +41,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	runDir := filepath.Join(homeDir, ".agentops", "runs", runID)
 	dbPath := filepath.Join(runDir, "logs.db")
 
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)
 	}
 
