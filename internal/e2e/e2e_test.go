@@ -73,7 +73,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 
 	// Create a run with grants to activate the proxy
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-proxy-binding",
+		Name:      "e2e-test-proxy-binding",
 		Workspace: workspace,
 		Grants:    []string{"github"}, // This activates the proxy
 		Cmd:       []string{"sleep", "10"},
@@ -146,7 +146,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 	workspace := createTestWorkspace(t)
 
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-proxy-network",
+		Name:      "e2e-test-proxy-network",
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Cmd:       []string{"sleep", "10"},
@@ -275,7 +275,7 @@ body = response.read().decode()
 print(body)
 `
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-network-capture",
+		Name:      "e2e-test-network-capture",
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Config: &config.Config{
@@ -354,7 +354,7 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 	// Run a command that tests connectivity to the proxy
 	// The proxy sets HTTP_PROXY env var, so we can check if it's reachable
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-host-docker-internal",
+		Name:      "e2e-test-host-docker-internal",
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Cmd:       []string{"sh", "-c", "curl -s --connect-timeout 5 http://$HTTP_PROXY/ || echo 'proxy_reachable'"},
@@ -395,7 +395,7 @@ func TestRunWithoutGrantsNoProxy(t *testing.T) {
 
 	// Create a run WITHOUT grants
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-no-proxy",
+		Name:      "e2e-test-no-proxy",
 		Workspace: workspace,
 		Grants:    nil, // No grants = no proxy
 		Cmd:       []string{"echo", "hello"},
@@ -427,7 +427,7 @@ func TestLogsAreCaptured(t *testing.T) {
 	testOutput := "e2e-test-unique-output-12345"
 
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-logs",
+		Name:      "e2e-test-logs",
 		Workspace: workspace,
 		Cmd:       []string{"echo", testOutput},
 	})
@@ -494,7 +494,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 
 	// Run a command that reads the file
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-workspace",
+		Name:      "e2e-test-workspace",
 		Workspace: workspace,
 		Cmd:       []string{"cat", "/workspace/" + testFile},
 	})
@@ -559,7 +559,7 @@ func TestConfigEnvironmentVariables(t *testing.T) {
 	}
 
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-test-env",
+		Name:      "e2e-test-env",
 		Workspace: workspace,
 		Config:    cfg,
 		Cmd:       []string{"sh", "-c", "echo $E2E_TEST_VAR"},
@@ -686,7 +686,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 	testOutput := "apple-container-e2e-test-output"
 
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-apple-test",
+		Name:      "e2e-apple-test",
 		Workspace: workspace,
 		Cmd:       []string{"echo", testOutput},
 	})
@@ -748,7 +748,7 @@ func TestAppleContainerWithProxy(t *testing.T) {
 
 	// Create a run with grants to activate the proxy
 	r, err := mgr.Create(ctx, run.Options{
-		Agent:     "e2e-apple-proxy-test",
+		Name:      "e2e-apple-proxy-test",
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Cmd:       []string{"sh", "-c", "echo HTTP_PROXY=$HTTP_PROXY"},
