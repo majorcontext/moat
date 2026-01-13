@@ -32,6 +32,13 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
+	// Enable WAL mode for better concurrent read/write performance.
+	// WAL allows readers to not block writers and vice versa.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enabling WAL mode: %w", err)
+	}
+
 	// Create tables
 	if err := createTables(db); err != nil {
 		db.Close()
