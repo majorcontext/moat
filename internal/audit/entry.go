@@ -50,6 +50,10 @@ type Entry struct {
 	// functions, cycles) will marshal as null, which may cause hash collisions.
 	Data any    `json:"data"`
 	Hash string `json:"hash"`
+	// dataJSON stores the canonical JSON used for hashing. This ensures hash
+	// verification works correctly after database round-trips, where Data
+	// becomes map[string]any (which marshals with sorted keys, unlike structs).
+	dataJSON []byte `json:"-"`
 }
 
 // NewEntry creates a new entry with computed hash.
@@ -59,12 +63,14 @@ func NewEntry(seq uint64, prevHash string, entryType EntryType, data any) *Entry
 
 // newEntryWithTimestamp creates an entry with a specific timestamp (for testing).
 func newEntryWithTimestamp(seq uint64, prevHash string, entryType EntryType, data any, ts time.Time) *Entry {
+	dataJSON, _ := json.Marshal(data)
 	e := &Entry{
 		Sequence:  seq,
 		Timestamp: ts,
 		Type:      entryType,
 		PrevHash:  prevHash,
 		Data:      data,
+		dataJSON:  dataJSON,
 	}
 	e.Hash = e.computeHash()
 	return e
@@ -88,8 +94,12 @@ func (e *Entry) computeHash() string {
 	// PrevHash
 	h.Write([]byte(e.PrevHash))
 
-	// Data (JSON encoded)
-	dataBytes, _ := json.Marshal(e.Data)
+	// Data (JSON encoded) - use stored dataJSON if available for consistency
+	// after database round-trips where Data becomes map[string]any
+	dataBytes := e.dataJSON
+	if dataBytes == nil {
+		dataBytes, _ = json.Marshal(e.Data)
+	}
 	h.Write(dataBytes)
 
 	return hex.EncodeToString(h.Sum(nil))
@@ -98,4 +108,22 @@ func (e *Entry) computeHash() string {
 // Verify checks if the entry's hash is valid.
 func (e *Entry) Verify() bool {
 	return e.Hash == e.computeHash()
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to set dataJSON.
+// This ensures hash verification works after JSON round-trips.
+func (e *Entry) UnmarshalJSON(data []byte) error {
+	// Use a type alias to avoid infinite recursion
+	type Alias Entry
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	// Set dataJSON from the unmarshaled Data for hash verification
+	e.dataJSON, _ = json.Marshal(e.Data)
+	return nil
 }
