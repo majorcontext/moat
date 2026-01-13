@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -138,5 +139,81 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	}
 	if !result3.Valid {
 		t.Errorf("Chain should be valid after adding: %s", result3.Error)
+	}
+}
+
+func TestIntegration_MerkleProofs(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "logs.db")
+
+	// Create store
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	// Add entries
+	for i := 0; i < 10; i++ {
+		_, err := store.AppendConsole(fmt.Sprintf("log line %d", i))
+		if err != nil {
+			t.Fatalf("AppendConsole: %v", err)
+		}
+	}
+
+	// Verify merkle root exists
+	root := store.MerkleRoot()
+	if root == "" {
+		t.Fatal("MerkleRoot should not be empty")
+	}
+
+	// Generate and verify proofs for all entries
+	for seq := uint64(1); seq <= 10; seq++ {
+		proof, err := store.ProveEntry(seq)
+		if err != nil {
+			t.Fatalf("ProveEntry(%d): %v", seq, err)
+		}
+
+		if !proof.Verify() {
+			t.Errorf("Proof for entry %d should verify", seq)
+		}
+
+		if proof.RootHash != root {
+			t.Errorf("Proof root should match store root")
+		}
+	}
+
+	// Close and reopen - proofs should still work
+	store.Close()
+
+	store2, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	defer store2.Close()
+
+	// Root should persist
+	if store2.MerkleRoot() != root {
+		t.Error("MerkleRoot should persist across reopen")
+	}
+
+	// Proofs should still verify
+	proof, _ := store2.ProveEntry(5)
+	if !proof.Verify() {
+		t.Error("Proof should still verify after reopen")
+	}
+
+	// Add more entries and verify new proofs
+	store2.AppendConsole("after reopen")
+	newRoot := store2.MerkleRoot()
+	if newRoot == root {
+		t.Error("Root should change after new entry")
+	}
+
+	proof2, _ := store2.ProveEntry(11)
+	if !proof2.Verify() {
+		t.Error("New entry proof should verify")
+	}
+	if proof2.RootHash != newRoot {
+		t.Error("New proof should use new root")
 	}
 }
