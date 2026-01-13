@@ -355,3 +355,101 @@ func TestIntegration_AuditWorkflow(t *testing.T) {
 		t.Errorf("AttestationCount = %d, want 1", result.AttestationCount)
 	}
 }
+
+func TestIntegration_BundleWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "logs.db")
+
+	// === PRODUCER: Create and populate store ===
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	// Add various entry types
+	// Use maps to ensure consistent JSON serialization (matches how Collector works)
+	for i := 0; i < 20; i++ {
+		store.Append(EntryConsole, map[string]any{"line": fmt.Sprintf("log line %d", i)})
+	}
+	store.Append(EntryNetwork, map[string]any{
+		"method":      "POST",
+		"url":         "https://api.example.com/data",
+		"status_code": 201,
+		"duration_ms": 250,
+	})
+	store.Append(EntryCredential, map[string]any{
+		"name":   "github",
+		"action": "injected",
+		"host":   "api.github.com",
+	})
+
+	// Create local attestation
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+	att := &Attestation{
+		Sequence:  22,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		PublicKey: signer.PublicKey(),
+	}
+	att.Signature = signer.Sign([]byte(att.RootHash))
+	store.SaveAttestation(att)
+
+	// Add Rekor proof
+	rekorProof := &RekorProof{
+		LogIndex:  99999,
+		LogID:     "test-log-id",
+		TreeSize:  1000000,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		EntryUUID: "test-uuid",
+	}
+	store.SaveRekorProof(22, rekorProof)
+
+	// Export with proofs for high-value entries
+	bundle, err := store.ExportWithProofs([]uint64{21, 22}) // Network + credential
+	if err != nil {
+		t.Fatalf("ExportWithProofs: %v", err)
+	}
+	store.Close()
+
+	// === TRANSPORT: Serialize and "send" ===
+	bundleJSON, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	t.Logf("Bundle size: %d bytes", len(bundleJSON))
+
+	// === CONSUMER: Receive and verify ===
+	var received ProofBundle
+	if err := json.Unmarshal(bundleJSON, &received); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	// Verify the bundle
+	result := received.Verify()
+	if !result.Valid {
+		t.Errorf("Bundle verification failed: %s", result.Error)
+	}
+
+	// Check counts
+	if result.EntryCount != 22 {
+		t.Errorf("EntryCount = %d, want 22", result.EntryCount)
+	}
+	if result.AttestationCount != 1 {
+		t.Errorf("AttestationCount = %d, want 1", result.AttestationCount)
+	}
+	if result.RekorProofCount != 1 {
+		t.Errorf("RekorProofCount = %d, want 1", result.RekorProofCount)
+	}
+
+	// Verify inclusion proofs
+	if len(received.Proofs) != 2 {
+		t.Errorf("Proofs = %d, want 2", len(received.Proofs))
+	}
+	for _, proof := range received.Proofs {
+		if !proof.Verify() {
+			t.Errorf("Inclusion proof for seq %d failed", proof.EntrySeq)
+		}
+	}
+}
