@@ -3,7 +3,6 @@ package audit
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"time"
@@ -18,42 +17,14 @@ const (
 	EntryCredential EntryType = "credential"
 )
 
-// ConsoleData holds console log entry data.
-type ConsoleData struct {
-	Line string `json:"line"`
-}
-
-// NetworkData holds network request entry data.
-type NetworkData struct {
-	Method         string `json:"method"`
-	URL            string `json:"url"`
-	StatusCode     int    `json:"status_code"`
-	DurationMs     int64  `json:"duration_ms"`
-	CredentialUsed string `json:"credential_used,omitempty"`
-	Error          string `json:"error,omitempty"`
-}
-
-// CredentialData holds credential usage entry data.
-type CredentialData struct {
-	Name   string `json:"name"`   // e.g., "github"
-	Action string `json:"action"` // e.g., "injected", "used", "revoked"
-	Host   string `json:"host"`   // e.g., "api.github.com"
-}
-
 // Entry represents a single hash-chained log entry.
 type Entry struct {
 	Sequence  uint64    `json:"seq"`
 	Timestamp time.Time `json:"ts"`
 	Type      EntryType `json:"type"`
 	PrevHash  string    `json:"prev"`
-	// Data must be JSON-serializable. Non-serializable values (e.g., channels,
-	// functions, cycles) will marshal as null, which may cause hash collisions.
-	Data any    `json:"data"`
-	Hash string `json:"hash"`
-	// dataJSON stores the canonical JSON used for hashing. This ensures hash
-	// verification works correctly after database round-trips, where Data
-	// becomes map[string]any (which marshals with sorted keys, unlike structs).
-	dataJSON []byte `json:"-"`
+	Data      any       `json:"data"`
+	Hash      string    `json:"hash"`
 }
 
 // NewEntry creates a new entry with computed hash.
@@ -63,14 +34,12 @@ func NewEntry(seq uint64, prevHash string, entryType EntryType, data any) *Entry
 
 // newEntryWithTimestamp creates an entry with a specific timestamp (for testing).
 func newEntryWithTimestamp(seq uint64, prevHash string, entryType EntryType, data any, ts time.Time) *Entry {
-	dataJSON, _ := json.Marshal(data)
 	e := &Entry{
 		Sequence:  seq,
 		Timestamp: ts,
 		Type:      entryType,
 		PrevHash:  prevHash,
 		Data:      data,
-		dataJSON:  dataJSON,
 	}
 	e.Hash = e.computeHash()
 	return e
@@ -82,7 +51,11 @@ func (e *Entry) computeHash() string {
 
 	// Sequence (8 bytes, big endian)
 	seqBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(seqBytes, e.Sequence)
+	seq := e.Sequence
+	for i := 7; i >= 0; i-- {
+		seqBytes[i] = byte(seq)
+		seq >>= 8
+	}
 	h.Write(seqBytes)
 
 	// Timestamp (RFC3339)
@@ -94,12 +67,8 @@ func (e *Entry) computeHash() string {
 	// PrevHash
 	h.Write([]byte(e.PrevHash))
 
-	// Data (JSON encoded) - use stored dataJSON if available for consistency
-	// after database round-trips where Data becomes map[string]any
-	dataBytes := e.dataJSON
-	if dataBytes == nil {
-		dataBytes, _ = json.Marshal(e.Data)
-	}
+	// Data (JSON encoded)
+	dataBytes, _ := json.Marshal(e.Data)
 	h.Write(dataBytes)
 
 	return hex.EncodeToString(h.Sum(nil))
@@ -108,22 +77,4 @@ func (e *Entry) computeHash() string {
 // Verify checks if the entry's hash is valid.
 func (e *Entry) Verify() bool {
 	return e.Hash == e.computeHash()
-}
-
-// UnmarshalJSON implements custom JSON unmarshaling to set dataJSON.
-// This ensures hash verification works after JSON round-trips.
-func (e *Entry) UnmarshalJSON(data []byte) error {
-	// Use a type alias to avoid infinite recursion
-	type Alias Entry
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(e),
-	}
-	if err := json.Unmarshal(data, aux); err != nil {
-		return err
-	}
-	// Set dataJSON from the unmarshaled Data for hash verification
-	e.dataJSON, _ = json.Marshal(e.Data)
-	return nil
 }
