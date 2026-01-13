@@ -416,6 +416,26 @@ func (s *Store) Export() (*ProofBundle, error) {
 	}, nil
 }
 
+// ExportWithProofs creates a proof bundle with inclusion proofs for specific entries.
+// This is useful for proving specific entries without including the full log.
+func (s *Store) ExportWithProofs(seqs []uint64) (*ProofBundle, error) {
+	bundle, err := s.Export()
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate inclusion proofs for requested entries
+	for _, seq := range seqs {
+		proof, err := s.ProveEntry(seq)
+		if err != nil {
+			return nil, fmt.Errorf("proving entry %d: %w", seq, err)
+		}
+		bundle.Proofs = append(bundle.Proofs, proof)
+	}
+
+	return bundle, nil
+}
+
 // VerifyChain verifies the integrity of the entire hash chain.
 func (s *Store) VerifyChain() (*VerifyResult, error) {
 	rows, err := s.db.Query(`
