@@ -113,6 +113,73 @@ func TestStore_PersistenceAcrossReopen(t *testing.T) {
 	_ = e1
 }
 
+func TestStore_Get(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	original, _ := store.Append(EntryConsole, map[string]any{"line": "test"})
+
+	retrieved, err := store.Get(1)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	if retrieved.Hash != original.Hash {
+		t.Errorf("Hash = %s, want %s", retrieved.Hash, original.Hash)
+	}
+}
+
+func TestStore_Get_NotFound(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	_, err := store.Get(999)
+	if err != ErrNotFound {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStore_Count(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	if count := store.Count(); count != 0 {
+		t.Errorf("Count = %d, want 0", count)
+	}
+
+	store.Append(EntryConsole, map[string]any{"line": "1"})
+	store.Append(EntryConsole, map[string]any{"line": "2"})
+	store.Append(EntryNetwork, map[string]any{"url": "http://example.com"})
+
+	if count := store.Count(); count != 3 {
+		t.Errorf("Count = %d, want 3", count)
+	}
+}
+
+func TestStore_Range(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	for i := 0; i < 10; i++ {
+		store.Append(EntryConsole, map[string]any{"line": i})
+	}
+
+	entries, err := store.Range(3, 7)
+	if err != nil {
+		t.Fatalf("Range: %v", err)
+	}
+
+	if len(entries) != 5 {
+		t.Errorf("len(entries) = %d, want 5", len(entries))
+	}
+	if entries[0].Sequence != 3 {
+		t.Errorf("First entry seq = %d, want 3", entries[0].Sequence)
+	}
+	if entries[4].Sequence != 7 {
+		t.Errorf("Last entry seq = %d, want 7", entries[4].Sequence)
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()

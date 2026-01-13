@@ -3,12 +3,16 @@ package audit
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
+
+// ErrNotFound is returned when an entry doesn't exist.
+var ErrNotFound = errors.New("entry not found")
 
 // Store provides tamper-proof log storage using SQLite.
 type Store struct {
@@ -105,4 +109,73 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// Get retrieves an entry by sequence number.
+func (s *Store) Get(seq uint64) (*Entry, error) {
+	row := s.db.QueryRow(`
+		SELECT seq, ts, type, prev_hash, data, hash
+		FROM entries WHERE seq = ?
+	`, seq)
+
+	return scanEntry(row)
+}
+
+// Count returns the total number of entries.
+func (s *Store) Count() uint64 {
+	var count uint64
+	s.db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&count)
+	return count
+}
+
+// Range retrieves entries from startSeq to endSeq (inclusive).
+func (s *Store) Range(startSeq, endSeq uint64) ([]*Entry, error) {
+	rows, err := s.db.Query(`
+		SELECT seq, ts, type, prev_hash, data, hash
+		FROM entries WHERE seq >= ? AND seq <= ?
+		ORDER BY seq
+	`, startSeq, endSeq)
+	if err != nil {
+		return nil, fmt.Errorf("querying range: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*Entry
+	for rows.Next() {
+		e, err := scanEntryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+func scanEntry(row *sql.Row) (*Entry, error) {
+	var e Entry
+	var tsStr, dataStr string
+	err := row.Scan(&e.Sequence, &tsStr, &e.Type, &e.PrevHash, &dataStr, &e.Hash)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning entry: %w", err)
+	}
+
+	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	json.Unmarshal([]byte(dataStr), &e.Data)
+	return &e, nil
+}
+
+func scanEntryRows(rows *sql.Rows) (*Entry, error) {
+	var e Entry
+	var tsStr, dataStr string
+	err := rows.Scan(&e.Sequence, &tsStr, &e.Type, &e.PrevHash, &dataStr, &e.Hash)
+	if err != nil {
+		return nil, fmt.Errorf("scanning entry: %w", err)
+	}
+
+	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	json.Unmarshal([]byte(dataStr), &e.Data)
+	return &e, nil
 }
