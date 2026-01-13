@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 )
 
 // CollectorMessage is the wire format for log messages from agents.
@@ -101,6 +102,9 @@ func (c *Collector) handleConnection(conn net.Conn) {
 
 	// If auth token is set (TCP mode), require authentication
 	if c.authToken != "" {
+		// Set read deadline to prevent slow-loris attacks during authentication
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
 		token := make([]byte, len(c.authToken))
 		if _, err := io.ReadFull(conn, token); err != nil {
 			return // Connection closed or incomplete token
@@ -108,6 +112,9 @@ func (c *Collector) handleConnection(conn net.Conn) {
 		if subtle.ConstantTimeCompare(token, []byte(c.authToken)) != 1 {
 			return // Wrong token - close connection
 		}
+
+		// Clear deadline for subsequent message reads
+		conn.SetReadDeadline(time.Time{})
 	}
 
 	scanner := bufio.NewScanner(conn)
