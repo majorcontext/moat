@@ -188,7 +188,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("created run", "id", r.ID, "name", r.Name)
-	fmt.Printf("Created run: %s\n", r.ID)
 
 	// Start run
 	if err := manager.Start(ctx, r.ID); err != nil {
@@ -197,19 +196,17 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("run started", "id", r.ID)
-	fmt.Printf("\nStarting agent %q...\n", r.Name)
-	fmt.Printf("Run ID: %s\n", r.ID)
+	fmt.Printf("Started agent %q (run %s)\n", r.Name, r.ID)
 
 	if len(r.Ports) > 0 {
 		globalCfg, _ := config.LoadGlobal()
 		proxyPort := globalCfg.Proxy.Port
 
-		fmt.Println("\nServices:")
+		fmt.Println("Services:")
 		for serviceName, containerPort := range r.Ports {
 			url := fmt.Sprintf("http://%s.%s.localhost:%d", serviceName, r.Name, proxyPort)
-			fmt.Printf("  %s: %s → :%d\n", serviceName, url, containerPort)
+			fmt.Printf("  %s: %s (container :%d)\n", serviceName, url, containerPort)
 		}
-		fmt.Printf("\nProxy listening on :%d\n", proxyPort)
 	}
 	fmt.Println()
 

@@ -3,7 +3,6 @@ package name
 
 import (
 	"math/rand"
-	"time"
 )
 
 var adjectives = []string{
@@ -32,10 +31,6 @@ var animals = []string{
 	"seal", "shark", "snake", "sparrow", "spider",
 	"squid", "swan", "tiger", "turtle", "viper",
 	"walrus", "whale", "wolf", "wombat", "yak",
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
 }
 
 // Generate returns a random name in adjective-animal format.

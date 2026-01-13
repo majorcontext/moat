@@ -26,7 +26,6 @@ import (
 type Manager struct {
 	runtime        container.Runtime
 	runs           map[string]*Run
-	runsByName     map[string]*Run // index by name for collision detection
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
 	mu             sync.RWMutex
@@ -52,7 +51,6 @@ func NewManager() (*Manager, error) {
 	return &Manager{
 		runtime:        rt,
 		runs:           make(map[string]*Run),
-		runsByName:     make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
 	}, nil
@@ -366,7 +364,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	m.mu.Lock()
 	m.runs[r.ID] = r
-	m.runsByName[r.Name] = r
 	m.mu.Unlock()
 
 	return r, nil
@@ -615,7 +612,6 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 	m.mu.Lock()
 	delete(m.runs, runID)
-	delete(m.runsByName, r.Name)
 	m.mu.Unlock()
 
 	return nil
