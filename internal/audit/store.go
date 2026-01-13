@@ -16,10 +16,11 @@ var ErrNotFound = errors.New("entry not found")
 
 // Store provides tamper-proof log storage using SQLite.
 type Store struct {
-	db       *sql.DB
-	mu       sync.Mutex
-	lastHash string
-	lastSeq  uint64
+	db         *sql.DB
+	mu         sync.Mutex
+	lastHash   string
+	lastSeq    uint64
+	merkleRoot string // Current Merkle tree root hash
 }
 
 // OpenStore opens or creates a log store at the given path.
@@ -57,25 +58,46 @@ func createTables(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
 		CREATE INDEX IF NOT EXISTS idx_entries_ts ON entries(ts);
+
+		CREATE TABLE IF NOT EXISTS metadata (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
 	`)
 	return err
 }
 
 func (s *Store) loadLastEntry() error {
+	// Load last entry state
 	row := s.db.QueryRow(`
 		SELECT seq, hash FROM entries ORDER BY seq DESC LIMIT 1
 	`)
 	var seq uint64
 	var hash string
 	err := row.Scan(&seq, &hash)
-	if err == sql.ErrNoRows {
-		return nil // Empty store
-	}
-	if err != nil {
+	switch {
+	case err == sql.ErrNoRows:
+		// Empty store - no entries yet
+	case err != nil:
 		return fmt.Errorf("loading last entry: %w", err)
+	default:
+		s.lastSeq = seq
+		s.lastHash = hash
 	}
-	s.lastSeq = seq
-	s.lastHash = hash
+
+	// Load merkle root
+	row = s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'merkle_root'`)
+	var root string
+	err = row.Scan(&root)
+	switch {
+	case err == sql.ErrNoRows:
+		// No root yet
+	case err != nil:
+		return fmt.Errorf("loading merkle root: %w", err)
+	default:
+		s.merkleRoot = root
+	}
+
 	return nil
 }
 
@@ -103,7 +125,34 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 	s.lastSeq = entry.Sequence
 	s.lastHash = entry.Hash
 
+	// Rebuild merkle root
+	s.rebuildMerkleRoot()
+
 	return entry, nil
+}
+
+// rebuildMerkleRoot rebuilds the tree from all entries and saves root.
+func (s *Store) rebuildMerkleRoot() {
+	entries, err := s.Range(1, s.lastSeq)
+	if err != nil {
+		return
+	}
+
+	tree := BuildMerkleTree(entries)
+	s.merkleRoot = tree.RootHash()
+
+	// Persist to metadata - use upsert pattern
+	_, _ = s.db.Exec(`
+		INSERT INTO metadata (key, value) VALUES ('merkle_root', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, s.merkleRoot)
+}
+
+// MerkleRoot returns the current Merkle tree root hash.
+func (s *Store) MerkleRoot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.merkleRoot
 }
 
 // Close closes the database connection.

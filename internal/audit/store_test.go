@@ -355,3 +355,60 @@ func TestStore_AppendCredential(t *testing.T) {
 		t.Errorf("Host = %s, want 'api.github.com'", data.Host)
 	}
 }
+
+func TestStore_MerkleRoot_Empty(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	root := store.MerkleRoot()
+	if root != "" {
+		t.Errorf("MerkleRoot = %q, want empty for empty store", root)
+	}
+}
+
+func TestStore_MerkleRoot_AfterAppend(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	store.Append(EntryConsole, map[string]any{"line": "test"})
+
+	root := store.MerkleRoot()
+	if root == "" {
+		t.Error("MerkleRoot should not be empty after append")
+	}
+}
+
+func TestStore_MerkleRoot_ChangesWithEntries(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	store.Append(EntryConsole, map[string]any{"line": "first"})
+	root1 := store.MerkleRoot()
+
+	store.Append(EntryConsole, map[string]any{"line": "second"})
+	root2 := store.MerkleRoot()
+
+	if root1 == root2 {
+		t.Error("MerkleRoot should change when entries are added")
+	}
+}
+
+func TestStore_MerkleRoot_PersistsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create store and add entries
+	store1, _ := OpenStore(dbPath)
+	store1.Append(EntryConsole, map[string]any{"line": "test"})
+	root1 := store1.MerkleRoot()
+	store1.Close()
+
+	// Reopen and check root
+	store2, _ := OpenStore(dbPath)
+	defer store2.Close()
+	root2 := store2.MerkleRoot()
+
+	if root1 != root2 {
+		t.Errorf("MerkleRoot changed after reopen: %q != %q", root1, root2)
+	}
+}
