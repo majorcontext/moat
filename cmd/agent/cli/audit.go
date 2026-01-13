@@ -90,6 +90,16 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
+	fmt.Println("External Attestations (Sigstore/Rekor)")
+	if result.RekorProofCount == 0 {
+		fmt.Println("  - No Rekor proofs found (offline mode)")
+	} else if result.RekorProofsValid {
+		fmt.Printf("  [ok] %d entries anchored to Rekor\n", result.RekorProofCount)
+	} else {
+		fmt.Println("  [FAIL] Rekor proofs: INVALID")
+	}
+
+	fmt.Println()
 	fmt.Println("===============================================================")
 
 	if result.Valid {
