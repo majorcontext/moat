@@ -2,8 +2,10 @@ package audit
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -17,10 +19,11 @@ type CollectorMessage struct {
 
 // Collector receives log messages and stores them with hash chaining.
 type Collector struct {
-	store    *Store
-	listener net.Listener
-	done     chan struct{}
-	wg       sync.WaitGroup
+	store     *Store
+	listener  net.Listener
+	authToken string
+	done      chan struct{}
+	wg        sync.WaitGroup
 }
 
 // NewCollector creates a new log collector.
@@ -29,6 +32,24 @@ func NewCollector(store *Store) *Collector {
 		store: store,
 		done:  make(chan struct{}),
 	}
+}
+
+// StartTCP starts the collector listening on TCP with token authentication.
+// Returns the port number the server is listening on.
+func (c *Collector) StartTCP(authToken string) (string, error) {
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		return "", err
+	}
+	c.listener = listener
+	c.authToken = authToken
+
+	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
+
+	c.wg.Add(1)
+	go c.acceptLoop()
+
+	return port, nil
 }
 
 // StartUnix starts the collector listening on a Unix socket.
@@ -77,6 +98,17 @@ func (c *Collector) acceptLoop() {
 func (c *Collector) handleConnection(conn net.Conn) {
 	defer c.wg.Done()
 	defer conn.Close()
+
+	// If auth token is set (TCP mode), require authentication
+	if c.authToken != "" {
+		token := make([]byte, len(c.authToken))
+		if _, err := io.ReadFull(conn, token); err != nil {
+			return // Connection closed or incomplete token
+		}
+		if subtle.ConstantTimeCompare(token, []byte(c.authToken)) != 1 {
+			return // Wrong token - close connection
+		}
+	}
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
