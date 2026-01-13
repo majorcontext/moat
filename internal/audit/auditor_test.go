@@ -317,3 +317,54 @@ func TestAuditor_VerifyAll_BrokenChain(t *testing.T) {
 		t.Error("Hash chain should be invalid")
 	}
 }
+
+func TestAuditor_VerifyAll_WithRekorProofs(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	// Add entries
+	for i := 0; i < 5; i++ {
+		if _, err := store.AppendConsole("log line"); err != nil {
+			t.Fatalf("AppendConsole: %v", err)
+		}
+	}
+
+	// Add Rekor proof
+	proof := &RekorProof{
+		LogIndex:  12345,
+		LogID:     "test-log-id",
+		TreeSize:  98765,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		EntryUUID: "test-uuid",
+	}
+	if err := store.SaveRekorProof(5, proof); err != nil {
+		t.Fatalf("SaveRekorProof: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	// Audit
+	auditor, err := NewAuditor(dbPath)
+	if err != nil {
+		t.Fatalf("NewAuditor: %v", err)
+	}
+	defer auditor.Close()
+
+	result, err := auditor.Verify()
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	if !result.Valid {
+		t.Errorf("Expected valid, got error: %s", result.Error)
+	}
+	if result.RekorProofCount != 1 {
+		t.Errorf("RekorProofCount = %d, want 1", result.RekorProofCount)
+	}
+}
