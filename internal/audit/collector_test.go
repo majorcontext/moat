@@ -330,13 +330,20 @@ func TestCollector_ConcurrentWrites(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(200 * time.Millisecond) // Allow processing to complete
 
-	// Verify all entries were stored
+	// Poll for expected count with timeout (race detector can be slow)
 	expectedCount := uint64(numClients * messagesPerClient)
-	count, err := store.Count()
-	if err != nil {
-		t.Fatalf("Count: %v", err)
+	deadline := time.Now().Add(5 * time.Second)
+	var count uint64
+	for time.Now().Before(deadline) {
+		count, err = store.Count()
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if count >= expectedCount {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if count != expectedCount {
 		t.Errorf("Count = %d, want %d", count, expectedCount)
