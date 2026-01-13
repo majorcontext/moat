@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -112,5 +113,42 @@ func TestProofBundle_Verify_TamperedEntry(t *testing.T) {
 	}
 	if result.HashChainValid {
 		t.Error("HashChainValid should be false")
+	}
+}
+
+func TestProofBundle_MarshalUnmarshal(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := OpenStore(filepath.Join(dir, "test.db"))
+
+	store.AppendConsole("line 1")
+	store.AppendConsole("line 2")
+
+	bundle, _ := store.Export()
+	store.Close()
+
+	// Marshal to JSON
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Unmarshal back
+	var restored ProofBundle
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	// Verify restored bundle
+	if restored.MerkleRoot != bundle.MerkleRoot {
+		t.Errorf("MerkleRoot mismatch after round-trip")
+	}
+	if len(restored.Entries) != len(bundle.Entries) {
+		t.Errorf("Entries count mismatch: %d != %d", len(restored.Entries), len(bundle.Entries))
+	}
+
+	// Verify the restored bundle
+	result := restored.Verify()
+	if !result.Valid {
+		t.Errorf("Restored bundle invalid: %s", result.Error)
 	}
 }
