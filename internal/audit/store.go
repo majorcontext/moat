@@ -63,6 +63,14 @@ func createTables(db *sql.DB) error {
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS attestations (
+			seq        INTEGER PRIMARY KEY,
+			root_hash  TEXT NOT NULL,
+			timestamp  TEXT NOT NULL,
+			signature  BLOB NOT NULL,
+			public_key BLOB NOT NULL
+		);
 	`)
 	return err
 }
@@ -276,6 +284,43 @@ func (s *Store) ProveEntry(seq uint64) (*InclusionProof, error) {
 
 	tree := BuildMerkleTree(entries)
 	return tree.ProveInclusion(seq)
+}
+
+// SaveAttestation saves an attestation to the store.
+func (s *Store) SaveAttestation(att *Attestation) error {
+	_, err := s.db.Exec(`
+		INSERT INTO attestations (seq, root_hash, timestamp, signature, public_key)
+		VALUES (?, ?, ?, ?, ?)
+	`, att.Sequence, att.RootHash, att.Timestamp.Format(time.RFC3339Nano),
+		att.Signature, att.PublicKey)
+	if err != nil {
+		return fmt.Errorf("saving attestation: %w", err)
+	}
+	return nil
+}
+
+// LoadAttestations returns all attestations in the store.
+func (s *Store) LoadAttestations() ([]*Attestation, error) {
+	rows, err := s.db.Query(`
+		SELECT seq, root_hash, timestamp, signature, public_key
+		FROM attestations ORDER BY seq
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("loading attestations: %w", err)
+	}
+	defer rows.Close()
+
+	var attestations []*Attestation
+	for rows.Next() {
+		var att Attestation
+		var tsStr string
+		if err := rows.Scan(&att.Sequence, &att.RootHash, &tsStr, &att.Signature, &att.PublicKey); err != nil {
+			return nil, fmt.Errorf("scanning attestation: %w", err)
+		}
+		att.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+		attestations = append(attestations, &att)
+	}
+	return attestations, rows.Err()
 }
 
 // VerifyChain verifies the integrity of the entire hash chain.
