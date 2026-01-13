@@ -1,6 +1,9 @@
 package deps
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseDependency(t *testing.T) {
 	tests := []struct {
@@ -54,5 +57,59 @@ func TestParseAllUnknown(t *testing.T) {
 	_, err := ParseAll([]string{"node", "unknowndep"})
 	if err == nil {
 		t.Error("ParseAll should error for unknown dependency")
+	}
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		deps    []string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid cases
+		{[]string{"node"}, false, ""},
+		{[]string{"node", "typescript"}, false, ""},
+		{[]string{"node@20", "yarn", "pnpm"}, false, ""},
+
+		// Missing requirement
+		{[]string{"typescript"}, true, "requires node"},
+		{[]string{"playwright"}, true, "requires node"},
+		{[]string{"yarn", "pnpm"}, true, "requires node"},
+
+		// Unknown dependency
+		{[]string{"unknown"}, true, "unknown dependency"},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.deps, ","), func(t *testing.T) {
+			deps, parseErr := ParseAll(tt.deps)
+			var err error
+			if parseErr == nil {
+				err = Validate(deps)
+			} else {
+				err = parseErr
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate(%v) should error", tt.deps)
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Validate(%v) error: %v", tt.deps, err)
+			}
+		})
+	}
+}
+
+func TestValidateSuggestion(t *testing.T) {
+	_, err := ParseAll([]string{"nodejs"})
+	if err == nil {
+		t.Fatal("should error for nodejs")
+	}
+	if !strings.Contains(err.Error(), "node") {
+		t.Errorf("error should suggest 'node', got: %v", err)
 	}
 }

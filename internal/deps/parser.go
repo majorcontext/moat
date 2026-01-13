@@ -2,6 +2,7 @@ package deps
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -35,9 +36,70 @@ func ParseAll(specs []string) ([]Dependency, error) {
 			return nil, err
 		}
 		if _, ok := Registry[dep.Name]; !ok {
-			return nil, fmt.Errorf("unknown dependency %q", dep.Name)
+			return nil, fmt.Errorf("unknown dependency %q%s", dep.Name, suggestDep(dep.Name))
 		}
 		deps = append(deps, dep)
 	}
 	return deps, nil
+}
+
+// Validate checks that all dependency requirements are satisfied.
+func Validate(deps []Dependency) error {
+	// Build set of dependency names
+	depSet := make(map[string]bool)
+	for _, d := range deps {
+		depSet[d.Name] = true
+	}
+
+	// Check requirements
+	for _, d := range deps {
+		spec, ok := Registry[d.Name]
+		if !ok {
+			return fmt.Errorf("unknown dependency %q%s", d.Name, suggestDep(d.Name))
+		}
+		for _, req := range spec.Requires {
+			if !depSet[req] {
+				return fmt.Errorf("%s requires %s\n\n  Add '%s' to your dependencies:\n    dependencies:\n      - %s\n      - %s",
+					d.Name, req, req, req, d.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// suggestDep returns a suggestion message if a similar dependency exists.
+func suggestDep(name string) string {
+	suggestions := map[string]string{
+		"nodejs":   "node",
+		"node.js":  "node",
+		"golang":   "go",
+		"python":   "python",
+		"python3":  "python",
+		"postgres": "psql",
+		"pg":       "psql",
+		"awscli":   "aws",
+		"aws-cli":  "aws",
+		"gcp":      "gcloud",
+	}
+	if sugg, ok := suggestions[name]; ok {
+		return fmt.Sprintf("\n  Did you mean '%s'?", sugg)
+	}
+
+	// Check for close matches in registry
+	for regName := range Registry {
+		if strings.Contains(regName, name) || strings.Contains(name, regName) {
+			return fmt.Sprintf("\n  Did you mean '%s'?", regName)
+		}
+	}
+	return ""
+}
+
+// List returns all available dependency names sorted alphabetically.
+func List() []string {
+	names := make([]string, 0, len(Registry))
+	for name := range Registry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
