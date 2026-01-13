@@ -107,6 +107,76 @@ func BuildMerkleTree(entries []*Entry) *MerkleTree {
 // ErrEntryNotFound is returned when an entry is not in the tree.
 var ErrEntryNotFound = errors.New("entry not found in tree")
 
+// IncrementalMerkleTree supports O(log n) append operations.
+// It maintains a "frontier" of subtree roots at each level, avoiding full tree rebuilds.
+// The final root hash is identical to what BuildMerkleTree produces.
+//
+// Thread Safety: This type is NOT thread-safe. Callers must provide external
+// synchronization if concurrent access is required. Store wraps this with a mutex.
+type IncrementalMerkleTree struct {
+	// frontier[i] holds the root of a complete subtree with 2^i leaves,
+	// or nil if no such subtree exists at that level.
+	frontier []*MerkleNode
+	size     uint64
+}
+
+// NewIncrementalMerkleTree creates an empty incremental tree.
+func NewIncrementalMerkleTree() *IncrementalMerkleTree {
+	return &IncrementalMerkleTree{}
+}
+
+// Append adds a new leaf to the tree in O(log n) time.
+func (t *IncrementalMerkleTree) Append(seq uint64, entryHash string) {
+	node := NewLeafNode(seq, entryHash)
+	t.size++
+
+	level := 0
+	// Combine with existing subtrees until we find an empty slot
+	for level < len(t.frontier) && t.frontier[level] != nil {
+		// Combine: existing subtree on left, new node on right
+		node = NewInternalNode(t.frontier[level], node)
+		t.frontier[level] = nil
+		level++
+	}
+
+	// Store at the first empty level
+	if level >= len(t.frontier) {
+		t.frontier = append(t.frontier, node)
+	} else {
+		t.frontier[level] = node
+	}
+}
+
+// RootHash computes the current root hash.
+// If the tree has an odd structure (non-power-of-2 size), combines subtrees right-to-left.
+func (t *IncrementalMerkleTree) RootHash() string {
+	if t.size == 0 {
+		return ""
+	}
+
+	// Combine all non-nil subtrees from smallest (rightmost) to largest
+	var root *MerkleNode
+	for _, node := range t.frontier {
+		if node == nil {
+			continue
+		}
+		if root == nil {
+			root = node
+		} else {
+			// Larger subtree on left, accumulated root on right
+			root = NewInternalNode(node, root)
+		}
+	}
+
+	// root is guaranteed non-nil here: size > 0 implies at least one frontier entry
+	return root.Hash
+}
+
+// Size returns the number of leaves in the tree.
+func (t *IncrementalMerkleTree) Size() uint64 {
+	return t.size
+}
+
 // InclusionProof contains the data needed to verify an entry is in the tree.
 type InclusionProof struct {
 	EntrySeq uint64        `json:"seq"`

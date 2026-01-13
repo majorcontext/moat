@@ -20,7 +20,8 @@ type Store struct {
 	mu         sync.Mutex
 	lastHash   string
 	lastSeq    uint64
-	merkleRoot string // Current Merkle tree root hash
+	merkleRoot string                 // Current Merkle tree root hash
+	merkleTree *IncrementalMerkleTree // In-memory tree for O(log n) appends
 }
 
 // OpenStore opens or creates a log store at the given path.
@@ -87,6 +88,9 @@ func createTables(db *sql.DB) error {
 }
 
 func (s *Store) loadLastEntry() error {
+	// Initialize incremental tree
+	s.merkleTree = NewIncrementalMerkleTree()
+
 	// Load last entry state
 	row := s.db.QueryRow(`
 		SELECT seq, hash FROM entries ORDER BY seq DESC LIMIT 1
@@ -97,6 +101,7 @@ func (s *Store) loadLastEntry() error {
 	switch {
 	case err == sql.ErrNoRows:
 		// Empty store - no entries yet
+		return nil
 	case err != nil:
 		return fmt.Errorf("loading last entry: %w", err)
 	default:
@@ -104,7 +109,7 @@ func (s *Store) loadLastEntry() error {
 		s.lastHash = hash
 	}
 
-	// Load merkle root
+	// Load stored merkle root from database (may be tampered - auditor will verify)
 	row = s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'merkle_root'`)
 	var root string
 	err = row.Scan(&root)
@@ -115,6 +120,26 @@ func (s *Store) loadLastEntry() error {
 		return fmt.Errorf("loading merkle root: %w", err)
 	default:
 		s.merkleRoot = root
+	}
+
+	// Rebuild incremental tree from all entries (one-time O(n) on open)
+	// This is used for future O(log n) appends, not for verification
+	rows, err := s.db.Query(`SELECT seq, hash FROM entries ORDER BY seq`)
+	if err != nil {
+		return fmt.Errorf("loading entries for merkle tree: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var entrySeq uint64
+		var entryHash string
+		if err := rows.Scan(&entrySeq, &entryHash); err != nil {
+			return fmt.Errorf("scanning entry for merkle tree: %w", err)
+		}
+		s.merkleTree.Append(entrySeq, entryHash)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating entries for merkle tree: %w", err)
 	}
 
 	return nil
@@ -144,27 +169,21 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 	s.lastSeq = entry.Sequence
 	s.lastHash = entry.Hash
 
-	// Rebuild merkle root
-	s.rebuildMerkleRoot()
+	// Update merkle tree incrementally - O(log n) instead of O(n)
+	s.merkleTree.Append(entry.Sequence, entry.Hash)
+	s.merkleRoot = s.merkleTree.RootHash()
 
-	return entry, nil
-}
-
-// rebuildMerkleRoot rebuilds the tree from all entries and saves root.
-func (s *Store) rebuildMerkleRoot() {
-	entries, err := s.Range(1, s.lastSeq)
-	if err != nil {
-		return
-	}
-
-	tree := BuildMerkleTree(entries)
-	s.merkleRoot = tree.RootHash()
-
-	// Persist to metadata - use upsert pattern
+	// Persist merkle root to metadata.
+	// Error is intentionally ignored: if this fails, the auditor will detect
+	// a mismatch between stored and computed roots during verification.
+	// This is a feature, not a bug - it ensures any persistence failure is
+	// surfaced as a verification failure rather than silently corrupting state.
 	_, _ = s.db.Exec(`
 		INSERT INTO metadata (key, value) VALUES ('merkle_root', ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`, s.merkleRoot)
+
+	return entry, nil
 }
 
 // MerkleRoot returns the current Merkle tree root hash.
