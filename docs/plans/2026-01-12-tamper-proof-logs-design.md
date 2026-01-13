@@ -248,7 +248,6 @@ func (c *LogCollector) Start(runtime RuntimeType, cfg CollectorConfig) error {
 }
 ```
 
-
 The collector assigns sequence numbers server-side, ignoring any client-provided values.
 
 ## Attestation Tiers
