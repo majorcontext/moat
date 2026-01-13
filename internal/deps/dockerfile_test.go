@@ -43,7 +43,7 @@ func TestGenerateDockerfile(t *testing.T) {
 	}
 
 	// Check protoc
-	if !strings.Contains(dockerfile, "protoc") && !strings.Contains(dockerfile, "25.1") {
+	if !strings.Contains(dockerfile, "protoc") || !strings.Contains(dockerfile, "25.1") {
 		t.Error("Dockerfile should install protoc 25.1")
 	}
 }
@@ -55,5 +55,36 @@ func TestGenerateDockerfileEmpty(t *testing.T) {
 	}
 	if !strings.HasPrefix(dockerfile, "FROM ubuntu:22.04") {
 		t.Error("Empty deps should still have base image")
+	}
+}
+
+func TestGenerateDockerfilePlaywright(t *testing.T) {
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "playwright"},
+	}
+	dockerfile, err := GenerateDockerfile(deps)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(dockerfile, "npm install -g playwright") {
+		t.Error("Dockerfile should install playwright")
+	}
+	if !strings.Contains(dockerfile, "npx playwright install") {
+		t.Error("Dockerfile should install playwright browsers")
+	}
+}
+
+func TestGenerateDockerfileGo(t *testing.T) {
+	deps := []Dependency{{Name: "go", Version: "1.22"}}
+	dockerfile, err := GenerateDockerfile(deps)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(dockerfile, "go.dev/dl/go1.22") {
+		t.Error("Dockerfile should install Go 1.22")
+	}
+	if !strings.Contains(dockerfile, "/usr/local/go/bin") {
+		t.Error("Dockerfile should set Go PATH")
 	}
 }
