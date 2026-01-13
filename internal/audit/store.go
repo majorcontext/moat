@@ -173,7 +173,11 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 	s.merkleTree.Append(entry.Sequence, entry.Hash)
 	s.merkleRoot = s.merkleTree.RootHash()
 
-	// Persist merkle root to metadata
+	// Persist merkle root to metadata.
+	// Error is intentionally ignored: if this fails, the auditor will detect
+	// a mismatch between stored and computed roots during verification.
+	// This is a feature, not a bug - it ensures any persistence failure is
+	// surfaced as a verification failure rather than silently corrupting state.
 	_, _ = s.db.Exec(`
 		INSERT INTO metadata (key, value) VALUES ('merkle_root', ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value

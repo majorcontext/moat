@@ -110,6 +110,9 @@ var ErrEntryNotFound = errors.New("entry not found in tree")
 // IncrementalMerkleTree supports O(log n) append operations.
 // It maintains a "frontier" of subtree roots at each level, avoiding full tree rebuilds.
 // The final root hash is identical to what BuildMerkleTree produces.
+//
+// Thread Safety: This type is NOT thread-safe. Callers must provide external
+// synchronization if concurrent access is required. Store wraps this with a mutex.
 type IncrementalMerkleTree struct {
 	// frontier[i] holds the root of a complete subtree with 2^i leaves,
 	// or nil if no such subtree exists at that level.
@@ -165,9 +168,7 @@ func (t *IncrementalMerkleTree) RootHash() string {
 		}
 	}
 
-	if root == nil {
-		return ""
-	}
+	// root is guaranteed non-nil here: size > 0 implies at least one frontier entry
 	return root.Hash
 }
 
