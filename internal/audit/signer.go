@@ -55,3 +55,22 @@ func NewSigner(keyPath string) (*Signer, error) {
 func (s *Signer) PublicKey() []byte {
 	return s.publicKey
 }
+
+// Sign signs a message and returns the signature.
+func (s *Signer) Sign(message []byte) []byte {
+	return ed25519.Sign(s.privateKey, message)
+}
+
+// Verify checks if a signature is valid for the message.
+func (s *Signer) Verify(message, signature []byte) bool {
+	return ed25519.Verify(s.publicKey, message, signature)
+}
+
+// VerifySignature verifies a signature using only the public key.
+// This is useful for third-party verification without the private key.
+func VerifySignature(publicKey, message, signature []byte) bool {
+	if len(publicKey) != ed25519.PublicKeySize {
+		return false
+	}
+	return ed25519.Verify(publicKey, message, signature)
+}

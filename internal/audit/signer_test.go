@@ -42,3 +42,48 @@ func TestSigner_LoadExistingKey(t *testing.T) {
 		t.Error("Loading existing key should return same public key")
 	}
 }
+
+func TestSigner_SignAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+
+	message := []byte("merkle root hash abc123")
+	signature := signer.Sign(message)
+
+	if len(signature) == 0 {
+		t.Fatal("Signature should not be empty")
+	}
+
+	if !signer.Verify(message, signature) {
+		t.Error("Signature should verify")
+	}
+}
+
+func TestSigner_VerifyTampered(t *testing.T) {
+	dir := t.TempDir()
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+
+	message := []byte("merkle root hash abc123")
+	signature := signer.Sign(message)
+
+	// Tamper with message
+	tampered := []byte("merkle root hash TAMPERED")
+
+	if signer.Verify(tampered, signature) {
+		t.Error("Tampered message should not verify")
+	}
+}
+
+func TestSigner_VerifyWithPublicKeyOnly(t *testing.T) {
+	dir := t.TempDir()
+	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
+
+	message := []byte("merkle root hash abc123")
+	signature := signer.Sign(message)
+
+	// Verify with only public key (simulates third-party verification)
+	valid := VerifySignature(signer.PublicKey(), message, signature)
+	if !valid {
+		t.Error("Should verify with public key only")
+	}
+}
