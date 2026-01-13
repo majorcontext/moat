@@ -251,6 +251,8 @@ func scanEntry(row *sql.Row) (*Entry, error) {
 	// Parse errors are safe to ignore: Append() writes RFC3339Nano format,
 	// so any value read from the database will parse successfully.
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	// Store the original JSON for hash verification (avoids map key ordering issues)
+	e.dataJSON = []byte(dataStr)
 	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
 	// before writing, so any value read from the database is valid JSON.
 	_ = json.Unmarshal([]byte(dataStr), &e.Data) //nolint:errcheck // documented safe above
@@ -268,6 +270,8 @@ func scanEntryRows(rows *sql.Rows) (*Entry, error) {
 	// Parse errors are safe to ignore: Append() writes RFC3339Nano format,
 	// so any value read from the database will parse successfully.
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	// Store the original JSON for hash verification (avoids map key ordering issues)
+	e.dataJSON = []byte(dataStr)
 	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
 	// before writing, so any value read from the database is valid JSON.
 	_ = json.Unmarshal([]byte(dataStr), &e.Data) //nolint:errcheck // documented safe above
