@@ -34,7 +34,10 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	runID := args[0]
 
 	// Find run directory
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("finding home directory: %w", err)
+	}
 	runDir := filepath.Join(homeDir, ".agentops", "runs", runID)
 	dbPath := filepath.Join(runDir, "logs.db")
 
@@ -95,6 +98,6 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("VERDICT: [FAIL] TAMPERED - %s\n", result.Error)
-	os.Exit(1)
-	return nil
+	// Return error so Cobra exits with code 1
+	return fmt.Errorf("tampering detected")
 }
