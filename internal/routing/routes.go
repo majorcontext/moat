@@ -45,11 +45,22 @@ func (rt *RouteTable) Add(agent string, services map[string]string) error {
 }
 
 // Remove unregisters an agent's routes.
+// If no routes remain, the routes file is deleted.
 func (rt *RouteTable) Remove(agent string) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
 	delete(rt.routes, agent)
+
+	// Delete the file if no routes remain
+	if len(rt.routes) == 0 {
+		path := filepath.Join(rt.dir, "routes.json")
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+
 	return rt.save()
 }
 
