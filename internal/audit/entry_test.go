@@ -54,3 +54,33 @@ func TestEntry_HashChangesWithSequence(t *testing.T) {
 		t.Error("Different sequences should produce different hashes")
 	}
 }
+
+func TestEntry_Verify_ValidEntry(t *testing.T) {
+	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
+
+	if !e.Verify() {
+		t.Error("Valid entry should verify")
+	}
+}
+
+func TestEntry_Verify_TamperedData(t *testing.T) {
+	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
+
+	// Tamper with data
+	e.Data = map[string]any{"line": "tampered"}
+
+	if e.Verify() {
+		t.Error("Tampered entry should not verify")
+	}
+}
+
+func TestEntry_Verify_TamperedSequence(t *testing.T) {
+	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
+
+	// Tamper with sequence
+	e.Sequence = 999
+
+	if e.Verify() {
+		t.Error("Tampered sequence should not verify")
+	}
+}
