@@ -247,16 +247,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	// Configure network mode and extra hosts based on runtime capabilities
+	// We use bridge mode when:
+	// 1. We have ports to publish (host mode doesn't support port publishing)
+	// 2. We're on macOS/Windows (host mode not supported)
+	// 3. We're using Apple container runtime
+	// We only use host mode when we need proxy access AND don't have ports to publish on Linux.
 	var networkMode string
 	var extraHosts []string
-	if proxyServer != nil {
-		if m.runtime.SupportsHostNetwork() {
-			// Docker on Linux: use host network so container can reach 127.0.0.1
+	needsPorts := len(ports) > 0
+	needsProxy := proxyServer != nil
+
+	if needsProxy || needsPorts {
+		if m.runtime.SupportsHostNetwork() && !needsPorts {
+			// Docker on Linux without ports: use host network so container can reach 127.0.0.1
 			networkMode = "host"
 		} else {
-			// Docker on macOS/Windows or Apple container: use bridge
+			// Use bridge mode when we need port publishing, or on macOS/Windows/Apple
 			networkMode = "bridge"
-			// Only Docker needs the extra host mapping
+			// Docker needs extra host mapping to reach host from bridge network
 			if m.runtime.Type() == container.RuntimeDocker {
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
@@ -274,11 +282,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	proxyEnv = append(proxyEnv, opts.Env...)
 
 	// Build port bindings for exposed services
+	// Use 0.0.0.0 to let Docker bind to all interfaces, then it assigns a random host port.
+	// The routing proxy handles security by only listening on localhost.
 	var portBindings map[int]string
 	if len(ports) > 0 {
 		portBindings = make(map[int]string)
 		for _, containerPort := range ports {
-			portBindings[containerPort] = "127.0.0.1"
+			portBindings[containerPort] = "0.0.0.0"
 		}
 	}
 
@@ -461,6 +471,11 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Unregister routes for this agent
+	if r.Name != "" {
+		_ = m.routes.Remove(r.Name)
+	}
+
 	m.mu.Lock()
 	r.State = StateStopped
 	r.StoppedAt = time.Now()
@@ -513,6 +528,11 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
 			}
+		}
+
+		// Unregister routes for this agent
+		if r.Name != "" {
+			_ = m.routes.Remove(r.Name)
 		}
 
 		m.mu.Lock()
