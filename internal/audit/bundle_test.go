@@ -59,3 +59,58 @@ func TestStore_Export(t *testing.T) {
 		t.Errorf("MerkleRoot mismatch")
 	}
 }
+
+func TestProofBundle_Verify_Valid(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := OpenStore(filepath.Join(dir, "test.db"))
+
+	// Add entries
+	for i := 0; i < 5; i++ {
+		store.AppendConsole("line")
+	}
+
+	// Create attestation
+	signer, _ := NewSigner(filepath.Join(dir, "test.key"))
+	att := &Attestation{
+		Sequence:  5,
+		RootHash:  store.MerkleRoot(),
+		Timestamp: time.Now().UTC(),
+		PublicKey: signer.PublicKey(),
+	}
+	att.Signature = signer.Sign([]byte(att.RootHash))
+	store.SaveAttestation(att)
+
+	bundle, _ := store.Export()
+	store.Close()
+
+	// Verify bundle
+	result := bundle.Verify()
+	if !result.Valid {
+		t.Errorf("Expected valid, got error: %s", result.Error)
+	}
+	if result.EntryCount != 5 {
+		t.Errorf("EntryCount = %d, want 5", result.EntryCount)
+	}
+}
+
+func TestProofBundle_Verify_TamperedEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := OpenStore(filepath.Join(dir, "test.db"))
+
+	store.AppendConsole("line 1")
+	store.AppendConsole("line 2")
+
+	bundle, _ := store.Export()
+	store.Close()
+
+	// Tamper with an entry
+	bundle.Entries[0].Hash = "tampered"
+
+	result := bundle.Verify()
+	if result.Valid {
+		t.Error("Expected invalid due to tampered entry")
+	}
+	if result.HashChainValid {
+		t.Error("HashChainValid should be false")
+	}
+}
