@@ -3,6 +3,7 @@ package audit
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -41,8 +42,12 @@ func (c *Collector) StartUnix(socketPath string) error {
 	}
 	c.listener = listener
 
-	// Set write-only permissions (0222)
-	os.Chmod(socketPath, 0222)
+	// Set write-only permissions (0222) so agents can write logs but cannot
+	// read them back. This is part of the tamper-proof security model.
+	if err := os.Chmod(socketPath, 0222); err != nil {
+		listener.Close()
+		return fmt.Errorf("setting socket permissions: %w", err)
+	}
 
 	c.wg.Add(1)
 	go c.acceptLoop()
@@ -85,7 +90,11 @@ func (c *Collector) handleConnection(conn net.Conn) {
 			entryType = EntryConsole
 		}
 
-		c.store.Append(entryType, msg.Data)
+		if _, err := c.store.Append(entryType, msg.Data); err != nil {
+			// Log error but continue processing - don't crash on storage errors
+			// TODO: Add structured logging here for observability
+			continue
+		}
 	}
 }
 
