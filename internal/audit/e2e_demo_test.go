@@ -147,7 +147,7 @@ func TestE2E_TamperProofAuditDemo(t *testing.T) {
 	fmt.Printf("  Hash Chain:    %s\n", icon(result.HashChainValid))
 	fmt.Printf("  Merkle Root:   %s\n", icon(result.MerkleRootValid))
 	fmt.Printf("  Attestations:  %s (%d verified)\n", icon(result.AttestationsValid), result.AttestationCount)
-	fmt.Printf("  Rekor Proofs:  %s (%d included)\n", icon(result.RekorProofsValid), result.RekorProofCount)
+	fmt.Printf("  Rekor Proofs:  %s (%d present, not verified)\n", icon(result.RekorProofsPresent), result.RekorProofCount)
 
 	fmt.Println("\n  Inclusion Proofs:")
 	for _, proof := range bundle.Proofs {

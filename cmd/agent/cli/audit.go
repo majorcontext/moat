@@ -128,11 +128,9 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("External Attestations (Sigstore/Rekor)")
 	if result.RekorProofCount == 0 {
-		fmt.Println("  - No Rekor proofs found (offline mode)")
-	} else if result.RekorProofsValid {
-		fmt.Printf("  [ok] %d entries anchored to Rekor\n", result.RekorProofCount)
+		fmt.Println("  - No Rekor proofs found")
 	} else {
-		fmt.Println("  [FAIL] Rekor proofs: INVALID")
+		fmt.Printf("  [info] %d entries anchored to Rekor (not verified - offline mode)\n", result.RekorProofCount)
 	}
 
 	fmt.Println()
@@ -218,7 +216,7 @@ func runVerifyBundle(cmd *cobra.Command, args []string) error {
 	if result.RekorProofCount == 0 {
 		fmt.Println("  - No Rekor proofs in bundle")
 	} else {
-		fmt.Printf("  [info] %d Rekor proof(s) included\n", result.RekorProofCount)
+		fmt.Printf("  [info] %d Rekor proof(s) included (not verified - offline mode)\n", result.RekorProofCount)
 	}
 
 	fmt.Println()

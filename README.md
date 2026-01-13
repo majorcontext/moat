@@ -420,7 +420,7 @@ Verification:
   Hash chain:      ✓ valid
   Merkle root:     ✓ valid
   Attestations:    ✓ valid (1 verified)
-  Rekor proofs:    - none included
+  Rekor proofs:    - none in bundle
 
 Result: ✓ VALID - No tampering detected
 ```

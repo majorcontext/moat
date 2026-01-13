@@ -25,14 +25,14 @@ type ProofBundle struct {
 // This works offline without access to the original database.
 func (b *ProofBundle) Verify() *Result {
 	result := &Result{
-		Valid:             true,
-		HashChainValid:    true,
-		MerkleRootValid:   true,
-		AttestationsValid: true,
-		RekorProofsValid:  true,
-		EntryCount:        uint64(len(b.Entries)),
-		AttestationCount:  len(b.Attestations),
-		RekorProofCount:   len(b.RekorProofs),
+		Valid:              true,
+		HashChainValid:     true,
+		MerkleRootValid:    true,
+		AttestationsValid:  true,
+		RekorProofsPresent: len(b.RekorProofs) > 0,
+		EntryCount:         uint64(len(b.Entries)),
+		AttestationCount:   len(b.Attestations),
+		RekorProofCount:    len(b.RekorProofs),
 	}
 
 	if len(b.Entries) == 0 {

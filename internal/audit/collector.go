@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/andybons/agentops/internal/log"
 )
 
 // CollectorMessage is the wire format for log messages from agents.
@@ -128,6 +130,7 @@ func (c *Collector) handleConnection(conn net.Conn) {
 	for scanner.Scan() {
 		var msg CollectorMessage
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			log.Warn("failed to unmarshal audit message", "error", err)
 			continue
 		}
 
@@ -137,8 +140,7 @@ func (c *Collector) handleConnection(conn net.Conn) {
 		}
 
 		if _, err := c.store.Append(entryType, msg.Data); err != nil {
-			// Log error but continue processing - don't crash on storage errors
-			// TODO: Add structured logging here for observability
+			log.Error("failed to append audit entry", "type", entryType, "error", err)
 			continue
 		}
 	}
