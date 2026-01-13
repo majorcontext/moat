@@ -200,3 +200,78 @@ func TestMerkleTree_ProveInclusion_NotFound(t *testing.T) {
 		t.Error("Expected error for non-existent entry")
 	}
 }
+
+func TestInclusionProof_Verify_Valid(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+		{Sequence: 3, Hash: "hash3"},
+		{Sequence: 4, Hash: "hash4"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	// Generate and verify proof for each entry
+	for _, e := range entries {
+		proof, err := tree.ProveInclusion(e.Sequence)
+		if err != nil {
+			t.Fatalf("ProveInclusion(%d): %v", e.Sequence, err)
+		}
+
+		if !proof.Verify() {
+			t.Errorf("Proof for entry %d should verify", e.Sequence)
+		}
+	}
+}
+
+func TestInclusionProof_Verify_TamperedLeaf(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	proof, _ := tree.ProveInclusion(1)
+
+	// Tamper with leaf hash
+	proof.LeafHash = "tampered"
+
+	if proof.Verify() {
+		t.Error("Tampered proof should not verify")
+	}
+}
+
+func TestInclusionProof_Verify_TamperedSibling(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	proof, _ := tree.ProveInclusion(1)
+
+	// Tamper with sibling
+	if len(proof.Siblings) > 0 {
+		proof.Siblings[0].Hash = "tampered"
+	}
+
+	if proof.Verify() {
+		t.Error("Tampered proof should not verify")
+	}
+}
+
+func TestInclusionProof_Verify_WrongRoot(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	proof, _ := tree.ProveInclusion(1)
+
+	// Change expected root
+	proof.RootHash = "wrongroot"
+
+	if proof.Verify() {
+		t.Error("Proof with wrong root should not verify")
+	}
+}

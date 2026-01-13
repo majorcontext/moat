@@ -175,3 +175,30 @@ func (t *MerkleTree) collectProofPath(node *MerkleNode, seq uint64) ([]SiblingNo
 
 	return nil, "", false
 }
+
+// Verify checks that the proof correctly proves inclusion in the claimed root.
+func (p *InclusionProof) Verify() bool {
+	// Start with the leaf hash
+	currentHash := p.LeafHash
+
+	// Walk up the tree using siblings
+	for _, sibling := range p.Siblings {
+		h := sha256.New()
+		h.Write([]byte{internalPrefix})
+
+		if sibling.IsRight {
+			// Sibling is on right: hash(current || sibling)
+			h.Write([]byte(currentHash))
+			h.Write([]byte(sibling.Hash))
+		} else {
+			// Sibling is on left: hash(sibling || current)
+			h.Write([]byte(sibling.Hash))
+			h.Write([]byte(currentHash))
+		}
+
+		currentHash = hex.EncodeToString(h.Sum(nil))
+	}
+
+	// Compare computed root with claimed root
+	return currentHash == p.RootHash
+}
