@@ -358,6 +358,73 @@ agent proxy stop
 
 Running the proxy separately is useful when you need privileged ports (like 80) since agents can then run without sudo.
 
+### `agent audit`
+
+View the tamper-proof audit log for a run with cryptographic verification.
+
+```bash
+agent audit [run-id] [flags]
+
+# Examples
+agent audit                           # Audit most recent run
+agent audit run-abc123                # Audit specific run
+agent audit --export proof.json       # Export proof bundle for offline verification
+agent audit run-abc123 -e audit.json  # Export specific run's proof bundle
+
+# Flags
+--export, -e    Export proof bundle to JSON file
+```
+
+**Output:**
+
+```
+Tamper-Proof Audit Log
+Run: run-abc123
+
+[seq=1] 2026-01-13T10:23:44.000Z console
+  line: Agent started
+  hash: a1b2c3d4...
+  ✓ verified
+
+[seq=2] 2026-01-13T10:23:44.100Z credential
+  name: github, action: injected, host: api.github.com
+  hash: e5f6a7b8... (prev: a1b2c3d4...)
+  ✓ verified
+
+Chain verification: ✓ VALID (5 entries, no tampering detected)
+Merkle root: 9c8d7e6f...
+```
+
+### `agent verify-bundle`
+
+Verify an exported proof bundle offline.
+
+```bash
+agent verify-bundle <file>
+
+# Example
+agent verify-bundle proof.json
+```
+
+**Output:**
+
+```
+Proof Bundle Verification
+
+Bundle version: 1
+Created: 2026-01-13T10:24:00.000Z
+Entries: 5
+Merkle root: 9c8d7e6f...
+
+Verification:
+  Hash chain:      ✓ valid
+  Merkle root:     ✓ valid
+  Attestations:    ✓ valid (1 verified)
+  Rekor proofs:    - none included
+
+Result: ✓ VALID - No tampering detected
+```
+
 ## How It Works
 
 ### Container Runtimes
@@ -404,6 +471,25 @@ Every run captures:
 - **Network** - All HTTP/HTTPS requests (`~/.agentops/runs/<id>/network.jsonl`)
 - **Traces** - OpenTelemetry-compatible spans (`~/.agentops/runs/<id>/traces.jsonl`)
 - **Metadata** - Run configuration (`~/.agentops/runs/<id>/metadata.json`)
+- **Audit Log** - Tamper-proof audit database (`~/.agentops/runs/<id>/audit.db`)
+
+### Tamper-Proof Audit Logging
+
+AgentOps provides cryptographic verification that audit logs haven't been tampered with:
+
+1. **Hash Chain** - Each log entry includes a SHA-256 hash of its contents plus the previous entry's hash, creating an immutable chain
+2. **Merkle Tree** - All entries are organized into a Merkle tree for efficient verification and inclusion proofs
+3. **Ed25519 Attestations** - The Merkle root can be signed with a per-run Ed25519 key for cryptographic proof of authenticity
+4. **Transparency Log Integration** - Supports Sigstore/Rekor for public timestamping and independent verification
+
+**Export proof bundles** for offline verification or sharing with auditors:
+
+```bash
+agent audit run-abc123 --export proof.json
+agent verify-bundle proof.json
+```
+
+The proof bundle contains entries, attestations, and inclusion proofs that can be verified without access to the original database.
 
 ## Development
 

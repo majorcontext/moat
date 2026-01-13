@@ -18,6 +18,7 @@ AgentOps runs AI agents in isolated containers with credential injection and ful
 ```
 cmd/agent/           CLI entry point (Cobra commands)
 internal/
+  audit/             Tamper-proof audit logging with cryptographic verification
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage, GitHub OAuth device flow
@@ -37,6 +38,8 @@ internal/
 **Observability:** Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
 **Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
+
+**Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated → `agent audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 
 ### Proxy Security Model
 
