@@ -143,7 +143,11 @@ func TestStore_Count(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	if count := store.Count(); count != 0 {
+	count, err := store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if count != 0 {
 		t.Errorf("Count = %d, want 0", count)
 	}
 
@@ -151,7 +155,11 @@ func TestStore_Count(t *testing.T) {
 	store.Append(EntryConsole, map[string]any{"line": "2"})
 	store.Append(EntryNetwork, map[string]any{"url": "http://example.com"})
 
-	if count := store.Count(); count != 3 {
+	count, err = store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if count != 3 {
 		t.Errorf("Count = %d, want 3", count)
 	}
 }

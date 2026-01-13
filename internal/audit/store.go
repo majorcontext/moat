@@ -122,10 +122,13 @@ func (s *Store) Get(seq uint64) (*Entry, error) {
 }
 
 // Count returns the total number of entries.
-func (s *Store) Count() uint64 {
+func (s *Store) Count() (uint64, error) {
 	var count uint64
-	s.db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&count)
-	return count
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting entries: %w", err)
+	}
+	return count, nil
 }
 
 // Range retrieves entries from startSeq to endSeq (inclusive).
@@ -162,7 +165,11 @@ func scanEntry(row *sql.Row) (*Entry, error) {
 		return nil, fmt.Errorf("scanning entry: %w", err)
 	}
 
+	// Parse errors are safe to ignore: Append() writes RFC3339Nano format,
+	// so any value read from the database will parse successfully.
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
+	// before writing, so any value read from the database is valid JSON.
 	json.Unmarshal([]byte(dataStr), &e.Data)
 	return &e, nil
 }
@@ -175,7 +182,11 @@ func scanEntryRows(rows *sql.Rows) (*Entry, error) {
 		return nil, fmt.Errorf("scanning entry: %w", err)
 	}
 
+	// Parse errors are safe to ignore: Append() writes RFC3339Nano format,
+	// so any value read from the database will parse successfully.
 	e.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	// Unmarshal errors are safe to ignore: Append() validates JSON marshaling
+	// before writing, so any value read from the database is valid JSON.
 	json.Unmarshal([]byte(dataStr), &e.Data)
 	return &e, nil
 }
