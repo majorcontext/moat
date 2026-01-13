@@ -1,0 +1,18 @@
+# Example: Multi-service agent with hostname routing
+#
+# This example runs two simple Python HTTP servers and exposes them
+# via hostname-based routing:
+#   - http://web.demo.localhost:8080 -> container port 3000
+#   - http://api.demo.localhost:8080 -> container port 8080
+#
+# Run with:
+#   agent run example examples/multi-service -- bash /workspace/start.sh
+
+name: demo
+
+runtime:
+  python: "3.11"
+
+ports:
+  web: 3000
+  api: 8080
