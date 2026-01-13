@@ -43,7 +43,7 @@ func (b *ProofBundle) Verify() *Result {
 	var prevHash string
 	for i, entry := range b.Entries {
 		// Check sequence is monotonic
-		expectedSeq := uint64(i + 1)
+		expectedSeq := uint64(i) + 1 //nolint:gosec // i is bounded by slice length
 		if entry.Sequence != expectedSeq {
 			result.Valid = false
 			result.HashChainValid = false

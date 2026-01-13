@@ -70,18 +70,18 @@ func runAudit(cmd *cobra.Command, args []string) error {
 
 	// Export if requested
 	if auditExportFile != "" {
-		bundle, err := exportBundle(runID, dbPath)
-		if err != nil {
-			return fmt.Errorf("exporting bundle: %w", err)
+		bundle, exportErr := exportBundle(dbPath)
+		if exportErr != nil {
+			return fmt.Errorf("exporting bundle: %w", exportErr)
 		}
 
-		data, err := json.MarshalIndent(bundle, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshaling bundle: %w", err)
+		data, marshalErr := json.MarshalIndent(bundle, "", "  ")
+		if marshalErr != nil {
+			return fmt.Errorf("marshaling bundle: %w", marshalErr)
 		}
 
-		if err := os.WriteFile(auditExportFile, data, 0644); err != nil {
-			return fmt.Errorf("writing bundle: %w", err)
+		if writeErr := os.WriteFile(auditExportFile, data, 0644); writeErr != nil {
+			return fmt.Errorf("writing bundle: %w", writeErr)
 		}
 
 		fmt.Printf("Proof bundle exported to: %s\n", auditExportFile)
@@ -148,7 +148,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("tampering detected")
 }
 
-func exportBundle(runID, dbPath string) (*audit.ProofBundle, error) {
+func exportBundle(dbPath string) (*audit.ProofBundle, error) {
 	store, err := audit.OpenStore(dbPath)
 	if err != nil {
 		return nil, err

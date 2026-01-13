@@ -401,7 +401,7 @@ func (s *Store) Export() (*ProofBundle, error) {
 	}
 
 	// Convert map to slice
-	var rekorProofs []*RekorProof
+	rekorProofs := make([]*RekorProof, 0, len(rekorProofsMap))
 	for _, p := range rekorProofsMap {
 		rekorProofs = append(rekorProofs, p)
 	}
