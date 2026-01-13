@@ -73,7 +73,7 @@ GitHub credential saved successfully
 **2. Run a command that calls the GitHub API**
 
 ```bash
-$ agent run my-agent . --runtime node:20 --grant github -- curl -s https://api.github.com/user
+$ agent run --runtime node:20 --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -88,7 +88,7 @@ The `--runtime node:20` flag selects the Node.js 20 Docker image (which includes
 **3. Verify the token was never exposed**
 
 ```bash
-$ agent run my-agent . --runtime node:20 --grant github -- env | grep -i token
+$ agent run --runtime node:20 --grant github -- env | grep -i token
 ```
 
 Output: _(nothing)_
@@ -168,10 +168,10 @@ ports:
 
 ```bash
 # Start with configured name from agent.yaml
-agent run my-agent ./project
+agent run ./project
 
 # Override name with --name flag
-agent run --name myapp my-agent ./project
+agent run --name myapp ./project
 ```
 
 If no name is specified (in config or flag), a random name is generated (e.g., `fluffy-chicken`).
@@ -325,6 +325,26 @@ agent destroy [run-id]
 
 # The run must be stopped before it can be destroyed
 ```
+
+### `agent proxy`
+
+Manage the hostname-based routing proxy. By default, the proxy starts automatically when needed and stops when the last agent exits. Use these commands to run it as a standalone daemon.
+
+```bash
+# Start proxy on default port (8080)
+agent proxy start
+
+# Start on privileged port (requires sudo)
+sudo agent proxy start --port=80
+
+# Check proxy status
+agent proxy status
+
+# Stop proxy
+agent proxy stop
+```
+
+Running the proxy separately is useful when you need privileged ports (like 80) since agents can then run without sudo.
 
 ## How It Works
 
