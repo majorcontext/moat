@@ -263,6 +263,21 @@ type VerifyResult struct {
 	Error           string
 }
 
+// ProveEntry generates an inclusion proof for the given sequence number.
+func (s *Store) ProveEntry(seq uint64) (*InclusionProof, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Rebuild tree from entries
+	entries, err := s.Range(1, s.lastSeq)
+	if err != nil {
+		return nil, fmt.Errorf("loading entries: %w", err)
+	}
+
+	tree := BuildMerkleTree(entries)
+	return tree.ProveInclusion(seq)
+}
+
 // VerifyChain verifies the integrity of the entire hash chain.
 func (s *Store) VerifyChain() (*VerifyResult, error) {
 	rows, err := s.db.Query(`

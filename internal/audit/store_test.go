@@ -412,3 +412,41 @@ func TestStore_MerkleRoot_PersistsAcrossReopen(t *testing.T) {
 		t.Errorf("MerkleRoot changed after reopen: %q != %q", root1, root2)
 	}
 }
+
+func TestStore_ProveEntry(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	// Add several entries
+	for i := 0; i < 5; i++ {
+		store.Append(EntryConsole, map[string]any{"line": i})
+	}
+
+	// Generate proof for entry 3
+	proof, err := store.ProveEntry(3)
+	if err != nil {
+		t.Fatalf("ProveEntry: %v", err)
+	}
+
+	if proof.EntrySeq != 3 {
+		t.Errorf("EntrySeq = %d, want 3", proof.EntrySeq)
+	}
+	if proof.RootHash != store.MerkleRoot() {
+		t.Error("Proof root should match store's merkle root")
+	}
+	if !proof.Verify() {
+		t.Error("Proof should verify")
+	}
+}
+
+func TestStore_ProveEntry_NotFound(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	store.Append(EntryConsole, map[string]any{"line": "test"})
+
+	_, err := store.ProveEntry(999)
+	if err == nil {
+		t.Error("Expected error for non-existent entry")
+	}
+}
