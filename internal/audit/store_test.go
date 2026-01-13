@@ -343,4 +343,15 @@ func TestStore_AppendCredential(t *testing.T) {
 	if entry.Type != EntryCredential {
 		t.Errorf("Type = %s, want %s", entry.Type, EntryCredential)
 	}
+
+	data := entry.Data.(*CredentialData)
+	if data.Name != "github" {
+		t.Errorf("Name = %s, want 'github'", data.Name)
+	}
+	if data.Action != "injected" {
+		t.Errorf("Action = %s, want 'injected'", data.Action)
+	}
+	if data.Host != "api.github.com" {
+		t.Errorf("Host = %s, want 'api.github.com'", data.Host)
+	}
 }
