@@ -377,6 +377,45 @@ func (s *Store) LoadRekorProofs() (map[uint64]*RekorProof, error) {
 	return proofs, rows.Err()
 }
 
+// Export creates a portable proof bundle from the store.
+func (s *Store) Export() (*ProofBundle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Load all entries
+	entries, err := s.Range(1, s.lastSeq)
+	if err != nil {
+		return nil, fmt.Errorf("loading entries: %w", err)
+	}
+
+	// Load attestations
+	attestations, err := s.LoadAttestations()
+	if err != nil {
+		return nil, fmt.Errorf("loading attestations: %w", err)
+	}
+
+	// Load Rekor proofs
+	rekorProofsMap, err := s.LoadRekorProofs()
+	if err != nil {
+		return nil, fmt.Errorf("loading rekor proofs: %w", err)
+	}
+
+	// Convert map to slice
+	var rekorProofs []*RekorProof
+	for _, p := range rekorProofsMap {
+		rekorProofs = append(rekorProofs, p)
+	}
+
+	return &ProofBundle{
+		Version:      BundleVersion,
+		CreatedAt:    time.Now().UTC(),
+		MerkleRoot:   s.merkleRoot,
+		Entries:      entries,
+		Attestations: attestations,
+		RekorProofs:  rekorProofs,
+	}, nil
+}
+
 // VerifyChain verifies the integrity of the entire hash chain.
 func (s *Store) VerifyChain() (*VerifyResult, error) {
 	rows, err := s.db.Query(`
