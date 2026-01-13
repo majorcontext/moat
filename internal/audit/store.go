@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // SQLite driver registration
 )
 
 // Store provides tamper-proof log storage using SQLite.
