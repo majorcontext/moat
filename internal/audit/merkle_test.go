@@ -137,3 +137,66 @@ func TestMerkleTree_BuildFromEntries_Deterministic(t *testing.T) {
 		t.Error("Same entries should produce same root hash")
 	}
 }
+
+func TestMerkleTree_ProveInclusion_SingleEntry(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	proof, err := tree.ProveInclusion(1)
+	if err != nil {
+		t.Fatalf("ProveInclusion: %v", err)
+	}
+
+	if proof.EntrySeq != 1 {
+		t.Errorf("EntrySeq = %d, want 1", proof.EntrySeq)
+	}
+	if proof.LeafHash == "" {
+		t.Error("LeafHash should not be empty")
+	}
+	if proof.RootHash != tree.RootHash() {
+		t.Errorf("RootHash mismatch")
+	}
+	// Single entry tree has no siblings
+	if len(proof.Siblings) != 0 {
+		t.Errorf("Siblings = %d, want 0", len(proof.Siblings))
+	}
+}
+
+func TestMerkleTree_ProveInclusion_FourEntries(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+		{Sequence: 3, Hash: "hash3"},
+		{Sequence: 4, Hash: "hash4"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	// Prove entry 3 (index 2)
+	proof, err := tree.ProveInclusion(3)
+	if err != nil {
+		t.Fatalf("ProveInclusion: %v", err)
+	}
+
+	if proof.EntrySeq != 3 {
+		t.Errorf("EntrySeq = %d, want 3", proof.EntrySeq)
+	}
+	// 4-entry tree has height 2, so 2 siblings needed
+	if len(proof.Siblings) != 2 {
+		t.Errorf("Siblings = %d, want 2", len(proof.Siblings))
+	}
+}
+
+func TestMerkleTree_ProveInclusion_NotFound(t *testing.T) {
+	entries := []*Entry{
+		{Sequence: 1, Hash: "hash1"},
+		{Sequence: 2, Hash: "hash2"},
+	}
+	tree := BuildMerkleTree(entries)
+
+	_, err := tree.ProveInclusion(999)
+	if err == nil {
+		t.Error("Expected error for non-existent entry")
+	}
+}
