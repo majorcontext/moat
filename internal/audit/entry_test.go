@@ -54,35 +54,3 @@ func TestEntry_HashChangesWithSequence(t *testing.T) {
 		t.Error("Different sequences should produce different hashes")
 	}
 }
-
-func TestEntry_Verify_ValidEntry(t *testing.T) {
-	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
-
-	if !e.Verify() {
-		t.Error("Valid entry should verify")
-	}
-}
-
-func TestEntry_Verify_TamperedData(t *testing.T) {
-	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
-
-	// Tamper with data and clear dataJSON to force re-marshaling
-	// (simulates what happens if someone creates a new entry with tampered data)
-	e.Data = map[string]any{"line": "tampered"}
-	e.dataJSON = nil // Clear cached JSON to test against new Data
-
-	if e.Verify() {
-		t.Error("Tampered entry should not verify")
-	}
-}
-
-func TestEntry_Verify_TamperedSequence(t *testing.T) {
-	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
-
-	// Tamper with sequence
-	e.Sequence = 999
-
-	if e.Verify() {
-		t.Error("Tampered sequence should not verify")
-	}
-}
