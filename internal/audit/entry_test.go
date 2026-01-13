@@ -66,8 +66,10 @@ func TestEntry_Verify_ValidEntry(t *testing.T) {
 func TestEntry_Verify_TamperedData(t *testing.T) {
 	e := NewEntry(1, "", EntryConsole, map[string]any{"line": "test"})
 
-	// Tamper with data
+	// Tamper with data and clear dataJSON to force re-marshaling
+	// (simulates what happens if someone creates a new entry with tampered data)
 	e.Data = map[string]any{"line": "tampered"}
+	e.dataJSON = nil // Clear cached JSON to test against new Data
 
 	if e.Verify() {
 		t.Error("Tampered entry should not verify")
