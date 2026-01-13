@@ -17,7 +17,7 @@ func TestFullObservabilityFlow(t *testing.T) {
 
 	// Save metadata
 	meta := Metadata{
-		Agent:     "test-agent",
+		Name:      "test-agent",
 		Workspace: "/tmp/workspace",
 		Grants:    []string{"github:repo"},
 		CreatedAt: time.Now(),
@@ -65,8 +65,8 @@ func TestFullObservabilityFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadMetadata: %v", err)
 	}
-	if loadedMeta.Agent != "test-agent" {
-		t.Errorf("Agent = %q, want %q", loadedMeta.Agent, "test-agent")
+	if loadedMeta.Name != "test-agent" {
+		t.Errorf("Name = %q, want %q", loadedMeta.Name, "test-agent")
 	}
 
 	logs, err := store.ReadLogs(0, 100)

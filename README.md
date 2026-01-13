@@ -224,23 +224,24 @@ fluffy-chicken  run-e5f6a1b2     running   web
 Run an agent in an isolated container.
 
 ```bash
-agent run <agent> [path] [flags] [-- command]
+agent run [path] [flags] [-- command]
 
 # Examples
-agent run my-agent . --runtime python:3.11     # Run with Python 3.11
-agent run my-agent . --runtime node:20         # Run with Node.js 20
-agent run test . --grant github                # Run with GitHub credentials
-agent run test . -e DEBUG=true                 # Run with environment variable
-agent run test . -- pytest -v                  # Run custom command
-agent run test . --name myapp                  # Run with specific agent name
+agent run                                      # Run from current directory
+agent run ./my-project                         # Run from specific directory
+agent run --name myapp                         # Run with specific name
+agent run --runtime python:3.11                # Run with Python 3.11
+agent run --runtime node:20 -- npm test        # Run with Node.js and custom command
+agent run --grant github                       # Run with GitHub credentials
+agent run -e DEBUG=true                        # Run with environment variable
 ```
 
 **Flags:**
 
+- `--name` - Name for this agent instance (default: from agent.yaml or random)
 - `--runtime` - Runtime language:version (e.g., `python:3.11`, `node:20`, `go:1.22`)
 - `--grant, -g` - Grant credential access (e.g., `github`, `github:repo,user`)
 - `--env, -e` - Set environment variable (can be repeated)
-- `--name` - Name for this agent instance (for hostname routing)
 
 ### `agent grant`
 

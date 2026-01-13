@@ -26,7 +26,6 @@ const (
 type Run struct {
 	ID          string
 	Name        string            // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
-	Agent       string
 	Workspace   string
 	Grants      []string
 	Ports       map[string]int    // service name -> container port
@@ -43,8 +42,7 @@ type Run struct {
 
 // Options configures a new run.
 type Options struct {
-	Name      string         // Optional explicit name (--name flag)
-	Agent     string
+	Name      string         // Optional explicit name (--name flag or from config)
 	Workspace string
 	Grants    []string
 	Cmd       []string       // Command to run (default: /bin/bash)

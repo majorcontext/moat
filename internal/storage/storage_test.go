@@ -30,7 +30,7 @@ func TestRunStoreMetadata(t *testing.T) {
 	s, _ := NewRunStore(dir, "run-test456")
 
 	meta := Metadata{
-		Agent:     "claude-code",
+		Name:      "claude-code",
 		Workspace: "/home/user/project",
 		Grants:    []string{"github:repo"},
 	}
@@ -42,8 +42,8 @@ func TestRunStoreMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadMetadata: %v", err)
 	}
-	if loaded.Agent != meta.Agent {
-		t.Errorf("Agent = %q, want %q", loaded.Agent, meta.Agent)
+	if loaded.Name != meta.Name {
+		t.Errorf("Name = %q, want %q", loaded.Name, meta.Name)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestLoadMetadataPreservesAllFields(t *testing.T) {
 	s, _ := NewRunStore(dir, "run-allfields")
 
 	meta := Metadata{
-		Agent:     "test-agent",
+		Name:      "test-agent",
 		Workspace: "/workspace",
 		Grants:    []string{"grant1", "grant2"},
 		Error:     "some error",

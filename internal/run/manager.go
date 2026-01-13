@@ -90,7 +90,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	r := &Run{
 		ID:        generateID(),
 		Name:      agentName,
-		Agent:     opts.Agent,
 		Workspace: opts.Workspace,
 		Grants:    opts.Grants,
 		Ports:     ports,
@@ -349,7 +348,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Save initial metadata (best-effort; non-fatal if it fails)
 	_ = store.SaveMetadata(storage.Metadata{
-		Agent:     opts.Agent,
+		Name:      r.Name,
 		Workspace: opts.Workspace,
 		Grants:    opts.Grants,
 		CreatedAt: r.CreatedAt,
