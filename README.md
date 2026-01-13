@@ -378,21 +378,21 @@ agent audit run-abc123 -e audit.json  # Export specific run's proof bundle
 **Output:**
 
 ```
-Tamper-Proof Audit Log
-Run: run-abc123
+Auditing run: run-abc123
+===============================================================
 
-[seq=1] 2026-01-13T10:23:44.000Z console
-  line: Agent started
-  hash: a1b2c3d4...
-  ✓ verified
+Log Integrity
+  [ok] Hash chain: 5 entries, no gaps, all hashes valid
+  [ok] Merkle tree: root matches computed root
 
-[seq=2] 2026-01-13T10:23:44.100Z credential
-  name: github, action: injected, host: api.github.com
-  hash: e5f6a7b8... (prev: a1b2c3d4...)
-  ✓ verified
+Local Signatures
+  [ok] 1 attestations, all signatures valid
 
-Chain verification: ✓ VALID (5 entries, no tampering detected)
-Merkle root: 9c8d7e6f...
+External Attestations (Sigstore/Rekor)
+  - No Rekor proofs found
+
+===============================================================
+VERDICT: [ok] INTACT - No tampering detected
 ```
 
 ### `agent verify-bundle`
@@ -410,19 +410,23 @@ agent verify-bundle proof.json
 
 ```
 Proof Bundle Verification
-
-Bundle version: 1
-Created: 2026-01-13T10:24:00.000Z
+===============================================================
+Bundle Version: 1
+Created: 2026-01-13 10:24:00 UTC
 Entries: 5
-Merkle root: 9c8d7e6f...
 
-Verification:
-  Hash chain:      ✓ valid
-  Merkle root:     ✓ valid
-  Attestations:    ✓ valid (1 verified)
-  Rekor proofs:    - none in bundle
+Log Integrity
+  [ok] Hash chain: 5 entries verified
+  [ok] Merkle root: 9c8d7e6fa1b2...
 
-Result: ✓ VALID - No tampering detected
+Local Signatures
+  [ok] 1 attestation(s) verified
+
+External Attestations (Sigstore/Rekor)
+  - No Rekor proofs in bundle
+
+===============================================================
+VERDICT: [ok] VALID
 ```
 
 ## How It Works
