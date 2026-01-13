@@ -111,6 +111,21 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// AppendConsole adds a console log entry.
+func (s *Store) AppendConsole(line string) (*Entry, error) {
+	return s.Append(EntryConsole, &ConsoleData{Line: line})
+}
+
+// AppendNetwork adds a network request entry.
+func (s *Store) AppendNetwork(data NetworkData) (*Entry, error) {
+	return s.Append(EntryNetwork, &data)
+}
+
+// AppendCredential adds a credential usage entry.
+func (s *Store) AppendCredential(data CredentialData) (*Entry, error) {
+	return s.Append(EntryCredential, &data)
+}
+
 // Get retrieves an entry by sequence number.
 func (s *Store) Get(seq uint64) (*Entry, error) {
 	row := s.db.QueryRow(`

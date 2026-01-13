@@ -18,6 +18,28 @@ const (
 	EntryCredential EntryType = "credential"
 )
 
+// ConsoleData holds console log entry data.
+type ConsoleData struct {
+	Line string `json:"line"`
+}
+
+// NetworkData holds network request entry data.
+type NetworkData struct {
+	Method         string `json:"method"`
+	URL            string `json:"url"`
+	StatusCode     int    `json:"status_code"`
+	DurationMs     int64  `json:"duration_ms"`
+	CredentialUsed string `json:"credential_used,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// CredentialData holds credential usage entry data.
+type CredentialData struct {
+	Name   string `json:"name"`   // e.g., "github"
+	Action string `json:"action"` // e.g., "injected", "used", "revoked"
+	Host   string `json:"host"`   // e.g., "api.github.com"
+}
+
 // Entry represents a single hash-chained log entry.
 type Entry struct {
 	Sequence  uint64    `json:"seq"`

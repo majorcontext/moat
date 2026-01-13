@@ -282,3 +282,65 @@ func TestStore_VerifyChain_BrokenLink(t *testing.T) {
 		t.Errorf("FirstInvalidSeq = %d, want 5", result.FirstInvalidSeq)
 	}
 }
+
+func TestStore_AppendConsole(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	entry, err := store.AppendConsole("hello world")
+	if err != nil {
+		t.Fatalf("AppendConsole: %v", err)
+	}
+
+	if entry.Type != EntryConsole {
+		t.Errorf("Type = %s, want %s", entry.Type, EntryConsole)
+	}
+
+	data := entry.Data.(*ConsoleData)
+	if data.Line != "hello world" {
+		t.Errorf("Line = %s, want 'hello world'", data.Line)
+	}
+}
+
+func TestStore_AppendNetwork(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	entry, err := store.AppendNetwork(NetworkData{
+		Method:         "GET",
+		URL:            "https://api.github.com/user",
+		StatusCode:     200,
+		DurationMs:     150,
+		CredentialUsed: "github",
+	})
+	if err != nil {
+		t.Fatalf("AppendNetwork: %v", err)
+	}
+
+	if entry.Type != EntryNetwork {
+		t.Errorf("Type = %s, want %s", entry.Type, EntryNetwork)
+	}
+
+	data := entry.Data.(*NetworkData)
+	if data.URL != "https://api.github.com/user" {
+		t.Errorf("URL = %s, want 'https://api.github.com/user'", data.URL)
+	}
+}
+
+func TestStore_AppendCredential(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	entry, err := store.AppendCredential(CredentialData{
+		Name:   "github",
+		Action: "injected",
+		Host:   "api.github.com",
+	})
+	if err != nil {
+		t.Fatalf("AppendCredential: %v", err)
+	}
+
+	if entry.Type != EntryCredential {
+		t.Errorf("Type = %s, want %s", entry.Type, EntryCredential)
+	}
+}
