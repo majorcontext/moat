@@ -145,12 +145,23 @@ SQLite provides atomic transactions, efficient range queries, and built-in integ
 
 ## Agent Isolation
 
-Agents write logs through a Unix domain socket. The agent cannot read back from the socket or access log files directly.
+Agents write logs through a write-only channel. The agent cannot read back from the channel or access log files directly. The transport mechanism varies by runtime.
 
-**Host side:**
+### Runtime-Aware Transport
+
+| Runtime | Transport | Security Model |
+|---------|-----------|----------------|
+| Docker | Unix socket | Filesystem permissions (0222 write-only) |
+| Apple containers | TCP via gateway | Token authentication (same as proxy) |
+
+**Why different transports?**
+
+Unix sockets are ideal for Docker - they're mounted into the container filesystem and permissions enforce write-only access. Apple containers run in VMs and cannot mount Unix sockets across the VM boundary. Instead, they access the host via a gateway IP (e.g., `192.168.64.1`), requiring TCP with token authentication.
+
+### Docker Transport (Unix Socket)
 
 ```go
-func (c *LogCollector) Start(runDir string) error {
+func (c *LogCollector) startUnixSocket(runDir string) error {
     c.socketPath = filepath.Join(runDir, "log.sock")
     listener, err := net.Listen("unix", c.socketPath)
     if err != nil {
@@ -174,6 +185,67 @@ Mounts: []Mount{
 Env: []string{
     "AGENTOPS_LOG_SOCKET=/run/agentops/log.sock",
 },
+```
+
+### Apple Container Transport (TCP + Token Auth)
+
+```go
+func (c *LogCollector) startTCPWithAuth(authToken string) error {
+    listener, err := net.Listen("tcp", "0.0.0.0:0") // Random port
+    if err != nil {
+        return err
+    }
+    c.port = listener.Addr().(*net.TCPAddr).Port
+    c.authToken = authToken
+    go c.acceptAuthenticatedConnections(listener)
+    return nil
+}
+
+func (c *LogCollector) acceptAuthenticatedConnections(listener net.Listener) {
+    for {
+        conn, err := listener.Accept()
+        if err != nil {
+            return
+        }
+        // First message must be auth token
+        token := make([]byte, 64)
+        if _, err := io.ReadFull(conn, token); err != nil {
+            conn.Close()
+            continue
+        }
+        if subtle.ConstantTimeCompare(token, []byte(c.authToken)) != 1 {
+            conn.Close()
+            continue
+        }
+        go c.handleConnection(conn)
+    }
+}
+```
+
+**Container environment:**
+
+```go
+Env: []string{
+    fmt.Sprintf("AGENTOPS_LOG_HOST=%s:%d", gateway, c.port),
+    fmt.Sprintf("AGENTOPS_LOG_TOKEN=%s", authToken),
+},
+```
+
+### Unified Interface
+
+The log collector exposes a unified interface regardless of transport:
+
+```go
+func (c *LogCollector) Start(runtime RuntimeType, cfg CollectorConfig) error {
+    switch runtime {
+    case RuntimeDocker:
+        return c.startUnixSocket(cfg.RunDir)
+    case RuntimeApple:
+        return c.startTCPWithAuth(cfg.AuthToken)
+    default:
+        return fmt.Errorf("unsupported runtime: %s", runtime)
+    }
+}
 ```
 
 The collector assigns sequence numbers server-side, ignoring any client-provided values.
