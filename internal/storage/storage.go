@@ -15,8 +15,7 @@ import (
 
 // Metadata holds information about an agent run.
 type Metadata struct {
-	Agent     string         `json:"agent"`
-	Name      string         `json:"name,omitempty"`
+	Name      string         `json:"name"`
 	Workspace string         `json:"workspace"`
 	Grants    []string       `json:"grants,omitempty"`
 	Ports     map[string]int `json:"ports,omitempty"`

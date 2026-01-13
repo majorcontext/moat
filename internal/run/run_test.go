@@ -45,13 +45,13 @@ func TestRunStates(t *testing.T) {
 
 func TestOptions(t *testing.T) {
 	opts := Options{
-		Agent:     "test-agent",
+		Name:      "test-agent",
 		Workspace: "/tmp/test",
 		Grants:    []string{"github", "aws:s3.read"},
 	}
 
-	if opts.Agent != "test-agent" {
-		t.Errorf("expected agent 'test-agent', got %s", opts.Agent)
+	if opts.Name != "test-agent" {
+		t.Errorf("expected name 'test-agent', got %s", opts.Name)
 	}
 	if opts.Workspace != "/tmp/test" {
 		t.Errorf("expected workspace '/tmp/test', got %s", opts.Workspace)

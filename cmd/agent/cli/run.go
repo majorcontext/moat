@@ -22,7 +22,7 @@ var (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run <agent> [path] [-- command]",
+	Use:   "run [path] [-- command]",
 	Short: "Run an agent in an isolated environment",
 	Long: `Run an agent in an isolated container with workspace mounting,
 credential injection, and full observability.
@@ -31,32 +31,34 @@ The agent runs in a Docker container with your workspace mounted at /workspace.
 If an agent.yaml exists in the workspace, its settings are used as defaults.
 
 Arguments:
-  <agent>      Name of the agent to run (a label for this run)
   [path]       Path to workspace directory (default: current directory)
   [-- cmd]     Optional command to run instead of agent's default
 
 Examples:
-  # Run an agent with a Python runtime
-  agent run my-agent . --runtime python:3.11
+  # Run from current directory (uses agent.yaml config)
+  agent run
+
+  # Run from a specific directory
+  agent run ./my-project
+
+  # Run with a specific name for hostname routing
+  agent run --name myapp ./my-project
+
+  # Run with a Python runtime
+  agent run --runtime python:3.11
 
   # Run with Node.js runtime and custom command
-  agent run my-agent . --runtime node:20 -- npm test
-
-  # Run with Go runtime
-  agent run my-agent . --runtime go:1.22
+  agent run --runtime node:20 -- npm test
 
   # Run with GitHub credentials
-  agent run my-agent . --grant github
-
-  # Run with multiple grants
-  agent run my-agent . --grant github --grant aws:s3.read
+  agent run --grant github
 
   # Run with environment variables
-  agent run my-agent . -e DEBUG=true -e API_KEY=xxx
+  agent run -e DEBUG=true -e API_KEY=xxx
 
   # Run multiple commands
-  agent run my-agent . -- sh -c "npm install && npm test"`,
-	Args: cobra.MinimumNArgs(1),
+  agent run -- sh -c "npm install && npm test"`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runAgent,
 }
 
@@ -69,25 +71,23 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
-	agentName := args[0]
-
-	// Parse args: <agent> [path] [-- command...]
+	// Parse args: [path] [-- command...]
 	workspacePath := "."
 	var containerCmd []string
 
 	// Check if there's a -- separator
 	dashIdx := cmd.ArgsLenAtDash()
 	if dashIdx >= 0 {
-		// Args before -- are agent and path
-		if dashIdx > 1 {
-			workspacePath = args[1]
+		// Args before -- are path (if any)
+		if dashIdx > 0 {
+			workspacePath = args[0]
 		}
 		// Args after -- are the command
 		containerCmd = args[dashIdx:]
 	} else {
-		// No --, so second arg (if present) is path
-		if len(args) > 1 {
-			workspacePath = args[1]
+		// No --, so first arg (if present) is path
+		if len(args) > 0 {
+			workspacePath = args[0]
 		}
 	}
 
@@ -133,16 +133,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// Apply config defaults
 	if cfg != nil {
-		if agentName == "" && cfg.Agent != "" {
-			agentName = cfg.Agent
-		}
 		if len(grants) == 0 && len(cfg.Grants) > 0 {
 			grants = cfg.Grants
 		}
 	}
 
 	log.Debug("preparing run",
-		"agent", agentName,
+		"name", agentInstanceName,
 		"workspace", absPath,
 		"grants", grants,
 		"cmd", containerCmd,
@@ -177,7 +174,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	opts := run.Options{
 		Name:      agentInstanceName,
-		Agent:     agentName,
 		Workspace: absPath,
 		Grants:    grants,
 		Cmd:       containerCmd,
@@ -191,7 +187,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating run: %w", err)
 	}
 
-	log.Info("created run", "id", r.ID, "agent", agentName)
+	log.Info("created run", "id", r.ID, "name", r.Name)
 	fmt.Printf("Created run: %s\n", r.ID)
 
 	// Start run
