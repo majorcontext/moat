@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/andybons/agentops/internal/config"
@@ -22,7 +23,7 @@ var proxyCmd = &cobra.Command{
 	Long: `Manage the hostname-based routing proxy.
 
 The routing proxy enables accessing agent services via hostnames like:
-  http://web.my-agent.localhost:8080
+  https://web.my-agent.localhost:8080
 
 Run with sudo to bind to privileged ports like 80:
   sudo agent proxy start --port=80`,
@@ -33,8 +34,9 @@ var proxyStartCmd = &cobra.Command{
 	Short: "Start the routing proxy",
 	Long: `Start the routing proxy in the foreground.
 
-The proxy routes requests based on hostname:
+The proxy routes requests based on hostname and supports both HTTP and HTTPS:
   http://<service>.<agent>.localhost:<port> -> container service
+  https://<service>.<agent>.localhost:<port> -> container service (TLS)
 
 Use --port to specify a custom port (default: 8080).
 Run with sudo for ports below 1024:
@@ -79,33 +81,46 @@ func startProxy(cmd *cobra.Command, args []string) error {
 
 	// Clean up stale lock
 	if lock != nil {
-		_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
+		_ = routing.RemoveProxyLock(proxyDir)
 	}
 
-	// Create route table
-	routes, err := routing.NewRouteTable(proxyDir)
+	// Create lifecycle manager
+	lc, err := routing.NewLifecycle(proxyDir, proxyPort)
 	if err != nil {
-		return fmt.Errorf("creating route table: %w", err)
+		return fmt.Errorf("creating lifecycle: %w", err)
+	}
+
+	// Enable TLS
+	newCA, err := lc.EnableTLS()
+	if err != nil {
+		return fmt.Errorf("enabling TLS: %w", err)
 	}
 
 	// Start proxy
-	server := routing.NewProxyServer(routes)
-	if err := server.Start(proxyPort); err != nil {
+	if err := lc.EnsureRunning(); err != nil {
 		return fmt.Errorf("starting proxy: %w", err)
 	}
 
-	// Save lock file
-	if err := routing.SaveProxyLock(proxyDir, routing.ProxyLockInfo{
-		PID:  os.Getpid(),
-		Port: server.Port(),
-	}); err != nil {
-		_ = server.Stop(context.Background()) // Best effort cleanup
-		return fmt.Errorf("saving proxy lock: %w", err)
-	}
+	log.Info("proxy started", "port", lc.Port(), "pid", os.Getpid())
+	fmt.Printf("Proxy listening on port %d (HTTP and HTTPS)\n", lc.Port())
+	fmt.Printf("Access services at:\n")
+	fmt.Printf("  http://<service>.<agent>.localhost:%d\n", lc.Port())
+	fmt.Printf("  https://<service>.<agent>.localhost:%d\n", lc.Port())
 
-	log.Info("proxy started", "port", server.Port(), "pid", os.Getpid())
-	fmt.Printf("Routing proxy listening on port %d\n", server.Port())
-	fmt.Printf("Access services at: http://<service>.<agent>.localhost:%d\n", server.Port())
+	// Print trust instructions if new CA was created
+	if newCA {
+		caPath := filepath.Join(proxyDir, "ca", "ca.crt")
+		fmt.Printf("\nGenerated CA certificate at %s\n", caPath)
+		fmt.Println("To avoid browser warnings, trust the CA:")
+		switch runtime.GOOS {
+		case "darwin":
+			fmt.Printf("  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %s\n", caPath)
+		case "linux":
+			fmt.Printf("  sudo cp %s /usr/local/share/ca-certificates/agentops.crt && sudo update-ca-certificates\n", caPath)
+		default:
+			fmt.Printf("  Add %s to your system's trusted certificates\n", caPath)
+		}
+	}
 
 	// Wait for interrupt
 	sigCh := make(chan os.Signal, 1)
@@ -113,10 +128,9 @@ func startProxy(cmd *cobra.Command, args []string) error {
 	<-sigCh
 
 	fmt.Println("\nShutting down proxy...")
-	if err := server.Stop(context.Background()); err != nil {
+	if err := lc.Stop(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
 	}
-	_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
 
 	return nil
 }
@@ -136,7 +150,7 @@ func stopProxy(cmd *cobra.Command, args []string) error {
 
 	if !lock.IsAlive() {
 		// Clean up stale lock
-		_ = routing.RemoveProxyLock(proxyDir) // Best effort cleanup
+		_ = routing.RemoveProxyLock(proxyDir)
 		fmt.Println("Proxy is not running (cleaned up stale lock)")
 		return nil
 	}
@@ -174,6 +188,7 @@ func statusProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Proxy running on port %d (pid %d)\n", lock.Port, lock.PID)
+	fmt.Printf("Supports HTTP and HTTPS on the same port\n")
 
 	// Show registered routes
 	routes, err := routing.NewRouteTable(proxyDir)
@@ -182,7 +197,7 @@ func statusProxy(cmd *cobra.Command, args []string) error {
 		if len(agents) > 0 {
 			fmt.Println("\nRegistered agents:")
 			for _, agent := range agents {
-				fmt.Printf("  - %s.localhost:%d\n", agent, lock.Port)
+				fmt.Printf("  - https://%s.localhost:%d\n", agent, lock.Port)
 			}
 		}
 	}

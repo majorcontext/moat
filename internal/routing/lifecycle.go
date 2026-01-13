@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"github.com/andybons/agentops/internal/proxy"
 )
 
 // Lifecycle manages the shared reverse proxy lifecycle.
@@ -12,7 +15,8 @@ type Lifecycle struct {
 	port    int
 	server  *ProxyServer
 	routes  *RouteTable
-	isOwner bool // true if this instance started the proxy
+	isOwner bool      // true if this instance started the proxy
+	ca      *proxy.CA // CA for TLS (nil if TLS disabled)
 }
 
 // NewLifecycle creates a lifecycle manager for the proxy.
@@ -35,6 +39,31 @@ func NewLifecycle(dir string, desiredPort int) (*Lifecycle, error) {
 	}, nil
 }
 
+// EnableTLS enables TLS support by loading or creating a CA.
+// Must be called before EnsureRunning().
+// Returns true if a new CA was created (caller should print trust instructions).
+func (lc *Lifecycle) EnableTLS() (newCA bool, err error) {
+	caDir := filepath.Join(lc.dir, "ca")
+
+	// Check if CA already exists
+	certPath := filepath.Join(caDir, "ca.crt")
+	_, statErr := os.Stat(certPath)
+	newCA = os.IsNotExist(statErr)
+
+	ca, err := proxy.NewCA(caDir)
+	if err != nil {
+		return false, fmt.Errorf("loading/creating CA: %w", err)
+	}
+
+	lc.ca = ca
+	return newCA, nil
+}
+
+// CA returns the CA used for TLS, or nil if TLS is not enabled.
+func (lc *Lifecycle) CA() *proxy.CA {
+	return lc.ca
+}
+
 // EnsureRunning starts the proxy if not already running.
 func (lc *Lifecycle) EnsureRunning() error {
 	// Check for existing proxy
@@ -55,11 +84,19 @@ func (lc *Lifecycle) EnsureRunning() error {
 
 	// Clean up stale lock if exists
 	if lock != nil {
-		_ = RemoveProxyLock(lc.dir) // Best effort cleanup
+		_ = RemoveProxyLock(lc.dir)
 	}
 
 	// Start new proxy
 	lc.server = NewProxyServer(lc.routes)
+
+	// Enable TLS if CA is configured
+	if lc.ca != nil {
+		if err := lc.server.EnableTLS(lc.ca); err != nil {
+			return fmt.Errorf("enabling TLS: %w", err)
+		}
+	}
+
 	if err := lc.server.Start(lc.port); err != nil {
 		return fmt.Errorf("starting proxy: %w", err)
 	}
@@ -72,7 +109,7 @@ func (lc *Lifecycle) EnsureRunning() error {
 		PID:  os.Getpid(),
 		Port: lc.port,
 	}); err != nil {
-		_ = lc.server.Stop(context.Background()) // Best effort cleanup
+		_ = lc.server.Stop(context.Background())
 		return fmt.Errorf("saving proxy lock: %w", err)
 	}
 
