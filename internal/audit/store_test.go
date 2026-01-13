@@ -240,7 +240,10 @@ func TestStore_VerifyChain_TamperedEntry(t *testing.T) {
 	}
 
 	// Directly tamper with entry 5 in the database
-	store.db.Exec(`UPDATE entries SET data = '{"line": "TAMPERED"}' WHERE seq = 5`)
+	_, err := store.db.Exec(`UPDATE entries SET data = '{"line": "TAMPERED"}' WHERE seq = 5`)
+	if err != nil {
+		t.Fatalf("tampering failed: %v", err)
+	}
 
 	result, err := store.VerifyChain()
 	if err != nil {
@@ -263,7 +266,10 @@ func TestStore_VerifyChain_BrokenLink(t *testing.T) {
 	}
 
 	// Break the chain by modifying prev_hash
-	store.db.Exec(`UPDATE entries SET prev_hash = 'wrong' WHERE seq = 5`)
+	_, err := store.db.Exec(`UPDATE entries SET prev_hash = 'wrong' WHERE seq = 5`)
+	if err != nil {
+		t.Fatalf("tampering failed: %v", err)
+	}
 
 	result, err := store.VerifyChain()
 	if err != nil {
@@ -271,5 +277,8 @@ func TestStore_VerifyChain_BrokenLink(t *testing.T) {
 	}
 	if result.Valid {
 		t.Error("Broken chain should not verify")
+	}
+	if result.FirstInvalidSeq != 5 {
+		t.Errorf("FirstInvalidSeq = %d, want 5", result.FirstInvalidSeq)
 	}
 }
