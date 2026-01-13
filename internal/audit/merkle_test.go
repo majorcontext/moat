@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -275,3 +276,152 @@ func TestInclusionProof_Verify_WrongRoot(t *testing.T) {
 		t.Error("Proof with wrong root should not verify")
 	}
 }
+
+// IncrementalMerkleTree tests
+
+func TestIncrementalMerkleTree_Empty(t *testing.T) {
+	tree := NewIncrementalMerkleTree()
+
+	if tree.RootHash() != "" {
+		t.Error("Empty tree should have empty root hash")
+	}
+	if tree.Size() != 0 {
+		t.Errorf("Size = %d, want 0", tree.Size())
+	}
+}
+
+func TestIncrementalMerkleTree_SingleEntry(t *testing.T) {
+	inc := NewIncrementalMerkleTree()
+	inc.Append(1, "hash1")
+
+	batch := BuildMerkleTree([]*Entry{{Sequence: 1, Hash: "hash1"}})
+
+	if inc.RootHash() != batch.RootHash() {
+		t.Errorf("Root mismatch for 1 entry:\n  incremental: %s\n  batch: %s",
+			inc.RootHash(), batch.RootHash())
+	}
+	if inc.Size() != 1 {
+		t.Errorf("Size = %d, want 1", inc.Size())
+	}
+}
+
+func TestIncrementalMerkleTree_MatchesBatchBuilder(t *testing.T) {
+	// Test various sizes including edge cases
+	sizes := []int{1, 2, 3, 4, 5, 7, 8, 15, 16, 17, 31, 32, 33, 100}
+
+	for _, n := range sizes {
+		entries := make([]*Entry, n)
+		inc := NewIncrementalMerkleTree()
+
+		for i := 0; i < n; i++ {
+			hash := fmt.Sprintf("hash%d", i+1)
+			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: hash}
+			inc.Append(uint64(i+1), hash)
+		}
+
+		batch := BuildMerkleTree(entries)
+
+		if inc.RootHash() != batch.RootHash() {
+			t.Errorf("Root mismatch for %d entries:\n  incremental: %s\n  batch: %s",
+				n, inc.RootHash(), batch.RootHash())
+		}
+	}
+}
+
+func TestIncrementalMerkleTree_IncrementalEquivalence(t *testing.T) {
+	// Verify that adding entries one-by-one produces same root as batch
+	inc := NewIncrementalMerkleTree()
+	var entries []*Entry
+
+	for i := 1; i <= 20; i++ {
+		hash := fmt.Sprintf("entry%d", i)
+		entries = append(entries, &Entry{Sequence: uint64(i), Hash: hash})
+		inc.Append(uint64(i), hash)
+
+		batch := BuildMerkleTree(entries)
+		if inc.RootHash() != batch.RootHash() {
+			t.Errorf("Root mismatch at size %d:\n  incremental: %s\n  batch: %s",
+				i, inc.RootHash(), batch.RootHash())
+		}
+	}
+}
+
+// Benchmarks
+
+// BenchmarkMerkleRebuild_FullRebuild simulates the old O(n) approach:
+// rebuild the entire tree from scratch on each append.
+func BenchmarkMerkleRebuild_FullRebuild(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, n := range sizes {
+		entries := make([]*Entry, n)
+		for i := 0; i < n; i++ {
+			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: fmt.Sprintf("hash%d", i+1)}
+		}
+
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				// Simulate one append with full rebuild
+				tree := BuildMerkleTree(entries)
+				_ = tree.RootHash()
+			}
+		})
+	}
+}
+
+// BenchmarkMerkleRebuild_Incremental measures the new O(log n) approach:
+// only recompute affected branches when appending.
+func BenchmarkMerkleRebuild_Incremental(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, n := range sizes {
+		// Pre-populate the tree
+		tree := NewIncrementalMerkleTree()
+		for i := 0; i < n; i++ {
+			tree.Append(uint64(i+1), fmt.Sprintf("hash%d", i+1))
+		}
+
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				// Simulate one append
+				tree.Append(uint64(n+i+1), fmt.Sprintf("newhash%d", i))
+				_ = tree.RootHash()
+			}
+		})
+	}
+}
+
+// BenchmarkMerkleAppend_Comparison directly compares append costs.
+func BenchmarkMerkleAppend_Comparison(b *testing.B) {
+	// Start with a tree of 10000 entries and measure append cost
+	n := 10000
+
+	b.Run("FullRebuild", func(b *testing.B) {
+		entries := make([]*Entry, n)
+		for i := 0; i < n; i++ {
+			entries[i] = &Entry{Sequence: uint64(i + 1), Hash: fmt.Sprintf("hash%d", i+1)}
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Add one entry and rebuild entire tree
+			newEntries := append(entries, &Entry{Sequence: uint64(n + i + 1), Hash: fmt.Sprintf("new%d", i)})
+			tree := BuildMerkleTree(newEntries)
+			_ = tree.RootHash()
+		}
+	})
+
+	b.Run("Incremental", func(b *testing.B) {
+		tree := NewIncrementalMerkleTree()
+		for i := 0; i < n; i++ {
+			tree.Append(uint64(i+1), fmt.Sprintf("hash%d", i+1))
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			tree.Append(uint64(n+i+1), fmt.Sprintf("new%d", i))
+			_ = tree.RootHash()
+		}
+	})
+}
+
