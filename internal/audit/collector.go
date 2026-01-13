@@ -61,9 +61,12 @@ func (c *Collector) StartTCP(authToken string) (string, error) {
 	c.listener = listener
 	c.authToken = authToken
 
-	// Type assertion is safe: net.Listen("tcp", ...) always returns a *net.TCPListener
-	// whose Addr() method returns *net.TCPAddr.
-	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port) //nolint:errcheck // type assertion guaranteed to succeed
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		listener.Close()
+		return "", fmt.Errorf("expected TCP listener, got %T", listener.Addr())
+	}
+	port := fmt.Sprintf("%d", tcpAddr.Port)
 
 	c.wg.Add(1)
 	go c.acceptLoop()
@@ -86,6 +89,7 @@ func (c *Collector) StartUnix(socketPath string) error {
 	// read them back. This is part of the tamper-proof security model.
 	if err := os.Chmod(socketPath, 0222); err != nil {
 		listener.Close()
+		os.Remove(socketPath)
 		return fmt.Errorf("setting socket permissions: %w", err)
 	}
 
