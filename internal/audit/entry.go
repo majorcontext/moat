@@ -3,6 +3,7 @@ package audit
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"time"
@@ -23,8 +24,10 @@ type Entry struct {
 	Timestamp time.Time `json:"ts"`
 	Type      EntryType `json:"type"`
 	PrevHash  string    `json:"prev"`
-	Data      any       `json:"data"`
-	Hash      string    `json:"hash"`
+	// Data must be JSON-serializable. Non-serializable values (e.g., channels,
+	// functions, cycles) will marshal as null, which may cause hash collisions.
+	Data any    `json:"data"`
+	Hash string `json:"hash"`
 }
 
 // NewEntry creates a new entry with computed hash.
@@ -51,11 +54,7 @@ func (e *Entry) computeHash() string {
 
 	// Sequence (8 bytes, big endian)
 	seqBytes := make([]byte, 8)
-	seq := e.Sequence
-	for i := 7; i >= 0; i-- {
-		seqBytes[i] = byte(seq)
-		seq >>= 8
-	}
+	binary.BigEndian.PutUint64(seqBytes, e.Sequence)
 	h.Write(seqBytes)
 
 	// Timestamp (RFC3339)
