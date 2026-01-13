@@ -190,3 +190,64 @@ func scanEntryRows(rows *sql.Rows) (*Entry, error) {
 	json.Unmarshal([]byte(dataStr), &e.Data)
 	return &e, nil
 }
+
+// VerifyResult contains the result of chain verification.
+type VerifyResult struct {
+	Valid           bool
+	EntryCount      uint64
+	FirstInvalidSeq uint64
+	Error           string
+}
+
+// VerifyChain verifies the integrity of the entire hash chain.
+func (s *Store) VerifyChain() (*VerifyResult, error) {
+	rows, err := s.db.Query(`
+		SELECT seq, ts, type, prev_hash, data, hash
+		FROM entries ORDER BY seq
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying entries: %w", err)
+	}
+	defer rows.Close()
+
+	result := &VerifyResult{Valid: true}
+	var prevHash string
+	var prevSeq uint64
+
+	for rows.Next() {
+		e, err := scanEntryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		result.EntryCount++
+
+		// Check sequence is monotonic with no gaps
+		if prevSeq > 0 && e.Sequence != prevSeq+1 {
+			result.Valid = false
+			result.FirstInvalidSeq = e.Sequence
+			result.Error = fmt.Sprintf("sequence gap: expected %d, got %d", prevSeq+1, e.Sequence)
+			return result, nil
+		}
+
+		// Check prev_hash links correctly
+		if e.PrevHash != prevHash {
+			result.Valid = false
+			result.FirstInvalidSeq = e.Sequence
+			result.Error = fmt.Sprintf("broken chain at seq %d: prev_hash mismatch", e.Sequence)
+			return result, nil
+		}
+
+		// Verify entry hash
+		if !e.Verify() {
+			result.Valid = false
+			result.FirstInvalidSeq = e.Sequence
+			result.Error = fmt.Sprintf("invalid hash at seq %d: entry tampered", e.Sequence)
+			return result, nil
+		}
+
+		prevHash = e.Hash
+		prevSeq = e.Sequence
+	}
+
+	return result, rows.Err()
+}

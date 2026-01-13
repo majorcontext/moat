@@ -197,3 +197,79 @@ func newTestStore(t *testing.T) *Store {
 	}
 	return store
 }
+
+func TestStore_VerifyChain_Empty(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	result, err := store.VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if !result.Valid {
+		t.Error("Empty chain should be valid")
+	}
+}
+
+func TestStore_VerifyChain_Valid(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	for i := 0; i < 100; i++ {
+		store.Append(EntryConsole, map[string]any{"line": i})
+	}
+
+	result, err := store.VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if !result.Valid {
+		t.Errorf("Valid chain should verify: %s", result.Error)
+	}
+	if result.EntryCount != 100 {
+		t.Errorf("EntryCount = %d, want 100", result.EntryCount)
+	}
+}
+
+func TestStore_VerifyChain_TamperedEntry(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	for i := 0; i < 10; i++ {
+		store.Append(EntryConsole, map[string]any{"line": i})
+	}
+
+	// Directly tamper with entry 5 in the database
+	store.db.Exec(`UPDATE entries SET data = '{"line": "TAMPERED"}' WHERE seq = 5`)
+
+	result, err := store.VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if result.Valid {
+		t.Error("Tampered chain should not verify")
+	}
+	if result.FirstInvalidSeq != 5 {
+		t.Errorf("FirstInvalidSeq = %d, want 5", result.FirstInvalidSeq)
+	}
+}
+
+func TestStore_VerifyChain_BrokenLink(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	for i := 0; i < 10; i++ {
+		store.Append(EntryConsole, map[string]any{"line": i})
+	}
+
+	// Break the chain by modifying prev_hash
+	store.db.Exec(`UPDATE entries SET prev_hash = 'wrong' WHERE seq = 5`)
+
+	result, err := store.VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if result.Valid {
+		t.Error("Broken chain should not verify")
+	}
+}
