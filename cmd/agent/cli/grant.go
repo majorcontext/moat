@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -161,8 +162,9 @@ See README.md for detailed setup instructions.`)
 		return fmt.Errorf("saving credential: %w", err)
 	}
 
-	log.Info("GitHub credential saved", "scopes", scopes)
-	fmt.Println("GitHub credential saved successfully")
+	credPath := filepath.Join(credential.DefaultStoreDir(), "github.enc")
+	log.Info("GitHub credential saved", "scopes", scopes, "path", credPath)
+	fmt.Printf("GitHub credential saved to %s\n", credPath)
 	return nil
 }
 
@@ -206,7 +208,8 @@ func grantAnthropic() error {
 		return fmt.Errorf("saving credential: %w", err)
 	}
 
-	log.Info("Anthropic credential saved")
-	fmt.Println("Anthropic API key saved successfully")
+	credPath := filepath.Join(credential.DefaultStoreDir(), "anthropic.enc")
+	log.Info("Anthropic credential saved", "path", credPath)
+	fmt.Printf("Anthropic API key saved to %s\n", credPath)
 	return nil
 }
