@@ -1,44 +1,17 @@
 // Package image handles container image selection.
 package image
 
-import "github.com/andybons/agentops/internal/config"
+import "github.com/andybons/agentops/internal/deps"
 
 // DefaultImage is the default container image.
 const DefaultImage = "ubuntu:22.04"
 
-// Resolve selects the best base image for the given config.
-func Resolve(cfg *config.Config) string {
-	if cfg == nil {
+// Resolve determines the image to use based on dependencies.
+// If depList is provided and non-empty, returns the tag for a built image.
+// Otherwise returns the default base image.
+func Resolve(depList []deps.Dependency) string {
+	if len(depList) == 0 {
 		return DefaultImage
 	}
-
-	// Count runtimes specified
-	runtimes := 0
-	if cfg.Runtime.Node != "" {
-		runtimes++
-	}
-	if cfg.Runtime.Python != "" {
-		runtimes++
-	}
-	if cfg.Runtime.Go != "" {
-		runtimes++
-	}
-
-	// If multiple runtimes, use ubuntu base
-	if runtimes > 1 {
-		return DefaultImage
-	}
-
-	// Single runtime - use official image
-	if cfg.Runtime.Node != "" {
-		return "node:" + cfg.Runtime.Node
-	}
-	if cfg.Runtime.Python != "" {
-		return "python:" + cfg.Runtime.Python
-	}
-	if cfg.Runtime.Go != "" {
-		return "golang:" + cfg.Runtime.Go
-	}
-
-	return DefaultImage
+	return deps.ImageTag(depList)
 }

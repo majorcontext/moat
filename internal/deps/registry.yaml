@@ -13,6 +13,12 @@ go:
   type: runtime
   default: "1.22"
 
+python:
+  description: Python programming language
+  type: runtime
+  default: "3.11"
+  versions: ["3.9", "3.10", "3.11", "3.12"]
+
 # Package managers / runtimes
 bun:
   description: JavaScript runtime and package manager

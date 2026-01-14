@@ -60,6 +60,13 @@ type Runtime interface {
 	// Docker on Linux supports this; Apple container does not.
 	SupportsHostNetwork() bool
 
+	// BuildImage builds an image from a Dockerfile content.
+	// Returns the image ID. The tag is applied to the built image.
+	BuildImage(ctx context.Context, dockerfile string, tag string) error
+
+	// ImageExists checks if an image with the given tag exists locally.
+	ImageExists(ctx context.Context, tag string) (bool, error)
+
 	// Close releases runtime resources.
 	Close() error
 }

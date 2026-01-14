@@ -15,6 +15,7 @@ import (
 	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/container"
 	"github.com/andybons/agentops/internal/credential"
+	"github.com/andybons/agentops/internal/deps"
 	"github.com/andybons/agentops/internal/image"
 	"github.com/andybons/agentops/internal/name"
 	"github.com/andybons/agentops/internal/proxy"
@@ -307,10 +308,64 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Parse and validate dependencies
+	var depList []deps.Dependency
+	if opts.Config != nil && len(opts.Config.Dependencies) > 0 {
+		var err error
+		depList, err = deps.ParseAll(opts.Config.Dependencies)
+		if err != nil {
+			// Clean up proxy server if parsing fails
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("parsing dependencies: %w", err)
+		}
+		if err := deps.Validate(depList); err != nil {
+			// Clean up proxy server if validation fails
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("validating dependencies: %w", err)
+		}
+	}
+
+	// Resolve container image based on dependencies
+	containerImage := image.Resolve(depList)
+
+	// Build image if we have dependencies
+	if len(depList) > 0 {
+		// Check if image already exists
+		exists, err := m.runtime.ImageExists(ctx, containerImage)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("checking image: %w", err)
+		}
+
+		if !exists {
+			// Generate and build Dockerfile
+			dockerfile, err := deps.GenerateDockerfile(depList)
+			if err != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("generating Dockerfile: %w", err)
+			}
+
+			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("building image: %w", err)
+			}
+		}
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
-		Image:        image.Resolve(opts.Config),
+		Image:        containerImage,
 		Cmd:          cmd,
 		WorkingDir:   "/workspace",
 		Env:          proxyEnv,

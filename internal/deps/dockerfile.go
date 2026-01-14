@@ -124,6 +124,14 @@ func generateRuntimeInstall(name, version string) string {
 		return fmt.Sprintf(`RUN curl -fsSL https://go.dev/dl/go%s.linux-amd64.tar.gz | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:$PATH"
 `, version)
+	case "python":
+		return fmt.Sprintf(`RUN apt-get update && apt-get install -y software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y python%s python%s-venv python%s-distutils \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python%s - --root-user-action=ignore \
+    && rm -rf /var/lib/apt/lists/*
+`, version, version, version, version)
 	default:
 		return ""
 	}

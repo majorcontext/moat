@@ -10,8 +10,8 @@
 
 name: demo
 
-runtime:
-  python: "3.11"
+dependencies:
+  - python@3.11
 
 ports:
   web: 3000
