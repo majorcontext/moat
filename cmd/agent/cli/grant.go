@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/andybons/agentops/internal/credential"
-	"github.com/andybons/agentops/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -126,7 +125,7 @@ See README.md for detailed setup instructions.`)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	log.Info("initiating GitHub device flow")
+	fmt.Println("Initiating GitHub device flow...")
 
 	deviceCode, err := auth.RequestDeviceCode(ctx)
 	if err != nil {
@@ -163,7 +162,6 @@ See README.md for detailed setup instructions.`)
 	}
 
 	credPath := filepath.Join(credential.DefaultStoreDir(), "github.enc")
-	log.Info("GitHub credential saved", "scopes", scopes, "path", credPath)
 	fmt.Printf("GitHub credential saved to %s\n", credPath)
 	return nil
 }
@@ -185,14 +183,16 @@ func grantAnthropic() error {
 		}
 	}
 
-	// Validate the key
+	// Validate the key by making a test API call
 	fmt.Println("\nValidating API key...")
+	fmt.Println("  POST api.anthropic.com/v1/messages (1-token response to verify key works)")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := auth.ValidateKey(ctx, apiKey); err != nil {
 		return fmt.Errorf("validating API key: %w", err)
 	}
+	fmt.Println("API key is valid.")
 
 	// Store the credential
 	store, err := credential.NewFileStore(
@@ -209,7 +209,6 @@ func grantAnthropic() error {
 	}
 
 	credPath := filepath.Join(credential.DefaultStoreDir(), "anthropic.enc")
-	log.Info("Anthropic credential saved", "path", credPath)
 	fmt.Printf("Anthropic API key saved to %s\n", credPath)
 	return nil
 }
