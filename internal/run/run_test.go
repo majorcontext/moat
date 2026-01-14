@@ -60,3 +60,41 @@ func TestOptions(t *testing.T) {
 		t.Errorf("expected 2 grants, got %d", len(opts.Grants))
 	}
 }
+
+func TestWorkspaceToClaudeDir(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "unix absolute path",
+			input:    "/home/alice/projects/myapp",
+			expected: "-home-alice-projects-myapp",
+		},
+		{
+			name:     "simple path",
+			input:    "/tmp/workspace",
+			expected: "-tmp-workspace",
+		},
+		{
+			name:     "deep nested path",
+			input:    "/Users/dev/Documents/code/project/subdir",
+			expected: "-Users-dev-Documents-code-project-subdir",
+		},
+		{
+			name:     "root path",
+			input:    "/workspace",
+			expected: "-workspace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := workspaceToClaudeDir(tt.input)
+			if result != tt.expected {
+				t.Errorf("workspaceToClaudeDir(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
