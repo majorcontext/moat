@@ -1,0 +1,109 @@
+# internal/deps/registry.yaml
+# Dependency registry - embedded into binary at compile time
+
+# Runtimes
+node:
+  description: Node.js runtime
+  type: runtime
+  default: "20"
+  versions: ["18", "20", "22"]
+
+go:
+  description: Go programming language
+  type: runtime
+  default: "1.22"
+
+python:
+  description: Python programming language
+  type: runtime
+  default: "3.11"
+  versions: ["3.9", "3.10", "3.11", "3.12"]
+
+# Package managers / runtimes
+bun:
+  description: JavaScript runtime and package manager
+  type: github-binary
+  repo: oven-sh/bun
+  asset: "bun-linux-x64.zip"
+  bin: bun
+  default: "1.1.0"
+
+# npm packages
+typescript:
+  description: TypeScript compiler
+  type: npm
+  package: typescript
+  requires: [node]
+
+yarn:
+  description: Yarn package manager
+  type: npm
+  package: yarn
+  requires: [node]
+
+pnpm:
+  description: pnpm package manager
+  type: npm
+  package: pnpm
+  requires: [node]
+
+# Build tools (github-binary)
+protoc:
+  description: Protocol Buffers compiler
+  type: github-binary
+  repo: protocolbuffers/protobuf
+  asset: "protoc-{version}-linux-x86_64.zip"
+  bin: bin/protoc
+  default: "25.1"
+
+sqlc:
+  description: SQL compiler for Go
+  type: github-binary
+  repo: sqlc-dev/sqlc
+  asset: "sqlc_{version}_linux_amd64.tar.gz"
+  default: "1.25.0"
+
+golangci-lint:
+  description: Go linter aggregator
+  type: github-binary
+  repo: golangci/golangci-lint
+  asset: "golangci-lint-{version}-linux-amd64.tar.gz"
+  bin: "golangci-lint-{version}-linux-amd64/golangci-lint"
+  default: "1.55.2"
+
+# CLI tools
+gh:
+  description: GitHub CLI
+  type: github-binary
+  repo: cli/cli
+  asset: "gh_{version}_linux_amd64.tar.gz"
+  bin: "gh_{version}_linux_amd64/bin/gh"
+  default: "2.40.0"
+
+# Database clients (apt)
+psql:
+  description: PostgreSQL client
+  type: apt
+  package: postgresql-client
+
+mysql:
+  description: MySQL client
+  type: apt
+  package: mysql-client
+
+# Custom installers (complex logic)
+playwright:
+  description: Browser testing framework
+  type: custom
+  requires: [node]
+  default: "latest"
+
+aws:
+  description: AWS CLI
+  type: custom
+  default: "2"
+
+gcloud:
+  description: Google Cloud CLI
+  type: custom
+  default: "latest"

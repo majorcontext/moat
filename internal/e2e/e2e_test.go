@@ -279,7 +279,7 @@ print(body)
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Config: &config.Config{
-			Runtime: config.Runtime{Python: "3.11"},
+			Dependencies: []string{"python@3.11"},
 		},
 		Cmd: []string{"python", "-c", pythonScript},
 	})

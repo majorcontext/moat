@@ -340,6 +340,21 @@ func (r *AppleRuntime) Close() error {
 	return nil
 }
 
+// ImageExists checks if an image exists locally.
+func (r *AppleRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "inspect", tag)
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// BuildImage is not supported for Apple containers.
+// Apple container uses install scripts instead of Dockerfile builds.
+func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag string) error {
+	return fmt.Errorf("building images is not supported for Apple containers; use install scripts instead")
+}
+
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *AppleRuntime) ensureImage(ctx context.Context, imageName string) error {
 	// Check if image exists

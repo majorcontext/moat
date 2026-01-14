@@ -42,3 +42,4 @@ go.work.sum
 
 # Git worktrees for isolated development
 .worktrees/
+.private-journal/

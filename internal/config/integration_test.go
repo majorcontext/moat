@@ -14,8 +14,8 @@ func TestFullConfigWorkflow(t *testing.T) {
 agent: test-agent
 version: 1.0.0
 
-runtime:
-  node: 20
+dependencies:
+  - node@20
 
 grants:
   - github:repo
@@ -49,8 +49,8 @@ mounts:
 	if cfg.Version != "1.0.0" {
 		t.Errorf("Version = %q", cfg.Version)
 	}
-	if cfg.Runtime.Node != "20" {
-		t.Errorf("Runtime.Node = %q", cfg.Runtime.Node)
+	if len(cfg.Dependencies) != 1 || cfg.Dependencies[0] != "node@20" {
+		t.Errorf("Dependencies = %v", cfg.Dependencies)
 	}
 	if len(cfg.Grants) != 1 || cfg.Grants[0] != "github:repo" {
 		t.Errorf("Grants = %v", cfg.Grants)

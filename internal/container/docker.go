@@ -1,13 +1,18 @@
 package container
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	goruntime "runtime"
 	"strconv"
 
+	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -214,9 +219,12 @@ func (r *DockerRuntime) Close() error {
 
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
-	_, err := r.cli.ImageInspect(ctx, imageName)
-	if err == nil {
-		return nil // Image exists
+	exists, err := r.ImageExists(ctx, imageName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
 	}
 
 	fmt.Printf("Pulling image %s...\n", imageName)
@@ -228,5 +236,76 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 
 	// Drain the reader to complete the pull
 	_, _ = io.Copy(os.Stdout, reader)
+	return nil
+}
+
+// ImageExists checks if an image exists locally.
+func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
+	_, err := r.cli.ImageInspect(ctx, tag)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
+	}
+	return true, nil
+}
+
+// BuildImage builds a Docker image from Dockerfile content.
+func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string) error {
+	// Create a tar archive with the Dockerfile
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	// Add Dockerfile to tar
+	header := &tar.Header{
+		Name: "Dockerfile",
+		Mode: 0644,
+		Size: int64(len(dockerfile)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("writing tar header: %w", err)
+	}
+	if _, err := tw.Write([]byte(dockerfile)); err != nil {
+		return fmt.Errorf("writing Dockerfile to tar: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("closing tar writer: %w", err)
+	}
+
+	fmt.Printf("Building image %s...\n", tag)
+
+	// Build the image
+	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
+		Tags:       []string{tag},
+		Dockerfile: "Dockerfile",
+		Remove:     true,
+	})
+	if err != nil {
+		return fmt.Errorf("building image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Stream build output and check for errors
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var msg struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+		}
+		if err := decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("reading build output: %w", err)
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("build error: %s", msg.Error)
+		}
+		if msg.Stream != "" {
+			fmt.Print(msg.Stream)
+		}
+	}
+
 	return nil
 }
