@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -51,13 +52,32 @@ func init() {
 	depsListCmd.Flags().StringVar(&typeFilter, "type", "", "filter by type (runtime, npm, apt, github-binary, custom)")
 }
 
+// validTypes defines all valid dependency types for filtering.
+var validTypes = map[string]bool{
+	"runtime":       true,
+	"github-binary": true,
+	"apt":           true,
+	"npm":           true,
+	"custom":        true,
+}
+
 func runDepsList(cmd *cobra.Command, args []string) error {
+	// Validate type filter if provided
+	if typeFilter != "" && !validTypes[typeFilter] {
+		validList := make([]string, 0, len(validTypes))
+		for t := range validTypes {
+			validList = append(validList, t)
+		}
+		sort.Strings(validList)
+		return fmt.Errorf("invalid type %q\n\n  Valid types: %s", typeFilter, strings.Join(validList, ", "))
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tTYPE\tDEFAULT\tDESCRIPTION")
 
 	names := deps.List()
 	for _, name := range names {
-		spec := deps.Registry[name]
+		spec, _ := deps.GetSpec(name)
 		if typeFilter != "" && string(spec.Type) != typeFilter {
 			continue
 		}
@@ -73,11 +93,11 @@ func runDepsList(cmd *cobra.Command, args []string) error {
 
 func runDepsInfo(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	spec, ok := deps.Registry[name]
+	spec, ok := deps.GetSpec(name)
 	if !ok {
 		// Try to suggest
 		suggestions := []string{}
-		for n := range deps.Registry {
+		for n := range deps.AllSpecs() {
 			if strings.Contains(n, name) || strings.Contains(name, n) {
 				suggestions = append(suggestions, n)
 			}
@@ -88,7 +108,7 @@ func runDepsInfo(cmd *cobra.Command, args []string) error {
 			msg += fmt.Sprintf("\n\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
 		}
 		msg += "\n\nRun 'agent deps list' to see all available dependencies."
-		return fmt.Errorf(msg)
+		return errors.New(msg)
 	}
 
 	fmt.Printf("Name:        %s\n", name)

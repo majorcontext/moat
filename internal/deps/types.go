@@ -8,7 +8,6 @@ const (
 	TypeGithubBinary InstallType = "github-binary"
 	TypeApt          InstallType = "apt"
 	TypeNpm          InstallType = "npm"
-	TypePip          InstallType = "pip"
 	TypeCustom       InstallType = "custom"
 )
 

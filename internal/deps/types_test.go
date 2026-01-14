@@ -19,7 +19,6 @@ func TestInstallTypeConstants(t *testing.T) {
 		TypeGithubBinary,
 		TypeApt,
 		TypeNpm,
-		TypePip,
 		TypeCustom,
 	}
 	for _, typ := range types {

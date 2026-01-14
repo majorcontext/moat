@@ -15,7 +15,8 @@ func ImageTag(deps []Dependency) string {
 	for i, d := range deps {
 		v := d.Version
 		if v == "" {
-			v = Registry[d.Name].Default
+			spec, _ := GetSpec(d.Name)
+			v = spec.Default
 		}
 		sorted[i] = d.Name + "@" + v
 	}

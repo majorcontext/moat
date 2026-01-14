@@ -113,3 +113,84 @@ func TestValidateSuggestion(t *testing.T) {
 		t.Errorf("error should suggest 'node', got: %v", err)
 	}
 }
+
+func TestVersionValidation(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid versions
+		{"node@20", false, ""},
+		{"node@20.11", false, ""},
+		{"go@1.22", false, ""},
+		{"protoc@25.1", false, ""},
+		{"python@3.11", false, ""},
+		{"python@3_11", false, ""}, // underscore allowed
+
+		// Invalid versions (shell injection attempts)
+		{"node@20; rm -rf /", true, "invalid character"},
+		{"node@$(whoami)", true, "invalid character"},
+		{"node@`id`", true, "invalid character"},
+		{"node@20|cat /etc/passwd", true, "invalid character"},
+		{"node@20&echo pwned", true, "invalid character"},
+		{"node@20\necho pwned", true, "invalid character"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Parse(%q) error: %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestVersionConstraintValidation(t *testing.T) {
+	// Node has versions ["18", "20", "22"] in registry
+	tests := []struct {
+		deps    []string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid versions
+		{[]string{"node@20"}, false, ""},
+		{[]string{"node@18"}, false, ""},
+		{[]string{"node@22"}, false, ""},
+		{[]string{"node"}, false, ""}, // No version = use default
+
+		// Invalid version for node (not in allowed list)
+		{[]string{"node@16"}, true, "invalid version"},
+		{[]string{"node@21"}, true, "invalid version"},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.deps, ","), func(t *testing.T) {
+			deps, parseErr := ParseAll(tt.deps)
+			if parseErr != nil {
+				t.Fatalf("ParseAll error: %v", parseErr)
+			}
+			err := Validate(deps)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate(%v) should error", tt.deps)
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Validate(%v) error: %v", tt.deps, err)
+			}
+		})
+	}
+}

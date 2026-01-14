@@ -4,13 +4,13 @@ package deps
 import "testing"
 
 func TestRegistryLoaded(t *testing.T) {
-	if len(Registry) == 0 {
+	if len(AllSpecs()) == 0 {
 		t.Fatal("Registry should not be empty")
 	}
 }
 
 func TestRegistryHasNode(t *testing.T) {
-	node, ok := Registry["node"]
+	node, ok := GetSpec("node")
 	if !ok {
 		t.Fatal("Registry should have 'node'")
 	}
@@ -23,7 +23,7 @@ func TestRegistryHasNode(t *testing.T) {
 }
 
 func TestRegistryHasProtoc(t *testing.T) {
-	protoc, ok := Registry["protoc"]
+	protoc, ok := GetSpec("protoc")
 	if !ok {
 		t.Fatal("Registry should have 'protoc'")
 	}
@@ -36,7 +36,7 @@ func TestRegistryHasProtoc(t *testing.T) {
 }
 
 func TestRegistryHasPlaywright(t *testing.T) {
-	pw, ok := Registry["playwright"]
+	pw, ok := GetSpec("playwright")
 	if !ok {
 		t.Fatal("Registry should have 'playwright'")
 	}

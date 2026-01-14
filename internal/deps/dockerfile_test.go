@@ -88,3 +88,20 @@ func TestGenerateDockerfileGo(t *testing.T) {
 		t.Error("Dockerfile should set Go PATH")
 	}
 }
+
+func TestGenerateDockerfilePython(t *testing.T) {
+	deps := []Dependency{{Name: "python", Version: "3.11"}}
+	dockerfile, err := GenerateDockerfile(deps)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(dockerfile, "python3.11") {
+		t.Error("Dockerfile should install Python 3.11")
+	}
+	if !strings.Contains(dockerfile, "deadsnakes") {
+		t.Error("Dockerfile should use deadsnakes PPA")
+	}
+	if !strings.Contains(dockerfile, "update-alternatives") {
+		t.Error("Dockerfile should set up Python alternatives for PATH")
+	}
+}

@@ -324,6 +324,29 @@ func TestGenerateInstallScript_BasePackages(t *testing.T) {
 	}
 }
 
+func TestGenerateInstallScript_Python(t *testing.T) {
+	deps := []Dependency{
+		{Name: "python", Version: "3.11"},
+	}
+
+	script, err := GenerateInstallScript(deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should install Python from deadsnakes PPA
+	if !strings.Contains(script, "deadsnakes") {
+		t.Error("script should use deadsnakes PPA")
+	}
+	if !strings.Contains(script, "python3.11") {
+		t.Error("script should install python3.11")
+	}
+	// Should set up update-alternatives for PATH
+	if !strings.Contains(script, "update-alternatives") {
+		t.Error("script should set up Python alternatives for PATH")
+	}
+}
+
 // Example test to demonstrate full script output
 func TestGenerateInstallScript_Example(t *testing.T) {
 	deps := []Dependency{
