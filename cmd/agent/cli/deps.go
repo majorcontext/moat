@@ -49,7 +49,7 @@ func init() {
 	depsCmd.AddCommand(depsListCmd)
 	depsCmd.AddCommand(depsInfoCmd)
 
-	depsListCmd.Flags().StringVar(&typeFilter, "type", "", "filter by type (runtime, npm, apt, github-binary, custom)")
+	depsListCmd.Flags().StringVar(&typeFilter, "type", "", "filter by type (runtime, npm, apt, github-binary, go-install, custom, meta)")
 }
 
 // validTypes defines all valid dependency types for filtering.
@@ -58,7 +58,9 @@ var validTypes = map[string]bool{
 	"github-binary": true,
 	"apt":           true,
 	"npm":           true,
+	"go-install":    true,
 	"custom":        true,
+	"meta":          true,
 }
 
 func runDepsList(cmd *cobra.Command, args []string) error {

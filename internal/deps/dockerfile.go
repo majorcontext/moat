@@ -18,11 +18,12 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 
 	// Sort dependencies into categories for optimal layer caching
 	var (
-		aptPkgs    []string
-		runtimes   []Dependency
-		githubBins []Dependency
-		npmPkgs    []Dependency
-		customDeps []Dependency
+		aptPkgs       []string
+		runtimes      []Dependency
+		githubBins    []Dependency
+		npmPkgs       []Dependency
+		goInstallPkgs []Dependency
+		customDeps    []Dependency
 	)
 
 	for _, dep := range deps {
@@ -36,8 +37,13 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 			githubBins = append(githubBins, dep)
 		case TypeNpm:
 			npmPkgs = append(npmPkgs, dep)
+		case TypeGoInstall:
+			goInstallPkgs = append(goInstallPkgs, dep)
 		case TypeCustom:
 			customDeps = append(customDeps, dep)
+		case TypeMeta:
+			// Meta dependencies are expanded during parsing/validation
+			// They should not appear here
 		}
 	}
 
@@ -98,6 +104,16 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 		}
 		b.WriteString("# npm packages\n")
 		b.WriteString("RUN npm install -g " + strings.Join(pkgNames, " ") + "\n\n")
+	}
+
+	// go install packages (requires Go runtime)
+	if len(goInstallPkgs) > 0 {
+		b.WriteString("# go install packages\n")
+		for _, dep := range goInstallPkgs {
+			spec, _ := GetSpec(dep.Name)
+			b.WriteString(getGoInstallCommands(spec).FormatForDockerfile())
+		}
+		b.WriteString("\n")
 	}
 
 	// Custom installs (playwright, aws, gcloud)

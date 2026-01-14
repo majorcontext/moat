@@ -80,6 +80,16 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 	}
 }
 
+// getGoInstallCommands returns install commands for go-install dependencies.
+// Uses GOBIN=/usr/local/bin to ensure binaries are in PATH.
+func getGoInstallCommands(spec DepSpec) InstallCommands {
+	return InstallCommands{
+		Commands: []string{
+			fmt.Sprintf("GOBIN=/usr/local/bin go install %s@latest", spec.GoPackage),
+		},
+	}
+}
+
 // getCustomCommands returns install commands for custom dependencies.
 func getCustomCommands(name, _ string) InstallCommands {
 	switch name {

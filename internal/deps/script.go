@@ -26,11 +26,12 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 
 	// Sort dependencies into categories for optimal install order
 	var (
-		aptPkgs    []string
-		runtimes   []Dependency
-		githubBins []Dependency
-		npmPkgs    []Dependency
-		customDeps []Dependency
+		aptPkgs       []string
+		runtimes      []Dependency
+		githubBins    []Dependency
+		npmPkgs       []Dependency
+		goInstallPkgs []Dependency
+		customDeps    []Dependency
 	)
 
 	for _, dep := range deps {
@@ -44,8 +45,12 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 			githubBins = append(githubBins, dep)
 		case TypeNpm:
 			npmPkgs = append(npmPkgs, dep)
+		case TypeGoInstall:
+			goInstallPkgs = append(goInstallPkgs, dep)
 		case TypeCustom:
 			customDeps = append(customDeps, dep)
+		case TypeMeta:
+			// Meta dependencies are expanded during parsing/validation
 		}
 	}
 
@@ -107,7 +112,17 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 		b.WriteString("npm install -g " + strings.Join(pkgNames, " ") + "\n\n")
 	}
 
-	// Step 6: Custom installs
+	// Step 6: go install packages (requires Go runtime)
+	if len(goInstallPkgs) > 0 {
+		b.WriteString("# go install packages\n")
+		for _, dep := range goInstallPkgs {
+			spec, _ := GetSpec(dep.Name)
+			b.WriteString(getGoInstallCommands(spec).FormatForScript())
+		}
+		b.WriteString("\n")
+	}
+
+	// Step 7: Custom installs
 	for _, dep := range customDeps {
 		spec, _ := GetSpec(dep.Name)
 		version := dep.Version

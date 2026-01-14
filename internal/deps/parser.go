@@ -46,17 +46,39 @@ func validateVersion(version string) error {
 }
 
 // ParseAll parses multiple dependency strings and validates they exist in the registry.
+// Meta dependencies are expanded into their constituent dependencies.
 func ParseAll(specs []string) ([]Dependency, error) {
 	deps := make([]Dependency, 0, len(specs))
+	seen := make(map[string]bool) // Track seen deps to avoid duplicates
+
 	for _, s := range specs {
 		dep, err := Parse(s)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := GetSpec(dep.Name); !ok {
+		spec, ok := GetSpec(dep.Name)
+		if !ok {
 			return nil, fmt.Errorf("unknown dependency %q%s", dep.Name, suggestDep(dep.Name))
 		}
-		deps = append(deps, dep)
+
+		// Meta dependencies don't support version specifiers
+		if spec.Type == TypeMeta {
+			if dep.Version != "" {
+				return nil, fmt.Errorf("meta dependency %q does not support version specifications", dep.Name)
+			}
+			for _, reqName := range spec.Requires {
+				if seen[reqName] {
+					continue
+				}
+				seen[reqName] = true
+				deps = append(deps, Dependency{Name: reqName})
+			}
+		} else {
+			if !seen[dep.Name] {
+				seen[dep.Name] = true
+				deps = append(deps, dep)
+			}
+		}
 	}
 	return deps, nil
 }
@@ -74,6 +96,17 @@ func Validate(deps []Dependency) error {
 		spec, ok := registry[d.Name]
 		if !ok {
 			return fmt.Errorf("unknown dependency %q%s", d.Name, suggestDep(d.Name))
+		}
+
+		// Validate go-install dependencies require go runtime
+		if spec.Type == TypeGoInstall && !depSet["go"] {
+			return fmt.Errorf("%s requires Go runtime\n\n  Add 'go' to your dependencies:\n    dependencies:\n      - go\n      - %s",
+				d.Name, d.Name)
+		}
+
+		// Validate go-install has required go-package field
+		if spec.Type == TypeGoInstall && spec.GoPackage == "" {
+			return fmt.Errorf("go-install dependency %q missing required 'go-package' field in registry", d.Name)
 		}
 
 		// Validate version against allowed versions if specified

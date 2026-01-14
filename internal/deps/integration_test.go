@@ -270,6 +270,45 @@ func TestEmptyDependencies(t *testing.T) {
 	}
 }
 
+// TestGoInstallDependencies tests that go-install type dependencies generate correct install commands.
+func TestGoInstallDependencies(t *testing.T) {
+	deps := []string{"go", "govulncheck", "mockgen"}
+	depList, err := ParseAll(deps)
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+
+	if err := Validate(depList); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	dockerfile, err := GenerateDockerfile(depList)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+
+	// Should contain go install commands with GOBIN set for PATH access
+	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
+		t.Error("Dockerfile missing govulncheck go install with GOBIN")
+	}
+	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
+		t.Error("Dockerfile missing mockgen go install with GOBIN")
+	}
+
+	script, err := GenerateInstallScript(depList)
+	if err != nil {
+		t.Fatalf("GenerateInstallScript: %v", err)
+	}
+
+	// Script should also contain go install commands with GOBIN set
+	if !strings.Contains(script, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
+		t.Error("Script missing govulncheck go install with GOBIN")
+	}
+	if !strings.Contains(script, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
+		t.Error("Script missing mockgen go install with GOBIN")
+	}
+}
+
 // TestDockerfileAndScriptConsistency tests that Dockerfile and install script generate similar output.
 func TestDockerfileAndScriptConsistency(t *testing.T) {
 	deps := []string{"node@20", "typescript", "psql"}
