@@ -81,7 +81,7 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 }
 
 // getCustomCommands returns install commands for custom dependencies.
-func getCustomCommands(name, version string) InstallCommands {
+func getCustomCommands(name, _ string) InstallCommands {
 	switch name {
 	case "playwright":
 		return InstallCommands{

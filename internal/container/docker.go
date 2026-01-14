@@ -11,7 +11,8 @@ import (
 	goruntime "runtime"
 	"strconv"
 
-	"github.com/docker/docker/api/types"
+	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -240,9 +241,9 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 
 // ImageExists checks if an image exists locally.
 func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
-	_, _, err := r.cli.ImageInspectWithRaw(ctx, tag)
+	_, err := r.cli.ImageInspect(ctx, tag)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if errdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
@@ -275,7 +276,7 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 	fmt.Printf("Building image %s...\n", tag)
 
 	// Build the image
-	resp, err := r.cli.ImageBuild(ctx, &buf, types.ImageBuildOptions{
+	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
