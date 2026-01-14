@@ -16,15 +16,22 @@ import (
 // RequestLogger is called for each proxied request.
 type RequestLogger func(method, url string, statusCode int, duration time.Duration, err error)
 
+// credentialHeader holds a header name and value for credential injection.
+type credentialHeader struct {
+	Name  string // Header name (e.g., "Authorization", "x-api-key")
+	Value string // Header value (e.g., "Bearer token", "sk-ant-...")
+}
+
 // Proxy is an HTTP proxy that injects credentials into outgoing requests.
 //
 // # Security Model
 //
 // The proxy handles two distinct security concerns:
 //
-//  1. Credential injection: The proxy injects Authorization headers for
-//     configured hosts (e.g., api.github.com). When CA is set, it performs
-//     TLS interception (MITM) to inject headers into HTTPS requests.
+//  1. Credential injection: The proxy injects credential headers for
+//     configured hosts (e.g., api.github.com, api.anthropic.com). When CA
+//     is set, it performs TLS interception (MITM) to inject headers into
+//     HTTPS requests. Supports custom header names (Authorization, x-api-key, etc).
 //
 //  2. Proxy authentication: When authToken is set, clients must authenticate
 //     to the proxy itself via Proxy-Authorization header. This prevents
@@ -36,7 +43,7 @@ type RequestLogger func(method, url string, statusCode int, duration time.Durati
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials map[string]string // host -> auth header value
+	credentials map[string]credentialHeader // host -> credential header
 	mu          sync.RWMutex
 	ca          *CA           // Optional CA for TLS interception
 	logger      RequestLogger // Optional request logger
@@ -46,7 +53,7 @@ type Proxy struct {
 // NewProxy creates a new auth proxy.
 func NewProxy() *Proxy {
 	return &Proxy{
-		credentials: make(map[string]string),
+		credentials: make(map[string]credentialHeader),
 	}
 }
 
@@ -75,11 +82,18 @@ func (p *Proxy) SetLogger(logger RequestLogger) {
 	p.logger = logger
 }
 
-// SetCredential sets the credential for a host.
+// SetCredential sets the credential for a host using the Authorization header.
+// This is a convenience wrapper for SetCredentialHeader with "Authorization" as the header name.
 func (p *Proxy) SetCredential(host, authHeader string) {
+	p.SetCredentialHeader(host, "Authorization", authHeader)
+}
+
+// SetCredentialHeader sets a custom credential header for a host.
+// Use this for APIs that use non-standard header names like "x-api-key".
+func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.credentials[host] = authHeader
+	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue}
 }
 
 // hasCredential checks if there's a credential for the host.
@@ -99,20 +113,20 @@ func (p *Proxy) hasCredential(host string) bool {
 	return false
 }
 
-// getCredential returns the credential for a host.
-func (p *Proxy) getCredential(host string) (string, bool) {
+// getCredential returns the credential header for a host.
+func (p *Proxy) getCredential(host string) (credentialHeader, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if auth, ok := p.credentials[host]; ok {
-		return auth, true
+	if cred, ok := p.credentials[host]; ok {
+		return cred, true
 	}
 	// Strip port and check
 	h, _, _ := net.SplitHostPort(host)
 	if h != "" {
-		auth, ok := p.credentials[h]
-		return auth, ok
+		cred, ok := p.credentials[h]
+		return cred, ok
 	}
-	return "", false
+	return credentialHeader{}, false
 }
 
 // ServeHTTP handles proxy requests.
@@ -183,8 +197,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Inject credentials if available
 	host := r.URL.Hostname()
-	if auth, ok := p.getCredential(host); ok {
-		outReq.Header.Set("Authorization", auth)
+	if cred, ok := p.getCredential(host); ok {
+		outReq.Header.Set(cred.Name, cred.Value)
 	}
 
 	// Remove proxy headers
@@ -341,8 +355,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.RequestURI = ""
 
 		// Inject credentials
-		if auth, ok := p.getCredential(host); ok {
-			req.Header.Set("Authorization", auth)
+		if cred, ok := p.getCredential(host); ok {
+			req.Header.Set(cred.Name, cred.Value)
 		}
 
 		// Remove proxy headers

@@ -28,7 +28,8 @@ Credentials are stored securely and injected into agent containers when
 requested via the --grant flag on 'agent run'.
 
 Supported providers:
-  github    GitHub OAuth (uses device flow for authentication)
+  github      GitHub OAuth (uses device flow for authentication)
+  anthropic   Anthropic API key (for Claude Code and Claude API)
 
 Scope format:
   provider              Use default scopes
@@ -52,7 +53,17 @@ Examples:
   agent grant github:repo,read:user,user:email
 
   # Use the credential in a run
-  agent run my-agent . --grant github`,
+  agent run my-agent . --grant github
+
+  # Grant Anthropic API access (interactive prompt)
+  agent grant anthropic
+
+  # Grant Anthropic API access (from environment variable)
+  export ANTHROPIC_API_KEY="sk-ant-..."  # set in your shell profile
+  agent grant anthropic
+
+  # Use Anthropic credential for Claude Code
+  agent run claude-code-test . --grant anthropic`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }
@@ -77,6 +88,8 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	switch provider {
 	case credential.ProviderGitHub:
 		return grantGitHub(scopes)
+	case credential.ProviderAnthropic:
+		return grantAnthropic()
 	default:
 		return fmt.Errorf("unsupported provider: %s", providerStr)
 	}
@@ -150,5 +163,50 @@ See README.md for detailed setup instructions.`)
 
 	log.Info("GitHub credential saved", "scopes", scopes)
 	fmt.Println("GitHub credential saved successfully")
+	return nil
+}
+
+func grantAnthropic() error {
+	auth := &credential.AnthropicAuth{}
+
+	// Get API key from environment variable or interactive prompt
+	// Environment variable is preferred for non-interactive/CI use
+	var apiKey string
+	var err error
+	if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
+		apiKey = envKey
+		fmt.Println("Using API key from ANTHROPIC_API_KEY environment variable")
+	} else {
+		apiKey, err = auth.PromptForAPIKey()
+		if err != nil {
+			return fmt.Errorf("reading API key: %w", err)
+		}
+	}
+
+	// Validate the key
+	fmt.Println("\nValidating API key...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := auth.ValidateKey(ctx, apiKey); err != nil {
+		return fmt.Errorf("validating API key: %w", err)
+	}
+
+	// Store the credential
+	store, err := credential.NewFileStore(
+		credential.DefaultStoreDir(),
+		credential.DefaultEncryptionKey(),
+	)
+	if err != nil {
+		return fmt.Errorf("opening credential store: %w", err)
+	}
+
+	cred := auth.CreateCredential(apiKey)
+	if err := store.Save(cred); err != nil {
+		return fmt.Errorf("saving credential: %w", err)
+	}
+
+	log.Info("Anthropic credential saved")
+	fmt.Println("Anthropic API key saved successfully")
 	return nil
 }

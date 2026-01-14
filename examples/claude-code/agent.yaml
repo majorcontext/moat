@@ -1,0 +1,7 @@
+agent: claude-code-test
+
+runtime:
+  node: "20"
+
+grants:
+  - anthropic

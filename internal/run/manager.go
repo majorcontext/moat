@@ -105,6 +105,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy server for this run if grants are specified
 	var proxyServer *proxy.Server
 	var proxyEnv []string
+	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
 	var mounts []container.MountConfig
 
 	// Always mount workspace
@@ -159,6 +160,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					case credential.ProviderGitHub:
 						p.SetCredential("api.github.com", "Bearer "+cred.Token)
 						p.SetCredential("github.com", "Bearer "+cred.Token)
+					case credential.ProviderAnthropic:
+						// Anthropic uses x-api-key header, not Authorization
+						p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
+						// Set a dummy ANTHROPIC_API_KEY so Claude Code doesn't error
+						// The real key is injected by the proxy at the network layer
+						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY=agentops-proxy-injected")
 					}
 				}
 			}
@@ -243,6 +250,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
+
+		// Add provider-specific env vars (collected during credential loading)
+		proxyEnv = append(proxyEnv, providerEnv...)
 	}
 
 	// Configure network mode and extra hosts based on runtime capabilities
