@@ -340,6 +340,40 @@ func (r *AppleRuntime) Close() error {
 	return nil
 }
 
+// SetupFirewall configures iptables to block all outbound traffic except to the proxy.
+func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+	// Apple containers run Linux VMs, so iptables should work
+	script := fmt.Sprintf(`
+		# Flush existing rules
+		iptables -F OUTPUT 2>/dev/null || true
+
+		# Allow loopback
+		iptables -A OUTPUT -o lo -j ACCEPT
+
+		# Allow established/related connections
+		iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+		# Allow DNS (UDP 53) - needed for initial hostname resolution
+		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+
+		# Allow traffic to proxy port
+		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
+
+		# Drop all other outbound traffic
+		iptables -A OUTPUT -j DROP
+	`, proxyPort)
+
+	cmd := exec.CommandContext(ctx, r.containerBin, "exec", containerID, "sh", "-c", script)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("firewall setup failed: %w: %s (iptables may not be available)", err, stderr.String())
+	}
+
+	return nil
+}
+
 // ImageExists checks if an image exists locally.
 func (r *AppleRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "image", "inspect", tag)

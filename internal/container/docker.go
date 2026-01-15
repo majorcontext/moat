@@ -217,6 +217,75 @@ func (r *DockerRuntime) Close() error {
 	return r.cli.Close()
 }
 
+// SetupFirewall configures iptables to block all outbound traffic except to the proxy.
+func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+	// Resolve proxy host to IP if it's a hostname
+	// For host.docker.internal, we need to resolve it inside the container
+	// For simplicity, we'll allow traffic to the Docker bridge gateway which handles host.docker.internal
+
+	// iptables rules:
+	// 1. Allow loopback
+	// 2. Allow established connections (for responses)
+	// 3. Allow DNS (needed to resolve hostnames before proxy can intercept)
+	// 4. Allow traffic to proxy
+	// 5. Drop everything else
+
+	// We run these as a single script to minimize exec calls
+	script := fmt.Sprintf(`
+		# Flush existing rules
+		iptables -F OUTPUT 2>/dev/null || true
+
+		# Allow loopback
+		iptables -A OUTPUT -o lo -j ACCEPT
+
+		# Allow established/related connections
+		iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+		# Allow DNS (UDP 53) - needed for initial hostname resolution
+		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+
+		# Allow traffic to proxy host on proxy port
+		# For Docker, we allow the entire Docker network range since host.docker.internal
+		# resolves to the host gateway IP which varies
+		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
+
+		# Drop all other outbound traffic
+		iptables -A OUTPUT -j DROP
+	`, proxyPort)
+
+	execConfig := container.ExecOptions{
+		Cmd:          []string{"sh", "-c", script},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return fmt.Errorf("creating exec for firewall setup: %w", err)
+	}
+
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return fmt.Errorf("attaching to exec for firewall setup: %w", err)
+	}
+	defer resp.Close()
+
+	// Read output to completion
+	_, _ = io.Copy(io.Discard, resp.Reader)
+
+	// Check exit code
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting exec for firewall setup: %w", err)
+	}
+
+	if inspect.ExitCode != 0 {
+		return fmt.Errorf("firewall setup failed with exit code %d (iptables may not be available in container)", inspect.ExitCode)
+	}
+
+	return nil
+}
+
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
 	exists, err := r.ImageExists(ctx, imageName)

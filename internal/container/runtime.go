@@ -69,6 +69,12 @@ type Runtime interface {
 
 	// Close releases runtime resources.
 	Close() error
+
+	// SetupFirewall configures iptables to only allow traffic to the proxy.
+	// proxyHost is the address the container uses to reach the proxy (e.g., "host.docker.internal").
+	// proxyPort is the proxy's port number.
+	// This blocks all other outbound traffic, forcing everything through the proxy.
+	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error
 }
 
 // Config holds configuration for creating a container.

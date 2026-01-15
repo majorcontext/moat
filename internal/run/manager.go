@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -240,9 +241,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
+		// Store proxy details for firewall setup (applied after container starts)
+		if needsProxyForFirewall {
+			r.FirewallEnabled = true
+			r.ProxyHost = m.runtime.GetHostAddress()
+			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
+			r.ProxyPort = proxyPortInt
+		}
+
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
-		proxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		proxyHost := r.ProxyHost + ":" + proxyServer.Port()
 		var proxyURL string
 		if proxyAuthToken != "" {
 			// Include auth credentials in URL: http://agentops:token@host:port
@@ -507,6 +516,16 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 		r.Error = err.Error()
 		m.mu.Unlock()
 		return err
+	}
+
+	// Set up firewall if enabled (strict network policy)
+	// This blocks all outbound traffic except to the proxy
+	if r.FirewallEnabled && r.ProxyPort > 0 {
+		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+			// Log warning but don't fail - firewall is best-effort
+			// (container may not have iptables available)
+			fmt.Fprintf(os.Stderr, "Warning: firewall setup failed: %v\n", err)
+		}
 	}
 
 	// Get actual port bindings after container starts

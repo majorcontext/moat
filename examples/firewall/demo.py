@@ -5,8 +5,10 @@ Firewall demo script
 Demonstrates:
   1. Allowed request to httpbin.org (in allow list)
   2. Blocked request to example.com (not in allow list)
+  3. Direct socket connection blocked (bypasses proxy env vars)
 """
 
+import socket
 import urllib.request
 import urllib.error
 import ssl
@@ -93,12 +95,45 @@ def main():
 
     print()
     print()
+
+    # Test 3: Direct socket connection (bypasses proxy)
+    print("-" * 50)
+    print("Test 3: Direct socket to example.com:80 (BLOCKED)")
+    print("-" * 50)
+    print()
+    print("This test bypasses HTTP_PROXY by opening a raw socket.")
+    print("The iptables firewall should block it.")
+    print()
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        # Try to connect directly to example.com
+        sock.connect(("93.184.216.34", 80))  # example.com's IP
+        sock.close()
+        print("Status: Connected successfully")
+        print()
+        print("Result: UNEXPECTED - Direct socket should have been blocked")
+    except socket.timeout:
+        print("Status: Connection timed out")
+        print()
+        print("Result: SUCCESS - Firewall blocked direct connection")
+    except OSError as e:
+        print(f"Status: Connection failed: {e}")
+        print()
+        print("Result: SUCCESS - Firewall blocked direct connection")
+
+    print()
+    print()
     print("=" * 50)
     print("Demo complete!")
     print("=" * 50)
     print()
     print("The firewall blocked example.com because it's not in the allow list.")
     print("Only httpbin.org and *.httpbin.org are permitted.")
+    print()
+    print("Direct socket connections are also blocked by iptables rules,")
+    print("preventing bypass of the HTTP proxy.")
 
 if __name__ == "__main__":
     main()
