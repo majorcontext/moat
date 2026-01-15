@@ -73,5 +73,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Pre-pull base images
+        run: |
+          docker pull python:3.11
+          docker pull ubuntu:22.04
+
       - name: Run E2E tests
-        run: go test -tags=e2e -timeout=10m ./internal/e2e/
+        run: go test -tags=e2e -timeout=15m ./internal/e2e/
