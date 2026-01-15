@@ -162,3 +162,143 @@ runtime:
 		t.Errorf("error should mention 'no longer supported', got: %v", err)
 	}
 }
+
+func TestLoadConfigWithNetworkStrict(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+network:
+  policy: strict
+  allow:
+    - "api.openai.com"
+    - "*.amazonaws.com"
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Network.Policy != "strict" {
+		t.Errorf("Network.Policy = %q, want %q", cfg.Network.Policy, "strict")
+	}
+	if len(cfg.Network.Allow) != 2 {
+		t.Fatalf("Network.Allow = %d, want 2", len(cfg.Network.Allow))
+	}
+	if cfg.Network.Allow[0] != "api.openai.com" {
+		t.Errorf("Network.Allow[0] = %q, want %q", cfg.Network.Allow[0], "api.openai.com")
+	}
+	if cfg.Network.Allow[1] != "*.amazonaws.com" {
+		t.Errorf("Network.Allow[1] = %q, want %q", cfg.Network.Allow[1], "*.amazonaws.com")
+	}
+}
+
+func TestLoadConfigWithNetworkPermissive(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+network:
+  policy: permissive
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Network.Policy != "permissive" {
+		t.Errorf("Network.Policy = %q, want %q", cfg.Network.Policy, "permissive")
+	}
+	if len(cfg.Network.Allow) != 0 {
+		t.Errorf("Network.Allow = %d, want 0", len(cfg.Network.Allow))
+	}
+}
+
+func TestLoadConfigNetworkDefaultsToPermissive(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Network.Policy != "permissive" {
+		t.Errorf("Network.Policy = %q, want %q (default)", cfg.Network.Policy, "permissive")
+	}
+	if len(cfg.Network.Allow) != 0 {
+		t.Errorf("Network.Allow = %d, want 0 (default)", len(cfg.Network.Allow))
+	}
+}
+
+func TestLoadConfigWithNetworkAllowOnly(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+network:
+  allow:
+    - "example.com"
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Policy should default to permissive even if allow is specified
+	if cfg.Network.Policy != "permissive" {
+		t.Errorf("Network.Policy = %q, want %q (default)", cfg.Network.Policy, "permissive")
+	}
+	if len(cfg.Network.Allow) != 1 {
+		t.Fatalf("Network.Allow = %d, want 1", len(cfg.Network.Allow))
+	}
+	if cfg.Network.Allow[0] != "example.com" {
+		t.Errorf("Network.Allow[0] = %q, want %q", cfg.Network.Allow[0], "example.com")
+	}
+}
+
+func TestLoadConfigRejectsInvalidNetworkPolicy(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+network:
+  policy: invalid
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error on invalid network policy")
+	}
+	if !strings.Contains(err.Error(), "invalid network policy") {
+		t.Errorf("error should mention 'invalid network policy', got: %v", err)
+	}
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg == nil {
+		t.Fatal("DefaultConfig() returned nil")
+	}
+	if cfg.Env == nil {
+		t.Error("DefaultConfig() should initialize Env map")
+	}
+	if cfg.Network.Policy != "permissive" {
+		t.Errorf("DefaultConfig() Network.Policy = %q, want %q", cfg.Network.Policy, "permissive")
+	}
+	if len(cfg.Network.Allow) != 0 {
+		t.Errorf("DefaultConfig() Network.Allow = %d, want 0", len(cfg.Network.Allow))
+	}
+}

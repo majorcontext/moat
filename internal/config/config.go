@@ -19,9 +19,16 @@ type Config struct {
 	Env          map[string]string `yaml:"env,omitempty"`
 	Mounts       []string          `yaml:"mounts,omitempty"`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
+	Network      NetworkConfig     `yaml:"network,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
+}
+
+// NetworkConfig configures network access policies for the agent.
+type NetworkConfig struct {
+	Policy string   `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
+	Allow  []string `yaml:"allow,omitempty"`  // allowed host patterns
 }
 
 // deprecatedRuntime is kept only to detect and reject old configs.
@@ -54,6 +61,16 @@ func Load(dir string) (*Config, error) {
 			cfg.Runtime.Node, cfg.Runtime.Node)
 	}
 
+	// Set default network policy if not specified
+	if cfg.Network.Policy == "" {
+		cfg.Network.Policy = "permissive"
+	}
+
+	// Validate network policy
+	if cfg.Network.Policy != "permissive" && cfg.Network.Policy != "strict" {
+		return nil, fmt.Errorf("invalid network policy %q: must be 'permissive' or 'strict'", cfg.Network.Policy)
+	}
+
 	return &cfg, nil
 }
 
@@ -61,5 +78,8 @@ func Load(dir string) (*Config, error) {
 func DefaultConfig() *Config {
 	return &Config{
 		Env: make(map[string]string),
+		Network: NetworkConfig{
+			Policy: "permissive",
+		},
 	}
 }
