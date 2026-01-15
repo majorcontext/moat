@@ -267,6 +267,34 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 	return err
 }
 
+// SecretResolution records a resolved secret (without the value).
+type SecretResolution struct {
+	Timestamp time.Time `json:"ts"`
+	Name      string    `json:"name"`    // env var name
+	Backend   string    `json:"backend"` // e.g., "1password"
+}
+
+// WriteSecretResolution records that a secret was resolved.
+func (s *RunStore) WriteSecretResolution(res SecretResolution) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "secrets.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, _ := json.Marshal(res)
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ReadNetworkRequests reads all network requests.
 func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
 	f, err := os.Open(filepath.Join(s.dir, "network.jsonl"))
