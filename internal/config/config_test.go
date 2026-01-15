@@ -330,3 +330,25 @@ secrets:
 		t.Errorf("unexpected DATABASE_URL: %s", cfg.Secrets["DATABASE_URL"])
 	}
 }
+
+func TestLoad_SecretsEnvOverlap(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+env:
+  API_KEY: literal-value
+secrets:
+  API_KEY: op://Dev/Key/value
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for overlapping env/secrets keys")
+	}
+	if !strings.Contains(err.Error(), "API_KEY") {
+		t.Errorf("error should mention the overlapping key: %v", err)
+	}
+}

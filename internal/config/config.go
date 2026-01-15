@@ -72,6 +72,13 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("invalid network policy %q: must be 'permissive' or 'strict'", cfg.Network.Policy)
 	}
 
+	// Check for overlapping env and secrets keys
+	for key := range cfg.Secrets {
+		if _, exists := cfg.Env[key]; exists {
+			return nil, fmt.Errorf("key %q defined in both 'env' and 'secrets' - use one or the other", key)
+		}
+	}
+
 	return &cfg, nil
 }
 
