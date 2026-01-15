@@ -17,6 +17,7 @@ type Config struct {
 	Dependencies []string          `yaml:"dependencies,omitempty"`
 	Grants       []string          `yaml:"grants,omitempty"`
 	Env          map[string]string `yaml:"env,omitempty"`
+	Secrets      map[string]string `yaml:"secrets,omitempty"`
 	Mounts       []string          `yaml:"mounts,omitempty"`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`

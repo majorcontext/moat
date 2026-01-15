@@ -302,3 +302,31 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("DefaultConfig() Network.Allow = %d, want 0", len(cfg.Network.Allow))
 	}
 }
+
+func TestLoad_Secrets(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+secrets:
+  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  DATABASE_URL: op://Prod/Database/url
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Secrets) != 2 {
+		t.Errorf("expected 2 secrets, got %d", len(cfg.Secrets))
+	}
+	if cfg.Secrets["OPENAI_API_KEY"] != "op://Dev/OpenAI/api-key" {
+		t.Errorf("unexpected OPENAI_API_KEY: %s", cfg.Secrets["OPENAI_API_KEY"])
+	}
+	if cfg.Secrets["DATABASE_URL"] != "op://Prod/Database/url" {
+		t.Errorf("unexpected DATABASE_URL: %s", cfg.Secrets["DATABASE_URL"])
+	}
+}
