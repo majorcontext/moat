@@ -265,7 +265,8 @@ func TestIsTextContentType(t *testing.T) {
 	}
 }
 
-// TestCaptureBody_TruncatesLargeBody verifies body capture truncation at MaxBodySize.
+// TestCaptureBody_TruncatesLargeBody verifies body capture truncation at MaxBodySize
+// while still forwarding the full body.
 func TestCaptureBody_TruncatesLargeBody(t *testing.T) {
 	// Create a body larger than MaxBodySize (8KB)
 	largeBody := strings.Repeat("x", MaxBodySize+1000)
@@ -278,13 +279,42 @@ func TestCaptureBody_TruncatesLargeBody(t *testing.T) {
 		t.Errorf("captured length = %d, want %d", len(captured), MaxBodySize)
 	}
 
-	// Full body should still be readable (up to MaxReadSize)
+	// Full body should still be readable and contain ALL original data
 	fullData, err := io.ReadAll(newBody)
 	if err != nil {
 		t.Fatalf("reading new body: %v", err)
 	}
 	if len(fullData) != len(largeBody) {
 		t.Errorf("full body length = %d, want %d", len(fullData), len(largeBody))
+	}
+}
+
+// TestCaptureBody_StreamsVeryLargeBody verifies bodies much larger than MaxBodySize
+// are fully forwarded (not truncated).
+func TestCaptureBody_StreamsVeryLargeBody(t *testing.T) {
+	// Create a body much larger than MaxBodySize (e.g., 100KB)
+	veryLargeBody := strings.Repeat("y", 100*1024)
+	body := io.NopCloser(strings.NewReader(veryLargeBody))
+
+	captured, newBody := captureBody(body, "application/json")
+
+	// Captured should still be truncated to MaxBodySize
+	if len(captured) != MaxBodySize {
+		t.Errorf("captured length = %d, want %d", len(captured), MaxBodySize)
+	}
+
+	// But full body must be fully forwarded
+	fullData, err := io.ReadAll(newBody)
+	if err != nil {
+		t.Fatalf("reading new body: %v", err)
+	}
+	if len(fullData) != len(veryLargeBody) {
+		t.Errorf("full body length = %d, want %d (body was truncated!)", len(fullData), len(veryLargeBody))
+	}
+
+	// Close should work
+	if err := newBody.Close(); err != nil {
+		t.Errorf("close error: %v", err)
 	}
 }
 

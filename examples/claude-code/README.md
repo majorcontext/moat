@@ -16,6 +16,14 @@ export ANTHROPIC_API_KEY="sk-ant-api03-..."
 agent grant anthropic
 ```
 
+Expected output:
+
+```
+Validating Anthropic API key...
+✓ API key is valid
+✓ Credential stored for anthropic
+```
+
 This validates the key and stores it encrypted. The key is never passed to the container directly—it's injected at the network layer by the proxy.
 
 ## Running Claude Code
@@ -79,10 +87,35 @@ After a run completes, view the captured data:
 ```bash
 # List runs
 agent list
+```
 
+Expected output:
+
+```
+RUN ID                                STATUS    AGENT      DURATION
+a1b2c3d4-e5f6-7890-abcd-ef1234567890  exited    my-agent   45s
+```
+
+```bash
 # View network requests (shows all API calls)
 cat ~/.agentops/runs/<run-id>/network.jsonl | jq .
+```
 
+Example network log entry:
+
+```json
+{
+  "ts": "2024-01-15T10:30:00Z",
+  "method": "POST",
+  "url": "https://api.anthropic.com/v1/messages",
+  "status_code": 200,
+  "duration_ms": 1234,
+  "req_headers": {"Content-Type": "application/json"},
+  "resp_headers": {"Content-Type": "application/json"}
+}
+```
+
+```bash
 # View console output
 cat ~/.agentops/runs/<run-id>/logs.jsonl
 ```

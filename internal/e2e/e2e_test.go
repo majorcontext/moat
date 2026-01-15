@@ -220,10 +220,11 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	// triggers deps.Builder which installs curl in the base layer. Without dependencies,
 	// image.Resolve returns bare ubuntu:22.04 which lacks curl.
 	//
-	// Note: Using -k (insecure) because the AgentOps CA isn't yet mounted into containers.
-	// The TLS interception still works - curl connects through CONNECT tunnel, and the
-	// proxy intercepts/logs the request. We just skip certificate verification on the
-	// client side for now.
+	// TODO: Mount CA certificate into container and remove -k flag to properly test
+	// TLS interception. Currently using -k (insecure) because the AgentOps CA isn't
+	// mounted into containers. The TLS interception still works - curl connects through
+	// CONNECT tunnel, and the proxy intercepts/logs the request - but we skip certificate
+	// verification on the client side, which means we don't validate the full chain.
 	r, err := mgr.Create(ctx, run.Options{
 		Name:      "e2e-test-network-capture",
 		Workspace: workspace,

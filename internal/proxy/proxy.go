@@ -15,12 +15,8 @@ import (
 )
 
 // MaxBodySize is the maximum size of request/response bodies to capture (8KB).
+// Only this much is buffered for logging; the full body is always forwarded.
 const MaxBodySize = 8 * 1024
-
-// MaxReadSize is the maximum total bytes to read from a body (1MB).
-// This prevents memory exhaustion on very large uploads while still
-// capturing the full content of most API requests.
-const MaxReadSize = 1024 * 1024
 
 // RequestLogData contains all data for a logged request.
 type RequestLogData struct {
@@ -53,9 +49,16 @@ func isTextContentType(ct string) bool {
 		strings.Contains(ct, "javascript")
 }
 
-// captureBody reads up to MaxReadSize bytes from a body, returning the captured
-// data (truncated to MaxBodySize) and a new ReadCloser that replays the content.
-// The original body is always fully consumed and closed.
+// readCloserWrapper wraps a Reader and Closer together.
+type readCloserWrapper struct {
+	io.Reader
+	io.Closer
+}
+
+// captureBody reads up to MaxBodySize bytes from a body for logging, returning
+// the captured data and a new ReadCloser that streams the full content.
+// For small bodies (<=MaxBodySize), the body is fully buffered.
+// For large bodies, only MaxBodySize is buffered; the rest streams through.
 func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser) {
 	if body == nil {
 		return nil, nil
@@ -66,25 +69,29 @@ func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser)
 		return nil, body
 	}
 
-	// Limit how much we read into memory to prevent OOM on large uploads.
-	// Bodies larger than MaxReadSize are truncated - we can't forward the
-	// full content, but this prevents memory exhaustion.
-	limitedReader := io.LimitReader(body, MaxReadSize)
-	allData, err := io.ReadAll(limitedReader)
-	body.Close()
+	// Read first MaxBodySize bytes for capture/logging
+	captureBuf := make([]byte, MaxBodySize)
+	n, err := io.ReadFull(body, captureBuf)
 
-	// Truncate captured portion for logging (full data still forwarded)
-	captured := allData
-	if len(captured) > MaxBodySize {
-		captured = captured[:MaxBodySize]
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		// Body was <= MaxBodySize, we got it all
+		body.Close()
+		captured := captureBuf[:n]
+		return captured, io.NopCloser(bytes.NewReader(captured))
 	}
 
-	// On error, still forward whatever data we got - better than nothing
 	if err != nil {
-		return captured, io.NopCloser(bytes.NewReader(allData))
+		// Read error - return what we got
+		body.Close()
+		captured := captureBuf[:n]
+		return captured, io.NopCloser(bytes.NewReader(captured))
 	}
 
-	return captured, io.NopCloser(bytes.NewReader(allData))
+	// Body is larger than MaxBodySize - stream the rest through
+	// Chain captured bytes with remaining body for full forwarding
+	captured := captureBuf[:n]
+	fullBody := io.MultiReader(bytes.NewReader(captured), body)
+	return captured, &readCloserWrapper{Reader: fullBody, Closer: body}
 }
 
 // FilterHeaders creates a copy of headers with sensitive values filtered.
