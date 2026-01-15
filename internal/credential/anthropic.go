@@ -17,8 +17,11 @@ const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 
 	// validationModel is the model used for API key validation.
-	// Using a stable Sonnet model for cost-effective key verification.
-	validationModel = "claude-sonnet-4-20250514"
+	// Using Haiku for minimal cost during key verification.
+	validationModel = "claude-3-haiku-20240307"
+
+	// anthropicKeyPrefix is the expected prefix for Anthropic API keys.
+	anthropicKeyPrefix = "sk-ant-"
 )
 
 // AnthropicAuth handles Anthropic API key authentication.
@@ -62,6 +65,11 @@ func (a *AnthropicAuth) PromptForAPIKey() (string, error) {
 		return "", fmt.Errorf("API key cannot be empty")
 	}
 
+	// Basic format validation to catch obvious errors early
+	if !strings.HasPrefix(key, anthropicKeyPrefix) {
+		return "", fmt.Errorf("invalid API key format: Anthropic keys start with %q", anthropicKeyPrefix)
+	}
+
 	return key, nil
 }
 
@@ -93,7 +101,8 @@ func (a *AnthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 		return nil
 	}
 
-	// Try to parse error response
+	// Parse error response but use generic messages to avoid leaking sensitive info.
+	// API error messages might contain partial key material or other sensitive data.
 	body, _ := io.ReadAll(resp.Body)
 
 	var errResp struct {
@@ -102,24 +111,22 @@ func (a *AnthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
+	_ = json.Unmarshal(body, &errResp)
 
-	if json.Unmarshal(body, &errResp) != nil || errResp.Error.Message == "" {
-		return fmt.Errorf("unexpected response (%d): %s", resp.StatusCode, string(body))
-	}
-
-	msg := errResp.Error.Message
+	// Use generic error messages to prevent information disclosure
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("invalid API key: %s", msg)
+		return fmt.Errorf("invalid API key (check that the key is correct and not expired)")
 	case http.StatusForbidden:
-		return fmt.Errorf("API key lacks required permissions: %s", msg)
+		return fmt.Errorf("API key lacks required permissions")
 	case http.StatusBadRequest:
-		if strings.Contains(msg, "credit") {
-			return fmt.Errorf("API key has insufficient credits: %s", msg)
+		// Check error type for credit-related issues (safe to check type, not message)
+		if errResp.Error.Type == "invalid_request_error" && strings.Contains(errResp.Error.Message, "credit") {
+			return fmt.Errorf("API key has insufficient credits")
 		}
-		return fmt.Errorf("invalid request: %s", msg)
+		return fmt.Errorf("invalid request (status %d)", resp.StatusCode)
 	default:
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, msg)
+		return fmt.Errorf("API error (status %d)", resp.StatusCode)
 	}
 }
 
