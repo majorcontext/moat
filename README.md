@@ -73,7 +73,7 @@ GitHub credential saved successfully
 **2. Run a command that calls the GitHub API**
 
 ```bash
-$ agent run --runtime node:20 --grant github -- curl -s https://api.github.com/user
+$ agent run --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -83,12 +83,12 @@ $ agent run --runtime node:20 --grant github -- curl -s https://api.github.com/u
 
 The `curl` command has no authentication flags—AgentOps injected the `Authorization` header automatically.
 
-The `--runtime node:20` flag selects the Node.js 20 Docker image (which includes curl). You can also use `--runtime python:3.11` or `--runtime go:1.22`.
+By default, containers use `ubuntu:22.04`. To use a different runtime, add `dependencies` to your `agent.yaml` (e.g., `node@20`, `python@3.11`, `go@1.22`).
 
 **3. Verify the token was never exposed**
 
 ```bash
-$ agent run --runtime node:20 --grant github -- env | grep -i token
+$ agent run --grant github -- env | grep -i token
 ```
 
 Output: _(nothing)_
@@ -211,7 +211,7 @@ This configuration:
 When an agent tries to access a blocked host:
 
 ```bash
-$ agent run --runtime node:20 -- curl -v https://blocked.example.com
+$ agent run -- curl -v https://blocked.example.com
 
 < HTTP/1.1 407 Proxy Authentication Required
 < X-AgentOps-Blocked: network-policy
@@ -351,16 +351,14 @@ agent run [path] [flags] [-- command]
 agent run                                      # Run from current directory
 agent run ./my-project                         # Run from specific directory
 agent run --name myapp                         # Run with specific name
-agent run --runtime python:3.11                # Run with Python 3.11
-agent run --runtime node:20 -- npm test        # Run with Node.js and custom command
 agent run --grant github                       # Run with GitHub credentials
 agent run -e DEBUG=true                        # Run with environment variable
+agent run -- npm test                          # Run with custom command
 ```
 
 **Flags:**
 
 - `--name` - Name for this agent instance (default: from agent.yaml or random)
-- `--runtime` - Runtime language:version (e.g., `python:3.11`, `node:20`, `go:1.22`)
 - `--grant, -g` - Grant credential access (e.g., `github`, `github:repo,user`)
 - `--env, -e` - Set environment variable (can be repeated)
 
@@ -567,16 +565,14 @@ When you run `agent grant github`, your GitHub token is stored securely. During 
 
 ### Image Selection
 
-AgentOps selects the container base image based on the `--runtime` flag or `agent.yaml` runtime config:
+AgentOps selects the container base image based on `dependencies` in `agent.yaml`:
 
-| Runtime                                           | Image          |
-| ------------------------------------------------- | -------------- |
-| `--runtime node:20` or `runtime.node: 20`         | `node:20`      |
-| `--runtime python:3.11` or `runtime.python: 3.11` | `python:3.11`  |
-| `--runtime go:1.22` or `runtime.go: 1.22`         | `golang:1.22`  |
-| Multiple or none                                  | `ubuntu:22.04` |
-
-The `--runtime` flag overrides `agent.yaml` settings.
+| Dependencies in agent.yaml | Image          |
+| -------------------------- | -------------- |
+| `node@20`                  | `node:20`      |
+| `python@3.11`              | `python:3.11`  |
+| `go@1.22`                  | `golang:1.22`  |
+| None specified             | `ubuntu:22.04` |
 
 ### Observability
 

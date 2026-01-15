@@ -521,7 +521,9 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 			// Firewall setup failed - this is fatal for strict policy since the user
 			// explicitly requested network isolation. Without iptables, only proxy-level
 			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
-			_ = m.runtime.StopContainer(ctx, r.ContainerID)
+			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+			}
 			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
 		}
 	}

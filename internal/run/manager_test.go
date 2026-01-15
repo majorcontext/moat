@@ -13,12 +13,12 @@ import (
 // - Strict network policy is configured (for firewall enforcement)
 func TestNetworkPolicyConfiguration(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          *config.Config
-		grants          []string
-		wantProxyStart  bool // whether proxy should be started
-		wantPolicyCall  bool // whether SetNetworkPolicy should be called
-		wantFirewall    bool // whether firewall should be enabled
+		name           string
+		config         *config.Config
+		grants         []string
+		wantProxyStart bool // whether proxy should be started
+		wantPolicyCall bool // whether SetNetworkPolicy should be called
+		wantFirewall   bool // whether firewall should be enabled
 	}{
 		{
 			name: "strict policy with allows and grants",
@@ -54,9 +54,9 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 				},
 			},
 			grants:         nil,
-			wantProxyStart: true,  // proxy started for firewall
-			wantPolicyCall: true,  // policy configured on proxy
-			wantFirewall:   true,  // iptables firewall enabled
+			wantProxyStart: true, // proxy started for firewall
+			wantPolicyCall: true, // policy configured on proxy
+			wantFirewall:   true, // iptables firewall enabled
 		},
 		{
 			name:           "nil config with grants",
