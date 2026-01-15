@@ -126,11 +126,11 @@ Create an `agent.yaml` in your workspace to configure runs:
 agent: my-agent
 version: 1.0.0
 
-# Runtime determines the base image
-runtime:
-  node: 20 # Uses node:20
-  # python: 3.11  # Uses python:3.11
-  # go: 1.22      # Uses golang:1.22
+# Dependencies determine the base image
+dependencies:
+  - node@20 # Uses node:20
+  # - python@3.11  # Uses python:3.11
+  # - go@1.22      # Uses golang:1.22
 
 # Credentials to inject (granted via `agent grant`)
 grants:
@@ -146,6 +146,104 @@ mounts:
   - ./data:/data:ro
   - ./cache:/cache
 ```
+
+## Network Policy
+
+Control outbound HTTP/HTTPS access from your agents with declarative network policies. By default, agents can make requests to any host. Enable strict mode to allow only specific hosts.
+
+### How It Works
+
+The network firewall is enforced via the credential-injecting proxy that containers already use for authentication. When a request is blocked, the agent receives a `407 Proxy Authentication Required` response with an `X-AgentOps-Blocked: network-policy` header and an actionable error message.
+
+### Configuration
+
+In `agent.yaml`, configure the network policy:
+
+```yaml
+agent: my-agent
+dependencies:
+  - node@20
+
+# Network policy (optional)
+network:
+  policy: strict  # "permissive" (default) or "strict"
+  allow:
+    - "api.openai.com"        # Allows ports 80 and 443
+    - "*.amazonaws.com"       # Wildcard matching
+    - "api.example.com:8080"  # Specific port only
+```
+
+**Policy modes:**
+
+- `permissive` (default) - All outbound HTTP/HTTPS is allowed
+- `strict` - All outbound HTTP/HTTPS is blocked except for:
+  - Hosts in the `allow` list
+  - Hosts derived from grants (e.g., `--grant github` automatically allows `github.com`, `api.github.com`, `*.githubusercontent.com`)
+
+**Allow list format:**
+
+- `api.example.com` - Allows HTTP (port 80) and HTTPS (port 443)
+- `api.example.com:8080` - Allows only the specified port (8080)
+- `*.example.com` - Wildcard matching for subdomains (ports 80 and 443)
+- `*.example.com:8080` - Wildcard with specific port
+
+### Example: OpenAI API with strict networking
+
+```yaml
+agent: openai-agent
+dependencies:
+  - python@3.11
+
+network:
+  policy: strict
+  allow:
+    - "api.openai.com"
+
+grants:
+  - github:repo
+```
+
+This configuration:
+- Blocks all outbound HTTP/HTTPS by default
+- Allows access to `api.openai.com` (ports 80 and 443)
+- Automatically allows GitHub hosts (`github.com`, `api.github.com`, etc.) because of the `github:repo` grant
+
+### What Happens When Blocked
+
+When an agent tries to access a blocked host:
+
+```bash
+$ agent run --runtime node:20 -- curl -v https://blocked.example.com
+
+< HTTP/1.1 407 Proxy Authentication Required
+< X-AgentOps-Blocked: network-policy
+< Content-Type: text/plain
+
+AgentOps: request blocked by network policy.
+Host "blocked.example.com" is not in the allow list.
+Add it to network.allow in agent.yaml or use policy: permissive.
+```
+
+### Limitations
+
+**Important:** The network policy has several limitations. Understand these before relying on it for security.
+
+1. **HTTP/HTTPS only** - The firewall only filters HTTP and HTTPS traffic that goes through the proxy. Direct TCP/UDP connections are NOT filtered. An agent can open raw sockets to any host.
+
+2. **Proxy-aware tools only** - The firewall relies on the `HTTP_PROXY` and `HTTPS_PROXY` environment variables. Tools that ignore these variables (or are explicitly configured to bypass proxies) can bypass the firewall.
+
+3. **DNS not filtered** - DNS queries are not filtered. An agent can resolve any hostname, even if it's blocked by the network policy.
+
+4. **Not a security boundary** - This is a safety feature to prevent accidental network access, not a security control. Containers can bypass it if they try. For true network isolation, use container runtime network policies or firewall rules.
+
+### Use Cases
+
+Network policies are useful for:
+
+- **Cost control** - Prevent accidental API calls to expensive services
+- **Compliance guardrails** - Ensure agents only access approved endpoints
+- **Testing isolation** - Verify agents work with specific API dependencies
+- **Debugging** - Quickly identify which services an agent is trying to reach
 
 ## Hostname-Based Service Routing
 
@@ -171,8 +269,8 @@ In `agent.yaml`, define the agent name and ports to expose:
 
 ```yaml
 name: myapp
-runtime:
-  node: 20
+dependencies:
+  - node@20
 ports:
   web: 3000
   api: 8080
