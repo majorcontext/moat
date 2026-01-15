@@ -191,24 +191,29 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			p.SetAuthToken(proxyAuthToken)
 		}
 
-		// Set up request logging if storage is available
-		// Note: r.Store will be created later, so we need to capture the pointer
-		p.SetLogger(func(method, url string, statusCode int, duration time.Duration, reqErr error) {
+		// Set up request logging if storage is available.
+		// r.Store is captured by pointer and created later.
+		p.SetLogger(func(data proxy.RequestLogData) {
 			if r.Store == nil {
 				return
 			}
-			errStr := ""
-			if reqErr != nil {
-				errStr = reqErr.Error()
+			var errStr string
+			if data.Err != nil {
+				errStr = data.Err.Error()
 			}
 			// Best-effort logging; errors are non-fatal
 			_ = r.Store.WriteNetworkRequest(storage.NetworkRequest{
-				Timestamp:  time.Now().UTC(),
-				Method:     method,
-				URL:        url,
-				StatusCode: statusCode,
-				Duration:   duration.Milliseconds(),
-				Error:      errStr,
+				Timestamp:       time.Now().UTC(),
+				Method:          data.Method,
+				URL:             data.URL,
+				StatusCode:      data.StatusCode,
+				Duration:        data.Duration.Milliseconds(),
+				Error:           errStr,
+				RequestHeaders:  proxy.FilterHeaders(data.RequestHeaders, data.AuthInjected, data.InjectedHeaderName),
+				ResponseHeaders: proxy.FilterHeaders(data.ResponseHeaders, false, ""),
+				RequestBody:     string(data.RequestBody),
+				ResponseBody:    string(data.ResponseBody),
+				BodyTruncated:   len(data.RequestBody) >= proxy.MaxBodySize || len(data.ResponseBody) >= proxy.MaxBodySize,
 			})
 		})
 

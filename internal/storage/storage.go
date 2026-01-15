@@ -202,10 +202,8 @@ func (s *RunStore) WriteSpan(span Span) error {
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("writing span: %w", err)
 	}
-	if _, err := f.Write([]byte("\n")); err != nil {
-		return fmt.Errorf("writing newline: %w", err)
-	}
-	return nil
+	_, err = f.Write([]byte("\n"))
+	return err
 }
 
 // ReadSpans reads all spans from the trace file.
@@ -233,12 +231,17 @@ func (s *RunStore) ReadSpans() ([]Span, error) {
 
 // NetworkRequest represents a logged HTTP request.
 type NetworkRequest struct {
-	Timestamp  time.Time `json:"ts"`
-	Method     string    `json:"method"`
-	URL        string    `json:"url"`
-	StatusCode int       `json:"status_code"`
-	Duration   int64     `json:"duration_ms"`
-	Error      string    `json:"error,omitempty"`
+	Timestamp       time.Time         `json:"ts"`
+	Method          string            `json:"method"`
+	URL             string            `json:"url"`
+	StatusCode      int               `json:"status_code"`
+	Duration        int64             `json:"duration_ms"`
+	Error           string            `json:"error,omitempty"`
+	RequestHeaders  map[string]string `json:"req_headers,omitempty"`
+	ResponseHeaders map[string]string `json:"resp_headers,omitempty"`
+	RequestBody     string            `json:"req_body,omitempty"`
+	ResponseBody    string            `json:"resp_body,omitempty"`
+	BodyTruncated   bool              `json:"truncated,omitempty"`
 }
 
 // WriteNetworkRequest appends a network request to the log.
@@ -249,17 +252,19 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 		0600,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("opening network file: %w", err)
 	}
 	defer f.Close()
-	data, _ := json.Marshal(req)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshaling network request: %w", err)
+	}
 	if _, err := f.Write(data); err != nil {
-		return err
+		return fmt.Errorf("writing network request: %w", err)
 	}
-	if _, err := f.Write([]byte("\n")); err != nil {
-		return err
-	}
-	return nil
+	_, err = f.Write([]byte("\n"))
+	return err
 }
 
 // ReadNetworkRequests reads all network requests.

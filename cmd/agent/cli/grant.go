@@ -72,6 +72,21 @@ func init() {
 	rootCmd.AddCommand(grantCmd)
 }
 
+// saveCredential stores a credential and returns the file path.
+func saveCredential(cred credential.Credential) (string, error) {
+	store, err := credential.NewFileStore(
+		credential.DefaultStoreDir(),
+		credential.DefaultEncryptionKey(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("opening credential store: %w", err)
+	}
+	if err := store.Save(cred); err != nil {
+		return "", fmt.Errorf("saving credential: %w", err)
+	}
+	return filepath.Join(credential.DefaultStoreDir(), string(cred.Provider)+".enc"), nil
+}
+
 func runGrant(cmd *cobra.Command, args []string) error {
 	arg := args[0]
 
@@ -141,27 +156,16 @@ See README.md for detailed setup instructions.`)
 		return fmt.Errorf("getting token: %w", err)
 	}
 
-	// Store the credential
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
-	)
-	if err != nil {
-		return fmt.Errorf("opening credential store: %w", err)
-	}
-
 	cred := credential.Credential{
 		Provider:  credential.ProviderGitHub,
 		Token:     token.AccessToken,
 		Scopes:    scopes,
 		CreatedAt: time.Now(),
 	}
-
-	if err := store.Save(cred); err != nil {
-		return fmt.Errorf("saving credential: %w", err)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
 	}
-
-	credPath := filepath.Join(credential.DefaultStoreDir(), "github.enc")
 	fmt.Printf("GitHub credential saved to %s\n", credPath)
 	return nil
 }
@@ -195,21 +199,11 @@ func grantAnthropic() error {
 	}
 	fmt.Println("API key is valid.")
 
-	// Store the credential
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
-	)
-	if err != nil {
-		return fmt.Errorf("opening credential store: %w", err)
-	}
-
 	cred := auth.CreateCredential(apiKey)
-	if err := store.Save(cred); err != nil {
-		return fmt.Errorf("saving credential: %w", err)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
 	}
-
-	credPath := filepath.Join(credential.DefaultStoreDir(), "anthropic.enc")
 	fmt.Printf("Anthropic API key saved to %s\n", credPath)
 	return nil
 }

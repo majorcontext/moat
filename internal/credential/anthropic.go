@@ -99,24 +99,24 @@ func (a *AnthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 		} `json:"error"`
 	}
 
-	if json.Unmarshal(body, &errResp) == nil && errResp.Error.Message != "" {
-		switch resp.StatusCode {
-		case http.StatusUnauthorized:
-			return fmt.Errorf("invalid API key: %s", errResp.Error.Message)
-		case http.StatusForbidden:
-			return fmt.Errorf("API key lacks required permissions: %s", errResp.Error.Message)
-		case http.StatusBadRequest:
-			// Bad request could mean invalid key format
-			if strings.Contains(errResp.Error.Message, "credit") {
-				return fmt.Errorf("API key has insufficient credits: %s", errResp.Error.Message)
-			}
-			return fmt.Errorf("invalid request: %s", errResp.Error.Message)
-		default:
-			return fmt.Errorf("API error (%d): %s", resp.StatusCode, errResp.Error.Message)
-		}
+	if json.Unmarshal(body, &errResp) != nil || errResp.Error.Message == "" {
+		return fmt.Errorf("unexpected response (%d): %s", resp.StatusCode, string(body))
 	}
 
-	return fmt.Errorf("unexpected response (%d): %s", resp.StatusCode, string(body))
+	msg := errResp.Error.Message
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("invalid API key: %s", msg)
+	case http.StatusForbidden:
+		return fmt.Errorf("API key lacks required permissions: %s", msg)
+	case http.StatusBadRequest:
+		if strings.Contains(msg, "credit") {
+			return fmt.Errorf("API key has insufficient credits: %s", msg)
+		}
+		return fmt.Errorf("invalid request: %s", msg)
+	default:
+		return fmt.Errorf("API error (%d): %s", resp.StatusCode, msg)
+	}
 }
 
 // CreateCredential creates a Credential from a validated API key.
