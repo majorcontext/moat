@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -187,17 +188,26 @@ func grantAnthropic() error {
 		}
 	}
 
-	// Validate the key by making a test API call
-	fmt.Println("\nValidating API key...")
-	fmt.Println("  POST https://api.anthropic.com/v1/messages")
-	fmt.Println(`  {"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Ask user if they want to validate the key (costs a small API call)
+	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
 
-	if err := auth.ValidateKey(ctx, apiKey); err != nil {
-		return fmt.Errorf("validating API key: %w", err)
+	if response == "" || response == "y" || response == "yes" {
+		fmt.Println("\nValidating API key...")
+		fmt.Println("  POST https://api.anthropic.com/v1/messages")
+		fmt.Println(`  {"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := auth.ValidateKey(ctx, apiKey); err != nil {
+			return fmt.Errorf("validating API key: %w", err)
+		}
+		fmt.Println("API key is valid.")
+	} else {
+		fmt.Println("Skipping validation.")
 	}
-	fmt.Println("API key is valid.")
 
 	cred := auth.CreateCredential(apiKey)
 	credPath, err := saveCredential(cred)

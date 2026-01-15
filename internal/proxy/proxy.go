@@ -50,35 +50,34 @@ func isTextContentType(ct string) bool {
 
 // captureBody reads up to MaxBodySize bytes from a body, returning the captured
 // data and a new ReadCloser that replays the full content for forwarding.
+// The original body is always fully consumed and closed.
 func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser) {
 	if body == nil {
 		return nil, nil
 	}
 
-	// Skip binary content types
+	// Skip binary content types - don't capture but still pass through
 	if !isTextContentType(contentType) {
 		return nil, body
 	}
 
-	// Read up to MaxBodySize + 1 to detect truncation
-	data, err := io.ReadAll(io.LimitReader(body, MaxBodySize+1))
+	// Read entire body upfront to avoid partial-read data loss.
+	// We must consume the full body before returning to ensure the
+	// forwarded reader contains all data.
+	allData, err := io.ReadAll(body)
+	body.Close()
 	if err != nil {
-		return nil, body
+		// On error, return empty body - we can't safely recover partial data
+		return nil, io.NopCloser(bytes.NewReader(nil))
 	}
 
-	// Read any remaining data (we still need to forward it)
-	remaining, _ := io.ReadAll(body)
-	body.Close()
-
-	// Truncate captured data if needed
-	captured := data
+	// Truncate captured portion for logging (full data still forwarded)
+	captured := allData
 	if len(captured) > MaxBodySize {
 		captured = captured[:MaxBodySize]
 	}
 
-	// Create new reader that replays all data for forwarding
-	fullData := append(data, remaining...)
-	return captured, io.NopCloser(bytes.NewReader(fullData))
+	return captured, io.NopCloser(bytes.NewReader(allData))
 }
 
 // FilterHeaders creates a copy of headers with sensitive values filtered.

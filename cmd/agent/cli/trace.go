@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/storage"
@@ -134,8 +135,14 @@ func showNetworkRequests(store *storage.RunStore, runID string) error {
 func printHeadersAndBody(label string, headers map[string]string, body string) {
 	if len(headers) > 0 {
 		fmt.Printf("  %s Headers:\n", label)
-		for k, v := range headers {
-			fmt.Printf("    %s: %s\n", k, v)
+		// Sort keys for consistent output
+		keys := make([]string, 0, len(headers))
+		for k := range headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Printf("    %s: %s\n", k, headers[k])
 		}
 	}
 	if body != "" {
