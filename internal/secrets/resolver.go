@@ -3,6 +3,7 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -45,6 +46,25 @@ func Resolve(ctx context.Context, reference string) (string, error) {
 	}
 
 	return r.Resolve(ctx, reference)
+}
+
+// ResolveAll resolves all secrets in the map, returning resolved values.
+// Keys are environment variable names, values are secret references.
+// Fails fast on first error.
+func ResolveAll(ctx context.Context, secrets map[string]string) (map[string]string, error) {
+	if len(secrets) == 0 {
+		return nil, nil
+	}
+
+	resolved := make(map[string]string, len(secrets))
+	for name, ref := range secrets {
+		val, err := Resolve(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolving secret %s: %w", name, err)
+		}
+		resolved[name] = val
+	}
+	return resolved, nil
 }
 
 // parseScheme extracts the scheme from a URI (e.g., "op" from "op://vault/item").
