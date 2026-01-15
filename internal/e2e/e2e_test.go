@@ -186,7 +186,8 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 // TestNetworkRequestsAreCaptured verifies that HTTP requests made through the proxy
 // are captured in the network trace.
 func TestNetworkRequestsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Use 5 minute timeout - Python image builds can be slow in CI
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Set up a test credential for GitHub so the proxy does TLS interception.
