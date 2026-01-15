@@ -23,6 +23,7 @@ import (
 	"github.com/andybons/agentops/internal/name"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/routing"
+	"github.com/andybons/agentops/internal/secrets"
 	"github.com/andybons/agentops/internal/storage"
 )
 
@@ -319,6 +320,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Add config env vars
 	if opts.Config != nil {
 		for k, v := range opts.Config.Env {
+			proxyEnv = append(proxyEnv, k+"="+v)
+		}
+	}
+
+	// Resolve and add secrets
+	if opts.Config != nil && len(opts.Config.Secrets) > 0 {
+		resolved, err := secrets.ResolveAll(ctx, opts.Config.Secrets)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, err
+		}
+		for k, v := range resolved {
 			proxyEnv = append(proxyEnv, k+"="+v)
 		}
 	}
