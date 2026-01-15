@@ -137,7 +137,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	if len(opts.Grants) > 0 {
+	// Start proxy if we have grants (for credential injection) or strict network policy
+	needsProxyForGrants := len(opts.Grants) > 0
+	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+
+	if needsProxyForGrants || needsProxyForFirewall {
 		p := proxy.NewProxy()
 
 		// Create CA for TLS interception

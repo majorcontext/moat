@@ -25,7 +25,11 @@ def make_request(url: str) -> tuple[int, str, dict]:
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode(), dict(e.headers)
     except urllib.error.URLError as e:
-        return 0, str(e.reason), {}
+        reason = str(e.reason)
+        # Python wraps proxy 407 errors in a tunnel connection failure message
+        if "407" in reason:
+            return 407, reason, {}
+        return 0, reason, {}
 
 def main():
     print("=" * 50)
