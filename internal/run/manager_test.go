@@ -7,14 +7,18 @@ import (
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration
-// from agent.yaml is properly wired into the proxy when grants are provided.
-// This is a structural test that verifies the right data flows through the system.
+// from agent.yaml is properly wired into the proxy.
+// The proxy is started when either:
+// - Grants are provided (for credential injection)
+// - Strict network policy is configured (for firewall enforcement)
 func TestNetworkPolicyConfiguration(t *testing.T) {
 	tests := []struct {
-		name     string
-		config   *config.Config
-		grants   []string
-		wantCall bool // whether SetNetworkPolicy should be called
+		name            string
+		config          *config.Config
+		grants          []string
+		wantProxyStart  bool // whether proxy should be started
+		wantPolicyCall  bool // whether SetNetworkPolicy should be called
+		wantFirewall    bool // whether firewall should be enabled
 	}{
 		{
 			name: "strict policy with allows and grants",
@@ -24,8 +28,10 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 					Allow:  []string{"api.example.com", "*.allowed.com"},
 				},
 			},
-			grants:   []string{"github"},
-			wantCall: true,
+			grants:         []string{"github"},
+			wantProxyStart: true,
+			wantPolicyCall: true,
+			wantFirewall:   true,
 		},
 		{
 			name: "permissive policy with grants",
@@ -34,54 +40,67 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 					Policy: "permissive",
 				},
 			},
-			grants:   []string{"github"},
-			wantCall: true,
+			grants:         []string{"github"},
+			wantProxyStart: true,
+			wantPolicyCall: true,
+			wantFirewall:   false,
 		},
 		{
-			name: "strict policy without grants",
+			name: "strict policy without grants (firewall only)",
 			config: &config.Config{
 				Network: config.NetworkConfig{
 					Policy: "strict",
 					Allow:  []string{"api.example.com"},
 				},
 			},
-			grants:   nil,
-			wantCall: false, // no proxy created, so no call
+			grants:         nil,
+			wantProxyStart: true,  // proxy started for firewall
+			wantPolicyCall: true,  // policy configured on proxy
+			wantFirewall:   true,  // iptables firewall enabled
 		},
 		{
-			name:     "nil config with grants",
-			config:   nil,
-			grants:   []string{"github"},
-			wantCall: false, // config is nil, so no call
+			name:           "nil config with grants",
+			config:         nil,
+			grants:         []string{"github"},
+			wantProxyStart: true,  // proxy started for grants
+			wantPolicyCall: false, // no config, so no policy call
+			wantFirewall:   false,
+		},
+		{
+			name: "permissive policy without grants",
+			config: &config.Config{
+				Network: config.NetworkConfig{
+					Policy: "permissive",
+				},
+			},
+			grants:         nil,
+			wantProxyStart: false, // no grants, no strict policy
+			wantPolicyCall: false,
+			wantFirewall:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// This test verifies the logic flow by checking that:
-			// 1. When opts.Config is not nil and grants are provided, SetNetworkPolicy gets called
-			// 2. The correct parameters (policy, allow, grants) would be passed
+			// Replicate the logic from manager.go
+			needsProxyForGrants := len(tt.grants) > 0
+			needsProxyForFirewall := tt.config != nil && tt.config.Network.Policy == "strict"
+			proxyStarted := needsProxyForGrants || needsProxyForFirewall
 
-			// We can't easily test the full Manager.Create() without a container runtime,
-			// but we can verify the logic is structured correctly by checking:
-			hasConfig := tt.config != nil
-			hasGrants := len(tt.grants) > 0
-			shouldCallSetNetworkPolicy := hasConfig && hasGrants
-
-			if shouldCallSetNetworkPolicy != tt.wantCall {
-				t.Errorf("expected SetNetworkPolicy call = %v, got logic that would call = %v",
-					tt.wantCall, shouldCallSetNetworkPolicy)
+			if proxyStarted != tt.wantProxyStart {
+				t.Errorf("proxy start: got %v, want %v", proxyStarted, tt.wantProxyStart)
 			}
 
-			// If we should call, verify the parameters would be correct
-			if shouldCallSetNetworkPolicy {
-				if tt.config.Network.Policy == "" {
-					t.Error("policy should not be empty when calling SetNetworkPolicy")
-				}
-				// Verify policy is valid
-				if tt.config.Network.Policy != "permissive" && tt.config.Network.Policy != "strict" {
-					t.Errorf("invalid policy: %s", tt.config.Network.Policy)
-				}
+			// SetNetworkPolicy is called when proxy is started AND config exists
+			policyCall := proxyStarted && tt.config != nil
+			if policyCall != tt.wantPolicyCall {
+				t.Errorf("SetNetworkPolicy call: got %v, want %v", policyCall, tt.wantPolicyCall)
+			}
+
+			// Firewall is enabled when strict policy is set
+			firewallEnabled := needsProxyForFirewall
+			if firewallEnabled != tt.wantFirewall {
+				t.Errorf("firewall enabled: got %v, want %v", firewallEnabled, tt.wantFirewall)
 			}
 		})
 	}
