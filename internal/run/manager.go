@@ -15,10 +15,10 @@ import (
 
 	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/deps"
 	"github.com/andybons/agentops/internal/image"
+	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/name"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/routing"

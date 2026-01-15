@@ -251,7 +251,7 @@ func TestIsTextContentType(t *testing.T) {
 		{"application/pdf", false},
 		{"video/mp4", false},
 		{"", false},
-		{"TEXT/PLAIN", true},   // case insensitive
+		{"TEXT/PLAIN", true},       // case insensitive
 		{"Application/JSON", true}, // case insensitive
 	}
 
