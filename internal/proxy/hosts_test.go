@@ -177,6 +177,13 @@ func TestMatchHost(t *testing.T) {
 			port:     443,
 			expected: false,
 		},
+		{
+			name:     "wildcard no match malicious subdomain spoof",
+			patterns: []string{"*.github.com"},
+			host:     "evilgithub.com",
+			port:     443,
+			expected: false,
+		},
 
 		// Port-specific matching
 		{

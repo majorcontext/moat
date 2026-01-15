@@ -224,15 +224,9 @@ Add it to network.allow in agent.yaml or use policy: permissive.
 
 ### Limitations
 
-**Important:** The network policy has several limitations. Understand these before relying on it for security.
+1. **Proxy-aware tools only** - HTTP/HTTPS filtering relies on the `HTTP_PROXY` and `HTTPS_PROXY` environment variables. Tools that ignore these variables will have their connections blocked by iptables rather than receiving a helpful error message.
 
-1. **HTTP/HTTPS only** - The firewall only filters HTTP and HTTPS traffic that goes through the proxy. Direct TCP/UDP connections are NOT filtered. An agent can open raw sockets to any host.
-
-2. **Proxy-aware tools only** - The firewall relies on the `HTTP_PROXY` and `HTTPS_PROXY` environment variables. Tools that ignore these variables (or are explicitly configured to bypass proxies) can bypass the firewall.
-
-3. **DNS not filtered** - DNS queries are not filtered. An agent can resolve any hostname, even if it's blocked by the network policy.
-
-4. **Not a security boundary** - This is a safety feature to prevent accidental network access, not a security control. Containers can bypass it if they try. For true network isolation, use container runtime network policies or firewall rules.
+2. **DNS not filtered** - DNS queries (UDP 53) are allowed so tools can resolve hostnames. An agent can resolve any hostname, even if HTTP access to it would be blocked.
 
 ### Use Cases
 
