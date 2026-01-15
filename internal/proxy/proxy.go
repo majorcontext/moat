@@ -66,15 +66,16 @@ func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser)
 	// forwarded reader contains all data.
 	allData, err := io.ReadAll(body)
 	body.Close()
-	if err != nil {
-		// On error, return empty body - we can't safely recover partial data
-		return nil, io.NopCloser(bytes.NewReader(nil))
-	}
 
 	// Truncate captured portion for logging (full data still forwarded)
 	captured := allData
 	if len(captured) > MaxBodySize {
 		captured = captured[:MaxBodySize]
+	}
+
+	// On error, still forward whatever data we got - better than nothing
+	if err != nil {
+		return captured, io.NopCloser(bytes.NewReader(allData))
 	}
 
 	return captured, io.NopCloser(bytes.NewReader(allData))

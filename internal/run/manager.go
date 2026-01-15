@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
@@ -191,10 +192,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			p.SetAuthToken(proxyAuthToken)
 		}
 
-		// Set up request logging if storage is available.
-		// r.Store is captured by pointer and created later.
+		// Set up request logging with atomic store reference for safe concurrent access.
+		// The store is created later, so we use atomic.Value to avoid data races.
+		var storeRef atomic.Value // holds *storage.RunStore
 		p.SetLogger(func(data proxy.RequestLogData) {
-			if r.Store == nil {
+			store, _ := storeRef.Load().(*storage.RunStore)
+			if store == nil {
 				return
 			}
 			var errStr string
@@ -202,7 +205,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				errStr = data.Err.Error()
 			}
 			// Best-effort logging; errors are non-fatal
-			_ = r.Store.WriteNetworkRequest(storage.NetworkRequest{
+			_ = store.WriteNetworkRequest(storage.NetworkRequest{
 				Timestamp:       time.Now().UTC(),
 				Method:          data.Method,
 				URL:             data.URL,
@@ -216,6 +219,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				BodyTruncated:   len(data.RequestBody) >= proxy.MaxBodySize || len(data.ResponseBody) >= proxy.MaxBodySize,
 			})
 		})
+		r.storeRef = &storeRef // Save reference to update later
 
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
@@ -451,6 +455,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
+	// Update atomic reference for concurrent logger access
+	if r.storeRef != nil {
+		r.storeRef.Store(store)
+	}
 
 	// Save initial metadata (best-effort; non-fatal if it fails)
 	_ = store.SaveMetadata(storage.Metadata{
