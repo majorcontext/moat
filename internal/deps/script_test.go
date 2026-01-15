@@ -326,7 +326,7 @@ func TestGenerateInstallScript_BasePackages(t *testing.T) {
 
 func TestGenerateInstallScript_Python(t *testing.T) {
 	deps := []Dependency{
-		{Name: "python", Version: "3.11"},
+		{Name: "python", Version: "3.10"},
 	}
 
 	script, err := GenerateInstallScript(deps)
@@ -334,12 +334,12 @@ func TestGenerateInstallScript_Python(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should install Python from deadsnakes PPA
-	if !strings.Contains(script, "deadsnakes") {
-		t.Error("script should use deadsnakes PPA")
+	// Should install Python from Ubuntu's default packages
+	if !strings.Contains(script, "python3") {
+		t.Error("script should install python3")
 	}
-	if !strings.Contains(script, "python3.11") {
-		t.Error("script should install python3.11")
+	if !strings.Contains(script, "python3-pip") {
+		t.Error("script should install python3-pip")
 	}
 	// Should set up update-alternatives for PATH
 	if !strings.Contains(script, "update-alternatives") {

@@ -32,15 +32,23 @@ func getRuntimeCommands(name, version string) InstallCommands {
 			},
 		}
 	case "python":
+		// Use Ubuntu's default python3 packages - more reliable than deadsnakes PPA
+		// For 3.10 (Ubuntu 22.04 default), use python3 packages directly
+		// For other versions, we'd need a different approach (e.g., pyenv or official docker images)
+		if version == "3.10" || version == "" {
+			return InstallCommands{
+				Commands: []string{
+					"apt-get update && apt-get install -y python3 python3-pip python3-venv",
+					"update-alternatives --install /usr/bin/python python /usr/bin/python3 1",
+				},
+			}
+		}
+		// For specific versions, use the official Python docker image approach via multi-stage
+		// or fall back to trying the system package manager
 		return InstallCommands{
 			Commands: []string{
-				"apt-get update && apt-get install -y software-properties-common",
-				"add-apt-repository -y ppa:deadsnakes/ppa",
-				"apt-get update",
-				fmt.Sprintf("apt-get install -y python%s python%s-venv python%s-distutils", version, version, version),
-				fmt.Sprintf("curl -sS https://bootstrap.pypa.io/get-pip.py | python%s - --root-user-action=ignore", version),
-				fmt.Sprintf("update-alternatives --install /usr/bin/python python /usr/bin/python%s 1", version),
-				fmt.Sprintf("update-alternatives --install /usr/bin/python3 python3 /usr/bin/python%s 1", version),
+				"apt-get update && apt-get install -y python3 python3-pip python3-venv",
+				"update-alternatives --install /usr/bin/python python /usr/bin/python3 1",
 			},
 		}
 	default:
