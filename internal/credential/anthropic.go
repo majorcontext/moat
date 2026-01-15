@@ -15,6 +15,10 @@ import (
 
 const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
+
+	// validationModel is the model used for API key validation.
+	// Using a stable Sonnet model for cost-effective key verification.
+	validationModel = "claude-sonnet-4-20250514"
 )
 
 // AnthropicAuth handles Anthropic API key authentication.
@@ -66,7 +70,7 @@ func (a *AnthropicAuth) PromptForAPIKey() (string, error) {
 func (a *AnthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 	// Make a minimal request to validate the key.
 	// We use a simple message request with max_tokens=1 to minimize cost.
-	reqBody := `{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`
+	reqBody := fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, validationModel)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", a.apiURL(), strings.NewReader(reqBody))
 	if err != nil {

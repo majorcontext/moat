@@ -15,6 +15,7 @@ import (
 
 	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/container"
+	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/deps"
 	"github.com/andybons/agentops/internal/image"
@@ -198,6 +199,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		p.SetLogger(func(data proxy.RequestLogData) {
 			store, _ := storeRef.Load().(*storage.RunStore)
 			if store == nil {
+				// Store not yet initialized - early request during container startup.
+				// This is expected and non-fatal; the request won't be logged.
+				log.Debug("skipping network log: store not yet initialized",
+					"method", data.Method,
+					"url", data.URL)
 				return
 			}
 			var errStr string

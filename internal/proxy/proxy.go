@@ -17,6 +17,11 @@ import (
 // MaxBodySize is the maximum size of request/response bodies to capture (8KB).
 const MaxBodySize = 8 * 1024
 
+// MaxReadSize is the maximum total bytes to read from a body (1MB).
+// This prevents memory exhaustion on very large uploads while still
+// capturing the full content of most API requests.
+const MaxReadSize = 1024 * 1024
+
 // RequestLogData contains all data for a logged request.
 type RequestLogData struct {
 	Method             string
@@ -48,8 +53,8 @@ func isTextContentType(ct string) bool {
 		strings.Contains(ct, "javascript")
 }
 
-// captureBody reads up to MaxBodySize bytes from a body, returning the captured
-// data and a new ReadCloser that replays the full content for forwarding.
+// captureBody reads up to MaxReadSize bytes from a body, returning the captured
+// data (truncated to MaxBodySize) and a new ReadCloser that replays the content.
 // The original body is always fully consumed and closed.
 func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser) {
 	if body == nil {
@@ -61,10 +66,11 @@ func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser)
 		return nil, body
 	}
 
-	// Read entire body upfront to avoid partial-read data loss.
-	// We must consume the full body before returning to ensure the
-	// forwarded reader contains all data.
-	allData, err := io.ReadAll(body)
+	// Limit how much we read into memory to prevent OOM on large uploads.
+	// Bodies larger than MaxReadSize are truncated - we can't forward the
+	// full content, but this prevents memory exhaustion.
+	limitedReader := io.LimitReader(body, MaxReadSize)
+	allData, err := io.ReadAll(limitedReader)
 	body.Close()
 
 	// Truncate captured portion for logging (full data still forwarded)

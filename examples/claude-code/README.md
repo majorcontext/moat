@@ -25,21 +25,21 @@ This validates the key and stores it encrypted. The key is never passed to the c
 Start an interactive Claude Code session:
 
 ```bash
-agent run my-agent examples/claude-code -- npx @anthropic-ai/claude-code
+agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code
 ```
 
 Claude Code will start in `/workspace` with your project files mounted.
 
-### One-Shot Mode
+### One-Shot Mode (Headless)
 
-Ask Claude to analyze or fix code without interaction:
+Ask Claude to analyze or fix code without interaction using `-p` (print mode):
 
 ```bash
 # Analyze the code
-agent run my-agent examples/claude-code -- npx @anthropic-ai/claude-code --print "what does this code do?"
+agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "what does this code do?"
 
 # Fix the bug
-agent run my-agent examples/claude-code -- npx @anthropic-ai/claude-code --print "fix the bug in main.py"
+agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "fix the bug in main.py"
 ```
 
 ## The Test Project
