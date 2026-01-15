@@ -88,6 +88,7 @@ type Config struct {
 	ExtraHosts   []string       // host:ip mappings (Docker-specific)
 	NetworkMode  string         // "bridge", "host", "none" (Docker-specific)
 	PortBindings map[int]string // container port -> host bind address (e.g., 3000 -> "127.0.0.1")
+	CapAdd       []string       // Linux capabilities to add (e.g., "NET_ADMIN")
 }
 
 // MountConfig describes a volume mount.

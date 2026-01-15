@@ -103,6 +103,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			NetworkMode:  networkMode,
 			ExtraHosts:   cfg.ExtraHosts,
 			PortBindings: portBindings,
+			CapAdd:       cfg.CapAdd,
 		},
 		nil, // network config
 		nil, // platform

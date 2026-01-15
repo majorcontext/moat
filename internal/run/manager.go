@@ -424,6 +424,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 	_ = installScript // TODO: pass to container config when Apple container support is complete
 
+	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
+	var capAdd []string
+	if r.FirewallEnabled {
+		capAdd = []string{"NET_ADMIN"}
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -435,6 +441,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		NetworkMode:  networkMode,
 		Mounts:       mounts,
 		PortBindings: portBindings,
+		CapAdd:       capAdd,
 	})
 	if err != nil {
 		// Clean up proxy server if container creation fails
