@@ -6,6 +6,7 @@ Run AI agents in isolated Docker containers with credential injection and full o
 
 - **Isolated Execution** - Each agent runs in its own Docker container with workspace mounting
 - **Credential Injection** - Transparent auth header injection via TLS-intercepting proxy
+- **Secrets Injection** - Pull secrets from 1Password and inject as environment variables
 - **Smart Image Selection** - Automatically selects container images based on runtime requirements
 - **Full Observability** - Capture logs, network requests, and traces for every run
 - **Declarative Config** - Configure agents via `agent.yaml` manifests
@@ -27,6 +28,9 @@ go build -o agent ./cmd/agent
 **Requirements:** A container runtime must be available:
 - **macOS:** Apple containers (macOS 15+, Apple Silicon) or Docker Desktop
 - **Linux:** Docker
+
+**Optional dependencies:**
+- **1Password CLI** - Required for secrets injection from 1Password (`brew install 1password-cli`)
 
 ## Setup
 
@@ -126,9 +130,11 @@ Create an `agent.yaml` in your workspace to configure runs:
 agent: my-agent
 version: 1.0.0
 
-# Dependencies determine the base image
+# Dependencies determine the base image and installed tools
 dependencies:
-  - node@20
+  - node@20      # Uses node:20 base image
+  # - python@3.11  # Uses python:3.11
+  # - go@1.22      # Uses golang:1.22
 
 # Credentials to inject (granted via `agent grant`)
 grants:
@@ -138,6 +144,11 @@ grants:
 env:
   NODE_ENV: development
   DEBUG: "true"
+
+# Secrets from external backends (injected as environment variables)
+secrets:
+  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  DATABASE_URL: op://Prod/Database/connection-string
 
 # Additional mounts (source:target[:ro])
 mounts:
@@ -563,6 +574,35 @@ When you run `agent grant github`, your GitHub token is stored securely. During 
 
 **Security:** The proxy binds to localhost only (Docker) or uses authenticated access with a per-run cryptographic token (Apple containers). Credentials are never exposed to the network.
 
+### Secrets Injection
+
+AgentOps can pull secrets from external backends and inject them as environment variables. Unlike credential injection (which happens at the network layer), secrets are resolved before the container starts and passed as environment variables.
+
+**1Password Setup:**
+
+```bash
+# Install the 1Password CLI
+brew install 1password-cli
+
+# Sign in to your account
+eval $(op signin)
+```
+
+**Configure secrets in agent.yaml:**
+
+```yaml
+secrets:
+  OPENAI_API_KEY: op://Development/OpenAI/api-key
+  DATABASE_URL: op://Production/Database/connection-string
+```
+
+The format is `op://vault/item/field`. When you run `agent run`, AgentOps resolves each secret reference and injects the value as an environment variable.
+
+**Security considerations:**
+- Secret values are passed as environment variables (visible to processes in the container)
+- Secret names and backends are logged for audit purposes, but values are never logged
+- For credentials that should never be visible to the agent, use credential injection (`--grant`) instead
+
 ### Image Selection
 
 AgentOps selects the container base image based on `dependencies` in `agent.yaml`:
@@ -581,6 +621,7 @@ Every run captures:
 - **Logs** - Timestamped container output (`~/.agentops/runs/<id>/logs.jsonl`)
 - **Network** - All HTTP/HTTPS requests (`~/.agentops/runs/<id>/network.jsonl`)
 - **Traces** - OpenTelemetry-compatible spans (`~/.agentops/runs/<id>/traces.jsonl`)
+- **Secrets** - Which secrets were resolved (names/backends only, never values) (`~/.agentops/runs/<id>/secrets.jsonl`)
 - **Metadata** - Run configuration (`~/.agentops/runs/<id>/metadata.json`)
 - **Audit Log** - Tamper-proof audit database (`~/.agentops/runs/<id>/audit.db`)
 
