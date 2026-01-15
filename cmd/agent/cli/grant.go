@@ -201,8 +201,8 @@ func grantAnthropic() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if err := auth.ValidateKey(ctx, apiKey); err != nil {
-			return fmt.Errorf("validating API key: %w", err)
+		if validateErr := auth.ValidateKey(ctx, apiKey); validateErr != nil {
+			return fmt.Errorf("validating API key: %w", validateErr)
 		}
 		fmt.Println("API key is valid.")
 	} else {

@@ -199,8 +199,8 @@ func (s *RunStore) WriteSpan(span Span) error {
 	if err != nil {
 		return fmt.Errorf("marshaling span: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("writing span: %w", err)
+	if _, writeErr := f.Write(data); writeErr != nil {
+		return fmt.Errorf("writing span: %w", writeErr)
 	}
 	_, err = f.Write([]byte("\n"))
 	return err
@@ -260,8 +260,8 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 	if err != nil {
 		return fmt.Errorf("marshaling network request: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("writing network request: %w", err)
+	if _, writeErr := f.Write(data); writeErr != nil {
+		return fmt.Errorf("writing network request: %w", writeErr)
 	}
 	_, err = f.Write([]byte("\n"))
 	return err
