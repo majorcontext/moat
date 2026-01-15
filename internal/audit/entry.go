@@ -18,6 +18,7 @@ const (
 	EntryConsole    EntryType = "console"
 	EntryNetwork    EntryType = "network"
 	EntryCredential EntryType = "credential"
+	EntrySecret     EntryType = "secret"
 )
 
 // FirstSequence is the sequence number of the first entry in a log.
@@ -44,6 +45,13 @@ type CredentialData struct {
 	Name   string `json:"name"`   // e.g., "github"
 	Action string `json:"action"` // e.g., "injected", "used", "revoked"
 	Host   string `json:"host"`   // e.g., "api.github.com"
+}
+
+// SecretData holds secret resolution entry data.
+type SecretData struct {
+	Name    string `json:"name"`    // env var name, e.g., "OPENAI_API_KEY"
+	Backend string `json:"backend"` // e.g., "1password", "ssm"
+	// Note: value is never logged
 }
 
 // Entry represents a single hash-chained log entry.
