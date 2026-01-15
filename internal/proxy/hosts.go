@@ -9,7 +9,7 @@ import (
 type hostPattern struct {
 	pattern    string // the original pattern
 	host       string // the host part (without port)
-	port       int    // specific port (0 means match 80/443)
+	port       int    // specific port, or 0 if unspecified (matches only ports 80 and 443)
 	isWildcard bool   // true if pattern starts with *.
 }
 
@@ -22,7 +22,7 @@ type hostPattern struct {
 func parseHostPattern(s string) hostPattern {
 	p := hostPattern{
 		pattern: s,
-		port:    0, // 0 means match default ports 80 and 443
+		port:    0, // 0 = unspecified, will match only ports 80 and 443
 	}
 
 	// Check for wildcard prefix
@@ -98,9 +98,16 @@ var grantHosts = map[string][]string{
 }
 
 // GetHostsForGrant returns the host patterns for a given grant name.
+// Supports scoped grants like "github:repo" by extracting the provider name.
 // Returns an empty slice if the grant is unknown.
 func GetHostsForGrant(grant string) []string {
-	hosts, ok := grantHosts[grant]
+	// Extract provider from scoped grant (e.g., "github:repo" -> "github")
+	provider := grant
+	if idx := strings.Index(grant, ":"); idx != -1 {
+		provider = grant[:idx]
+	}
+
+	hosts, ok := grantHosts[provider]
 	if !ok {
 		return []string{}
 	}

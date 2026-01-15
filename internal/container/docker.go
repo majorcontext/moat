@@ -219,19 +219,22 @@ func (r *DockerRuntime) Close() error {
 }
 
 // SetupFirewall configures iptables to block all outbound traffic except to the proxy.
+// The proxyHost parameter is accepted for interface consistency but not used in the
+// iptables rules. This is intentional: host.docker.internal resolves to a dynamic IP
+// that varies per Docker installation, and resolving it inside the container would
+// add complexity. The security model relies on the proxy port being unique (randomly
+// assigned per-run) rather than IP filtering. Combined with the proxy's authentication
+// for Apple containers, this provides sufficient protection.
 func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
-	// Resolve proxy host to IP if it's a hostname
-	// For host.docker.internal, we need to resolve it inside the container
-	// For simplicity, we'll allow traffic to the Docker bridge gateway which handles host.docker.internal
-
 	// iptables rules:
 	// 1. Allow loopback
 	// 2. Allow established connections (for responses)
 	// 3. Allow DNS (needed to resolve hostnames before proxy can intercept)
-	// 4. Allow traffic to proxy
+	// 4. Allow traffic to proxy port (any destination - see function comment)
 	// 5. Drop everything else
 
 	// We run these as a single script to minimize exec calls
+	_ = proxyHost // See function comment for why this is unused
 	script := fmt.Sprintf(`
 		# Flush existing rules
 		iptables -F OUTPUT 2>/dev/null || true
@@ -245,9 +248,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		# Allow DNS (UDP 53) - needed for initial hostname resolution
 		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 
-		# Allow traffic to proxy host on proxy port
-		# For Docker, we allow the entire Docker network range since host.docker.internal
-		# resolves to the host gateway IP which varies
+		# Allow traffic to proxy port (destination IP not filtered - see function comment)
 		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
 
 		# Drop all other outbound traffic

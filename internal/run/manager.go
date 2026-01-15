@@ -375,54 +375,40 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Resolve container image based on dependencies
 	containerImage := image.Resolve(depList)
 
-	// Build image if we have dependencies (Docker only)
-	// Apple containers use install scripts instead
-	var installScript string
-	if len(depList) > 0 {
-		if m.runtime.Type() == container.RuntimeApple {
-			// For Apple containers, generate install script to run at container start
-			script, err := deps.GenerateInstallScript(depList)
+	// Build custom image if we have dependencies (Docker only)
+	// Apple containers don't support custom image builds; dependencies would need
+	// to be installed via install scripts at container start (not yet implemented).
+	if len(depList) > 0 && m.runtime.Type() == container.RuntimeDocker {
+		exists, err := m.runtime.ImageExists(ctx, containerImage)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("checking image: %w", err)
+		}
+
+		if !exists {
+			dockerfile, err := deps.GenerateDockerfile(depList)
 			if err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
-				return nil, fmt.Errorf("generating install script: %w", err)
+				return nil, fmt.Errorf("generating Dockerfile: %w", err)
 			}
-			installScript = script
-		} else {
-			// For Docker, build a custom image with dependencies pre-installed
-			exists, err := m.runtime.ImageExists(ctx, containerImage)
-			if err != nil {
+
+			depNames := make([]string, len(depList))
+			for i, d := range depList {
+				depNames[i] = d.Name
+			}
+			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
-				return nil, fmt.Errorf("checking image: %w", err)
-			}
-
-			if !exists {
-				dockerfile, err := deps.GenerateDockerfile(depList)
-				if err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
-					return nil, fmt.Errorf("generating Dockerfile: %w", err)
-				}
-
-				depNames := make([]string, len(depList))
-				for i, d := range depList {
-					depNames[i] = d.Name
-				}
-				if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
-					return nil, fmt.Errorf("building image with dependencies [%s]: %w",
-						strings.Join(depNames, ", "), err)
-				}
+				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
+					strings.Join(depNames, ", "), err)
 			}
 		}
 	}
-	_ = installScript // TODO: pass to container config when Apple container support is complete
 
 	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
 	var capAdd []string

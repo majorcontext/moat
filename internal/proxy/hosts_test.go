@@ -393,8 +393,33 @@ func TestGetHostsForGrant(t *testing.T) {
 			},
 		},
 		{
+			name:  "github grant with repo scope",
+			grant: "github:repo",
+			expected: []string{
+				"github.com",
+				"api.github.com",
+				"*.githubusercontent.com",
+				"*.github.com",
+			},
+		},
+		{
+			name:  "github grant with multiple scopes",
+			grant: "github:repo,user",
+			expected: []string{
+				"github.com",
+				"api.github.com",
+				"*.githubusercontent.com",
+				"*.github.com",
+			},
+		},
+		{
 			name:     "unknown grant",
 			grant:    "unknown",
+			expected: []string{},
+		},
+		{
+			name:     "unknown grant with scope",
+			grant:    "unknown:scope",
 			expected: []string{},
 		},
 		{

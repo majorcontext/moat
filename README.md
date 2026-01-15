@@ -128,9 +128,7 @@ version: 1.0.0
 
 # Dependencies determine the base image
 dependencies:
-  - node@20 # Uses node:20
-  # - python@3.11  # Uses python:3.11
-  # - go@1.22      # Uses golang:1.22
+  - node@20
 
 # Credentials to inject (granted via `agent grant`)
 grants:
