@@ -598,10 +598,20 @@ secrets:
 
 The format is `op://vault/item/field`. When you run `agent run`, AgentOps resolves each secret reference and injects the value as an environment variable.
 
+**Supported backends:**
+
+| Backend | URI Scheme | Required CLI |
+|---------|------------|--------------|
+| 1Password | `op://vault/item/field` | `op` (`brew install 1password-cli`) |
+
+More backends (AWS SSM, HashiCorp Vault) are planned.
+
 **Security considerations:**
 - Secret values are passed as environment variables (visible to processes in the container)
 - Secret names and backends are logged for audit purposes, but values are never logged
 - For credentials that should never be visible to the agent, use credential injection (`--grant`) instead
+
+**Note:** Secrets providers delegate to external CLI tools rather than bundling SDKs. This keeps the AgentOps binary small and leverages existing authentication (SSO, credential files, etc.). Native SDK integration may be added in the future for performance-sensitive use cases.
 
 ### Image Selection
 
