@@ -227,6 +227,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		})
 		r.storeRef = &storeRef // Save reference to update later
 
+		// Configure network policy from agent.yaml
+		if opts.Config != nil {
+			p.SetNetworkPolicy(opts.Config.Network.Policy, opts.Config.Network.Allow, opts.Grants)
+		}
+
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
