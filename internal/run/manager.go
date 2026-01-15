@@ -241,17 +241,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
+		// Get proxy host address (needed for both proxy URL and firewall setup)
+		hostAddr := m.runtime.GetHostAddress()
+
 		// Store proxy details for firewall setup (applied after container starts)
 		if needsProxyForFirewall {
 			r.FirewallEnabled = true
-			r.ProxyHost = m.runtime.GetHostAddress()
+			r.ProxyHost = hostAddr
 			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
 			r.ProxyPort = proxyPortInt
 		}
 
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
-		proxyHost := r.ProxyHost + ":" + proxyServer.Port()
+		proxyHost := hostAddr + ":" + proxyServer.Port()
 		var proxyURL string
 		if proxyAuthToken != "" {
 			// Include auth credentials in URL: http://agentops:token@host:port
