@@ -165,17 +165,20 @@ type credentialHeader struct {
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials map[string]credentialHeader // host -> credential header
-	mu          sync.RWMutex
-	ca          *CA           // Optional CA for TLS interception
-	logger      RequestLogger // Optional request logger
-	authToken   string        // Optional auth token required for proxy access
+	credentials  map[string]credentialHeader // host -> credential header
+	mu           sync.RWMutex
+	ca           *CA           // Optional CA for TLS interception
+	logger       RequestLogger // Optional request logger
+	authToken    string        // Optional auth token required for proxy access
+	policy       string        // "permissive" or "strict"
+	allowedHosts []hostPattern // parsed allow patterns for strict policy
 }
 
 // NewProxy creates a new auth proxy.
 func NewProxy() *Proxy {
 	return &Proxy{
 		credentials: make(map[string]credentialHeader),
+		policy:      "permissive", // default to permissive
 	}
 }
 
@@ -205,6 +208,31 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue}
+}
+
+// SetNetworkPolicy sets the network policy and allowed hosts.
+// policy should be "permissive" or "strict".
+// allows is a list of host patterns like "api.example.com" or "*.example.com".
+// grants is a list of grant names like "github" that will be expanded to host patterns.
+func (p *Proxy) SetNetworkPolicy(policy string, allows []string, grants []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.policy = policy
+	p.allowedHosts = nil
+
+	// Parse explicit allow patterns
+	for _, pattern := range allows {
+		p.allowedHosts = append(p.allowedHosts, parseHostPattern(pattern))
+	}
+
+	// Add hosts from grants
+	for _, grant := range grants {
+		grantHosts := GetHostsForGrant(grant)
+		for _, pattern := range grantHosts {
+			p.allowedHosts = append(p.allowedHosts, parseHostPattern(pattern))
+		}
+	}
 }
 
 // getCredential returns the credential header for a host.
@@ -264,8 +292,34 @@ func (p *Proxy) checkAuth(r *http.Request) bool {
 	return false
 }
 
+// checkNetworkPolicy checks if the host:port is allowed by the network policy.
+// Returns true if allowed, false if blocked.
+func (p *Proxy) checkNetworkPolicy(host string, port int) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Permissive policy allows everything
+	if p.policy != "strict" {
+		return true
+	}
+
+	// Strict policy requires host to match allowedHosts
+	return matchHost(p.allowedHosts, host, port)
+}
+
+// writeBlockedResponse writes a 407 response when a request is blocked by network policy.
+func (p *Proxy) writeBlockedResponse(w http.ResponseWriter, host string) {
+	w.Header().Set("X-AgentOps-Blocked", "network-policy")
+	w.Header().Set("Proxy-Authenticate", "AgentOps-Policy")
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusProxyAuthRequired)
+	_, _ = w.Write([]byte("AgentOps: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.allow in agent.yaml or use policy: permissive.\n"))
+}
+
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+
+	// Extract host and infer port from scheme
 	host := r.URL.Hostname()
 	cred, authInjected := p.getCredential(host)
 
@@ -273,6 +327,29 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	var reqBody []byte
 	reqBody, r.Body = captureBody(r.Body, r.Header.Get("Content-Type"))
 	originalReqHeaders := r.Header.Clone()
+
+	port := 80
+	if r.URL.Scheme == "https" {
+		port = 443
+	}
+	if r.URL.Port() != "" {
+		// Port explicitly specified in URL
+		var err error
+		port, err = net.LookupPort("tcp", r.URL.Port())
+		if err != nil {
+			port = 80 // fallback
+		}
+	}
+
+	// Check network policy
+	if !p.checkNetworkPolicy(host, port) {
+		duration := time.Since(start)
+		// Log blocked request
+		p.logRequest(r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
+		// Send 407 response with policy headers
+		p.writeBlockedResponse(w, host)
+		return
+	}
 
 	// Create outgoing request
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
@@ -329,9 +406,29 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
-	host, _, _ := net.SplitHostPort(r.Host)
-	if host == "" {
-		host = r.Host
+	// Extract host and port for network policy check
+	host, portStr, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		// r.Host should always have port in CONNECT requests
+		http.Error(w, "invalid host format", http.StatusBadRequest)
+		return
+	}
+
+	port, err := net.LookupPort("tcp", portStr)
+	if err != nil {
+		http.Error(w, "invalid port", http.StatusBadRequest)
+		return
+	}
+
+	// Check network policy before establishing tunnel
+	if !p.checkNetworkPolicy(host, port) {
+		// Log blocked request
+		if p.logger != nil {
+			p.logRequest(r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+		}
+		// Send 407 response with policy headers
+		p.writeBlockedResponse(w, host)
+		return
 	}
 
 	if _, hasCredential := p.getCredential(host); p.ca != nil && hasCredential {
