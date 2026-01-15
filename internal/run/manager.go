@@ -515,9 +515,11 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	// This blocks all outbound traffic except to the proxy
 	if r.FirewallEnabled && r.ProxyPort > 0 {
 		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Log warning but don't fail - firewall is best-effort
-			// (container may not have iptables available)
-			fmt.Fprintf(os.Stderr, "Warning: firewall setup failed: %v\n", err)
+			// Firewall setup failed - this is fatal for strict policy since the user
+			// explicitly requested network isolation. Without iptables, only proxy-level
+			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
+			_ = m.runtime.StopContainer(ctx, r.ContainerID)
+			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
 		}
 	}
 
