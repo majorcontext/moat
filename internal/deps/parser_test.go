@@ -155,6 +155,85 @@ func TestVersionValidation(t *testing.T) {
 	}
 }
 
+func TestMetaDependencyExpansion(t *testing.T) {
+	// go-extras is a meta dependency that expands to gofumpt, govulncheck, goreleaser
+	deps, err := ParseAll([]string{"go", "go-extras"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	// Should have go + 3 expanded deps = 4 total
+	if len(deps) != 4 {
+		t.Errorf("expected 4 deps after expansion, got %d: %v", len(deps), deps)
+	}
+
+	// Verify the expanded deps
+	names := make(map[string]bool)
+	for _, d := range deps {
+		names[d.Name] = true
+	}
+	expected := []string{"go", "gofumpt", "govulncheck", "goreleaser"}
+	for _, exp := range expected {
+		if !names[exp] {
+			t.Errorf("expected %q in expanded deps, got %v", exp, deps)
+		}
+	}
+
+	// Validate should pass since go is included
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+}
+
+func TestMetaDependencyDeduplication(t *testing.T) {
+	// Including both go-extras and gofumpt should not duplicate gofumpt
+	deps, err := ParseAll([]string{"go", "gofumpt", "go-extras"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	// Should have go + gofumpt + govulncheck + goreleaser = 4 total (no duplicate gofumpt)
+	if len(deps) != 4 {
+		t.Errorf("expected 4 deps (no duplicates), got %d: %v", len(deps), deps)
+	}
+}
+
+func TestMetaDependencyVersionRejected(t *testing.T) {
+	// Meta dependencies should not accept version specifiers
+	_, err := ParseAll([]string{"go-extras@1.0"})
+	if err == nil {
+		t.Error("ParseAll should error for meta dependency with version")
+	}
+	if !strings.Contains(err.Error(), "does not support version") {
+		t.Errorf("error should mention version not supported, got: %v", err)
+	}
+}
+
+func TestGoInstallRequiresGoRuntime(t *testing.T) {
+	// go-install dependencies require Go runtime
+	deps, err := ParseAll([]string{"govulncheck"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	err = Validate(deps)
+	if err == nil {
+		t.Error("Validate should error for go-install without go runtime")
+	}
+	if !strings.Contains(err.Error(), "requires Go runtime") {
+		t.Errorf("error should mention Go runtime requirement, got: %v", err)
+	}
+
+	// Should pass when go is included
+	deps, err = ParseAll([]string{"go", "govulncheck"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate should pass with go runtime: %v", err)
+	}
+}
+
 func TestVersionConstraintValidation(t *testing.T) {
 	// Node has versions ["18", "20", "22"] in registry
 	tests := []struct {

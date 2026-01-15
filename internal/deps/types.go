@@ -8,7 +8,9 @@ const (
 	TypeGithubBinary InstallType = "github-binary"
 	TypeApt          InstallType = "apt"
 	TypeNpm          InstallType = "npm"
+	TypeGoInstall    InstallType = "go-install"
 	TypeCustom       InstallType = "custom"
+	TypeMeta         InstallType = "meta"
 )
 
 // DepSpec defines a dependency in the registry.
@@ -27,8 +29,11 @@ type DepSpec struct {
 	// For apt type
 	Package string `yaml:"package,omitempty"`
 
-	// For npm/pip type
+	// For npm type
 	// Package field is reused
+
+	// For go-install type
+	GoPackage string `yaml:"go-package,omitempty"`
 }
 
 // Dependency represents a parsed dependency from agent.yaml.

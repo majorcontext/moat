@@ -107,3 +107,73 @@ gcloud:
   description: Google Cloud CLI
   type: custom
   default: "latest"
+
+# Task runners
+task:
+  description: Task runner / Make alternative
+  type: github-binary
+  repo: go-task/task
+  asset: "task_linux_amd64.tar.gz"
+  bin: task
+  default: "3.40.0"
+
+# Go development tools
+gofumpt:
+  description: Stricter gofmt
+  type: github-binary
+  repo: mvdan/gofumpt
+  asset: "gofumpt_v{version}_linux_amd64"
+  bin: "gofumpt_v{version}_linux_amd64"
+  default: "0.7.0"
+  requires: [go]
+
+govulncheck:
+  description: Go vulnerability scanner
+  type: go-install
+  go-package: golang.org/x/vuln/cmd/govulncheck
+  requires: [go]
+
+goreleaser:
+  description: Go release automation
+  type: github-binary
+  repo: goreleaser/goreleaser
+  asset: "goreleaser_Linux_x86_64.tar.gz"
+  bin: goreleaser
+  default: "2.5.0"
+
+air:
+  description: Live reload for Go apps
+  type: github-binary
+  repo: cosmtrek/air
+  asset: "air_{version}_linux_amd64.tar.gz"
+  bin: air
+  default: "1.52.0"
+  requires: [go]
+
+mockgen:
+  description: Go mock generator
+  type: go-install
+  go-package: go.uber.org/mock/mockgen
+  requires: [go]
+
+buf:
+  description: Protocol Buffers tooling
+  type: github-binary
+  repo: bufbuild/buf
+  asset: "buf-Linux-x86_64.tar.gz"
+  bin: buf/bin/buf
+  default: "1.47.0"
+
+act:
+  description: Run GitHub Actions locally
+  type: github-binary
+  repo: nektos/act
+  asset: "act_Linux_x86_64.tar.gz"
+  bin: act
+  default: "0.2.70"
+
+# Meta dependencies (bundles)
+go-extras:
+  description: Common Go development tools (gofumpt, govulncheck, goreleaser)
+  type: meta
+  requires: [gofumpt, govulncheck, goreleaser]
