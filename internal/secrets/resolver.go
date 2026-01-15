@@ -1,4 +1,5 @@
 // Package secrets provides pluggable secret resolution from external backends.
+// The resolver registry is safe for concurrent use.
 package secrets
 
 import (
@@ -23,7 +24,7 @@ var (
 	mu        sync.RWMutex
 )
 
-// Register adds a resolver to the registry.
+// Register adds a resolver to the registry. Safe for concurrent use.
 func Register(r Resolver) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -32,7 +33,7 @@ func Register(r Resolver) {
 
 // Resolve dispatches to the appropriate resolver based on URI scheme.
 func Resolve(ctx context.Context, reference string) (string, error) {
-	scheme := parseScheme(reference)
+	scheme := ParseScheme(reference)
 	if scheme == "" {
 		return "", &InvalidReferenceError{Reference: reference, Reason: "missing scheme"}
 	}
@@ -60,15 +61,15 @@ func ResolveAll(ctx context.Context, secrets map[string]string) (map[string]stri
 	for name, ref := range secrets {
 		val, err := Resolve(ctx, ref)
 		if err != nil {
-			return nil, fmt.Errorf("resolving secret %s: %w", name, err)
+			return nil, fmt.Errorf("resolving secret %s (%s): %w", name, ref, err)
 		}
 		resolved[name] = val
 	}
 	return resolved, nil
 }
 
-// parseScheme extracts the scheme from a URI (e.g., "op" from "op://vault/item").
-func parseScheme(ref string) string {
+// ParseScheme extracts the scheme from a URI (e.g., "op" from "op://vault/item").
+func ParseScheme(ref string) string {
 	idx := strings.Index(ref, "://")
 	if idx < 1 {
 		return ""
@@ -76,9 +77,20 @@ func parseScheme(ref string) string {
 	return ref[:idx]
 }
 
-// clearRegistry removes all registered resolvers. For testing only.
-func clearRegistry() {
+// withTestRegistry runs a function with an isolated resolver registry.
+// The original registry is saved and restored after the function returns.
+// This is safe for parallel tests. For testing only.
+func withTestRegistry(fn func()) {
 	mu.Lock()
-	defer mu.Unlock()
+	saved := resolvers
 	resolvers = make(map[string]Resolver)
+	mu.Unlock()
+
+	defer func() {
+		mu.Lock()
+		resolvers = saved
+		mu.Unlock()
+	}()
+
+	fn()
 }

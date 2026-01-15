@@ -17,6 +17,11 @@ func (r *OnePasswordResolver) Scheme() string {
 
 // Resolve fetches a secret using `op read`.
 func (r *OnePasswordResolver) Resolve(ctx context.Context, reference string) (string, error) {
+	// Check for context cancellation before expensive operations
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	// Check op CLI is available
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", &BackendError{

@@ -352,3 +352,23 @@ secrets:
 		t.Errorf("error should mention the overlapping key: %v", err)
 	}
 }
+
+func TestLoad_SecretsInvalidReference(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+secrets:
+  API_KEY: not-a-valid-uri
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid secret reference")
+	}
+	if !strings.Contains(err.Error(), "missing scheme") {
+		t.Errorf("error should mention missing scheme: %v", err)
+	}
+}

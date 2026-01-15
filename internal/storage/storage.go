@@ -317,3 +317,26 @@ func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
 	}
 	return reqs, nil
 }
+
+// ReadSecretResolutions reads all secret resolutions.
+func (s *RunStore) ReadSecretResolutions() ([]SecretResolution, error) {
+	f, err := os.Open(filepath.Join(s.dir, "secrets.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var resolutions []SecretResolution
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var res SecretResolution
+		if err := json.Unmarshal(scanner.Bytes(), &res); err != nil {
+			continue
+		}
+		resolutions = append(resolutions, res)
+	}
+	return resolutions, nil
+}

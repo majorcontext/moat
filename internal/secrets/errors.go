@@ -1,5 +1,8 @@
 package secrets
 
+// Error types for secret resolution failures. Each error type provides
+// context to help users diagnose and fix issues with their secret references.
+
 import "fmt"
 
 // UnsupportedSchemeError indicates an unrecognized URI scheme.

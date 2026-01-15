@@ -325,8 +325,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	// Resolve and add secrets
-	// Track resolved secret names for audit logging (logged after store is created)
-	var resolvedSecretNames []string
+	// Track resolved secrets for audit logging (logged after store is created)
+	type resolvedSecret struct {
+		name   string
+		scheme string
+	}
+	var resolvedSecrets []resolvedSecret
 	if opts.Config != nil && len(opts.Config.Secrets) > 0 {
 		resolved, err := secrets.ResolveAll(ctx, opts.Config.Secrets)
 		if err != nil {
@@ -337,7 +341,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 		for k, v := range resolved {
 			proxyEnv = append(proxyEnv, k+"="+v)
-			resolvedSecretNames = append(resolvedSecretNames, k)
+			resolvedSecrets = append(resolvedSecrets, resolvedSecret{
+				name:   k,
+				scheme: secrets.ParseScheme(opts.Config.Secrets[k]),
+			})
 		}
 	}
 
@@ -507,11 +514,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	})
 
 	// Log resolved secrets (best-effort; non-fatal if it fails)
-	for _, secretName := range resolvedSecretNames {
+	for _, secret := range resolvedSecrets {
 		_ = store.WriteSecretResolution(storage.SecretResolution{
 			Timestamp: time.Now().UTC(),
-			Name:      secretName,
-			Backend:   "1password", // TODO: extract backend from scheme when adding more backends
+			Name:      secret.name,
+			Backend:   secret.scheme,
 		})
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,6 +77,13 @@ func Load(dir string) (*Config, error) {
 	for key := range cfg.Secrets {
 		if _, exists := cfg.Env[key]; exists {
 			return nil, fmt.Errorf("key %q defined in both 'env' and 'secrets' - use one or the other", key)
+		}
+	}
+
+	// Validate secret references have valid URI format
+	for key, ref := range cfg.Secrets {
+		if !strings.Contains(ref, "://") {
+			return nil, fmt.Errorf("secret %q has invalid reference %q: missing scheme (expected format: scheme://path, e.g., op://vault/item/field)", key, ref)
 		}
 	}
 
