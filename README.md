@@ -228,6 +228,10 @@ Add it to network.allow in agent.yaml or use policy: permissive.
 
 2. **DNS not filtered** - DNS queries (UDP 53) are allowed so tools can resolve hostnames. An agent can resolve any hostname, even if HTTP access to it would be blocked.
 
+3. **Wildcards don't match base domain** - The pattern `*.example.com` matches `api.example.com` and `foo.bar.example.com`, but does NOT match `example.com` itself. To allow both, include both patterns: `*.example.com` and `example.com`.
+
+4. **Brief startup window** - The iptables firewall is configured immediately after container start. There is a brief window (milliseconds) before rules are applied. For most use cases this is not a concern.
+
 ### Use Cases
 
 Network policies are useful for:
