@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/andybons/agentops/internal/audit"
 	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/container"
 	"github.com/andybons/agentops/internal/credential"
@@ -505,6 +506,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		r.storeRef.Store(store)
 	}
 
+	// Open audit store for tamper-proof logging
+	auditStore, err := audit.OpenStore(filepath.Join(store.Dir(), "audit.db"))
+	if err != nil {
+		// Clean up container, proxy, and storage if audit store fails
+		_ = m.runtime.RemoveContainer(ctx, containerID)
+		if proxyServer != nil {
+			_ = proxyServer.Stop(context.Background())
+		}
+		return nil, fmt.Errorf("opening audit store: %w", err)
+	}
+	r.AuditStore = auditStore
+
 	// Save initial metadata (best-effort; non-fatal if it fails)
 	_ = store.SaveMetadata(storage.Metadata{
 		Name:      r.Name,
@@ -519,6 +532,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			Timestamp: time.Now().UTC(),
 			Name:      secret.name,
 			Backend:   secret.scheme,
+		})
+		// Also log to tamper-proof audit trail
+		_, _ = auditStore.AppendSecret(audit.SecretData{
+			Name:    secret.name,
+			Backend: secret.scheme,
 		})
 	}
 
@@ -790,6 +808,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if m.proxyLifecycle.ShouldStop() {
 		if err := m.proxyLifecycle.Stop(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: stopping routing proxy: %v\n", err)
+		}
+	}
+
+	// Close audit store
+	if r.AuditStore != nil {
+		if err := r.AuditStore.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: closing audit store: %v\n", err)
 		}
 	}
 

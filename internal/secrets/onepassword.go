@@ -22,6 +22,14 @@ func (r *OnePasswordResolver) Resolve(ctx context.Context, reference string) (st
 		return "", err
 	}
 
+	// Validate reference format (defense in depth - registry already checks scheme)
+	if !strings.HasPrefix(reference, "op://") {
+		return "", &InvalidReferenceError{
+			Reference: reference,
+			Reason:    "1Password references must start with op://",
+		}
+	}
+
 	// Check op CLI is available
 	if _, err := exec.LookPath("op"); err != nil {
 		return "", &BackendError{

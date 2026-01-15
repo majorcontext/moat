@@ -79,3 +79,21 @@ func TestOnePasswordResolver_ParseError_GenericError(t *testing.T) {
 		t.Errorf("expected reason to contain error message, got %q", backendErr.Reason)
 	}
 }
+
+func TestOnePasswordResolver_InvalidScheme(t *testing.T) {
+	r := &OnePasswordResolver{}
+
+	// Test with wrong scheme (should be caught by resolver)
+	_, err := r.Resolve(t.Context(), "ssm:///some/path")
+	if err == nil {
+		t.Fatal("expected error for invalid scheme")
+	}
+
+	var invalid *InvalidReferenceError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected InvalidReferenceError, got %T: %v", err, err)
+	}
+	if !strings.Contains(invalid.Reason, "op://") {
+		t.Errorf("expected reason to mention op://, got %q", invalid.Reason)
+	}
+}

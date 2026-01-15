@@ -607,9 +607,18 @@ The format is `op://vault/item/field`. When you run `agent run`, AgentOps resolv
 More backends (AWS SSM, HashiCorp Vault) are planned.
 
 **Security considerations:**
-- Secret values are passed as environment variables (visible to processes in the container)
-- Secret names and backends are logged for audit purposes, but values are never logged
-- For credentials that should never be visible to the agent, use credential injection (`--grant`) instead
+
+> **Important:** Secrets are injected as environment variables, which means **any process in the container can read them**. This is a fundamental trade-off of environment variable injection.
+
+- Secret values are passed as environment variables and visible to all processes in the container
+- Secret names and backends are logged to the tamper-proof audit trail, but values are never logged
+- For credentials that should never be visible to the agent (like API tokens for third-party services), use credential injection (`--grant`) instead—it injects headers at the network layer without exposing the token
+
+| Use Case | Recommended Approach |
+|----------|---------------------|
+| API tokens for HTTP services | `--grant` (credential injection) |
+| Database connection strings | `secrets:` (environment variable) |
+| SDK API keys (OpenAI, etc.) | `secrets:` (environment variable) |
 
 **Note:** Secrets providers delegate to external CLI tools rather than bundling SDKs. This keeps the AgentOps binary small and leverages existing authentication (SSO, credential files, etc.). Native SDK integration may be added in the future for performance-sensitive use cases.
 
