@@ -302,3 +302,73 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("DefaultConfig() Network.Allow = %d, want 0", len(cfg.Network.Allow))
 	}
 }
+
+func TestLoad_Secrets(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+secrets:
+  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  DATABASE_URL: op://Prod/Database/url
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Secrets) != 2 {
+		t.Errorf("expected 2 secrets, got %d", len(cfg.Secrets))
+	}
+	if cfg.Secrets["OPENAI_API_KEY"] != "op://Dev/OpenAI/api-key" {
+		t.Errorf("unexpected OPENAI_API_KEY: %s", cfg.Secrets["OPENAI_API_KEY"])
+	}
+	if cfg.Secrets["DATABASE_URL"] != "op://Prod/Database/url" {
+		t.Errorf("unexpected DATABASE_URL: %s", cfg.Secrets["DATABASE_URL"])
+	}
+}
+
+func TestLoad_SecretsEnvOverlap(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+env:
+  API_KEY: literal-value
+secrets:
+  API_KEY: op://Dev/Key/value
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for overlapping env/secrets keys")
+	}
+	if !strings.Contains(err.Error(), "API_KEY") {
+		t.Errorf("error should mention the overlapping key: %v", err)
+	}
+}
+
+func TestLoad_SecretsInvalidReference(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude
+secrets:
+  API_KEY: not-a-valid-uri
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid secret reference")
+	}
+	if !strings.Contains(err.Error(), "missing scheme") {
+		t.Errorf("error should mention missing scheme: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/andybons/agentops/internal/audit"
 	"github.com/andybons/agentops/internal/config"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/storage"
@@ -36,6 +37,7 @@ type Run struct {
 	ProxyServer *proxy.Server     // Auth proxy for credential injection
 	Store       *storage.RunStore // Run data storage
 	storeRef    *atomic.Value     // Atomic reference for concurrent logger access
+	AuditStore  *audit.Store      // Tamper-proof audit log
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	StoppedAt   time.Time

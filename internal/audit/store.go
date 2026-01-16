@@ -223,6 +223,11 @@ func (s *Store) AppendCredential(data CredentialData) (*Entry, error) {
 	return s.Append(EntryCredential, &data)
 }
 
+// AppendSecret adds a secret resolution entry.
+func (s *Store) AppendSecret(data SecretData) (*Entry, error) {
+	return s.Append(EntrySecret, &data)
+}
+
 // Get retrieves an entry by sequence number.
 func (s *Store) Get(seq uint64) (*Entry, error) {
 	row := s.db.QueryRow(`

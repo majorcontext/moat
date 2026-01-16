@@ -267,6 +267,34 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 	return err
 }
 
+// SecretResolution records a resolved secret (without the value).
+type SecretResolution struct {
+	Timestamp time.Time `json:"ts"`
+	Name      string    `json:"name"`    // env var name
+	Backend   string    `json:"backend"` // e.g., "1password"
+}
+
+// WriteSecretResolution records that a secret was resolved.
+func (s *RunStore) WriteSecretResolution(res SecretResolution) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "secrets.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, _ := json.Marshal(res)
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ReadNetworkRequests reads all network requests.
 func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
 	f, err := os.Open(filepath.Join(s.dir, "network.jsonl"))
@@ -288,4 +316,27 @@ func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
 		reqs = append(reqs, req)
 	}
 	return reqs, nil
+}
+
+// ReadSecretResolutions reads all secret resolutions.
+func (s *RunStore) ReadSecretResolutions() ([]SecretResolution, error) {
+	f, err := os.Open(filepath.Join(s.dir, "secrets.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var resolutions []SecretResolution
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var res SecretResolution
+		if err := json.Unmarshal(scanner.Bytes(), &res); err != nil {
+			continue
+		}
+		resolutions = append(resolutions, res)
+	}
+	return resolutions, nil
 }
