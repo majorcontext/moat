@@ -267,6 +267,42 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					if setup := credential.GetProviderSetup(provider); setup != nil {
 						setup.ConfigureProxy(p, cred)
 						providerEnv = append(providerEnv, setup.ContainerEnv(cred)...)
+					} else if provider == credential.ProviderAWS {
+						// AWS credentials are handled via credential endpoint, not header injection
+						// Parse stored config: Token=roleARN, Scopes=[region, sessionDuration, externalID]
+						roleARN := cred.Token
+						region := "us-east-1"
+						sessionDurationStr := ""
+						externalID := ""
+						if len(cred.Scopes) > 0 && cred.Scopes[0] != "" {
+							region = cred.Scopes[0]
+						}
+						if len(cred.Scopes) > 1 {
+							sessionDurationStr = cred.Scopes[1]
+						}
+						if len(cred.Scopes) > 2 {
+							externalID = cred.Scopes[2]
+						}
+
+						sessionDuration := 15 * time.Minute
+						if sessionDurationStr != "" {
+							if d, err := time.ParseDuration(sessionDurationStr); err == nil {
+								sessionDuration = d
+							}
+						}
+
+						awsProvider, err := proxy.NewAWSCredentialProvider(
+							roleARN,
+							region,
+							sessionDuration,
+							externalID,
+							"moat-"+r.ID,
+						)
+						if err != nil {
+							return nil, fmt.Errorf("creating AWS credential provider: %w", err)
+						}
+						p.SetAWSHandler(awsProvider.Handler())
+						r.AWSCredentialProvider = awsProvider
 					}
 				}
 			}
@@ -383,6 +419,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
+
+		// Set AWS credential endpoint URL if AWS grant is active
+		if r.AWSCredentialProvider != nil {
+			awsCredURL := proxyURL + "/_aws/credentials"
+			proxyEnv = append(proxyEnv,
+				"AWS_CONTAINER_CREDENTIALS_FULL_URI="+awsCredURL,
+				"AWS_REGION="+r.AWSCredentialProvider.Region(),
+			)
+			// Explicitly unset any direct credentials to prevent confusion
+			proxyEnv = append(proxyEnv,
+				"AWS_ACCESS_KEY_ID=",
+				"AWS_SECRET_ACCESS_KEY=",
+				"AWS_SESSION_TOKEN=",
+			)
+		}
 	}
 
 	// Set up SSH agent proxy for SSH grants (e.g., git clone git@github.com:...)

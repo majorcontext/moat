@@ -59,6 +59,9 @@ type Run struct {
 
 	// Snapshot settings
 	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
+
+	// AWS credential provider (set when using aws grant)
+	AWSCredentialProvider *proxy.AWSCredentialProvider
 }
 
 // Options configures a new run.
