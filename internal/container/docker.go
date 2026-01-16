@@ -103,6 +103,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			NetworkMode:  networkMode,
 			ExtraHosts:   cfg.ExtraHosts,
 			PortBindings: portBindings,
+			CapAdd:       cfg.CapAdd,
 		},
 		nil, // network config
 		nil, // platform
@@ -215,6 +216,76 @@ func (r *DockerRuntime) SupportsHostNetwork() bool {
 // Close releases Docker client resources.
 func (r *DockerRuntime) Close() error {
 	return r.cli.Close()
+}
+
+// SetupFirewall configures iptables to block all outbound traffic except to the proxy.
+// The proxyHost parameter is accepted for interface consistency but not used in the
+// iptables rules. This is intentional: host.docker.internal resolves to a dynamic IP
+// that varies per Docker installation, and resolving it inside the container would
+// add complexity. The security model relies on the proxy port being unique (randomly
+// assigned per-run) rather than IP filtering. Combined with the proxy's authentication
+// for Apple containers, this provides sufficient protection.
+func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+	// iptables rules:
+	// 1. Allow loopback
+	// 2. Allow established connections (for responses)
+	// 3. Allow DNS (needed to resolve hostnames before proxy can intercept)
+	// 4. Allow traffic to proxy port (any destination - see function comment)
+	// 5. Drop everything else
+
+	// We run these as a single script to minimize exec calls
+	_ = proxyHost // See function comment for why this is unused
+	script := fmt.Sprintf(`
+		# Flush existing rules
+		iptables -F OUTPUT 2>/dev/null || true
+
+		# Allow loopback
+		iptables -A OUTPUT -o lo -j ACCEPT
+
+		# Allow established/related connections
+		iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+		# Allow DNS (UDP 53) - needed for initial hostname resolution
+		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+
+		# Allow traffic to proxy port (destination IP not filtered - see function comment)
+		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
+
+		# Drop all other outbound traffic
+		iptables -A OUTPUT -j DROP
+	`, proxyPort)
+
+	execConfig := container.ExecOptions{
+		Cmd:          []string{"sh", "-c", script},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return fmt.Errorf("creating exec for firewall setup: %w", err)
+	}
+
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return fmt.Errorf("attaching to exec for firewall setup: %w", err)
+	}
+	defer resp.Close()
+
+	// Read output to completion
+	_, _ = io.Copy(io.Discard, resp.Reader)
+
+	// Check exit code
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting exec for firewall setup: %w", err)
+	}
+
+	if inspect.ExitCode != 0 {
+		return fmt.Errorf("firewall setup failed with exit code %d (iptables may not be available in container)", inspect.ExitCode)
+	}
+
+	return nil
 }
 
 // ensureImage pulls an image if it doesn't exist locally.

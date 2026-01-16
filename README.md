@@ -73,7 +73,7 @@ GitHub credential saved successfully
 **2. Run a command that calls the GitHub API**
 
 ```bash
-$ agent run --runtime node:20 --grant github -- curl -s https://api.github.com/user
+$ agent run --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -83,12 +83,12 @@ $ agent run --runtime node:20 --grant github -- curl -s https://api.github.com/u
 
 The `curl` command has no authentication flags—AgentOps injected the `Authorization` header automatically.
 
-The `--runtime node:20` flag selects the Node.js 20 Docker image (which includes curl). You can also use `--runtime python:3.11` or `--runtime go:1.22`.
+By default, containers use `ubuntu:22.04`. To use a different runtime, add `dependencies` to your `agent.yaml` (e.g., `node@20`, `python@3.11`, `go@1.22`).
 
 **3. Verify the token was never exposed**
 
 ```bash
-$ agent run --runtime node:20 --grant github -- env | grep -i token
+$ agent run --grant github -- env | grep -i token
 ```
 
 Output: _(nothing)_
@@ -126,11 +126,9 @@ Create an `agent.yaml` in your workspace to configure runs:
 agent: my-agent
 version: 1.0.0
 
-# Runtime determines the base image
-runtime:
-  node: 20 # Uses node:20
-  # python: 3.11  # Uses python:3.11
-  # go: 1.22      # Uses golang:1.22
+# Dependencies determine the base image
+dependencies:
+  - node@20
 
 # Credentials to inject (granted via `agent grant`)
 grants:
@@ -146,6 +144,102 @@ mounts:
   - ./data:/data:ro
   - ./cache:/cache
 ```
+
+## Network Policy
+
+Control outbound HTTP/HTTPS access from your agents with declarative network policies. By default, agents can make requests to any host. Enable strict mode to allow only specific hosts.
+
+### How It Works
+
+The network firewall is enforced via the credential-injecting proxy that containers already use for authentication. When a request is blocked, the agent receives a `407 Proxy Authentication Required` response with an `X-AgentOps-Blocked: network-policy` header and an actionable error message.
+
+### Configuration
+
+In `agent.yaml`, configure the network policy:
+
+```yaml
+agent: my-agent
+dependencies:
+  - node@20
+
+# Network policy (optional)
+network:
+  policy: strict  # "permissive" (default) or "strict"
+  allow:
+    - "api.openai.com"        # Allows ports 80 and 443
+    - "*.amazonaws.com"       # Wildcard matching
+    - "api.example.com:8080"  # Specific port only
+```
+
+**Policy modes:**
+
+- `permissive` (default) - All outbound HTTP/HTTPS is allowed
+- `strict` - All outbound HTTP/HTTPS is blocked except for:
+  - Hosts in the `allow` list
+  - Hosts derived from grants (e.g., `--grant github` automatically allows `github.com`, `api.github.com`, `*.githubusercontent.com`)
+
+**Allow list format:**
+
+- `api.example.com` - Allows HTTP (port 80) and HTTPS (port 443)
+- `api.example.com:8080` - Allows only the specified port (8080)
+- `*.example.com` - Wildcard matching for subdomains (ports 80 and 443)
+- `*.example.com:8080` - Wildcard with specific port
+
+### Example: OpenAI API with strict networking
+
+```yaml
+agent: openai-agent
+dependencies:
+  - python@3.11
+
+network:
+  policy: strict
+  allow:
+    - "api.openai.com"
+
+grants:
+  - github:repo
+```
+
+This configuration:
+- Blocks all outbound HTTP/HTTPS by default
+- Allows access to `api.openai.com` (ports 80 and 443)
+- Automatically allows GitHub hosts (`github.com`, `api.github.com`, etc.) because of the `github:repo` grant
+
+### What Happens When Blocked
+
+When an agent tries to access a blocked host:
+
+```bash
+$ agent run -- curl -v https://blocked.example.com
+
+< HTTP/1.1 407 Proxy Authentication Required
+< X-AgentOps-Blocked: network-policy
+< Content-Type: text/plain
+
+AgentOps: request blocked by network policy.
+Host "blocked.example.com" is not in the allow list.
+Add it to network.allow in agent.yaml or use policy: permissive.
+```
+
+### Limitations
+
+1. **Proxy-aware tools only** - HTTP/HTTPS filtering relies on the `HTTP_PROXY` and `HTTPS_PROXY` environment variables. Tools that ignore these variables will have their connections blocked by iptables rather than receiving a helpful error message.
+
+2. **DNS not filtered** - DNS queries (UDP 53) are allowed so tools can resolve hostnames. An agent can resolve any hostname, even if HTTP access to it would be blocked.
+
+3. **Wildcards don't match base domain** - The pattern `*.example.com` matches `api.example.com` and `foo.bar.example.com`, but does NOT match `example.com` itself. To allow both, include both patterns: `*.example.com` and `example.com`.
+
+4. **Brief startup window** - The iptables firewall is configured immediately after container start. There is a brief window (milliseconds) before rules are applied. For most use cases this is not a concern.
+
+### Use Cases
+
+Network policies are useful for:
+
+- **Cost control** - Prevent accidental API calls to expensive services
+- **Compliance guardrails** - Ensure agents only access approved endpoints
+- **Testing isolation** - Verify agents work with specific API dependencies
+- **Debugging** - Quickly identify which services an agent is trying to reach
 
 ## Hostname-Based Service Routing
 
@@ -171,8 +265,8 @@ In `agent.yaml`, define the agent name and ports to expose:
 
 ```yaml
 name: myapp
-runtime:
-  node: 20
+dependencies:
+  - node@20
 ports:
   web: 3000
   api: 8080
@@ -257,16 +351,14 @@ agent run [path] [flags] [-- command]
 agent run                                      # Run from current directory
 agent run ./my-project                         # Run from specific directory
 agent run --name myapp                         # Run with specific name
-agent run --runtime python:3.11                # Run with Python 3.11
-agent run --runtime node:20 -- npm test        # Run with Node.js and custom command
 agent run --grant github                       # Run with GitHub credentials
 agent run -e DEBUG=true                        # Run with environment variable
+agent run -- npm test                          # Run with custom command
 ```
 
 **Flags:**
 
 - `--name` - Name for this agent instance (default: from agent.yaml or random)
-- `--runtime` - Runtime language:version (e.g., `python:3.11`, `node:20`, `go:1.22`)
 - `--grant, -g` - Grant credential access (e.g., `github`, `github:repo,user`)
 - `--env, -e` - Set environment variable (can be repeated)
 
@@ -473,16 +565,14 @@ When you run `agent grant github`, your GitHub token is stored securely. During 
 
 ### Image Selection
 
-AgentOps selects the container base image based on the `--runtime` flag or `agent.yaml` runtime config:
+AgentOps selects the container base image based on `dependencies` in `agent.yaml`:
 
-| Runtime                                           | Image          |
-| ------------------------------------------------- | -------------- |
-| `--runtime node:20` or `runtime.node: 20`         | `node:20`      |
-| `--runtime python:3.11` or `runtime.python: 3.11` | `python:3.11`  |
-| `--runtime go:1.22` or `runtime.go: 1.22`         | `golang:1.22`  |
-| Multiple or none                                  | `ubuntu:22.04` |
-
-The `--runtime` flag overrides `agent.yaml` settings.
+| Dependencies in agent.yaml | Image          |
+| -------------------------- | -------------- |
+| `node@20`                  | `node:20`      |
+| `python@3.11`              | `python:3.11`  |
+| `go@1.22`                  | `golang:1.22`  |
+| None specified             | `ubuntu:22.04` |
 
 ### Observability
 

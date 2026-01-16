@@ -47,13 +47,14 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 		}
 	}
 
-	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives)
+	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall)
 	b.WriteString("# Base packages\n")
 	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
 	b.WriteString("    curl \\\n")
 	b.WriteString("    ca-certificates \\\n")
 	b.WriteString("    gnupg \\\n")
 	b.WriteString("    unzip \\\n")
+	b.WriteString("    iptables \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 
 	// User-specified apt packages

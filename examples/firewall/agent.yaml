@@ -1,0 +1,22 @@
+# Example: Network firewall with strict policy
+#
+# This example demonstrates the outgoing HTTP/HTTPS firewall.
+# Only requests to httpbin.org are allowed; all others are blocked.
+#
+# Run with:
+#   agent run examples/firewall -- python3 /workspace/demo.py
+#
+# Expected output:
+#   - Request to httpbin.org succeeds (200 OK)
+#   - Request to example.com is blocked (407 Proxy Authentication Required)
+
+name: firewall-demo
+
+dependencies:
+  - python@3.11
+
+network:
+  policy: strict
+  allow:
+    - "httpbin.org"
+    - "*.httpbin.org"

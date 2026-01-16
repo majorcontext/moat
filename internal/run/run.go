@@ -40,6 +40,11 @@ type Run struct {
 	StartedAt   time.Time
 	StoppedAt   time.Time
 	Error       string
+
+	// Firewall settings (set when network.policy is strict)
+	FirewallEnabled bool
+	ProxyHost       string // Host address for proxy (for firewall rules)
+	ProxyPort       int    // Port number for proxy (for firewall rules)
 }
 
 // Options configures a new run.

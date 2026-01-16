@@ -186,8 +186,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 // TestNetworkRequestsAreCaptured verifies that HTTP requests made through the proxy
 // are captured in the network trace.
 func TestNetworkRequestsAreCaptured(t *testing.T) {
-	// Use 3 minute timeout - gh download from GitHub is fast, no apt beyond base packages
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 
 	// Set up a test credential for GitHub so the proxy does TLS interception.
@@ -214,28 +213,23 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	workspace := createTestWorkspace(t)
+	workspace := createTestWorkspaceWithRuntime(t, "python", "3.10")
 
-	// Use curl to make HTTPS request through the proxy. Adding gh as a dependency
-	// triggers deps.Builder which installs curl in the base layer. Without dependencies,
-	// image.Resolve returns bare ubuntu:22.04 which lacks curl.
+	// Use Python to make HTTPS request through the proxy. Python is simpler to
+	// set up than gh/curl and handles SSL certificates more gracefully.
 	//
-	// TODO: Mount CA certificate into container and remove -k flag to properly test
-	// TLS interception. Currently using -k (insecure) because the AgentOps CA isn't
-	// mounted into containers. The TLS interception still works - curl connects through
-	// CONNECT tunnel, and the proxy intercepts/logs the request - but we skip certificate
-	// verification on the client side, which means we don't validate the full chain.
+	// TODO: Mount CA certificate into container to properly test TLS interception.
+	// Currently using PYTHONHTTPSVERIFY=0 because the AgentOps CA isn't mounted.
 	r, err := mgr.Create(ctx, run.Options{
 		Name:      "e2e-test-network-capture",
 		Workspace: workspace,
 		Grants:    []string{"github"},
 		Config: &config.Config{
-			Dependencies: []string{"gh"}, // Triggers image build which installs curl
+			Dependencies: []string{"python@3.10"},
 		},
 		Cmd: []string{
-			"curl", "-v", "-k", // -k skips certificate verification
-			"-H", "User-Agent: AgentOps-E2E-Test/1.0",
-			"https://api.github.com/zen",
+			"python", "-c",
+			"import urllib.request; print(urllib.request.urlopen('https://api.github.com/zen').read().decode())",
 		},
 	})
 	if err != nil {

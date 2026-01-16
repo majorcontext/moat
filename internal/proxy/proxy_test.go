@@ -175,6 +175,201 @@ func TestProxy_AuthTokenInvalidToken(t *testing.T) {
 	}
 }
 
+func TestProxy_NetworkPolicyPermissive(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetNetworkPolicy("permissive", []string{}, []string{})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestProxy_NetworkPolicyStrictBlocked(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	// Set strict policy with no allowed hosts
+	p.SetNetworkPolicy("strict", []string{}, []string{})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
+	}
+
+	if resp.Header.Get("X-AgentOps-Blocked") != "network-policy" {
+		t.Errorf("X-AgentOps-Blocked header missing or wrong")
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "blocked by network policy") {
+		t.Errorf("response body should mention network policy blocking")
+	}
+}
+
+func TestProxy_NetworkPolicyStrictAllowed(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	// Extract port from backend URL to allow it
+	backendURL := mustParseURL(backend.URL)
+	allowPattern := "127.0.0.1:" + backendURL.Port()
+
+	p := NewProxy()
+	// Allow localhost/127.0.0.1 with the specific port
+	p.SetNetworkPolicy("strict", []string{allowPattern}, []string{})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "backend response" {
+		t.Errorf("body = %q, want %q", string(body), "backend response")
+	}
+}
+
+func TestProxy_NetworkPolicyWithGrants(t *testing.T) {
+	p := NewProxy()
+	// Set policy with github grant
+	p.SetNetworkPolicy("strict", []string{}, []string{"github"})
+
+	// Should allow github.com (port 443)
+	if !p.checkNetworkPolicy("github.com", 443) {
+		t.Errorf("github.com:443 should be allowed with github grant")
+	}
+
+	// Should allow api.github.com (port 443)
+	if !p.checkNetworkPolicy("api.github.com", 443) {
+		t.Errorf("api.github.com:443 should be allowed with github grant")
+	}
+
+	// Should allow wildcard match for githubusercontent.com
+	if !p.checkNetworkPolicy("raw.githubusercontent.com", 443) {
+		t.Errorf("raw.githubusercontent.com:443 should be allowed with github grant (wildcard)")
+	}
+
+	// Should block non-github hosts
+	if p.checkNetworkPolicy("example.com", 443) {
+		t.Errorf("example.com:443 should be blocked")
+	}
+}
+
+func TestProxy_NetworkPolicyMixedAllowsAndGrants(t *testing.T) {
+	p := NewProxy()
+	// Combine explicit allows and grants
+	p.SetNetworkPolicy("strict", []string{"api.example.com"}, []string{"github"})
+
+	// Should allow explicit pattern
+	if !p.checkNetworkPolicy("api.example.com", 443) {
+		t.Errorf("api.example.com:443 should be allowed (explicit)")
+	}
+
+	// Should allow github from grant
+	if !p.checkNetworkPolicy("github.com", 443) {
+		t.Errorf("github.com:443 should be allowed (grant)")
+	}
+
+	// Should block others
+	if p.checkNetworkPolicy("evil.com", 443) {
+		t.Errorf("evil.com:443 should be blocked")
+	}
+}
+
+func TestProxy_NetworkPolicyLogging(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend response"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetNetworkPolicy("strict", []string{}, []string{}) // Block everything
+
+	var loggedMethod string
+	var loggedStatus int
+
+	p.SetLogger(func(data RequestLogData) {
+		loggedMethod = data.Method
+		loggedStatus = data.StatusCode
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if loggedStatus != http.StatusProxyAuthRequired {
+		t.Errorf("logged status = %d, want %d", loggedStatus, http.StatusProxyAuthRequired)
+	}
+
+	if loggedMethod != "GET" {
+		t.Errorf("logged method = %q, want GET", loggedMethod)
+	}
+}
+
 func mustParseURL(s string) *url.URL {
 	u, err := url.Parse(s)
 	if err != nil {

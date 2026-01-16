@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -137,7 +138,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	if len(opts.Grants) > 0 {
+	// Start proxy if we have grants (for credential injection) or strict network policy
+	needsProxyForGrants := len(opts.Grants) > 0
+	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+
+	if needsProxyForGrants || needsProxyForFirewall {
 		p := proxy.NewProxy()
 
 		// Create CA for TLS interception
@@ -227,13 +232,29 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		})
 		r.storeRef = &storeRef // Save reference to update later
 
+		// Configure network policy from agent.yaml
+		if opts.Config != nil {
+			p.SetNetworkPolicy(opts.Config.Network.Policy, opts.Config.Network.Allow, opts.Grants)
+		}
+
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
 
+		// Get proxy host address (needed for both proxy URL and firewall setup)
+		hostAddr := m.runtime.GetHostAddress()
+
+		// Store proxy details for firewall setup (applied after container starts)
+		if needsProxyForFirewall {
+			r.FirewallEnabled = true
+			r.ProxyHost = hostAddr
+			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
+			r.ProxyPort = proxyPortInt
+		}
+
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
-		proxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		proxyHost := hostAddr + ":" + proxyServer.Port()
 		var proxyURL string
 		if proxyAuthToken != "" {
 			// Include auth credentials in URL: http://agentops:token@host:port
@@ -357,54 +378,46 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Resolve container image based on dependencies
 	containerImage := image.Resolve(depList)
 
-	// Build image if we have dependencies (Docker only)
-	// Apple containers use install scripts instead
-	var installScript string
-	if len(depList) > 0 {
-		if m.runtime.Type() == container.RuntimeApple {
-			// For Apple containers, generate install script to run at container start
-			script, err := deps.GenerateInstallScript(depList)
+	// Build custom image if we have dependencies (Docker only)
+	// Apple containers don't support custom image builds; dependencies would need
+	// to be installed via install scripts at container start (not yet implemented).
+	if len(depList) > 0 && m.runtime.Type() == container.RuntimeDocker {
+		exists, err := m.runtime.ImageExists(ctx, containerImage)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("checking image: %w", err)
+		}
+
+		if !exists {
+			dockerfile, err := deps.GenerateDockerfile(depList)
 			if err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
-				return nil, fmt.Errorf("generating install script: %w", err)
+				return nil, fmt.Errorf("generating Dockerfile: %w", err)
 			}
-			installScript = script
-		} else {
-			// For Docker, build a custom image with dependencies pre-installed
-			exists, err := m.runtime.ImageExists(ctx, containerImage)
-			if err != nil {
+
+			depNames := make([]string, len(depList))
+			for i, d := range depList {
+				depNames[i] = d.Name
+			}
+			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
-				return nil, fmt.Errorf("checking image: %w", err)
-			}
-
-			if !exists {
-				dockerfile, err := deps.GenerateDockerfile(depList)
-				if err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
-					return nil, fmt.Errorf("generating Dockerfile: %w", err)
-				}
-
-				depNames := make([]string, len(depList))
-				for i, d := range depList {
-					depNames[i] = d.Name
-				}
-				if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
-					return nil, fmt.Errorf("building image with dependencies [%s]: %w",
-						strings.Join(depNames, ", "), err)
-				}
+				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
+					strings.Join(depNames, ", "), err)
 			}
 		}
 	}
-	_ = installScript // TODO: pass to container config when Apple container support is complete
+
+	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
+	var capAdd []string
+	if r.FirewallEnabled {
+		capAdd = []string{"NET_ADMIN"}
+	}
 
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
@@ -417,6 +430,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		NetworkMode:  networkMode,
 		Mounts:       mounts,
 		PortBindings: portBindings,
+		CapAdd:       capAdd,
 	})
 	if err != nil {
 		// Clean up proxy server if container creation fails
@@ -498,6 +512,20 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 		r.Error = err.Error()
 		m.mu.Unlock()
 		return err
+	}
+
+	// Set up firewall if enabled (strict network policy)
+	// This blocks all outbound traffic except to the proxy
+	if r.FirewallEnabled && r.ProxyPort > 0 {
+		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+			// Firewall setup failed - this is fatal for strict policy since the user
+			// explicitly requested network isolation. Without iptables, only proxy-level
+			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
+			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+			}
+			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
+		}
 	}
 
 	// Get actual port bindings after container starts
