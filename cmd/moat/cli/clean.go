@@ -8,8 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/run"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +20,7 @@ var (
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Remove stopped runs and unused images",
-	Long: `Interactively remove stopped runs and unused agentops images.
+	Long: `Interactively remove stopped runs and unused moat images.
 
 Shows what will be removed and asks for confirmation before proceeding.
 Use --force to skip confirmation (for scripts).
@@ -64,7 +64,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find unused images (images not used by any running container)
-	// For now, we consider all agentops images as candidates for cleanup.
+	// For now, we consider all moat images as candidates for cleanup.
 	// A more sophisticated approach would track which images are in use,
 	// but this is complex: we'd need to inspect each container's image tag.
 	images, err := rt.ListImages(ctx)
