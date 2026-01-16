@@ -101,9 +101,11 @@ func (r *SSMResolver) parseAWSError(stderr []byte, reference, paramPath string) 
 
 	// Parameter not found
 	if strings.Contains(msg, "ParameterNotFound") {
-		return &NotFoundError{
-			Reference: reference,
+		return &BackendError{
 			Backend:   "AWS SSM",
+			Reference: reference,
+			Reason:    "parameter not found",
+			Fix:       "Create it with:\n  aws ssm put-parameter --name \"" + paramPath + "\" --value \"your-value\" --type SecureString\n\nOr list existing parameters:\n  aws ssm describe-parameters --query 'Parameters[].Name'",
 		}
 	}
 

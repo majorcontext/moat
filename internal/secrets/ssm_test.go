@@ -80,12 +80,15 @@ func TestSSMResolver_ParseAWSError_ParameterNotFound(t *testing.T) {
 	stderr := []byte("An error occurred (ParameterNotFound) when calling the GetParameter operation")
 	err := r.parseAWSError(stderr, ref, "/test/param")
 
-	var notFound *NotFoundError
-	if !errors.As(err, &notFound) {
-		t.Fatalf("expected NotFoundError, got %T: %v", err, err)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T: %v", err, err)
 	}
-	if notFound.Backend != "AWS SSM" {
-		t.Errorf("expected backend 'AWS SSM', got %q", notFound.Backend)
+	if !strings.Contains(backendErr.Reason, "not found") {
+		t.Errorf("expected reason to contain 'not found', got %q", backendErr.Reason)
+	}
+	if !strings.Contains(backendErr.Fix, "aws ssm put-parameter") {
+		t.Errorf("expected fix to show how to create parameter, got %q", backendErr.Fix)
 	}
 }
 
