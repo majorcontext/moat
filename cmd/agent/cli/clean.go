@@ -177,8 +177,17 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// Remove unused images
+	// Re-check each image before removal to handle race condition where
+	// a container might have started using the image since we listed them.
 	for _, img := range unusedImages {
 		fmt.Printf("Removing image %s... ", img.Tag)
+
+		// Re-check if image is now in use
+		if isImageInUse(ctx, rt, img.ID, img.Tag) {
+			fmt.Println("skipped (now in use)")
+			continue
+		}
+
 		if err := rt.RemoveImage(ctx, img.ID); err != nil {
 			fmt.Printf("error: %v\n", err)
 			failedCount++
@@ -195,4 +204,20 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
 	}
 	return nil
+}
+
+// isImageInUse checks if an image is currently being used by any running container.
+// This is used to prevent race conditions during image cleanup.
+func isImageInUse(ctx context.Context, rt container.Runtime, imageID, imageTag string) bool {
+	containers, err := rt.ListContainers(ctx)
+	if err != nil {
+		// If we can't list containers, err on the side of caution
+		return true
+	}
+	for _, c := range containers {
+		if c.Status == "running" && (c.Image == imageTag || c.Image == imageID) {
+			return true
+		}
+	}
+	return false
 }

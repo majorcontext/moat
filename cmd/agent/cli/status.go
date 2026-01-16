@@ -82,12 +82,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing images: %w", err)
 	}
 
-	// Calculate disk usage per run
+	// Calculate disk usage per run (with timeout to prevent blocking on slow disks)
 	runDiskUsage := make(map[string]int64)
 	baseDir := storage.DefaultBaseDir()
 	for _, r := range runs {
 		runDir := filepath.Join(baseDir, r.ID)
-		size := getDirSize(runDir)
+		size := getDirSizeWithTimeout(runDir, 2*time.Second)
 		runDiskUsage[r.ID] = size
 	}
 
@@ -101,7 +101,13 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	var stoppedDisk int64
 	for _, r := range runs {
 		age := formatAge(r.CreatedAt)
-		diskMB := runDiskUsage[r.ID] / (1024 * 1024)
+		size := runDiskUsage[r.ID]
+		var diskMB int64
+		if size >= 0 {
+			diskMB = size / (1024 * 1024)
+		} else {
+			diskMB = -1 // Indicates timeout/unknown
+		}
 		output.Runs = append(output.Runs, runInfo{
 			Name:   r.Name,
 			ID:     r.ID,
@@ -113,7 +119,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			runningCount++
 		} else {
 			stoppedCount++
-			stoppedDisk += runDiskUsage[r.ID]
+			if size >= 0 {
+				stoppedDisk += size
+			}
 		}
 	}
 	stoppedDiskMB := stoppedDisk / (1024 * 1024)
@@ -206,7 +214,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	output.TotalDisk = totalImageSize
 	for _, size := range runDiskUsage {
-		output.TotalDisk += size
+		if size >= 0 {
+			output.TotalDisk += size
+		}
 	}
 
 	// Output
@@ -225,8 +235,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  NAME\tRUN ID\tSTATE\tAGE\tDISK")
 		for _, r := range output.Runs {
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%d MB\n",
-				r.Name, r.ID, r.State, r.Age, r.DiskMB)
+			diskStr := fmt.Sprintf("%d MB", r.DiskMB)
+			if r.DiskMB < 0 {
+				diskStr = "?"
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
+				r.Name, r.ID, r.State, r.Age, diskStr)
 		}
 		w.Flush()
 	}
@@ -275,6 +289,22 @@ func formatAge(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+// getDirSizeWithTimeout calculates directory size with a timeout to prevent
+// blocking on slow filesystems. Returns -1 if the operation times out.
+func getDirSizeWithTimeout(path string, timeout time.Duration) int64 {
+	result := make(chan int64, 1)
+	go func() {
+		result <- getDirSize(path)
+	}()
+
+	select {
+	case size := <-result:
+		return size
+	case <-time.After(timeout):
+		return -1
+	}
 }
 
 func getDirSize(path string) int64 {
