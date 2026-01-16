@@ -50,7 +50,6 @@ type imageInfo struct {
 	Tag     string `json:"tag"`
 	Created string `json:"created"`
 	SizeMB  int64  `json:"size_mb"`
-	UsedBy  string `json:"used_by"`
 }
 
 type healthItem struct {
@@ -117,6 +116,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			stoppedDisk += runDiskUsage[r.ID]
 		}
 	}
+	stoppedDiskMB := stoppedDisk / (1024 * 1024)
 
 	// Images section
 	var totalImageSize int64
@@ -134,32 +134,37 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	if stoppedCount > 0 {
 		output.Health = append(output.Health, healthItem{
 			Status:  "warning",
-			Message: fmt.Sprintf("%d stopped runs can be cleaned (%d MB)", stoppedCount, stoppedDisk/(1024*1024)),
+			Message: fmt.Sprintf("%d stopped runs can be cleaned (%d MB)", stoppedCount, stoppedDiskMB),
 		})
 	}
 
 	// Check for orphaned containers
-	containers, _ := rt.ListContainers(ctx)
-	knownRunIDs := make(map[string]bool)
-	for _, r := range runs {
-		knownRunIDs[r.ID] = true
-	}
-	orphanedCount := 0
-	for _, c := range containers {
-		if !knownRunIDs[c.Name] {
-			orphanedCount++
-		}
-	}
-	if orphanedCount > 0 {
-		output.Health = append(output.Health, healthItem{
-			Status:  "warning",
-			Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
-		})
+	containers, err := rt.ListContainers(ctx)
+	if err != nil {
+		// Log warning but don't fail - this is just a health check
+		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", err)
 	} else {
-		output.Health = append(output.Health, healthItem{
-			Status:  "ok",
-			Message: "No orphaned containers",
-		})
+		knownRunIDs := make(map[string]bool)
+		for _, r := range runs {
+			knownRunIDs[r.ID] = true
+		}
+		orphanedCount := 0
+		for _, c := range containers {
+			if !knownRunIDs[c.Name] {
+				orphanedCount++
+			}
+		}
+		if orphanedCount > 0 {
+			output.Health = append(output.Health, healthItem{
+				Status:  "warning",
+				Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
+			})
+		} else {
+			output.Health = append(output.Health, healthItem{
+				Status:  "ok",
+				Message: "No orphaned containers",
+			})
+		}
 	}
 
 	output.TotalDisk = totalImageSize
