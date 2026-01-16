@@ -138,11 +138,20 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Build a tag-to-ID mapping so we can track images by both identifiers
+	tagToID := make(map[string]string)
+	for _, img := range images {
+		tagToID[img.Tag] = img.ID
+	}
+
 	// Check for orphaned containers and unused images
 	containers, err := rt.ListContainers(ctx)
 	if err != nil {
-		// Log warning but don't fail - this is just a health check
-		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", err)
+		// Add health warning so users know container checks are incomplete
+		output.Health = append(output.Health, healthItem{
+			Status:  "warning",
+			Message: fmt.Sprintf("Failed to list containers: %v", err),
+		})
 	} else {
 		knownRunIDs := make(map[string]bool)
 		runningImages := make(map[string]bool)
@@ -156,6 +165,10 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			}
 			if c.Status == "running" {
 				runningImages[c.Image] = true
+				// Also mark the image ID as in-use if we can resolve it
+				if id, ok := tagToID[c.Image]; ok {
+					runningImages[id] = true
+				}
 			}
 		}
 		if orphanedCount > 0 {
@@ -171,10 +184,10 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for unused images (not used by any running container)
-		// Only check by tag: containers report image tags, not IDs
+		// Check both tag and ID since an image might be referenced either way
 		unusedImageCount := 0
 		for _, img := range images {
-			if !runningImages[img.Tag] {
+			if !runningImages[img.Tag] && !runningImages[img.ID] {
 				unusedImageCount++
 			}
 		}

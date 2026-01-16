@@ -72,13 +72,26 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing images: %w", err)
 	}
 
-	// Filter out images that might be in use by running containers
+	// Build a tag-to-ID mapping so we can track images by both identifiers.
+	// This handles cases where the same image ID has multiple tags.
+	tagToID := make(map[string]string)
+	for _, img := range images {
+		tagToID[img.Tag] = img.ID
+	}
+
+	// Filter out images that might be in use by running containers.
+	// Track both tags and IDs since containers report tags but we need
+	// to match against image IDs for correctness.
 	containers, containerErr := rt.ListContainers(ctx)
 	runningImages := make(map[string]bool)
 	if containerErr == nil {
 		for _, c := range containers {
 			if c.Status == "running" {
 				runningImages[c.Image] = true
+				// Also mark the image ID as in-use if we can resolve it
+				if id, ok := tagToID[c.Image]; ok {
+					runningImages[id] = true
+				}
 			}
 		}
 	} else {
@@ -89,8 +102,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	var unusedImages []container.ImageInfo
 	for _, img := range images {
-		// Only check by tag: containers report image tags, not IDs
-		if !runningImages[img.Tag] {
+		// Check both tag and ID since an image might be referenced either way
+		if !runningImages[img.Tag] && !runningImages[img.ID] {
 			unusedImages = append(unusedImages, img)
 		}
 	}
