@@ -30,7 +30,8 @@ go build -o agent ./cmd/agent
 - **Linux:** Docker
 
 **Optional dependencies:**
-- **1Password CLI** - Required for secrets injection from 1Password (`brew install 1password-cli`)
+- **1Password CLI** - Required for 1Password secrets (`brew install 1password-cli`)
+- **AWS CLI** - Required for AWS SSM secrets (`brew install awscli`)
 
 ## Setup
 
@@ -598,13 +599,38 @@ secrets:
 
 The format is `op://vault/item/field`. When you run `agent run`, AgentOps resolves each secret reference and injects the value as an environment variable.
 
+**AWS SSM Parameter Store Setup:**
+
+```bash
+# Install the AWS CLI
+brew install awscli
+
+# Configure credentials (choose one method)
+aws configure                    # Interactive setup
+aws sso login                    # SSO authentication
+# Or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
+```
+
+**Configure secrets in agent.yaml:**
+
+```yaml
+secrets:
+  DATABASE_URL: ssm:///production/database/url
+  API_KEY: ssm:///production/myapp/api-key
+  # Cross-region secret:
+  REDIS_URL: ssm://us-east-1/production/redis/url
+```
+
+The format is `ssm:///parameter/path` or `ssm://region/parameter/path` for cross-region access. SecureString parameters are automatically decrypted.
+
 **Supported backends:**
 
 | Backend | URI Scheme | Required CLI |
 |---------|------------|--------------|
 | 1Password | `op://vault/item/field` | `op` (`brew install 1password-cli`) |
+| AWS SSM | `ssm:///parameter/path` | `aws` (`brew install awscli`) |
 
-More backends (AWS SSM, HashiCorp Vault) are planned.
+More backends (HashiCorp Vault) are planned.
 
 **Security considerations:**
 

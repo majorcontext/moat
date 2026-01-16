@@ -58,3 +58,44 @@ func TestOnePasswordResolver_Integration(t *testing.T) {
 
 	t.Logf("Successfully resolved secret (length: %d)", len(val))
 }
+
+func TestSSMResolver_Integration(t *testing.T) {
+	// Skip if aws CLI not available
+	if _, err := exec.LookPath("aws"); err != nil {
+		t.Skip("aws CLI not installed, skipping integration test")
+	}
+
+	// Skip if not authenticated (check with aws sts get-caller-identity)
+	cmd := exec.Command("aws", "sts", "get-caller-identity")
+	if err := cmd.Run(); err != nil {
+		t.Skip("not authenticated to AWS, skipping integration test")
+	}
+
+	// Configure via environment variables:
+	//   SSM_TEST_PARAM - parameter path (default: "/agentops/test/secret")
+	//   SSM_TEST_REGION - AWS region (optional)
+	paramPath := os.Getenv("SSM_TEST_PARAM")
+	if paramPath == "" {
+		paramPath = "/agentops/test/secret"
+	}
+
+	testRef := "ssm://" + paramPath
+	if region := os.Getenv("SSM_TEST_REGION"); region != "" {
+		testRef = "ssm://" + region + paramPath
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resolver := &SSMResolver{}
+	val, err := resolver.Resolve(ctx, testRef)
+	if err != nil {
+		t.Fatalf("failed to resolve %s: %v", testRef, err)
+	}
+
+	if val == "" {
+		t.Error("resolved value is empty")
+	}
+
+	t.Logf("Successfully resolved secret (length: %d)", len(val))
+}

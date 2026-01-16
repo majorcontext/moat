@@ -1,0 +1,32 @@
+# Example: Secrets injection from AWS SSM Parameter Store
+#
+# This example demonstrates injecting secrets from AWS SSM Parameter Store
+# into the container environment. The agent receives the secret value as an
+# environment variable without ever seeing the SSM reference.
+#
+# Prerequisites:
+#   1. Install AWS CLI: brew install awscli
+#   2. Configure credentials: aws configure (or aws sso login)
+#   3. Create a test parameter (if it doesn't exist):
+#      aws ssm put-parameter --name "/myapp/test-secret" --value "my-test-value" --type SecureString
+#
+# Run with:
+#   agent run examples/secrets-ssm -- sh -c 'echo Your secret: $TEST_SECRET'
+#
+# Note: Use single quotes to prevent your shell from expanding $TEST_SECRET
+# before it reaches the container.
+#
+# The container will have TEST_SECRET set to the value from SSM.
+
+name: secrets-ssm-demo
+
+dependencies:
+  - node@20
+
+secrets:
+  TEST_SECRET: ssm:///myapp/test-secret
+  # Cross-region secret example (uncomment to use):
+  # OTHER_SECRET: ssm://us-east-1/myapp/other-secret
+
+env:
+  NODE_ENV: production
