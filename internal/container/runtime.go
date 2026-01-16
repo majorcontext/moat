@@ -5,6 +5,7 @@ package container
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // RuntimeType identifies the container runtime being used.
@@ -75,6 +76,15 @@ type Runtime interface {
 	// proxyPort is the proxy's port number.
 	// This blocks all other outbound traffic, forcing everything through the proxy.
 	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error
+
+	// ListImages returns all agentops-managed images.
+	ListImages(ctx context.Context) ([]ImageInfo, error)
+
+	// ListContainers returns all agentops containers (running + stopped).
+	ListContainers(ctx context.Context) ([]ContainerInfo, error)
+
+	// RemoveImage removes an image by ID or tag.
+	RemoveImage(ctx context.Context, id string) error
 }
 
 // Config holds configuration for creating a container.
@@ -96,4 +106,21 @@ type MountConfig struct {
 	Source   string
 	Target   string
 	ReadOnly bool
+}
+
+// ImageInfo contains information about a container image.
+type ImageInfo struct {
+	ID      string
+	Tag     string
+	Size    int64
+	Created time.Time
+}
+
+// ContainerInfo contains information about a container.
+type ContainerInfo struct {
+	ID      string
+	Name    string
+	Image   string
+	Status  string // "running", "exited", "created"
+	Created time.Time
 }
