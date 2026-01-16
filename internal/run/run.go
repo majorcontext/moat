@@ -57,6 +57,7 @@ type Options struct {
 	Cmd       []string       // Command to run (default: /bin/bash)
 	Config    *config.Config // Optional agent.yaml config
 	Env       []string       // Additional environment variables (KEY=VALUE)
+	Rebuild   bool           // Force rebuild of container image (ignores cache)
 }
 
 // generateID creates a unique run identifier.

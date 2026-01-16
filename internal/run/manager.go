@@ -404,6 +404,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Resolve container image based on dependencies
 	containerImage := image.Resolve(depList)
 
+	// Handle --rebuild: delete existing image to force fresh build
+	if opts.Rebuild && len(depList) > 0 && m.runtime.Type() == container.RuntimeDocker {
+		exists, _ := m.runtime.ImageExists(ctx, containerImage)
+		if exists {
+			fmt.Printf("Removing cached image %s...\n", containerImage)
+			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
+			}
+		}
+	}
+
 	// Build custom image if we have dependencies (Docker only)
 	// Apple containers don't support custom image builds; dependencies would need
 	// to be installed via install scripts at container start (not yet implemented).
