@@ -92,13 +92,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	r := &Run{
-		ID:        generateID(),
-		Name:      agentName,
-		Workspace: opts.Workspace,
-		Grants:    opts.Grants,
-		Ports:     ports,
-		State:     StateCreated,
-		CreatedAt: time.Now(),
+		ID:            generateID(),
+		Name:          agentName,
+		Workspace:     opts.Workspace,
+		Grants:        opts.Grants,
+		Ports:         ports,
+		State:         StateCreated,
+		KeepContainer: opts.KeepContainer,
+		CreatedAt:     time.Now(),
 	}
 
 	// Default command
@@ -688,7 +689,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	m.mu.Lock()
 	r.State = StateStopped
 	r.StoppedAt = time.Now()
+	keepContainer := r.KeepContainer
+	containerID := r.ContainerID
 	m.mu.Unlock()
+
+	// Auto-remove container unless --keep was specified
+	if !keepContainer {
+		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+		}
+	}
 
 	return nil
 }
@@ -750,7 +760,16 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if err != nil {
 			r.Error = err.Error()
 		}
+		keepContainer := r.KeepContainer
 		m.mu.Unlock()
+
+		// Auto-remove container unless --keep was specified
+		if !keepContainer {
+			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+			}
+		}
+
 		return err
 	case <-ctx.Done():
 		return m.Stop(context.Background(), runID)
