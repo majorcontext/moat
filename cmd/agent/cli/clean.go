@@ -74,18 +74,23 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	// Filter out images that might be in use by running containers
 	containers, containerErr := rt.ListContainers(ctx)
-	runningImageTags := make(map[string]bool)
+	runningImages := make(map[string]bool)
 	if containerErr == nil {
 		for _, c := range containers {
 			if c.Status == "running" {
-				runningImageTags[c.Image] = true
+				runningImages[c.Image] = true
 			}
 		}
+	} else {
+		// Log the error so users know why we might not detect in-use images
+		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", containerErr)
+		fmt.Fprintf(os.Stderr, "Proceeding with image cleanup but cannot verify images are unused\n")
 	}
 
 	var unusedImages []container.ImageInfo
 	for _, img := range images {
-		if !runningImageTags[img.Tag] {
+		// Check both tag and ID since containers might report either
+		if !runningImages[img.Tag] && !runningImages[img.ID] {
 			unusedImages = append(unusedImages, img)
 		}
 	}

@@ -145,7 +145,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", err)
 	} else {
 		knownRunIDs := make(map[string]bool)
-		runningImageTags := make(map[string]bool)
+		runningImages := make(map[string]bool)
 		for _, r := range runs {
 			knownRunIDs[r.ID] = true
 		}
@@ -155,7 +155,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 				orphanedCount++
 			}
 			if c.Status == "running" {
-				runningImageTags[c.Image] = true
+				runningImages[c.Image] = true
 			}
 		}
 		if orphanedCount > 0 {
@@ -171,9 +171,10 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for unused images (not used by any running container)
+		// Check both tag and ID since containers might report either
 		unusedImageCount := 0
 		for _, img := range images {
-			if !runningImageTags[img.Tag] {
+			if !runningImages[img.Tag] && !runningImages[img.ID] {
 				unusedImageCount++
 			}
 		}
