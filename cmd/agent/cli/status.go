@@ -138,13 +138,14 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Check for orphaned containers
+	// Check for orphaned containers and unused images
 	containers, err := rt.ListContainers(ctx)
 	if err != nil {
 		// Log warning but don't fail - this is just a health check
 		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", err)
 	} else {
 		knownRunIDs := make(map[string]bool)
+		runningImageTags := make(map[string]bool)
 		for _, r := range runs {
 			knownRunIDs[r.ID] = true
 		}
@@ -152,6 +153,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		for _, c := range containers {
 			if !knownRunIDs[c.Name] {
 				orphanedCount++
+			}
+			if c.Status == "running" {
+				runningImageTags[c.Image] = true
 			}
 		}
 		if orphanedCount > 0 {
@@ -163,6 +167,25 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			output.Health = append(output.Health, healthItem{
 				Status:  "ok",
 				Message: "No orphaned containers",
+			})
+		}
+
+		// Check for unused images (not used by any running container)
+		unusedImageCount := 0
+		for _, img := range images {
+			if !runningImageTags[img.Tag] {
+				unusedImageCount++
+			}
+		}
+		if unusedImageCount > 0 {
+			output.Health = append(output.Health, healthItem{
+				Status:  "warning",
+				Message: fmt.Sprintf("%d unused images can be cleaned", unusedImageCount),
+			})
+		} else if len(images) > 0 {
+			output.Health = append(output.Health, healthItem{
+				Status:  "ok",
+				Message: "No unused images",
 			})
 		}
 	}

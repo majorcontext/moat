@@ -57,25 +57,35 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	// Find stopped runs
 	var stoppedRuns []*run.Run
-	runningImages := make(map[string]bool)
 	for _, r := range runs {
-		if r.State == run.StateRunning {
-			// Track images used by running containers
-			// TODO: get actual image tag from container
-		} else if r.State == run.StateStopped {
+		if r.State == run.StateStopped {
 			stoppedRuns = append(stoppedRuns, r)
 		}
 	}
 
-	// Find unused images
+	// Find unused images (images not used by any running container)
+	// For now, we consider all agentops images as candidates for cleanup.
+	// A more sophisticated approach would track which images are in use,
+	// but this is complex: we'd need to inspect each container's image tag.
 	images, err := rt.ListImages(ctx)
 	if err != nil {
 		return fmt.Errorf("listing images: %w", err)
 	}
 
+	// Filter out images that might be in use by running containers
+	containers, containerErr := rt.ListContainers(ctx)
+	runningImageTags := make(map[string]bool)
+	if containerErr == nil {
+		for _, c := range containers {
+			if c.Status == "running" {
+				runningImageTags[c.Image] = true
+			}
+		}
+	}
+
 	var unusedImages []container.ImageInfo
 	for _, img := range images {
-		if !runningImages[img.Tag] {
+		if !runningImageTags[img.Tag] {
 			unusedImages = append(unusedImages, img)
 		}
 	}
@@ -136,11 +146,12 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	// Remove stopped runs
 	var freedSize int64
-	var removedCount int
+	var removedCount, failedCount int
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
 		if err := manager.Destroy(ctx, r.ID); err != nil {
 			fmt.Printf("error: %v\n", err)
+			failedCount++
 			continue
 		}
 		fmt.Println("done")
@@ -152,6 +163,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Removing image %s... ", img.Tag)
 		if err := rt.RemoveImage(ctx, img.ID); err != nil {
 			fmt.Printf("error: %v\n", err)
+			failedCount++
 			continue
 		}
 		fmt.Println("done")
@@ -159,6 +171,10 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		freedSize += img.Size
 	}
 
-	fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
+	if failedCount > 0 {
+		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed)\n", removedCount, freedSize/(1024*1024), failedCount)
+	} else {
+		fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
+	}
 	return nil
 }
