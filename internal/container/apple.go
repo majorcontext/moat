@@ -432,6 +432,119 @@ func (c *combinedReadCloser) Close() error {
 	return c.cmd.Wait()
 }
 
+// ListImages returns all agentops-managed images.
+func (r *AppleRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "list", "--format", "json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing images: %w", err)
+	}
+
+	var images []struct {
+		ID      string `json:"id"`
+		Tag     string `json:"tag"`
+		Size    int64  `json:"size"`
+		Created string `json:"created"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &images); err != nil {
+		// Try line-by-line JSON if array parse fails
+		return r.parseImageLines(stdout.Bytes())
+	}
+
+	var result []ImageInfo
+	for _, img := range images {
+		if strings.HasPrefix(img.Tag, "agentops/") {
+			created, _ := time.Parse(time.RFC3339, img.Created)
+			result = append(result, ImageInfo{
+				ID:      img.ID,
+				Tag:     img.Tag,
+				Size:    img.Size,
+				Created: created,
+			})
+		}
+	}
+	return result, nil
+}
+
+func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
+	var result []ImageInfo
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var img struct {
+			ID      string `json:"id"`
+			Tag     string `json:"tag"`
+			Size    int64  `json:"size"`
+			Created string `json:"created"`
+		}
+		if err := json.Unmarshal(line, &img); err != nil {
+			continue
+		}
+		if strings.HasPrefix(img.Tag, "agentops/") {
+			created, _ := time.Parse(time.RFC3339, img.Created)
+			result = append(result, ImageInfo{
+				ID:      img.ID,
+				Tag:     img.Tag,
+				Size:    img.Size,
+				Created: created,
+			})
+		}
+	}
+	return result, nil
+}
+
+// ListContainers returns all agentops containers.
+func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
+	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--all", "--format", "json")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing containers: %w", err)
+	}
+
+	var containers []struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Image   string `json:"image"`
+		Status  string `json:"status"`
+		Created string `json:"created"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &containers); err != nil {
+		return nil, fmt.Errorf("parsing container list: %w", err)
+	}
+
+	var result []Info
+	for _, c := range containers {
+		if isRunID(c.Name) {
+			created, _ := time.Parse(time.RFC3339, c.Created)
+			result = append(result, Info{
+				ID:      c.ID,
+				Name:    c.Name,
+				Image:   c.Image,
+				Status:  c.Status,
+				Created: created,
+			})
+		}
+	}
+	return result, nil
+}
+
+// RemoveImage removes an image by ID or tag.
+func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "rm", "--force", id)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("removing image %s: %w: %s", id, err, stderr.String())
+	}
+	return nil
+}
+
 // BuildRunArgs is exported for testing.
 func BuildRunArgs(cfg Config) []string {
 	r := &AppleRuntime{}

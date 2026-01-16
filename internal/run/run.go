@@ -26,22 +26,23 @@ const (
 
 // Run represents an agent execution environment.
 type Run struct {
-	ID          string
-	Name        string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
-	Workspace   string
-	Grants      []string
-	Ports       map[string]int // service name -> container port
-	HostPorts   map[string]int // service name -> host port (after binding)
-	State       State
-	ContainerID string
-	ProxyServer *proxy.Server     // Auth proxy for credential injection
-	Store       *storage.RunStore // Run data storage
-	storeRef    *atomic.Value     // Atomic reference for concurrent logger access
-	AuditStore  *audit.Store      // Tamper-proof audit log
-	CreatedAt   time.Time
-	StartedAt   time.Time
-	StoppedAt   time.Time
-	Error       string
+	ID            string
+	Name          string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
+	Workspace     string
+	Grants        []string
+	Ports         map[string]int // service name -> container port
+	HostPorts     map[string]int // service name -> host port (after binding)
+	State         State
+	ContainerID   string
+	ProxyServer   *proxy.Server     // Auth proxy for credential injection
+	Store         *storage.RunStore // Run data storage
+	storeRef      *atomic.Value     // Atomic reference for concurrent logger access
+	AuditStore    *audit.Store      // Tamper-proof audit log
+	KeepContainer bool              // If true, don't auto-remove container after run
+	CreatedAt     time.Time
+	StartedAt     time.Time
+	StoppedAt     time.Time
+	Error         string
 
 	// Firewall settings (set when network.policy is strict)
 	FirewallEnabled bool
@@ -51,12 +52,14 @@ type Run struct {
 
 // Options configures a new run.
 type Options struct {
-	Name      string // Optional explicit name (--name flag or from config)
-	Workspace string
-	Grants    []string
-	Cmd       []string       // Command to run (default: /bin/bash)
-	Config    *config.Config // Optional agent.yaml config
-	Env       []string       // Additional environment variables (KEY=VALUE)
+	Name          string // Optional explicit name (--name flag or from config)
+	Workspace     string
+	Grants        []string
+	Cmd           []string       // Command to run (default: /bin/bash)
+	Config        *config.Config // Optional agent.yaml config
+	Env           []string       // Additional environment variables (KEY=VALUE)
+	Rebuild       bool           // Force rebuild of container image (ignores cache)
+	KeepContainer bool           // If true, don't auto-remove container after run
 }
 
 // generateID creates a unique run identifier.

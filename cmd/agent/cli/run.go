@@ -15,9 +15,11 @@ import (
 )
 
 var (
-	grants   []string
-	runEnv   []string
-	nameFlag string
+	grants        []string
+	runEnv        []string
+	nameFlag      string
+	rebuildFlag   bool
+	keepContainer bool
 )
 
 var runCmd = &cobra.Command{
@@ -63,6 +65,8 @@ func init() {
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
 	runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from agent.yaml or random)")
+	runCmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "force rebuild of container image (Docker only, ignored for Apple containers)")
+	runCmd.Flags().BoolVar(&keepContainer, "keep", false, "keep container after run completes (for debugging)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -156,12 +160,14 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	defer manager.Close()
 
 	opts := run.Options{
-		Name:      agentInstanceName,
-		Workspace: absPath,
-		Grants:    grants,
-		Cmd:       containerCmd,
-		Config:    cfg,
-		Env:       runEnv,
+		Name:          agentInstanceName,
+		Workspace:     absPath,
+		Grants:        grants,
+		Cmd:           containerCmd,
+		Config:        cfg,
+		Env:           runEnv,
+		Rebuild:       rebuildFlag,
+		KeepContainer: keepContainer,
 	}
 
 	// Create run

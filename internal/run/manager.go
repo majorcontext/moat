@@ -92,13 +92,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	r := &Run{
-		ID:        generateID(),
-		Name:      agentName,
-		Workspace: opts.Workspace,
-		Grants:    opts.Grants,
-		Ports:     ports,
-		State:     StateCreated,
-		CreatedAt: time.Now(),
+		ID:            generateID(),
+		Name:          agentName,
+		Workspace:     opts.Workspace,
+		Grants:        opts.Grants,
+		Ports:         ports,
+		State:         StateCreated,
+		KeepContainer: opts.KeepContainer,
+		CreatedAt:     time.Now(),
 	}
 
 	// Default command
@@ -404,6 +405,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Resolve container image based on dependencies
 	containerImage := image.Resolve(depList)
 
+	// Handle --rebuild: delete existing image to force fresh build (Docker only)
+	if opts.Rebuild {
+		if m.runtime.Type() != container.RuntimeDocker {
+			fmt.Fprintf(os.Stderr, "Note: --rebuild is ignored for %s runtime (no custom image builds)\n", m.runtime.Type())
+		} else if len(depList) > 0 {
+			exists, _ := m.runtime.ImageExists(ctx, containerImage)
+			if exists {
+				fmt.Printf("Removing cached image %s...\n", containerImage)
+				if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
+				}
+			}
+		}
+	}
+
 	// Build custom image if we have dependencies (Docker only)
 	// Apple containers don't support custom image builds; dependencies would need
 	// to be installed via install scripts at container start (not yet implemented).
@@ -677,7 +693,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	m.mu.Lock()
 	r.State = StateStopped
 	r.StoppedAt = time.Now()
+	keepContainer := r.KeepContainer
+	containerID := r.ContainerID
 	m.mu.Unlock()
+
+	// Auto-remove container unless --keep was specified
+	if !keepContainer {
+		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+		}
+	}
 
 	return nil
 }
@@ -739,7 +764,16 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if err != nil {
 			r.Error = err.Error()
 		}
+		keepContainer := r.KeepContainer
 		m.mu.Unlock()
+
+		// Auto-remove container unless --keep was specified
+		if !keepContainer {
+			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+			}
+		}
+
 		return err
 	case <-ctx.Done():
 		return m.Stop(context.Background(), runID)
