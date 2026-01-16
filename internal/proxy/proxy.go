@@ -307,7 +307,11 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		statusCode = resp.StatusCode
 	}
 
-	p.logRequest(r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, cred.Name)
+	logCredHeaderName := ""
+	if authInjected {
+		logCredHeaderName = cred.Name
+	}
+	p.logRequest(r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -451,7 +455,11 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			statusCode = resp.StatusCode
 		}
 
-		p.logRequest(req.Method, req.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, cred.Name)
+		logCredHeaderName := ""
+		if authInjected {
+			logCredHeaderName = cred.Name
+		}
+		p.logRequest(req.Method, req.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
 
 		if err != nil {
 			errResp := &http.Response{

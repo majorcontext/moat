@@ -13,7 +13,7 @@ def fibonacci(n: int) -> int:
     """
     if n <= 1:
         return n
-    # Bug: should be n-2, not n-3
+    # Bug: should be n-2, not n-3 (causes incorrect results, e.g. F(5)=3 instead of 5)
     return fibonacci(n - 1) + fibonacci(n - 3)
 
 
