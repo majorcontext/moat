@@ -20,6 +20,7 @@ code, dependencies, tools, credentials, and observability.
 
 Core promise: agent run my-agent . just works — zero Docker knowledge,
 zero secret copying, full visibility.`,
+	SilenceUsage: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		log.Init(verbose, jsonOut)
 	},
