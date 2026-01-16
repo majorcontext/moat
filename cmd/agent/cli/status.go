@@ -171,10 +171,10 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for unused images (not used by any running container)
-		// Check both tag and ID since containers might report either
+		// Only check by tag: containers report image tags, not IDs
 		unusedImageCount := 0
 		for _, img := range images {
-			if !runningImages[img.Tag] && !runningImages[img.ID] {
+			if !runningImages[img.Tag] {
 				unusedImageCount++
 			}
 		}

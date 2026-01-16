@@ -89,8 +89,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	var unusedImages []container.ImageInfo
 	for _, img := range images {
-		// Check both tag and ID since containers might report either
-		if !runningImages[img.Tag] && !runningImages[img.ID] {
+		// Only check by tag: containers report image tags, not IDs
+		if !runningImages[img.Tag] {
 			unusedImages = append(unusedImages, img)
 		}
 	}
