@@ -10,6 +10,8 @@ import (
 	"os"
 	goruntime "runtime"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
@@ -379,4 +381,86 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 	}
 
 	return nil
+}
+
+// ListImages returns all agentops-managed images.
+// Filters to images with "agentops/" prefix in any tag.
+func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
+	images, err := r.cli.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("listing images: %w", err)
+	}
+
+	var result []ImageInfo
+	for _, img := range images {
+		// Check if any tag has agentops/ prefix
+		for _, tag := range img.RepoTags {
+			if strings.HasPrefix(tag, "agentops/") {
+				result = append(result, ImageInfo{
+					ID:      img.ID,
+					Tag:     tag,
+					Size:    img.Size,
+					Created: time.Unix(img.Created, 0),
+				})
+				break // Only add once per image
+			}
+		}
+	}
+	return result, nil
+}
+
+// ListContainers returns all agentops containers.
+// Filters to containers whose name matches an 8-char hex run ID pattern.
+func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+		All: true, // Include stopped containers
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing containers: %w", err)
+	}
+
+	var result []ContainerInfo
+	for _, c := range containers {
+		// Check if any name looks like an agentops run ID (8 hex chars)
+		for _, name := range c.Names {
+			// Names have leading slash, e.g., "/a1b2c3d4"
+			name = strings.TrimPrefix(name, "/")
+			if isRunID(name) {
+				result = append(result, ContainerInfo{
+					ID:      c.ID[:12],
+					Name:    name,
+					Image:   c.Image,
+					Status:  c.State,
+					Created: time.Unix(c.Created, 0),
+				})
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+// RemoveImage removes an image by ID or tag.
+func (r *DockerRuntime) RemoveImage(ctx context.Context, id string) error {
+	_, err := r.cli.ImageRemove(ctx, id, image.RemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
+	if err != nil {
+		return fmt.Errorf("removing image %s: %w", id, err)
+	}
+	return nil
+}
+
+// isRunID checks if a string looks like an agentops run ID (8 hex chars).
+func isRunID(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
