@@ -246,6 +246,7 @@ The credential broker is the security core. Agents request scoped capabilitiesâ€
 moat grant github              # GitHub device flow
 moat grant github:repo         # Specific scope
 moat grant github:repo,user    # Multiple scopes
+moat grant aws --role=ARN      # AWS IAM role (see AWS credentials below)
 ```
 
 ### SSH Access
@@ -321,6 +322,34 @@ If you see decryption errors after upgrading Moat, your credentials may have bee
 ```bash
 moat grant github  # or other provider
 ```
+
+### AWS credentials
+
+AWS credentials use IAM role assumption with short-lived sessions:
+
+```bash
+# Grant access to an IAM role
+moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole
+
+# With custom options
+moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole \
+  --region=us-west-2 \
+  --session-duration=1h
+
+# Use in a run
+moat run --grant aws ./my-agent
+```
+
+**How it works:**
+- Your host AWS credentials assume the specified role at runtime
+- The agent receives short-lived credentials (15 minutes by default)
+- Credentials auto-refresh via AWS SDK's built-in mechanism
+- Your long-lived credentials never enter the container
+
+**Required IAM setup:**
+1. Create an IAM role with appropriate permissions for the agent
+2. Configure the role's trust policy to allow your IAM user/role to assume it
+3. Ensure you have `sts:AssumeRole` permission
 
 ## Secrets
 
