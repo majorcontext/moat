@@ -73,6 +73,18 @@ func TestSSMResolver_Scheme(t *testing.T) {
 	}
 }
 
+func TestSSMResolver_InvalidScheme(t *testing.T) {
+	r := &SSMResolver{}
+	_, err := r.Resolve(t.Context(), "op://vault/item/field")
+	if err == nil {
+		t.Fatal("expected error for invalid scheme")
+	}
+	var invalid *InvalidReferenceError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected InvalidReferenceError, got %T: %v", err, err)
+	}
+}
+
 func TestSSMResolver_ParseAWSError_ParameterNotFound(t *testing.T) {
 	r := &SSMResolver{}
 	ref := "ssm:///test/param"
@@ -162,6 +174,25 @@ func TestSSMResolver_ParseAWSError_EndpointError(t *testing.T) {
 	}
 	if !strings.Contains(backendErr.Reason, "could not connect") {
 		t.Errorf("expected reason to mention connection failure, got %q", backendErr.Reason)
+	}
+}
+
+func TestSSMResolver_ParseAWSError_KMSAccessDenied(t *testing.T) {
+	r := &SSMResolver{}
+	ref := "ssm:///test/param"
+
+	stderr := []byte("An error occurred (KMSAccessDenied) when calling the GetParameter operation: Access denied to KMS key")
+	err := r.parseAWSError(stderr, ref, "/test/param")
+
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T: %v", err, err)
+	}
+	if !strings.Contains(backendErr.Reason, "cannot decrypt") {
+		t.Errorf("expected reason to contain 'cannot decrypt', got %q", backendErr.Reason)
+	}
+	if !strings.Contains(backendErr.Fix, "kms:Decrypt") {
+		t.Errorf("expected fix to mention kms:Decrypt, got %q", backendErr.Fix)
 	}
 }
 

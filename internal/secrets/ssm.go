@@ -22,6 +22,14 @@ func (r *SSMResolver) Resolve(ctx context.Context, reference string) (string, er
 		return "", err
 	}
 
+	// Validate reference format (defense in depth - registry already checks scheme)
+	if !strings.HasPrefix(reference, "ssm://") {
+		return "", &InvalidReferenceError{
+			Reference: reference,
+			Reason:    "SSM references must start with ssm://",
+		}
+	}
+
 	// Check aws CLI is available
 	if _, err := exec.LookPath("aws"); err != nil {
 		return "", &BackendError{
@@ -116,6 +124,16 @@ func (r *SSMResolver) parseAWSError(stderr []byte, reference, paramPath string) 
 			Reference: reference,
 			Reason:    "access denied",
 			Fix:       "Check IAM permissions for ssm:GetParameter on " + paramPath,
+		}
+	}
+
+	// KMS decryption denied (for SecureString parameters)
+	if strings.Contains(msg, "KMS") && (strings.Contains(msg, "AccessDenied") || strings.Contains(msg, "InvalidKeyId")) {
+		return &BackendError{
+			Backend:   "AWS SSM",
+			Reference: reference,
+			Reason:    "cannot decrypt SecureString parameter",
+			Fix:       "Check IAM permissions for kms:Decrypt on the key used to encrypt " + paramPath,
 		}
 	}
 

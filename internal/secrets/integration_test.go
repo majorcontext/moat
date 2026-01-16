@@ -72,11 +72,11 @@ func TestSSMResolver_Integration(t *testing.T) {
 	}
 
 	// Configure via environment variables:
-	//   SSM_TEST_PARAM - parameter path (default: "/agentops/test/secret")
+	//   SSM_TEST_PARAM - parameter path (default: "/myapp/test-secret")
 	//   SSM_TEST_REGION - AWS region (optional)
 	paramPath := os.Getenv("SSM_TEST_PARAM")
 	if paramPath == "" {
-		paramPath = "/agentops/test/secret"
+		paramPath = "/myapp/test-secret"
 	}
 
 	testRef := "ssm://" + paramPath
