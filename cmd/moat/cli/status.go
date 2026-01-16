@@ -9,16 +9,16 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/run"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/run"
+	"github.com/andybons/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show runs, images, disk usage, and health",
-	Long: `Display the current state of agentops resources including:
+	Long: `Display the current state of moat resources including:
 - Active and stopped runs
 - Cached container images
 - Disk usage
