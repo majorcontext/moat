@@ -1,0 +1,15 @@
+name: aws-example
+
+dependencies:
+  - python@3.11
+  - aws
+
+# Request AWS credentials
+grants:
+  - aws
+
+# Command to verify credentials work
+command:
+  - aws
+  - sts
+  - get-caller-identity
