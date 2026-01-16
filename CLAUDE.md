@@ -33,7 +33,7 @@ internal/
 
 **Credential Injection:** `agent grant github` → OAuth device flow → token stored encrypted → `agent run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
 
-**Image Selection:** `agent.yaml` runtime field → `image.Resolve()` → node:X / python:X / golang:X / ubuntu:22.04
+**Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X / python:X / golang:X / ubuntu:22.04
 
 **Observability:** Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
