@@ -405,13 +405,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Resolve container image based on dependencies
 	containerImage := image.Resolve(depList)
 
-	// Handle --rebuild: delete existing image to force fresh build
-	if opts.Rebuild && len(depList) > 0 && m.runtime.Type() == container.RuntimeDocker {
-		exists, _ := m.runtime.ImageExists(ctx, containerImage)
-		if exists {
-			fmt.Printf("Removing cached image %s...\n", containerImage)
-			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
+	// Handle --rebuild: delete existing image to force fresh build (Docker only)
+	if opts.Rebuild {
+		if m.runtime.Type() != container.RuntimeDocker {
+			fmt.Fprintf(os.Stderr, "Note: --rebuild is ignored for %s runtime (no custom image builds)\n", m.runtime.Type())
+		} else if len(depList) > 0 {
+			exists, _ := m.runtime.ImageExists(ctx, containerImage)
+			if exists {
+				fmt.Printf("Removing cached image %s...\n", containerImage)
+				if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
+				}
 			}
 		}
 	}

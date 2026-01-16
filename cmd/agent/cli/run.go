@@ -65,7 +65,7 @@ func init() {
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
 	runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from agent.yaml or random)")
-	runCmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "force rebuild of container image (ignores cache)")
+	runCmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "force rebuild of container image (Docker only, ignored for Apple containers)")
 	runCmd.Flags().BoolVar(&keepContainer, "keep", false, "keep container after run completes (for debugging)")
 }
 
