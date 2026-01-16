@@ -2,14 +2,15 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/andybons/agentops/internal/credential"
-	"github.com/andybons/agentops/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +29,8 @@ Credentials are stored securely and injected into agent containers when
 requested via the --grant flag on 'agent run'.
 
 Supported providers:
-  github    GitHub OAuth (uses device flow for authentication)
+  github      GitHub OAuth (uses device flow for authentication)
+  anthropic   Anthropic API key (for Claude Code and Claude API)
 
 Scope format:
   provider              Use default scopes
@@ -52,13 +54,38 @@ Examples:
   agent grant github:repo,read:user,user:email
 
   # Use the credential in a run
-  agent run my-agent . --grant github`,
+  agent run my-agent . --grant github
+
+  # Grant Anthropic API access (interactive prompt)
+  agent grant anthropic
+
+  # Grant Anthropic API access (from environment variable)
+  export ANTHROPIC_API_KEY="sk-ant-..."  # set in your shell profile
+  agent grant anthropic
+
+  # Use Anthropic credential for Claude Code
+  agent run claude-code-test . --grant anthropic`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }
 
 func init() {
 	rootCmd.AddCommand(grantCmd)
+}
+
+// saveCredential stores a credential and returns the file path.
+func saveCredential(cred credential.Credential) (string, error) {
+	store, err := credential.NewFileStore(
+		credential.DefaultStoreDir(),
+		credential.DefaultEncryptionKey(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("opening credential store: %w", err)
+	}
+	if err := store.Save(cred); err != nil {
+		return "", fmt.Errorf("saving credential: %w", err)
+	}
+	return filepath.Join(credential.DefaultStoreDir(), string(cred.Provider)+".enc"), nil
 }
 
 func runGrant(cmd *cobra.Command, args []string) error {
@@ -77,6 +104,8 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	switch provider {
 	case credential.ProviderGitHub:
 		return grantGitHub(scopes)
+	case credential.ProviderAnthropic:
+		return grantAnthropic()
 	default:
 		return fmt.Errorf("unsupported provider: %s", providerStr)
 	}
@@ -112,7 +141,7 @@ See README.md for detailed setup instructions.`)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	log.Info("initiating GitHub device flow")
+	fmt.Println("Initiating GitHub device flow...")
 
 	deviceCode, err := auth.RequestDeviceCode(ctx)
 	if err != nil {
@@ -128,27 +157,63 @@ See README.md for detailed setup instructions.`)
 		return fmt.Errorf("getting token: %w", err)
 	}
 
-	// Store the credential
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
-	)
-	if err != nil {
-		return fmt.Errorf("opening credential store: %w", err)
-	}
-
 	cred := credential.Credential{
 		Provider:  credential.ProviderGitHub,
 		Token:     token.AccessToken,
 		Scopes:    scopes,
 		CreatedAt: time.Now(),
 	}
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("GitHub credential saved to %s\n", credPath)
+	return nil
+}
 
-	if err := store.Save(cred); err != nil {
-		return fmt.Errorf("saving credential: %w", err)
+func grantAnthropic() error {
+	auth := &credential.AnthropicAuth{}
+
+	// Get API key from environment variable or interactive prompt
+	// Environment variable is preferred for non-interactive/CI use
+	var apiKey string
+	var err error
+	if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
+		apiKey = envKey
+		fmt.Println("Using API key from ANTHROPIC_API_KEY environment variable")
+	} else {
+		apiKey, err = auth.PromptForAPIKey()
+		if err != nil {
+			return fmt.Errorf("reading API key: %w", err)
+		}
 	}
 
-	log.Info("GitHub credential saved", "scopes", scopes)
-	fmt.Println("GitHub credential saved successfully")
+	// Ask user if they want to validate the key (costs a small API call)
+	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "" || response == "y" || response == "yes" {
+		fmt.Println("\nValidating API key...")
+		fmt.Println("  POST https://api.anthropic.com/v1/messages")
+		fmt.Println(`  {"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if validateErr := auth.ValidateKey(ctx, apiKey); validateErr != nil {
+			return fmt.Errorf("validating API key: %w", validateErr)
+		}
+		fmt.Println("API key is valid.")
+	} else {
+		fmt.Println("Skipping validation.")
+	}
+
+	cred := auth.CreateCredential(apiKey)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Anthropic API key saved to %s\n", credPath)
 	return nil
 }

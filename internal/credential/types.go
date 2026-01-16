@@ -7,8 +7,9 @@ import "time"
 type Provider string
 
 const (
-	ProviderGitHub Provider = "github"
-	ProviderAWS    Provider = "aws"
+	ProviderGitHub    Provider = "github"
+	ProviderAWS       Provider = "aws"
+	ProviderAnthropic Provider = "anthropic"
 )
 
 // Credential represents a stored credential.

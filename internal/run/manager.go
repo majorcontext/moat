@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/andybons/agentops/internal/credential"
 	"github.com/andybons/agentops/internal/deps"
 	"github.com/andybons/agentops/internal/image"
+	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/name"
 	"github.com/andybons/agentops/internal/proxy"
 	"github.com/andybons/agentops/internal/routing"
@@ -105,6 +107,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy server for this run if grants are specified
 	var proxyServer *proxy.Server
 	var proxyEnv []string
+	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
 	var mounts []container.MountConfig
 
 	// Always mount workspace
@@ -159,6 +162,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					case credential.ProviderGitHub:
 						p.SetCredential("api.github.com", "Bearer "+cred.Token)
 						p.SetCredential("github.com", "Bearer "+cred.Token)
+					case credential.ProviderAnthropic:
+						// Anthropic uses x-api-key header, not Authorization
+						p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
+						// Set a dummy ANTHROPIC_API_KEY so Claude Code doesn't error
+						// The real key is injected by the proxy at the network layer
+						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY=agentops-proxy-injected")
 					}
 				}
 			}
@@ -184,26 +193,39 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			p.SetAuthToken(proxyAuthToken)
 		}
 
-		// Set up request logging if storage is available
-		// Note: r.Store will be created later, so we need to capture the pointer
-		p.SetLogger(func(method, url string, statusCode int, duration time.Duration, reqErr error) {
-			if r.Store == nil {
+		// Set up request logging with atomic store reference for safe concurrent access.
+		// The store is created later, so we use atomic.Value to avoid data races.
+		var storeRef atomic.Value // holds *storage.RunStore
+		p.SetLogger(func(data proxy.RequestLogData) {
+			store, _ := storeRef.Load().(*storage.RunStore)
+			if store == nil {
+				// Store not yet initialized - early request during container startup.
+				// This is expected and non-fatal; the request won't be logged.
+				log.Debug("skipping network log: store not yet initialized",
+					"method", data.Method,
+					"url", data.URL)
 				return
 			}
-			errStr := ""
-			if reqErr != nil {
-				errStr = reqErr.Error()
+			var errStr string
+			if data.Err != nil {
+				errStr = data.Err.Error()
 			}
 			// Best-effort logging; errors are non-fatal
-			_ = r.Store.WriteNetworkRequest(storage.NetworkRequest{
-				Timestamp:  time.Now().UTC(),
-				Method:     method,
-				URL:        url,
-				StatusCode: statusCode,
-				Duration:   duration.Milliseconds(),
-				Error:      errStr,
+			_ = store.WriteNetworkRequest(storage.NetworkRequest{
+				Timestamp:       time.Now().UTC(),
+				Method:          data.Method,
+				URL:             data.URL,
+				StatusCode:      data.StatusCode,
+				Duration:        data.Duration.Milliseconds(),
+				Error:           errStr,
+				RequestHeaders:  proxy.FilterHeaders(data.RequestHeaders, data.AuthInjected, data.InjectedHeaderName),
+				ResponseHeaders: proxy.FilterHeaders(data.ResponseHeaders, false, ""),
+				RequestBody:     string(data.RequestBody),
+				ResponseBody:    string(data.ResponseBody),
+				BodyTruncated:   len(data.RequestBody) > proxy.MaxBodySize || len(data.ResponseBody) > proxy.MaxBodySize,
 			})
 		})
+		r.storeRef = &storeRef // Save reference to update later
 
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
@@ -243,6 +265,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
+
+		// Add provider-specific env vars (collected during credential loading)
+		proxyEnv = append(proxyEnv, providerEnv...)
 	}
 
 	// Configure network mode and extra hosts based on runtime capabilities
@@ -436,6 +461,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
+	// Update atomic reference for concurrent logger access
+	if r.storeRef != nil {
+		r.storeRef.Store(store)
+	}
 
 	// Save initial metadata (best-effort; non-fatal if it fails)
 	_ = store.SaveMetadata(storage.Metadata{

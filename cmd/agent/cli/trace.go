@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/andybons/agentops/internal/log"
 	"github.com/andybons/agentops/internal/storage"
@@ -11,6 +12,7 @@ import (
 
 var (
 	traceNetwork bool
+	traceVerbose bool
 )
 
 var traceCmd = &cobra.Command{
@@ -22,6 +24,7 @@ Examples:
   agent trace                   # Traces from most recent run
   agent trace run-abc123        # Traces from specific run
   agent trace --network         # Show network requests
+  agent trace --network -v      # Show network requests with headers and bodies
   agent trace --json            # Output as JSON`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTrace,
@@ -30,6 +33,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(traceCmd)
 	traceCmd.Flags().BoolVar(&traceNetwork, "network", false, "show network requests")
+	traceCmd.Flags().BoolVarP(&traceVerbose, "verbose", "v", false, "show headers and bodies (requires --network)")
 }
 
 func runTrace(cmd *cobra.Command, args []string) error {
@@ -110,12 +114,47 @@ func showNetworkRequests(store *storage.RunStore, runID string) error {
 	}
 
 	for _, req := range reqs {
-		ts := req.Timestamp.Format("15:04:05.000")
 		status := fmt.Sprintf("%d", req.StatusCode)
 		if req.Error != "" {
 			status = "ERR"
 		}
-		fmt.Printf("[%s] %s %s %s (%dms)\n", ts, req.Method, req.URL, status, req.Duration)
+		fmt.Printf("[%s] %s %s %s (%dms)\n", req.Timestamp.Format("15:04:05.000"), req.Method, req.URL, status, req.Duration)
+
+		if traceVerbose {
+			printHeadersAndBody("Request", req.RequestHeaders, req.RequestBody)
+			printHeadersAndBody("Response", req.ResponseHeaders, req.ResponseBody)
+			if req.BodyTruncated {
+				fmt.Println("  [Body truncated to 8KB in storage]")
+			}
+			fmt.Println()
+		}
 	}
 	return nil
+}
+
+func printHeadersAndBody(label string, headers map[string]string, body string) {
+	if len(headers) > 0 {
+		fmt.Printf("  %s Headers:\n", label)
+		// Sort keys for consistent output
+		keys := make([]string, 0, len(headers))
+		for k := range headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Printf("    %s: %s\n", k, headers[k])
+		}
+	}
+	if body != "" {
+		fmt.Printf("  %s Body:\n", label)
+		fmt.Printf("    %s\n", truncateDisplay(body, 500))
+	}
+}
+
+// truncateDisplay truncates a string for display, adding ellipsis if needed.
+func truncateDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

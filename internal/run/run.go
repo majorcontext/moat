@@ -3,6 +3,7 @@ package run
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"sync/atomic"
 	"time"
 
 	"github.com/andybons/agentops/internal/config"
@@ -34,6 +35,7 @@ type Run struct {
 	ContainerID string
 	ProxyServer *proxy.Server     // Auth proxy for credential injection
 	Store       *storage.RunStore // Run data storage
+	storeRef    *atomic.Value     // Atomic reference for concurrent logger access
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	StoppedAt   time.Time
