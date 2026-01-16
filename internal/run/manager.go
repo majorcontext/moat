@@ -14,18 +14,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andybons/agentops/internal/audit"
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/credential"
-	"github.com/andybons/agentops/internal/deps"
-	"github.com/andybons/agentops/internal/image"
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/name"
-	"github.com/andybons/agentops/internal/proxy"
-	"github.com/andybons/agentops/internal/routing"
-	"github.com/andybons/agentops/internal/secrets"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/audit"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/credential"
+	"github.com/andybons/moat/internal/deps"
+	"github.com/andybons/moat/internal/image"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/name"
+	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/routing"
+	"github.com/andybons/moat/internal/secrets"
+	"github.com/andybons/moat/internal/storage"
 )
 
 // Manager handles run lifecycle operations.
@@ -175,7 +175,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
 						// Set a dummy ANTHROPIC_API_KEY so Claude Code doesn't error
 						// The real key is injected by the proxy at the network layer
-						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY=agentops-proxy-injected")
+						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY=moat-proxy-injected")
 					}
 				}
 			}
@@ -278,14 +278,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// only supports directory mounts, not individual file mounts.
 		mounts = append(mounts, container.MountConfig{
 			Source:   caDir,
-			Target:   "/etc/ssl/certs/agentops-ca",
+			Target:   "/etc/ssl/certs/moat-ca",
 			ReadOnly: true,
 		})
 
 		// Set env vars for tools that support custom CA bundles
 		// SSL_CERT_FILE is used by many tools (curl, wget, etc)
 		// The CA cert is at ca.crt within the mounted directory
-		caCertInContainer := "/etc/ssl/certs/agentops-ca/ca.crt"
+		caCertInContainer := "/etc/ssl/certs/moat-ca/ca.crt"
 		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
@@ -364,20 +364,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Build AGENTOPS_* environment variables for host injection
+	// Build MOAT_* environment variables for host injection
 	if len(ports) > 0 {
 		globalCfg, _ := config.LoadGlobal()
 		proxyPort := globalCfg.Proxy.Port
 
 		baseHost := fmt.Sprintf("%s.localhost:%d", agentName, proxyPort)
-		proxyEnv = append(proxyEnv, "AGENTOPS_HOST="+baseHost)
-		proxyEnv = append(proxyEnv, "AGENTOPS_URL=http://"+baseHost)
+		proxyEnv = append(proxyEnv, "MOAT_HOST="+baseHost)
+		proxyEnv = append(proxyEnv, "MOAT_URL=http://"+baseHost)
 
 		for serviceName := range ports {
 			upperName := strings.ToUpper(serviceName)
 			serviceHost := fmt.Sprintf("%s.%s.localhost:%d", serviceName, agentName, proxyPort)
-			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_HOST_%s=%s", upperName, serviceHost))
-			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_URL_%s=http://%s", upperName, serviceHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_HOST_%s=%s", upperName, serviceHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_URL_%s=http://%s", upperName, serviceHost))
 		}
 	}
 

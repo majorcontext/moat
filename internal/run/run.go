@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andybons/agentops/internal/audit"
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/proxy"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/audit"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/storage"
 )
 
 // State represents the current state of a run.
@@ -52,7 +52,7 @@ type Run struct {
 
 // Options configures a new run.
 type Options struct {
-	Name          string // Optional explicit name (--name flag or from config)
+	Name          string         // Optional explicit name (--name flag or from config)
 	Workspace     string
 	Grants        []string
 	Cmd           []string       // Command to run (default: /bin/bash)

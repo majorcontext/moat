@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/run"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -37,25 +37,25 @@ Arguments:
 
 Examples:
   # Run from current directory (uses agent.yaml config)
-  agent run
+  moat run
 
   # Run from a specific directory
-  agent run ./my-project
+  moat run ./my-project
 
   # Run with a specific name for hostname routing
-  agent run --name myapp ./my-project
+  moat run --name myapp ./my-project
 
   # Run with GitHub credentials
-  agent run --grant github
+  moat run --grant github
 
   # Run with environment variables
-  agent run -e DEBUG=true -e API_KEY=xxx
+  moat run -e DEBUG=true -e API_KEY=xxx
 
   # Run with custom command
-  agent run -- npm test
+  moat run -- npm test
 
   # Run multiple commands
-  agent run -- sh -c "npm install && npm test"`,
+  moat run -- sh -c "npm install && npm test"`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runAgent,
 }
