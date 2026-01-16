@@ -383,8 +383,8 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 	return nil
 }
 
-// ListImages returns all agentops-managed images.
-// Filters to images with "agentops/" prefix in any tag.
+// ListImages returns all moat-managed images.
+// Filters to images with "moat/" prefix in any tag.
 func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	images, err := r.cli.ImageList(ctx, image.ListOptions{})
 	if err != nil {
@@ -393,9 +393,9 @@ func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 	var result []ImageInfo
 	for _, img := range images {
-		// Check if any tag has agentops/ prefix
+		// Check if any tag has moat/ prefix
 		for _, tag := range img.RepoTags {
-			if strings.HasPrefix(tag, "agentops/") {
+			if strings.HasPrefix(tag, "moat/") {
 				result = append(result, ImageInfo{
 					ID:      img.ID,
 					Tag:     tag,
@@ -409,7 +409,7 @@ func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	return result, nil
 }
 
-// ListContainers returns all agentops containers.
+// ListContainers returns all moat containers.
 // Filters to containers whose name matches an 8-char hex run ID pattern.
 func (r *DockerRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
@@ -421,7 +421,7 @@ func (r *DockerRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 
 	var result []Info
 	for _, c := range containers {
-		// Check if any name looks like an agentops run ID (8 hex chars)
+		// Check if any name looks like a moat run ID (8 hex chars)
 		for _, name := range c.Names {
 			// Names have leading slash, e.g., "/a1b2c3d4"
 			name = strings.TrimPrefix(name, "/")
