@@ -497,7 +497,7 @@ func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
 }
 
 // ListContainers returns all agentops containers.
-func (r *AppleRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--all", "--format", "json")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -517,11 +517,11 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, err
 		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
 
-	var result []ContainerInfo
+	var result []Info
 	for _, c := range containers {
 		if isRunID(c.Name) {
 			created, _ := time.Parse(time.RFC3339, c.Created)
-			result = append(result, ContainerInfo{
+			result = append(result, Info{
 				ID:      c.ID,
 				Name:    c.Name,
 				Image:   c.Image,

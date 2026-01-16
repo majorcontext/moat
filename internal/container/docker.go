@@ -411,7 +411,7 @@ func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 // ListContainers returns all agentops containers.
 // Filters to containers whose name matches an 8-char hex run ID pattern.
-func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+func (r *DockerRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
 		All: true, // Include stopped containers
 	})
@@ -419,14 +419,14 @@ func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, er
 		return nil, fmt.Errorf("listing containers: %w", err)
 	}
 
-	var result []ContainerInfo
+	var result []Info
 	for _, c := range containers {
 		// Check if any name looks like an agentops run ID (8 hex chars)
 		for _, name := range c.Names {
 			// Names have leading slash, e.g., "/a1b2c3d4"
 			name = strings.TrimPrefix(name, "/")
 			if isRunID(name) {
-				result = append(result, ContainerInfo{
+				result = append(result, Info{
 					ID:      c.ID[:12],
 					Name:    name,
 					Image:   c.Image,

@@ -81,7 +81,7 @@ type Runtime interface {
 	ListImages(ctx context.Context) ([]ImageInfo, error)
 
 	// ListContainers returns all agentops containers (running + stopped).
-	ListContainers(ctx context.Context) ([]ContainerInfo, error)
+	ListContainers(ctx context.Context) ([]Info, error)
 
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
@@ -116,8 +116,8 @@ type ImageInfo struct {
 	Created time.Time
 }
 
-// ContainerInfo contains information about a container.
-type ContainerInfo struct {
+// Info contains information about a container.
+type Info struct {
 	ID      string
 	Name    string
 	Image   string
