@@ -1,0 +1,145 @@
+package proxy
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+)
+
+// AWSCredentials holds temporary AWS credentials.
+type AWSCredentials struct {
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+	Expiration      time.Time
+}
+
+// AWSCredentialHandler serves AWS credentials via HTTP in ECS container format.
+type AWSCredentialHandler struct {
+	getCredentials func(ctx context.Context) (*AWSCredentials, error)
+}
+
+// ServeHTTP implements http.Handler, returning credentials in ECS format.
+func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	creds, err := h.getCredentials(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get credentials: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// ECS container credential format
+	resp := map[string]string{
+		"AccessKeyId":     creds.AccessKeyID,
+		"SecretAccessKey": creds.SecretAccessKey,
+		"Token":           creds.SessionToken,
+		"Expiration":      creds.Expiration.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// STSAssumeRoler interface for STS AssumeRole operation (enables testing).
+type STSAssumeRoler interface {
+	AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
+}
+
+// AWSCredentialProvider manages AWS credential fetching and caching.
+type AWSCredentialProvider struct {
+	roleARN         string
+	region          string
+	sessionDuration time.Duration
+	externalID      string
+	sessionName     string
+
+	mu         sync.RWMutex
+	cached     *AWSCredentials
+	expiration time.Time
+
+	// stsClient for making AssumeRole calls (injectable for testing)
+	stsClient STSAssumeRoler
+}
+
+// NewAWSCredentialProvider creates a new AWS credential provider.
+func NewAWSCredentialProvider(roleARN, region string, sessionDuration time.Duration, externalID, sessionName string) (*AWSCredentialProvider, error) {
+	// Load AWS config from host environment
+	ctx := context.Background()
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("loading AWS config: %w", err)
+	}
+
+	return &AWSCredentialProvider{
+		roleARN:         roleARN,
+		region:          region,
+		sessionDuration: sessionDuration,
+		externalID:      externalID,
+		sessionName:     sessionName,
+		stsClient:       sts.NewFromConfig(cfg),
+	}, nil
+}
+
+// Handler returns an HTTP handler for serving credentials.
+func (p *AWSCredentialProvider) Handler() http.Handler {
+	return &AWSCredentialHandler{
+		getCredentials: p.GetCredentials,
+	}
+}
+
+// Region returns the configured AWS region.
+func (p *AWSCredentialProvider) Region() string {
+	return p.region
+}
+
+// GetCredentials returns cached credentials or fetches new ones.
+func (p *AWSCredentialProvider) GetCredentials(ctx context.Context) (*AWSCredentials, error) {
+	p.mu.RLock()
+	// Return cached if valid with 5-minute buffer
+	if p.cached != nil && time.Now().Add(5*time.Minute).Before(p.expiration) {
+		creds := p.cached
+		p.mu.RUnlock()
+		return creds, nil
+	}
+	p.mu.RUnlock()
+
+	// Need to refresh
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if p.cached != nil && time.Now().Add(5*time.Minute).Before(p.expiration) {
+		return p.cached, nil
+	}
+
+	// Call STS AssumeRole
+	input := &sts.AssumeRoleInput{
+		RoleArn:         aws.String(p.roleARN),
+		RoleSessionName: aws.String(p.sessionName),
+		DurationSeconds: aws.Int32(int32(p.sessionDuration.Seconds())),
+	}
+	if p.externalID != "" {
+		input.ExternalId = aws.String(p.externalID)
+	}
+
+	result, err := p.stsClient.AssumeRole(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("assuming role %s: %w", p.roleARN, err)
+	}
+
+	p.cached = &AWSCredentials{
+		AccessKeyID:     *result.Credentials.AccessKeyId,
+		SecretAccessKey: *result.Credentials.SecretAccessKey,
+		SessionToken:    *result.Credentials.SessionToken,
+		Expiration:      *result.Credentials.Expiration,
+	}
+	p.expiration = *result.Credentials.Expiration
+
+	return p.cached, nil
+}
