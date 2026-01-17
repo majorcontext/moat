@@ -44,11 +44,13 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// ECS container credential format
-	resp := map[string]string{
+	// AWS credential_process format
+	// See: https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html
+	resp := map[string]interface{}{
+		"Version":         1,
 		"AccessKeyId":     creds.AccessKeyID,
 		"SecretAccessKey": creds.SecretAccessKey,
-		"Token":           creds.SessionToken,
+		"SessionToken":    creds.SessionToken,
 		"Expiration":      creds.Expiration.Format(time.RFC3339),
 	}
 
@@ -113,6 +115,11 @@ func (p *AWSCredentialProvider) Handler() http.Handler {
 // Region returns the configured AWS region.
 func (p *AWSCredentialProvider) Region() string {
 	return p.region
+}
+
+// RoleARN returns the configured IAM role ARN.
+func (p *AWSCredentialProvider) RoleARN() string {
+	return p.roleARN
 }
 
 // GetCredentials returns cached credentials or fetches new ones.

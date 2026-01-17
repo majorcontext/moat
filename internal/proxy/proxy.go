@@ -474,7 +474,11 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, hasCredential := p.getCredential(host); p.ca != nil && hasCredential {
+	// Do MITM interception when we have a CA. This is needed for:
+	// 1. Credential injection (when we have credentials for this host)
+	// 2. Request logging/observability
+	// 3. Working with custom CA bundles (client trusts our CA, we verify upstream)
+	if p.ca != nil {
 		p.handleConnectWithInterception(w, r, host)
 		return
 	}

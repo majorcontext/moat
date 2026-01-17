@@ -115,32 +115,17 @@ aws iam get-role --role-name AgentOpsRole --query Role.Arn --output text
 ## How It Works
 
 1. **Grant phase**: `agent grant aws --role=ARN` validates that your host credentials can assume the role
-2. **Run phase**: AgentOps calls `sts:AssumeRole` and provides credentials to the container
-3. **Credential delivery**: Varies by platform (see below)
+2. **Run phase**: AgentOps mounts a credential helper into the container
+3. **Execution**: AWS SDK uses `credential_process` to fetch fresh credentials on demand
 
-### Platform Differences
-
-| Platform | Method | Auto-refresh |
-|----------|--------|--------------|
-| Linux (no ports) | Credential endpoint at localhost | Yes |
-| Linux (with ports) | Environment variables | No |
-| macOS/Windows | Environment variables | No |
-
-**Why the difference?** AWS SDKs only trust credential endpoints from loopback addresses (`localhost`, `127.0.0.1`). On macOS/Windows, Docker containers can't reach the host's localhost, and `host.docker.internal` [isn't in the SDK's allowed list](https://github.com/boto/botocore/issues/2515).
-
-**For long-running agents on macOS/Windows**, use a longer session duration:
-```bash
-agent grant aws --role=ARN --session-duration=1h  # up to 12h
-```
-
-**Linux (with credential endpoint):**
 ```
 ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│    Agent      │     │    Proxy      │     │   AWS STS     │
+│    Agent      │     │   AgentOps    │     │   AWS STS     │
 │  (container)  │     │    (host)     │     │               │
 └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
         │                     │                     │
-        │ GET localhost/_aws/credentials            │
+        │ AWS SDK needs creds │                     │
+        │ (credential_process)│                     │
         │────────────────────>│                     │
         │                     │ AssumeRole          │
         │                     │────────────────────>│
@@ -148,23 +133,10 @@ agent grant aws --role=ARN --session-duration=1h  # up to 12h
         │ {credentials}       │                     │
         │<────────────────────│                     │
         │                     │                     │
-        │ (SDK caches, auto-refreshes)              │
+        │ (SDK caches, auto-refreshes on expiry)    │
 ```
 
-**macOS/Windows (direct injection):**
-```
-┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│    Agent      │     │   AgentOps    │     │   AWS STS     │
-│  (container)  │     │    (host)     │     │               │
-└───────┬───────┘     └───────┬───────┘     └───────┬───────┘
-        │                     │ AssumeRole          │
-        │                     │────────────────────>│
-        │                     │<────────────────────│
-        │ AWS_ACCESS_KEY_ID=...(env vars at start)  │
-        │<────────────────────│                     │
-        │                     │                     │
-        │ (uses env vars directly, no refresh)      │
-```
+Credentials are automatically refreshed when they expire—no special configuration needed. The `--session-duration` flag controls how long each credential set lasts before refresh (default: 15m).
 
 ## Grant Options
 
@@ -184,16 +156,22 @@ agent grant aws --role=ARN --external-id=my-external-id
 
 ## Verifying Isolation
 
-The agent never sees your actual AWS credentials:
+The agent receives temporary assumed-role credentials, not your host credentials. Credentials are fetched via `credential_process`, not stored in environment variables:
 
 ```bash
-# Inside the container, these are explicitly unset
-agent run --grant aws . -- env | grep AWS
-# AWS_CONTAINER_CREDENTIALS_FULL_URI=http://.../_aws/credentials
-# AWS_REGION=us-east-1
-# AWS_ACCESS_KEY_ID=
-# AWS_SECRET_ACCESS_KEY=
-# AWS_SESSION_TOKEN=
+# Check the AWS config in the container
+agent run --grant aws . -- cat /agentops/aws/config
+# [default]
+# credential_process = /agentops/aws/credentials
+# region = us-east-1
+
+# Verify identity shows assumed role
+agent run --grant aws . -- aws sts get-caller-identity
+# {
+#     "UserId": "AROA...:agentops-run-abc123",
+#     "Account": "123456789012",
+#     "Arn": "arn:aws:sts::123456789012:assumed-role/AgentOpsRole/agentops-run-abc123"
+# }
 ```
 
-The only way to get credentials is through the credential endpoint, which returns short-lived assumed-role credentials.
+The ARN shows `assumed-role/RoleName/session-name`, confirming the agent is using temporary credentials from role assumption.

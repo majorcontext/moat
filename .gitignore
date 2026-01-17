@@ -44,6 +44,9 @@ go.work.sum
 /moat
 /agent
 
+# Generated credential helpers (built via go generate)
+internal/run/helpers/aws-credential-helper-*
+
 # Git worktrees for isolated development
 .worktrees/
 .private-journal/

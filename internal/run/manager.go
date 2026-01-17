@@ -328,6 +328,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			p.SetAuthToken(proxyAuthToken)
 		}
 
+		// Set up AWS credential handler if AWS grant is active
+		if r.AWSCredentialProvider != nil {
+			// Use same auth token as the main proxy (if set)
+			r.AWSCredentialProvider.SetAuthToken(proxyAuthToken)
+			p.SetAWSHandler(r.AWSCredentialProvider.Handler())
+		}
+
 		// Set up request logging with atomic store reference for safe concurrent access.
 		// The store is created later, so we use atomic.Value to avoid data races.
 		var storeRef atomic.Value // holds *storage.RunStore
@@ -420,50 +427,61 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
 
-		// Set AWS credentials if AWS grant is active
+		// Set up AWS credential_process if AWS grant is active
+		// Instead of static credential injection, we use credential_process for dynamic refresh.
+		// A small binary inside the container fetches credentials from our proxy on demand.
 		if r.AWSCredentialProvider != nil {
-			// AWS SDKs only trust container credential endpoints from loopback addresses
-			// or specific ECS hosts. host.docker.internal is NOT trusted.
-			// See: https://github.com/boto/botocore/issues/2515
-			//
-			// On Linux with host network (and no ports), we can use localhost.
-			// On macOS/Windows (bridge mode required), we inject credentials directly.
-			canUseHostNetwork := m.runtime.SupportsHostNetwork() && len(ports) == 0
-			if canUseHostNetwork {
-				// Linux host network: container can reach localhost
-				awsCredURL := "http://127.0.0.1:" + proxyServer.Port() + "/_aws/credentials"
-
-				awsTokenBytes := make([]byte, 32)
-				if _, err := rand.Read(awsTokenBytes); err != nil {
-					return nil, fmt.Errorf("generating AWS credential auth token: %w", err)
-				}
-				awsAuthToken := hex.EncodeToString(awsTokenBytes)
-				r.AWSCredentialProvider.SetAuthToken(awsAuthToken)
-				p.SetAWSHandler(r.AWSCredentialProvider.Handler())
-
-				proxyEnv = append(proxyEnv,
-					"AWS_CONTAINER_CREDENTIALS_FULL_URI="+awsCredURL,
-					"AWS_CONTAINER_AUTHORIZATION_TOKEN="+awsAuthToken,
-					"AWS_REGION="+r.AWSCredentialProvider.Region(),
-				)
-			} else {
-				// macOS/Windows/ports: inject credentials directly (no auto-refresh)
-				// Credentials are already short-lived from AssumeRole
-				creds, err := r.AWSCredentialProvider.GetCredentials(ctx)
-				if err != nil {
-					return nil, fmt.Errorf("getting AWS credentials: %w", err)
-				}
-
-				proxyEnv = append(proxyEnv,
-					"AWS_ACCESS_KEY_ID="+creds.AccessKeyID,
-					"AWS_SECRET_ACCESS_KEY="+creds.SecretAccessKey,
-					"AWS_SESSION_TOKEN="+creds.SessionToken,
-					"AWS_REGION="+r.AWSCredentialProvider.Region(),
-				)
-
-				// Log expiration time so user knows when credentials expire
-				fmt.Printf("AWS credentials injected (expire: %s)\n", creds.Expiration.Local().Format("15:04:05"))
+			// Create temp directory for credential helper and config
+			awsDir, err := os.MkdirTemp("", "agentops-aws-*")
+			if err != nil {
+				return nil, fmt.Errorf("creating AWS credential helper directory: %w", err)
 			}
+
+			// Write the credential helper binary
+			helperPath := filepath.Join(awsDir, "credentials")
+			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0755); err != nil {
+				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
+			}
+
+			// Write AWS config file
+			awsConfig := fmt.Sprintf(`[default]
+credential_process = /agentops/aws/credentials
+region = %s
+`, r.AWSCredentialProvider.Region())
+			configPath := filepath.Join(awsDir, "config")
+			if err := os.WriteFile(configPath, []byte(awsConfig), 0644); err != nil {
+				return nil, fmt.Errorf("writing AWS config: %w", err)
+			}
+
+			// Mount the directory
+			mounts = append(mounts, container.MountConfig{
+				Source:   awsDir,
+				Target:   "/agentops/aws",
+				ReadOnly: true,
+			})
+
+			// Build credential endpoint URL
+			credentialURL := "http://" + proxyHost + "/_aws/credentials"
+
+			// Set environment variables
+			proxyEnv = append(proxyEnv,
+				"AWS_CONFIG_FILE=/agentops/aws/config",
+				"AGENTOPS_CREDENTIAL_URL="+credentialURL,
+				"AWS_REGION="+r.AWSCredentialProvider.Region(),
+				// AWS traffic goes through proxy for firewall/observability.
+				// Tell AWS SDK to trust our CA for MITM SSL.
+				"AWS_CA_BUNDLE="+caCertInContainer,
+				// Disable pager - containers may not have 'less' installed
+				"AWS_PAGER=",
+			)
+
+			// Include auth token if proxy requires it
+			if proxyAuthToken != "" {
+				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+proxyAuthToken)
+			}
+
+			fmt.Printf("AWS credential_process configured (role: %s)\n",
+				filepath.Base(r.AWSCredentialProvider.RoleARN()))
 		}
 	}
 

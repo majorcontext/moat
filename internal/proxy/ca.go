@@ -194,8 +194,11 @@ func (ca *CA) GenerateCert(host string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("creating certificate: %w", err)
 	}
 
+	// Include CA cert in chain so clients can verify the full chain.
+	// Some SSL libraries (like Python's) need the issuer cert in the chain
+	// even when using a custom CA bundle.
 	cert := &tls.Certificate{
-		Certificate: [][]byte{certDER},
+		Certificate: [][]byte{certDER, ca.cert.Raw},
 		PrivateKey:  key,
 	}
 

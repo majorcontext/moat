@@ -15,7 +15,7 @@ import (
 )
 
 func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
-	t.Run("returns credentials in ECS format", func(t *testing.T) {
+	t.Run("returns credentials in credential_process format", func(t *testing.T) {
 		expiration := time.Now().Add(15 * time.Minute)
 		handler := &AWSCredentialHandler{
 			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
@@ -42,14 +42,18 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
+		// Check Version field (required by credential_process)
+		if resp["Version"] != float64(1) {
+			t.Errorf("Version = %v, want 1", resp["Version"])
+		}
 		if resp["AccessKeyId"] != "AKIAIOSFODNN7EXAMPLE" {
 			t.Errorf("AccessKeyId = %v, want AKIAIOSFODNN7EXAMPLE", resp["AccessKeyId"])
 		}
 		if resp["SecretAccessKey"] != "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" {
 			t.Errorf("SecretAccessKey missing or wrong")
 		}
-		if resp["Token"] != "FwoGZXIvYXdzEBY..." {
-			t.Errorf("Token = %v, want FwoGZXIvYXdzEBY...", resp["Token"])
+		if resp["SessionToken"] != "FwoGZXIvYXdzEBY..." {
+			t.Errorf("SessionToken = %v, want FwoGZXIvYXdzEBY...", resp["SessionToken"])
 		}
 		if _, ok := resp["Expiration"]; !ok {
 			t.Error("Expiration missing from response")
