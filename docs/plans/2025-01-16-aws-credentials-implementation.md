@@ -139,26 +139,32 @@ Added `AWSCredentialProvider` field to `Run` struct in `internal/run/run.go`.
 
 ---
 
-### Task 8: Create Embedded Credential Helper ✓
+### Task 8: Create Credential Helper ✓
 
 **Files created:**
-- `cmd/aws-credential-helper/main.go` - Standalone binary that fetches credentials from proxy
-- `internal/run/credential_helper.go` - Embeds pre-built Linux binaries
-- `internal/run/helpers/aws-credential-helper-linux-amd64` - AMD64 binary
-- `internal/run/helpers/aws-credential-helper-linux-arm64` - ARM64 binary
+- `internal/run/credential_helper.go` - Shell script constant for credential fetching
 
-The credential helper:
+The credential helper is a simple shell script that:
 - Reads `AGENTOPS_CREDENTIAL_URL` and `AGENTOPS_CREDENTIAL_TOKEN` from environment
-- Fetches credentials from proxy endpoint with Authorization header
+- Uses `curl` to fetch credentials from the proxy endpoint
 - Outputs credential_process format to stdout
 
-Build command:
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" \
-  -o internal/run/helpers/aws-credential-helper-linux-amd64 ./cmd/aws-credential-helper
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" \
-  -o internal/run/helpers/aws-credential-helper-linux-arm64 ./cmd/aws-credential-helper
+#!/bin/sh
+set -e
+if [ -z "$AGENTOPS_CREDENTIAL_URL" ]; then
+  echo "AGENTOPS_CREDENTIAL_URL not set" >&2
+  exit 1
+fi
+if [ -n "$AGENTOPS_CREDENTIAL_TOKEN" ]; then
+  exec curl -sf -m 10 -H "Authorization: Bearer $AGENTOPS_CREDENTIAL_TOKEN" "$AGENTOPS_CREDENTIAL_URL"
+else
+  exec curl -sf -m 10 "$AGENTOPS_CREDENTIAL_URL"
+fi
 ```
+
+This works because containers using `--grant aws` must have the AWS CLI installed,
+and the `aws` dependency includes `curl` as part of its installation.
 
 ---
 
@@ -235,5 +241,4 @@ Container                    Host Proxy                 AWS STS
 - `internal/proxy/hosts.go` - Allowed hosts
 - `internal/run/manager.go` - Integration
 - `internal/run/run.go` - Run struct field
-- `internal/run/credential_helper.go` - Embedded binaries
-- `cmd/aws-credential-helper/main.go` - Helper binary source
+- `internal/run/credential_helper.go` - Shell script for credential fetching

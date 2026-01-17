@@ -1,29 +1,24 @@
-//go:generate go run generate.go
-
 package run
 
-import (
-	_ "embed"
-	"runtime"
-)
+// AWSCredentialHelperScript is a shell script that fetches AWS credentials
+// from the AgentOps proxy. It implements the AWS credential_process interface.
+//
+// This requires curl, which is available in containers that have the AWS CLI
+// installed (the aws dependency includes curl as part of its installation).
+const AWSCredentialHelperScript = `#!/bin/sh
+set -e
+if [ -z "$AGENTOPS_CREDENTIAL_URL" ]; then
+  echo "AGENTOPS_CREDENTIAL_URL not set" >&2
+  exit 1
+fi
+if [ -n "$AGENTOPS_CREDENTIAL_TOKEN" ]; then
+  exec curl -sf -m 10 -H "Authorization: Bearer $AGENTOPS_CREDENTIAL_TOKEN" "$AGENTOPS_CREDENTIAL_URL"
+else
+  exec curl -sf -m 10 "$AGENTOPS_CREDENTIAL_URL"
+fi
+`
 
-// Embedded AWS credential helper binaries for Linux containers.
-// These are built during development/release with:
-//   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o internal/run/helpers/aws-credential-helper-linux-amd64 ./cmd/aws-credential-helper
-//   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o internal/run/helpers/aws-credential-helper-linux-arm64 ./cmd/aws-credential-helper
-
-//go:embed helpers/aws-credential-helper-linux-amd64
-var awsCredentialHelperAmd64 []byte
-
-//go:embed helpers/aws-credential-helper-linux-arm64
-var awsCredentialHelperArm64 []byte
-
-// GetAWSCredentialHelper returns the AWS credential helper binary for the current architecture.
-// This binary is designed to run in Linux containers, so it selects based on runtime.GOARCH
-// which matches the container architecture when running on the same host.
+// GetAWSCredentialHelper returns the credential helper script as bytes.
 func GetAWSCredentialHelper() []byte {
-	if runtime.GOARCH == "arm64" {
-		return awsCredentialHelperArm64
-	}
-	return awsCredentialHelperAmd64
+	return []byte(AWSCredentialHelperScript)
 }
