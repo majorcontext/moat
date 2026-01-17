@@ -115,33 +115,55 @@ aws iam get-role --role-name AgentOpsRole --query Role.Arn --output text
 ## How It Works
 
 1. **Grant phase**: `agent grant aws --role=ARN` validates that your host credentials can assume the role
-2. **Run phase**: AgentOps starts a credential endpoint that the container's AWS SDK discovers
-3. **Credential fetch**: When the agent makes an AWS API call, the SDK fetches credentials from the endpoint
-4. **Role assumption**: The endpoint calls `sts:AssumeRole` using your host credentials
-5. **Auto-refresh**: Credentials are cached and refreshed automatically before expiration
+2. **Run phase**: AgentOps calls `sts:AssumeRole` and provides credentials to the container
+3. **Credential delivery**: Varies by platform (see below)
 
+### Platform Differences
+
+| Platform | Method | Auto-refresh |
+|----------|--------|--------------|
+| Linux (no ports) | Credential endpoint at localhost | Yes |
+| Linux (with ports) | Environment variables | No |
+| macOS/Windows | Environment variables | No |
+
+**Why the difference?** AWS SDKs only trust credential endpoints from loopback addresses (`localhost`, `127.0.0.1`). On macOS/Windows, Docker containers can't reach the host's localhost, and `host.docker.internal` [isn't in the SDK's allowed list](https://github.com/boto/botocore/issues/2515).
+
+**For long-running agents on macOS/Windows**, use a longer session duration:
+```bash
+agent grant aws --role=ARN --session-duration=1h  # up to 12h
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Agent (container)   │   Proxy (host)   │     AWS STS       │
-└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                       │
-         │ aws s3 ls             │                       │
-         │ (SDK needs creds)     │                       │
-         │                       │                       │
-         │ GET /_aws/credentials │                       │
-         │──────────────────────>│                       │
-         │                       │ AssumeRole            │
-         │                       │──────────────────────>│
-         │                       │                       │
-         │                       │ {AccessKeyId,         │
-         │                       │  SecretAccessKey,     │
-         │                       │  SessionToken}        │
-         │                       │<──────────────────────│
-         │                       │                       │
-         │ {credentials}         │                       │
-         │<──────────────────────│                       │
-         │                       │                       │
-         │ (SDK caches & uses)   │                       │
+
+**Linux (with credential endpoint):**
+```
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│    Agent      │     │    Proxy      │     │   AWS STS     │
+│  (container)  │     │    (host)     │     │               │
+└───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+        │                     │                     │
+        │ GET localhost/_aws/credentials            │
+        │────────────────────>│                     │
+        │                     │ AssumeRole          │
+        │                     │────────────────────>│
+        │                     │<────────────────────│
+        │ {credentials}       │                     │
+        │<────────────────────│                     │
+        │                     │                     │
+        │ (SDK caches, auto-refreshes)              │
+```
+
+**macOS/Windows (direct injection):**
+```
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│    Agent      │     │   AgentOps    │     │   AWS STS     │
+│  (container)  │     │    (host)     │     │               │
+└───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+        │                     │ AssumeRole          │
+        │                     │────────────────────>│
+        │                     │<────────────────────│
+        │ AWS_ACCESS_KEY_ID=...(env vars at start)  │
+        │<────────────────────│                     │
+        │                     │                     │
+        │ (uses env vars directly, no refresh)      │
 ```
 
 ## Grant Options

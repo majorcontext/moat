@@ -420,33 +420,50 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
 
-		// Set AWS credential endpoint URL if AWS grant is active
+		// Set AWS credentials if AWS grant is active
 		if r.AWSCredentialProvider != nil {
-			awsCredURL := proxyURL + "/_aws/credentials"
+			// AWS SDKs only trust container credential endpoints from loopback addresses
+			// or specific ECS hosts. host.docker.internal is NOT trusted.
+			// See: https://github.com/boto/botocore/issues/2515
+			//
+			// On Linux with host network (and no ports), we can use localhost.
+			// On macOS/Windows (bridge mode required), we inject credentials directly.
+			canUseHostNetwork := m.runtime.SupportsHostNetwork() && len(ports) == 0
+			if canUseHostNetwork {
+				// Linux host network: container can reach localhost
+				awsCredURL := "http://127.0.0.1:" + proxyServer.Port() + "/_aws/credentials"
 
-			// Generate auth token for AWS credential endpoint
-			// AWS SDK requires AWS_CONTAINER_AUTHORIZATION_TOKEN when using non-loopback hosts
-			awsTokenBytes := make([]byte, 32)
-			if _, err := rand.Read(awsTokenBytes); err != nil {
-				return nil, fmt.Errorf("generating AWS credential auth token: %w", err)
+				awsTokenBytes := make([]byte, 32)
+				if _, err := rand.Read(awsTokenBytes); err != nil {
+					return nil, fmt.Errorf("generating AWS credential auth token: %w", err)
+				}
+				awsAuthToken := hex.EncodeToString(awsTokenBytes)
+				r.AWSCredentialProvider.SetAuthToken(awsAuthToken)
+				p.SetAWSHandler(r.AWSCredentialProvider.Handler())
+
+				proxyEnv = append(proxyEnv,
+					"AWS_CONTAINER_CREDENTIALS_FULL_URI="+awsCredURL,
+					"AWS_CONTAINER_AUTHORIZATION_TOKEN="+awsAuthToken,
+					"AWS_REGION="+r.AWSCredentialProvider.Region(),
+				)
+			} else {
+				// macOS/Windows/ports: inject credentials directly (no auto-refresh)
+				// Credentials are already short-lived from AssumeRole
+				creds, err := r.AWSCredentialProvider.GetCredentials(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("getting AWS credentials: %w", err)
+				}
+
+				proxyEnv = append(proxyEnv,
+					"AWS_ACCESS_KEY_ID="+creds.AccessKeyID,
+					"AWS_SECRET_ACCESS_KEY="+creds.SecretAccessKey,
+					"AWS_SESSION_TOKEN="+creds.SessionToken,
+					"AWS_REGION="+r.AWSCredentialProvider.Region(),
+				)
+
+				// Log expiration time so user knows when credentials expire
+				fmt.Printf("AWS credentials injected (expire: %s)\n", creds.Expiration.Local().Format("15:04:05"))
 			}
-			awsAuthToken := hex.EncodeToString(awsTokenBytes)
-			r.AWSCredentialProvider.SetAuthToken(awsAuthToken)
-
-			// Now set the handler (after auth token is configured)
-			p.SetAWSHandler(r.AWSCredentialProvider.Handler())
-
-			proxyEnv = append(proxyEnv,
-				"AWS_CONTAINER_CREDENTIALS_FULL_URI="+awsCredURL,
-				"AWS_CONTAINER_AUTHORIZATION_TOKEN="+awsAuthToken,
-				"AWS_REGION="+r.AWSCredentialProvider.Region(),
-			)
-			// Explicitly unset any direct credentials to prevent confusion
-			proxyEnv = append(proxyEnv,
-				"AWS_ACCESS_KEY_ID=",
-				"AWS_SECRET_ACCESS_KEY=",
-				"AWS_SESSION_TOKEN=",
-			)
 		}
 	}
 
