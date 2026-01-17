@@ -109,9 +109,10 @@ func getCustomCommands(name, _ string) InstallCommands {
 			},
 		}
 	case "aws":
+		// Detect architecture at build time: x86_64 or aarch64
 		return InstallCommands{
 			Commands: []string{
-				`curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip`,
+				`ARCH=$(uname -m) && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscliv2.zip`,
 				"unzip -q /tmp/awscliv2.zip -d /tmp",
 				"/tmp/aws/install",
 				"rm -rf /tmp/aws*",
