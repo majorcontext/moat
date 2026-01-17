@@ -24,10 +24,20 @@ type AWSCredentials struct {
 // AWSCredentialHandler serves AWS credentials via HTTP in ECS container format.
 type AWSCredentialHandler struct {
 	getCredentials func(ctx context.Context) (*AWSCredentials, error)
+	authToken      string // Required auth token (from AWS_CONTAINER_AUTHORIZATION_TOKEN)
 }
 
 // ServeHTTP implements http.Handler, returning credentials in ECS format.
 func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Verify auth token if required
+	if h.authToken != "" {
+		auth := r.Header.Get("Authorization")
+		if auth == "" || auth != "Bearer "+h.authToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	creds, err := h.getCredentials(r.Context())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get credentials: %v", err), http.StatusInternalServerError)
@@ -58,6 +68,7 @@ type AWSCredentialProvider struct {
 	sessionDuration time.Duration
 	externalID      string
 	sessionName     string
+	authToken       string // Auth token for credential endpoint
 
 	mu         sync.RWMutex
 	cached     *AWSCredentials
@@ -86,10 +97,16 @@ func NewAWSCredentialProvider(roleARN, region string, sessionDuration time.Durat
 	}, nil
 }
 
+// SetAuthToken sets the required auth token for the credential endpoint.
+func (p *AWSCredentialProvider) SetAuthToken(token string) {
+	p.authToken = token
+}
+
 // Handler returns an HTTP handler for serving credentials.
 func (p *AWSCredentialProvider) Handler() http.Handler {
 	return &AWSCredentialHandler{
 		getCredentials: p.GetCredentials,
+		authToken:      p.authToken,
 	}
 }
 

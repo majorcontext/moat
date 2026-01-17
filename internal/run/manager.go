@@ -301,7 +301,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						if err != nil {
 							return nil, fmt.Errorf("creating AWS credential provider: %w", err)
 						}
-						p.SetAWSHandler(awsProvider.Handler())
+						// Store provider; handler will be set later after auth token is generated
 						r.AWSCredentialProvider = awsProvider
 					}
 				}
@@ -423,8 +423,22 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Set AWS credential endpoint URL if AWS grant is active
 		if r.AWSCredentialProvider != nil {
 			awsCredURL := proxyURL + "/_aws/credentials"
+
+			// Generate auth token for AWS credential endpoint
+			// AWS SDK requires AWS_CONTAINER_AUTHORIZATION_TOKEN when using non-loopback hosts
+			awsTokenBytes := make([]byte, 32)
+			if _, err := rand.Read(awsTokenBytes); err != nil {
+				return nil, fmt.Errorf("generating AWS credential auth token: %w", err)
+			}
+			awsAuthToken := hex.EncodeToString(awsTokenBytes)
+			r.AWSCredentialProvider.SetAuthToken(awsAuthToken)
+
+			// Now set the handler (after auth token is configured)
+			p.SetAWSHandler(r.AWSCredentialProvider.Handler())
+
 			proxyEnv = append(proxyEnv,
 				"AWS_CONTAINER_CREDENTIALS_FULL_URI="+awsCredURL,
+				"AWS_CONTAINER_AUTHORIZATION_TOKEN="+awsAuthToken,
 				"AWS_REGION="+r.AWSCredentialProvider.Region(),
 			)
 			// Explicitly unset any direct credentials to prevent confusion
