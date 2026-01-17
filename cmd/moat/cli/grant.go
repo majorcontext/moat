@@ -330,8 +330,8 @@ func grantAWS(roleARN, region, sessionDuration, externalID string) error {
 	// Validate session duration if specified
 	if sessionDuration != "" {
 		awsCfg.SessionDurationStr = sessionDuration
-		if _, err := awsCfg.SessionDuration(); err != nil {
-			return err
+		if _, sdErr := awsCfg.SessionDuration(); sdErr != nil {
+			return sdErr
 		}
 	}
 
@@ -357,7 +357,7 @@ Error: %w`, err)
 
 	input := &sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleARN),
-		RoleSessionName: aws.String("agentops-grant-test"),
+		RoleSessionName: aws.String(fmt.Sprintf("agentops-grant-test-%d", time.Now().Unix())),
 		DurationSeconds: aws.Int32(900), // 15 min for test
 	}
 	if externalID != "" {

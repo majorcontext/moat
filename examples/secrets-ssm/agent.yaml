@@ -11,22 +11,15 @@
 #      aws ssm put-parameter --name "/myapp/test-secret" --value "my-test-value" --type SecureString
 #
 # Run with:
-#   agent run examples/secrets-ssm -- sh -c 'echo Your secret: $TEST_SECRET'
-#
-# Note: Use single quotes to prevent your shell from expanding $TEST_SECRET
-# before it reaches the container.
+#   moat run examples/secrets-ssm
 #
 # The container will have TEST_SECRET set to the value from SSM.
 
 name: secrets-ssm-demo
-
-dependencies:
-  - node@20
 
 secrets:
   TEST_SECRET: ssm:///myapp/test-secret
   # Cross-region secret example (uncomment to use):
   # OTHER_SECRET: ssm://us-east-1/myapp/other-secret
 
-env:
-  NODE_ENV: production
+command: ["sh", "-c", "echo Your secret: $TEST_SECRET"]

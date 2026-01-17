@@ -474,10 +474,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Do MITM interception when we have a CA. This is needed for:
-	// 1. Credential injection (when we have credentials for this host)
-	// 2. Request logging/observability
-	// 3. Working with custom CA bundles (client trusts our CA, we verify upstream)
+	// Do MITM interception when we have a CA configured.
+	//
+	// Security note: This intercepts ALL HTTPS traffic, not just credential-injected hosts.
+	// This is intentional for full observability - a core AgentOps feature. The container
+	// trusts our CA (mounted at /etc/ssl/certs/agentops-ca/) and we verify upstream certs.
+	//
+	// Applications with certificate pinning may fail. This is expected behavior since
+	// observability requires seeing all traffic.
 	if p.ca != nil {
 		p.handleConnectWithInterception(w, r, host)
 		return

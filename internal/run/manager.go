@@ -292,6 +292,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						}
 
 						awsProvider, err := proxy.NewAWSCredentialProvider(
+							ctx,
 							roleARN,
 							region,
 							sessionDuration,
@@ -436,8 +437,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			if err != nil {
 				return nil, fmt.Errorf("creating AWS credential helper directory: %w", err)
 			}
+			r.awsTempDir = awsDir // Track for cleanup
 
-			// Write the credential helper binary
+			// Write the credential helper script
 			helperPath := filepath.Join(awsDir, "credentials")
 			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0755); err != nil {
 				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
@@ -1343,6 +1345,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			}
 		}
 
+		// Clean up AWS temp directory
+		if r.awsTempDir != "" {
+			if rmErr := os.RemoveAll(r.awsTempDir); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", rmErr)
+			}
+		}
+
 		return err
 	case <-ctx.Done():
 		// Context canceled - caller chose to detach, don't stop the run
@@ -1433,6 +1442,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	for provider, cleanupPath := range r.ProviderCleanupPaths {
 		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
 			setup.Cleanup(cleanupPath)
+		}
+	}
+
+	// Clean up AWS temp directory
+	if r.awsTempDir != "" {
+		if err := os.RemoveAll(r.awsTempDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", err)
 		}
 	}
 

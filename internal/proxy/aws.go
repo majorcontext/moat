@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -55,7 +56,10 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		// Response already started, can't send HTTP error. Log and continue.
+		fmt.Fprintf(os.Stderr, "Warning: failed to encode AWS credentials response: %v\n", err)
+	}
 }
 
 // STSAssumeRoler interface for STS AssumeRole operation (enables testing).
@@ -81,9 +85,8 @@ type AWSCredentialProvider struct {
 }
 
 // NewAWSCredentialProvider creates a new AWS credential provider.
-func NewAWSCredentialProvider(roleARN, region string, sessionDuration time.Duration, externalID, sessionName string) (*AWSCredentialProvider, error) {
+func NewAWSCredentialProvider(ctx context.Context, roleARN, region string, sessionDuration time.Duration, externalID, sessionName string) (*AWSCredentialProvider, error) {
 	// Load AWS config from host environment
-	ctx := context.Background()
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
@@ -157,13 +160,17 @@ func (p *AWSCredentialProvider) GetCredentials(ctx context.Context) (*AWSCredent
 		return nil, fmt.Errorf("assuming role %s: %w", p.roleARN, err)
 	}
 
-	p.cached = &AWSCredentials{
-		AccessKeyID:     *result.Credentials.AccessKeyId,
-		SecretAccessKey: *result.Credentials.SecretAccessKey,
-		SessionToken:    *result.Credentials.SessionToken,
-		Expiration:      *result.Credentials.Expiration,
+	if result.Credentials == nil {
+		return nil, fmt.Errorf("AWS returned empty credentials for role %s", p.roleARN)
 	}
-	p.expiration = *result.Credentials.Expiration
+
+	p.cached = &AWSCredentials{
+		AccessKeyID:     aws.ToString(result.Credentials.AccessKeyId),
+		SecretAccessKey: aws.ToString(result.Credentials.SecretAccessKey),
+		SessionToken:    aws.ToString(result.Credentials.SessionToken),
+		Expiration:      aws.ToTime(result.Credentials.Expiration),
+	}
+	p.expiration = aws.ToTime(result.Credentials.Expiration)
 
 	return p.cached, nil
 }
