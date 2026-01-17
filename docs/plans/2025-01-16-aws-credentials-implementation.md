@@ -164,6 +164,10 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" \
 
 ## Architecture Notes
 
+### Problem: Credential Expiration
+
+AWS credentials injected as static environment variables expire after the session duration (default 15m, max 12h). Agent runs can last multiple days, so we need dynamic credential refresh.
+
 ### Why credential_process Instead of AWS_CONTAINER_CREDENTIALS_FULL_URI?
 
 The original plan proposed using `AWS_CONTAINER_CREDENTIALS_FULL_URI` (ECS-style credentials). The implementation uses `credential_process` instead because:
@@ -172,12 +176,30 @@ The original plan proposed using `AWS_CONTAINER_CREDENTIALS_FULL_URI` (ECS-style
 2. **Direct injection challenges** - On macOS/Windows, injecting credentials directly into the container environment was problematic
 3. **Dynamic refresh** - credential_process is called on-demand by AWS SDKs, providing automatic refresh
 
+The SDK caches credentials and calls the helper again ~5 minutes before expiry.
+
 ### Security Model
 
 1. **Auth token** - When proxy binds to 0.0.0.0 (Apple containers), a cryptographic token is required
 2. **Token delivery** - Token passed via `AGENTOPS_CREDENTIAL_TOKEN` environment variable
 3. **Authorization header** - Credential helper includes `Authorization: Bearer <token>` in requests
 4. **CA bundle** - AWS traffic goes through proxy for observability; `AWS_CA_BUNDLE` trusts the MITM CA
+
+### Endpoint Reachability by Platform
+
+| Platform | Proxy Host | Auth Required |
+|----------|------------|---------------|
+| Linux (host network) | 127.0.0.1 | No |
+| Linux (bridge) | host.docker.internal | Yes |
+| macOS/Windows | host.docker.internal | Yes |
+| Apple containers | gateway IP | Yes |
+
+### Error Handling
+
+- Credential helper has timeout to fail fast
+- Non-zero exit on HTTP failure
+- AWS SDK retries and surfaces errors to user
+- If proxy dies, existing credentials work until expiry
 
 ### Credential Flow
 
