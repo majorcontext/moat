@@ -52,7 +52,7 @@ type Run struct {
 
 // Options configures a new run.
 type Options struct {
-	Name          string         // Optional explicit name (--name flag or from config)
+	Name          string // Optional explicit name (--name flag or from config)
 	Workspace     string
 	Grants        []string
 	Cmd           []string       // Command to run (default: /bin/bash)

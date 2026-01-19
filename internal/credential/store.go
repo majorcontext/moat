@@ -139,5 +139,5 @@ func DefaultStoreDir() string {
 // In production, this should use a proper key derivation or keychain.
 func DefaultEncryptionKey() []byte {
 	// For now, use a fixed key. TODO: Use system keychain.
-	return []byte("moat-default-key-32-bytes!!!")
+	return []byte("moat-default-encryption-key-32b!")
 }
