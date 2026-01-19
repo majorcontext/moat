@@ -356,6 +356,8 @@ moat run -- npm test            # Custom command (overrides agent.yaml)
 moat logs -n 50                 # Last N lines
 ```
 
+**Command precedence:** CLI command (`-- cmd`) > `command` in agent.yaml
+
 ## How It Works
 
 **Container runtimes**: Auto-detects Apple containers (macOS 15+, Apple Silicon) or Docker.
