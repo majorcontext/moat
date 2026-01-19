@@ -459,6 +459,34 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Mount Claude projects directory so logs appear in the right place on host.
+	// This is enabled when:
+	// - claude.sync_logs is explicitly true, OR
+	// - anthropic grant is configured (automatic Claude Code integration)
+	if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
+		if hostHome, err := os.UserHomeDir(); err == nil {
+			// Detect container home directory from image
+			containerHome := m.runtime.GetImageHomeDir(ctx, containerImage)
+
+			claudeDir := workspaceToClaudeDir(opts.Workspace)
+			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
+
+			// Ensure directory exists on host
+			if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to create Claude logs directory: %v\n", err)
+			} else {
+				// Container writes to ~/.claude/projects/-workspace/
+				// Host sees it as ~/.claude/projects/<workspace-path-encoded>/
+				containerClaudeProjects := filepath.Join(containerHome, ".claude", "projects", "-workspace")
+				mounts = append(mounts, container.MountConfig{
+					Source:   hostClaudeProjects,
+					Target:   containerClaudeProjects,
+					ReadOnly: false,
+				})
+			}
+		}
+	}
+
 	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
 	var capAdd []string
 	if r.FirewallEnabled {
@@ -875,4 +903,13 @@ func (m *Manager) Close() error {
 	m.mu.RUnlock()
 
 	return m.runtime.Close()
+}
+
+// workspaceToClaudeDir converts an absolute workspace path to Claude's project directory format.
+// Example: /home/alice/projects/myapp -> -home-alice-projects-myapp
+func workspaceToClaudeDir(absPath string) string {
+	// Normalize to forward slashes for cross-platform consistency
+	normalized := filepath.ToSlash(absPath)
+	cleaned := strings.TrimPrefix(normalized, "/")
+	return "-" + strings.ReplaceAll(cleaned, "/", "-")
 }

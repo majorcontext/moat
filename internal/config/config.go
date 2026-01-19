@@ -23,6 +23,7 @@ type Config struct {
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
+	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -32,6 +33,31 @@ type Config struct {
 type NetworkConfig struct {
 	Policy string   `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
 	Allow  []string `yaml:"allow,omitempty"`  // allowed host patterns
+}
+
+// ClaudeConfig configures Claude Code integration options.
+type ClaudeConfig struct {
+	// SyncLogs enables mounting Claude's session logs directory so logs from
+	// inside the container appear on the host at the correct project location.
+	// Default: false, unless the "anthropic" grant is configured (then true).
+	SyncLogs *bool `yaml:"sync_logs,omitempty"`
+}
+
+// ShouldSyncClaudeLogs returns true if Claude session logs should be synced.
+// The logic is:
+// - If claude.sync_logs is explicitly set, use that value
+// - Otherwise, enable sync_logs if "anthropic" is in grants (Claude Code integration)
+func (c *Config) ShouldSyncClaudeLogs() bool {
+	if c.Claude.SyncLogs != nil {
+		return *c.Claude.SyncLogs
+	}
+	// Default: enable if anthropic grant is configured
+	for _, grant := range c.Grants {
+		if grant == "anthropic" || strings.HasPrefix(grant, "anthropic:") {
+			return true
+		}
+	}
+	return false
 }
 
 // deprecatedRuntime is kept only to detect and reject old configs.

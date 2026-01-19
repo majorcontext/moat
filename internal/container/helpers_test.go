@@ -42,3 +42,47 @@ func TestIsRunID(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidUsername(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// Valid usernames
+		{"root", true},
+		{"node", true},
+		{"vscode", true},
+		{"user1", true},
+		{"my_user", true},
+		{"my-user", true},
+		{"user.name", true},
+		{"User123", true},
+
+		// Invalid: empty or too long
+		{"", false},
+		{"this_username_is_way_too_long_for_posix", false},
+
+		// Invalid: starts with hyphen or dot
+		{"-user", false},
+		{".user", false},
+
+		// Invalid: path traversal attempts
+		{"../etc", false},
+		{"user/bin", false},
+		{"user\x00name", false},
+
+		// Invalid: special characters
+		{"user name", false},
+		{"user@host", false},
+		{"user:group", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isValidUsername(tt.input)
+			if got != tt.want {
+				t.Errorf("isValidUsername(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
