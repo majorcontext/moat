@@ -28,10 +28,6 @@ import (
 	"github.com/andybons/moat/internal/storage"
 )
 
-// ContainerHomeDir is the home directory inside containers.
-// This is configurable to support different base images (e.g., /root for ubuntu, /home/vscode for devcontainers).
-const ContainerHomeDir = "/root"
-
 // Manager handles run lifecycle operations.
 type Manager struct {
 	runtime        container.Runtime
@@ -124,27 +120,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Target:   "/workspace",
 		ReadOnly: false,
 	})
-
-	// Mount Claude projects directory so logs appear in the right place on host.
-	// Container writes to ~/.claude/projects/-workspace/
-	// Host sees it as ~/.claude/projects/-home-alice-projects-myapp/
-	// This allows Claude session logs to be properly attributed to the original workspace.
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		claudeDir := workspaceToClaudeDir(opts.Workspace)
-		hostClaudeProjects := filepath.Join(homeDir, ".claude", "projects", claudeDir)
-
-		// Ensure directory exists on host
-		if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create Claude logs directory: %v\n", err)
-		} else {
-			containerClaudeProjects := filepath.Join(ContainerHomeDir, ".claude", "projects", "-workspace")
-			mounts = append(mounts, container.MountConfig{
-				Source:   hostClaudeProjects,
-				Target:   containerClaudeProjects,
-				ReadOnly: false,
-			})
-		}
-	}
 
 	// Add mounts from config
 	if opts.Config != nil {
@@ -476,6 +451,34 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
 					strings.Join(depNames, ", "), err)
+			}
+		}
+	}
+
+	// Mount Claude projects directory so logs appear in the right place on host.
+	// This is enabled when:
+	// - claude.sync_logs is explicitly true, OR
+	// - anthropic grant is configured (automatic Claude Code integration)
+	if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
+		if hostHome, err := os.UserHomeDir(); err == nil {
+			// Detect container home directory from image
+			containerHome := m.runtime.GetImageHomeDir(ctx, containerImage)
+
+			claudeDir := workspaceToClaudeDir(opts.Workspace)
+			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
+
+			// Ensure directory exists on host
+			if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to create Claude logs directory: %v\n", err)
+			} else {
+				// Container writes to ~/.claude/projects/-workspace/
+				// Host sees it as ~/.claude/projects/<workspace-path-encoded>/
+				containerClaudeProjects := filepath.Join(containerHome, ".claude", "projects", "-workspace")
+				mounts = append(mounts, container.MountConfig{
+					Source:   hostClaudeProjects,
+					Target:   containerClaudeProjects,
+					ReadOnly: false,
+				})
 			}
 		}
 	}

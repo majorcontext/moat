@@ -85,6 +85,10 @@ type Runtime interface {
 
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
+
+	// GetImageHomeDir returns the home directory configured in an image.
+	// Returns "/root" if detection fails or no home is configured.
+	GetImageHomeDir(ctx context.Context, imageName string) string
 }
 
 // Config holds configuration for creating a container.

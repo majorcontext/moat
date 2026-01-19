@@ -545,6 +545,69 @@ func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetImageHomeDir returns the home directory configured in an image.
+// For Apple containers, we inspect the image config similar to Docker.
+// Returns "/root" if detection fails or no home is configured.
+func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
+	const defaultHome = "/root"
+
+	// Ensure image is available first
+	if err := r.ensureImage(ctx, imageName); err != nil {
+		return defaultHome
+	}
+
+	// Try to inspect the image for config
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "inspect", imageName)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return defaultHome
+	}
+
+	// Parse the JSON output
+	var info []struct {
+		Config struct {
+			User string   `json:"user"`
+			Env  []string `json:"env"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil || len(info) == 0 {
+		return defaultHome
+	}
+
+	// Check for explicit HOME in environment
+	for _, env := range info[0].Config.Env {
+		if strings.HasPrefix(env, "HOME=") {
+			return strings.TrimPrefix(env, "HOME=")
+		}
+	}
+
+	// Check the USER - if non-root, derive home from it
+	user := info[0].Config.User
+	if user == "" || user == "root" || user == "0" {
+		return defaultHome
+	}
+
+	// Strip any UID:GID format
+	if colonIdx := strings.Index(user, ":"); colonIdx != -1 {
+		user = user[:colonIdx]
+	}
+
+	// If it's a numeric UID, we can't determine the home directory
+	if _, err := strconv.Atoi(user); err == nil {
+		return defaultHome
+	}
+
+	// Validate username contains only safe characters (POSIX username pattern)
+	// This prevents path traversal attacks from malicious image configs
+	if !isValidUsername(user) {
+		return defaultHome
+	}
+
+	return "/home/" + user
+}
+
 // BuildRunArgs is exported for testing.
 func BuildRunArgs(cfg Config) []string {
 	r := &AppleRuntime{}

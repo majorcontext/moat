@@ -441,3 +441,81 @@ command: ["", "arg1"]
 		t.Errorf("error should mention empty command: %v", err)
 	}
 }
+
+func TestShouldSyncClaudeLogs(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "default without anthropic grant",
+			config:   Config{Grants: []string{"github"}},
+			expected: false,
+		},
+		{
+			name:     "default with anthropic grant",
+			config:   Config{Grants: []string{"anthropic"}},
+			expected: true,
+		},
+		{
+			name:     "default with anthropic:scope grant",
+			config:   Config{Grants: []string{"anthropic:admin"}},
+			expected: true,
+		},
+		{
+			name:     "explicit true without anthropic",
+			config:   Config{Claude: ClaudeConfig{SyncLogs: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "explicit false with anthropic",
+			config:   Config{Grants: []string{"anthropic"}, Claude: ClaudeConfig{SyncLogs: boolPtr(false)}},
+			expected: false,
+		},
+		{
+			name:     "explicit true with anthropic",
+			config:   Config{Grants: []string{"anthropic"}, Claude: ClaudeConfig{SyncLogs: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "empty config",
+			config:   Config{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.ShouldSyncClaudeLogs()
+			if result != tt.expected {
+				t.Errorf("ShouldSyncClaudeLogs() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadConfigWithClaudeSyncLogs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  sync_logs: true
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Claude.SyncLogs == nil {
+		t.Fatal("Claude.SyncLogs should not be nil")
+	}
+	if *cfg.Claude.SyncLogs != true {
+		t.Errorf("Claude.SyncLogs = %v, want true", *cfg.Claude.SyncLogs)
+	}
+}

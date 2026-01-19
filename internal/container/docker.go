@@ -451,3 +451,53 @@ func (r *DockerRuntime) RemoveImage(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// GetImageHomeDir returns the home directory configured in an image.
+// It inspects the image config for the USER directive and determines the home directory.
+// Returns "/root" if detection fails or the user is root.
+func (r *DockerRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
+	// Default to /root
+	const defaultHome = "/root"
+
+	// Ensure image is available first
+	if err := r.ensureImage(ctx, imageName); err != nil {
+		return defaultHome
+	}
+
+	inspect, err := r.cli.ImageInspect(ctx, imageName)
+	if err != nil {
+		return defaultHome
+	}
+
+	// Check for explicit HOME in environment
+	for _, env := range inspect.Config.Env {
+		if strings.HasPrefix(env, "HOME=") {
+			return strings.TrimPrefix(env, "HOME=")
+		}
+	}
+
+	// Check the USER directive - if non-root, derive home from it
+	user := inspect.Config.User
+	if user == "" || user == "root" || user == "0" {
+		return defaultHome
+	}
+
+	// For non-root users, common convention is /home/<user>
+	// Strip any UID:GID format (e.g., "1000:1000" or "node:node")
+	if colonIdx := strings.Index(user, ":"); colonIdx != -1 {
+		user = user[:colonIdx]
+	}
+
+	// If it's a numeric UID, we can't determine the home directory
+	if _, err := strconv.Atoi(user); err == nil {
+		return defaultHome
+	}
+
+	// Validate username contains only safe characters (POSIX username pattern)
+	// This prevents path traversal attacks from malicious image configs
+	if !isValidUsername(user) {
+		return defaultHome
+	}
+
+	return "/home/" + user
+}
