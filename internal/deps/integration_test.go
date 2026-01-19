@@ -51,7 +51,7 @@ func TestFullPipeline(t *testing.T) {
 
 	// Generate image tag
 	tag := ImageTag(depList)
-	if !strings.HasPrefix(tag, "agentops/run:") {
+	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
 }
@@ -218,7 +218,7 @@ func TestPipelineWithDefaultVersions(t *testing.T) {
 
 	// Generate image tag - should use default versions
 	tag := ImageTag(depList)
-	if !strings.HasPrefix(tag, "agentops/run:") {
+	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
 
@@ -265,7 +265,7 @@ func TestEmptyDependencies(t *testing.T) {
 
 	// Generate image tag for empty list
 	tag := ImageTag(depList)
-	if !strings.HasPrefix(tag, "agentops/run:") {
+	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
 }

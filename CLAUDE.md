@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AgentOps runs AI agents in isolated containers with credential injection and full observability. Key features:
+Moat runs AI agents in isolated containers with credential injection and full observability. Key features:
 
-- **Isolated Execution** - Each agent runs in its own container (Docker or Apple containers) with workspace mounting
+- **Isolated Execution** - Each moat runs in its own container (Docker or Apple containers) with workspace mounting
 - **Credential Injection** - Transparent auth header injection via TLS-intercepting proxy (agent never sees raw tokens)
 - **Smart Image Selection** - Automatically selects container images based on `agent.yaml` runtime config
 - **Full Observability** - Captures logs, network requests, and traces for every run
@@ -16,7 +16,7 @@ AgentOps runs AI agents in isolated containers with credential injection and ful
 ## Architecture
 
 ```
-cmd/agent/           CLI entry point (Cobra commands)
+cmd/moat/           CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
   config/            agent.yaml parsing, mount string parsing
@@ -31,22 +31,22 @@ internal/
 
 ### Key Flows
 
-**Credential Injection:** `agent grant github` → OAuth device flow → token stored encrypted → `agent run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
+**Credential Injection:** `moat grant github` → OAuth device flow → token stored encrypted → `moat run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
 
 **Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X / python:X / golang:X / ubuntu:22.04
 
-**Observability:** Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
+**Observability:** Container stdout → `storage.LogWriter` → `~/.moat/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
 **Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
 
-**Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated → `agent audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
+**Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 
 ### Proxy Security Model
 
 The credential-injecting proxy has different security configurations per runtime:
 
 - **Docker:** Proxy binds to `127.0.0.1` (localhost only). Containers reach it via `host.docker.internal` or host network mode.
-- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://agentops:token@host:port` URL format.
+- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://moat:token@host:port` URL format.
 
 See `internal/proxy/proxy.go` for the security model documentation.
 

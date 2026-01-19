@@ -84,7 +84,7 @@ func TestEntry_HashChangesWithSequence(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -183,7 +183,7 @@ func (e *Entry) Verify() bool {
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -242,7 +242,7 @@ func TestEntry_Verify_TamperedSequence(t *testing.T) {
 **Step 2: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -266,7 +266,7 @@ git commit -m "test(audit): add verification tests for tamper detection"
 **Step 1: Add SQLite dependency**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go get modernc.org/sqlite
 ```
 
@@ -352,7 +352,7 @@ func newTestStore(t *testing.T) *Store {
 **Step 3: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -476,7 +476,7 @@ func (s *Store) Close() error {
 **Step 5: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -573,7 +573,7 @@ func TestStore_Range(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -666,7 +666,7 @@ func scanEntryRows(rows *sql.Rows) (*Entry, error) {
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -772,7 +772,7 @@ func TestStore_VerifyChain_BrokenLink(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -848,7 +848,7 @@ func (s *Store) VerifyChain() (*VerifyResult, error) {
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -959,7 +959,7 @@ func TestCollector_UnixSocket_MultipleMessages(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1075,7 +1075,7 @@ func (c *Collector) Stop() error {
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1202,7 +1202,7 @@ func TestCollector_TCP_RejectsWrongToken(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1284,7 +1284,7 @@ Note: The Collector struct needs to be updated to include authToken. The full up
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1377,7 +1377,7 @@ func TestStore_AppendCredential(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1433,7 +1433,7 @@ func (s *Store) AppendCredential(data CredentialData) (*Entry, error) {
 **Step 4: Run test to verify it passes**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v
 ```
 
@@ -1576,7 +1576,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 **Step 2: Run test**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v -run TestIntegration
 ```
 
@@ -1596,7 +1596,7 @@ git commit -m "test(audit): add integration test for full workflow"
 **Step 1: Run all tests**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 go test ./internal/audit/... -v -cover
 ```
 
@@ -1605,7 +1605,7 @@ Expected: All tests pass with good coverage.
 **Step 2: Run linter**
 
 ```bash
-cd /Users/andybons/dev/agentops/.worktrees/tamper-proof-logs
+cd /Users/andybons/dev/moat/.worktrees/tamper-proof-logs
 golangci-lint run ./internal/audit/...
 ```
 

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 )
 
 // authTimeout is the deadline for completing token authentication.

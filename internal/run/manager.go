@@ -260,8 +260,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyHost := hostAddr + ":" + proxyServer.Port()
 		var proxyURL string
 		if proxyAuthToken != "" {
-			// Include auth credentials in URL: http://agentops:token@host:port
-			proxyURL = "http://agentops:" + proxyAuthToken + "@" + proxyHost
+			// Include auth credentials in URL: http://moat:token@host:port
+			proxyURL = "http://moat:" + proxyAuthToken + "@" + proxyHost
 		} else {
 			proxyURL = "http://" + proxyHost
 		}

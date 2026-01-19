@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/deps"
+	"github.com/andybons/moat/internal/deps"
 	"github.com/spf13/cobra"
 )
 

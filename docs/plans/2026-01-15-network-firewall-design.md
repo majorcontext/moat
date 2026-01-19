@@ -5,7 +5,7 @@
 
 ## Overview
 
-Add outgoing firewall capability to AgentOps containers. When activated, only explicitly allowed HTTP/HTTPS destinations are permitted.
+Add outgoing firewall capability to Moat containers. When activated, only explicitly allowed HTTP/HTTPS destinations are permitted.
 
 ## Goals
 
@@ -61,7 +61,7 @@ Enforcement happens at the existing credential-injecting proxy:
 ```
 Container makes HTTP/HTTPS request
     ↓
-HTTP_PROXY / HTTPS_PROXY routes to AgentOps proxy
+HTTP_PROXY / HTTPS_PROXY routes to Moat proxy
     ↓
 Proxy checks: is network.policy == "strict"?
     ↓ yes
@@ -75,11 +75,11 @@ No match? → Return 407, log blocked request
 
 ```http
 HTTP/1.1 407 Proxy Authentication Required
-X-AgentOps-Blocked: network-policy
-Proxy-Authenticate: AgentOps-Policy
+X-Moat-Blocked: network-policy
+Proxy-Authenticate: Moat-Policy
 Content-Type: text/plain
 
-AgentOps: request blocked by network policy.
+Moat: request blocked by network policy.
 Host "api.example.com" is not in the allow list.
 Add it to network.allow in agent.yaml or use policy: permissive.
 ```
@@ -87,7 +87,7 @@ Add it to network.allow in agent.yaml or use policy: permissive.
 The `407` status code:
 - Is proxy-specific (won't be confused with application-level rejections)
 - Won't trigger automatic retries in most HTTP clients
-- The `X-AgentOps-Blocked: network-policy` header enables programmatic detection
+- The `X-Moat-Blocked: network-policy` header enables programmatic detection
 
 ### Host Matching Logic
 
@@ -131,7 +131,7 @@ All requests logged regardless of policy:
    - New fields: `policy string`, `allowedHosts []hostPattern`
    - New method: `SetNetworkPolicy(policy string, allows []string, grants []string)`
    - Modify request handler: check policy before forwarding
-   - Return 407 with `X-AgentOps-Blocked` header on deny
+   - Return 407 with `X-Moat-Blocked` header on deny
 
 3. **`internal/proxy/hosts.go`** (new file) - Host matching logic
    - `hostPattern` struct (pattern string, port int, isWildcard bool)

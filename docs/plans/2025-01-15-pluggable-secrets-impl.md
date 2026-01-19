@@ -635,7 +635,7 @@ Add import at top of `internal/run/manager.go`:
 ```go
 import (
 	// ... existing imports ...
-	"github.com/andybons/agentops/internal/secrets"
+	"github.com/andybons/moat/internal/secrets"
 )
 ```
 
@@ -785,9 +785,9 @@ func TestOnePasswordResolver_Integration(t *testing.T) {
 	}
 
 	// This test requires a real 1Password item to exist.
-	// Create a test item: op item create --category=login --title="AgentOps Test" --vault="Private" password=test-secret
+	// Create a test item: op item create --category=login --title="Moat Test" --vault="Private" password=test-secret
 	// Then set this reference:
-	testRef := "op://Private/AgentOps Test/password"
+	testRef := "op://Private/Moat Test/password"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

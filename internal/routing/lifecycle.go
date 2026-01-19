@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/agentops/internal/proxy"
+	"github.com/andybons/moat/internal/proxy"
 )
 
 // Lifecycle manages the shared reverse proxy lifecycle.
@@ -75,7 +75,7 @@ func (lc *Lifecycle) EnsureRunning() error {
 	if lock != nil && lock.IsAlive() {
 		// Proxy already running - check for port mismatch only if specific port requested
 		if lc.port > 0 && lock.Port != lc.port {
-			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset AGENTOPS_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
+			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
 		}
 		lc.port = lock.Port
 		lc.isOwner = false

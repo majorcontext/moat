@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 )
 
 // EntryType identifies the kind of log entry.

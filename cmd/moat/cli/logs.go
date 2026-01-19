@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

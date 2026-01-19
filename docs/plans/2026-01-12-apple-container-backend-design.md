@@ -84,7 +84,7 @@ func NewRuntime() (Runtime, error) {
 
 ### Apple Container CLI Mapping
 
-| AgentOps Operation | Apple Container CLI |
+| Moat Operation | Apple Container CLI |
 |-------------------|---------------------|
 | CreateContainer | `container run --detach --name <id> [opts] <image> [cmd]` |
 | StartContainer | (handled by run --detach) |

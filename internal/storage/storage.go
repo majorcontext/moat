@@ -75,14 +75,14 @@ func (s *RunStore) LoadMetadata() (Metadata, error) {
 }
 
 // DefaultBaseDir returns the default base directory for run storage.
-// This is ~/.agentops/runs.
+// This is ~/.moat/runs.
 func DefaultBaseDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		// Fallback to current directory if home dir cannot be determined
-		return filepath.Join(".", ".agentops", "runs")
+		return filepath.Join(".", ".moat", "runs")
 	}
-	return filepath.Join(homeDir, ".agentops", "runs")
+	return filepath.Join(homeDir, ".moat", "runs")
 }
 
 // LogEntry represents a single log line with timestamp.

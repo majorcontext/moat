@@ -4,7 +4,7 @@
 
 **Goal:** Add commands for managing container resources while preserving the run abstraction.
 
-**Architecture:** Extend the `container.Runtime` interface with listing/removal methods. Add new CLI commands that operate on agentops-managed resources only. Use the `agentops/` image prefix and run ID container names for filtering.
+**Architecture:** Extend the `container.Runtime` interface with listing/removal methods. Add new CLI commands that operate on moat-managed resources only. Use the `moat/` image prefix and run ID container names for filtering.
 
 **Tech Stack:** Go, Cobra CLI, Docker SDK, Apple container CLI
 
@@ -41,10 +41,10 @@ type ContainerInfo struct {
 Add to the `Runtime` interface:
 
 ```go
-// ListImages returns all agentops-managed images.
+// ListImages returns all moat-managed images.
 ListImages(ctx context.Context) ([]ImageInfo, error)
 
-// ListContainers returns all agentops containers (running + stopped).
+// ListContainers returns all moat containers (running + stopped).
 ListContainers(ctx context.Context) ([]ContainerInfo, error)
 
 // RemoveImage removes an image by ID or tag.
@@ -98,8 +98,8 @@ func TestDockerRuntime_ListImages(t *testing.T) {
 		t.Fatalf("ListImages: %v", err)
 	}
 
-	// Should return without error (may be empty if no agentops images)
-	t.Logf("Found %d agentops images", len(images))
+	// Should return without error (may be empty if no moat images)
+	t.Logf("Found %d moat images", len(images))
 }
 
 func TestDockerRuntime_ListContainers(t *testing.T) {
@@ -115,7 +115,7 @@ func TestDockerRuntime_ListContainers(t *testing.T) {
 		t.Fatalf("ListContainers: %v", err)
 	}
 
-	t.Logf("Found %d agentops containers", len(containers))
+	t.Logf("Found %d moat containers", len(containers))
 }
 ```
 
@@ -124,8 +124,8 @@ func TestDockerRuntime_ListContainers(t *testing.T) {
 Add to `docker.go`:
 
 ```go
-// ListImages returns all agentops-managed images.
-// Filters to images with "agentops/" prefix in any tag.
+// ListImages returns all moat-managed images.
+// Filters to images with "moat/" prefix in any tag.
 func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	images, err := r.cli.ImageList(ctx, image.ListOptions{})
 	if err != nil {
@@ -134,9 +134,9 @@ func (r *DockerRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 	var result []ImageInfo
 	for _, img := range images {
-		// Check if any tag has agentops/ prefix
+		// Check if any tag has moat/ prefix
 		for _, tag := range img.RepoTags {
-			if strings.HasPrefix(tag, "agentops/") {
+			if strings.HasPrefix(tag, "moat/") {
 				result = append(result, ImageInfo{
 					ID:      img.ID,
 					Tag:     tag,
@@ -158,7 +158,7 @@ Add import `"strings"` if not present.
 Add to `docker.go`:
 
 ```go
-// ListContainers returns all agentops containers.
+// ListContainers returns all moat containers.
 // Filters to containers whose name matches an 8-char hex run ID pattern.
 func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
@@ -170,7 +170,7 @@ func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, er
 
 	var result []ContainerInfo
 	for _, c := range containers {
-		// Check if any name looks like an agentops run ID (8 hex chars)
+		// Check if any name looks like an moat run ID (8 hex chars)
 		for _, name := range c.Names {
 			// Names have leading slash, e.g., "/a1b2c3d4"
 			name = strings.TrimPrefix(name, "/")
@@ -189,7 +189,7 @@ func (r *DockerRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, er
 	return result, nil
 }
 
-// isRunID checks if a string looks like an agentops run ID (8 hex chars).
+// isRunID checks if a string looks like an moat run ID (8 hex chars).
 func isRunID(s string) bool {
 	if len(s) != 8 {
 		return false
@@ -245,7 +245,7 @@ git commit -m "feat(container): implement Docker listing methods"
 Add to `apple.go`:
 
 ```go
-// ListImages returns all agentops-managed images.
+// ListImages returns all moat-managed images.
 func (r *AppleRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "image", "list", "--format", "json")
 	var stdout bytes.Buffer
@@ -268,7 +268,7 @@ func (r *AppleRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 	var result []ImageInfo
 	for _, img := range images {
-		if strings.HasPrefix(img.Tag, "agentops/") {
+		if strings.HasPrefix(img.Tag, "moat/") {
 			created, _ := time.Parse(time.RFC3339, img.Created)
 			result = append(result, ImageInfo{
 				ID:      img.ID,
@@ -296,7 +296,7 @@ func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
 		if err := json.Unmarshal(line, &img); err != nil {
 			continue
 		}
-		if strings.HasPrefix(img.Tag, "agentops/") {
+		if strings.HasPrefix(img.Tag, "moat/") {
 			created, _ := time.Parse(time.RFC3339, img.Created)
 			result = append(result, ImageInfo{
 				ID:      img.ID,
@@ -315,7 +315,7 @@ func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
 Add to `apple.go`:
 
 ```go
-// ListContainers returns all agentops containers.
+// ListContainers returns all moat containers.
 func (r *AppleRuntime) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--all", "--format", "json")
 	var stdout bytes.Buffer
@@ -376,7 +376,7 @@ func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
 Move `isRunID` function to a shared location or duplicate in `apple.go`:
 
 ```go
-// isRunID checks if a string looks like an agentops run ID (8 hex chars).
+// isRunID checks if a string looks like an moat run ID (8 hex chars).
 func isRunID(s string) bool {
 	if len(s) != 8 {
 		return false
@@ -406,7 +406,7 @@ git commit -m "feat(container): implement Apple runtime listing methods"
 
 ---
 
-## Task 4: Add `agent status` Command
+## Task 4: Add `moat status` Command
 
 **Files:**
 - Create: `cmd/agent/cli/status.go`
@@ -427,16 +427,16 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/run"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/run"
+	"github.com/andybons/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show runs, images, disk usage, and health",
-	Long: `Display the current state of agentops resources including:
+	Long: `Display the current state of moat resources including:
 - Active and stopped runs
 - Cached container images
 - Disk usage
@@ -687,7 +687,7 @@ git commit -m "feat(cli): add agent status command"
 
 ---
 
-## Task 5: Add `agent clean` Command
+## Task 5: Add `moat clean` Command
 
 **Files:**
 - Create: `cmd/agent/cli/clean.go`
@@ -707,8 +707,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/run"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -719,7 +719,7 @@ var (
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Remove stopped runs and unused images",
-	Long: `Interactively remove stopped runs and unused agentops images.
+	Long: `Interactively remove stopped runs and unused moat images.
 
 Shows what will be removed and asks for confirmation before proceeding.
 Use --force to skip confirmation (for scripts).
@@ -877,7 +877,7 @@ git commit -m "feat(cli): add agent clean command"
 
 ---
 
-## Task 6: Add `agent system` Parent Command and Subcommands
+## Task 6: Add `moat system` Parent Command and Subcommands
 
 **Files:**
 - Create: `cmd/agent/cli/system.go`
@@ -923,14 +923,14 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
+	"github.com/andybons/moat/internal/container"
 	"github.com/spf13/cobra"
 )
 
 var systemImagesCmd = &cobra.Command{
 	Use:   "images",
-	Short: "List agentops-managed images",
-	Long: `List all container images created by agentops.
+	Short: "List moat-managed images",
+	Long: `List all container images created by moat.
 
 This is an escape hatch for debugging. Use 'agent status' for normal operations.
 
@@ -963,7 +963,7 @@ func listSystemImages(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(images) == 0 {
-		fmt.Println("No agentops images found")
+		fmt.Println("No moat images found")
 		return nil
 	}
 
@@ -1004,14 +1004,14 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
+	"github.com/andybons/moat/internal/container"
 	"github.com/spf13/cobra"
 )
 
 var systemContainersCmd = &cobra.Command{
 	Use:   "containers",
-	Short: "List agentops-managed containers",
-	Long: `List all containers created by agentops.
+	Short: "List moat-managed containers",
+	Long: `List all containers created by moat.
 
 This is an escape hatch for debugging. Use 'agent status' for normal operations.
 
@@ -1044,7 +1044,7 @@ func listSystemContainers(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(containers) == 0 {
-		fmt.Println("No agentops containers found")
+		fmt.Println("No moat containers found")
 		return nil
 	}
 
@@ -1083,7 +1083,7 @@ git commit -m "feat(cli): add agent system images/containers commands"
 
 ---
 
-## Task 7: Add `--rebuild` Flag to `agent run`
+## Task 7: Add `--rebuild` Flag to `moat run`
 
 **Files:**
 - Modify: `cmd/agent/cli/run.go`
@@ -1237,9 +1237,9 @@ This plan implements:
 1. **Runtime interface extensions** for listing images/containers
 2. **Docker implementation** of listing methods
 3. **Apple runtime implementation** of listing methods
-4. **`agent status`** - overview of runs, images, disk usage, health
-5. **`agent clean`** - interactive cleanup with y/N confirmation
-6. **`agent system images/containers`** - read-only escape hatches
-7. **`agent run --rebuild`** - nuclear option for cache issues
+4. **`moat status`** - overview of runs, images, disk usage, health
+5. **`moat clean`** - interactive cleanup with y/N confirmation
+6. **`moat system images/containers`** - read-only escape hatches
+7. **`moat run --rebuild`** - nuclear option for cache issues
 
 Total: 8 tasks, approximately 25-30 commits following TDD approach.

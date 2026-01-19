@@ -20,8 +20,8 @@ func TestDockerRuntime_ListImages(t *testing.T) {
 		t.Fatalf("ListImages: %v", err)
 	}
 
-	// Should return without error (may be empty if no agentops images)
-	t.Logf("Found %d agentops images", len(images))
+	// Should return without error (may be empty if no moat images)
+	t.Logf("Found %d moat images", len(images))
 }
 
 func TestDockerRuntime_ListContainers(t *testing.T) {
@@ -37,5 +37,5 @@ func TestDockerRuntime_ListContainers(t *testing.T) {
 		t.Fatalf("ListContainers: %v", err)
 	}
 
-	t.Logf("Found %d agentops containers", len(containers))
+	t.Logf("Found %d moat containers", len(containers))
 }

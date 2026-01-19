@@ -67,7 +67,7 @@ func TestDefaultBaseDir(t *testing.T) {
 		t.Fatalf("UserHomeDir: %v", err)
 	}
 
-	expected := filepath.Join(homeDir, ".agentops", "runs")
+	expected := filepath.Join(homeDir, ".moat", "runs")
 	if baseDir != expected {
 		t.Errorf("DefaultBaseDir = %q, want %q", baseDir, expected)
 	}

@@ -3,7 +3,7 @@ package image
 import (
 	"testing"
 
-	"github.com/andybons/agentops/internal/deps"
+	"github.com/andybons/moat/internal/deps"
 )
 
 func TestResolveNoDeps(t *testing.T) {

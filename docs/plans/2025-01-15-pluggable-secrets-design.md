@@ -267,4 +267,4 @@ Error: Cannot resolve secret OPENAI_API_KEY
 
 - Caching resolved secrets for the duration of a run
 - Secret rotation handling (re-resolve on long-running agents?)
-- `agent secrets list` command to show what would be resolved (without values)
+- `moat secrets list` command to show what would be resolved (without values)

@@ -212,7 +212,7 @@ RUN npm install -g playwright && npx playwright install --with-deps
 - Apt packages batched into one layer
 
 **Image tagging:**
-- Generated images tagged with hash of dependency list: `agentops/run:<hash>`
+- Generated images tagged with hash of dependency list: `moat/run:<hash>`
 - Subsequent runs with same dependencies reuse cached image
 
 ## Apple Containers Implementation
@@ -243,7 +243,7 @@ apt-get install -y nodejs
 **Trade-off:** First run is slower (30-60s for full stack), but keeps implementation simple.
 
 **Future optimization (TODO):**
-- After successful install, snapshot container to `~/.agentops/images/<hash>.tar`
+- After successful install, snapshot container to `~/.moat/images/<hash>.tar`
 - On subsequent runs, restore from snapshot if dependency hash matches
 - Invalidate when dependency list changes
 

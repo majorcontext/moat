@@ -1,18 +1,18 @@
-# AgentOps Design Document
+# Moat Design Document
 
 **Date:** 2026-01-10
 **Status:** Draft
 
 ## Overview
 
-AgentOps is local execution infrastructure for AI agents. The core abstraction is a **run** — a sealed, ephemeral workspace containing code, dependencies, tools, credentials, and observability.
+Moat is local execution infrastructure for AI agents. The core abstraction is a **run** — a sealed, ephemeral workspace containing code, dependencies, tools, credentials, and observability.
 
-**Core promise:** `agent run claude-code .` just works — zero Docker knowledge, zero secret copying, full visibility.
+**Core promise:** `moat run claude-code .` just works — zero Docker knowledge, zero secret copying, full visibility.
 
 ### Mental Model
 
 - **Runs, not containers** — Users never think about Docker. They think about "I want to run claude-code on this repo with GitHub access."
-- **Zero-config start, progressive complexity** — `agent run claude-code .` works immediately. Add `agent.yaml` only when you need customization.
+- **Zero-config start, progressive complexity** — `moat run claude-code .` works immediately. Add `agent.yaml` only when you need customization.
 - **Credentials as capabilities** — Agents request scoped capabilities (`github:repo`, `aws:s3.read`). The broker mints short-lived, run-scoped tokens. No secrets copied into containers.
 - **Everything is observable** — Every run emits structured traces (OpenTelemetry). Logs, tool invocations, file changes, network calls — all captured, all replayable.
 
@@ -79,7 +79,7 @@ agent promote [run-id]          # Graduate workspace/artifacts to persistent sto
 
 ### Implicit Behavior
 
-- `agent run` with no agent specified looks for `agent.yaml`, falls back to interactive prompt
+- `moat run` with no agent specified looks for `agent.yaml`, falls back to interactive prompt
 - Running in a git repo auto-mounts the repo as the workspace
 - If credentials are needed but not granted, prompts interactively (no silent failures)
 
@@ -117,7 +117,7 @@ The broker is the security core. It mediates all authenticated requests — the 
 
 ### Credential Lifecycle
 
-1. **Grant** — User runs `agent grant github`. AgentOps initiates device flow, receives token, stores encrypted on host.
+1. **Grant** — User runs `moat grant github`. Moat initiates device flow, receives token, stores encrypted on host.
 2. **Bind** — When a run starts with `--grant github:repo`, the broker notes this run can use `github:repo` scope.
 3. **Inject** — Container makes request to `api.github.com`. Proxy sees the run-id, checks granted caps, injects `Authorization: Bearer <token>`.
 4. **Scope enforcement** — If run has `github:repo` but requests `/gists`, proxy rejects with clear error.
@@ -125,7 +125,7 @@ The broker is the security core. It mediates all authenticated requests — the 
 
 ### Storage
 
-Credentials stored in `~/.agentops/credentials/` — encrypted at rest, keyed by provider. Runs reference capabilities, never raw tokens.
+Credentials stored in `~/.moat/credentials/` — encrypted at rest, keyed by provider. Runs reference capabilities, never raw tokens.
 
 ---
 
@@ -143,14 +143,14 @@ Credentials stored in `~/.agentops/credentials/` — encrypted at rest, keyed by
 
 ### Curated Base Images
 
-AgentOps maintains a small set of base images optimized for common cases:
+Moat maintains a small set of base images optimized for common cases:
 
 | Image | Contents |
 |-------|----------|
-| `agentops/node20` | Node 20, npm, common build tools |
-| `agentops/python311` | Python 3.11, pip, venv |
-| `agentops/polyglot` | Node 20 + Python 3.11 + Go 1.22 |
-| `agentops/minimal` | Just the essentials, for custom setups |
+| `moat/node20` | Node 20, npm, common build tools |
+| `moat/python311` | Python 3.11, pip, venv |
+| `moat/polyglot` | Node 20 + Python 3.11 + Go 1.22 |
+| `moat/minimal` | Just the essentials, for custom setups |
 
 ### System Packages
 
@@ -158,7 +158,7 @@ When `agent.yaml` specifies system packages, these are installed at first run an
 
 ### Agent Binaries
 
-Agents like `claude-code` are fetched and cached in `~/.agentops/agents/`. Version pinned in `agent.yaml` or defaults to latest stable.
+Agents like `claude-code` are fetched and cached in `~/.moat/agents/`. Version pinned in `agent.yaml` or defaults to latest stable.
 
 ---
 
@@ -196,7 +196,7 @@ http://localhost:9999/callback                → active run's OAuth handler
 ### OAuth Flow
 
 1. User registers `http://localhost:9999/callback` with OAuth provider (once)
-2. Run starts, AgentOps notes it expects OAuth callbacks
+2. Run starts, Moat notes it expects OAuth callbacks
 3. OAuth redirect hits `/callback`, proxy routes to active run's `/auth/callback`
 4. If multiple runs, proxy uses state parameter or prompts user
 
@@ -221,7 +221,7 @@ Default: allow all. Explicit allowlist available for security-conscious users.
 
 ### Storage Format
 
-OpenTelemetry spans, stored locally in `~/.agentops/runs/<run-id>/`.
+OpenTelemetry spans, stored locally in `~/.moat/runs/<run-id>/`.
 
 ### CLI Commands
 
@@ -280,7 +280,7 @@ ai:
 ### Host Directory Structure
 
 ```
-~/.agentops/
+~/.moat/
   config.yaml              # Global settings
   credentials/             # Encrypted tokens
   agents/                  # Cached agent binaries
@@ -356,7 +356,7 @@ ai:
 
 ## Implementation Priority
 
-1. **Core loop** — `agent run` with Docker, basic workspace mounting
+1. **Core loop** — `moat run` with Docker, basic workspace mounting
 2. **Credential broker** — GitHub and AWS, proxy injection
-3. **Observability** — OTLP capture, `agent logs` and `agent trace`
+3. **Observability** — OTLP capture, `moat logs` and `moat trace`
 4. **Polish** — `agent.yaml` parsing, curated images, cleanup

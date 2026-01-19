@@ -10,7 +10,7 @@ A cryptographically verifiable logging system that prevents tampering by malicio
 
 ## Problem Statement
 
-The current logging system stores plain JSONL files with no integrity verification. An attacker who gains access to `~/.agentops/runs/` can modify, delete, or reorder log entries without detection. A malicious agent could potentially hide evidence of data exfiltration or other harmful actions.
+The current logging system stores plain JSONL files with no integrity verification. An attacker who gains access to `~/.moat/runs/` can modify, delete, or reorder log entries without detection. A malicious agent could potentially hide evidence of data exfiltration or other harmful actions.
 
 ## Threat Model
 
@@ -131,7 +131,7 @@ type MerkleNode struct {
 ## Storage Layout
 
 ```
-~/.agentops/runs/<run-id>/
+~/.moat/runs/<run-id>/
 ├── logs.db                    # SQLite: entries + merkle nodes
 ├── attestations/
 │   ├── root-0001.sig          # Local signature of merkle root
@@ -179,11 +179,11 @@ func (c *LogCollector) startUnixSocket(runDir string) error {
 Mounts: []Mount{
     {
         Source:   filepath.Join(runDir, "log.sock"),
-        Target:   "/run/agentops/log.sock",
+        Target:   "/run/moat/log.sock",
     },
 },
 Env: []string{
-    "AGENTOPS_LOG_SOCKET=/run/agentops/log.sock",
+    "MOAT_LOG_SOCKET=/run/moat/log.sock",
 },
 ```
 
@@ -226,8 +226,8 @@ func (c *LogCollector) acceptAuthenticatedConnections(listener net.Listener) {
 
 ```go
 Env: []string{
-    fmt.Sprintf("AGENTOPS_LOG_HOST=%s:%d", gateway, c.port),
-    fmt.Sprintf("AGENTOPS_LOG_TOKEN=%s", authToken),
+    fmt.Sprintf("MOAT_LOG_HOST=%s:%d", gateway, c.port),
+    fmt.Sprintf("MOAT_LOG_TOKEN=%s", authToken),
 },
 ```
 
@@ -374,14 +374,14 @@ Contents:
 - `verify.go` - Standalone verification code
 - `README.md` - Verification instructions
 
-Third-party auditors can verify without AgentOps installed.
+Third-party auditors can verify without Moat installed.
 
 ### Go API
 
 ```go
-import "github.com/anthropic/agentops/audit"
+import "github.com/anthropic/moat/audit"
 
-run, _ := audit.LoadRun("~/.agentops/runs/run-abc123")
+run, _ := audit.LoadRun("~/.moat/runs/run-abc123")
 
 result, _ := audit.Verify(run, audit.VerifyOptions{
     CheckHashChain:  true,

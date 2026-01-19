@@ -118,7 +118,7 @@ func TestProxy_AuthTokenValidBasicAuth(t *testing.T) {
 
 	// Request with valid Basic auth (username:token format) should succeed
 	proxyURL := mustParseURL(proxyServer.URL)
-	proxyURL.User = url.UserPassword("agentops", "secret-token-123")
+	proxyURL.User = url.UserPassword("moat", "secret-token-123")
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -156,7 +156,7 @@ func TestProxy_AuthTokenInvalidToken(t *testing.T) {
 
 	// Request with wrong token should fail
 	proxyURL := mustParseURL(proxyServer.URL)
-	proxyURL.User = url.UserPassword("agentops", "wrong-token")
+	proxyURL.User = url.UserPassword("moat", "wrong-token")
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -233,8 +233,8 @@ func TestProxy_NetworkPolicyStrictBlocked(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
 	}
 
-	if resp.Header.Get("X-AgentOps-Blocked") != "network-policy" {
-		t.Errorf("X-AgentOps-Blocked header missing or wrong")
+	if resp.Header.Get("X-Moat-Blocked") != "network-policy" {
+		t.Errorf("X-Moat-Blocked header missing or wrong")
 	}
 
 	body, _ := io.ReadAll(resp.Body)

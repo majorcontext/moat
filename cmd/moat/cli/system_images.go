@@ -7,14 +7,14 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
+	"github.com/andybons/moat/internal/container"
 	"github.com/spf13/cobra"
 )
 
 var systemImagesCmd = &cobra.Command{
 	Use:   "images",
-	Short: "List agentops-managed images",
-	Long: `List all container images created by agentops.
+	Short: "List moat-managed images",
+	Long: `List all container images created by moat.
 
 This is an escape hatch for debugging. Use 'agent status' for normal operations.
 
@@ -47,7 +47,7 @@ func listSystemImages(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(images) == 0 {
-		fmt.Println("No agentops images found")
+		fmt.Println("No moat images found")
 		return nil
 	}
 

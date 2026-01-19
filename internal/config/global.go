@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GlobalConfig holds global AgentOps settings from ~/.agentops/config.yaml.
+// GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
 	Proxy ProxyConfig `yaml:"proxy"`
 }
@@ -27,21 +27,21 @@ func DefaultGlobalConfig() *GlobalConfig {
 	}
 }
 
-// LoadGlobal reads ~/.agentops/config.yaml and applies environment overrides.
+// LoadGlobal reads ~/.moat/config.yaml and applies environment overrides.
 func LoadGlobal() (*GlobalConfig, error) {
 	cfg := DefaultGlobalConfig()
 
 	// Try to load from file
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		configPath := filepath.Join(homeDir, ".agentops", "config.yaml")
+		configPath := filepath.Join(homeDir, ".moat", "config.yaml")
 		if data, err := os.ReadFile(configPath); err == nil {
 			_ = yaml.Unmarshal(data, cfg) // Ignore unmarshal errors, use defaults
 		}
 	}
 
 	// Apply environment overrides
-	if portStr := os.Getenv("AGENTOPS_PROXY_PORT"); portStr != "" {
+	if portStr := os.Getenv("MOAT_PROXY_PORT"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil {
 			cfg.Proxy.Port = port
 		}
@@ -50,11 +50,11 @@ func LoadGlobal() (*GlobalConfig, error) {
 	return cfg, nil
 }
 
-// GlobalConfigDir returns the path to ~/.agentops.
+// GlobalConfigDir returns the path to ~/.moat.
 func GlobalConfigDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".agentops")
+		return filepath.Join(".", ".moat")
 	}
-	return filepath.Join(homeDir, ".agentops")
+	return filepath.Join(homeDir, ".moat")
 }

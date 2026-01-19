@@ -7,14 +7,14 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/container"
+	"github.com/andybons/moat/internal/container"
 	"github.com/spf13/cobra"
 )
 
 var systemContainersCmd = &cobra.Command{
 	Use:   "containers",
-	Short: "List agentops-managed containers",
-	Long: `List all containers created by agentops.
+	Short: "List moat-managed containers",
+	Long: `List all containers created by moat.
 
 This is an escape hatch for debugging. Use 'agent status' for normal operations.
 
@@ -47,7 +47,7 @@ func listSystemContainers(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(containers) == 0 {
-		fmt.Println("No agentops containers found")
+		fmt.Println("No moat containers found")
 		return nil
 	}
 

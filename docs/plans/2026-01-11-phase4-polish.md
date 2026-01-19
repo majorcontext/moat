@@ -209,7 +209,7 @@ package image
 import (
 	"testing"
 
-	"github.com/andybons/agentops/internal/config"
+	"github.com/andybons/moat/internal/config"
 )
 
 func TestResolveDefault(t *testing.T) {
@@ -265,7 +265,7 @@ Expected: FAIL (package does not exist)
 // internal/image/resolver.go
 package image
 
-import "github.com/andybons/agentops/internal/config"
+import "github.com/andybons/moat/internal/config"
 
 // DefaultImage is the default container image.
 const DefaultImage = "ubuntu:22.04"
@@ -335,7 +335,7 @@ Wire config parsing into the run command.
 
 ```go
 // internal/run/run.go
-import "github.com/andybons/agentops/internal/config"
+import "github.com/andybons/moat/internal/config"
 
 type Options struct {
 	Agent     string

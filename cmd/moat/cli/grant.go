@@ -1,4 +1,4 @@
-// cmd/agent/cli/grant.go
+// cmd/moat/cli/grant.go
 package cli
 
 import (
@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/agentops/internal/credential"
+	"github.com/andybons/moat/internal/credential"
 	"github.com/spf13/cobra"
 )
 
 // getGitHubClientID returns the GitHub OAuth client ID from environment.
 // Returns empty string if not configured.
 func getGitHubClientID() string {
-	return os.Getenv("AGENTOPS_GITHUB_CLIENT_ID")
+	return os.Getenv("MOAT_GITHUB_CLIENT_ID")
 }
 
 var grantCmd = &cobra.Command{
@@ -45,26 +45,26 @@ GitHub scopes (see https://docs.github.com/en/apps/oauth-apps/building-oauth-app
 
 Examples:
   # Grant GitHub access with default scopes (repo)
-  agent grant github
+  moat grant github
 
   # Grant GitHub access with repo scope only
-  agent grant github:repo
+  moat grant github:repo
 
   # Grant GitHub access with multiple scopes
-  agent grant github:repo,read:user,user:email
+  moat grant github:repo,read:user,user:email
 
   # Use the credential in a run
-  agent run my-agent . --grant github
+  moat run my-agent . --grant github
 
   # Grant Anthropic API access (interactive prompt)
-  agent grant anthropic
+  moat grant anthropic
 
   # Grant Anthropic API access (from environment variable)
   export ANTHROPIC_API_KEY="sk-ant-..."  # set in your shell profile
-  agent grant anthropic
+  moat grant anthropic
 
   # Use Anthropic credential for Claude Code
-  agent run claude-code-test . --grant anthropic`,
+  moat run claude-code-test . --grant anthropic`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }
@@ -116,9 +116,9 @@ func grantGitHub(scopes []string) error {
 	if clientID == "" {
 		return fmt.Errorf(`GitHub OAuth App not configured
 
-To use 'agent grant github', set the AGENTOPS_GITHUB_CLIENT_ID environment variable:
+To use 'moat grant github', set the MOAT_GITHUB_CLIENT_ID environment variable:
 
-  export AGENTOPS_GITHUB_CLIENT_ID="your-client-id"
+  export MOAT_GITHUB_CLIENT_ID="your-client-id"
 
 To create a GitHub OAuth App:
   1. Go to https://github.com/settings/developers

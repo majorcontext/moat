@@ -356,11 +356,11 @@ func TestSSMResolver_Integration(t *testing.T) {
 	}
 
 	// Configure via environment variables:
-	//   SSM_TEST_PARAM - parameter path (default: "/agentops/test/secret")
+	//   SSM_TEST_PARAM - parameter path (default: "/moat/test/secret")
 	//   SSM_TEST_REGION - AWS region (optional)
 	paramPath := os.Getenv("SSM_TEST_PARAM")
 	if paramPath == "" {
-		paramPath = "/agentops/test/secret"
+		paramPath = "/moat/test/secret"
 	}
 
 	testRef := "ssm://" + paramPath
@@ -450,7 +450,7 @@ env:
 go test ./internal/secrets/... -v
 
 # Integration test (requires AWS credentials and test parameter)
-# First create: aws ssm put-parameter --name "/agentops/test/secret" --value "test-value" --type SecureString
+# First create: aws ssm put-parameter --name "/moat/test/secret" --value "test-value" --type SecureString
 go test -tags=integration -v ./internal/secrets/... -run SSM
 ```
 

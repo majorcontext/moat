@@ -242,7 +242,7 @@ func TestLoadGlobalConfig(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create config file
-	configDir := filepath.Join(tmpHome, ".agentops")
+	configDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(configDir, 0755)
 	configPath := filepath.Join(configDir, "config.yaml")
 
@@ -283,8 +283,8 @@ func TestLoadGlobalConfigEnvOverride(t *testing.T) {
 	os.Setenv("HOME", tmpHome)
 	defer os.Setenv("HOME", origHome)
 
-	os.Setenv("AGENTOPS_PROXY_PORT", "7000")
-	defer os.Unsetenv("AGENTOPS_PROXY_PORT")
+	os.Setenv("MOAT_PROXY_PORT", "7000")
+	defer os.Unsetenv("MOAT_PROXY_PORT")
 
 	cfg, err := LoadGlobal()
 	if err != nil {
@@ -319,7 +319,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GlobalConfig holds global AgentOps settings from ~/.agentops/config.yaml.
+// GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
 	Proxy ProxyConfig `yaml:"proxy"`
 }
@@ -338,21 +338,21 @@ func DefaultGlobalConfig() *GlobalConfig {
 	}
 }
 
-// LoadGlobal reads ~/.agentops/config.yaml and applies environment overrides.
+// LoadGlobal reads ~/.moat/config.yaml and applies environment overrides.
 func LoadGlobal() (*GlobalConfig, error) {
 	cfg := DefaultGlobalConfig()
 
 	// Try to load from file
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		configPath := filepath.Join(homeDir, ".agentops", "config.yaml")
+		configPath := filepath.Join(homeDir, ".moat", "config.yaml")
 		if data, err := os.ReadFile(configPath); err == nil {
 			yaml.Unmarshal(data, cfg)
 		}
 	}
 
 	// Apply environment overrides
-	if portStr := os.Getenv("AGENTOPS_PROXY_PORT"); portStr != "" {
+	if portStr := os.Getenv("MOAT_PROXY_PORT"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil {
 			cfg.Proxy.Port = port
 		}
@@ -361,13 +361,13 @@ func LoadGlobal() (*GlobalConfig, error) {
 	return cfg, nil
 }
 
-// GlobalConfigDir returns the path to ~/.agentops.
+// GlobalConfigDir returns the path to ~/.moat.
 func GlobalConfigDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".agentops")
+		return filepath.Join(".", ".moat")
 	}
-	return filepath.Join(homeDir, ".agentops")
+	return filepath.Join(homeDir, ".moat")
 }
 ```
 
@@ -1486,8 +1486,8 @@ git commit -m "feat(cli): add --name flag to agent run"
 Add to imports:
 
 ```go
-	"github.com/andybons/agentops/internal/name"
-	"github.com/andybons/agentops/internal/routing"
+	"github.com/andybons/moat/internal/name"
+	"github.com/andybons/moat/internal/routing"
 ```
 
 **Step 2: Add route table to Manager**
@@ -1694,20 +1694,20 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 Before container creation in Create, add host environment variables:
 
 ```go
-	// Build AGENTOPS_* environment variables for host injection
+	// Build MOAT_* environment variables for host injection
 	if len(ports) > 0 {
 		globalCfg, _ := config.LoadGlobal()
 		proxyPort := globalCfg.Proxy.Port
 
 		baseHost := fmt.Sprintf("%s.localhost:%d", agentName, proxyPort)
-		proxyEnv = append(proxyEnv, "AGENTOPS_HOST="+baseHost)
-		proxyEnv = append(proxyEnv, "AGENTOPS_URL=http://"+baseHost)
+		proxyEnv = append(proxyEnv, "MOAT_HOST="+baseHost)
+		proxyEnv = append(proxyEnv, "MOAT_URL=http://"+baseHost)
 
 		for serviceName := range ports {
 			upperName := strings.ToUpper(serviceName)
 			serviceHost := fmt.Sprintf("%s.%s.localhost:%d", serviceName, agentName, proxyPort)
-			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_HOST_%s=%s", upperName, serviceHost))
-			proxyEnv = append(proxyEnv, fmt.Sprintf("AGENTOPS_URL_%s=http://%s", upperName, serviceHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_HOST_%s=%s", upperName, serviceHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_URL_%s=http://%s", upperName, serviceHost))
 		}
 	}
 ```
@@ -1918,7 +1918,7 @@ func (lc *Lifecycle) EnsureRunning() error {
 	if lock != nil && lock.IsAlive() {
 		// Proxy already running
 		if lock.Port != lc.port && lc.port != 0 {
-			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset AGENTOPS_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
+			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
 		}
 		lc.port = lock.Port
 		lc.isOwner = false
@@ -2115,7 +2115,7 @@ In `runAgent`, after Start succeeds, add service URLs:
 	fmt.Println()
 ```
 
-Add import for `"github.com/andybons/agentops/internal/config"` if not present.
+Add import for `"github.com/andybons/moat/internal/config"` if not present.
 
 **Step 2: Update list output**
 
@@ -2361,20 +2361,20 @@ Services are available at:
 ### Environment Variables
 
 Inside the container, these environment variables are set:
-- `AGENTOPS_HOST=myapp.localhost:8080`
-- `AGENTOPS_URL=http://myapp.localhost:8080`
-- `AGENTOPS_HOST_WEB=web.myapp.localhost:8080`
-- `AGENTOPS_URL_WEB=http://web.myapp.localhost:8080`
+- `MOAT_HOST=myapp.localhost:8080`
+- `MOAT_URL=http://myapp.localhost:8080`
+- `MOAT_HOST_WEB=web.myapp.localhost:8080`
+- `MOAT_URL_WEB=http://web.myapp.localhost:8080`
 
 ### Proxy Configuration
 
-Global config in `~/.agentops/config.yaml`:
+Global config in `~/.moat/config.yaml`:
 ```yaml
 proxy:
   port: 8080
 ```
 
-Or via environment: `AGENTOPS_PROXY_PORT=9000`
+Or via environment: `MOAT_PROXY_PORT=9000`
 ```
 
 **Step 2: Commit**

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/agentops/internal/audit"
+	"github.com/andybons/moat/internal/audit"
 	"github.com/spf13/cobra"
 )
 
@@ -55,7 +55,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("finding home directory: %w", err)
 	}
-	runDir := filepath.Join(homeDir, ".agentops", "runs", runID)
+	runDir := filepath.Join(homeDir, ".moat", "runs", runID)
 	dbPath := filepath.Join(runDir, "logs.db")
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {

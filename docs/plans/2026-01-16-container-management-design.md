@@ -7,21 +7,21 @@ Users need to manage underlying container resources (images, containers) for:
 - Cleaning up orphaned containers from crashed runs
 - Disk space management
 
-Currently, users drop to Docker Desktop GUI or raw Docker CLI, which breaks the agentops abstraction and requires Docker knowledge.
+Currently, users drop to Docker Desktop GUI or raw Docker CLI, which breaks the moat abstraction and requires Docker knowledge.
 
 ## Design Philosophy
 
 **Stay at the "run" abstraction.** Users should think in runs, not containers. The container/image layer is an implementation detail.
 
 Rather than exposing Docker internals, we provide higher-level operations that address the underlying needs:
-- Force fresh build → `agent run --rebuild`
-- Clean up old stuff → `agent clean`
-- See resource usage → `agent status`
-- Debug escape hatch → `agent system images/containers` (read-only)
+- Force fresh build → `moat run --rebuild`
+- Clean up old stuff → `moat clean`
+- See resource usage → `moat status`
+- Debug escape hatch → `moat system images/containers` (read-only)
 
 ## Commands
 
-### `agent status`
+### `moat status`
 
 Shows runs, images, disk usage, and health indicators.
 
@@ -36,10 +36,10 @@ Runs (3 total, 1 running)
 
 Images (4 total, 892 MB)
   IMAGE                        CREATED     SIZE      USED BY
-  agentops/my-agent:latest     2h ago      312 MB    my-agent
-  agentops/test-bot:latest     1d ago      298 MB    test-bot
-  agentops/scraper:latest      3d ago      282 MB    scraper
-  agentops/base-node:22        5d ago      -         (base)
+  moat/my-agent:latest     2h ago      312 MB    my-agent
+  moat/test-bot:latest     1d ago      298 MB    test-bot
+  moat/scraper:latest      3d ago      282 MB    scraper
+  moat/base-node:22        5d ago      -         (base)
 
 Health
   ⚠ 2 stopped runs can be cleaned (290 MB)
@@ -54,7 +54,7 @@ Health
 - Supports `--json` for scripting
 - "USED BY" column links images to runs
 
-### `agent clean`
+### `moat clean`
 
 Interactively removes stopped runs and unused images.
 
@@ -68,7 +68,7 @@ Stopped runs (2):
   scraper     i9j0k1l2    stopped   3d ago   201 MB
 
 Unused images (1):
-  agentops/scraper:latest    3d ago    282 MB    (no active run)
+  moat/scraper:latest    3d ago    282 MB    (no active run)
 
 Total: 3 resources, 572 MB
 
@@ -76,7 +76,7 @@ Remove these resources? [y/N]: y
 
 Removing run test-bot (e5f6g7h8)... done
 Removing run scraper (i9j0k1l2)... done
-Removing image agentops/scraper:latest... done
+Removing image moat/scraper:latest... done
 
 Cleaned 3 resources, freed 572 MB
 ```
@@ -93,62 +93,62 @@ Cleaned 3 resources, freed 572 MB
 
 **Future:** Can evolve to TUI-style interface for bulk selection.
 
-### `agent system images`
+### `moat system images`
 
-Read-only listing of agentops-managed images.
+Read-only listing of moat-managed images.
 
 ```
 $ agent system images
 
 IMAGE ID       TAG                          SIZE      CREATED
-sha256:a1b2    agentops/my-agent:latest     312 MB    2h ago
-sha256:c3d4    agentops/test-bot:latest     298 MB    1d ago
-sha256:e5f6    agentops/base-node:22        245 MB    5d ago
+sha256:a1b2    moat/my-agent:latest     312 MB    2h ago
+sha256:c3d4    moat/test-bot:latest     298 MB    1d ago
+sha256:e5f6    moat/base-node:22        245 MB    5d ago
 
 To remove an image: docker rmi <image-id>
 ```
 
-### `agent system containers`
+### `moat system containers`
 
-Read-only listing of agentops-managed containers.
+Read-only listing of moat-managed containers.
 
 ```
 $ agent system containers
 
 CONTAINER ID   NAME                    STATUS     CREATED
-abc123def456   agentops-a1b2c3d4       running    2h ago
-fed654cba321   agentops-e5f6g7h8       exited     1d ago
+abc123def456   moat-a1b2c3d4       running    2h ago
+fed654cba321   moat-e5f6g7h8       exited     1d ago
 
 To remove a container: docker rm <container-id>
 To view logs: docker logs <container-id>
 ```
 
-**Behaviors for both `agent system` commands:**
+**Behaviors for both `moat system` commands:**
 - Read-only—just identification, no delete operations
-- Filters to only agentops resources (by label or naming convention)
+- Filters to only moat resources (by label or naming convention)
 - Includes helpful hint showing native commands
 - Supports `--json` for scripting
 - Shows appropriate native commands based on runtime (Docker vs Apple)
 
-### `agent run --rebuild`
+### `moat run --rebuild`
 
 Nuclear option: delete cached image, rebuild from scratch.
 
 ```
 $ agent run --rebuild my-agent .
 
-Removing cached image agentops/my-agent:latest... done
+Removing cached image moat/my-agent:latest... done
 Building image (no cache)...
   Step 1/5: FROM node:22-slim
   Step 2/5: ...
   ...
-Image built: agentops/my-agent:latest (312 MB)
+Image built: moat/my-agent:latest (312 MB)
 
 Starting run a1b2c3d4...
 ```
 
 **Behaviors:**
-- Deletes existing `agentops/<agent-name>:latest` image if present
+- Deletes existing `moat/<agent-name>:latest` image if present
 - Builds with `--no-cache` (Docker) or equivalent
 - Does not re-pull base images (user can `docker pull` manually if needed)
 - Works even if no cached image exists (just builds normally)
@@ -159,8 +159,8 @@ Starting run a1b2c3d4...
 ### Resource Identification
 
 Agentops resources are identified by:
-- **Containers:** Named with `agentops-` prefix and/or labeled with `agentops=true`
-- **Images:** Tagged with `agentops/` prefix
+- **Containers:** Named with `moat-` prefix and/or labeled with `moat=true`
+- **Images:** Tagged with `moat/` prefix
 
 Labels should be added during creation for reliable filtering.
 
@@ -169,10 +169,10 @@ Labels should be added during creation for reliable filtering.
 The `container.Runtime` interface needs:
 
 ```go
-// ListImages returns all agentops-managed images.
+// ListImages returns all moat-managed images.
 ListImages(ctx context.Context) ([]ImageInfo, error)
 
-// ListContainers returns all agentops containers (running + stopped).
+// ListContainers returns all moat containers (running + stopped).
 ListContainers(ctx context.Context) ([]ContainerInfo, error)
 
 // RemoveImage removes an image by ID or tag.
@@ -196,6 +196,6 @@ cmd/agent/cli/
 
 ### Not Included
 
-- Delete operations in `agent system`—users use native Docker/container CLI
-- Management of non-agentops resources
+- Delete operations in `moat system`—users use native Docker/container CLI
+- Management of non-moat resources
 - `--pull` flag to refresh base images (too much complexity)

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/andybons/agentops/cmd/agent/cli"
+	"github.com/andybons/moat/cmd/moat/cli"
 )
 
 func main() {

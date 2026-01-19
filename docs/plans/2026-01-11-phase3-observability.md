@@ -4,7 +4,7 @@
 
 **Goal:** Capture everything that happens in a run and provide CLI commands to view logs and traces.
 
-**Architecture:** Run data is stored in `~/.agentops/runs/<run-id>/`. Logs are captured as timestamped lines. Traces use OpenTelemetry spans stored as JSON. The proxy logs network calls. CLI commands (`agent logs`, `agent trace`) read from this storage.
+**Architecture:** Run data is stored in `~/.moat/runs/<run-id>/`. Logs are captured as timestamped lines. Traces use OpenTelemetry spans stored as JSON. The proxy logs network calls. CLI commands (`moat logs`, `moat trace`) read from this storage.
 
 **Tech Stack:** Go, OpenTelemetry SDK, JSON storage, Cobra CLI
 
@@ -147,13 +147,13 @@ func (s *RunStore) LoadMetadata() (*Metadata, error) {
 	return &m, nil
 }
 
-// DefaultBaseDir returns ~/.agentops/runs
+// DefaultBaseDir returns ~/.moat/runs
 func DefaultBaseDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".agentops", "runs")
+		return filepath.Join(".", ".moat", "runs")
 	}
-	return filepath.Join(home, ".agentops", "runs")
+	return filepath.Join(home, ".moat", "runs")
 }
 ```
 
@@ -495,7 +495,7 @@ Wire log capture into the run lifecycle.
 ```go
 // internal/run/run.go - add Store field
 import (
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/storage"
 )
 
 type Run struct {
@@ -709,7 +709,7 @@ git commit -m "feat(proxy): add network request logging"
 
 ---
 
-## Task 6: CLI `agent logs` Command
+## Task 6: CLI `moat logs` Command
 
 Add command to view run logs.
 
@@ -729,8 +729,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -852,7 +852,7 @@ git commit -m "feat(cli): add agent logs command"
 
 ---
 
-## Task 7: CLI `agent trace` Command
+## Task 7: CLI `moat trace` Command
 
 Add command to view trace spans.
 
@@ -870,8 +870,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

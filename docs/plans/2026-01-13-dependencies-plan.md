@@ -1063,8 +1063,8 @@ func TestImageTag(t *testing.T) {
 		{Name: "typescript"},
 	}
 	tag := ImageTag(deps)
-	if !strings.HasPrefix(tag, "agentops/run:") {
-		t.Errorf("tag should start with agentops/run:, got %s", tag)
+	if !strings.HasPrefix(tag, "moat/run:") {
+		t.Errorf("tag should start with moat/run:, got %s", tag)
 	}
 	// Tag should be deterministic
 	tag2 := ImageTag(deps)
@@ -1127,7 +1127,7 @@ func ImageTag(deps []Dependency) string {
 	h := sha256.Sum256([]byte(strings.Join(sorted, ",")))
 	hash := hex.EncodeToString(h[:])[:12]
 
-	return "agentops/run:" + hash
+	return "moat/run:" + hash
 }
 ```
 
@@ -1405,8 +1405,8 @@ package image
 import (
 	"testing"
 
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/deps"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/deps"
 )
 
 func TestResolveNoDeps(t *testing.T) {
@@ -1448,7 +1448,7 @@ Expected: FAIL - function signature changed
 // internal/image/resolver.go
 package image
 
-import "github.com/andybons/agentops/internal/deps"
+import "github.com/andybons/moat/internal/deps"
 
 // DefaultImage is the default container image.
 const DefaultImage = "ubuntu:22.04"
@@ -1575,7 +1575,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/andybons/agentops/internal/deps"
+	"github.com/andybons/moat/internal/deps"
 	"github.com/spf13/cobra"
 )
 
@@ -1830,7 +1830,7 @@ func TestFullPipeline(t *testing.T) {
 
 	// Generate image tag
 	tag := ImageTag(depList)
-	if !strings.HasPrefix(tag, "agentops/run:") {
+	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
 }

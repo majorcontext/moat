@@ -39,7 +39,7 @@ ports:
   api: 8080
 ```
 
-**Global config (~/.agentops/config.yaml):**
+**Global config (~/.moat/config.yaml):**
 ```yaml
 proxy:
   port: 8080
@@ -55,7 +55,7 @@ proxy:
 ### Lifecycle
 - **Start:** Automatically launched when the first agent with exposed ports starts
 - **Stop:** Automatically shuts down when the last agent with exposed ports is destroyed
-- **Coordination:** Lock file at `~/.agentops/proxy/proxy.lock` with PID
+- **Coordination:** Lock file at `~/.moat/proxy/proxy.lock` with PID
 
 ### Host Header Routing
 ```
@@ -65,7 +65,7 @@ Host: web.myapp.localhost:8080
         └─────── service name → lookup container host port
 ```
 
-### Proxy State Storage (~/.agentops/proxy/)
+### Proxy State Storage (~/.moat/proxy/)
 - `proxy.lock` - PID, port, started_at
 - `routes.json` - Current routing table:
   ```json
@@ -88,17 +88,17 @@ Host: web.myapp.localhost:8080
 Inject bound hostnames as environment variables:
 
 ```bash
-AGENTOPS_HOST=myapp.localhost:8080
-AGENTOPS_HOST_WEB=web.myapp.localhost:8080
-AGENTOPS_HOST_API=api.myapp.localhost:8080
-AGENTOPS_URL=http://myapp.localhost:8080
-AGENTOPS_URL_WEB=http://web.myapp.localhost:8080
-AGENTOPS_URL_API=http://api.myapp.localhost:8080
+MOAT_HOST=myapp.localhost:8080
+MOAT_HOST_WEB=web.myapp.localhost:8080
+MOAT_HOST_API=api.myapp.localhost:8080
+MOAT_URL=http://myapp.localhost:8080
+MOAT_URL_WEB=http://web.myapp.localhost:8080
+MOAT_URL_API=http://api.myapp.localhost:8080
 ```
 
-- `AGENTOPS_HOST_*` for host:port (e.g., CORS allowed origins)
-- `AGENTOPS_URL_*` for full URLs (e.g., OAuth redirect URIs)
-- `AGENTOPS_HOST` / `AGENTOPS_URL` as the default service entry point
+- `MOAT_HOST_*` for host:port (e.g., CORS allowed origins)
+- `MOAT_URL_*` for full URLs (e.g., OAuth redirect URIs)
+- `MOAT_HOST` / `MOAT_URL` as the default service entry point
 
 ## Port Binding Implementation
 
@@ -147,7 +147,7 @@ Services:
 Proxy listening on :8080
 ```
 
-**Updated `agent list`:**
+**Updated `moat list`:**
 ```
 NAME            RUN ID           STATE     SERVICES
 myapp           run-a1b2c3d4     running   web, api
@@ -163,8 +163,8 @@ Small curated word lists (~50 each). If generated name collides with running age
 ## Proxy Configuration
 
 **Precedence:**
-1. `AGENTOPS_PROXY_PORT` env var
-2. `~/.agentops/config.yaml` proxy.port
+1. `MOAT_PROXY_PORT` env var
+2. `~/.moat/config.yaml` proxy.port
 3. Default: 8080
 
 **Startup Behavior:**
@@ -174,8 +174,8 @@ Small curated word lists (~50 each). If generated name collides with running age
 4. If running on different port → error:
    ```
    Error: proxy port mismatch
-   Proxy is already running on port 8080, but AGENTOPS_PROXY_PORT is set to 9000.
-   Either unset AGENTOPS_PROXY_PORT, or stop all agents to restart the proxy on the new port.
+   Proxy is already running on port 8080, but MOAT_PROXY_PORT is set to 9000.
+   Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy on the new port.
    ```
 5. If not running → start proxy on desired port
 
@@ -194,7 +194,7 @@ HTTP 404 Not Found
 ```
 
 **Proxy Crashes:**
-Next `agent run` detects stale lock, cleans up, starts fresh proxy.
+Next `moat run` detects stale lock, cleans up, starts fresh proxy.
 
 **Apple Container `--publish` Not Supported:**
 Fall back to direct container IP access with warning.
@@ -218,7 +218,7 @@ internal/
 internal/
   config/
     config.go     # Add Name field
-    global.go     # New: ~/.agentops/config.yaml parsing
+    global.go     # New: ~/.moat/config.yaml parsing
 
   container/
     runtime.go    # Add GetPortBindings() to interface
@@ -239,7 +239,7 @@ cmd/agent/cli/
 
 **Storage Layout:**
 ```
-~/.agentops/
+~/.moat/
   config.yaml
   proxy/
     proxy.lock

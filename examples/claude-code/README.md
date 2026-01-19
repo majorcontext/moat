@@ -98,7 +98,7 @@ a1b2c3d4-e5f6-7890-abcd-ef1234567890  exited    my-agent   45s
 
 ```bash
 # View network requests (shows all API calls)
-cat ~/.agentops/runs/<run-id>/network.jsonl | jq .
+cat ~/.moat/runs/<run-id>/network.jsonl | jq .
 ```
 
 Example network log entry:
@@ -117,5 +117,5 @@ Example network log entry:
 
 ```bash
 # View console output
-cat ~/.agentops/runs/<run-id>/logs.jsonl
+cat ~/.moat/runs/<run-id>/logs.jsonl
 ```
