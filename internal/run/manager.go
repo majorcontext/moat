@@ -54,12 +54,101 @@ func NewManager() (*Manager, error) {
 		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
-	return &Manager{
+	m := &Manager{
 		runtime:        rt,
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
-	}, nil
+	}
+
+	// Load existing runs from disk and reconcile with container state
+	if err := m.loadPersistedRuns(context.Background()); err != nil {
+		log.Debug("loading persisted runs", "error", err)
+		// Non-fatal - continue with empty runs map
+	}
+
+	return m, nil
+}
+
+// loadPersistedRuns loads run metadata from disk and reconciles with actual container state.
+func (m *Manager) loadPersistedRuns(ctx context.Context) error {
+	baseDir := storage.DefaultBaseDir()
+	runIDs, err := storage.ListRunDirs(baseDir)
+	if err != nil {
+		return err
+	}
+
+	for _, runID := range runIDs {
+		store, err := storage.NewRunStore(baseDir, runID)
+		if err != nil {
+			log.Debug("opening run store", "id", runID, "error", err)
+			continue
+		}
+
+		meta, err := store.LoadMetadata()
+		if err != nil {
+			log.Debug("loading run metadata", "id", runID, "error", err)
+			continue
+		}
+
+		// Skip runs that are marked as stopped or have no container ID
+		if meta.State == string(StateStopped) || meta.ContainerID == "" {
+			continue
+		}
+
+		// Check if the container actually exists and get its current state
+		containerState, err := m.runtime.ContainerState(ctx, meta.ContainerID)
+		if err != nil {
+			// Container doesn't exist - mark run as stopped
+			log.Debug("container not found", "id", runID, "container", meta.ContainerID)
+			meta.State = string(StateStopped)
+			_ = store.SaveMetadata(meta)
+			continue
+		}
+
+		// Map container state to run state
+		var runState State
+		switch containerState {
+		case "running":
+			runState = StateRunning
+		case "exited", "dead":
+			runState = StateStopped
+		case "created", "restarting":
+			runState = StateCreated
+		default:
+			runState = State(meta.State)
+		}
+
+		// Create run object from metadata
+		r := &Run{
+			ID:          runID,
+			Name:        meta.Name,
+			Workspace:   meta.Workspace,
+			Grants:      meta.Grants,
+			Ports:       meta.Ports,
+			State:       runState,
+			ContainerID: meta.ContainerID,
+			Store:       store,
+			Interactive: meta.Interactive,
+			CreatedAt:   meta.CreatedAt,
+			StartedAt:   meta.StartedAt,
+			StoppedAt:   meta.StoppedAt,
+			Error:       meta.Error,
+		}
+
+		// Update metadata if state changed
+		if string(runState) != meta.State {
+			_ = r.SaveMetadata()
+		}
+
+		m.mu.Lock()
+		m.runs[runID] = r
+		m.mu.Unlock()
+
+		log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
+	}
+
+	return nil
 }
 
 // Create initializes a new run without starting it.
@@ -99,6 +188,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Ports:         ports,
 		State:         StateCreated,
 		KeepContainer: opts.KeepContainer,
+		Interactive:   opts.Interactive,
 		CreatedAt:     time.Now(),
 	}
 
@@ -567,12 +657,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	r.AuditStore = auditStore
 
 	// Save initial metadata (best-effort; non-fatal if it fails)
-	_ = store.SaveMetadata(storage.Metadata{
-		Name:      r.Name,
-		Workspace: opts.Workspace,
-		Grants:    opts.Grants,
-		CreatedAt: r.CreatedAt,
-	})
+	_ = r.SaveMetadata()
 
 	// Log resolved secrets (best-effort; non-fatal if it fails)
 	for _, secret := range resolvedSecrets {
@@ -595,8 +680,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	return r, nil
 }
 
+// StartOptions configures how a run is started.
+type StartOptions struct {
+	// StreamLogs controls whether container logs are streamed to stdout.
+	// Set to false for interactive mode where attach handles I/O.
+	StreamLogs bool
+}
+
 // Start begins execution of a run.
-func (m *Manager) Start(ctx context.Context, runID string) error {
+func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) error {
 	m.mu.Lock()
 	r, ok := m.runs[runID]
 	if !ok {
@@ -666,8 +758,13 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	r.StartedAt = time.Now()
 	m.mu.Unlock()
 
-	// Stream logs to stdout
-	go m.streamLogs(context.Background(), r)
+	// Save state to disk
+	_ = r.SaveMetadata()
+
+	// Stream logs to stdout (unless disabled for interactive mode)
+	if opts.StreamLogs {
+		go m.streamLogs(context.Background(), r)
+	}
 
 	return nil
 }
@@ -728,6 +825,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	keepContainer := r.KeepContainer
 	containerID := r.ContainerID
 	m.mu.Unlock()
+
+	// Save state to disk
+	_ = r.SaveMetadata()
 
 	// Auto-remove container unless --keep was specified
 	if !keepContainer {
@@ -799,6 +899,9 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		keepContainer := r.KeepContainer
 		m.mu.Unlock()
 
+		// Save state to disk
+		_ = r.SaveMetadata()
+
 		// Auto-remove container unless --keep was specified
 		if !keepContainer {
 			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
@@ -808,7 +911,8 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 
 		return err
 	case <-ctx.Done():
-		return m.Stop(context.Background(), runID)
+		// Context canceled - caller chose to detach, don't stop the run
+		return ctx.Err()
 	}
 }
 
@@ -889,6 +993,90 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	m.mu.Unlock()
 
 	return nil
+}
+
+// Attach connects stdin/stdout/stderr to a running container.
+func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	return m.runtime.Attach(ctx, containerID, container.AttachOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		TTY:    true, // Default to TTY mode for now
+	})
+}
+
+// FollowLogs streams container logs to the provided writer.
+// This is more reliable than Attach for output-only mode on already-running containers.
+func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	logs, err := m.runtime.ContainerLogs(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("getting container logs: %w", err)
+	}
+	defer logs.Close()
+
+	_, err = io.Copy(w, logs)
+	return err
+}
+
+// RecentLogs returns the last n lines of container logs.
+// Used to show context when re-attaching to a running container.
+func (m *Manager) RecentLogs(runID string, lines int) (string, error) {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return "", fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	// Get all logs (non-following)
+	allLogs, err := m.runtime.ContainerLogsAll(context.Background(), containerID)
+	if err != nil {
+		return "", err
+	}
+
+	// Return last n lines
+	return lastNLines(string(allLogs), lines), nil
+}
+
+// lastNLines returns the last n lines of a string.
+func lastNLines(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+
+	// Find line boundaries from the end
+	end := len(s)
+	count := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '\n' {
+			count++
+			if count == n+1 {
+				return s[i+1 : end]
+			}
+		}
+	}
+	// Fewer than n lines, return all
+	return s
 }
 
 // Close releases manager resources.

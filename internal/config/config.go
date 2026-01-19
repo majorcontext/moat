@@ -24,6 +24,7 @@ type Config struct {
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
+	Interactive  bool              `yaml:"interactive,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`

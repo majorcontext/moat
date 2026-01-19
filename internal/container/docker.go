@@ -501,3 +501,78 @@ func (r *DockerRuntime) GetImageHomeDir(ctx context.Context, imageName string) s
 
 	return "/home/" + user
 }
+
+// ContainerState returns the state of a container ("running", "exited", "created", etc).
+// Returns an error if the container doesn't exist.
+func (r *DockerRuntime) ContainerState(ctx context.Context, containerID string) (string, error) {
+	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspecting container: %w", err)
+	}
+	return inspect.State.Status, nil
+}
+
+// Attach connects stdin/stdout/stderr to a running container.
+func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts AttachOptions) error {
+	resp, err := r.cli.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  opts.Stdin != nil,
+		Stdout: opts.Stdout != nil,
+		Stderr: opts.Stderr != nil,
+	})
+	if err != nil {
+		return fmt.Errorf("attaching to container: %w", err)
+	}
+	defer resp.Close()
+
+	// Set up bidirectional copy
+	outputDone := make(chan error, 1)
+	stdinDone := make(chan error, 1)
+
+	// Copy container output to stdout/stderr
+	go func() {
+		if opts.TTY {
+			// In TTY mode, stdout and stderr are multiplexed
+			_, err := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- err
+		} else {
+			// In non-TTY mode, we need to demux the stream
+			// Docker uses a header to indicate stdout vs stderr
+			_, err := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- err
+		}
+	}()
+
+	// Copy stdin to container (if provided)
+	if opts.Stdin != nil {
+		go func() {
+			_, err := io.Copy(resp.Conn, opts.Stdin)
+			// Close write side when stdin ends
+			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
+					err = closeErr
+				}
+			}
+			stdinDone <- err
+		}()
+	}
+
+	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-stdinDone:
+			// Stdin error - could be escape sequence or EOF
+			if err != nil && err != io.EOF {
+				return err
+			}
+			// Normal stdin EOF - continue waiting for output
+		case err := <-outputDone:
+			if err != nil && err != io.EOF {
+				return err
+			}
+			return nil
+		}
+	}
+}

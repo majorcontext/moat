@@ -1,0 +1,18 @@
+# Example: Interactive Python REPL
+#
+# This example demonstrates running an interactive Python REPL
+# with your workspace available for imports and exploration.
+#
+# Run with:
+#   moat run examples/interactive-python
+#
+# The Python interpreter starts automatically in interactive mode.
+# Type 'exit()' or press Ctrl+D to end the session.
+
+name: interactive-python
+
+dependencies:
+  - python@3.11
+
+command: ["python3"]
+interactive: true

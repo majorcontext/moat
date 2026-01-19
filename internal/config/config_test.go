@@ -519,3 +519,42 @@ claude:
 		t.Errorf("Claude.SyncLogs = %v, want true", *cfg.Claude.SyncLogs)
 	}
 }
+
+func TestLoadConfigWithInteractive(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["bash"]
+interactive: true
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Interactive {
+		t.Error("Interactive should be true")
+	}
+}
+
+func TestLoadConfigInteractiveDefaultFalse(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["npm", "start"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Interactive {
+		t.Error("Interactive should default to false")
+	}
+}
