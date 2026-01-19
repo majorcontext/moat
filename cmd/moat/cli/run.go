@@ -299,7 +299,6 @@ func runAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
 			fmt.Printf("Press Ctrl+C again within 500ms to stop, or use 'moat stop %s'\n", r.ID)
 			fmt.Printf("Use 'moat attach %s' to reattach\n", r.ID)
-			lastSigTime = now
 			// Don't cancel - let the run continue
 			return nil
 

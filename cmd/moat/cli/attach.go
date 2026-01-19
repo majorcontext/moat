@@ -153,7 +153,6 @@ func attachOutputMode(ctx context.Context, manager *run.Manager, r *run.Run) err
 			log.Debug("received signal, detaching", "signal", sig)
 			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
 			fmt.Printf("Press Ctrl+C again within 500ms to stop\n")
-			lastSigTime = now
 			return nil
 
 		case <-logsDone:
