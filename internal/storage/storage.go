@@ -15,14 +15,16 @@ import (
 
 // Metadata holds information about an agent run.
 type Metadata struct {
-	Name      string         `json:"name"`
-	Workspace string         `json:"workspace"`
-	Grants    []string       `json:"grants,omitempty"`
-	Ports     map[string]int `json:"ports,omitempty"`
-	CreatedAt time.Time      `json:"created_at,omitempty"`
-	StartedAt time.Time      `json:"started_at,omitempty"`
-	StoppedAt time.Time      `json:"stopped_at,omitempty"`
-	Error     string         `json:"error,omitempty"`
+	Name        string         `json:"name"`
+	Workspace   string         `json:"workspace"`
+	Grants      []string       `json:"grants,omitempty"`
+	Ports       map[string]int `json:"ports,omitempty"`
+	ContainerID string         `json:"container_id,omitempty"`
+	State       string         `json:"state,omitempty"`
+	CreatedAt   time.Time      `json:"created_at,omitempty"`
+	StartedAt   time.Time      `json:"started_at,omitempty"`
+	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
+	Error       string         `json:"error,omitempty"`
 }
 
 // RunStore manages storage for a single agent run.
@@ -83,6 +85,31 @@ func DefaultBaseDir() string {
 		return filepath.Join(".", ".moat", "runs")
 	}
 	return filepath.Join(homeDir, ".moat", "runs")
+}
+
+// ListRunDirs returns all run IDs that have stored metadata.
+// It scans baseDir for directories containing metadata.json.
+func ListRunDirs(baseDir string) ([]string, error) {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No runs directory yet
+		}
+		return nil, err
+	}
+
+	var runIDs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		// Check if metadata.json exists
+		metaPath := filepath.Join(baseDir, entry.Name(), "metadata.json")
+		if _, err := os.Stat(metaPath); err == nil {
+			runIDs = append(runIDs, entry.Name())
+		}
+	}
+	return runIDs, nil
 }
 
 // LogEntry represents a single log line with timestamp.

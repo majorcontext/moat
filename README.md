@@ -137,6 +137,9 @@ ports:
 
 # Default command to run (can be overridden with -- on CLI)
 command: ["npm", "start"]
+
+# Run in interactive mode (equivalent to -it flag)
+# interactive: true
 ```
 
 Then just run:
@@ -335,6 +338,7 @@ moat verify-bundle proof.json
 | Command | Description |
 |---------|-------------|
 | `moat run [path] [-- cmd]` | Run an agent |
+| `moat attach <run-id>` | Attach to a running agent |
 | `moat grant <provider>` | Store credentials |
 | `moat revoke <provider>` | Remove credentials |
 | `moat logs [run-id]` | View logs |
@@ -342,9 +346,14 @@ moat verify-bundle proof.json
 | `moat audit [run-id]` | Verify audit log |
 | `moat verify-bundle <file>` | Verify exported proof bundle |
 | `moat list` | List runs |
+| `moat status` | Show runs, images, disk usage, and health |
 | `moat stop [run-id]` | Stop a run |
 | `moat destroy [run-id]` | Remove a run |
 | `moat proxy start/stop/status` | Manage the proxy |
+| `moat clean` | Remove stopped runs and unused images |
+| `moat promote <run-id>` | Promote run artifacts to persistent storage |
+| `moat deps list/info` | Manage and inspect dependencies |
+| `moat system images/containers` | Low-level container system commands |
 
 ### Common flags
 
@@ -353,8 +362,57 @@ moat run --name myapp           # Set agent name
 moat run --grant github         # Inject credentials
 moat run -e DEBUG=true          # Set env variable
 moat run -- npm test            # Custom command (overrides agent.yaml)
+moat run -d ./my-project        # Run detached (in background)
+moat run -it -- bash            # Interactive shell
+moat attach run-abc123          # Attach to running container
+moat attach -it run-abc123      # Attach interactively
 moat logs -n 50                 # Last N lines
 ```
+
+### Detach and attach
+
+Runs exist independently of your terminal. By default, `moat run` attaches to the container (you see output).
+
+**Non-interactive mode** (default):
+- `Ctrl+C` → Detach (run continues in background)
+- `Ctrl+C Ctrl+C` (within 500ms) → Stop the run
+
+```bash
+# Start attached (default)
+moat run ./my-project
+
+# Start detached
+moat run -d ./my-project
+
+# Reattach to a running container
+moat attach <run-id>
+```
+
+### Interactive mode
+
+For shells and REPLs, use `-it` to connect stdin and allocate a TTY:
+
+```bash
+moat run -it -- bash
+moat run -it -- python
+moat attach -it <run-id>
+```
+
+Or configure it in `agent.yaml`:
+
+```yaml
+# agent.yaml
+command: ["bash"]
+interactive: true
+```
+
+Then just `moat run` without flags—interactive mode is automatic.
+
+**Interactive mode escape sequences** (press `Ctrl-/` then a key):
+- `Ctrl-/ d` → Detach (run continues in background)
+- `Ctrl-/ k` → Stop the run
+
+In interactive mode, `Ctrl+C` is passed through to the container process (e.g., to interrupt a Python script), so the escape sequence provides an alternative way to detach or stop.
 
 ## How It Works
 

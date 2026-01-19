@@ -613,3 +613,61 @@ func BuildRunArgs(cfg Config) []string {
 	r := &AppleRuntime{}
 	return r.buildRunArgs(cfg)
 }
+
+// ContainerState returns the state of a container ("running", "exited", "created", etc).
+// Returns an error if the container doesn't exist.
+func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("inspecting container %s: %w", containerID, err)
+	}
+
+	// Apple's inspect returns an array of container info objects
+	var info []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+		return "", fmt.Errorf("parsing container %s info: %w", containerID, err)
+	}
+
+	if len(info) == 0 {
+		return "", fmt.Errorf("container %s not found", containerID)
+	}
+
+	return info[0].Status, nil
+}
+
+// Attach connects stdin/stdout/stderr to a running container.
+func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts AttachOptions) error {
+	// Build attach command arguments
+	args := []string{"attach"}
+	if opts.Stdin != nil {
+		args = append(args, "--stdin")
+	}
+	args = append(args, containerID)
+
+	cmd := exec.CommandContext(ctx, r.containerBin, args...)
+
+	// Connect stdin/stdout/stderr
+	if opts.Stdin != nil {
+		cmd.Stdin = opts.Stdin
+	}
+	if opts.Stdout != nil {
+		cmd.Stdout = opts.Stdout
+	}
+	if opts.Stderr != nil {
+		cmd.Stderr = opts.Stderr
+	}
+
+	// Run the attach command
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("attaching to container: %w", err)
+	}
+	return nil
+}

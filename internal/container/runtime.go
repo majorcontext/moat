@@ -83,12 +83,28 @@ type Runtime interface {
 	// ListContainers returns all moat containers (running + stopped).
 	ListContainers(ctx context.Context) ([]Info, error)
 
+	// ContainerState returns the state of a container ("running", "exited", "created", etc).
+	// Returns an error if the container doesn't exist.
+	ContainerState(ctx context.Context, id string) (string, error)
+
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
 
 	// GetImageHomeDir returns the home directory configured in an image.
 	// Returns "/root" if detection fails or no home is configured.
 	GetImageHomeDir(ctx context.Context, imageName string) string
+
+	// Attach connects stdin/stdout/stderr to a running container.
+	// Returns when the attachment ends (container exits or context canceled).
+	Attach(ctx context.Context, id string, opts AttachOptions) error
+}
+
+// AttachOptions configures container attachment.
+type AttachOptions struct {
+	Stdin  io.Reader  // If non-nil, forward input to container
+	Stdout io.Writer  // If non-nil, receive stdout from container
+	Stderr io.Writer  // If non-nil, receive stderr from container (may be same as Stdout)
+	TTY    bool       // If true, use TTY mode (raw terminal)
 }
 
 // Config holds configuration for creating a container.

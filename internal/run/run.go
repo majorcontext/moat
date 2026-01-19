@@ -60,6 +60,8 @@ type Options struct {
 	Env           []string       // Additional environment variables (KEY=VALUE)
 	Rebuild       bool           // Force rebuild of container image (ignores cache)
 	KeepContainer bool           // If true, don't auto-remove container after run
+	Interactive   bool           // Keep stdin open for interactive input
+	TTY           bool           // Allocate a pseudo-TTY
 }
 
 // generateID creates a unique run identifier.
@@ -70,4 +72,24 @@ func generateID() string {
 		return "run-" + hex.EncodeToString([]byte(time.Now().Format("150405.000")))
 	}
 	return "run-" + hex.EncodeToString(b)
+}
+
+// SaveMetadata persists the run's current state to disk.
+// This should be called after any state change.
+func (r *Run) SaveMetadata() error {
+	if r.Store == nil {
+		return nil // No store configured
+	}
+	return r.Store.SaveMetadata(storage.Metadata{
+		Name:        r.Name,
+		Workspace:   r.Workspace,
+		Grants:      r.Grants,
+		Ports:       r.Ports,
+		ContainerID: r.ContainerID,
+		State:       string(r.State),
+		CreatedAt:   r.CreatedAt,
+		StartedAt:   r.StartedAt,
+		StoppedAt:   r.StoppedAt,
+		Error:       r.Error,
+	})
 }

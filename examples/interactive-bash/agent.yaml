@@ -1,0 +1,16 @@
+# Example: Interactive bash shell
+#
+# This example demonstrates running an interactive bash shell inside
+# a container with your workspace mounted. Useful for debugging,
+# exploring, or running ad-hoc commands.
+#
+# Run with:
+#   moat run examples/interactive-bash
+#
+# The shell starts automatically with stdin/stdout connected.
+# Type 'exit' or press Ctrl+D to end the session.
+
+name: interactive-bash
+
+command: ["bash"]
+interactive: true
