@@ -18,9 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"bytes"
+
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
+	"github.com/andybons/moat/internal/credential/keyring"
 	"github.com/andybons/moat/internal/run"
 	"github.com/andybons/moat/internal/storage"
 )
@@ -754,4 +757,92 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	if !foundProxy {
 		t.Errorf("HTTP_PROXY not found in logs: %v", logs)
 	}
+}
+
+// =============================================================================
+// Keychain Integration Tests
+// =============================================================================
+
+// TestKeychainKeyPersistence verifies that the encryption key is stored securely
+// and persists across calls. This tests the keyring package integration.
+func TestKeychainKeyPersistence(t *testing.T) {
+	// Get or create the encryption key
+	key1, err := keyring.GetOrCreateKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateKey (first call): %v", err)
+	}
+
+	if len(key1) != 32 {
+		t.Errorf("Key should be 32 bytes, got %d", len(key1))
+	}
+
+	// Get the key again - should return the same key
+	key2, err := keyring.GetOrCreateKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateKey (second call): %v", err)
+	}
+
+	if !bytes.Equal(key1, key2) {
+		t.Error("Key should be the same on subsequent calls (persistence check)")
+	}
+
+	t.Log("Encryption key persists correctly across calls")
+}
+
+// TestCredentialRoundTripWithKeychain verifies that credentials can be saved
+// and retrieved using the keychain-stored encryption key.
+func TestCredentialRoundTripWithKeychain(t *testing.T) {
+	// Use a temp directory for this test's credentials
+	tmpDir := t.TempDir()
+
+	// Get the encryption key (uses keychain or file fallback)
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey: %v", err)
+	}
+
+	// Create a credential store
+	store, err := credential.NewFileStore(tmpDir, key)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create a test credential
+	testCred := credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "test-token-e2e-keychain-roundtrip",
+		Scopes:   []string{"repo", "read:user"},
+	}
+
+	// Save it
+	if err := store.Save(testCred); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Create a new store instance (simulates restart)
+	key2, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey (second call): %v", err)
+	}
+
+	store2, err := credential.NewFileStore(tmpDir, key2)
+	if err != nil {
+		t.Fatalf("NewFileStore (second instance): %v", err)
+	}
+
+	// Retrieve the credential
+	retrieved, err := store2.Get(credential.ProviderGitHub)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// Verify it matches
+	if retrieved.Token != testCred.Token {
+		t.Errorf("Token mismatch: got %q, want %q", retrieved.Token, testCred.Token)
+	}
+	if len(retrieved.Scopes) != len(testCred.Scopes) {
+		t.Errorf("Scopes mismatch: got %v, want %v", retrieved.Scopes, testCred.Scopes)
+	}
+
+	t.Log("Credential round-trip with keychain-stored key successful")
 }
