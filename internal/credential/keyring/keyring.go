@@ -1,4 +1,13 @@
 // Package keyring provides secure storage for the credential encryption key.
+//
+// Platform requirements:
+//   - macOS: Uses Keychain via Security framework (works out of the box)
+//   - Linux: Requires libsecret (GNOME), kwallet (KDE), or pass (CLI)
+//   - Headless/CI: Automatically falls back to file-based storage at ~/.moat/encryption.key
+//
+// The package attempts to store keys in the system keychain first for better security.
+// If the keychain is unavailable (e.g., in CI, headless servers, or containers),
+// it silently falls back to file-based storage with restricted permissions (0600).
 package keyring
 
 import (
@@ -8,6 +17,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/zalando/go-keyring"
 )
@@ -82,17 +93,53 @@ type fileBackend struct {
 }
 
 func (f *fileBackend) Get() ([]byte, error) {
+	// Check file permissions before reading - warn if too permissive
+	info, err := os.Stat(f.path)
+	if err != nil {
+		return nil, fmt.Errorf("reading key file: %w", err)
+	}
+	perm := info.Mode().Perm()
+	if perm&0077 != 0 {
+		slog.Warn("key file has permissive permissions, should be 0600",
+			"path", f.path,
+			"permissions", fmt.Sprintf("%04o", perm))
+	}
+
 	data, err := os.ReadFile(f.path)
 	if err != nil {
 		return nil, fmt.Errorf("reading key file: %w", err)
 	}
-	return decodeKey(string(data))
+	// Trim whitespace to handle trailing newlines from manual editing
+	return decodeKey(strings.TrimSpace(string(data)))
 }
 
 func (f *fileBackend) Set(key []byte) error {
 	dir := filepath.Dir(f.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating key directory: %w", err)
+	}
+
+	// Use a lock file to prevent race conditions when multiple processes
+	// try to create the key simultaneously
+	lockPath := f.path + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("creating lock file: %w", err)
+	}
+	defer lockFile.Close()
+	defer os.Remove(lockPath)
+
+	// Acquire exclusive lock
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
+	// Double-check if another process created the key while we waited for lock
+	if existing, err := f.Get(); err == nil {
+		// Key was created by another process, use it instead
+		copy(key, existing)
+		return nil
 	}
 
 	encoded := encodeKey(key)
@@ -156,9 +203,14 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	}
 
 	// 5. Fall back to file storage
-	slog.Info("system keychain unavailable, using file-based key storage")
+	slog.Warn("system keychain unavailable, using file-based key storage",
+		"keychain_error", primaryErr.Error(),
+		"fallback_path", DefaultKeyFilePath())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
-		return nil, fmt.Errorf("storing encryption key: primary (%s) failed: %v; fallback (%s) failed: %w",
+		return nil, fmt.Errorf("storing encryption key failed.\n"+
+			"  Keychain (%s): %v\n"+
+			"  File (%s): %v\n"+
+			"Remediation: Ensure ~/.moat directory is writable, or check keychain access in System Settings > Privacy & Security",
 			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
 	}
 
@@ -182,6 +234,14 @@ func DeleteKey() error {
 	var primaryErr, fallbackErr error
 	primaryErr = primary.Delete()
 	fallbackErr = fallback.Delete()
+
+	// Log partial failures for observability
+	if primaryErr != nil && fallbackErr == nil {
+		slog.Debug("keychain delete failed (file delete succeeded)", "error", primaryErr)
+	}
+	if fallbackErr != nil && primaryErr == nil {
+		slog.Debug("file delete failed (keychain delete succeeded)", "error", fallbackErr)
+	}
 
 	// Return error only if both failed (one succeeding is fine)
 	if primaryErr != nil && fallbackErr != nil {

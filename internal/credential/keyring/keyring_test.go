@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,6 +129,34 @@ func TestGetOrCreateKeyStoresInPrimary(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateKeyBothBackendsFail(t *testing.T) {
+	primary := &mockBackend{
+		getErr: fmt.Errorf("keychain unavailable"),
+		setErr: fmt.Errorf("keychain write failed"),
+	}
+	fallback := &mockBackend{
+		getErr: fmt.Errorf("file not found"),
+		setErr: fmt.Errorf("permission denied"),
+	}
+
+	_, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err == nil {
+		t.Fatal("expected error when both backends fail to store")
+	}
+
+	// Verify error message contains both backend errors
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "keychain write failed") {
+		t.Errorf("error should mention keychain failure: %v", err)
+	}
+	if !strings.Contains(errMsg, "permission denied") {
+		t.Errorf("error should mention file failure: %v", err)
+	}
+	if !strings.Contains(errMsg, "Remediation") {
+		t.Errorf("error should contain remediation guidance: %v", err)
+	}
+}
+
 func TestEncodeDecodeKey(t *testing.T) {
 	original := make([]byte, 32)
 	for i := range original {
@@ -242,6 +271,42 @@ func TestFileBackendNotFound(t *testing.T) {
 	_, err := backend.Get()
 	if err == nil {
 		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestFileBackendTrimsWhitespace(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyPath := filepath.Join(tmpDir, "test.key")
+	backend := &fileBackend{path: keyPath}
+
+	// Generate a test key
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i * 5)
+	}
+
+	// Store it normally first
+	if err := backend.Set(key); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Manually add trailing newlines to simulate editor modification
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := os.WriteFile(keyPath, append(data, '\n', '\n', ' ', '\n'), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Should still read correctly with whitespace trimmed
+	retrieved, err := backend.Get()
+	if err != nil {
+		t.Fatalf("Get failed after adding whitespace: %v", err)
+	}
+
+	if !bytes.Equal(key, retrieved) {
+		t.Error("key should be retrieved correctly despite trailing whitespace")
 	}
 }
 

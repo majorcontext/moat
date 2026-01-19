@@ -8,6 +8,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
@@ -17,8 +18,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"bytes"
 
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/container"
@@ -778,7 +777,19 @@ func cleanupKeychainKey(t *testing.T) {
 
 // TestKeychainKeyPersistence verifies that the encryption key is stored securely
 // and persists across calls. This tests the keyring package integration.
+//
+// IMPORTANT: This test uses the real system keychain or file storage. It will
+// create a key entry that persists after the test unless MOAT_TEST_CLEANUP=1.
+// In CI environments, set MOAT_TEST_CLEANUP=1 to clean up test artifacts.
+// For local development, the test will reuse any existing key (which is the
+// expected production behavior).
 func TestKeychainKeyPersistence(t *testing.T) {
+	// Warn developers about test isolation
+	if os.Getenv("MOAT_TEST_CLEANUP") == "" {
+		t.Log("Note: MOAT_TEST_CLEANUP not set. Test will use/create real keychain entry.")
+		t.Log("Set MOAT_TEST_CLEANUP=1 to clean up test artifacts after test.")
+	}
+
 	// Register cleanup for CI environments
 	t.Cleanup(func() { cleanupKeychainKey(t) })
 
