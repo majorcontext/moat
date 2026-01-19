@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -154,6 +155,85 @@ func TestGetOrCreateKeyBothBackendsFail(t *testing.T) {
 	}
 	if !strings.Contains(errMsg, "Remediation") {
 		t.Errorf("error should contain remediation guidance: %v", err)
+	}
+}
+
+func TestFileBackendConcurrentCreation(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyPath := filepath.Join(tmpDir, "concurrent.key")
+
+	const numGoroutines = 10
+	keys := make([][]byte, numGoroutines)
+	errors := make([]error, numGoroutines)
+
+	// Use a WaitGroup to synchronize goroutines
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Use a channel to start all goroutines at roughly the same time
+	start := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start // Wait for start signal
+
+			backend := &fileBackend{path: keyPath}
+
+			// Generate a unique random key for this goroutine
+			key := make([]byte, 32)
+			if _, err := rand.Read(key); err != nil {
+				errors[i] = err
+				return
+			}
+
+			// Try to set the key
+			if err := backend.Set(key); err != nil {
+				errors[i] = err
+				return
+			}
+
+			// Read back the key
+			retrieved, err := backend.Get()
+			if err != nil {
+				errors[i] = err
+				return
+			}
+			keys[i] = retrieved
+		}()
+	}
+
+	// Start all goroutines at once
+	close(start)
+	wg.Wait()
+
+	// Check for errors
+	for i, err := range errors {
+		if err != nil {
+			t.Errorf("goroutine %d failed: %v", i, err)
+		}
+	}
+
+	// All goroutines should have read the SAME key (the first one written)
+	var firstKey []byte
+	for i, key := range keys {
+		if key == nil {
+			continue
+		}
+		if firstKey == nil {
+			firstKey = key
+			continue
+		}
+		if !bytes.Equal(key, firstKey) {
+			t.Errorf("goroutine %d got different key: race condition detected!\n"+
+				"expected: %x\n"+
+				"got:      %x", i, firstKey, key)
+		}
+	}
+
+	if firstKey == nil {
+		t.Error("no goroutine successfully created a key")
 	}
 }
 
