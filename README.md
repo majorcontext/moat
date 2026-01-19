@@ -1,5 +1,7 @@
 # Moat
 
+> **Early Release:** This project is in active development. APIs and configuration formats may change. Feedback and contributions welcome.
+
 Run AI agents locally with one command. Zero Docker knowledge. Zero secret copying. Full visibility.
 
 ## Philosophy
