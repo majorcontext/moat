@@ -191,9 +191,13 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 
 	// Set up a test credential for GitHub so the proxy does TLS interception.
 	// Without credentials, the proxy does transparent tunneling and doesn't log requests.
+	encKey, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey: %v", err)
+	}
 	credStore, err := credential.NewFileStore(
 		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
+		encKey,
 	)
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
