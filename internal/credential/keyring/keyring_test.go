@@ -2,10 +2,127 @@ package keyring
 
 import (
 	"bytes"
+	"crypto/rand"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// mockBackend for testing fallback behavior
+type mockBackend struct {
+	key      []byte
+	getErr   error
+	setErr   error
+	getCalls int
+	setCalls int
+}
+
+func (m *mockBackend) Get() ([]byte, error) {
+	m.getCalls++
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	if m.key == nil {
+		return nil, fmt.Errorf("key not found")
+	}
+	return m.key, nil
+}
+
+func (m *mockBackend) Set(key []byte) error {
+	m.setCalls++
+	if m.setErr != nil {
+		return m.setErr
+	}
+	m.key = key
+	return nil
+}
+
+func (m *mockBackend) Delete() error {
+	m.key = nil
+	return nil
+}
+
+func (m *mockBackend) Name() string {
+	return "mock"
+}
+
+func TestGetOrCreateKeyExisting(t *testing.T) {
+	existingKey := make([]byte, 32)
+	rand.Read(existingKey)
+
+	primary := &mockBackend{key: existingKey}
+	fallback := &mockBackend{}
+
+	key, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !bytes.Equal(key, existingKey) {
+		t.Error("should return existing key from primary")
+	}
+	if primary.getCalls != 1 {
+		t.Errorf("primary.Get called %d times, want 1", primary.getCalls)
+	}
+	if fallback.getCalls != 0 {
+		t.Error("fallback should not be checked when primary succeeds")
+	}
+}
+
+func TestGetOrCreateKeyFallbackExisting(t *testing.T) {
+	existingKey := make([]byte, 32)
+	rand.Read(existingKey)
+
+	primary := &mockBackend{getErr: fmt.Errorf("keychain unavailable")}
+	fallback := &mockBackend{key: existingKey}
+
+	key, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !bytes.Equal(key, existingKey) {
+		t.Error("should return existing key from fallback")
+	}
+}
+
+func TestGetOrCreateKeyGeneratesNew(t *testing.T) {
+	primary := &mockBackend{getErr: fmt.Errorf("keychain unavailable"), setErr: fmt.Errorf("keychain unavailable")}
+	fallback := &mockBackend{}
+
+	key, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(key) != 32 {
+		t.Errorf("generated key wrong length: got %d, want 32", len(key))
+	}
+	if fallback.setCalls != 1 {
+		t.Error("should store new key in fallback when primary unavailable")
+	}
+}
+
+func TestGetOrCreateKeyStoresInPrimary(t *testing.T) {
+	primary := &mockBackend{}
+	fallback := &mockBackend{}
+
+	key, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(key) != 32 {
+		t.Errorf("generated key wrong length: got %d, want 32", len(key))
+	}
+	if primary.setCalls != 1 {
+		t.Error("should store new key in primary when available")
+	}
+	if fallback.setCalls != 0 {
+		t.Error("should not use fallback when primary works")
+	}
+}
 
 func TestEncodeDecodeKey(t *testing.T) {
 	original := make([]byte, 32)

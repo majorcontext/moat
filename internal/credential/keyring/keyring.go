@@ -2,8 +2,10 @@
 package keyring
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -118,4 +120,52 @@ func DefaultKeyFilePath() string {
 		return filepath.Join(".", ".moat", "encryption.key")
 	}
 	return filepath.Join(home, ".moat", "encryption.key")
+}
+
+// generateKey creates a new random encryption key.
+func generateKey() ([]byte, error) {
+	key := make([]byte, KeySize)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("generating random key: %w", err)
+	}
+	return key, nil
+}
+
+// getOrCreateKeyWithBackends retrieves or creates an encryption key using the provided backends.
+func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
+	// 1. Try primary backend (keychain)
+	if key, err := primary.Get(); err == nil {
+		return key, nil
+	}
+
+	// 2. Try fallback backend (file)
+	if key, err := fallback.Get(); err == nil {
+		return key, nil
+	}
+
+	// 3. Generate new key
+	key, err := generateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Try to store in primary
+	if err := primary.Set(key); err == nil {
+		return key, nil
+	}
+
+	// 5. Fall back to file storage
+	slog.Info("system keychain unavailable, using file-based key storage")
+	if err := fallback.Set(key); err != nil {
+		return nil, fmt.Errorf("storing encryption key: %w", err)
+	}
+
+	return key, nil
+}
+
+// GetOrCreateKey retrieves the encryption key from keychain or file, generating a new one if needed.
+func GetOrCreateKey() ([]byte, error) {
+	primary := &keychainBackend{}
+	fallback := &fileBackend{path: DefaultKeyFilePath()}
+	return getOrCreateKeyWithBackends(primary, fallback)
 }
