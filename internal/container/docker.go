@@ -549,7 +549,9 @@ func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts Att
 			_, err := io.Copy(resp.Conn, opts.Stdin)
 			// Close write side when stdin ends
 			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
-				closeWriter.CloseWrite()
+				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
+					err = closeErr
+				}
 			}
 			stdinDone <- err
 		}()

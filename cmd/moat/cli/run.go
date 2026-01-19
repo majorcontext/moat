@@ -24,7 +24,6 @@ var (
 	keepContainer bool
 	detachFlag    bool
 	interactFlag  bool
-	ttyFlag       bool
 )
 
 var runCmd = &cobra.Command{
@@ -44,7 +43,7 @@ Non-interactive mode (default):
   Ctrl+C            Detach (run continues)
   Ctrl+C Ctrl+C     Stop the run (within 500ms)
 
-Interactive mode (-it):
+Interactive mode (-i):
   Ctrl-/ d          Detach (run continues)
   Ctrl-/ k          Stop the run
   Ctrl+C            Sent to container process
@@ -75,7 +74,7 @@ Examples:
   moat run -d ./my-project
 
   # Run interactive shell
-  moat run -it -- bash`,
+  moat run -i -- bash`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runAgent,
 }
@@ -88,8 +87,7 @@ func init() {
 	runCmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "force rebuild of container image (Docker only, ignored for Apple containers)")
 	runCmd.Flags().BoolVar(&keepContainer, "keep", false, "keep container after run completes (for debugging)")
 	runCmd.Flags().BoolVarP(&detachFlag, "detach", "d", false, "run in background and return immediately")
-	runCmd.Flags().BoolVarP(&interactFlag, "interactive", "i", false, "keep stdin open for interactive input")
-	runCmd.Flags().BoolVarP(&ttyFlag, "tty", "t", false, "allocate a pseudo-TTY")
+	runCmd.Flags().BoolVarP(&interactFlag, "interactive", "i", false, "interactive mode (stdin + TTY)")
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
@@ -152,7 +150,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine interactive mode: CLI flags > config > default
-	interactive := interactFlag || ttyFlag
+	interactive := interactFlag
 	if !interactive && cfg != nil && cfg.Interactive {
 		interactive = true
 	}
@@ -207,7 +205,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Rebuild:       rebuildFlag,
 		KeepContainer: keepContainer,
 		Interactive:   interactive,
-		TTY:           ttyFlag || interactFlag, // -i implies -t for convenience
+		TTY:           interactive,
 	}
 
 	// Create run
@@ -297,11 +295,11 @@ func runAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 			}
 
 			// First Ctrl+C - detach
-			lastSigTime = now
 			log.Debug("received signal, detaching", "signal", sig)
 			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
 			fmt.Printf("Press Ctrl+C again within 500ms to stop, or use 'moat stop %s'\n", r.ID)
 			fmt.Printf("Use 'moat attach %s' to reattach\n", r.ID)
+			lastSigTime = now
 			// Don't cancel - let the run continue
 			return nil
 
@@ -328,7 +326,11 @@ func runInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error
 			log.Debug("failed to enable raw mode", "error", err)
 			// Continue without raw mode - escapes may echo
 		} else {
-			defer term.RestoreTerminal(rawState)
+			defer func() {
+				if err := term.RestoreTerminal(rawState); err != nil {
+					log.Debug("failed to restore terminal", "error", err)
+				}
+			}()
 		}
 	}
 

@@ -22,10 +22,7 @@ const (
 	containerExitCheckDelay = 200 * time.Millisecond
 )
 
-var (
-	attachInteractive bool
-	attachTTY         bool
-)
+var attachInteractive bool
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <run-id>",
@@ -33,26 +30,26 @@ var attachCmd = &cobra.Command{
 	Long: `Attach local stdin, stdout, and stderr to a running agent.
 
 By default, attaches in the same mode the run was started with:
-  - If the run was started with -it, attach will use interactive mode
+  - If the run was started with -i, attach will use interactive mode
   - Otherwise, only stdout/stderr are connected
 
-Use -i/-t to force interactive mode, or -i=false to force output-only mode.
+Use -i to force interactive mode, or -i=false to force output-only mode.
 
 Non-interactive mode:
   Ctrl+C            Detach (run continues)
   Ctrl+C Ctrl+C     Stop the run (within 500ms)
 
-Interactive mode (-it):
+Interactive mode (-i):
   Ctrl-/ d          Detach (run continues)
   Ctrl-/ k          Stop the run
   Ctrl+C            Sent to container process
 
 Examples:
-  # Attach to see output (or interactive if run was started with -it)
+  # Attach to see output (or interactive if run was started with -i)
   moat attach run-abc123
 
   # Force interactive mode
-  moat attach -it run-abc123
+  moat attach -i run-abc123
 
   # Force output-only mode even if run was started interactively
   moat attach -i=false run-abc123`,
@@ -62,8 +59,7 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(attachCmd)
-	attachCmd.Flags().BoolVarP(&attachInteractive, "interactive", "i", false, "interactive mode with stdin (use -i=false to force output-only)")
-	attachCmd.Flags().BoolVarP(&attachTTY, "tty", "t", false, "allocate a pseudo-TTY")
+	attachCmd.Flags().BoolVarP(&attachInteractive, "interactive", "i", false, "interactive mode (use -i=false to force output-only)")
 }
 
 func attachToRun(cmd *cobra.Command, args []string) error {
@@ -87,11 +83,11 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine interactive mode:
-	// - If -i or -t flag was explicitly set, use that value
+	// - If -i flag was explicitly set, use that value
 	// - Otherwise, use the run's original mode
 	interactive := r.Interactive // Default to run's mode
-	if cmd.Flags().Changed("interactive") || cmd.Flags().Changed("tty") {
-		interactive = attachInteractive || attachTTY
+	if cmd.Flags().Changed("interactive") {
+		interactive = attachInteractive
 	}
 
 	fmt.Printf("Attaching to run %s (%s)...\n", r.ID, r.Name)
@@ -154,10 +150,10 @@ func attachOutputMode(ctx context.Context, manager *run.Manager, r *run.Run) err
 			}
 
 			// First Ctrl+C - detach
-			lastSigTime = now
 			log.Debug("received signal, detaching", "signal", sig)
 			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
 			fmt.Printf("Press Ctrl+C again within 500ms to stop\n")
+			lastSigTime = now
 			return nil
 
 		case <-logsDone:
@@ -211,7 +207,11 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 			log.Debug("failed to enable raw mode", "error", err)
 			// Continue without raw mode - escapes may echo
 		} else {
-			defer term.RestoreTerminal(rawState)
+			defer func() {
+				if err := term.RestoreTerminal(rawState); err != nil {
+					log.Debug("failed to restore terminal", "error", err)
+				}
+			}()
 		}
 	}
 

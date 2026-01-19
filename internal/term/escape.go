@@ -131,9 +131,9 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 				// If we have output to return first, defer the escape
 				if len(out) > 0 {
 					pendingEscape = &EscapeError{Action: EscapeDetach}
-				} else {
-					return 0, EscapeError{Action: EscapeDetach}
+					break
 				}
+				return 0, EscapeError{Action: EscapeDetach}
 
 			case escapeKeyStop:
 				if i+1 < n {
@@ -141,23 +141,17 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 				}
 				if len(out) > 0 {
 					pendingEscape = &EscapeError{Action: EscapeStop}
-				} else {
-					return 0, EscapeError{Action: EscapeStop}
+					break
 				}
+				return 0, EscapeError{Action: EscapeStop}
 
 			case EscapePrefix:
 				// Ctrl-/ Ctrl-/ sends a single Ctrl-/
 				out = append(out, EscapePrefix)
-				continue
 
 			default:
 				// Not a recognized escape - pass through both bytes
 				out = append(out, EscapePrefix, b)
-				continue
-			}
-			// If we set pendingEscape, break out of the loop
-			if pendingEscape != nil {
-				break
 			}
 			continue
 		}
