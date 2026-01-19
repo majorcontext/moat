@@ -3,6 +3,7 @@
 // Platform requirements:
 //   - macOS: Uses Keychain via Security framework (works out of the box)
 //   - Linux: Requires libsecret (GNOME), kwallet (KDE), or pass (CLI)
+//   - Windows: Uses Windows Credential Manager (works out of the box)
 //   - Headless/CI: Automatically falls back to file-based storage at ~/.moat/encryption.key
 //
 // The package attempts to store keys in the system keychain first for better security.
@@ -18,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/zalando/go-keyring"
 )
@@ -122,25 +122,23 @@ func (f *fileBackend) Set(key []byte) error {
 	// Use a lock file to prevent race conditions when multiple processes
 	// try to create the key simultaneously
 	lockPath := f.path + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return fmt.Errorf("creating lock file: %w", err)
 	}
-	defer lockFile.Close()
+	defer lf.Close()
 	defer os.Remove(lockPath)
 
 	// Acquire exclusive lock
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+	unlock, err := lockFile(lf)
+	if err != nil {
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	}()
+	defer unlock()
 
-	// Double-check if another process created the key while we waited for lock
-	if existing, err := f.Get(); err == nil {
-		// Key was created by another process, use it instead
-		copy(key, existing)
+	// If key already exists, don't overwrite it - another process may have created it
+	// while we waited for the lock. The caller should re-read the key after this returns.
+	if _, err := os.Stat(f.path); err == nil {
 		return nil
 	}
 
@@ -205,15 +203,19 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	}
 
 	// 5. Fall back to file storage
-	slog.Warn("system keychain unavailable, using file-based key storage",
-		"keychain_error", primaryErr.Error(),
+	slog.Info("system keychain unavailable, using file-based key storage",
 		"fallback_path", DefaultKeyFilePath())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
 		return nil, fmt.Errorf("storing encryption key failed.\n"+
 			"  Keychain (%s): %v\n"+
 			"  File (%s): %v\n"+
-			"Remediation: Ensure ~/.moat directory is writable, or check keychain access in System Settings > Privacy & Security",
+			"Remediation: Ensure ~/.moat directory is writable and check system keychain access settings",
 			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
+	}
+
+	// Re-read the key from fallback in case another process created it while we waited
+	if storedKey, err := fallback.Get(); err == nil {
+		return storedKey, nil
 	}
 
 	return key, nil
