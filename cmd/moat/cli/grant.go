@@ -75,9 +75,13 @@ func init() {
 
 // saveCredential stores a credential and returns the file path.
 func saveCredential(cred credential.Credential) (string, error) {
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		return "", fmt.Errorf("getting encryption key: %w", err)
+	}
 	store, err := credential.NewFileStore(
 		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
+		key,
 	)
 	if err != nil {
 		return "", fmt.Errorf("opening credential store: %w", err)

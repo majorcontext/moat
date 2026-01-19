@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/andybons/moat/internal/credential/keyring"
 )
 
 // FileStore implements Store using encrypted files.
@@ -83,7 +85,10 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	nonce, ciphertext := encrypted[:nonceSize], encrypted[nonceSize:]
 	data, err := s.cipher.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting credential: %w", err)
+		return nil, fmt.Errorf("decrypting credential for %s: %w\n"+
+			"  This may indicate the encryption key has changed.\n"+
+			"  If you recently upgraded moat, your credentials may have been encrypted with the old key.\n"+
+			"  To re-authenticate: moat grant %s", provider, err, provider)
 	}
 
 	var cred Credential
@@ -135,9 +140,8 @@ func DefaultStoreDir() string {
 	return filepath.Join(home, ".moat", "credentials")
 }
 
-// DefaultEncryptionKey returns a key derived from the user's environment.
-// In production, this should use a proper key derivation or keychain.
-func DefaultEncryptionKey() []byte {
-	// For now, use a fixed key. TODO: Use system keychain.
-	return []byte("moat-default-encryption-key-32b!")
+// DefaultEncryptionKey retrieves the encryption key from secure storage.
+// Uses system keychain when available, falls back to file-based storage.
+func DefaultEncryptionKey() ([]byte, error) {
+	return keyring.GetOrCreateKey()
 }

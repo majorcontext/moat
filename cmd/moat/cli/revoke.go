@@ -27,9 +27,13 @@ func init() {
 func runRevoke(cmd *cobra.Command, args []string) error {
 	provider := credential.Provider(args[0])
 
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		return fmt.Errorf("getting encryption key: %w", err)
+	}
 	store, err := credential.NewFileStore(
 		credential.DefaultStoreDir(),
-		credential.DefaultEncryptionKey(),
+		key,
 	)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)

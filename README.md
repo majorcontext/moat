@@ -191,6 +191,27 @@ grants:
 - Scoped per-run—when the run ends, the capability binding is discarded
 - Full audit trail of which credentials were used and when
 
+### Encryption key storage
+
+Moat encrypts stored credentials using AES-256-GCM. The encryption key is stored securely using your system's keychain:
+
+| Platform | Storage |
+|----------|---------|
+| macOS | Keychain via Security framework |
+| Linux | Secret Service (GNOME Keyring/KWallet) |
+| Windows | Credential Manager |
+| Headless/CI | File-based fallback at `~/.moat/encryption.key` |
+
+The system keychain is preferred for better security. If unavailable (e.g., in CI environments, headless servers, or containers), Moat automatically falls back to file-based storage with restricted permissions (0600).
+
+**Troubleshooting:**
+
+If you see decryption errors after upgrading Moat, your credentials may have been encrypted with a different key. Re-authenticate with:
+
+```bash
+moat grant github  # or other provider
+```
+
 ## Secrets
 
 Pull secrets from external backends and inject as environment variables:
