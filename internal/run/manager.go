@@ -157,9 +157,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		p.SetCA(ca)
 
 		// Load credentials for granted providers
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr != nil {
+			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
+		}
 		store, err := credential.NewFileStore(
 			credential.DefaultStoreDir(),
-			credential.DefaultEncryptionKey(),
+			key,
 		)
 		if err == nil {
 			for _, grant := range opts.Grants {

@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/andybons/moat/internal/credential/keyring"
 )
 
 // FileStore implements Store using encrypted files.
@@ -135,9 +137,8 @@ func DefaultStoreDir() string {
 	return filepath.Join(home, ".moat", "credentials")
 }
 
-// DefaultEncryptionKey returns a key derived from the user's environment.
-// In production, this should use a proper key derivation or keychain.
-func DefaultEncryptionKey() []byte {
-	// For now, use a fixed key. TODO: Use system keychain.
-	return []byte("moat-default-encryption-key-32b!")
+// DefaultEncryptionKey retrieves the encryption key from secure storage.
+// Uses system keychain when available, falls back to file-based storage.
+func DefaultEncryptionKey() ([]byte, error) {
+	return keyring.GetOrCreateKey()
 }
