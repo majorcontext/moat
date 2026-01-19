@@ -20,7 +20,7 @@ func TestFullPipeline(t *testing.T) {
 	}
 
 	// Generate Dockerfile
-	dockerfile, err := GenerateDockerfile(depList)
+	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestFullPipeline(t *testing.T) {
 	}
 
 	// Generate image tag
-	tag := ImageTag(depList)
+	tag := ImageTag(depList, nil)
 	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
@@ -119,9 +119,9 @@ func TestOrderIndependentImageTags(t *testing.T) {
 		t.Fatalf("ParseAll deps3: %v", err)
 	}
 
-	tag1 := ImageTag(deps1)
-	tag2 := ImageTag(deps2)
-	tag3 := ImageTag(deps3)
+	tag1 := ImageTag(deps1, nil)
+	tag2 := ImageTag(deps2, nil)
+	tag3 := ImageTag(deps3, nil)
 
 	if tag1 != tag2 || tag1 != tag3 {
 		t.Errorf("image tags not order-independent:\n  tag1=%s\n  tag2=%s\n  tag3=%s", tag1, tag2, tag3)
@@ -199,7 +199,7 @@ func TestPipelineWithDefaultVersions(t *testing.T) {
 	}
 
 	// Generate Dockerfile - should use default versions from registry
-	dockerfile, err := GenerateDockerfile(depList)
+	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
@@ -217,13 +217,13 @@ func TestPipelineWithDefaultVersions(t *testing.T) {
 	}
 
 	// Generate image tag - should use default versions
-	tag := ImageTag(depList)
+	tag := ImageTag(depList, nil)
 	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
 
 	// Verify image tag is deterministic
-	tag2 := ImageTag(depList)
+	tag2 := ImageTag(depList, nil)
 	if tag != tag2 {
 		t.Errorf("image tags not deterministic: %s != %s", tag, tag2)
 	}
@@ -246,7 +246,7 @@ func TestEmptyDependencies(t *testing.T) {
 	}
 
 	// Generate Dockerfile for empty list
-	dockerfile, err := GenerateDockerfile(depList)
+	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestEmptyDependencies(t *testing.T) {
 	}
 
 	// Generate image tag for empty list
-	tag := ImageTag(depList)
+	tag := ImageTag(depList, nil)
 	if !strings.HasPrefix(tag, "moat/run:") {
 		t.Errorf("unexpected tag format: %s", tag)
 	}
@@ -282,7 +282,7 @@ func TestGoInstallDependencies(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	dockerfile, err := GenerateDockerfile(depList)
+	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	dockerfile, err := GenerateDockerfile(depList)
+	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}

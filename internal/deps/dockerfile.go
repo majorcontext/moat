@@ -2,15 +2,26 @@
 package deps
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
 )
 
+// DockerfileOptions configures Dockerfile generation.
+type DockerfileOptions struct {
+	// NeedsSSH indicates SSH grants are present and the image needs
+	// openssh-client, socat, and the moat-init entrypoint for agent forwarding.
+	NeedsSSH bool
+}
+
 const baseImage = "ubuntu:22.04"
 
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
-func GenerateDockerfile(deps []Dependency) (string, error) {
+func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
+	if opts == nil {
+		opts = &DockerfileOptions{}
+	}
 	var b strings.Builder
 
 	b.WriteString("FROM " + baseImage + "\n\n")
@@ -45,6 +56,11 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 			// Meta dependencies are expanded during parsing/validation
 			// They should not appear here
 		}
+	}
+
+	// Add SSH packages if SSH grants are present
+	if opts.NeedsSSH {
+		aptPkgs = append(aptPkgs, "openssh-client", "socat")
 	}
 
 	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall)
@@ -127,6 +143,17 @@ func GenerateDockerfile(deps []Dependency) (string, error) {
 		b.WriteString(fmt.Sprintf("# %s (custom)\n", dep.Name))
 		b.WriteString(getCustomCommands(dep.Name, version).FormatForDockerfile())
 		b.WriteString("\n")
+	}
+
+	// If SSH is needed, install the moat-init entrypoint script
+	// This script sets up the SSH agent bridge when MOAT_SSH_TCP_ADDR is set
+	if opts.NeedsSSH {
+		// Base64 encode the embedded script to avoid shell escaping issues
+		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
+
+		b.WriteString("# Moat initialization script (SSH agent forwarding)\n")
+		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
+		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	}
 
 	return b.String(), nil

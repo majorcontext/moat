@@ -19,6 +19,7 @@ const (
 	EntryNetwork    EntryType = "network"
 	EntryCredential EntryType = "credential"
 	EntrySecret     EntryType = "secret"
+	EntrySSH        EntryType = "ssh"
 )
 
 // FirstSequence is the sequence number of the first entry in a log.
@@ -52,6 +53,14 @@ type SecretData struct {
 	Name    string `json:"name"`    // env var name, e.g., "OPENAI_API_KEY"
 	Backend string `json:"backend"` // e.g., "1password", "ssm"
 	// Note: value is never logged
+}
+
+// SSHData holds SSH agent operation entry data.
+type SSHData struct {
+	Action      string `json:"action"`                // "list", "sign_allowed", "sign_denied"
+	Host        string `json:"host,omitempty"`        // target host (for sign operations)
+	Fingerprint string `json:"fingerprint,omitempty"` // key fingerprint (for sign operations)
+	Error       string `json:"error,omitempty"`       // error message (for denied operations)
 }
 
 // Entry represents a single hash-chained log entry.

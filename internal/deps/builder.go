@@ -8,8 +8,18 @@ import (
 	"strings"
 )
 
+// ImageTagOptions configures image tag generation.
+type ImageTagOptions struct {
+	// NeedsSSH indicates the image needs SSH packages and init script.
+	NeedsSSH bool
+}
+
 // ImageTag generates a deterministic image tag for a set of dependencies.
-func ImageTag(deps []Dependency) string {
+func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
+	if opts == nil {
+		opts = &ImageTagOptions{}
+	}
+
 	// Sort deps for deterministic ordering
 	sorted := make([]string, len(deps))
 	for i, d := range deps {
@@ -22,8 +32,14 @@ func ImageTag(deps []Dependency) string {
 	}
 	sort.Strings(sorted)
 
-	// Hash the sorted deps list
-	h := sha256.Sum256([]byte(strings.Join(sorted, ",")))
+	// Build the hash input
+	hashInput := strings.Join(sorted, ",")
+	if opts.NeedsSSH {
+		hashInput += ",ssh:agent"
+	}
+
+	// Hash the combined input
+	h := sha256.Sum256([]byte(hashInput))
 	hash := hex.EncodeToString(h[:])[:12]
 
 	return "moat/run:" + hash

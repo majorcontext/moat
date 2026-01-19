@@ -14,7 +14,7 @@ func TestGenerateDockerfile(t *testing.T) {
 		{Name: "psql"},
 	}
 
-	dockerfile, err := GenerateDockerfile(deps)
+	dockerfile, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestGenerateDockerfile(t *testing.T) {
 }
 
 func TestGenerateDockerfileEmpty(t *testing.T) {
-	dockerfile, err := GenerateDockerfile(nil)
+	dockerfile, err := GenerateDockerfile(nil, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestGenerateDockerfilePlaywright(t *testing.T) {
 		{Name: "node", Version: "20"},
 		{Name: "playwright"},
 	}
-	dockerfile, err := GenerateDockerfile(deps)
+	dockerfile, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestGenerateDockerfilePlaywright(t *testing.T) {
 
 func TestGenerateDockerfileGo(t *testing.T) {
 	deps := []Dependency{{Name: "go", Version: "1.22"}}
-	dockerfile, err := GenerateDockerfile(deps)
+	dockerfile, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestGenerateDockerfileGo(t *testing.T) {
 
 func TestGenerateDockerfilePython(t *testing.T) {
 	deps := []Dependency{{Name: "python", Version: "3.10"}}
-	dockerfile, err := GenerateDockerfile(deps)
+	dockerfile, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -103,5 +103,54 @@ func TestGenerateDockerfilePython(t *testing.T) {
 	}
 	if !strings.Contains(dockerfile, "update-alternatives") {
 		t.Error("Dockerfile should set up Python alternatives for PATH")
+	}
+}
+
+func TestGenerateDockerfileWithSSH(t *testing.T) {
+	// Test with NeedsSSH option (triggered by SSH grants)
+	dockerfile, err := GenerateDockerfile(nil, &DockerfileOptions{NeedsSSH: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Check that openssh-client and socat are installed
+	if !strings.Contains(dockerfile, "openssh-client") {
+		t.Error("Dockerfile should install openssh-client")
+	}
+	if !strings.Contains(dockerfile, "socat") {
+		t.Error("Dockerfile should install socat")
+	}
+
+	// Check that the entrypoint script is created (via base64)
+	if !strings.Contains(dockerfile, "moat-init") {
+		t.Error("Dockerfile should create moat-init entrypoint")
+	}
+	if !strings.Contains(dockerfile, "base64 -d") {
+		t.Error("Dockerfile should use base64 decoding for entrypoint script")
+	}
+	if !strings.Contains(dockerfile, "ENTRYPOINT") {
+		t.Error("Dockerfile should set ENTRYPOINT to moat-init")
+	}
+}
+
+func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
+	// Test combining regular deps with SSH
+	deps := []Dependency{{Name: "node", Version: "20"}}
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsSSH: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Check node is installed
+	if !strings.Contains(dockerfile, "nodesource") {
+		t.Error("Dockerfile should install Node.js")
+	}
+
+	// Check SSH is also installed
+	if !strings.Contains(dockerfile, "openssh-client") {
+		t.Error("Dockerfile should install openssh-client")
+	}
+	if !strings.Contains(dockerfile, "ENTRYPOINT") {
+		t.Error("Dockerfile should set ENTRYPOINT")
 	}
 }

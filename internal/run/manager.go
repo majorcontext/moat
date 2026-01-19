@@ -25,6 +25,7 @@ import (
 	"github.com/andybons/moat/internal/proxy"
 	"github.com/andybons/moat/internal/routing"
 	"github.com/andybons/moat/internal/secrets"
+	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
 
@@ -388,6 +389,155 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, providerEnv...)
 	}
 
+	// Set up SSH agent proxy for SSH grants (e.g., git clone git@github.com:...)
+	var sshServer *sshagent.Server
+	var sshSocketDir string // Track for cleanup on error
+	sshGrants := filterSSHGrants(opts.Grants)
+	if len(sshGrants) > 0 {
+		upstreamSocket := os.Getenv("SSH_AUTH_SOCK")
+		if upstreamSocket == "" {
+			// Clean up HTTP proxy if it was started
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("SSH grants require SSH_AUTH_SOCK to be set\n\n" +
+				"Start your SSH agent with: eval \"$(ssh-agent -s)\" && ssh-add")
+		}
+
+		// Load SSH mappings for granted hosts
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
+		}
+		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("opening credential store: %w", err)
+		}
+
+		sshMappings, err := store.GetSSHMappingsForHosts(sshGrants)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("loading SSH mappings: %w", err)
+		}
+		if len(sshMappings) == 0 {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("no SSH keys configured for hosts: %v\n\n"+
+				"Grant SSH access first:\n"+
+				"  moat grant ssh --host %s", sshGrants, sshGrants[0])
+		}
+
+		// Connect to upstream SSH agent
+		upstreamAgent, err := sshagent.ConnectAgent(upstreamSocket)
+		if err != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("connecting to SSH agent: %w", err)
+		}
+
+		// Create filtering proxy
+		sshProxy := sshagent.NewProxy(upstreamAgent)
+		for _, mapping := range sshMappings {
+			sshProxy.AllowKey(mapping.KeyFingerprint, []string{mapping.Host})
+		}
+
+		// For Docker on macOS, Unix sockets can't be shared via bind mounts because
+		// Docker Desktop runs containers in a Linux VM. We use TCP instead and have
+		// the container create a local Unix socket using socat.
+		// For Apple containers and Docker on Linux, Unix sockets work fine via mounts.
+		usesTCP := m.runtime.Type() == container.RuntimeDocker && !m.runtime.SupportsHostNetwork()
+
+		if usesTCP {
+			// Use TCP server - container will use socat to bridge
+			sshServer = sshagent.NewTCPServer(sshProxy, "127.0.0.1:0") // :0 picks random port
+			if err := sshServer.Start(); err != nil {
+				upstreamAgent.Close()
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("starting SSH agent proxy (TCP): %w", err)
+			}
+
+			// Get the actual TCP address after binding
+			tcpAddr := sshServer.TCPAddr()
+			hostAddr := m.runtime.GetHostAddress()
+			containerSSHDir := "/run/moat/ssh"
+
+			// Extract port from TCP address (format is "host:port" or "[::]:port")
+			_, tcpPort, err := parseHostPort(tcpAddr)
+			if err != nil {
+				_ = sshServer.Stop()
+				upstreamAgent.Close()
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("parsing SSH proxy address %q: %w", tcpAddr, err)
+			}
+			containerTCPAddr := hostAddr + ":" + tcpPort
+
+			// Set env vars for container to set up socat bridge
+			// Container entrypoint will run: socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork TCP:host:port
+			proxyEnv = append(proxyEnv,
+				"MOAT_SSH_TCP_ADDR="+containerTCPAddr,
+				"SSH_AUTH_SOCK="+containerSSHDir+"/agent.sock",
+			)
+
+			log.Debug("SSH agent proxy started (TCP mode)",
+				"tcpAddr", tcpAddr,
+				"containerAddr", containerTCPAddr,
+				"hosts", sshGrants,
+				"keys", len(sshMappings))
+		} else {
+			// Use Unix socket - can be mounted directly
+			homeDir, _ := os.UserHomeDir()
+			sshSocketDir = filepath.Join(homeDir, ".moat", "sockets", r.ID)
+			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
+				upstreamAgent.Close()
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("creating SSH socket directory: %w", err)
+			}
+			socketPath := filepath.Join(sshSocketDir, "agent.sock")
+
+			sshServer = sshagent.NewServer(sshProxy, socketPath)
+			if err := sshServer.Start(); err != nil {
+				upstreamAgent.Close()
+				os.RemoveAll(sshSocketDir)
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("starting SSH agent proxy: %w", err)
+			}
+
+			// Mount socket directory into container
+			containerSSHDir := "/run/moat/ssh"
+			mounts = append(mounts, container.MountConfig{
+				Source:   sshSocketDir,
+				Target:   containerSSHDir,
+				ReadOnly: false,
+			})
+
+			// Set SSH_AUTH_SOCK for container
+			proxyEnv = append(proxyEnv, "SSH_AUTH_SOCK="+containerSSHDir+"/agent.sock")
+
+			log.Debug("SSH agent proxy started (Unix socket mode)",
+				"socket", socketPath,
+				"hosts", sshGrants,
+				"keys", len(sshMappings))
+		}
+	}
+
 	// Configure network mode and extra hosts based on runtime capabilities
 	// We use bridge mode when:
 	// 1. We have ports to publish (host mode doesn't support port publishing)
@@ -496,14 +646,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Resolve container image based on dependencies
-	containerImage := image.Resolve(depList)
+	// Resolve container image based on dependencies and SSH grants
+	hasSSHGrants := len(sshGrants) > 0
+	containerImage := image.Resolve(depList, &image.ResolveOptions{
+		NeedsSSH: hasSSHGrants,
+	})
+
+	// Determine if we need a custom image
+	needsCustomImage := len(depList) > 0 || hasSSHGrants
 
 	// Handle --rebuild: delete existing image to force fresh build (Docker only)
 	if opts.Rebuild {
 		if m.runtime.Type() != container.RuntimeDocker {
 			fmt.Fprintf(os.Stderr, "Note: --rebuild is ignored for %s runtime (no custom image builds)\n", m.runtime.Type())
-		} else if len(depList) > 0 {
+		} else if needsCustomImage {
 			exists, _ := m.runtime.ImageExists(ctx, containerImage)
 			if exists {
 				fmt.Printf("Removing cached image %s...\n", containerImage)
@@ -514,10 +670,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Build custom image if we have dependencies (Docker only)
+	// Build custom image if we have dependencies or SSH grants (Docker only)
 	// Apple containers don't support custom image builds; dependencies would need
 	// to be installed via install scripts at container start (not yet implemented).
-	if len(depList) > 0 && m.runtime.Type() == container.RuntimeDocker {
+	if needsCustomImage && m.runtime.Type() == container.RuntimeDocker {
 		exists, err := m.runtime.ImageExists(ctx, containerImage)
 		if err != nil {
 			if proxyServer != nil {
@@ -527,7 +683,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 
 		if !exists {
-			dockerfile, err := deps.GenerateDockerfile(depList)
+			dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
+				NeedsSSH: hasSSHGrants,
+			})
 			if err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
@@ -597,15 +755,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		CapAdd:       capAdd,
 	})
 	if err != nil {
-		// Clean up proxy server if container creation fails
+		// Clean up proxy servers if container creation fails
 		if proxyServer != nil {
 			_ = proxyServer.Stop(context.Background())
+		}
+		if sshServer != nil {
+			_ = sshServer.Stop()
 		}
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
+	r.SSHAgentServer = sshServer
 
 	// Ensure proxy is running if we have ports to expose
 	if len(ports) > 0 {
@@ -670,6 +832,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		_, _ = auditStore.AppendSecret(audit.SecretData{
 			Name:    secret.name,
 			Backend: secret.scheme,
+		})
+	}
+
+	// Wire up SSH audit logging if SSH server is active
+	if sshServer != nil {
+		sshServer.Proxy().SetAuditFunc(func(event sshagent.AuditEvent) {
+			_, _ = auditStore.AppendSSH(audit.SSHData{
+				Action:      event.Action,
+				Host:        event.Host,
+				Fingerprint: event.Fingerprint,
+				Error:       event.Error,
+			})
 		})
 	}
 
@@ -814,6 +988,13 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Stop the SSH agent server if one was created
+	if r.SSHAgentServer != nil {
+		if err := r.SSHAgentServer.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
+		}
+	}
+
 	// Unregister routes for this agent
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
@@ -882,6 +1063,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if r.ProxyServer != nil {
 			if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
+			}
+		}
+
+		// Stop the SSH agent server if one was created
+		if r.SSHAgentServer != nil {
+			if stopErr := r.SSHAgentServer.Stop(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", stopErr)
 			}
 		}
 
@@ -964,6 +1152,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if r.ProxyServer != nil {
 		if err := r.ProxyServer.Stop(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		}
+	}
+
+	// Stop the SSH agent server if one was created and still running
+	if r.SSHAgentServer != nil {
+		if err := r.SSHAgentServer.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
 		}
 	}
 
@@ -1087,6 +1282,9 @@ func (m *Manager) Close() error {
 		if r.ProxyServer != nil {
 			_ = r.ProxyServer.Stop(context.Background())
 		}
+		if r.SSHAgentServer != nil {
+			_ = r.SSHAgentServer.Stop()
+		}
 	}
 	m.mu.RUnlock()
 
@@ -1100,4 +1298,38 @@ func workspaceToClaudeDir(absPath string) string {
 	normalized := filepath.ToSlash(absPath)
 	cleaned := strings.TrimPrefix(normalized, "/")
 	return "-" + strings.ReplaceAll(cleaned, "/", "-")
+}
+
+// filterSSHGrants extracts SSH host grants from the grants list.
+// SSH grants have the format "ssh:<host>" (e.g., "ssh:github.com").
+func filterSSHGrants(grants []string) []string {
+	var hosts []string
+	for _, g := range grants {
+		if strings.HasPrefix(g, "ssh:") {
+			hosts = append(hosts, strings.TrimPrefix(g, "ssh:"))
+		}
+	}
+	return hosts
+}
+
+// parseHostPort splits an address into host and port components.
+// It handles IPv4 ("127.0.0.1:8080"), IPv6 ("[::1]:8080"), and named hosts.
+// Returns empty strings if the address cannot be parsed.
+func parseHostPort(addr string) (host, port string, err error) {
+	// Find the last colon that separates host and port
+	// For IPv6, the host is enclosed in brackets: [::1]:8080
+	if strings.HasPrefix(addr, "[") {
+		// IPv6 format: [host]:port
+		closeBracket := strings.LastIndex(addr, "]")
+		if closeBracket == -1 || closeBracket+2 > len(addr) || addr[closeBracket+1] != ':' {
+			return "", "", fmt.Errorf("invalid address format: %s", addr)
+		}
+		return addr[1:closeBracket], addr[closeBracket+2:], nil
+	}
+	// IPv4 or hostname format: host:port
+	lastColon := strings.LastIndex(addr, ":")
+	if lastColon == -1 {
+		return "", "", fmt.Errorf("no port in address: %s", addr)
+	}
+	return addr[:lastColon], addr[lastColon+1:], nil
 }

@@ -228,6 +228,11 @@ func (s *Store) AppendSecret(data SecretData) (*Entry, error) {
 	return s.Append(EntrySecret, &data)
 }
 
+// AppendSSH adds an SSH agent operation entry.
+func (s *Store) AppendSSH(data SSHData) (*Entry, error) {
+	return s.Append(EntrySSH, &data)
+}
+
 // Get retrieves an entry by sequence number.
 func (s *Store) Get(seq uint64) (*Entry, error) {
 	row := s.db.QueryRow(`

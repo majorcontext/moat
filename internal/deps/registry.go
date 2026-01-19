@@ -10,6 +10,9 @@ import (
 //go:embed registry.yaml
 var registryData []byte
 
+//go:embed scripts/moat-init.sh
+var MoatInitScript string
+
 // registry holds all available dependencies. It is read-only after init().
 var registry map[string]DepSpec
 
