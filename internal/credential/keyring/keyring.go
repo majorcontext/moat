@@ -21,6 +21,7 @@ package keyring
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -171,10 +172,22 @@ func (f *fileBackend) Name() string {
 }
 
 // DefaultKeyFilePath returns the default path for the fallback key file.
+// The path is always absolute to ensure consistent key storage across
+// different working directories.
 func DefaultKeyFilePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".moat", "encryption.key")
+		// UserHomeDir failed - this is rare but can happen in unusual environments.
+		// Try common fallback locations to ensure an absolute path.
+		// Check $HOME directly (Unix) or use temp directory as last resort.
+		if envHome := os.Getenv("HOME"); envHome != "" {
+			return filepath.Join(envHome, ".moat", "encryption.key")
+		}
+		// Last resort: use temp directory with a consistent subdirectory.
+		// This is better than current directory because it's absolute.
+		slog.Warn("could not determine home directory, using temp directory for key storage",
+			"error", err)
+		return filepath.Join(os.TempDir(), ".moat", "encryption.key")
 	}
 	return filepath.Join(home, ".moat", "encryption.key")
 }
@@ -209,7 +222,13 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	// 4. Try to store in primary
 	primaryErr := primary.Set(key)
 	if primaryErr == nil {
-		return key, nil
+		// Re-read from primary for consistency with fallback path.
+		// This ensures we always return the actually stored key.
+		storedKey, getErr := primary.Get()
+		if getErr != nil {
+			return nil, fmt.Errorf("failed to verify stored encryption key in %s: %w", primary.Name(), getErr)
+		}
+		return storedKey, nil
 	}
 
 	// 5. Fall back to file storage
@@ -261,7 +280,11 @@ func DeleteKey() error {
 
 	// Return error only if both failed (one succeeding is fine)
 	if primaryErr != nil && fallbackErr != nil {
-		return fmt.Errorf("deleting key: keychain: %v; file: %w", primaryErr, fallbackErr)
+		return fmt.Errorf("deleting key from all backends: %w",
+			errors.Join(
+				fmt.Errorf("keychain: %w", primaryErr),
+				fmt.Errorf("file: %w", fallbackErr),
+			))
 	}
 	return nil
 }

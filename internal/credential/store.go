@@ -85,7 +85,10 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	nonce, ciphertext := encrypted[:nonceSize], encrypted[nonceSize:]
 	data, err := s.cipher.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting credential: %w", err)
+		return nil, fmt.Errorf("decrypting credential for %s: %w\n"+
+			"  This may indicate the encryption key has changed.\n"+
+			"  If you recently upgraded moat, your credentials may have been encrypted with the old key.\n"+
+			"  To re-authenticate: moat grant %s", provider, err, provider)
 	}
 
 	var cred Credential
