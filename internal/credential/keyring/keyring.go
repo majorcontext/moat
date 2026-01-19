@@ -133,7 +133,9 @@ func (f *fileBackend) Set(key []byte) error {
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	}()
 
 	// Double-check if another process created the key while we waited for lock
 	if existing, err := f.Get(); err == nil {
