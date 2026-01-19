@@ -213,12 +213,14 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
 	}
 
-	// Re-read the key from fallback in case another process created it while we waited
-	if storedKey, err := fallback.Get(); err == nil {
-		return storedKey, nil
+	// Re-read the key from fallback to ensure we return the actual stored key.
+	// This is mandatory because another process may have created the key while we waited
+	// for the lock, and our generated key may differ from what was stored.
+	storedKey, err := fallback.Get()
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify stored encryption key: %w", err)
 	}
-
-	return key, nil
+	return storedKey, nil
 }
 
 // GetOrCreateKey retrieves the encryption key from keychain or file, generating a new one if needed.
