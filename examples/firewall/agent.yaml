@@ -4,7 +4,7 @@
 # Only requests to httpbin.org are allowed; all others are blocked.
 #
 # Run with:
-#   agent run examples/firewall -- python3 /workspace/demo.py
+#   moat run examples/firewall
 #
 # Expected output:
 #   - Request to httpbin.org succeeds (200 OK)
@@ -20,3 +20,5 @@ network:
   allow:
     - "httpbin.org"
     - "*.httpbin.org"
+
+command: ["python3", "/workspace/demo.py"]

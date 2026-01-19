@@ -41,6 +41,7 @@ go.work.sum
 .conductor/
 
 # Built binary
+/moat
 /agent
 
 # Git worktrees for isolated development

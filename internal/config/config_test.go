@@ -372,3 +372,72 @@ secrets:
 		t.Errorf("error should mention missing scheme: %v", err)
 	}
 }
+
+func TestLoadConfigWithCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["npm", "start"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Command) != 2 {
+		t.Fatalf("Command = %d args, want 2", len(cfg.Command))
+	}
+	if cfg.Command[0] != "npm" {
+		t.Errorf("Command[0] = %q, want %q", cfg.Command[0], "npm")
+	}
+	if cfg.Command[1] != "start" {
+		t.Errorf("Command[1] = %q, want %q", cfg.Command[1], "start")
+	}
+}
+
+func TestLoadConfigWithCommandShell(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["sh", "-c", "echo hello && npm test"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Command) != 3 {
+		t.Fatalf("Command = %d args, want 3", len(cfg.Command))
+	}
+	if cfg.Command[0] != "sh" {
+		t.Errorf("Command[0] = %q, want %q", cfg.Command[0], "sh")
+	}
+	if cfg.Command[2] != "echo hello && npm test" {
+		t.Errorf("Command[2] = %q, want %q", cfg.Command[2], "echo hello && npm test")
+	}
+}
+
+func TestLoadConfigWithEmptyCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["", "arg1"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when command[0] is empty")
+	}
+	if !strings.Contains(err.Error(), "command[0] cannot be empty") {
+		t.Errorf("error should mention empty command: %v", err)
+	}
+}

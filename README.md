@@ -132,6 +132,9 @@ mounts:
 ports:
   web: 3000
   api: 8080
+
+# Default command to run (can be overridden with -- on CLI)
+command: ["npm", "start"]
 ```
 
 Then just run:
@@ -139,6 +142,22 @@ Then just run:
 ```bash
 moat run ./my-project
 ```
+
+### Command
+
+The `command` field specifies the default command to run in the container.
+
+```yaml
+# Simple command
+command: ["npm", "start"]
+
+# Shell command (for pipelines, environment variable expansion, etc.)
+command: ["sh", "-c", "npm install && npm start"]
+```
+
+**Security note:** When using shell commands (`sh -c`), be cautious with variable interpolation. Variables in the command string are expanded inside the container, which is generally safe. However, avoid constructing commands from untrusted input.
+
+**Precedence:** CLI command (`-- cmd`) > `command` in agent.yaml
 
 ## Credentials
 
@@ -310,7 +329,7 @@ moat verify-bundle proof.json
 moat run --name myapp           # Set agent name
 moat run --grant github         # Inject credentials
 moat run -e DEBUG=true          # Set env variable
-moat run -- npm test            # Custom command
+moat run -- npm test            # Custom command (overrides agent.yaml)
 moat logs -n 50                 # Last N lines
 ```
 

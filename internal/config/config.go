@@ -22,6 +22,7 @@ type Config struct {
 	Mounts       []string          `yaml:"mounts,omitempty"`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
+	Command      []string          `yaml:"command,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -85,6 +86,11 @@ func Load(dir string) (*Config, error) {
 		if !strings.Contains(ref, "://") {
 			return nil, fmt.Errorf("secret %q has invalid reference %q: missing scheme (expected format: scheme://path, e.g., op://vault/item/field)", key, ref)
 		}
+	}
+
+	// Validate command if specified
+	if len(cfg.Command) > 0 && cfg.Command[0] == "" {
+		return nil, fmt.Errorf("command[0] cannot be empty: the first element must be the executable")
 	}
 
 	return &cfg, nil

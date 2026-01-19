@@ -11,10 +11,7 @@
 #      op item create --category=password --title="Test Secret" --vault="Private" password=my-test-value
 #
 # Run with:
-#   agent run examples/secrets -- sh -c 'echo Your secret: $TEST_SECRET'
-#
-# Note: Use single quotes to prevent your shell from expanding $TEST_SECRET
-# before it reaches the container.
+#   moat run examples/secrets-1password
 #
 # The container will have TEST_SECRET set to the value from 1Password.
 
@@ -22,3 +19,5 @@ name: secrets-demo
 
 secrets:
   TEST_SECRET: op://Private/Test Secret/password
+
+command: ["sh", "-c", "echo Your secret: $TEST_SECRET"]
