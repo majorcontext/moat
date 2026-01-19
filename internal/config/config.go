@@ -88,6 +88,11 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
+	// Validate command if specified
+	if len(cfg.Command) > 0 && cfg.Command[0] == "" {
+		return nil, fmt.Errorf("command[0] cannot be empty: the first element must be the executable")
+	}
+
 	return &cfg, nil
 }
 

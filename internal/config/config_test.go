@@ -422,3 +422,22 @@ command: ["sh", "-c", "echo hello && npm test"]
 		t.Errorf("Command[2] = %q, want %q", cfg.Command[2], "echo hello && npm test")
 	}
 }
+
+func TestLoadConfigWithEmptyCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+command: ["", "arg1"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when command[0] is empty")
+	}
+	if !strings.Contains(err.Error(), "command[0] cannot be empty") {
+		t.Errorf("error should mention empty command: %v", err)
+	}
+}
