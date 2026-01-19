@@ -31,6 +31,9 @@ go.work.sum
 # .idea/
 # .vscode/
 
+# macOS
+.DS_Store
+
 # Claude Code local settings (user-specific permissions)
 .claude/*.local.json
 

@@ -109,8 +109,8 @@ func generateCA() (*CA, error) {
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization: []string{"AgentOps"},
-			CommonName:   "AgentOps CA",
+			Organization: []string{"Moat"},
+			CommonName:   "Moat CA",
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0), // 10 years
@@ -173,7 +173,7 @@ func (ca *CA) GenerateCert(host string) (*tls.Certificate, error) {
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{"AgentOps"},
+			Organization: []string{"Moat"},
 			CommonName:   host,
 		},
 		NotBefore:   time.Now(),

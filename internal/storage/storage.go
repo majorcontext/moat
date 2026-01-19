@@ -1,4 +1,4 @@
-// Package storage provides run storage infrastructure for AgentOps.
+// Package storage provides run storage infrastructure for Moat.
 // It handles persisting and loading run metadata, logs, and traces.
 package storage
 

@@ -219,7 +219,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	// set up than gh/curl and handles SSL certificates more gracefully.
 	//
 	// TODO: Mount CA certificate into container to properly test TLS interception.
-	// Currently using PYTHONHTTPSVERIFY=0 because the AgentOps CA isn't mounted.
+	// Currently using PYTHONHTTPSVERIFY=0 because the Moat CA isn't mounted.
 	r, err := mgr.Create(ctx, run.Options{
 		Name:      "e2e-test-network-capture",
 		Workspace: workspace,

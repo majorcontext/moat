@@ -1,10 +1,10 @@
-# Contributing to AgentOps
+# Contributing to Moat
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/andybons/agentops.git
-cd agentops
+git clone https://github.com/andybons/moat.git
+cd moat
 go build ./...
 ```
 
@@ -33,7 +33,7 @@ golangci-lint run
 ## Architecture
 
 ```
-cmd/agent/           CLI entry point (Cobra commands)
+cmd/moat/            CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
   config/            agent.yaml parsing, mount string parsing
@@ -49,15 +49,15 @@ internal/
 ### Key Flows
 
 **Credential Injection:**
-1. `agent grant github` → OAuth device flow → token stored encrypted
-2. `agent run --grant github` → proxy started → container traffic routed through proxy
+1. `moat grant github` → OAuth device flow → token stored encrypted
+2. `moat run --grant github` → proxy started → container traffic routed through proxy
 3. Proxy intercepts HTTPS, injects `Authorization` headers for matching hosts
 
 **Image Selection:**
 - `agent.yaml` `dependencies` field → `image.Resolve()` → `node:X` / `python:X` / `golang:X` / `ubuntu:22.04`
 
 **Observability:**
-- Container stdout → `storage.LogWriter` → `~/.agentops/runs/<id>/logs.jsonl`
+- Container stdout → `storage.LogWriter` → `~/.moat/runs/<id>/logs.jsonl`
 - Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
 **Container Runtime Selection:**
@@ -65,7 +65,7 @@ internal/
 
 **Audit Logging:**
 - Events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated
-- `agent audit <run-id>` displays chain with verification
+- `moat audit <run-id>` displays chain with verification
 - `--export` creates portable proof bundle
 
 ### Proxy Security Model
@@ -73,7 +73,7 @@ internal/
 The credential-injecting proxy has different security configurations per runtime:
 
 - **Docker:** Proxy binds to `127.0.0.1` (localhost only). Containers reach it via `host.docker.internal` or host network mode.
-- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://agentops:token@host:port` URL format.
+- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://moat:token@host:port` URL format.
 
 See [`internal/proxy/proxy.go`](internal/proxy/proxy.go) for the full security model documentation.
 
@@ -90,7 +90,7 @@ Key points:
 ## Data Directory Structure
 
 ```
-~/.agentops/
+~/.moat/
   config.yaml              # Global settings
   credentials/             # Encrypted tokens
   proxy/ca/                # Generated CA certificate
