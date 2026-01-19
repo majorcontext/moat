@@ -36,3 +36,32 @@ func TestDecodeKeyWrongLength(t *testing.T) {
 		t.Error("expected error for wrong key length")
 	}
 }
+
+func TestKeychainBackend(t *testing.T) {
+	backend := &keychainBackend{}
+
+	// Generate a test key
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i * 2)
+	}
+
+	// Store it
+	if err := backend.Set(key); err != nil {
+		// Skip if keychain unavailable (CI environment)
+		t.Skipf("keychain unavailable: %v", err)
+	}
+
+	// Retrieve it
+	retrieved, err := backend.Get()
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !bytes.Equal(key, retrieved) {
+		t.Errorf("retrieved key doesn't match: got %v, want %v", retrieved, key)
+	}
+
+	// Clean up
+	_ = backend.Delete()
+}

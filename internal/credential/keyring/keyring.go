@@ -4,6 +4,8 @@ package keyring
 import (
 	"encoding/base64"
 	"fmt"
+
+	"github.com/zalando/go-keyring"
 )
 
 const (
@@ -30,4 +32,42 @@ func decodeKey(encoded string) ([]byte, error) {
 		return nil, fmt.Errorf("invalid key length: expected %d bytes, got %d", KeySize, len(key))
 	}
 	return key, nil
+}
+
+// Backend defines the interface for key storage.
+type Backend interface {
+	Get() ([]byte, error)
+	Set(key []byte) error
+	Delete() error
+	Name() string
+}
+
+// keychainBackend stores keys in the system keychain.
+type keychainBackend struct{}
+
+func (k *keychainBackend) Get() ([]byte, error) {
+	encoded, err := keyring.Get(ServiceName, AccountName)
+	if err != nil {
+		return nil, fmt.Errorf("keychain get: %w", err)
+	}
+	return decodeKey(encoded)
+}
+
+func (k *keychainBackend) Set(key []byte) error {
+	encoded := encodeKey(key)
+	if err := keyring.Set(ServiceName, AccountName, encoded); err != nil {
+		return fmt.Errorf("keychain set: %w", err)
+	}
+	return nil
+}
+
+func (k *keychainBackend) Delete() error {
+	if err := keyring.Delete(ServiceName, AccountName); err != nil {
+		return fmt.Errorf("keychain delete: %w", err)
+	}
+	return nil
+}
+
+func (k *keychainBackend) Name() string {
+	return "system keychain"
 }
