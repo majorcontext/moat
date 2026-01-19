@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 )
 
 // NewRuntime creates a new container runtime, auto-detecting the best available option.

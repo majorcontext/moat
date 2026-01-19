@@ -432,7 +432,7 @@ func (c *combinedReadCloser) Close() error {
 	return c.cmd.Wait()
 }
 
-// ListImages returns all agentops-managed images.
+// ListImages returns all moat-managed images.
 func (r *AppleRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "image", "list", "--format", "json")
 	var stdout bytes.Buffer
@@ -455,7 +455,7 @@ func (r *AppleRuntime) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 	var result []ImageInfo
 	for _, img := range images {
-		if strings.HasPrefix(img.Tag, "agentops/") {
+		if strings.HasPrefix(img.Tag, "moat/") {
 			created, _ := time.Parse(time.RFC3339, img.Created)
 			result = append(result, ImageInfo{
 				ID:      img.ID,
@@ -483,7 +483,7 @@ func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
 		if err := json.Unmarshal(line, &img); err != nil {
 			continue
 		}
-		if strings.HasPrefix(img.Tag, "agentops/") {
+		if strings.HasPrefix(img.Tag, "moat/") {
 			created, _ := time.Parse(time.RFC3339, img.Created)
 			result = append(result, ImageInfo{
 				ID:      img.ID,
@@ -496,7 +496,7 @@ func (r *AppleRuntime) parseImageLines(data []byte) ([]ImageInfo, error) {
 	return result, nil
 }
 
-// ListContainers returns all agentops containers.
+// ListContainers returns all moat containers.
 func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--all", "--format", "json")
 	var stdout bytes.Buffer

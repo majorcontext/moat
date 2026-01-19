@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/proxy"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/proxy"
 )
 
 // ReverseProxy routes requests based on Host header to container services.

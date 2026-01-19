@@ -77,10 +77,10 @@ type Runtime interface {
 	// This blocks all other outbound traffic, forcing everything through the proxy.
 	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error
 
-	// ListImages returns all agentops-managed images.
+	// ListImages returns all moat-managed images.
 	ListImages(ctx context.Context) ([]ImageInfo, error)
 
-	// ListContainers returns all agentops containers (running + stopped).
+	// ListContainers returns all moat containers (running + stopped).
 	ListContainers(ctx context.Context) ([]Info, error)
 
 	// RemoveImage removes an image by ID or tag.

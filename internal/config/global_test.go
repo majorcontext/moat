@@ -14,7 +14,7 @@ func TestLoadGlobalConfig(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create config file
-	configDir := filepath.Join(tmpHome, ".agentops")
+	configDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(configDir, 0755)
 	configPath := filepath.Join(configDir, "config.yaml")
 
@@ -55,8 +55,8 @@ func TestLoadGlobalConfigEnvOverride(t *testing.T) {
 	os.Setenv("HOME", tmpHome)
 	defer os.Setenv("HOME", origHome)
 
-	os.Setenv("AGENTOPS_PROXY_PORT", "7000")
-	defer os.Unsetenv("AGENTOPS_PROXY_PORT")
+	os.Setenv("MOAT_PROXY_PORT", "7000")
+	defer os.Unsetenv("MOAT_PROXY_PORT")
 
 	cfg, err := LoadGlobal()
 	if err != nil {

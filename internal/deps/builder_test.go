@@ -12,8 +12,8 @@ func TestImageTag(t *testing.T) {
 		{Name: "typescript"},
 	}
 	tag := ImageTag(deps)
-	if !strings.HasPrefix(tag, "agentops/run:") {
-		t.Errorf("tag should start with agentops/run:, got %s", tag)
+	if !strings.HasPrefix(tag, "moat/run:") {
+		t.Errorf("tag should start with moat/run:, got %s", tag)
 	}
 	// Tag should be deterministic
 	tag2 := ImageTag(deps)

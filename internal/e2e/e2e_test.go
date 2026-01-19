@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/container"
-	"github.com/andybons/agentops/internal/credential"
-	"github.com/andybons/agentops/internal/run"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/credential"
+	"github.com/andybons/moat/internal/run"
+	"github.com/andybons/moat/internal/storage"
 )
 
 func TestMain(m *testing.M) {
@@ -219,7 +219,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	// set up than gh/curl and handles SSL certificates more gracefully.
 	//
 	// TODO: Mount CA certificate into container to properly test TLS interception.
-	// Currently using PYTHONHTTPSVERIFY=0 because the AgentOps CA isn't mounted.
+	// Currently using PYTHONHTTPSVERIFY=0 because the Moat CA isn't mounted.
 	r, err := mgr.Create(ctx, run.Options{
 		Name:      "e2e-test-network-capture",
 		Workspace: workspace,

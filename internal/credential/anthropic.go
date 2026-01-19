@@ -1,4 +1,4 @@
-// Package credential provides credential management for AgentOps.
+// Package credential provides credential management for Moat.
 package credential
 
 import (

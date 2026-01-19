@@ -472,14 +472,14 @@ import (
 // DefaultStoreDir returns the default credential store directory.
 func DefaultStoreDir() string {
     home, _ := os.UserHomeDir()
-    return filepath.Join(home, ".agentops", "credentials")
+    return filepath.Join(home, ".moat", "credentials")
 }
 
 // DefaultEncryptionKey returns a key derived from the user's environment.
 // In production, this should use a proper key derivation or keychain.
 func DefaultEncryptionKey() []byte {
     // For now, use a fixed key. TODO: Use system keychain.
-    return []byte("agentops-default-key-32bytes!!")
+    return []byte("moat-default-key-32bytes!!")
 }
 ```
 
@@ -495,8 +495,8 @@ import (
     "strings"
     "time"
 
-    "github.com/andybons/agentops/internal/credential"
-    "github.com/andybons/agentops/internal/log"
+    "github.com/andybons/moat/internal/credential"
+    "github.com/andybons/moat/internal/log"
     "github.com/spf13/cobra"
 )
 
@@ -606,8 +606,8 @@ package cli
 import (
     "fmt"
 
-    "github.com/andybons/agentops/internal/credential"
-    "github.com/andybons/agentops/internal/log"
+    "github.com/andybons/moat/internal/credential"
+    "github.com/andybons/moat/internal/log"
     "github.com/spf13/cobra"
 )
 
@@ -1062,8 +1062,8 @@ containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
 import (
     "strings"
 
-    "github.com/andybons/agentops/internal/credential"
-    "github.com/andybons/agentops/internal/proxy"
+    "github.com/andybons/moat/internal/credential"
+    "github.com/andybons/moat/internal/proxy"
 )
 ```
 
@@ -1114,11 +1114,11 @@ git commit -m "fix: address any issues found in e2e testing"
 
 After completing all tasks, Phase 2 delivers:
 
-1. **Encrypted credential store** at `~/.agentops/credentials/`
-2. **GitHub device flow** via `agent grant github`
-3. **Credential revocation** via `agent revoke github`
+1. **Encrypted credential store** at `~/.moat/credentials/`
+2. **GitHub device flow** via `moat grant github`
+3. **Credential revocation** via `moat revoke github`
 4. **Auth proxy** that injects Authorization headers
 5. **Container integration** with HTTP_PROXY/HTTPS_PROXY env vars
-6. **End-to-end flow** where `agent run test . --grant github` enables authenticated GitHub API access
+6. **End-to-end flow** where `moat run test . --grant github` enables authenticated GitHub API access
 
 The container never sees the actual token - it just makes normal HTTP requests that get intercepted and authenticated by the proxy.

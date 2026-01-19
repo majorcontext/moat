@@ -265,7 +265,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkAuth validates the Proxy-Authorization header against the required token.
-// Accepts both Basic auth (from HTTP_PROXY=http://agentops:token@host) and Bearer format.
+// Accepts both Basic auth (from HTTP_PROXY=http://moat:token@host) and Bearer format.
 // Uses constant-time comparison to prevent timing attacks.
 func (p *Proxy) checkAuth(r *http.Request) bool {
 	auth := r.Header.Get("Proxy-Authorization")
@@ -309,11 +309,11 @@ func (p *Proxy) checkNetworkPolicy(host string, port int) bool {
 
 // writeBlockedResponse writes a 407 response when a request is blocked by network policy.
 func (p *Proxy) writeBlockedResponse(w http.ResponseWriter, host string) {
-	w.Header().Set("X-AgentOps-Blocked", "network-policy")
-	w.Header().Set("Proxy-Authenticate", "AgentOps-Policy")
+	w.Header().Set("X-Moat-Blocked", "network-policy")
+	w.Header().Set("Proxy-Authenticate", "Moat-Policy")
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusProxyAuthRequired)
-	_, _ = w.Write([]byte("AgentOps: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.allow in agent.yaml or use policy: permissive.\n"))
+	_, _ = w.Write([]byte("Moat: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.allow in agent.yaml or use policy: permissive.\n"))
 }
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {

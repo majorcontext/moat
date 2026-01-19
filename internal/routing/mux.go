@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 )
 
 const (

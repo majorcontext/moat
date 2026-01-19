@@ -1,6 +1,6 @@
 package container
 
-// isRunID checks if a string looks like an agentops run ID (8 hex chars).
+// isRunID checks if a string looks like an moat run ID (8 hex chars).
 func isRunID(s string) bool {
 	if len(s) != 8 {
 		return false

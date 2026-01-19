@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andybons/agentops/internal/audit"
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/proxy"
-	"github.com/andybons/agentops/internal/storage"
+	"github.com/andybons/moat/internal/audit"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/storage"
 )
 
 // State represents the current state of a run.

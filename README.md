@@ -1,4 +1,4 @@
-# AgentOps
+# Moat
 
 Run AI agents locally with one command. Zero Docker knowledge. Zero secret copying. Full visibility.
 
@@ -6,10 +6,10 @@ Run AI agents locally with one command. Zero Docker knowledge. Zero secret copyi
 
 **Don't manage containers. Manage runs.**
 
-A "run" is a sealed workspace: your code, dependencies, credentials, and observability—all managed as one unit. You shouldn't need to understand Docker, copy tokens around, or piece together logs from different places. AgentOps handles the infrastructure so you can focus on what the agent actually does.
+A "run" is a sealed workspace: your code, dependencies, credentials, and observability—all managed as one unit. You shouldn't need to understand Docker, copy tokens around, or piece together logs from different places. Moat handles the infrastructure so you can focus on what the agent actually does.
 
 ```
-agent run --grant github -- npx claude-code
+moat run --grant github -- npx claude-code
 ```
 
 What happens when you run this:
@@ -21,15 +21,15 @@ What happens when you run this:
 ## Installation
 
 ```bash
-go install github.com/andybons/agentops/cmd/agent@latest
+go install github.com/andybons/moat/cmd/moat@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/andybons/agentops.git
-cd agentops
-go build -o agent ./cmd/agent
+git clone https://github.com/andybons/moat.git
+cd moat
+go build -o moat ./cmd/moat
 ```
 
 **Requirements:** Docker or Apple containers (macOS 15+ with Apple Silicon—auto-detected).
@@ -41,7 +41,7 @@ go build -o agent ./cmd/agent
 ### 1. Grant credentials (one time)
 
 ```bash
-$ agent grant github
+$ moat grant github
 
 To authorize, visit: https://github.com/login/device
 Enter code: ABCD-1234
@@ -53,7 +53,7 @@ GitHub credential saved successfully
 ### 2. Run a command with injected credentials
 
 ```bash
-$ agent run --grant github -- curl -s https://api.github.com/user
+$ moat run --grant github -- curl -s https://api.github.com/user
 {
   "login": "your-username",
   "id": 1234567,
@@ -66,14 +66,14 @@ No `GITHUB_TOKEN` in the command. No secrets in environment variables. The token
 ### 3. Verify the agent never saw your token
 
 ```bash
-$ agent run --grant github -- env | grep -i token
+$ moat run --grant github -- env | grep -i token
 # (nothing)
 ```
 
 ### 4. See exactly what happened
 
 ```bash
-$ agent trace --network
+$ moat trace --network
 
 [10:23:44.512] GET https://api.github.com/user 200 (89ms)
 ```
@@ -82,7 +82,7 @@ Every HTTP request through the proxy is logged—useful for auditing, debugging,
 
 ## Why This Matters
 
-| Traditional approach | With AgentOps |
+| Traditional approach | With Moat |
 |---------------------|---------------|
 | `GITHUB_TOKEN=xxx` in env | Token never in container |
 | Agent could log/exfiltrate credentials | Token injected at network layer only |
@@ -104,7 +104,7 @@ dependencies:
   # - python@3.11  # Uses python:3.11
   # - go@1.22      # Uses golang:1.22
 
-# Credentials to inject (granted via `agent grant`)
+# Credentials to inject (granted via `moat grant`)
 grants:
   - github:repo
 
@@ -137,7 +137,7 @@ ports:
 Then just run:
 
 ```bash
-agent run ./my-project
+moat run ./my-project
 ```
 
 ## Credentials
@@ -147,15 +147,15 @@ The credential broker is the security core. Agents request scoped capabilities�
 ### Granting access
 
 ```bash
-agent grant github              # GitHub device flow
-agent grant github:repo         # Specific scope
-agent grant github:repo,user    # Multiple scopes
+moat grant github              # GitHub device flow
+moat grant github:repo         # Specific scope
+moat grant github:repo,user    # Multiple scopes
 ```
 
 ### Using credentials in runs
 
 ```bash
-agent run --grant github ./my-project
+moat run --grant github ./my-project
 ```
 
 Or declare in `agent.yaml`:
@@ -167,7 +167,7 @@ grants:
 
 ### Security model
 
-- Tokens stored encrypted on host (`~/.agentops/credentials/`)
+- Tokens stored encrypted on host (`~/.moat/credentials/`)
 - Injected via TLS-intercepting proxy—never in container environment
 - Scoped per-run—when the run ends, the capability binding is discarded
 - Full audit trail of which credentials were used and when
@@ -210,7 +210,7 @@ network:
 When blocked, agents get a clear error:
 
 ```
-AgentOps: request blocked by network policy.
+Moat: request blocked by network policy.
 Host "blocked.example.com" is not in the allow list.
 Add it to network.allow in agent.yaml or use policy: permissive.
 ```
@@ -229,10 +229,10 @@ ports:
 Run two agents working on different features:
 
 ```bash
-$ agent run --name dark-mode ./my-app &
-$ agent run --name checkout-flow ./my-app &
+$ moat run --name dark-mode ./my-app &
+$ moat run --name checkout-flow ./my-app &
 
-$ agent list
+$ moat list
 NAME            RUN ID       STATE     SERVICES
 dark-mode       run-a1b2...  running   web, api
 checkout-flow   run-c3d4...  running   web, api
@@ -253,17 +253,17 @@ Inside each container, environment variables point to its own services:
 
 ```bash
 # In dark-mode container:
-AGENTOPS_URL_WEB=http://web.dark-mode.localhost:8080
+MOAT_URL_WEB=http://web.dark-mode.localhost:8080
 
 # In checkout-flow container:
-AGENTOPS_URL_WEB=http://web.checkout-flow.localhost:8080
+MOAT_URL_WEB=http://web.checkout-flow.localhost:8080
 ```
 
-When done, stop both agents by run ID (from `agent list`):
+When done, stop both agents by run ID (from `moat list`):
 
 ```bash
-$ agent stop run-a1b2...
-$ agent stop run-c3d4...
+$ moat stop run-a1b2...
+$ moat stop run-c3d4...
 ```
 
 ## Observability
@@ -275,43 +275,43 @@ Every run captures structured data:
 - **Audit**: Tamper-proof log with hash chain and Merkle tree verification
 
 ```bash
-agent logs              # View container output
-agent logs -n 50        # Last 50 lines
-agent trace --network   # View HTTP requests
-agent audit             # Verify audit log integrity
+moat logs              # View container output
+moat logs -n 50        # Last 50 lines
+moat trace --network   # View HTTP requests
+moat audit             # Verify audit log integrity
 ```
 
 Export proof bundles for offline verification:
 
 ```bash
-agent audit --export proof.json
-agent verify-bundle proof.json
+moat audit --export proof.json
+moat verify-bundle proof.json
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `agent run [path] [-- cmd]` | Run an agent |
-| `agent grant <provider>` | Store credentials |
-| `agent revoke <provider>` | Remove credentials |
-| `agent logs [run-id]` | View logs |
-| `agent trace [run-id]` | View traces/network |
-| `agent audit [run-id]` | Verify audit log |
-| `agent verify-bundle <file>` | Verify exported proof bundle |
-| `agent list` | List runs |
-| `agent stop [run-id]` | Stop a run |
-| `agent destroy [run-id]` | Remove a run |
-| `agent proxy start/stop/status` | Manage the proxy |
+| `moat run [path] [-- cmd]` | Run an agent |
+| `moat grant <provider>` | Store credentials |
+| `moat revoke <provider>` | Remove credentials |
+| `moat logs [run-id]` | View logs |
+| `moat trace [run-id]` | View traces/network |
+| `moat audit [run-id]` | Verify audit log |
+| `moat verify-bundle <file>` | Verify exported proof bundle |
+| `moat list` | List runs |
+| `moat stop [run-id]` | Stop a run |
+| `moat destroy [run-id]` | Remove a run |
+| `moat proxy start/stop/status` | Manage the proxy |
 
 ### Common flags
 
 ```bash
-agent run --name myapp           # Set agent name
-agent run --grant github         # Inject credentials
-agent run -e DEBUG=true          # Set env variable
-agent run -- npm test            # Custom command
-agent logs -n 50                 # Last N lines
+moat run --name myapp           # Set agent name
+moat run --grant github         # Inject credentials
+moat run -e DEBUG=true          # Set env variable
+moat run -- npm test            # Custom command
+moat logs -n 50                 # Last N lines
 ```
 
 ## How It Works
@@ -326,20 +326,20 @@ agent logs -n 50                 # Last N lines
 
 ## Setup Notes
 
-### GitHub OAuth App (for `agent grant github`)
+### GitHub OAuth App (for `moat grant github`)
 
 1. Go to [GitHub Developer Settings](https://github.com/settings/developers) → New OAuth App
 2. Enable **Device Flow** in the app settings
-3. Set `AGENTOPS_GITHUB_CLIENT_ID` in your shell profile
+3. Set `MOAT_GITHUB_CLIENT_ID` in your shell profile
 
 ### Trusting the CA certificate (for hostname routing)
 
 ```bash
 # macOS
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.agentops/proxy/ca/ca.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.moat/proxy/ca/ca.crt
 
 # Linux
-sudo cp ~/.agentops/proxy/ca/ca.crt /usr/local/share/ca-certificates/agentops.crt && sudo update-ca-certificates
+sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt && sudo update-ca-certificates
 ```
 
 ### Optional CLI dependencies

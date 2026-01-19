@@ -23,11 +23,11 @@ func TestOnePasswordResolver_Integration(t *testing.T) {
 	}
 
 	// This test requires a real 1Password item to exist.
-	// Create a test item: op item create --category=login --title="AgentOps Test" --vault="Private" password=test-secret
+	// Create a test item: op item create --category=login --title="Moat Test" --vault="Private" password=test-secret
 	//
 	// Configure via environment variables:
 	//   OP_TEST_VAULT - vault name (default: "Private")
-	//   OP_TEST_ITEM  - item name (default: "AgentOps Test")
+	//   OP_TEST_ITEM  - item name (default: "Moat Test")
 	//   OP_TEST_FIELD - field name (default: "password")
 	vault := os.Getenv("OP_TEST_VAULT")
 	if vault == "" {
@@ -35,7 +35,7 @@ func TestOnePasswordResolver_Integration(t *testing.T) {
 	}
 	item := os.Getenv("OP_TEST_ITEM")
 	if item == "" {
-		item = "AgentOps Test"
+		item = "Moat Test"
 	}
 	field := os.Getenv("OP_TEST_FIELD")
 	if field == "" {

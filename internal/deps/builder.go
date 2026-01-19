@@ -26,5 +26,5 @@ func ImageTag(deps []Dependency) string {
 	h := sha256.Sum256([]byte(strings.Join(sorted, ",")))
 	hash := hex.EncodeToString(h[:])[:12]
 
-	return "agentops/run:" + hash
+	return "moat/run:" + hash
 }

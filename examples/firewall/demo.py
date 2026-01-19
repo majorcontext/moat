@@ -13,7 +13,7 @@ import urllib.request
 import urllib.error
 import ssl
 
-# Create SSL context that trusts the AgentOps CA
+# Create SSL context that trusts the Moat CA
 ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE  # Trust proxy's generated certs
@@ -79,8 +79,8 @@ def main():
     if status == 407:
         print(f"Status: {status} Proxy Authentication Required")
         print()
-        if "X-AgentOps-Blocked" in headers:
-            print(f"Header: X-AgentOps-Blocked: {headers['X-AgentOps-Blocked']}")
+        if "X-Moat-Blocked" in headers:
+            print(f"Header: X-Moat-Blocked: {headers['X-Moat-Blocked']}")
         print()
         print("Response body:")
         for line in body.strip().split('\n'):

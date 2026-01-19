@@ -9,9 +9,9 @@ import (
 	"runtime"
 	"syscall"
 
-	"github.com/andybons/agentops/internal/config"
-	"github.com/andybons/agentops/internal/log"
-	"github.com/andybons/agentops/internal/routing"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/routing"
 	"github.com/spf13/cobra"
 )
 
@@ -116,7 +116,7 @@ func startProxy(cmd *cobra.Command, args []string) error {
 		case "darwin":
 			fmt.Printf("  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %s\n", caPath)
 		case "linux":
-			fmt.Printf("  sudo cp %s /usr/local/share/ca-certificates/agentops.crt && sudo update-ca-certificates\n", caPath)
+			fmt.Printf("  sudo cp %s /usr/local/share/ca-certificates/moat.crt && sudo update-ca-certificates\n", caPath)
 		default:
 			fmt.Printf("  Add %s to your system's trusted certificates\n", caPath)
 		}

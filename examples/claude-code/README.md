@@ -5,7 +5,7 @@ Run Claude Code in an isolated container with automatic API key injection.
 ## Prerequisites
 
 1. An Anthropic API key (get one at https://console.anthropic.com/)
-2. AgentOps built and in your PATH
+2. Moat built and in your PATH
 
 ## Setup (One-Time)
 
@@ -13,7 +13,7 @@ Store your Anthropic API key securely:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
-agent grant anthropic
+moat grant anthropic
 ```
 
 Expected output:
@@ -33,7 +33,7 @@ This validates the key and stores it encrypted. The key is never passed to the c
 Start an interactive Claude Code session:
 
 ```bash
-agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code
+moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code
 ```
 
 Claude Code will start in `/workspace` with your project files mounted.
@@ -44,10 +44,10 @@ Ask Claude to analyze or fix code without interaction using `-p` (print mode):
 
 ```bash
 # Analyze the code
-agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "what does this code do?"
+moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "what does this code do?"
 
 # Fix the bug
-agent run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "fix the bug in main.py"
+moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "fix the bug in main.py"
 ```
 
 ## The Test Project
@@ -75,7 +75,7 @@ Ask Claude Code to fix it and verify the output.
 
 ## What's Happening
 
-1. AgentOps creates an isolated container with Node.js 20
+1. Moat creates an isolated container with Node.js 20
 2. A TLS-intercepting proxy starts and injects your API key into requests to `api.anthropic.com`
 3. Claude Code runs inside the container, unaware of the real API key
 4. All network requests are logged for observability
@@ -86,7 +86,7 @@ After a run completes, view the captured data:
 
 ```bash
 # List runs
-agent list
+moat list
 ```
 
 Expected output:
@@ -98,7 +98,7 @@ a1b2c3d4-e5f6-7890-abcd-ef1234567890  exited    my-agent   45s
 
 ```bash
 # View network requests (shows all API calls)
-cat ~/.agentops/runs/<run-id>/network.jsonl | jq .
+cat ~/.moat/runs/<run-id>/network.jsonl | jq .
 ```
 
 Example network log entry:
@@ -117,5 +117,5 @@ Example network log entry:
 
 ```bash
 # View console output
-cat ~/.agentops/runs/<run-id>/logs.jsonl
+cat ~/.moat/runs/<run-id>/logs.jsonl
 ```

@@ -3,7 +3,7 @@ package run
 import (
 	"testing"
 
-	"github.com/andybons/agentops/internal/config"
+	"github.com/andybons/moat/internal/config"
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration

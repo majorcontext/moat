@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/andybons/agentops/internal/run"
+	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 

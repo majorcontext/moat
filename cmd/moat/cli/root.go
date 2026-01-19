@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -12,13 +12,13 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "agent",
-	Short: "AgentOps - Local execution infrastructure for AI agents",
-	Long: `AgentOps is local execution infrastructure for AI agents.
+	Use:   "moat",
+	Short: "Moat - Local execution infrastructure for AI agents",
+	Long: `Moat is local execution infrastructure for AI agents.
 The core abstraction is a run — a sealed, ephemeral workspace containing
 code, dependencies, tools, credentials, and observability.
 
-Core promise: agent run my-agent . just works — zero Docker knowledge,
+Core promise: moat run my-agent . just works — zero Docker knowledge,
 zero secret copying, full visibility.`,
 	SilenceUsage: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {

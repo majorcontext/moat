@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybons/agentops/internal/log"
+	"github.com/andybons/moat/internal/log"
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
 
