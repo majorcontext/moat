@@ -4,6 +4,8 @@ package keyring
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/zalando/go-keyring"
 )
@@ -70,4 +72,50 @@ func (k *keychainBackend) Delete() error {
 
 func (k *keychainBackend) Name() string {
 	return "system keychain"
+}
+
+// fileBackend stores keys in a file with restricted permissions.
+type fileBackend struct {
+	path string
+}
+
+func (f *fileBackend) Get() ([]byte, error) {
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		return nil, fmt.Errorf("reading key file: %w", err)
+	}
+	return decodeKey(string(data))
+}
+
+func (f *fileBackend) Set(key []byte) error {
+	dir := filepath.Dir(f.path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating key directory: %w", err)
+	}
+
+	encoded := encodeKey(key)
+	if err := os.WriteFile(f.path, []byte(encoded), 0600); err != nil {
+		return fmt.Errorf("writing key file: %w", err)
+	}
+	return nil
+}
+
+func (f *fileBackend) Delete() error {
+	if err := os.Remove(f.path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("deleting key file: %w", err)
+	}
+	return nil
+}
+
+func (f *fileBackend) Name() string {
+	return "file (" + f.path + ")"
+}
+
+// DefaultKeyFilePath returns the default path for the fallback key file.
+func DefaultKeyFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".moat", "encryption.key")
+	}
+	return filepath.Join(home, ".moat", "encryption.key")
 }
