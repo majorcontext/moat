@@ -427,3 +427,183 @@ func TestDeleteKey(t *testing.T) {
 		t.Errorf("DeleteKey (second call): %v", err)
 	}
 }
+
+// =============================================================================
+// Regression Tests for Race Condition Fixes
+// =============================================================================
+
+// TestMandatoryReReadAfterSet verifies that getOrCreateKeyWithBackends
+// always returns the key that was actually stored, not the generated key.
+// This is a regression test for the race condition where re-read failure
+// could cause different processes to have different keys.
+func TestMandatoryReReadAfterSet(t *testing.T) {
+	// Create a mock backend that stores a DIFFERENT key than what was passed
+	// This simulates another process having written first
+	differentKey := make([]byte, 32)
+	for i := range differentKey {
+		differentKey[i] = byte(i + 100)
+	}
+
+	primary := &mockBackend{getErr: fmt.Errorf("keychain unavailable"), setErr: fmt.Errorf("keychain unavailable")}
+	fallback := &mockBackendWithOverride{
+		storedKey: differentKey,
+	}
+
+	key, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The returned key should be the one from storage (differentKey),
+	// NOT the one that was generated internally
+	if !bytes.Equal(key, differentKey) {
+		t.Errorf("should return stored key, not generated key\n"+
+			"got:  %x\n"+
+			"want: %x", key, differentKey)
+	}
+}
+
+// mockBackendWithOverride is a mock that stores a predetermined key
+// regardless of what Set() receives, simulating another process having written.
+type mockBackendWithOverride struct {
+	storedKey []byte
+	setCalled bool
+}
+
+func (m *mockBackendWithOverride) Get() ([]byte, error) {
+	if !m.setCalled {
+		return nil, fmt.Errorf("key not found")
+	}
+	return m.storedKey, nil
+}
+
+func (m *mockBackendWithOverride) Set(key []byte) error {
+	m.setCalled = true
+	// Ignore the passed key, use our predetermined one
+	return nil
+}
+
+func (m *mockBackendWithOverride) Delete() error {
+	m.storedKey = nil
+	m.setCalled = false
+	return nil
+}
+
+func (m *mockBackendWithOverride) Name() string {
+	return "mock-override"
+}
+
+// TestLockFileCleanup verifies that the lock file is removed after Set completes.
+func TestLockFileCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyPath := filepath.Join(tmpDir, "test.key")
+	lockPath := keyPath + ".lock"
+	backend := &fileBackend{path: keyPath}
+
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+
+	// Set should create and then remove the lock file
+	if err := backend.Set(key); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Lock file should be cleaned up
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file should be removed after Set completes")
+	}
+
+	// Key file should exist
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Errorf("key file should exist: %v", err)
+	}
+}
+
+// TestFileExistsAfterLockAcquired verifies that Set() does not overwrite
+// an existing key file, even if it was created while waiting for the lock.
+func TestFileExistsAfterLockAcquired(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyPath := filepath.Join(tmpDir, "test.key")
+	backend := &fileBackend{path: keyPath}
+
+	// Pre-create a key file (simulating another process having written)
+	existingKey := make([]byte, 32)
+	for i := range existingKey {
+		existingKey[i] = byte(i + 50)
+	}
+	encoded := encodeKey(existingKey)
+	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte(encoded), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Now try to Set a different key
+	newKey := make([]byte, 32)
+	for i := range newKey {
+		newKey[i] = byte(i + 100)
+	}
+
+	if err := backend.Set(newKey); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// The file should still contain the ORIGINAL key, not the new one
+	retrieved, err := backend.Get()
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !bytes.Equal(retrieved, existingKey) {
+		t.Errorf("Set should not overwrite existing key\n"+
+			"got:  %x\n"+
+			"want: %x", retrieved, existingKey)
+	}
+}
+
+// TestReReadFailureCausesError verifies that if the re-read after Set fails,
+// we return an error rather than silently returning a potentially wrong key.
+func TestReReadFailureCausesError(t *testing.T) {
+	// Create a mock where Get always fails after Set
+	primary := &mockBackend{getErr: fmt.Errorf("keychain unavailable"), setErr: fmt.Errorf("keychain unavailable")}
+	fallback := &mockBackendGetFailsAfterSet{}
+
+	_, err := getOrCreateKeyWithBackends(primary, fallback)
+	if err == nil {
+		t.Error("expected error when re-read fails after Set")
+	}
+	if !strings.Contains(err.Error(), "failed to verify stored encryption key") {
+		t.Errorf("error should mention verification failure: %v", err)
+	}
+}
+
+// mockBackendGetFailsAfterSet is a mock where Get fails after Set succeeds.
+// This simulates a scenario where the file is written but then can't be read
+// (e.g., disk error, permission change).
+type mockBackendGetFailsAfterSet struct {
+	setCalled bool
+}
+
+func (m *mockBackendGetFailsAfterSet) Get() ([]byte, error) {
+	if m.setCalled {
+		return nil, fmt.Errorf("simulated read failure after write")
+	}
+	return nil, fmt.Errorf("key not found")
+}
+
+func (m *mockBackendGetFailsAfterSet) Set(key []byte) error {
+	m.setCalled = true
+	return nil
+}
+
+func (m *mockBackendGetFailsAfterSet) Delete() error {
+	m.setCalled = false
+	return nil
+}
+
+func (m *mockBackendGetFailsAfterSet) Name() string {
+	return "mock-get-fails"
+}

@@ -9,6 +9,13 @@
 // The package attempts to store keys in the system keychain first for better security.
 // If the keychain is unavailable (e.g., in CI, headless servers, or containers),
 // it silently falls back to file-based storage with restricted permissions (0600).
+//
+// Concurrency: File-based storage uses file locking (flock on Unix) to prevent
+// race conditions during concurrent key creation. On Windows, the file backend
+// does not use locking since Windows Credential Manager is the primary backend
+// and file fallback is mainly used in headless/CI environments where concurrent
+// first-run scenarios are rare. If concurrent access to file storage is needed
+// on Windows, external synchronization should be used.
 package keyring
 
 import (
@@ -120,7 +127,10 @@ func (f *fileBackend) Set(key []byte) error {
 	}
 
 	// Use a lock file to prevent race conditions when multiple processes
-	// try to create the key simultaneously
+	// try to create the key simultaneously. The lock file is cleaned up on
+	// normal exit via defer. If a process crashes while holding the lock,
+	// the stale .lock file is harmless and can be safely deleted manually.
+	// The next process will create a new lock file.
 	lockPath := f.path + ".lock"
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
