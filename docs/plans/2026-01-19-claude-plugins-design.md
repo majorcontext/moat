@@ -6,7 +6,7 @@
 ## Overview
 
 Agents running Claude Code need plugins and MCP servers, but the current approach has friction:
-- Plugin cache at `~/.claude/plugins/cache/` breaks when mounting `~/.claude`
+- Plugin cache at `~/.claude/plugins/` breaks when mounting `~/.claude` into containers because `installed_plugins.json` contains absolute host paths (e.g., `/Users/alice/.claude/plugins/cache/plugin-name/1.0.0/`) that don't exist inside the container
 - Private marketplaces need Git credentials that shouldn't enter sandboxes
 - Plugin versions resolved at runtime are non-deterministic
 

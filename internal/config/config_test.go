@@ -588,3 +588,260 @@ command: ["npm", "start"]
 		t.Error("Interactive should default to false")
 	}
 }
+
+func TestLoadConfigWithClaudePlugins(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  plugins:
+    typescript-lsp@official: true
+    debug-tool@acme: false
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Claude.Plugins) != 2 {
+		t.Fatalf("Claude.Plugins = %d, want 2", len(cfg.Claude.Plugins))
+	}
+	if !cfg.Claude.Plugins["typescript-lsp@official"] {
+		t.Error("typescript-lsp@official should be enabled")
+	}
+	if cfg.Claude.Plugins["debug-tool@acme"] {
+		t.Error("debug-tool@acme should be disabled")
+	}
+}
+
+func TestLoadConfigWithClaudeMarketplaces(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  marketplaces:
+    acme:
+      source: github
+      repo: acme-corp/claude-plugins
+    internal:
+      source: git
+      url: git@github.com:org/internal-plugins.git
+      ref: main
+    local:
+      source: directory
+      path: /opt/plugins
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Claude.Marketplaces) != 3 {
+		t.Fatalf("Claude.Marketplaces = %d, want 3", len(cfg.Claude.Marketplaces))
+	}
+
+	acme := cfg.Claude.Marketplaces["acme"]
+	if acme.Source != "github" {
+		t.Errorf("acme.Source = %q, want %q", acme.Source, "github")
+	}
+	if acme.Repo != "acme-corp/claude-plugins" {
+		t.Errorf("acme.Repo = %q, want %q", acme.Repo, "acme-corp/claude-plugins")
+	}
+
+	internal := cfg.Claude.Marketplaces["internal"]
+	if internal.Source != "git" {
+		t.Errorf("internal.Source = %q, want %q", internal.Source, "git")
+	}
+	if internal.URL != "git@github.com:org/internal-plugins.git" {
+		t.Errorf("internal.URL = %q, want %q", internal.URL, "git@github.com:org/internal-plugins.git")
+	}
+	if internal.Ref != "main" {
+		t.Errorf("internal.Ref = %q, want %q", internal.Ref, "main")
+	}
+
+	local := cfg.Claude.Marketplaces["local"]
+	if local.Source != "directory" {
+		t.Errorf("local.Source = %q, want %q", local.Source, "directory")
+	}
+	if local.Path != "/opt/plugins" {
+		t.Errorf("local.Path = %q, want %q", local.Path, "/opt/plugins")
+	}
+}
+
+func TestLoadConfigMarketplaceValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		errContains string
+	}{
+		{
+			name: "missing source",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      repo: owner/repo
+`,
+			errContains: "'source' is required",
+		},
+		{
+			name: "invalid source",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      source: invalid
+`,
+			errContains: "invalid source",
+		},
+		{
+			name: "github missing repo",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      source: github
+`,
+			errContains: "'repo' is required",
+		},
+		{
+			name: "github invalid repo format",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      source: github
+      repo: just-name
+`,
+			errContains: "owner/repo format",
+		},
+		{
+			name: "git missing url",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      source: git
+`,
+			errContains: "'url' is required",
+		},
+		{
+			name: "directory missing path",
+			content: `
+agent: test
+claude:
+  marketplaces:
+    bad:
+      source: directory
+`,
+			errContains: "'path' is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "agent.yaml")
+			os.WriteFile(configPath, []byte(tt.content), 0644)
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("Load should error")
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error should contain %q, got: %v", tt.errContains, err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigWithClaudeMCP(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  mcp:
+    github:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      grant: github
+    filesystem:
+      command: npx
+      args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+      cwd: /workspace
+    custom:
+      command: python
+      args: ["-m", "my_server"]
+      env:
+        API_URL: https://api.example.com
+        TOKEN: "${secrets.MY_TOKEN}"
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Claude.MCP) != 3 {
+		t.Fatalf("Claude.MCP = %d, want 3", len(cfg.Claude.MCP))
+	}
+
+	github := cfg.Claude.MCP["github"]
+	if github.Command != "npx" {
+		t.Errorf("github.Command = %q, want %q", github.Command, "npx")
+	}
+	if len(github.Args) != 2 {
+		t.Errorf("github.Args = %d, want 2", len(github.Args))
+	}
+	if github.Grant != "github" {
+		t.Errorf("github.Grant = %q, want %q", github.Grant, "github")
+	}
+
+	filesystem := cfg.Claude.MCP["filesystem"]
+	if filesystem.Cwd != "/workspace" {
+		t.Errorf("filesystem.Cwd = %q, want %q", filesystem.Cwd, "/workspace")
+	}
+
+	custom := cfg.Claude.MCP["custom"]
+	if custom.Env["API_URL"] != "https://api.example.com" {
+		t.Errorf("custom.Env[API_URL] = %q, want %q", custom.Env["API_URL"], "https://api.example.com")
+	}
+	if custom.Env["TOKEN"] != "${secrets.MY_TOKEN}" {
+		t.Errorf("custom.Env[TOKEN] = %q, want %q", custom.Env["TOKEN"], "${secrets.MY_TOKEN}")
+	}
+}
+
+func TestLoadConfigMCPMissingCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  mcp:
+    bad:
+      args: ["--help"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when MCP command is missing")
+	}
+	if !strings.Contains(err.Error(), "'command' is required") {
+		t.Errorf("error should mention missing command: %v", err)
+	}
+}

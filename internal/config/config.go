@@ -42,6 +42,55 @@ type ClaudeConfig struct {
 	// inside the container appear on the host at the correct project location.
 	// Default: false, unless the "anthropic" grant is configured (then true).
 	SyncLogs *bool `yaml:"sync_logs,omitempty"`
+
+	// Plugins enables or disables specific plugins for this run.
+	// Keys are in format "plugin-name@marketplace", values are true/false.
+	Plugins map[string]bool `yaml:"plugins,omitempty"`
+
+	// Marketplaces defines additional plugin marketplaces for this run.
+	Marketplaces map[string]MarketplaceSpec `yaml:"marketplaces,omitempty"`
+
+	// MCP defines MCP (Model Context Protocol) server configurations.
+	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
+// MarketplaceSpec defines a plugin marketplace source.
+type MarketplaceSpec struct {
+	// Source is the type of marketplace: "github", "git", or "directory"
+	Source string `yaml:"source"`
+
+	// Repo is the GitHub repository in "owner/repo" format (for source: github)
+	Repo string `yaml:"repo,omitempty"`
+
+	// URL is the git URL (for source: git)
+	// Supports both HTTPS (https://github.com/org/repo.git) and
+	// SSH (git@github.com:org/repo.git) URLs
+	URL string `yaml:"url,omitempty"`
+
+	// Path is the local directory path (for source: directory)
+	Path string `yaml:"path,omitempty"`
+
+	// Ref is the git branch, tag, or commit to use (optional)
+	Ref string `yaml:"ref,omitempty"`
+}
+
+// MCPServerSpec defines an MCP server configuration.
+type MCPServerSpec struct {
+	// Command is the executable to run
+	Command string `yaml:"command"`
+
+	// Args are command-line arguments
+	Args []string `yaml:"args,omitempty"`
+
+	// Env are environment variables for the server
+	// Supports ${secrets.NAME} syntax for secret references
+	Env map[string]string `yaml:"env,omitempty"`
+
+	// Grant specifies a credential grant to inject (e.g., "github", "anthropic")
+	Grant string `yaml:"grant,omitempty"`
+
+	// Cwd is the working directory for the server
+	Cwd string `yaml:"cwd,omitempty"`
 }
 
 // ShouldSyncClaudeLogs returns true if Claude session logs should be synced.
@@ -120,7 +169,55 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("command[0] cannot be empty: the first element must be the executable")
 	}
 
+	// Validate Claude marketplace specs
+	for name, spec := range cfg.Claude.Marketplaces {
+		if err := validateMarketplaceSpec(name, spec); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate Claude MCP server specs
+	for name, spec := range cfg.Claude.MCP {
+		if err := validateMCPServerSpec(name, spec); err != nil {
+			return nil, err
+		}
+	}
+
 	return &cfg, nil
+}
+
+// validateMarketplaceSpec validates a marketplace specification.
+func validateMarketplaceSpec(name string, spec MarketplaceSpec) error {
+	switch spec.Source {
+	case "github":
+		if spec.Repo == "" {
+			return fmt.Errorf("claude.marketplaces.%s: 'repo' is required for github source (format: owner/repo)", name)
+		}
+		if !strings.Contains(spec.Repo, "/") {
+			return fmt.Errorf("claude.marketplaces.%s: 'repo' must be in owner/repo format, got %q", name, spec.Repo)
+		}
+	case "git":
+		if spec.URL == "" {
+			return fmt.Errorf("claude.marketplaces.%s: 'url' is required for git source", name)
+		}
+	case "directory":
+		if spec.Path == "" {
+			return fmt.Errorf("claude.marketplaces.%s: 'path' is required for directory source", name)
+		}
+	case "":
+		return fmt.Errorf("claude.marketplaces.%s: 'source' is required (must be 'github', 'git', or 'directory')", name)
+	default:
+		return fmt.Errorf("claude.marketplaces.%s: invalid source %q (must be 'github', 'git', or 'directory')", name, spec.Source)
+	}
+	return nil
+}
+
+// validateMCPServerSpec validates an MCP server specification.
+func validateMCPServerSpec(name string, spec MCPServerSpec) error {
+	if spec.Command == "" {
+		return fmt.Errorf("claude.mcp.%s: 'command' is required", name)
+	}
+	return nil
 }
 
 // DefaultConfig returns a default configuration.
