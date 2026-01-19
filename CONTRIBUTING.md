@@ -33,7 +33,7 @@ golangci-lint run
 ## Architecture
 
 ```
-cmd/moat/            CLI entry point (Cobra commands)
+cmd/moat/           CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
   config/            agent.yaml parsing, mount string parsing
