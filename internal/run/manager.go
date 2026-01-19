@@ -129,6 +129,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			State:       runState,
 			ContainerID: meta.ContainerID,
 			Store:       store,
+			Interactive: meta.Interactive,
 			CreatedAt:   meta.CreatedAt,
 			StartedAt:   meta.StartedAt,
 			StoppedAt:   meta.StoppedAt,
@@ -187,6 +188,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Ports:         ports,
 		State:         StateCreated,
 		KeepContainer: opts.KeepContainer,
+		Interactive:   opts.Interactive,
 		CreatedAt:     time.Now(),
 	}
 

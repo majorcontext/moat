@@ -16,14 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Timing constants for run behavior
-const (
-	// runDoublePressWindow is how quickly Ctrl+C must be pressed twice to stop
-	runDoublePressWindow = 500 * time.Millisecond
-	// runContainerExitCheckDelay is how long to wait for container exit detection
-	runContainerExitCheckDelay = 200 * time.Millisecond
-)
-
 var (
 	grants        []string
 	runEnv        []string
@@ -293,7 +285,7 @@ func runAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 		select {
 		case sig := <-sigCh:
 			now := time.Now()
-			if now.Sub(lastSigTime) < runDoublePressWindow {
+			if now.Sub(lastSigTime) < doublePressWindow {
 				// Double Ctrl+C - stop the run
 				fmt.Printf("\nStopping run %s...\n", r.ID)
 				waitCancel()
@@ -420,7 +412,7 @@ func runInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error
 				}
 				fmt.Printf("Run %s completed\n", r.ID)
 				return nil
-			case <-time.After(runContainerExitCheckDelay):
+			case <-time.After(containerExitCheckDelay):
 				// Container didn't exit quickly - check run state
 				currentRun, getErr := manager.Get(r.ID)
 				if getErr != nil || currentRun.State != run.StateRunning {

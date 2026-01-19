@@ -21,6 +21,7 @@ type Metadata struct {
 	Ports       map[string]int `json:"ports,omitempty"`
 	ContainerID string         `json:"container_id,omitempty"`
 	State       string         `json:"state,omitempty"`
+	Interactive bool           `json:"interactive,omitempty"`
 	CreatedAt   time.Time      `json:"created_at,omitempty"`
 	StartedAt   time.Time      `json:"started_at,omitempty"`
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`

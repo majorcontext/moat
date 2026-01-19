@@ -32,8 +32,11 @@ var attachCmd = &cobra.Command{
 	Short: "Attach to a running agent",
 	Long: `Attach local stdin, stdout, and stderr to a running agent.
 
-By default, only stdout/stderr are connected. Use -i to also connect stdin
-for interactive sessions.
+By default, attaches in the same mode the run was started with:
+  - If the run was started with -it, attach will use interactive mode
+  - Otherwise, only stdout/stderr are connected
+
+Use -i/-t to force interactive mode, or -i=false to force output-only mode.
 
 Non-interactive mode:
   Ctrl+C            Detach (run continues)
@@ -45,24 +48,26 @@ Interactive mode (-it):
   Ctrl+C            Sent to container process
 
 Examples:
-  # Attach to see output
+  # Attach to see output (or interactive if run was started with -it)
   moat attach run-abc123
 
-  # Attach interactively
-  moat attach -it run-abc123`,
+  # Force interactive mode
+  moat attach -it run-abc123
+
+  # Force output-only mode even if run was started interactively
+  moat attach -i=false run-abc123`,
 	Args: cobra.ExactArgs(1),
 	RunE: attachToRun,
 }
 
 func init() {
 	rootCmd.AddCommand(attachCmd)
-	attachCmd.Flags().BoolVarP(&attachInteractive, "interactive", "i", false, "keep stdin open for interactive input")
+	attachCmd.Flags().BoolVarP(&attachInteractive, "interactive", "i", false, "interactive mode with stdin (use -i=false to force output-only)")
 	attachCmd.Flags().BoolVarP(&attachTTY, "tty", "t", false, "allocate a pseudo-TTY")
 }
 
 func attachToRun(cmd *cobra.Command, args []string) error {
 	runID := args[0]
-	interactive := attachInteractive || attachTTY
 
 	// Create manager
 	manager, err := run.NewManager()
@@ -79,6 +84,14 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 
 	if r.State != run.StateRunning {
 		return fmt.Errorf("run %s is not running (state: %s)", runID, r.State)
+	}
+
+	// Determine interactive mode:
+	// - If -i or -t flag was explicitly set, use that value
+	// - Otherwise, use the run's original mode
+	interactive := r.Interactive // Default to run's mode
+	if cmd.Flags().Changed("interactive") || cmd.Flags().Changed("tty") {
+		interactive = attachInteractive || attachTTY
 	}
 
 	fmt.Printf("Attaching to run %s (%s)...\n", r.ID, r.Name)

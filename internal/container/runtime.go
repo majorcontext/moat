@@ -101,10 +101,10 @@ type Runtime interface {
 
 // AttachOptions configures container attachment.
 type AttachOptions struct {
-	Stdin  io.Reader  // If non-nil, forward input to container
-	Stdout io.Writer  // If non-nil, receive stdout from container
-	Stderr io.Writer  // If non-nil, receive stderr from container (may be same as Stdout)
-	TTY    bool       // If true, use TTY mode (raw terminal)
+	Stdin  io.Reader // If non-nil, forward input to container
+	Stdout io.Writer // If non-nil, receive stdout from container
+	Stderr io.Writer // If non-nil, receive stderr from container (may be same as Stdout)
+	TTY    bool      // If true, use TTY mode (raw terminal)
 }
 
 // Config holds configuration for creating a container.

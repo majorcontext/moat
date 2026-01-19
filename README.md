@@ -364,8 +364,9 @@ moat run -e DEBUG=true          # Set env variable
 moat run -- npm test            # Custom command (overrides agent.yaml)
 moat run -d ./my-project        # Run detached (in background)
 moat run -it -- bash            # Interactive shell
-moat attach run-abc123          # Attach to running container
-moat attach -it run-abc123      # Attach interactively
+moat attach run-abc123          # Attach (uses run's original mode)
+moat attach -it run-abc123      # Force interactive mode
+moat attach -i=false run-abc123 # Force output-only mode
 moat logs -n 50                 # Last N lines
 ```
 
@@ -384,7 +385,7 @@ moat run ./my-project
 # Start detached
 moat run -d ./my-project
 
-# Reattach to a running container
+# Reattach to a running container (uses the run's original mode)
 moat attach <run-id>
 ```
 
@@ -395,7 +396,6 @@ For shells and REPLs, use `-it` to connect stdin and allocate a TTY:
 ```bash
 moat run -it -- bash
 moat run -it -- python
-moat attach -it <run-id>
 ```
 
 Or configure it in `agent.yaml`:
@@ -407,6 +407,14 @@ interactive: true
 ```
 
 Then just `moat run` without flags—interactive mode is automatic.
+
+When reattaching, `moat attach` defaults to the run's original mode. Use flags to override:
+
+```bash
+moat attach <run-id>         # Uses run's original mode
+moat attach -it <run-id>     # Force interactive
+moat attach -i=false <run-id>  # Force output-only
+```
 
 **Interactive mode escape sequences** (press `Ctrl-/` then a key):
 - `Ctrl-/ d` → Detach (run continues in background)

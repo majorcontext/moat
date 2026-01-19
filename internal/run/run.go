@@ -39,6 +39,7 @@ type Run struct {
 	storeRef      *atomic.Value     // Atomic reference for concurrent logger access
 	AuditStore    *audit.Store      // Tamper-proof audit log
 	KeepContainer bool              // If true, don't auto-remove container after run
+	Interactive   bool              // If true, run was started in interactive mode
 	CreatedAt     time.Time
 	StartedAt     time.Time
 	StoppedAt     time.Time
@@ -87,6 +88,7 @@ func (r *Run) SaveMetadata() error {
 		Ports:       r.Ports,
 		ContainerID: r.ContainerID,
 		State:       string(r.State),
+		Interactive: r.Interactive,
 		CreatedAt:   r.CreatedAt,
 		StartedAt:   r.StartedAt,
 		StoppedAt:   r.StoppedAt,
