@@ -763,9 +763,25 @@ func TestAppleContainerWithProxy(t *testing.T) {
 // Keychain Integration Tests
 // =============================================================================
 
+// cleanupKeychainKey deletes the test encryption key if MOAT_TEST_CLEANUP is set.
+// This prevents test artifacts from accumulating in CI environments.
+func cleanupKeychainKey(t *testing.T) {
+	t.Helper()
+	if os.Getenv("MOAT_TEST_CLEANUP") != "" {
+		if err := keyring.DeleteKey(); err != nil {
+			t.Logf("Note: cleanup failed (may be expected): %v", err)
+		} else {
+			t.Log("Cleaned up test encryption key")
+		}
+	}
+}
+
 // TestKeychainKeyPersistence verifies that the encryption key is stored securely
 // and persists across calls. This tests the keyring package integration.
 func TestKeychainKeyPersistence(t *testing.T) {
+	// Register cleanup for CI environments
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
 	// Get or create the encryption key
 	key1, err := keyring.GetOrCreateKey()
 	if err != nil {

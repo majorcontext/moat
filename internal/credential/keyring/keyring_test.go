@@ -49,7 +49,9 @@ func (m *mockBackend) Name() string {
 
 func TestGetOrCreateKeyExisting(t *testing.T) {
 	existingKey := make([]byte, 32)
-	rand.Read(existingKey)
+	if _, err := rand.Read(existingKey); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
 
 	primary := &mockBackend{key: existingKey}
 	fallback := &mockBackend{}
@@ -72,7 +74,9 @@ func TestGetOrCreateKeyExisting(t *testing.T) {
 
 func TestGetOrCreateKeyFallbackExisting(t *testing.T) {
 	existingKey := make([]byte, 32)
-	rand.Read(existingKey)
+	if _, err := rand.Read(existingKey); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
 
 	primary := &mockBackend{getErr: fmt.Errorf("keychain unavailable")}
 	fallback := &mockBackend{key: existingKey}
@@ -238,5 +242,43 @@ func TestFileBackendNotFound(t *testing.T) {
 	_, err := backend.Get()
 	if err == nil {
 		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestDefaultKeyFilePath(t *testing.T) {
+	path := DefaultKeyFilePath()
+
+	// Path should not be empty
+	if path == "" {
+		t.Error("DefaultKeyFilePath returned empty string")
+	}
+
+	// Path should end with the expected filename
+	if filepath.Base(path) != "encryption.key" {
+		t.Errorf("path should end with encryption.key, got %s", filepath.Base(path))
+	}
+
+	// Path should contain .moat directory
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) != ".moat" {
+		t.Errorf("path should be in .moat directory, got %s", dir)
+	}
+}
+
+func TestDeleteKey(t *testing.T) {
+	// Create a key first
+	_, err := GetOrCreateKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateKey: %v", err)
+	}
+
+	// Delete should succeed (deletes from wherever it was stored)
+	if err := DeleteKey(); err != nil {
+		t.Errorf("DeleteKey: %v", err)
+	}
+
+	// Calling delete again should also succeed (idempotent)
+	if err := DeleteKey(); err != nil {
+		t.Errorf("DeleteKey (second call): %v", err)
 	}
 }

@@ -150,14 +150,16 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	}
 
 	// 4. Try to store in primary
-	if err := primary.Set(key); err == nil {
+	primaryErr := primary.Set(key)
+	if primaryErr == nil {
 		return key, nil
 	}
 
 	// 5. Fall back to file storage
 	slog.Info("system keychain unavailable, using file-based key storage")
-	if err := fallback.Set(key); err != nil {
-		return nil, fmt.Errorf("storing encryption key: %w", err)
+	if fallbackErr := fallback.Set(key); fallbackErr != nil {
+		return nil, fmt.Errorf("storing encryption key: primary (%s) failed: %v; fallback (%s) failed: %w",
+			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
 	}
 
 	return key, nil
@@ -168,4 +170,22 @@ func GetOrCreateKey() ([]byte, error) {
 	primary := &keychainBackend{}
 	fallback := &fileBackend{path: DefaultKeyFilePath()}
 	return getOrCreateKeyWithBackends(primary, fallback)
+}
+
+// DeleteKey removes the encryption key from all storage backends.
+// This is useful for testing cleanup and reset scenarios.
+func DeleteKey() error {
+	primary := &keychainBackend{}
+	fallback := &fileBackend{path: DefaultKeyFilePath()}
+
+	// Try to delete from both backends, collecting any errors
+	var primaryErr, fallbackErr error
+	primaryErr = primary.Delete()
+	fallbackErr = fallback.Delete()
+
+	// Return error only if both failed (one succeeding is fine)
+	if primaryErr != nil && fallbackErr != nil {
+		return fmt.Errorf("deleting key: keychain: %v; file: %w", primaryErr, fallbackErr)
+	}
+	return nil
 }
