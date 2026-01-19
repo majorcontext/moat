@@ -391,7 +391,10 @@ func TestFileBackendTrimsWhitespace(t *testing.T) {
 }
 
 func TestDefaultKeyFilePath(t *testing.T) {
-	path := DefaultKeyFilePath()
+	path, err := DefaultKeyFilePath()
+	if err != nil {
+		t.Fatalf("DefaultKeyFilePath failed: %v", err)
+	}
 
 	// Path should not be empty
 	if path == "" {

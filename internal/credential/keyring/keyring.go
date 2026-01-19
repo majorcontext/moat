@@ -10,12 +10,16 @@
 // If the keychain is unavailable (e.g., in CI, headless servers, or containers),
 // it silently falls back to file-based storage with restricted permissions (0600).
 //
-// Concurrency: File-based storage uses file locking (flock on Unix) to prevent
-// race conditions during concurrent key creation. On Windows, the file backend
-// does not use locking since Windows Credential Manager is the primary backend
-// and file fallback is mainly used in headless/CI environments where concurrent
-// first-run scenarios are rare. If concurrent access to file storage is needed
-// on Windows, external synchronization should be used.
+// Concurrency: All key creation operations are protected by a global file lock
+// (~/.moat/key.lock) to prevent race conditions when multiple processes attempt
+// to create a key simultaneously. Both keychain and file backends check for
+// existing keys before writing to avoid overwriting keys created by other processes.
+// On Windows, file locking is a no-op, but Windows Credential Manager is the primary
+// backend and concurrent first-run scenarios in file fallback are rare.
+//
+// Security: The file backend will refuse to read keys from files with overly
+// permissive permissions (anything other than 0600). If permissions have been
+// changed, the key may have been compromised and should be rotated.
 package keyring
 
 import (
@@ -77,6 +81,13 @@ func (k *keychainBackend) Get() ([]byte, error) {
 }
 
 func (k *keychainBackend) Set(key []byte) error {
+	// Check if key already exists - don't overwrite to prevent race conditions.
+	// If another process created a key between our Get() and Set() calls,
+	// we should use that key instead of overwriting it.
+	if _, err := keyring.Get(ServiceName, AccountName); err == nil {
+		return nil // Key already exists, don't overwrite
+	}
+
 	encoded := encodeKey(key)
 	if err := keyring.Set(ServiceName, AccountName, encoded); err != nil {
 		return fmt.Errorf("keychain set: %w", err)
@@ -100,17 +111,23 @@ type fileBackend struct {
 	path string
 }
 
+// ErrInsecurePermissions is returned when the key file has overly permissive permissions.
+var ErrInsecurePermissions = errors.New("key file has insecure permissions")
+
 func (f *fileBackend) Get() ([]byte, error) {
-	// Check file permissions before reading - warn if too permissive
+	// Check file permissions before reading - fail if too permissive.
+	// If permissions were changed, the key may have been compromised.
 	info, err := os.Stat(f.path)
 	if err != nil {
 		return nil, fmt.Errorf("reading key file: %w", err)
 	}
 	perm := info.Mode().Perm()
 	if perm&0077 != 0 {
-		slog.Warn("key file has permissive permissions, should be 0600",
-			"path", f.path,
-			"permissions", fmt.Sprintf("%04o", perm))
+		return nil, fmt.Errorf("%w: %s has permissions %04o (expected 0600).\n"+
+			"  The key may have been exposed. To fix:\n"+
+			"  1. chmod 600 %s\n"+
+			"  2. Consider re-granting credentials: moat grant <provider>",
+			ErrInsecurePermissions, f.path, perm, f.path)
 	}
 
 	data, err := os.ReadFile(f.path)
@@ -171,25 +188,26 @@ func (f *fileBackend) Name() string {
 	return "file (" + f.path + ")"
 }
 
+// ErrNoHomeDirectory is returned when the home directory cannot be determined.
+var ErrNoHomeDirectory = errors.New("could not determine home directory for secure key storage")
+
 // DefaultKeyFilePath returns the default path for the fallback key file.
 // The path is always absolute to ensure consistent key storage across
 // different working directories.
-func DefaultKeyFilePath() string {
+// Returns an error if the home directory cannot be determined, as using
+// temp directories is insecure (may be world-readable or cleared on reboot).
+func DefaultKeyFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// UserHomeDir failed - this is rare but can happen in unusual environments.
-		// Try common fallback locations to ensure an absolute path.
-		// Check $HOME directly (Unix) or use temp directory as last resort.
+		// UserHomeDir failed - try $HOME directly (Unix).
 		if envHome := os.Getenv("HOME"); envHome != "" {
-			return filepath.Join(envHome, ".moat", "encryption.key")
+			return filepath.Join(envHome, ".moat", "encryption.key"), nil
 		}
-		// Last resort: use temp directory with a consistent subdirectory.
-		// This is better than current directory because it's absolute.
-		slog.Warn("could not determine home directory, using temp directory for key storage",
-			"error", err)
-		return filepath.Join(os.TempDir(), ".moat", "encryption.key")
+		// Cannot determine home directory - fail rather than use insecure temp directory.
+		// Temp directories may be world-readable, shared between users, or cleared on reboot.
+		return "", fmt.Errorf("%w: set $HOME environment variable or ensure user home is configured", ErrNoHomeDirectory)
 	}
-	return filepath.Join(home, ".moat", "encryption.key")
+	return filepath.Join(home, ".moat", "encryption.key"), nil
 }
 
 // generateKey creates a new random encryption key.
@@ -199,6 +217,47 @@ func generateKey() ([]byte, error) {
 		return nil, fmt.Errorf("generating random key: %w", err)
 	}
 	return key, nil
+}
+
+// globalLockPath returns the path for the global key operation lock file.
+// This lock is used to serialize all key creation operations across both
+// keychain and file backends, preventing race conditions.
+func globalLockPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if envHome := os.Getenv("HOME"); envHome != "" {
+			home = envHome
+		} else {
+			home = os.TempDir()
+		}
+	}
+	return filepath.Join(home, ".moat", "key.lock")
+}
+
+// withGlobalKeyLock executes fn while holding the global key lock.
+// This ensures that only one process at a time can create or modify the encryption key,
+// preventing race conditions between keychain and file backend operations.
+func withGlobalKeyLock(fn func() ([]byte, error)) ([]byte, error) {
+	lockPath := globalLockPath()
+
+	// Ensure lock directory exists
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", err)
+	}
+
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("creating global key lock file: %w", err)
+	}
+	defer lf.Close()
+
+	unlock, err := lockFile(lf)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring global key lock: %w", err)
+	}
+	defer unlock()
+
+	return fn()
 }
 
 // getOrCreateKeyWithBackends retrieves or creates an encryption key using the provided backends.
@@ -233,7 +292,7 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 
 	// 5. Fall back to file storage
 	slog.Info("system keychain unavailable, using file-based key storage",
-		"fallback_path", DefaultKeyFilePath())
+		"fallback", fallback.Name())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
 		return nil, fmt.Errorf("storing encryption key failed.\n"+
 			"  Keychain (%s): %v\n"+
@@ -253,17 +312,32 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 }
 
 // GetOrCreateKey retrieves the encryption key from keychain or file, generating a new one if needed.
+// The entire operation is protected by a global file lock to prevent race conditions
+// when multiple processes attempt to create a key simultaneously.
 func GetOrCreateKey() ([]byte, error) {
-	primary := &keychainBackend{}
-	fallback := &fileBackend{path: DefaultKeyFilePath()}
-	return getOrCreateKeyWithBackends(primary, fallback)
+	return withGlobalKeyLock(func() ([]byte, error) {
+		keyFilePath, err := DefaultKeyFilePath()
+		if err != nil {
+			return nil, err
+		}
+		primary := &keychainBackend{}
+		fallback := &fileBackend{path: keyFilePath}
+		return getOrCreateKeyWithBackends(primary, fallback)
+	})
 }
 
 // DeleteKey removes the encryption key from all storage backends.
 // This is useful for testing cleanup and reset scenarios.
 func DeleteKey() error {
+	keyFilePath, err := DefaultKeyFilePath()
+	if err != nil {
+		// If we can't determine the key file path, we can still try to delete from keychain.
+		// Log the error but continue with keychain-only deletion.
+		slog.Debug("could not determine key file path for deletion", "error", err)
+		keyFilePath = "" // Will cause file backend to fail gracefully
+	}
 	primary := &keychainBackend{}
-	fallback := &fileBackend{path: DefaultKeyFilePath()}
+	fallback := &fileBackend{path: keyFilePath}
 
 	// Try to delete from both backends, collecting any errors
 	var primaryErr, fallbackErr error
