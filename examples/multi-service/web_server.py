@@ -21,5 +21,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Web server running on port {PORT}")
-    print(f"AGENTOPS_URL_WEB={os.environ.get('AGENTOPS_URL_WEB', 'not set')}")
+    print(f"MOAT_URL_WEB={os.environ.get('MOAT_URL_WEB', 'not set')}")
     server.serve_forever()
