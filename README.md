@@ -132,6 +132,9 @@ mounts:
 ports:
   web: 3000
   api: 8080
+
+# Default command to run (can be overridden with -- on CLI)
+command: ["npm", "start"]
 ```
 
 Then just run:
@@ -310,9 +313,11 @@ moat verify-bundle proof.json
 moat run --name myapp           # Set agent name
 moat run --grant github         # Inject credentials
 moat run -e DEBUG=true          # Set env variable
-moat run -- npm test            # Custom command
+moat run -- npm test            # Custom command (overrides agent.yaml)
 moat logs -n 50                 # Last N lines
 ```
+
+**Command precedence:** CLI command (`-- cmd`) > `command` in agent.yaml
 
 ## How It Works
 

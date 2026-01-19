@@ -6,7 +6,7 @@
 #   - http://api.demo.localhost:8080 -> container port 8080
 #
 # Run with:
-#   agent run example examples/multi-service -- bash /workspace/start.sh
+#   moat run examples/multi-service
 
 name: demo
 
@@ -16,3 +16,5 @@ dependencies:
 ports:
   web: 3000
   api: 8080
+
+command: ["bash", "/workspace/start.sh"]

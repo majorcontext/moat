@@ -123,6 +123,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if len(grants) == 0 && len(cfg.Grants) > 0 {
 			grants = cfg.Grants
 		}
+		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
+			containerCmd = cfg.Command
+		}
 	}
 
 	log.Debug("preparing run",

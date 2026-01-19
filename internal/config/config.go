@@ -22,6 +22,7 @@ type Config struct {
 	Mounts       []string          `yaml:"mounts,omitempty"`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
+	Command      []string          `yaml:"command,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
