@@ -3,8 +3,35 @@
 package trace
 
 import (
+	"encoding/binary"
 	"fmt"
 	"sync"
+	"syscall"
+)
+
+// Netlink connector constants for process events
+const (
+	// Connector multicast group for process events
+	_CN_IDX_PROC = 0x1
+	_CN_VAL_PROC = 0x1
+
+	// Process event types from linux/cn_proc.h
+	_PROC_EVENT_FORK = 0x00000001
+	_PROC_EVENT_EXEC = 0x00000002
+	_PROC_EVENT_EXIT = 0x80000000
+
+	// Connector subscription operations
+	_PROC_CN_MCAST_LISTEN = 1
+	_PROC_CN_MCAST_IGNORE = 2
+
+	// NETLINK_CONNECTOR protocol number
+	_NETLINK_CONNECTOR = 11
+)
+
+// Blank identifiers to satisfy compiler until imports are used
+var (
+	_ = binary.LittleEndian
+	_ = syscall.AF_NETLINK
 )
 
 // ProcConnectorTracer implements process tracing using Linux proc connector.
