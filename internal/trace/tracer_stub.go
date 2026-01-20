@@ -1,11 +1,16 @@
 package trace
 
-import "log/slog"
+import (
+	"log/slog"
+	"sync"
+)
 
 // StubTracer is a no-op tracer for platforms without native tracing support.
 type StubTracer struct {
 	events    chan ExecEvent
 	callbacks []func(ExecEvent)
+	mu        sync.Mutex
+	stopped   bool
 }
 
 // NewStubTracer creates a stub tracer that does nothing.
@@ -21,6 +26,13 @@ func (t *StubTracer) Start() error {
 }
 
 func (t *StubTracer) Stop() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.stopped {
+		return nil
+	}
+	t.stopped = true
 	close(t.events)
 	return nil
 }
@@ -30,17 +42,27 @@ func (t *StubTracer) Events() <-chan ExecEvent {
 }
 
 func (t *StubTracer) OnExec(cb func(ExecEvent)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.callbacks = append(t.callbacks, cb)
 }
 
 // Emit allows manual event injection for testing.
 func (t *StubTracer) Emit(event ExecEvent) {
-	for _, cb := range t.callbacks {
-		cb(event)
-	}
+	// Send to channel first (non-blocking)
 	select {
 	case t.events <- event:
 	default:
+	}
+
+	// Copy callbacks under lock, then invoke
+	t.mu.Lock()
+	cbs := make([]func(ExecEvent), len(t.callbacks))
+	copy(cbs, t.callbacks)
+	t.mu.Unlock()
+
+	for _, cb := range cbs {
+		cb(event)
 	}
 }
 
