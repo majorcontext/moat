@@ -336,4 +336,3 @@ func ConvertToDirectorySource(name string, entry MarketplaceEntry, mountPath str
 		},
 	}
 }
-

@@ -93,10 +93,10 @@ func TestFilterSSHGrants(t *testing.T) {
 
 func TestHasSSHGrant(t *testing.T) {
 	tests := []struct {
-		name     string
-		hosts    []string
-		host     string
-		want     bool
+		name  string
+		hosts []string
+		host  string
+		want  bool
 	}{
 		{
 			name:  "exact match",

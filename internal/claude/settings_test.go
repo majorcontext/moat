@@ -341,11 +341,11 @@ func TestHasPluginsOrMarketplaces(t *testing.T) {
 func TestGetMarketplaceNames(t *testing.T) {
 	settings := &Settings{
 		EnabledPlugins: map[string]bool{
-			"plugin-a@market-1":  true,
-			"plugin-b@market-1":  true,
-			"plugin-c@market-2":  true,
-			"plugin-d@market-3":  false,
-			"plugin-no-market":   true, // No @ separator
+			"plugin-a@market-1": true,
+			"plugin-b@market-1": true,
+			"plugin-c@market-2": true,
+			"plugin-d@market-3": false,
+			"plugin-no-market":  true, // No @ separator
 		},
 		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
 			"market-1":     {},

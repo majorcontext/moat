@@ -14,11 +14,11 @@ import (
 type SettingSource string
 
 const (
-	SourceClaudeUser   SettingSource = "~/.claude/settings.json"
-	SourceMoatUser     SettingSource = "~/.moat/claude/settings.json"
-	SourceProject      SettingSource = ".claude/settings.json"
-	SourceAgentYAML    SettingSource = "agent.yaml"
-	SourceUnknown      SettingSource = "unknown"
+	SourceClaudeUser SettingSource = "~/.claude/settings.json"
+	SourceMoatUser   SettingSource = "~/.moat/claude/settings.json"
+	SourceProject    SettingSource = ".claude/settings.json"
+	SourceAgentYAML  SettingSource = "agent.yaml"
+	SourceUnknown    SettingSource = "unknown"
 )
 
 // Settings represents Claude's native settings.json format.
@@ -268,4 +268,3 @@ func (s *Settings) GetMarketplaceNames() []string {
 	}
 	return result
 }
-
