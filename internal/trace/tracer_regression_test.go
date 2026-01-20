@@ -174,9 +174,7 @@ done:
 func TestStubTracerStopBeforeStart(t *testing.T) {
 	tracer := NewStubTracer(Config{})
 
-	// Stop before Start should not panic
-	// Note: current implementation will panic because events channel isn't protected
-	// This test documents the expected behavior after fix
+	// Stop before Start should not panic - it returns early when !started
 	err := tracer.Stop()
 	if err != nil {
 		t.Errorf("Stop() before Start() returned error: %v", err)

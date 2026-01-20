@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -10,6 +11,7 @@ type StubTracer struct {
 	events    chan ExecEvent
 	callbacks []func(ExecEvent)
 	mu        sync.Mutex
+	started   bool
 	stopped   bool
 }
 
@@ -21,6 +23,14 @@ func NewStubTracer(cfg Config) *StubTracer {
 }
 
 func (t *StubTracer) Start() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.started {
+		return fmt.Errorf("tracer already started")
+	}
+
+	t.started = true
 	slog.Debug("stub tracer started (no-op)")
 	return nil
 }
@@ -29,7 +39,7 @@ func (t *StubTracer) Stop() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.stopped {
+	if !t.started || t.stopped {
 		return nil
 	}
 	t.stopped = true

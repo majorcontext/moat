@@ -51,10 +51,16 @@ type ProcConnectorTracer struct {
 	// Tracked PIDs (container processes and their children)
 	trackedPIDs map[int]bool
 	pidMu       sync.RWMutex
+	lastCleanup time.Time
 
 	// Metrics for observability
 	droppedEvents int64
 }
+
+const (
+	// cleanupInterval is how often to check for stale PIDs
+	cleanupInterval = 60 * time.Second
+)
 
 // NewProcConnectorTracer creates a new proc connector tracer.
 func NewProcConnectorTracer(cfg Config) (*ProcConnectorTracer, error) {
@@ -196,6 +202,11 @@ func (t *ProcConnectorTracer) readLoop() {
 		default:
 		}
 
+		// Periodically cleanup stale PIDs (in case EXIT events were missed)
+		if time.Since(t.lastCleanup) > cleanupInterval {
+			t.cleanupStalePIDs()
+		}
+
 		// Set read timeout to periodically check done channel
 		tv := syscall.Timeval{Sec: 1, Usec: 0}
 		if err := syscall.SetsockoptTimeval(t.sock, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv); err != nil {
@@ -293,6 +304,21 @@ func (t *ProcConnectorTracer) shouldTrack(pid int) bool {
 	tracked := t.trackedPIDs[pid]
 	t.pidMu.RUnlock()
 	return tracked
+}
+
+// cleanupStalePIDs removes PIDs from trackedPIDs that no longer exist in /proc.
+// This handles cases where EXIT events are missed (e.g., buffer overflow).
+func (t *ProcConnectorTracer) cleanupStalePIDs() {
+	t.pidMu.Lock()
+	defer t.pidMu.Unlock()
+
+	for pid := range t.trackedPIDs {
+		procPath := fmt.Sprintf("/proc/%d", pid)
+		if _, err := os.Stat(procPath); os.IsNotExist(err) {
+			delete(t.trackedPIDs, pid)
+		}
+	}
+	t.lastCleanup = time.Now()
 }
 
 func (t *ProcConnectorTracer) buildExecEvent(pid int) *ExecEvent {
