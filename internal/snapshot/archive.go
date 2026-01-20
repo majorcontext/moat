@@ -169,9 +169,9 @@ func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
 	// Clean the workspace (except .git backup)
 	entries, err := os.ReadDir(workspacePath)
 	if err != nil {
-		// Restore .git on error
+		// Restore .git on error (best effort)
 		if gitBackup != "" {
-			os.Rename(gitBackup, gitDir)
+			_ = os.Rename(gitBackup, gitDir)
 		}
 		return fmt.Errorf("read workspace directory: %w", err)
 	}
@@ -183,9 +183,9 @@ func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
 		}
 		path := filepath.Join(workspacePath, name)
 		if err := os.RemoveAll(path); err != nil {
-			// Restore .git on error
+			// Restore .git on error (best effort)
 			if gitBackup != "" {
-				os.Rename(gitBackup, gitDir)
+				_ = os.Rename(gitBackup, gitDir)
 			}
 			return fmt.Errorf("remove %s: %w", name, err)
 		}
@@ -193,9 +193,9 @@ func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
 
 	// Extract the archive
 	if err := b.RestoreTo(nativeRef, workspacePath); err != nil {
-		// Restore .git on error
+		// Restore .git on error (best effort)
 		if gitBackup != "" {
-			os.Rename(gitBackup, gitDir)
+			_ = os.Rename(gitBackup, gitDir)
 		}
 		return fmt.Errorf("extract archive: %w", err)
 	}
@@ -235,7 +235,8 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 			return fmt.Errorf("read tar header: %w", err)
 		}
 
-		targetPath := filepath.Join(destPath, header.Name)
+		// targetPath is validated below before any filesystem operations
+		targetPath := filepath.Join(destPath, header.Name) //nolint:gosec // G305: validated below
 
 		// Ensure the target path is within destPath (prevent path traversal)
 		// Use filepath.Rel to check - if it starts with ".." it escapes destPath
@@ -246,7 +247,8 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
+			//nolint:gosec // G115: Mode is masked to permission bits which fit in uint32
+			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode&0777)); err != nil {
 				return fmt.Errorf("create directory %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
@@ -255,12 +257,14 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 				return fmt.Errorf("create parent directory for %s: %w", header.Name, err)
 			}
 
-			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			//nolint:gosec // G115: Mode is masked to permission bits which fit in uint32
+			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode&0777))
 			if err != nil {
 				return fmt.Errorf("create file %s: %w", header.Name, err)
 			}
 
-			if _, err := io.Copy(f, tr); err != nil {
+			// Limit copy size to prevent decompression bombs (1GB max per file)
+			if _, err := io.Copy(f, io.LimitReader(tr, 1<<30)); err != nil {
 				f.Close()
 				return fmt.Errorf("write file %s: %w", header.Name, err)
 			}
@@ -280,7 +284,7 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 			// Resolve the symlink target relative to its location within destPath
 			// This handles cases like "../sibling" which is valid within the archive
 			symlinkDir := filepath.Dir(targetPath)
-			resolvedTarget := filepath.Join(symlinkDir, header.Linkname)
+			resolvedTarget := filepath.Join(symlinkDir, header.Linkname) //nolint:gosec // G305: validated below
 			resolvedTarget = filepath.Clean(resolvedTarget)
 
 			// Verify the resolved target stays within destPath
@@ -338,7 +342,7 @@ func (b *ArchiveBackend) List(_ string) ([]string, error) {
 
 // buildMatcher creates a gitignore matcher from .gitignore files and additional patterns.
 func (b *ArchiveBackend) buildMatcher(workspacePath string) (gitignore.Matcher, error) {
-	var patterns []gitignore.Pattern
+	patterns := make([]gitignore.Pattern, 0, len(b.opts.Additional)+16)
 
 	// Add patterns from .gitignore files if enabled
 	if b.opts.UseGitignore {

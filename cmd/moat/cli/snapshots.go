@@ -79,7 +79,7 @@ func listSnapshots(cmd *cobra.Command, args []string) error {
 	snapshotDir := filepath.Join(runDir, "snapshots")
 
 	// Check if snapshot directory exists
-	if _, err := os.Stat(snapshotDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(snapshotDir); os.IsNotExist(statErr) {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode([]snapshot.Metadata{})
 		}
@@ -152,7 +152,7 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 	snapshotDir := filepath.Join(runDir, "snapshots")
 
 	// Check if snapshot directory exists
-	if _, err := os.Stat(snapshotDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(snapshotDir); os.IsNotExist(statErr) {
 		fmt.Println("No snapshots found for this run")
 		return nil
 	}

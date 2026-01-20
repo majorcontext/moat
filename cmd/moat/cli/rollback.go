@@ -64,7 +64,7 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	snapshotDir := filepath.Join(runDir, "snapshots")
 
 	// Check if snapshot directory exists
-	if _, err := os.Stat(snapshotDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(snapshotDir); os.IsNotExist(statErr) {
 		return fmt.Errorf("no snapshots found for this run")
 	}
 
@@ -84,7 +84,8 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// Get the most recent snapshot
-		snapshots, err := engine.List()
+		var snapshots []snapshot.Metadata
+		snapshots, err = engine.List()
 		if err != nil {
 			return fmt.Errorf("listing snapshots: %w", err)
 		}
@@ -98,9 +99,9 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	// Restore to a different directory
 	if rollbackTo != "" {
 		fmt.Printf("Extracting snapshot to %s... ", rollbackTo)
-		if err := engine.RestoreTo(snapshotID, rollbackTo); err != nil {
+		if restoreErr := engine.RestoreTo(snapshotID, rollbackTo); restoreErr != nil {
 			fmt.Println("error")
-			return fmt.Errorf("extracting snapshot: %w", err)
+			return fmt.Errorf("extracting snapshot: %w", restoreErr)
 		}
 		fmt.Println("done")
 		return nil

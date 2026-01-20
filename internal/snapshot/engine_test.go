@@ -202,13 +202,11 @@ func TestEngineList(t *testing.T) {
 	// Create multiple snapshots with small delays to ensure different timestamps
 	types := []Type{TypePreRun, TypeGit, TypeBuild}
 	labels := []string{"first", "second", "third"}
-	var metas []Metadata
 	for i := 0; i < 3; i++ {
-		meta, err := engine.Create(types[i], labels[i])
+		_, err := engine.Create(types[i], labels[i])
 		if err != nil {
 			t.Fatalf("Create() error: %v", err)
 		}
-		metas = append(metas, meta)
 		// Small sleep to ensure different timestamps
 		time.Sleep(10 * time.Millisecond)
 	}

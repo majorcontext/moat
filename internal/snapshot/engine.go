@@ -193,7 +193,7 @@ func (e *Engine) List() ([]Metadata, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var list []Metadata
+	list := make([]Metadata, 0, len(e.snapshots))
 	for _, meta := range e.snapshots {
 		list = append(list, meta)
 	}
@@ -242,7 +242,7 @@ func (e *Engine) loadMetadata() error {
 
 // saveMetadata saves snapshot metadata to the metadata file.
 func (e *Engine) saveMetadata() error {
-	var list []Metadata
+	list := make([]Metadata, 0, len(e.snapshots))
 	for _, meta := range e.snapshots {
 		list = append(list, meta)
 	}

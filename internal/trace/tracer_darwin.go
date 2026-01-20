@@ -275,11 +275,11 @@ func (t *DarwinTracer) parseKinfoProc(buf []byte) processInfo {
 		return info
 	}
 
-	// Extract PID (p_pid)
-	info.pid = int(int32(binary.LittleEndian.Uint32(buf[pidOffset:])))
+	// Extract PID (p_pid) - PIDs are always positive and fit in int32
+	info.pid = int(int32(binary.LittleEndian.Uint32(buf[pidOffset:]))) //nolint:gosec // G115: PID fits in int32
 
 	// Extract PPID (p_ppid)
-	info.ppid = int(int32(binary.LittleEndian.Uint32(buf[ppidOffset:])))
+	info.ppid = int(int32(binary.LittleEndian.Uint32(buf[ppidOffset:]))) //nolint:gosec // G115: PID fits in int32
 
 	// Extract command name (p_comm) - null-terminated string
 	commEnd := commOffset
@@ -294,7 +294,7 @@ func (t *DarwinTracer) parseKinfoProc(buf []byte) processInfo {
 	// Extract start time (p_starttime.tv_sec) - timeval struct
 	// On Darwin, timeval has tv_sec (int64 on 64-bit) at offset 0
 	if startOffset+8 <= len(buf) {
-		info.startTime = int64(binary.LittleEndian.Uint64(buf[startOffset:]))
+		info.startTime = int64(binary.LittleEndian.Uint64(buf[startOffset:])) //nolint:gosec // G115: timestamp fits in int64
 	}
 
 	return info
@@ -343,7 +343,7 @@ func (t *DarwinTracer) buildExecEvent(info processInfo) ExecEvent {
 
 // getProcessArgs retrieves command line arguments using raw sysctl.
 func (t *DarwinTracer) getProcessArgs(pid int) []string {
-	mib := []int32{ctlKern, kernProcArgs2, int32(pid)}
+	mib := []int32{ctlKern, kernProcArgs2, int32(pid)} //nolint:gosec // G115: PID fits in int32
 
 	// Get required buffer size
 	var size uintptr
