@@ -271,6 +271,24 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 				return fmt.Errorf("create parent directory for symlink %s: %w", header.Name, err)
 			}
 
+			// Validate symlink target doesn't escape destPath (path traversal prevention)
+			// Reject absolute symlink targets - they could point anywhere on the filesystem
+			if filepath.IsAbs(header.Linkname) {
+				return fmt.Errorf("invalid symlink in archive: absolute path not allowed: %s -> %s", header.Name, header.Linkname)
+			}
+
+			// Resolve the symlink target relative to its location within destPath
+			// This handles cases like "../sibling" which is valid within the archive
+			symlinkDir := filepath.Dir(targetPath)
+			resolvedTarget := filepath.Join(symlinkDir, header.Linkname)
+			resolvedTarget = filepath.Clean(resolvedTarget)
+
+			// Verify the resolved target stays within destPath
+			relToDestPath, err := filepath.Rel(destPath, resolvedTarget)
+			if err != nil || strings.HasPrefix(relToDestPath, "..") {
+				return fmt.Errorf("invalid symlink in archive: target escapes destination: %s -> %s", header.Name, header.Linkname)
+			}
+
 			// Remove existing file/symlink if present
 			os.Remove(targetPath)
 

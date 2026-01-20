@@ -1,6 +1,8 @@
 package snapshot
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,6 +407,134 @@ func TestArchiveBackendSymlinks(t *testing.T) {
 	}
 	if string(content) != "target content\n" {
 		t.Errorf("symlink content = %q, want %q", string(content), "target content\n")
+	}
+}
+
+func TestArchiveBackendSymlinkPathTraversal(t *testing.T) {
+	// This test verifies that symlinks with path traversal attacks are rejected
+	snapshotDir := t.TempDir()
+	restoreDir := t.TempDir()
+
+	testCases := []struct {
+		name        string
+		linkName    string
+		linkTarget  string
+		shouldError bool
+	}{
+		{
+			name:        "absolute symlink",
+			linkName:    "bad-link.txt",
+			linkTarget:  "/etc/passwd",
+			shouldError: true,
+		},
+		{
+			name:        "relative path traversal",
+			linkName:    "bad-link.txt",
+			linkTarget:  "../../../etc/passwd",
+			shouldError: true,
+		},
+		{
+			name:        "relative path traversal to parent",
+			linkName:    "subdir/bad-link.txt",
+			linkTarget:  "../../escape.txt",
+			shouldError: true,
+		},
+		{
+			name:        "valid relative symlink in same dir",
+			linkName:    "valid-link.txt",
+			linkTarget:  "target.txt",
+			shouldError: false,
+		},
+		{
+			name:        "valid relative symlink to sibling",
+			linkName:    "subdir/valid-link.txt",
+			linkTarget:  "../target.txt",
+			shouldError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a malicious archive with the symlink
+			archivePath := filepath.Join(snapshotDir, tc.name+".tar.gz")
+			createMaliciousArchive(t, archivePath, tc.linkName, tc.linkTarget)
+
+			// Try to restore it
+			backend := NewArchiveBackend(snapshotDir, ArchiveOptions{})
+			testRestoreDir := filepath.Join(restoreDir, tc.name)
+			if err := os.MkdirAll(testRestoreDir, 0755); err != nil {
+				t.Fatalf("failed to create restore dir: %v", err)
+			}
+
+			err := backend.RestoreTo(archivePath, testRestoreDir)
+
+			if tc.shouldError {
+				if err == nil {
+					t.Errorf("expected error for malicious symlink %q -> %q, got nil", tc.linkName, tc.linkTarget)
+				} else if !strings.Contains(err.Error(), "invalid symlink") {
+					t.Errorf("expected 'invalid symlink' error, got: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for valid symlink %q -> %q: %v", tc.linkName, tc.linkTarget, err)
+				}
+			}
+		})
+	}
+}
+
+// createMaliciousArchive creates a tar.gz archive containing a symlink with the given target.
+// This simulates an attacker-crafted archive attempting path traversal.
+func createMaliciousArchive(t *testing.T, archivePath, linkName, linkTarget string) {
+	t.Helper()
+
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatalf("failed to create archive file: %v", err)
+	}
+	defer f.Close()
+
+	gw := gzip.NewWriter(f)
+	defer gw.Close()
+
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	// Add a target file that valid symlinks can point to
+	targetContent := []byte("target content")
+	targetHeader := &tar.Header{
+		Name: "target.txt",
+		Mode: 0644,
+		Size: int64(len(targetContent)),
+	}
+	if err := tw.WriteHeader(targetHeader); err != nil {
+		t.Fatalf("failed to write target header: %v", err)
+	}
+	if _, err := tw.Write(targetContent); err != nil {
+		t.Fatalf("failed to write target content: %v", err)
+	}
+
+	// Create parent directory for symlinks in subdirs
+	if dir := filepath.Dir(linkName); dir != "." {
+		dirHeader := &tar.Header{
+			Name:     dir + "/",
+			Mode:     0755,
+			Typeflag: tar.TypeDir,
+		}
+		if err := tw.WriteHeader(dirHeader); err != nil {
+			t.Fatalf("failed to write dir header: %v", err)
+		}
+	}
+
+	// Add the symlink
+	header := &tar.Header{
+		Name:     linkName,
+		Linkname: linkTarget,
+		Mode:     0777,
+		Typeflag: tar.TypeSymlink,
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		t.Fatalf("failed to write symlink header: %v", err)
 	}
 }
 
