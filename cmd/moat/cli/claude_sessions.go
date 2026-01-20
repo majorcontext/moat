@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -90,7 +89,7 @@ func runSessionsList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Filter if needed
-	var filtered []*claude.Session
+	filtered := make([]*claude.Session, 0, len(sessions))
 	for _, s := range sessions {
 		if sessionsActiveOnly && s.State != claude.SessionStateRunning {
 			continue
@@ -120,8 +119,7 @@ func runSessionsList(cmd *cobra.Command, args []string) error {
 	w.Flush()
 
 	fmt.Println()
-	fmt.Println("Resume a session: moat claude --resume <session>")
-	fmt.Println("Attach to running: moat attach <session>")
+	fmt.Println("Attach to a running session: moat attach <session>")
 
 	return nil
 }
@@ -137,14 +135,9 @@ func shortenPath(path string) string {
 		return "~" + path[len(home):]
 	}
 
-	// If still too long, truncate the middle
+	// If still too long, truncate from the start
 	const maxLen = 40
 	if len(path) > maxLen {
-		// Show first and last parts
-		base := filepath.Base(path)
-		if len(base) > maxLen-5 {
-			return "..." + path[len(path)-maxLen+3:]
-		}
 		return "..." + path[len(path)-maxLen+3:]
 	}
 

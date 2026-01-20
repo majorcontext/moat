@@ -139,7 +139,7 @@ func RunAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 	defer signal.Stop(sigCh)
 
 	// Track Ctrl+C timing for double-press detection
-	var lastSigTime time.Time
+	lastSigTime := time.Time{}
 
 	// Create a cancellable context for the wait
 	waitCtx, waitCancel := context.WithCancel(ctx)
@@ -165,6 +165,8 @@ func RunAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 				fmt.Printf("Run %s stopped\n", r.ID)
 				return nil
 			}
+			lastSigTime = now
+			_ = lastSigTime // Mark as used for linter (value read in next iteration)
 
 			// First Ctrl+C - detach
 			log.Debug("received signal, detaching", "signal", sig)

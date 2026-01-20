@@ -859,18 +859,33 @@ region = %s
 				})
 			}
 		}
+	}
 
-		// Mount Claude OAuth credentials for Pro/Max subscription mode.
-		// This allows Claude Code in the container to use host's OAuth login.
-		if opts.Config != nil && opts.Config.Claude.UseOAuth {
-			hostCredentials := filepath.Join(hostHome, ".claude", ".credentials.json")
-			if _, err := os.Stat(hostCredentials); err == nil {
-				containerCredentials := filepath.Join(containerHome, ".claude", ".credentials.json")
-				mounts = append(mounts, container.MountConfig{
-					Source:   hostCredentials,
-					Target:   containerCredentials,
-					ReadOnly: true,
-				})
+	// Set up provider-specific container mounts (e.g., credential files, state files)
+	if containerHome != "" {
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr == nil {
+			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+			if storeErr == nil {
+				for _, grant := range opts.Grants {
+					provider := credential.Provider(strings.Split(grant, ":")[0])
+					if cred, err := store.Get(provider); err == nil {
+						if setup := credential.GetProviderSetup(provider); setup != nil {
+							providerMounts, cleanupPath, mountErr := setup.ContainerMounts(cred, containerHome)
+							if mountErr != nil {
+								log.Debug("failed to set up provider mounts", "provider", provider, "error", mountErr)
+							} else {
+								mounts = append(mounts, providerMounts...)
+								if cleanupPath != "" {
+									if r.ProviderCleanupPaths == nil {
+										r.ProviderCleanupPaths = make(map[string]string)
+									}
+									r.ProviderCleanupPaths[string(provider)] = cleanupPath
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}

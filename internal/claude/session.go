@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -27,6 +28,9 @@ const (
 	SessionStateStopped   = "stopped"
 	SessionStateCompleted = "completed"
 )
+
+// validSessionID matches safe session IDs (alphanumeric with hyphens).
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
 
 // SessionManager handles session persistence and lookup.
 type SessionManager struct {
@@ -121,7 +125,7 @@ func (m *SessionManager) List() ([]*Session, error) {
 		return nil, fmt.Errorf("reading sessions directory: %w", err)
 	}
 
-	var sessions []*Session
+	sessions := make([]*Session, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -168,17 +172,18 @@ func (m *SessionManager) Touch(id string) error {
 
 // Delete removes a session.
 func (m *SessionManager) Delete(id string) error {
+	if !validSessionID.MatchString(id) {
+		return fmt.Errorf("invalid session ID: %s", id)
+	}
 	sessionDir := filepath.Join(m.dir, id)
 	return os.RemoveAll(sessionDir)
 }
 
-// sessionPath returns the path to a session's metadata file.
-func (m *SessionManager) sessionPath(id string) string {
-	return filepath.Join(m.dir, id, "metadata.json")
-}
-
 // save persists a session to disk.
 func (m *SessionManager) save(session *Session) error {
+	if !validSessionID.MatchString(session.ID) {
+		return fmt.Errorf("invalid session ID: %s", session.ID)
+	}
 	sessionDir := filepath.Join(m.dir, session.ID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return fmt.Errorf("creating session directory: %w", err)
@@ -199,6 +204,9 @@ func (m *SessionManager) save(session *Session) error {
 
 // load reads a session from disk.
 func (m *SessionManager) load(id string) (*Session, error) {
+	if !validSessionID.MatchString(id) {
+		return nil, fmt.Errorf("invalid session ID: %s", id)
+	}
 	metadataPath := filepath.Join(m.dir, id, "metadata.json")
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
