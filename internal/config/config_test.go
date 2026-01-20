@@ -49,6 +49,36 @@ env:
 	}
 }
 
+func TestLoadConfigWithSSHGrants(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: my-agent
+
+grants:
+  - github
+  - ssh:github.com
+  - ssh:gitlab.com
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Grants) != 3 {
+		t.Errorf("Grants = %d, want 3", len(cfg.Grants))
+	}
+	// Verify SSH grants are preserved with correct format
+	expectedGrants := []string{"github", "ssh:github.com", "ssh:gitlab.com"}
+	for i, expected := range expectedGrants {
+		if cfg.Grants[i] != expected {
+			t.Errorf("Grants[%d] = %q, want %q", i, cfg.Grants[i], expected)
+		}
+	}
+}
+
 func TestLoadConfigNotFound(t *testing.T) {
 	dir := t.TempDir()
 	cfg, err := Load(dir)

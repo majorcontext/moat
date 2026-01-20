@@ -1,0 +1,39 @@
+# SSH GitHub Authentication Example
+#
+# This example demonstrates SSH access to GitHub through moat's SSH agent proxy.
+# Your private keys stay on your machine - only signing requests are forwarded.
+#
+# Setup:
+#   1. Ensure your SSH agent is running: eval "$(ssh-agent -s)" && ssh-add
+#   2. Grant SSH access: moat grant ssh --host github.com
+#
+# Run:
+#   moat run ./examples/ssh-github
+#
+# Expected output:
+#   Hi <username>! You've successfully authenticated, but GitHub does not provide shell access.
+
+agent: ssh-github-test
+
+grants:
+  - ssh:github.com
+
+# Test SSH authentication with GitHub.
+# The SSH packages (openssh-client, socat) are automatically installed when SSH grants are used.
+# The -o flags ensure we don't hang on host key prompts.
+# GitHub closes the connection after printing the welcome message, so we use || true.
+command:
+  - sh
+  - -c
+  - |
+    echo "=== SSH Agent Socket ==="
+    echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+    ls -la /run/moat/ssh/ 2>/dev/null || echo "Socket dir not found"
+
+    echo ""
+    echo "=== Available SSH Keys ==="
+    ssh-add -l || echo "No keys available or agent not accessible"
+
+    echo ""
+    echo "=== Testing SSH connection to GitHub ==="
+    ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1 || true

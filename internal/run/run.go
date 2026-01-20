@@ -9,6 +9,7 @@ import (
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
 
@@ -26,24 +27,25 @@ const (
 
 // Run represents an agent execution environment.
 type Run struct {
-	ID            string
-	Name          string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
-	Workspace     string
-	Grants        []string
-	Ports         map[string]int // service name -> container port
-	HostPorts     map[string]int // service name -> host port (after binding)
-	State         State
-	ContainerID   string
-	ProxyServer   *proxy.Server     // Auth proxy for credential injection
-	Store         *storage.RunStore // Run data storage
-	storeRef      *atomic.Value     // Atomic reference for concurrent logger access
-	AuditStore    *audit.Store      // Tamper-proof audit log
-	KeepContainer bool              // If true, don't auto-remove container after run
-	Interactive   bool              // If true, run was started in interactive mode
-	CreatedAt     time.Time
-	StartedAt     time.Time
-	StoppedAt     time.Time
-	Error         string
+	ID             string
+	Name           string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
+	Workspace      string
+	Grants         []string
+	Ports          map[string]int // service name -> container port
+	HostPorts      map[string]int // service name -> host port (after binding)
+	State          State
+	ContainerID    string
+	ProxyServer    *proxy.Server     // Auth proxy for credential injection
+	SSHAgentServer *sshagent.Server  // SSH agent proxy for SSH key access
+	Store          *storage.RunStore // Run data storage
+	storeRef       *atomic.Value     // Atomic reference for concurrent logger access
+	AuditStore     *audit.Store      // Tamper-proof audit log
+	KeepContainer  bool              // If true, don't auto-remove container after run
+	Interactive    bool              // If true, run was started in interactive mode
+	CreatedAt      time.Time
+	StartedAt      time.Time
+	StoppedAt      time.Time
+	Error          string
 
 	// Firewall settings (set when network.policy is strict)
 	FirewallEnabled bool

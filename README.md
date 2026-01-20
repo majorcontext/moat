@@ -176,6 +176,39 @@ moat grant github:repo         # Specific scope
 moat grant github:repo,user    # Multiple scopes
 ```
 
+### SSH Access
+
+Grant agents SSH access to specific hosts—your private keys stay on your machine:
+
+```bash
+# Grant access to github.com using your SSH agent's default key
+$ moat grant ssh --host github.com
+Using key: user@host (SHA256:...)
+Granted SSH access to github.com
+
+# Test SSH access with the example (see examples/ssh-github/)
+$ moat run ./examples/ssh-github
+Hi username! You've successfully authenticated, but GitHub does not provide shell access.
+
+# Use SSH access for git operations
+$ moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
+```
+
+The agent connects through moat's SSH proxy—signing requests are forwarded to your SSH agent, but only for the granted hosts. The private key never enters the container.
+
+```yaml
+# Or declare in agent.yaml
+grants:
+  - github            # For HTTPS API access
+  - ssh:github.com    # For SSH git operations
+  - ssh:gitlab.com    # Multiple hosts supported
+```
+
+**Requirements:**
+- Your SSH agent must be running (`SSH_AUTH_SOCK` must be set)
+- Add keys with `ssh-add ~/.ssh/id_ed25519`
+- Run `moat grant ssh --host <hostname>` before using
+
 ### Using credentials in runs
 
 ```bash
@@ -340,6 +373,7 @@ moat verify-bundle proof.json
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat attach <run-id>` | Attach to a running agent |
 | `moat grant <provider>` | Store credentials |
+| `moat grant ssh --host <host>` | Grant SSH access for a host |
 | `moat revoke <provider>` | Remove credentials |
 | `moat logs [run-id]` | View logs |
 | `moat trace [run-id]` | View traces/network |
@@ -360,6 +394,7 @@ moat verify-bundle proof.json
 ```bash
 moat run --name myapp           # Set agent name
 moat run --grant github         # Inject credentials
+moat run --grant ssh:github.com # Grant SSH access
 moat run -e DEBUG=true          # Set env variable
 moat run -- npm test            # Custom command (overrides agent.yaml)
 moat run -d ./my-project        # Run detached (in background)
@@ -427,6 +462,8 @@ In interactive mode, `Ctrl+C` is passed through to the container process (e.g., 
 **Container runtimes**: Auto-detects Apple containers (macOS 15+, Apple Silicon) or Docker.
 
 **Credential injection**: A TLS-intercepting proxy sits between the container and the internet. It inspects requests and injects `Authorization` headers for granted services. The proxy binds to localhost (Docker) or uses per-run token auth (Apple containers).
+
+**SSH agent proxy**: For SSH grants, moat runs a filtering SSH agent proxy that connects to your local SSH agent. Only keys mapped to granted hosts are visible to the container. Sign requests are forwarded to your real agent—private keys never enter the container.
 
 **Image selection**: The `dependencies` field maps to base images—`node@20` → `node:20`, `python@3.11` → `python:3.11`. No dependencies defaults to `ubuntu:22.04`.
 

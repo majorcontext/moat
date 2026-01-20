@@ -816,6 +816,175 @@ func TestKeychainKeyPersistence(t *testing.T) {
 	t.Log("Encryption key persists correctly across calls")
 }
 
+// =============================================================================
+// SSH Agent Proxy Tests
+// =============================================================================
+
+// TestSSHGrantRequiresAgent verifies that SSH grants fail gracefully when no SSH agent is available.
+func TestSSHGrantRequiresAgent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	// Save the original SSH_AUTH_SOCK and clear it for this test
+	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	os.Unsetenv("SSH_AUTH_SOCK")
+	defer func() {
+		if origAuthSock != "" {
+			os.Setenv("SSH_AUTH_SOCK", origAuthSock)
+		}
+	}()
+
+	// Try to create a run with SSH grants but no SSH agent
+	_, err = mgr.Create(ctx, run.Options{
+		Name:      "e2e-ssh-no-agent",
+		Workspace: workspace,
+		Grants:    []string{"ssh:github.com"},
+		Cmd:       []string{"echo", "hello"},
+	})
+
+	// Should fail because SSH_AUTH_SOCK is not set
+	if err == nil {
+		t.Error("Expected error when SSH grants are used without SSH_AUTH_SOCK")
+	}
+	if !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
+		t.Errorf("Error should mention SSH_AUTH_SOCK, got: %v", err)
+	}
+}
+
+// TestSSHGrantWithoutMapping verifies that SSH grants fail gracefully when no mapping exists.
+func TestSSHGrantWithoutMapping(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	// Check if SSH agent is available
+	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	if origAuthSock == "" {
+		t.Skip("SSH_AUTH_SOCK not set, skipping test")
+	}
+
+	// Try to create a run with SSH grant for a host that has no mapping
+	_, err = mgr.Create(ctx, run.Options{
+		Name:      "e2e-ssh-no-mapping",
+		Workspace: workspace,
+		Grants:    []string{"ssh:nonexistent-host.example.com"},
+		Cmd:       []string{"echo", "hello"},
+	})
+
+	// Should fail because no SSH mapping exists for this host
+	if err == nil {
+		t.Error("Expected error when SSH grants are used without mapping")
+	}
+	if !strings.Contains(err.Error(), "no SSH mapping") {
+		t.Errorf("Error should mention missing SSH mapping, got: %v", err)
+	}
+}
+
+// TestSSHAuthSockEnvSetInContainer verifies that SSH_AUTH_SOCK is set in container
+// when SSH grants are configured (requires actual SSH agent and mapping).
+func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
+	// This test requires:
+	// 1. SSH_AUTH_SOCK to be set
+	// 2. An SSH mapping for github.com to exist
+	// Skip if not available
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		t.Skip("SSH_AUTH_SOCK not set, skipping test")
+	}
+
+	// Check if we have an SSH mapping for github.com
+	encKey, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey: %v", err)
+	}
+	credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	mappings, err := credStore.GetSSHMappingsForHosts([]string{"github.com"})
+	if err != nil {
+		t.Fatalf("GetSSHMappingsForHosts: %v", err)
+	}
+	if len(mappings) == 0 {
+		t.Skip("No SSH mapping for github.com, skipping test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-ssh-env-test",
+		Workspace: workspace,
+		Grants:    []string{"ssh:github.com"},
+		Cmd:       []string{"sh", "-c", "echo SSH_AUTH_SOCK=$SSH_AUTH_SOCK"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	// Verify SSH server was started
+	if r.SSHAgentServer == nil {
+		t.Error("SSHAgentServer should be set when SSH grants are configured")
+	}
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Logf("Wait returned error (may be expected): %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Read logs to verify SSH_AUTH_SOCK was set
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	foundSSHSock := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "SSH_AUTH_SOCK=/run/moat/ssh/agent.sock") {
+			foundSSHSock = true
+			t.Logf("SSH_AUTH_SOCK: %s", entry.Line)
+			break
+		}
+	}
+
+	if !foundSSHSock {
+		t.Errorf("SSH_AUTH_SOCK not set correctly in container\nLogs: %v", logs)
+	}
+}
+
 // TestCredentialRoundTripWithKeychain verifies that credentials can be saved
 // and retrieved using the keychain-stored encryption key.
 func TestCredentialRoundTripWithKeychain(t *testing.T) {
