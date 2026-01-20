@@ -25,6 +25,8 @@ type Config struct {
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
+	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
+	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -91,6 +93,40 @@ type MCPServerSpec struct {
 
 	// Cwd is the working directory for the server
 	Cwd string `yaml:"cwd,omitempty"`
+}
+
+// SnapshotConfig configures workspace snapshots.
+type SnapshotConfig struct {
+	Disabled  bool                    `yaml:"disabled,omitempty"`
+	Triggers  SnapshotTriggerConfig   `yaml:"triggers,omitempty"`
+	Exclude   SnapshotExcludeConfig   `yaml:"exclude,omitempty"`
+	Retention SnapshotRetentionConfig `yaml:"retention,omitempty"`
+}
+
+// SnapshotTriggerConfig configures when snapshots are created.
+type SnapshotTriggerConfig struct {
+	DisablePreRun        bool `yaml:"disable_pre_run,omitempty"`
+	DisableGitCommits    bool `yaml:"disable_git_commits,omitempty"`
+	DisableBuilds        bool `yaml:"disable_builds,omitempty"`
+	DisableIdle          bool `yaml:"disable_idle,omitempty"`
+	IdleThresholdSeconds int  `yaml:"idle_threshold_seconds,omitempty"`
+}
+
+// SnapshotExcludeConfig configures what to exclude from snapshots.
+type SnapshotExcludeConfig struct {
+	IgnoreGitignore bool     `yaml:"ignore_gitignore,omitempty"`
+	Additional      []string `yaml:"additional,omitempty"`
+}
+
+// SnapshotRetentionConfig configures snapshot retention.
+type SnapshotRetentionConfig struct {
+	MaxCount      int  `yaml:"max_count,omitempty"`
+	DeleteInitial bool `yaml:"delete_initial,omitempty"`
+}
+
+// TracingConfig configures execution tracing.
+type TracingConfig struct {
+	DisableExec bool `yaml:"disable_exec,omitempty"`
 }
 
 // ShouldSyncClaudeLogs returns true if Claude session logs should be synced.
@@ -183,6 +219,14 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
+	// Snapshot defaults
+	if cfg.Snapshots.Triggers.IdleThresholdSeconds == 0 {
+		cfg.Snapshots.Triggers.IdleThresholdSeconds = 30
+	}
+	if cfg.Snapshots.Retention.MaxCount == 0 {
+		cfg.Snapshots.Retention.MaxCount = 10
+	}
+
 	return &cfg, nil
 }
 
@@ -226,6 +270,14 @@ func DefaultConfig() *Config {
 		Env: make(map[string]string),
 		Network: NetworkConfig{
 			Policy: "permissive",
+		},
+		Snapshots: SnapshotConfig{
+			Triggers: SnapshotTriggerConfig{
+				IdleThresholdSeconds: 30,
+			},
+			Retention: SnapshotRetentionConfig{
+				MaxCount: 10,
+			},
 		},
 	}
 }
