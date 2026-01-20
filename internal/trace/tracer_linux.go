@@ -3,10 +3,16 @@
 package trace
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // Netlink connector constants for process events
@@ -168,8 +174,169 @@ func (t *ProcConnectorTracer) subscribe(listen bool) error {
 
 func (t *ProcConnectorTracer) readLoop() {
 	defer t.wg.Done()
-	// Will be implemented in next task
-	<-t.done
+
+	buf := make([]byte, 4096)
+	for {
+		select {
+		case <-t.done:
+			return
+		default:
+		}
+
+		// Set read timeout to periodically check done channel
+		tv := syscall.Timeval{Sec: 1, Usec: 0}
+		syscall.SetsockoptTimeval(t.sock, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv)
+
+		n, _, err := syscall.Recvfrom(t.sock, buf, 0)
+		if err != nil {
+			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
+				continue
+			}
+			select {
+			case <-t.done:
+				return
+			default:
+				continue
+			}
+		}
+
+		if n >= 52 { // Minimum size: nlhdr(16) + cnhdr(20) + proc_event(16)
+			t.parseMessage(buf[:n])
+		}
+	}
+}
+
+func (t *ProcConnectorTracer) parseMessage(buf []byte) {
+	// Skip netlink header (16) and connector header (20)
+	offset := 36
+
+	if len(buf) < offset+16 {
+		return
+	}
+
+	// Parse process event header
+	what := binary.LittleEndian.Uint32(buf[offset:])
+	offset += 16 // Skip: what(4) + cpu(4) + timestamp(8)
+
+	switch what {
+	case _PROC_EVENT_EXEC:
+		if len(buf) < offset+8 {
+			return
+		}
+		pid := int(binary.LittleEndian.Uint32(buf[offset:]))
+
+		if t.shouldTrack(pid) {
+			if event := t.buildExecEvent(pid); event != nil {
+				t.emitEvent(*event)
+			}
+		}
+
+	case _PROC_EVENT_FORK:
+		if len(buf) < offset+16 {
+			return
+		}
+		parentPid := int(binary.LittleEndian.Uint32(buf[offset:]))
+		childPid := int(binary.LittleEndian.Uint32(buf[offset+8:]))
+
+		// Track children of tracked processes
+		t.pidMu.RLock()
+		tracked := t.trackedPIDs[parentPid]
+		t.pidMu.RUnlock()
+		if tracked {
+			t.pidMu.Lock()
+			t.trackedPIDs[childPid] = true
+			t.pidMu.Unlock()
+		}
+
+	case _PROC_EVENT_EXIT:
+		if len(buf) < offset+8 {
+			return
+		}
+		pid := int(binary.LittleEndian.Uint32(buf[offset:]))
+		t.pidMu.Lock()
+		delete(t.trackedPIDs, pid)
+		t.pidMu.Unlock()
+	}
+}
+
+func (t *ProcConnectorTracer) shouldTrack(pid int) bool {
+	// If no filtering configured, track everything
+	if t.config.PID == 0 && t.config.CgroupPath == "" {
+		return true
+	}
+
+	t.pidMu.RLock()
+	tracked := t.trackedPIDs[pid]
+	t.pidMu.RUnlock()
+	return tracked
+}
+
+func (t *ProcConnectorTracer) buildExecEvent(pid int) *ExecEvent {
+	procPath := fmt.Sprintf("/proc/%d", pid)
+
+	// Read cmdline (null-separated)
+	cmdline, err := os.ReadFile(filepath.Join(procPath, "cmdline"))
+	if err != nil {
+		return nil
+	}
+
+	parts := strings.Split(string(cmdline), "\x00")
+	if len(parts) == 0 || parts[0] == "" {
+		return nil
+	}
+
+	cmd := filepath.Base(parts[0])
+	var args []string
+	if len(parts) > 1 {
+		args = parts[1:]
+		if len(args) > 0 && args[len(args)-1] == "" {
+			args = args[:len(args)-1]
+		}
+	}
+
+	// Read cwd
+	cwd, _ := os.Readlink(filepath.Join(procPath, "cwd"))
+
+	// Read ppid from status
+	ppid := 0
+	if f, err := os.Open(filepath.Join(procPath, "status")); err == nil {
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "PPid:") {
+				fields := strings.Fields(scanner.Text())
+				if len(fields) >= 2 {
+					ppid, _ = strconv.Atoi(fields[1])
+				}
+				break
+			}
+		}
+		f.Close()
+	}
+
+	return &ExecEvent{
+		Timestamp:  time.Now(),
+		PID:        pid,
+		PPID:       ppid,
+		Command:    cmd,
+		Args:       args,
+		WorkingDir: cwd,
+	}
+}
+
+func (t *ProcConnectorTracer) emitEvent(event ExecEvent) {
+	select {
+	case t.events <- event:
+	default:
+	}
+
+	t.mu.Lock()
+	cbs := make([]func(ExecEvent), len(t.callbacks))
+	copy(cbs, t.callbacks)
+	t.mu.Unlock()
+
+	for _, cb := range cbs {
+		cb(event)
+	}
 }
 
 // Compile-time interface check
