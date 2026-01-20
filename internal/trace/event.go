@@ -33,12 +33,14 @@ func (e ExecEvent) IsGitCommit() bool {
 
 // IsBuildCommand returns true if this event is a build command.
 func (e ExecEvent) IsBuildCommand() bool {
-	// Check for common build commands
+	// Check for common build commands.
+	// Each pattern is matched exactly against the joined args string,
+	// or as a prefix followed by a space (to allow additional flags).
 	buildCommands := map[string][]string{
 		"npm":    {"run build", "run compile"},
 		"yarn":   {"build"},
 		"go":     {"build", "install"},
-		"make":   {"", "all", "build"},
+		"make":   {"all", "build"},
 		"cargo":  {"build"},
 		"mvn":    {"package", "compile"},
 		"gradle": {"build"},
@@ -49,12 +51,19 @@ func (e ExecEvent) IsBuildCommand() bool {
 		return false
 	}
 
+	// Special case: bare "make" with no args is a build command
+	if e.Command == "make" && len(e.Args) == 0 {
+		return true
+	}
+
 	argsStr := strings.Join(e.Args, " ")
 	for _, pattern := range patterns {
-		if pattern == "" && len(e.Args) == 0 {
-			return true // bare "make"
+		// Exact match (e.g., "build" or "run build")
+		if argsStr == pattern {
+			return true
 		}
-		if strings.HasPrefix(argsStr, pattern) {
+		// Pattern followed by space (e.g., "build ./..." or "run build --production")
+		if strings.HasPrefix(argsStr, pattern+" ") {
 			return true
 		}
 	}
