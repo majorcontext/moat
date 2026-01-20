@@ -51,6 +51,10 @@ type Run struct {
 	FirewallEnabled bool
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
+
+	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
+	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
+	ProviderCleanupPaths map[string]string
 }
 
 // Options configures a new run.

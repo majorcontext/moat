@@ -144,6 +144,12 @@ type credentialHeader struct {
 	Value string // Header value (e.g., "Bearer token", "sk-ant-...")
 }
 
+// extraHeader holds an additional header to inject for a host.
+type extraHeader struct {
+	Name  string
+	Value string
+}
+
 // Proxy is an HTTP proxy that injects credentials into outgoing requests.
 //
 // # Security Model
@@ -166,6 +172,7 @@ type credentialHeader struct {
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
 	credentials  map[string]credentialHeader // host -> credential header
+	extraHeaders map[string][]extraHeader    // host -> additional headers to inject
 	mu           sync.RWMutex
 	ca           *CA           // Optional CA for TLS interception
 	logger       RequestLogger // Optional request logger
@@ -177,8 +184,9 @@ type Proxy struct {
 // NewProxy creates a new auth proxy.
 func NewProxy() *Proxy {
 	return &Proxy{
-		credentials: make(map[string]credentialHeader),
-		policy:      "permissive", // default to permissive
+		credentials:  make(map[string]credentialHeader),
+		extraHeaders: make(map[string][]extraHeader),
+		policy:       "permissive", // default to permissive
 	}
 }
 
@@ -208,6 +216,15 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue}
+}
+
+// AddExtraHeader adds an additional header to inject for a host.
+// This is used for headers beyond the main credential header, such as
+// beta feature flags or API version headers.
+func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.extraHeaders[host] = append(p.extraHeaders[host], extraHeader{Name: headerName, Value: headerValue})
 }
 
 // SetNetworkPolicy sets the network policy and allowed hosts.
@@ -248,6 +265,20 @@ func (p *Proxy) getCredential(host string) (credentialHeader, bool) {
 		return cred, ok
 	}
 	return credentialHeader{}, false
+}
+
+// getExtraHeaders returns additional headers to inject for a host.
+func (p *Proxy) getExtraHeaders(host string) []extraHeader {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if headers, ok := p.extraHeaders[host]; ok {
+		return headers
+	}
+	h, _, _ := net.SplitHostPort(host)
+	if h != "" {
+		return p.extraHeaders[h]
+	}
+	return nil
 }
 
 // ServeHTTP handles proxy requests.
@@ -534,6 +565,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)
+		}
+		// Inject extra headers (e.g., anthropic-beta for OAuth)
+		for _, h := range p.getExtraHeaders(r.Host) {
+			req.Header.Set(h.Name, h.Value)
 		}
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")

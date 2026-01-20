@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -261,17 +262,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			for _, grant := range opts.Grants {
 				provider := credential.Provider(strings.Split(grant, ":")[0])
 				if cred, err := store.Get(provider); err == nil {
-					// Map provider to host
-					switch provider {
-					case credential.ProviderGitHub:
-						p.SetCredential("api.github.com", "Bearer "+cred.Token)
-						p.SetCredential("github.com", "Bearer "+cred.Token)
-					case credential.ProviderAnthropic:
-						// Anthropic uses x-api-key header, not Authorization
-						p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
-						// Set a dummy ANTHROPIC_API_KEY so Claude Code doesn't error
-						// The real key is injected by the proxy at the network layer
-						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY="+claude.ProxyInjectedPlaceholder)
+					// Use provider-specific setup if available
+					if setup := credential.GetProviderSetup(provider); setup != nil {
+						setup.ConfigureProxy(p, cred)
+						providerEnv = append(providerEnv, setup.ContainerEnv(cred)...)
 					}
 				}
 			}
@@ -475,7 +469,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			containerSSHDir := "/run/moat/ssh"
 
 			// Extract port from TCP address (format is "host:port" or "[::]:port")
-			_, tcpPort, err := parseHostPort(tcpAddr)
+			_, tcpPort, err := net.SplitHostPort(tcpAddr)
 			if err != nil {
 				_ = sshServer.Stop()
 				upstreamAgent.Close()
@@ -733,18 +727,33 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				})
 			}
 		}
+	}
 
-		// Mount Claude OAuth credentials for Pro/Max subscription mode.
-		// This allows Claude Code in the container to use host's OAuth login.
-		if opts.Config != nil && opts.Config.Claude.UseOAuth {
-			hostCredentials := filepath.Join(hostHome, ".claude", ".credentials.json")
-			if _, err := os.Stat(hostCredentials); err == nil {
-				containerCredentials := filepath.Join(containerHome, ".claude", ".credentials.json")
-				mounts = append(mounts, container.MountConfig{
-					Source:   hostCredentials,
-					Target:   containerCredentials,
-					ReadOnly: true,
-				})
+	// Set up provider-specific container mounts (e.g., credential files, state files)
+	if containerHome != "" {
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr == nil {
+			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+			if storeErr == nil {
+				for _, grant := range opts.Grants {
+					provider := credential.Provider(strings.Split(grant, ":")[0])
+					if cred, err := store.Get(provider); err == nil {
+						if setup := credential.GetProviderSetup(provider); setup != nil {
+							providerMounts, cleanupPath, mountErr := setup.ContainerMounts(cred, containerHome)
+							if mountErr != nil {
+								log.Debug("failed to set up provider mounts", "provider", provider, "error", mountErr)
+							} else {
+								mounts = append(mounts, providerMounts...)
+								if cleanupPath != "" {
+									if r.ProviderCleanupPaths == nil {
+										r.ProviderCleanupPaths = make(map[string]string)
+									}
+									r.ProviderCleanupPaths[string(provider)] = cleanupPath
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1101,6 +1110,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.StoppedAt = time.Now()
 	keepContainer := r.KeepContainer
 	containerID := r.ContainerID
+	providerCleanupPaths := r.ProviderCleanupPaths
 	m.mu.Unlock()
 
 	// Save state to disk
@@ -1110,6 +1120,13 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	if !keepContainer {
 		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
 			fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+		}
+	}
+
+	// Clean up provider resources
+	for provider, cleanupPath := range providerCleanupPaths {
+		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
+			setup.Cleanup(cleanupPath)
 		}
 	}
 
@@ -1181,6 +1198,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			r.Error = err.Error()
 		}
 		keepContainer := r.KeepContainer
+		providerCleanupPaths := r.ProviderCleanupPaths
 		m.mu.Unlock()
 
 		// Save state to disk
@@ -1190,6 +1208,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if !keepContainer {
 			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+			}
+		}
+
+		// Clean up provider resources
+		for provider, cleanupPath := range providerCleanupPaths {
+			if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
+				setup.Cleanup(cleanupPath)
 			}
 		}
 
@@ -1276,6 +1301,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if r.AuditStore != nil {
 		if err := r.AuditStore.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: closing audit store: %v\n", err)
+		}
+	}
+
+	// Clean up provider resources
+	for provider, cleanupPath := range r.ProviderCleanupPaths {
+		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
+			setup.Cleanup(cleanupPath)
 		}
 	}
 
@@ -1406,26 +1438,4 @@ func filterSSHGrants(grants []string) []string {
 		}
 	}
 	return hosts
-}
-
-// parseHostPort splits an address into host and port components.
-// It handles IPv4 ("127.0.0.1:8080"), IPv6 ("[::1]:8080"), and named hosts.
-// Returns empty strings if the address cannot be parsed.
-func parseHostPort(addr string) (host, port string, err error) {
-	// Find the last colon that separates host and port
-	// For IPv6, the host is enclosed in brackets: [::1]:8080
-	if strings.HasPrefix(addr, "[") {
-		// IPv6 format: [host]:port
-		closeBracket := strings.LastIndex(addr, "]")
-		if closeBracket == -1 || closeBracket+2 > len(addr) || addr[closeBracket+1] != ':' {
-			return "", "", fmt.Errorf("invalid address format: %s", addr)
-		}
-		return addr[1:closeBracket], addr[closeBracket+2:], nil
-	}
-	// IPv4 or hostname format: host:port
-	lastColon := strings.LastIndex(addr, ":")
-	if lastColon == -1 {
-		return "", "", fmt.Errorf("no port in address: %s", addr)
-	}
-	return addr[:lastColon], addr[lastColon+1:], nil
 }

@@ -47,6 +47,12 @@ pnpm:
   package: pnpm
   requires: [node]
 
+claude-code:
+  description: Claude Code CLI
+  type: npm
+  package: "@anthropic-ai/claude-code"
+  requires: [node]
+
 # Build tools (github-binary)
 protoc:
   description: Protocol Buffers compiler

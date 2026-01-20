@@ -43,11 +43,6 @@ type ClaudeConfig struct {
 	// Default: false, unless the "anthropic" grant is configured (then true).
 	SyncLogs *bool `yaml:"sync_logs,omitempty"`
 
-	// UseOAuth enables Claude OAuth mode for Pro/Max subscriptions.
-	// When true, mounts ~/.claude/.credentials.json into the container.
-	// This is set automatically by "moat claude" when OAuth credentials are detected.
-	UseOAuth bool `yaml:"-"` // Internal only, not in agent.yaml
-
 	// Plugins enables or disables specific plugins for this run.
 	// Keys are in format "plugin-name@marketplace", values are true/false.
 	Plugins map[string]bool `yaml:"plugins,omitempty"`

@@ -11,12 +11,13 @@ Run AI agents locally with one command. Zero Docker knowledge. Zero secret copyi
 A "run" is a sealed workspace: your code, dependencies, credentials, and observability—all managed as one unit. You shouldn't need to understand Docker, copy tokens around, or piece together logs from different places. Moat handles the infrastructure so you can focus on what the agent actually does.
 
 ```
-moat run --grant github -- npx claude-code
+moat claude
 ```
 
 What happens when you run this:
 - An isolated container is created with your code mounted
-- GitHub credentials are injected at the network layer (the agent never sees your token)
+- Claude Code is pre-installed and ready to go
+- Credentials are injected at the network layer (the agent never sees your tokens)
 - Every API call, log line, and network request is captured
 - When it's done, the workspace is disposable—or you can keep the artifacts
 
@@ -81,6 +82,77 @@ $ moat trace --network
 ```
 
 Every HTTP request through the proxy is logged—useful for auditing, debugging, and understanding what an agent did.
+
+## Claude Code
+
+The fastest way to run Claude Code in an isolated environment:
+
+```bash
+moat grant anthropic   # One-time: imports your Claude Code credentials
+moat claude
+```
+
+This starts Claude Code interactively in your current directory, using your existing Claude Pro/Max subscription.
+
+### How credentials work
+
+If you have Claude Code installed and logged in, `moat grant anthropic` automatically imports your OAuth credentials from the macOS keychain. No API key required—it uses your existing subscription.
+
+```bash
+$ moat grant anthropic
+
+Found Claude Code credentials.
+  Subscription: claude_pro
+  Expires: 2025-02-15T10:30:00Z
+
+Use Claude Code credentials? [Y/n]: y
+
+Claude Code credentials imported to ~/.moat/credentials/anthropic.json
+```
+
+The credentials are injected at the network layer via a TLS-intercepting proxy. Claude Code in the container authenticates normally, but the actual tokens never enter the container environment.
+
+### Common usage
+
+```bash
+# Start Claude Code in current directory
+moat claude
+
+# Start in a specific project
+moat claude ./my-project
+
+# Run with a prompt (non-interactive)
+moat claude -p "explain this codebase"
+moat claude -p "fix the failing tests"
+
+# Add GitHub access for Claude
+moat claude --grant github
+
+# Name the session for easy reference
+moat claude --name my-feature
+
+# Run in background, then attach later
+moat claude -d
+moat attach <run-id>
+```
+
+### With API key (pay-as-you-go)
+
+If you have an Anthropic API key instead of a Claude Pro/Max subscription:
+
+```bash
+# When prompted, decline Claude Code import and enter your API key
+moat grant anthropic
+
+# Or set the environment variable first
+export ANTHROPIC_API_KEY="sk-ant-api..."
+moat grant anthropic
+
+# Claude Code will use the key automatically
+moat claude
+```
+
+The API key is injected at the network layer—Claude Code never sees it directly.
 
 ## Why This Matters
 
@@ -370,6 +442,8 @@ moat verify-bundle proof.json
 
 | Command | Description |
 |---------|-------------|
+| `moat claude [workspace]` | Run Claude Code (easiest way to start) |
+| `moat claude sessions` | List Claude Code sessions |
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat attach <run-id>` | Attach to a running agent |
 | `moat grant <provider>` | Store credentials |
