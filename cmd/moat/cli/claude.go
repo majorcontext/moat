@@ -140,7 +140,7 @@ func runPluginsList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Plugins for %s:\n\n", absPath)
 
 	// Sort plugin names for consistent output
-	var names []string
+	names := make([]string, 0, len(settings.EnabledPlugins))
 	for name := range settings.EnabledPlugins {
 		names = append(names, name)
 	}
@@ -250,7 +250,7 @@ func runMarketplacesList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Marketplaces:\n\n")
 
 	// Sort marketplace names for consistent output
-	var names []string
+	names := make([]string, 0, len(settings.ExtraKnownMarketplaces))
 	for name := range settings.ExtraKnownMarketplaces {
 		names = append(names, name)
 	}

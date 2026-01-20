@@ -78,7 +78,7 @@ func TestGenerateSettingsNil(t *testing.T) {
 	}
 
 	// Should produce valid empty settings
-	if result.EnabledPlugins != nil && len(result.EnabledPlugins) > 0 {
+	if len(result.EnabledPlugins) > 0 {
 		t.Error("EnabledPlugins should be empty for nil input")
 	}
 }

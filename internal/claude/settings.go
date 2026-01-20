@@ -151,17 +151,17 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 	if err == nil {
 		// 1. Load Claude's native user settings from ~/.claude/settings.json
 		claudeUserSettingsPath := filepath.Join(homeDir, ".claude", "settings.json")
-		claudeUserSettings, err := LoadSettings(claudeUserSettingsPath)
-		if err != nil {
-			return nil, err
+		claudeUserSettings, loadErr := LoadSettings(claudeUserSettingsPath)
+		if loadErr != nil {
+			return nil, loadErr
 		}
 		result = MergeSettings(result, claudeUserSettings, SourceClaudeUser)
 
 		// 2. Load moat-specific user defaults from ~/.moat/claude/settings.json
 		moatUserSettingsPath := filepath.Join(homeDir, ".moat", "claude", "settings.json")
-		moatUserSettings, err := LoadSettings(moatUserSettingsPath)
-		if err != nil {
-			return nil, err
+		moatUserSettings, loadErr := LoadSettings(moatUserSettingsPath)
+		if loadErr != nil {
+			return nil, loadErr
 		}
 		result = MergeSettings(result, moatUserSettings, SourceMoatUser)
 	}
