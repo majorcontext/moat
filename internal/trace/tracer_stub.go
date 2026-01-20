@@ -49,18 +49,24 @@ func (t *StubTracer) OnExec(cb func(ExecEvent)) {
 
 // Emit allows manual event injection for testing.
 func (t *StubTracer) Emit(event ExecEvent) {
-	// Send to channel first (non-blocking)
+	t.mu.Lock()
+	if t.stopped {
+		t.mu.Unlock()
+		return
+	}
+
+	// Copy callbacks under lock
+	cbs := make([]func(ExecEvent), len(t.callbacks))
+	copy(cbs, t.callbacks)
+
+	// Send to channel (non-blocking) while holding lock to prevent race with Stop()
 	select {
 	case t.events <- event:
 	default:
 	}
-
-	// Copy callbacks under lock, then invoke
-	t.mu.Lock()
-	cbs := make([]func(ExecEvent), len(t.callbacks))
-	copy(cbs, t.callbacks)
 	t.mu.Unlock()
 
+	// Invoke callbacks outside lock to prevent deadlock
 	for _, cb := range cbs {
 		cb(event)
 	}

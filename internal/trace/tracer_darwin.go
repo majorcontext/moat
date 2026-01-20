@@ -5,6 +5,7 @@ package trace
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
 	"time"
@@ -60,9 +61,14 @@ type DarwinTracer struct {
 	wg           sync.WaitGroup
 	mu           sync.Mutex
 	started      bool
+	stopped      bool
 	seenProcs    map[int]int64 // pid -> start time (to detect exec)
+	trackedPIDs  map[int]bool  // PIDs we're actively tracking (for descendant tracking)
 	procMu       sync.Mutex
 	pollInterval time.Duration
+
+	// Metrics for observability
+	droppedEvents int64
 }
 
 // NewDarwinTracer creates a new sysctl-based tracer for macOS.
@@ -72,6 +78,7 @@ func NewDarwinTracer(cfg Config) (*DarwinTracer, error) {
 		events:       make(chan ExecEvent, 100),
 		done:         make(chan struct{}),
 		seenProcs:    make(map[int]int64),
+		trackedPIDs:  make(map[int]bool),
 		pollInterval: defaultPollMs * time.Millisecond,
 	}, nil
 }
@@ -98,14 +105,19 @@ func (t *DarwinTracer) Stop() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !t.started {
+	if !t.started || t.stopped {
 		return nil
 	}
 
+	t.stopped = true
 	close(t.done)
 	t.wg.Wait()
 	close(t.events)
 	t.started = false
+
+	if t.droppedEvents > 0 {
+		slog.Debug("tracer stopped", "dropped_events", t.droppedEvents)
+	}
 
 	return nil
 }
@@ -150,6 +162,11 @@ func (t *DarwinTracer) scanProcesses(initial bool) {
 	// Track which PIDs we've seen this scan (for cleanup)
 	currentPIDs := make(map[int]bool)
 
+	// Initialize target PID tracking on first scan
+	if initial && t.config.PID > 0 {
+		t.trackedPIDs[t.config.PID] = true
+	}
+
 	for _, proc := range procs {
 		currentPIDs[proc.pid] = true
 
@@ -160,8 +177,16 @@ func (t *DarwinTracer) scanProcesses(initial bool) {
 		// Update tracking
 		t.seenProcs[proc.pid] = proc.startTime
 
+		// Check if we should track this process
+		shouldTrack := t.shouldTrackLocked(proc.pid, proc.ppid)
+
+		// If parent is tracked, track this process too (for descendants)
+		if shouldTrack && t.config.PID > 0 {
+			t.trackedPIDs[proc.pid] = true
+		}
+
 		// Emit event for new processes (but not on initial scan)
-		if isNew && !initial && t.shouldTrack(proc.pid, proc.ppid) {
+		if isNew && !initial && shouldTrack {
 			event := t.buildExecEvent(proc)
 			t.emitEvent(event)
 		}
@@ -171,6 +196,7 @@ func (t *DarwinTracer) scanProcesses(initial bool) {
 	for pid := range t.seenProcs {
 		if !currentPIDs[pid] {
 			delete(t.seenProcs, pid)
+			delete(t.trackedPIDs, pid)
 		}
 	}
 }
@@ -274,23 +300,22 @@ func (t *DarwinTracer) parseKinfoProc(buf []byte) processInfo {
 	return info
 }
 
-// shouldTrack returns true if the process should be tracked.
-func (t *DarwinTracer) shouldTrack(pid, ppid int) bool {
+// shouldTrackLocked returns true if the process should be tracked.
+// Must be called while holding procMu.
+func (t *DarwinTracer) shouldTrackLocked(pid, ppid int) bool {
 	// If no filtering configured, track everything
 	if t.config.PID == 0 {
 		return true
 	}
 
-	// Track if it's the target PID or a child of it
-	if pid == t.config.PID || ppid == t.config.PID {
+	// Track if it's the target PID
+	if pid == t.config.PID {
 		return true
 	}
 
-	// Check if parent is already tracked (for grandchildren)
-	if _, tracked := t.seenProcs[ppid]; tracked {
-		// Parent exists, check if it's in our tracked lineage
-		// This is a simplification - for deep nesting we'd need ancestry tracking
-		return ppid == t.config.PID
+	// Track if parent is in our tracked lineage (handles grandchildren and deeper)
+	if t.trackedPIDs[ppid] {
+		return true
 	}
 
 	return false
@@ -389,18 +414,25 @@ func (t *DarwinTracer) getProcessArgs(pid int) []string {
 
 // emitEvent sends an event to the channel and callbacks.
 func (t *DarwinTracer) emitEvent(event ExecEvent) {
-	// Non-blocking send to channel
+	t.mu.Lock()
+	if t.stopped {
+		t.mu.Unlock()
+		return
+	}
+
+	// Copy callbacks under lock
+	cbs := make([]func(ExecEvent), len(t.callbacks))
+	copy(cbs, t.callbacks)
+
+	// Send to channel (non-blocking) while holding lock to prevent race with Stop()
 	select {
 	case t.events <- event:
 	default:
+		t.droppedEvents++
 	}
-
-	// Call registered callbacks
-	t.mu.Lock()
-	cbs := make([]func(ExecEvent), len(t.callbacks))
-	copy(cbs, t.callbacks)
 	t.mu.Unlock()
 
+	// Invoke callbacks outside lock to prevent deadlock
 	for _, cb := range cbs {
 		cb(event)
 	}

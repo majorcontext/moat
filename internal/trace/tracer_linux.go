@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,10 +46,14 @@ type ProcConnectorTracer struct {
 	wg        sync.WaitGroup
 	mu        sync.Mutex
 	started   bool
+	stopped   bool
 
 	// Tracked PIDs (container processes and their children)
 	trackedPIDs map[int]bool
 	pidMu       sync.RWMutex
+
+	// Metrics for observability
+	droppedEvents int64
 }
 
 // NewProcConnectorTracer creates a new proc connector tracer.
@@ -109,10 +114,11 @@ func (t *ProcConnectorTracer) Stop() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !t.started {
+	if !t.started || t.stopped {
 		return nil
 	}
 
+	t.stopped = true
 	close(t.done)
 	_ = t.subscribe(false)
 	syscall.Close(t.sock)
@@ -120,6 +126,10 @@ func (t *ProcConnectorTracer) Stop() error {
 	t.wg.Wait()
 	close(t.events)
 	t.started = false
+
+	if t.droppedEvents > 0 {
+		slog.Debug("tracer stopped", "dropped_events", t.droppedEvents)
+	}
 
 	return nil
 }
@@ -176,6 +186,9 @@ func (t *ProcConnectorTracer) readLoop() {
 	defer t.wg.Done()
 
 	buf := make([]byte, 4096)
+	consecutiveErrors := 0
+	const maxConsecutiveErrors = 10
+
 	for {
 		select {
 		case <-t.done:
@@ -185,20 +198,31 @@ func (t *ProcConnectorTracer) readLoop() {
 
 		// Set read timeout to periodically check done channel
 		tv := syscall.Timeval{Sec: 1, Usec: 0}
-		syscall.SetsockoptTimeval(t.sock, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv)
+		if err := syscall.SetsockoptTimeval(t.sock, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv); err != nil {
+			slog.Debug("failed to set socket timeout", "error", err)
+		}
 
 		n, _, err := syscall.Recvfrom(t.sock, buf, 0)
 		if err != nil {
 			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
+				consecutiveErrors = 0
 				continue
 			}
 			select {
 			case <-t.done:
 				return
 			default:
+				consecutiveErrors++
+				if consecutiveErrors >= maxConsecutiveErrors {
+					slog.Error("too many consecutive errors in tracer read loop, stopping",
+						"error", err, "count", consecutiveErrors)
+					return
+				}
+				slog.Debug("error reading from netlink socket", "error", err)
 				continue
 			}
 		}
+		consecutiveErrors = 0
 
 		if n >= 52 { // Minimum size: nlhdr(16) + cnhdr(20) + proc_event(16)
 			t.parseMessage(buf[:n])
@@ -324,16 +348,25 @@ func (t *ProcConnectorTracer) buildExecEvent(pid int) *ExecEvent {
 }
 
 func (t *ProcConnectorTracer) emitEvent(event ExecEvent) {
+	t.mu.Lock()
+	if t.stopped {
+		t.mu.Unlock()
+		return
+	}
+
+	// Copy callbacks under lock
+	cbs := make([]func(ExecEvent), len(t.callbacks))
+	copy(cbs, t.callbacks)
+
+	// Send to channel (non-blocking) while holding lock to prevent race with Stop()
 	select {
 	case t.events <- event:
 	default:
+		t.droppedEvents++
 	}
-
-	t.mu.Lock()
-	cbs := make([]func(ExecEvent), len(t.callbacks))
-	copy(cbs, t.callbacks)
 	t.mu.Unlock()
 
+	// Invoke callbacks outside lock to prevent deadlock
 	for _, cb := range cbs {
 		cb(event)
 	}
