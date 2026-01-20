@@ -170,6 +170,23 @@ done:
 	}
 }
 
+// TestStubTracerDoubleStart tests that calling Start() twice returns an error.
+func TestStubTracerDoubleStart(t *testing.T) {
+	tracer := NewStubTracer(Config{})
+
+	// First start should succeed
+	if err := tracer.Start(); err != nil {
+		t.Fatalf("first Start() failed: %v", err)
+	}
+	defer tracer.Stop()
+
+	// Second start should return an error
+	err := tracer.Start()
+	if err == nil {
+		t.Error("expected error from second Start(), got nil")
+	}
+}
+
 // TestStubTracerStopBeforeStart tests that Stop() before Start() is safe.
 func TestStubTracerStopBeforeStart(t *testing.T) {
 	tracer := NewStubTracer(Config{})
