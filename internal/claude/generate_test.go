@@ -298,6 +298,14 @@ func TestGeneratedConfigCleanup(t *testing.T) {
 }
 
 func TestRequiredMounts(t *testing.T) {
+	// Create a temp directory structure for the cache
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "plugins")
+	marketplacesDir := filepath.Join(cacheDir, "marketplaces")
+	if err := os.MkdirAll(marketplacesDir, 0755); err != nil {
+		t.Fatalf("failed to create marketplaces dir: %v", err)
+	}
+
 	settings := &Settings{
 		EnabledPlugins: map[string]bool{
 			"plugin@market": true,
@@ -308,7 +316,7 @@ func TestRequiredMounts(t *testing.T) {
 		SettingsPath: "/tmp/moat-claude-123/settings.json",
 	}
 
-	mounts := RequiredMounts(settings, generatedConfig, "/home/user/.moat/claude/plugins", "/home/container")
+	mounts := RequiredMounts(settings, generatedConfig, cacheDir, "/home/container")
 
 	// Should have plugin cache mount
 	var hasCacheMount bool
@@ -336,6 +344,41 @@ func TestRequiredMounts(t *testing.T) {
 	}
 	if !hasSettingsMount {
 		t.Error("should have settings mount")
+	}
+}
+
+func TestRequiredMounts_NoMarketplacesDir(t *testing.T) {
+	// Use a non-existent cache directory
+	cacheDir := "/nonexistent/path/to/cache"
+
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{
+			"plugin@market": true,
+		},
+	}
+
+	generatedConfig := &GeneratedConfig{
+		SettingsPath: "/tmp/moat-claude-123/settings.json",
+	}
+
+	mounts := RequiredMounts(settings, generatedConfig, cacheDir, "/home/container")
+
+	// Should NOT have plugin cache mount (directory doesn't exist)
+	for _, m := range mounts {
+		if strings.Contains(m.Target, "claude-plugins") {
+			t.Error("should not have plugin cache mount when directory doesn't exist")
+		}
+	}
+
+	// Should still have settings mount
+	var hasSettingsMount bool
+	for _, m := range mounts {
+		if strings.Contains(m.Target, "settings.json") {
+			hasSettingsMount = true
+		}
+	}
+	if !hasSettingsMount {
+		t.Error("should have settings mount even when cache dir doesn't exist")
 	}
 }
 

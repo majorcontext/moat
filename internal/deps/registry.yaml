@@ -91,6 +91,12 @@ mysql:
   type: apt
   package: mysql-client
 
+# Common tools (apt)
+git:
+  description: Git version control
+  type: apt
+  package: git
+
 # Custom installers (complex logic)
 playwright:
   description: Browser testing framework

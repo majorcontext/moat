@@ -733,6 +733,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				})
 			}
 		}
+
+		// Mount Claude OAuth credentials for Pro/Max subscription mode.
+		// This allows Claude Code in the container to use host's OAuth login.
+		if opts.Config != nil && opts.Config.Claude.UseOAuth {
+			hostCredentials := filepath.Join(hostHome, ".claude", ".credentials.json")
+			if _, err := os.Stat(hostCredentials); err == nil {
+				containerCredentials := filepath.Join(containerHome, ".claude", ".credentials.json")
+				mounts = append(mounts, container.MountConfig{
+					Source:   hostCredentials,
+					Target:   containerCredentials,
+					ReadOnly: true,
+				})
+			}
+		}
 	}
 
 	// Set up Claude plugins if configured in settings or agent.yaml
