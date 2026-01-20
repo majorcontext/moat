@@ -265,10 +265,12 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 
 			// Limit copy size to prevent decompression bombs (1GB max per file)
 			if _, err := io.Copy(f, io.LimitReader(tr, 1<<30)); err != nil {
-				f.Close()
+				_ = f.Close() // Best effort close; preserve the write error
 				return fmt.Errorf("write file %s: %w", header.Name, err)
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("close file %s: %w", header.Name, err)
+			}
 		case tar.TypeSymlink:
 			// Ensure parent directory exists
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {

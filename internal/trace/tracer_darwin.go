@@ -67,6 +67,9 @@ type DarwinTracer struct {
 	procMu       sync.Mutex
 	pollInterval time.Duration
 
+	// Error tracking
+	consecutiveErrors int
+
 	// Metrics for observability
 	droppedEvents int64
 }
@@ -92,7 +95,8 @@ func (t *DarwinTracer) Start() error {
 	}
 
 	// Initialize with current processes (don't emit events for existing ones)
-	t.scanProcesses(true)
+	// Ignore error - we'll start with empty process list if scan fails
+	_ = t.scanProcesses(true)
 
 	t.started = true
 	t.wg.Add(1)
@@ -132,6 +136,8 @@ func (t *DarwinTracer) OnExec(cb func(ExecEvent)) {
 	t.callbacks = append(t.callbacks, cb)
 }
 
+const maxConsecutiveDarwinErrors = 10
+
 // pollLoop periodically scans for new processes.
 func (t *DarwinTracer) pollLoop() {
 	defer t.wg.Done()
@@ -144,16 +150,26 @@ func (t *DarwinTracer) pollLoop() {
 		case <-t.done:
 			return
 		case <-ticker.C:
-			t.scanProcesses(false)
+			if err := t.scanProcesses(false); err != nil {
+				t.consecutiveErrors++
+				if t.consecutiveErrors >= maxConsecutiveDarwinErrors {
+					slog.Error("too many consecutive errors in darwin tracer, stopping",
+						"error", err, "count", t.consecutiveErrors)
+					return
+				}
+				slog.Debug("error scanning processes", "error", err)
+			} else {
+				t.consecutiveErrors = 0
+			}
 		}
 	}
 }
 
 // scanProcesses uses sysctl to get all processes and detect new ones.
-func (t *DarwinTracer) scanProcesses(initial bool) {
+func (t *DarwinTracer) scanProcesses(initial bool) error {
 	procs, err := t.getAllProcesses()
 	if err != nil {
-		return
+		return err
 	}
 
 	t.procMu.Lock()
@@ -199,6 +215,8 @@ func (t *DarwinTracer) scanProcesses(initial bool) {
 			delete(t.trackedPIDs, pid)
 		}
 	}
+
+	return nil
 }
 
 // processInfo holds basic process information from kinfo_proc.

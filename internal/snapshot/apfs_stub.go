@@ -2,8 +2,13 @@
 
 package snapshot
 
+import "fmt"
+
+// ErrAPFSNotAvailable is returned when APFS operations are attempted on non-Darwin platforms.
+var ErrAPFSNotAvailable = fmt.Errorf("APFS snapshots are only available on macOS")
+
 // APFSBackend is a stub for non-darwin platforms.
-// On non-darwin systems, all methods return nil/empty values.
+// On non-darwin systems, all methods return errors to indicate APFS is unavailable.
 type APFSBackend struct{}
 
 // NewAPFSBackend returns a stub APFSBackend on non-darwin platforms.
@@ -16,29 +21,29 @@ func (b *APFSBackend) Name() string {
 	return "apfs"
 }
 
-// Create is a no-op on non-darwin platforms.
+// Create returns an error on non-darwin platforms.
 func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
-	return "", nil
+	return "", ErrAPFSNotAvailable
 }
 
-// Restore is a no-op on non-darwin platforms.
+// Restore returns an error on non-darwin platforms.
 func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
-	return nil
+	return ErrAPFSNotAvailable
 }
 
-// RestoreTo is a no-op on non-darwin platforms.
+// RestoreTo returns an error on non-darwin platforms.
 func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
-	return nil
+	return ErrAPFSNotAvailable
 }
 
-// Delete is a no-op on non-darwin platforms.
+// Delete returns an error on non-darwin platforms.
 func (b *APFSBackend) Delete(nativeRef string) error {
-	return nil
+	return ErrAPFSNotAvailable
 }
 
-// List returns an empty slice on non-darwin platforms.
+// List returns an error on non-darwin platforms.
 func (b *APFSBackend) List(workspacePath string) ([]string, error) {
-	return nil, nil
+	return nil, ErrAPFSNotAvailable
 }
 
 // IsAPFS returns false on non-darwin platforms.

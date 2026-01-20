@@ -392,17 +392,24 @@ func (s *RunStore) WriteExecEvent(event ExecEvent) error {
 	if err != nil {
 		return fmt.Errorf("opening exec file: %w", err)
 	}
-	defer f.Close()
 
 	data, err := json.Marshal(event)
 	if err != nil {
+		_ = f.Close()
 		return fmt.Errorf("marshaling exec event: %w", err)
 	}
 	if _, writeErr := f.Write(data); writeErr != nil {
+		_ = f.Close()
 		return fmt.Errorf("writing exec event: %w", writeErr)
 	}
-	_, err = f.Write([]byte("\n"))
-	return err
+	if _, writeErr := f.Write([]byte("\n")); writeErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing exec event newline: %w", writeErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		return fmt.Errorf("closing exec file: %w", closeErr)
+	}
+	return nil
 }
 
 // ReadExecEvents reads all execution events from exec.jsonl.
