@@ -349,11 +349,18 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 
 	fmt.Printf("Building image %s...\n", tag)
 
+	// Determine platform based on host architecture
+	platform := "linux/amd64"
+	if goruntime.GOARCH == "arm64" {
+		platform = "linux/arm64"
+	}
+
 	// Build the image
 	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
+		Platform:   platform,
 	})
 	if err != nil {
 		return fmt.Errorf("building image: %w", err)

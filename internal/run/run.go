@@ -59,6 +59,12 @@ type Run struct {
 
 	// Snapshot settings
 	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
+
+	// AWS credential provider (set when using aws grant)
+	AWSCredentialProvider *proxy.AWSCredentialProvider
+
+	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
+	awsTempDir string
 }
 
 // Options configures a new run.

@@ -267,6 +267,41 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					if setup := credential.GetProviderSetup(provider); setup != nil {
 						setup.ConfigureProxy(p, cred)
 						providerEnv = append(providerEnv, setup.ContainerEnv(cred)...)
+					} else if provider == credential.ProviderAWS {
+						// AWS credentials are handled via credential endpoint, not header injection
+						// Parse stored config: Token=roleARN, Scopes=[region, sessionDuration, externalID]
+						awsConfig := credential.AWSConfig{
+							RoleARN: cred.Token,
+							Region:  "us-east-1",
+						}
+						if len(cred.Scopes) > 0 && cred.Scopes[0] != "" {
+							awsConfig.Region = cred.Scopes[0]
+						}
+						if len(cred.Scopes) > 1 {
+							awsConfig.SessionDurationStr = cred.Scopes[1]
+						}
+						if len(cred.Scopes) > 2 {
+							awsConfig.ExternalID = cred.Scopes[2]
+						}
+
+						sessionDuration, err := awsConfig.SessionDuration()
+						if err != nil {
+							return nil, fmt.Errorf("invalid AWS session duration: %w", err)
+						}
+
+						awsProvider, err := proxy.NewAWSCredentialProvider(
+							ctx,
+							awsConfig.RoleARN,
+							awsConfig.Region,
+							sessionDuration,
+							awsConfig.ExternalID,
+							"moat-"+r.ID,
+						)
+						if err != nil {
+							return nil, fmt.Errorf("creating AWS credential provider: %w", err)
+						}
+						// Store provider; handler will be set later after auth token is generated
+						r.AWSCredentialProvider = awsProvider
 					}
 				}
 			}
@@ -290,6 +325,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			}
 			proxyAuthToken = hex.EncodeToString(tokenBytes)
 			p.SetAuthToken(proxyAuthToken)
+		}
+
+		// Set up AWS credential handler if AWS grant is active
+		if r.AWSCredentialProvider != nil {
+			// Use same auth token as the main proxy (if set)
+			r.AWSCredentialProvider.SetAuthToken(proxyAuthToken)
+			p.SetAWSHandler(r.AWSCredentialProvider.Handler())
 		}
 
 		// Set up request logging with atomic store reference for safe concurrent access.
@@ -383,6 +425,65 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
+
+		// Set up AWS credential_process if AWS grant is active
+		// Instead of static credential injection, we use credential_process for dynamic refresh.
+		// A small binary inside the container fetches credentials from our proxy on demand.
+		if r.AWSCredentialProvider != nil {
+			// Create temp directory for credential helper and config
+			awsDir, err := os.MkdirTemp("", "agentops-aws-*")
+			if err != nil {
+				return nil, fmt.Errorf("creating AWS credential helper directory: %w", err)
+			}
+			r.awsTempDir = awsDir // Track for cleanup
+
+			// Write the credential helper script
+			// Use 0700 permissions since the script contains the credential endpoint URL
+			helperPath := filepath.Join(awsDir, "credentials")
+			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0700); err != nil {
+				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
+			}
+
+			// Write AWS config file
+			awsConfig := fmt.Sprintf(`[default]
+credential_process = /agentops/aws/credentials
+region = %s
+`, r.AWSCredentialProvider.Region())
+			configPath := filepath.Join(awsDir, "config")
+			if err := os.WriteFile(configPath, []byte(awsConfig), 0644); err != nil {
+				return nil, fmt.Errorf("writing AWS config: %w", err)
+			}
+
+			// Mount the directory
+			mounts = append(mounts, container.MountConfig{
+				Source:   awsDir,
+				Target:   "/agentops/aws",
+				ReadOnly: true,
+			})
+
+			// Build credential endpoint URL
+			credentialURL := "http://" + proxyHost + "/_aws/credentials"
+
+			// Set environment variables
+			proxyEnv = append(proxyEnv,
+				"AWS_CONFIG_FILE=/agentops/aws/config",
+				"AGENTOPS_CREDENTIAL_URL="+credentialURL,
+				"AWS_REGION="+r.AWSCredentialProvider.Region(),
+				// AWS traffic goes through proxy for firewall/observability.
+				// Tell AWS SDK to trust our CA for MITM SSL.
+				"AWS_CA_BUNDLE="+caCertInContainer,
+				// Disable pager - containers may not have 'less' installed
+				"AWS_PAGER=",
+			)
+
+			// Include auth token if proxy requires it
+			if proxyAuthToken != "" {
+				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+proxyAuthToken)
+			}
+
+			fmt.Printf("AWS credential_process configured (role: %s)\n",
+				filepath.Base(r.AWSCredentialProvider.RoleARN()))
+		}
 	}
 
 	// Set up SSH agent proxy for SSH grants (e.g., git clone git@github.com:...)
@@ -1345,6 +1446,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			}
 		}
 
+		// Clean up AWS temp directory
+		if r.awsTempDir != "" {
+			if rmErr := os.RemoveAll(r.awsTempDir); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", rmErr)
+			}
+		}
+
 		return err
 	case <-ctx.Done():
 		// Context canceled - caller chose to detach, don't stop the run
@@ -1435,6 +1543,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	for provider, cleanupPath := range r.ProviderCleanupPaths {
 		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
 			setup.Cleanup(cleanupPath)
+		}
+	}
+
+	// Clean up AWS temp directory
+	if r.awsTempDir != "" {
+		if err := os.RemoveAll(r.awsTempDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", err)
 		}
 	}
 

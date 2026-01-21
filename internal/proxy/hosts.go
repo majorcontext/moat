@@ -99,6 +99,11 @@ var grantHosts = map[string][]string{
 		"api.anthropic.com",
 		"*.anthropic.com",
 	},
+	"aws": {
+		"sts.amazonaws.com",
+		"sts.*.amazonaws.com",
+		"*.amazonaws.com",
+	},
 }
 
 // GetHostsForGrant returns the host patterns for a given grant name.

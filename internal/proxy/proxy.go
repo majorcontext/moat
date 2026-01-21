@@ -179,6 +179,7 @@ type Proxy struct {
 	authToken    string        // Optional auth token required for proxy access
 	policy       string        // "permissive" or "strict"
 	allowedHosts []hostPattern // parsed allow patterns for strict policy
+	awsHandler   http.Handler  // Optional handler for AWS credential endpoint
 }
 
 // NewProxy creates a new auth proxy.
@@ -203,6 +204,11 @@ func (p *Proxy) SetCA(ca *CA) {
 // SetLogger sets the request logger.
 func (p *Proxy) SetLogger(logger RequestLogger) {
 	p.logger = logger
+}
+
+// SetAWSHandler sets the handler for AWS credential requests.
+func (p *Proxy) SetAWSHandler(h http.Handler) {
+	p.awsHandler = h
 }
 
 // SetCredential sets the credential for a host using the Authorization header.
@@ -285,6 +291,12 @@ func (p *Proxy) getExtraHeaders(host string) []extraHeader {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.authToken != "" && !p.checkAuth(r) {
 		http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
+		return
+	}
+
+	// Handle AWS credential endpoint
+	if p.awsHandler != nil && strings.HasPrefix(r.URL.Path, "/_aws/credentials") {
+		p.awsHandler.ServeHTTP(w, r)
 		return
 	}
 
@@ -462,7 +474,15 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, hasCredential := p.getCredential(host); p.ca != nil && hasCredential {
+	// Do MITM interception when we have a CA configured.
+	//
+	// Security note: This intercepts ALL HTTPS traffic, not just credential-injected hosts.
+	// This is intentional for full observability - a core AgentOps feature. The container
+	// trusts our CA (mounted at /etc/ssl/certs/agentops-ca/) and we verify upstream certs.
+	//
+	// Applications with certificate pinning may fail. This is expected behavior since
+	// observability requires seeing all traffic.
+	if p.ca != nil {
 		p.handleConnectWithInterception(w, r, host)
 		return
 	}

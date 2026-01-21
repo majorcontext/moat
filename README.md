@@ -246,6 +246,7 @@ The credential broker is the security core. Agents request scoped capabilitiesâ€
 moat grant github              # GitHub device flow
 moat grant github:repo         # Specific scope
 moat grant github:repo,user    # Multiple scopes
+moat grant aws --role=ARN      # AWS IAM role (see AWS credentials below)
 ```
 
 ### SSH Access
@@ -321,6 +322,38 @@ If you see decryption errors after upgrading Moat, your credentials may have bee
 ```bash
 moat grant github  # or other provider
 ```
+
+### AWS credentials
+
+AWS credentials use IAM role assumption with short-lived sessions:
+
+```bash
+# Grant access to an IAM role
+moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole
+
+# With custom options
+moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole \
+  --region=us-west-2 \
+  --session-duration=1h
+
+# Use in a run
+moat run --grant aws ./my-agent
+```
+
+**How it works:**
+- Your host AWS credentials assume the specified role at runtime
+- The agent receives short-lived session credentials (15 minutes by default)
+- Credentials auto-refresh via a credential helper that fetches from the proxy
+- Your long-lived credentials never enter the container
+
+**Note:** Unlike GitHub and Anthropic grants where tokens are injected at the network layer and never visible to the container, AWS uses `credential_process`â€”a standard AWS mechanism where the SDK calls a helper script to fetch credentials on demand. This means short-lived session credentials are available to the container, but your long-lived IAM credentials remain on the host.
+
+**Security note:** Any code in the container can access the session credentials. Use an IAM role with minimal permissions scoped to what the agent actually needs.
+
+**Required IAM setup:**
+1. Create an IAM role with appropriate permissions for the agent
+2. Configure the role's trust policy to allow your IAM user/role to assume it
+3. Ensure you have `sts:AssumeRole` permission
 
 ## Secrets
 
