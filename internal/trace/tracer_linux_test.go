@@ -14,8 +14,8 @@ func TestProcConnectorTracerCleanupStalePIDs(t *testing.T) {
 	}
 
 	// Add some PIDs - use PID 1 (init, always exists) and a fake high PID
-	tracer.trackedPIDs[1] = true           // Should survive cleanup (exists)
-	tracer.trackedPIDs[999999999] = true   // Should be removed (doesn't exist)
+	tracer.trackedPIDs[1] = true         // Should survive cleanup (exists)
+	tracer.trackedPIDs[999999999] = true // Should be removed (doesn't exist)
 
 	// Run cleanup
 	tracer.cleanupStalePIDs()
