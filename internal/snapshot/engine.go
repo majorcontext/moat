@@ -231,7 +231,7 @@ func (e *Engine) loadMetadata() error {
 
 	var list []Metadata
 	if err := json.Unmarshal(data, &list); err != nil {
-		return fmt.Errorf("corrupted snapshot metadata at %s: %w\nTo reset, delete the file: rm %s", path, err, path)
+		return fmt.Errorf("corrupted snapshot metadata at %s: %w\nTo reset, delete the file: rm %q", path, err, path)
 	}
 
 	for _, meta := range list {

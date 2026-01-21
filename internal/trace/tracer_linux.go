@@ -36,7 +36,14 @@ const (
 )
 
 // ProcConnectorTracer implements process tracing using Linux proc connector.
-// Requires CAP_NET_ADMIN or root privileges.
+//
+// Privilege Requirements:
+//   - Requires CAP_NET_ADMIN capability OR root privileges
+//   - Without these, Start() will fail with "operation not permitted"
+//   - In containers, the host must allow CAP_NET_ADMIN (--cap-add=NET_ADMIN in Docker)
+//
+// The proc connector provides real-time notifications of process events via netlink.
+// This is more efficient than polling /proc and catches short-lived processes.
 type ProcConnectorTracer struct {
 	config    Config
 	sock      int
@@ -63,6 +70,8 @@ const (
 )
 
 // NewProcConnectorTracer creates a new proc connector tracer.
+// The tracer is created in a stopped state; call Start() to begin receiving events.
+// Start() requires CAP_NET_ADMIN capability or root privileges.
 func NewProcConnectorTracer(cfg Config) (*ProcConnectorTracer, error) {
 	return &ProcConnectorTracer{
 		config:      cfg,

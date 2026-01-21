@@ -31,6 +31,14 @@ func (b *APFSBackend) Name() string {
 // Create creates an APFS clone of the workspace directory.
 // Uses cp -c for copy-on-write cloning which is instant and space-efficient.
 func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
+	// Validate paths don't start with "-" to prevent argument injection
+	if strings.HasPrefix(filepath.Base(workspacePath), "-") {
+		return "", fmt.Errorf("invalid workspace path: name cannot start with -")
+	}
+	if strings.HasPrefix(id, "-") {
+		return "", fmt.Errorf("invalid snapshot id: cannot start with -")
+	}
+
 	// Ensure snapshot directory exists
 	if err := os.MkdirAll(b.snapshotDir, 0755); err != nil {
 		return "", fmt.Errorf("create snapshot directory: %w", err)
@@ -71,6 +79,14 @@ func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
 // Restore restores the workspace from an APFS clone (in-place).
 // Preserves the .git directory in the workspace.
 func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
+	// Validate paths don't start with "-" to prevent argument injection
+	if strings.HasPrefix(filepath.Base(workspacePath), "-") {
+		return fmt.Errorf("invalid workspace path: name cannot start with -")
+	}
+	if strings.HasPrefix(filepath.Base(nativeRef), "-") {
+		return fmt.Errorf("invalid snapshot reference: name cannot start with -")
+	}
+
 	// First, preserve the .git directory if it exists
 	gitDir := filepath.Join(workspacePath, ".git")
 	var gitBackup string
@@ -139,6 +155,14 @@ func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
 
 // RestoreTo restores an APFS clone to a different directory.
 func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
+	// Validate paths don't start with "-" to prevent argument injection
+	if strings.HasPrefix(filepath.Base(nativeRef), "-") {
+		return fmt.Errorf("invalid snapshot reference: name cannot start with -")
+	}
+	if strings.HasPrefix(filepath.Base(destPath), "-") {
+		return fmt.Errorf("invalid destination path: name cannot start with -")
+	}
+
 	// Ensure destination exists
 	if err := os.MkdirAll(destPath, 0755); err != nil {
 		return fmt.Errorf("create destination directory: %w", err)

@@ -210,6 +210,10 @@ func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
 	return nil
 }
 
+// maxArchiveFiles is the maximum number of files allowed in an archive restore.
+// This prevents zip bomb attacks with millions of small files.
+const maxArchiveFiles = 100000
+
 // RestoreTo extracts the archive to an arbitrary destination path.
 func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 	file, err := os.Open(nativeRef)
@@ -225,6 +229,7 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 	defer gr.Close()
 
 	tr := tar.NewReader(gr)
+	fileCount := 0
 
 	for {
 		header, err := tr.Next()
@@ -233,6 +238,12 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("read tar header: %w", err)
+		}
+
+		// Check file count limit to prevent zip bomb attacks
+		fileCount++
+		if fileCount > maxArchiveFiles {
+			return fmt.Errorf("archive contains too many files (limit: %d)", maxArchiveFiles)
 		}
 
 		// targetPath is validated below before any filesystem operations
