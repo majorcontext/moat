@@ -241,9 +241,9 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 
 	if failed > 0 {
 		fmt.Printf("\nPruned %d snapshots (%d failed)\n", deleted, failed)
-	} else {
-		fmt.Printf("\nPruned %d snapshots\n", deleted)
+		return fmt.Errorf("failed to delete %d of %d snapshots", failed, len(toDelete))
 	}
 
+	fmt.Printf("\nPruned %d snapshots\n", deleted)
 	return nil
 }

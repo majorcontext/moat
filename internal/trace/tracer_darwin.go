@@ -16,6 +16,10 @@ import (
 
 // kinfo_proc structure offsets vary by architecture.
 // These are the offsets for the fields we need to parse.
+//
+// The structure is defined in sys/sysctl.h. These offsets are validated at
+// runtime by checking PID 1 (launchd) properties. If offsets are incorrect
+// for the running macOS version, Start() will log a warning.
 var (
 	procSize    int
 	pidOffset   int
@@ -92,6 +96,13 @@ func (t *DarwinTracer) Start() error {
 
 	if t.started {
 		return fmt.Errorf("tracer already started")
+	}
+
+	// Validate kinfo_proc offsets by checking PID 1 (launchd)
+	// This catches offset mismatches on unsupported macOS versions
+	if err := t.validateOffsets(); err != nil {
+		slog.Warn("darwin tracer offset validation failed, process tracing may be unreliable",
+			"error", err, "arch", runtime.GOARCH)
 	}
 
 	// Initialize with current processes (don't emit events for existing ones)
@@ -316,6 +327,48 @@ func (t *DarwinTracer) parseKinfoProc(buf []byte) processInfo {
 	}
 
 	return info
+}
+
+// validateOffsets checks that kinfo_proc offsets are correct by examining PID 1.
+// PID 1 (launchd on macOS) always exists and has known properties we can validate.
+func (t *DarwinTracer) validateOffsets() error {
+	procs, err := t.getAllProcesses()
+	if err != nil {
+		return fmt.Errorf("get processes: %w", err)
+	}
+
+	// Find PID 1 (launchd)
+	var pid1 *processInfo
+	for i := range procs {
+		if procs[i].pid == 1 {
+			pid1 = &procs[i]
+			break
+		}
+	}
+
+	if pid1 == nil {
+		return fmt.Errorf("PID 1 not found in process list")
+	}
+
+	// Validate PID 1 properties:
+	// - PPID should be 0 (init process has no parent)
+	// - Command should be "launchd"
+	// - Start time should be positive and reasonable (after year 2000)
+	if pid1.ppid != 0 {
+		return fmt.Errorf("PID 1 has unexpected PPID %d (expected 0)", pid1.ppid)
+	}
+
+	if pid1.comm != "launchd" {
+		return fmt.Errorf("PID 1 has unexpected command %q (expected launchd)", pid1.comm)
+	}
+
+	// Year 2000 in Unix time
+	const year2000 = 946684800
+	if pid1.startTime < year2000 {
+		return fmt.Errorf("PID 1 has invalid start time %d", pid1.startTime)
+	}
+
+	return nil
 }
 
 // shouldTrackLocked returns true if the process should be tracked.
