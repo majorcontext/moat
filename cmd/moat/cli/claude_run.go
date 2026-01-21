@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/andybons/moat/internal/claude"
@@ -14,6 +15,10 @@ import (
 	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
+
+// validEnvKey matches valid environment variable names.
+// Must start with letter or underscore, followed by letters, digits, or underscores.
+var validEnvKey = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 var (
 	claudeFlags        ExecFlags
@@ -88,7 +93,13 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolving workspace path: %w", err)
 	}
 
-	// Verify path exists and is a directory
+	// Resolve symlinks to get the real path
+	absPath, err = filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return fmt.Errorf("workspace path %q: %w", workspace, err)
+	}
+
+	// Verify path is a directory
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return fmt.Errorf("workspace path %q: %w", absPath, err)
@@ -180,6 +191,9 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 			key, value, ok := strings.Cut(e, "=")
 			if !ok {
 				return fmt.Errorf("invalid environment variable %q: expected KEY=VALUE format", e)
+			}
+			if !validEnvKey.MatchString(key) {
+				return fmt.Errorf("invalid environment variable name %q: must start with letter or underscore, contain only letters, digits, and underscores", key)
 			}
 			cfg.Env[key] = value
 		}

@@ -218,7 +218,11 @@ func (p *Proxy) SetCredential(host, authHeader string) {
 
 // SetCredentialHeader sets a custom credential header for a host.
 // Use this for APIs that use non-standard header names like "x-api-key".
+// The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
+	if !isValidHost(host) {
+		return // Silently ignore invalid hosts to avoid breaking callers
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue}
@@ -227,10 +231,31 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 // AddExtraHeader adds an additional header to inject for a host.
 // This is used for headers beyond the main credential header, such as
 // beta feature flags or API version headers.
+// The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
+	if !isValidHost(host) {
+		return // Silently ignore invalid hosts to avoid breaking callers
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.extraHeaders[host] = append(p.extraHeaders[host], extraHeader{Name: headerName, Value: headerValue})
+}
+
+// isValidHost checks if a host string is valid for credential injection.
+// Returns false for empty strings, paths, or other invalid values.
+func isValidHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	// Reject anything that looks like a path or URL
+	if strings.ContainsAny(host, "/:@") {
+		return false
+	}
+	// Reject whitespace
+	if strings.ContainsAny(host, " \t\n\r") {
+		return false
+	}
+	return true
 }
 
 // SetNetworkPolicy sets the network policy and allowed hosts.
