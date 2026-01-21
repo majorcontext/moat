@@ -114,7 +114,7 @@ type Config struct {
 	Cmd          []string
 	WorkingDir   string
 	Env          []string
-	User         string         // User to run as (e.g., "1000:1000" or "moatuser")
+	User         string // User to run as (e.g., "1000:1000" or "moatuser")
 	Mounts       []MountConfig
 	ExtraHosts   []string       // host:ip mappings (Docker-specific)
 	NetworkMode  string         // "bridge", "host", "none" (Docker-specific)
