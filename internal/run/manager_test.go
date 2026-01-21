@@ -122,12 +122,13 @@ const moatuserUID = 5000
 
 // determineContainerUser replicates the UID mapping logic from manager.go
 // for testing purposes. This allows us to test the logic without a real container.
-func determineContainerUser(goos string, hostUID, hostGID int) string {
+// In production, the UID/GID come from the workspace owner (via getWorkspaceOwner).
+func determineContainerUser(goos string, workspaceUID, workspaceGID int) string {
 	if goos == "linux" {
-		if hostUID != moatuserUID {
-			return fmt.Sprintf("%d:%d", hostUID, hostGID)
+		if workspaceUID != moatuserUID {
+			return fmt.Sprintf("%d:%d", workspaceUID, workspaceGID)
 		}
-		// If host UID matches moatuserUID, use the image's default moatuser
+		// If workspace owner UID matches moatuserUID, use the image's default moatuser
 		return ""
 	}
 	// On macOS/Windows, leave containerUser empty to use the image default
@@ -135,72 +136,72 @@ func determineContainerUser(goos string, hostUID, hostGID int) string {
 }
 
 // TestContainerUserMapping verifies that container user is set correctly
-// based on host OS and UID. This is critical for security boundaries.
+// based on host OS and workspace owner UID. This is critical for security boundaries.
 func TestContainerUserMapping(t *testing.T) {
 	tests := []struct {
-		name     string
-		goos     string
-		hostUID  int
-		hostGID  int
-		wantUser string
+		name         string
+		goos         string
+		workspaceUID int
+		workspaceGID int
+		wantUser     string
 	}{
 		{
-			name:     "Linux with typical developer UID",
-			goos:     "linux",
-			hostUID:  1000,
-			hostGID:  1000,
-			wantUser: "1000:1000", // map to host user
+			name:         "Linux with typical developer UID",
+			goos:         "linux",
+			workspaceUID: 1000,
+			workspaceGID: 1000,
+			wantUser:     "1000:1000", // map to workspace owner
 		},
 		{
-			name:     "Linux with moatuser UID",
-			goos:     "linux",
-			hostUID:  moatuserUID,
-			hostGID:  moatuserUID,
-			wantUser: "", // use image default
+			name:         "Linux with moatuser UID",
+			goos:         "linux",
+			workspaceUID: moatuserUID,
+			workspaceGID: moatuserUID,
+			wantUser:     "", // use image default
 		},
 		{
-			name:     "Linux with root UID",
-			goos:     "linux",
-			hostUID:  0,
-			hostGID:  0,
-			wantUser: "0:0", // map to root (should be avoided)
+			name:         "Linux with root UID",
+			goos:         "linux",
+			workspaceUID: 0,
+			workspaceGID: 0,
+			wantUser:     "0:0", // map to root (should be avoided)
 		},
 		{
-			name:     "Linux with high UID",
-			goos:     "linux",
-			hostUID:  65534,
-			hostGID:  65534,
-			wantUser: "65534:65534", // map to host user
+			name:         "Linux with high UID",
+			goos:         "linux",
+			workspaceUID: 65534,
+			workspaceGID: 65534,
+			wantUser:     "65534:65534", // map to workspace owner
 		},
 		{
-			name:     "Linux with different UID/GID",
-			goos:     "linux",
-			hostUID:  1001,
-			hostGID:  1002,
-			wantUser: "1001:1002", // map to host user with different group
+			name:         "Linux with different UID/GID",
+			goos:         "linux",
+			workspaceUID: 1001,
+			workspaceGID: 1002,
+			wantUser:     "1001:1002", // map to workspace owner with different group
 		},
 		{
-			name:     "macOS always uses image default",
-			goos:     "darwin",
-			hostUID:  501,
-			hostGID:  20,
-			wantUser: "", // Docker Desktop handles mapping
+			name:         "macOS always uses image default",
+			goos:         "darwin",
+			workspaceUID: 501,
+			workspaceGID: 20,
+			wantUser:     "", // Docker Desktop handles mapping
 		},
 		{
-			name:     "Windows always uses image default",
-			goos:     "windows",
-			hostUID:  0,
-			hostGID:  0,
-			wantUser: "", // Docker Desktop handles mapping
+			name:         "Windows always uses image default",
+			goos:         "windows",
+			workspaceUID: 0,
+			workspaceGID: 0,
+			wantUser:     "", // Docker Desktop handles mapping
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := determineContainerUser(tt.goos, tt.hostUID, tt.hostGID)
+			got := determineContainerUser(tt.goos, tt.workspaceUID, tt.workspaceGID)
 			if got != tt.wantUser {
 				t.Errorf("determineContainerUser(%q, %d, %d) = %q, want %q",
-					tt.goos, tt.hostUID, tt.hostGID, got, tt.wantUser)
+					tt.goos, tt.workspaceUID, tt.workspaceGID, got, tt.wantUser)
 			}
 		})
 	}

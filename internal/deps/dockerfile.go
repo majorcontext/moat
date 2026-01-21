@@ -127,9 +127,14 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	// Create non-root user for security
 	// Claude Code and other tools refuse certain flags when running as root
 	// Also create .claude directory structure for Claude Code state (todos, settings, logs, etc.)
+	// Note: We check if UID 5000 exists and delete it first. This is unlikely since UID 5000
+	// is above the typical user range, but we handle it for robustness.
 	b.WriteString("# Create non-root user\n")
 	b.WriteString(fmt.Sprintf("RUN existing_user=$(getent passwd %s | cut -d: -f1) && \\\n", containerUID))
-	b.WriteString("    if [ -n \"$existing_user\" ]; then userdel -r \"$existing_user\" 2>/dev/null || true; fi && \\\n")
+	b.WriteString("    if [ -n \"$existing_user\" ]; then \\\n")
+	b.WriteString("      echo \"Removing existing user $existing_user with UID " + containerUID + "\" && \\\n")
+	b.WriteString("      userdel -r \"$existing_user\" || echo \"Warning: failed to remove user $existing_user\"; \\\n")
+	b.WriteString("    fi && \\\n")
 	b.WriteString(fmt.Sprintf("    useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
 	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects && \\\n", containerUser))
 	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))

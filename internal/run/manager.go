@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/andybons/moat/internal/audit"
@@ -32,6 +33,24 @@ import (
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
+
+// getWorkspaceOwner returns the UID and GID of the workspace directory owner.
+// This is used on Linux to run containers as the workspace owner, ensuring
+// file permissions work correctly even when moat is run with sudo.
+// Falls back to the current process UID/GID if stat fails.
+func getWorkspaceOwner(workspace string) (uid, gid int) {
+	info, err := os.Stat(workspace)
+	if err != nil {
+		// Fall back to process UID/GID
+		return os.Getuid(), os.Getgid()
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		// Fall back to process UID/GID (non-Unix system)
+		return os.Getuid(), os.Getgid()
+	}
+	return int(stat.Uid), int(stat.Gid)
+}
 
 // Manager handles run lifecycle operations.
 type Manager struct {
@@ -1027,20 +1046,21 @@ region = %s
 	}
 
 	// Determine container user
-	// On Linux with native Docker, we need to run as the host user's UID to ensure
-	// workspace file permissions work correctly. On macOS/Windows, Docker Desktop
-	// handles UID translation automatically, so we can use the default moatuser (5000).
+	// On Linux with native Docker, we need to run as the workspace owner's UID to ensure
+	// file permissions work correctly. On macOS/Windows, Docker Desktop handles UID
+	// translation automatically, so we can use the default moatuser (5000).
 	const moatuserUID = 5000
 	var containerUser string
 	if goruntime.GOOS == "linux" {
-		hostUID := os.Getuid()
-		hostGID := os.Getgid()
-		if hostUID != moatuserUID {
-			// Run as host user's UID:GID for correct workspace permissions
-			containerUser = fmt.Sprintf("%d:%d", hostUID, hostGID)
-			log.Debug("using host UID for container", "uid", hostUID, "gid", hostGID)
+		// Use the workspace owner's UID/GID, not the process UID.
+		// This handles cases where moat is run with sudo or as a different user.
+		workspaceUID, workspaceGID := getWorkspaceOwner(opts.Workspace)
+		if workspaceUID != moatuserUID {
+			// Run as workspace owner's UID:GID for correct file permissions
+			containerUser = fmt.Sprintf("%d:%d", workspaceUID, workspaceGID)
+			log.Debug("using workspace owner UID for container", "uid", workspaceUID, "gid", workspaceGID, "workspace", opts.Workspace)
 		}
-		// If host UID is 5000, we can use the image's default moatuser
+		// If workspace owner UID is 5000, we can use the image's default moatuser
 	}
 	// On macOS/Windows, leave containerUser empty to use the image default (moatuser)
 
