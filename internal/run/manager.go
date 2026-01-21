@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/audit"
+	"github.com/andybons/moat/internal/claude"
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
@@ -270,7 +271,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
 						// Set a dummy ANTHROPIC_API_KEY so Claude Code doesn't error
 						// The real key is injected by the proxy at the network layer
-						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY=moat-proxy-injected")
+						providerEnv = append(providerEnv, "ANTHROPIC_API_KEY="+claude.ProxyInjectedPlaceholder)
 					}
 				}
 			}
@@ -711,11 +712,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// This is enabled when:
 	// - claude.sync_logs is explicitly true, OR
 	// - anthropic grant is configured (automatic Claude Code integration)
-	if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
-		if hostHome, err := os.UserHomeDir(); err == nil {
-			// Detect container home directory from image
-			containerHome := m.runtime.GetImageHomeDir(ctx, containerImage)
-
+	var containerHome string
+	if hostHome, err := os.UserHomeDir(); err == nil {
+		containerHome = m.runtime.GetImageHomeDir(ctx, containerImage)
+		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			claudeDir := workspaceToClaudeDir(opts.Workspace)
 			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
 
@@ -732,6 +732,73 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					ReadOnly: false,
 				})
 			}
+		}
+	}
+
+	// Set up Claude plugins if configured in settings or agent.yaml
+	var claudeGenerated *claude.GeneratedConfig
+	if opts.Config != nil {
+		// Load and merge Claude settings from all sources
+		claudeSettings, loadErr := claude.LoadAllSettings(opts.Workspace, opts.Config)
+		if loadErr != nil {
+			if proxyServer != nil {
+				_ = proxyServer.Stop(context.Background())
+			}
+			return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
+		}
+
+		// Only proceed if there are plugins or marketplaces configured
+		if claudeSettings.HasPluginsOrMarketplaces() {
+			// Extract SSH grants for marketplace access validation
+			sshHosts := claude.FilterSSHGrants(opts.Grants)
+
+			// Validate SSH access early - fail fast if private marketplaces need SSH
+			if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, err
+			}
+
+			// Set up marketplace manager and ensure all marketplaces are cloned
+			cacheDir, cacheErr := claude.DefaultCacheDir()
+			if cacheErr != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
+			}
+
+			marketplaceManager := claude.NewMarketplaceManager(cacheDir)
+			if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("setting up marketplaces: %w", err)
+			}
+
+			// Generate container configuration
+			var genErr error
+			claudeGenerated, genErr = claude.GenerateContainerConfig(claudeSettings, opts.Config, "/moat/claude-plugins", opts.Grants)
+			if genErr != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("generating Claude config: %w", genErr)
+			}
+
+			// Add mounts for plugin cache and settings
+			for _, mount := range claude.RequiredMounts(claudeSettings, claudeGenerated, cacheDir, containerHome) {
+				mounts = append(mounts, container.MountConfig{
+					Source:   mount.Source,
+					Target:   mount.Target,
+					ReadOnly: mount.ReadOnly,
+				})
+			}
+
+			log.Debug("configured Claude plugins",
+				"plugins", len(claudeSettings.EnabledPlugins),
+				"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
 		}
 	}
 
@@ -762,6 +829,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if sshServer != nil {
 			_ = sshServer.Stop()
 		}
+		if claudeGenerated != nil {
+			_ = claudeGenerated.Cleanup()
+		}
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -778,6 +848,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			if proxyServer != nil {
 				_ = proxyServer.Stop(context.Background())
 			}
+			if claudeGenerated != nil {
+				_ = claudeGenerated.Cleanup()
+			}
 			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
@@ -785,6 +858,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			_ = m.runtime.RemoveContainer(ctx, containerID)
 			if proxyServer != nil {
 				_ = proxyServer.Stop(context.Background())
+			}
+			if claudeGenerated != nil {
+				_ = claudeGenerated.Cleanup()
 			}
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
@@ -797,6 +873,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		_ = m.runtime.RemoveContainer(ctx, containerID)
 		if proxyServer != nil {
 			_ = proxyServer.Stop(context.Background())
+		}
+		if claudeGenerated != nil {
+			_ = claudeGenerated.Cleanup()
 		}
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
@@ -813,6 +892,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		_ = m.runtime.RemoveContainer(ctx, containerID)
 		if proxyServer != nil {
 			_ = proxyServer.Stop(context.Background())
+		}
+		if claudeGenerated != nil {
+			_ = claudeGenerated.Cleanup()
 		}
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
