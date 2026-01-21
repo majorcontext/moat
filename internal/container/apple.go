@@ -425,6 +425,11 @@ func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag st
 // fixBuilderDNS ensures the Apple container builder has working DNS.
 // This works around apple/container#656 where the builder's default DNS
 // (the gateway) doesn't forward queries.
+//
+// Note: If multiple moat processes run concurrently, they may race to configure
+// the builder's DNS. This is generally safe because they'll write the same or
+// similar DNS servers, and the buildkit builder handles resolv.conf updates
+// gracefully. A file lock could be added if this becomes problematic.
 func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
 	// Use configured DNS if provided
 	dnsServers := configuredDNS

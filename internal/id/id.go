@@ -29,7 +29,12 @@ func Generate(prefix string) string {
 
 // IsValid checks if an ID has the expected format: <prefix>_<12 hex chars>.
 // Returns true if the ID matches the format, false otherwise.
+// Returns false if prefix is empty or contains whitespace.
 func IsValid(id string, prefix string) bool {
+	// Validate prefix is non-empty and has no whitespace
+	if prefix == "" || strings.TrimSpace(prefix) != prefix {
+		return false
+	}
 	expectedPrefix := prefix + "_"
 	if !strings.HasPrefix(id, expectedPrefix) {
 		return false

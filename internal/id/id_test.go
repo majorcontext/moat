@@ -108,6 +108,9 @@ func TestIsValid(t *testing.T) {
 		{"empty ID", "", "run", false},
 		{"just prefix", "run", "run", false},
 		{"empty prefix", "run_abc123def456", "", false},
+		{"prefix with leading space", "run_abc123def456", " run", false},
+		{"prefix with trailing space", "run_abc123def456", "run ", false},
+		{"prefix with only spaces", "run_abc123def456", "   ", false},
 	}
 
 	for _, tt := range tests {

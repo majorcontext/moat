@@ -118,7 +118,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if _, err := os.Stat(hostClaudeJSON); err == nil {
 		if err := copyFile(hostClaudeJSON, filepath.Join(stagingDir, ".claude.json")); err != nil {
 			// Non-fatal, just log and continue
-			log.Debug("failed to copy .claude.json", "error", err)
+			log.Warn("failed to copy .claude.json, onboarding state may reset", "error", err)
 		}
 	}
 
@@ -127,7 +127,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if info, err := os.Stat(hostStatsig); err == nil && info.IsDir() {
 		if err := copyDir(hostStatsig, filepath.Join(stagingDir, "statsig")); err != nil {
 			// Non-fatal, just log and continue
-			log.Debug("failed to copy statsig directory", "error", err)
+			log.Warn("failed to copy statsig directory, feature flags may differ", "error", err)
 		}
 	}
 
@@ -136,7 +136,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if _, err := os.Stat(hostStatsCache); err == nil {
 		if err := copyFile(hostStatsCache, filepath.Join(stagingDir, "stats-cache.json")); err != nil {
 			// Non-fatal, just log and continue
-			log.Debug("failed to copy stats-cache.json", "error", err)
+			log.Warn("failed to copy stats-cache.json, usage stats may reset", "error", err)
 		}
 	}
 
