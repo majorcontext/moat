@@ -210,9 +210,12 @@ func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
 	return nil
 }
 
-// maxArchiveFiles is the maximum number of files allowed in an archive restore.
-// This prevents zip bomb attacks with millions of small files.
-const maxArchiveFiles = 100000
+// Archive extraction limits to prevent zip bomb attacks.
+const (
+	maxArchiveFiles     = 100000   // Maximum number of files
+	maxArchiveFileSize  = 1 << 30  // 1GB per file
+	maxArchiveTotalSize = 10 << 30 // 10GB total extracted size
+)
 
 // RestoreTo extracts the archive to an arbitrary destination path.
 func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
@@ -230,6 +233,7 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 
 	tr := tar.NewReader(gr)
 	fileCount := 0
+	var totalWritten int64
 
 	for {
 		header, err := tr.Next()
@@ -274,10 +278,18 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 				return fmt.Errorf("create file %s: %w", header.Name, err)
 			}
 
-			// Limit copy size to prevent decompression bombs (1GB max per file)
-			if _, err := io.Copy(f, io.LimitReader(tr, 1<<30)); err != nil {
+			// Check total size limit before writing
+			if totalWritten > maxArchiveTotalSize {
+				_ = f.Close()
+				return fmt.Errorf("archive exceeds maximum total extracted size (limit: %d bytes)", maxArchiveTotalSize)
+			}
+
+			// Limit copy size to prevent decompression bombs
+			written, copyErr := io.Copy(f, io.LimitReader(tr, maxArchiveFileSize))
+			totalWritten += written
+			if copyErr != nil {
 				_ = f.Close() // Best effort close; preserve the write error
-				return fmt.Errorf("write file %s: %w", header.Name, err)
+				return fmt.Errorf("write file %s: %w", header.Name, copyErr)
 			}
 			if err := f.Close(); err != nil {
 				return fmt.Errorf("close file %s: %w", header.Name, err)

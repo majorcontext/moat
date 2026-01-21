@@ -57,7 +57,7 @@ func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
 	// -c: use clonefile(2) for copy-on-write
 	// -R: recursive
 	// -p: preserve mode, ownership, timestamps
-	cmd := exec.Command("cp", "-c", "-R", "-p", workspacePath, clonePath)
+	cmd := exec.Command("cp", "-c", "-R", "-p", "--", workspacePath, clonePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// If cp -c fails (e.g., cross-device or non-APFS), fall back to regular copy
@@ -134,7 +134,7 @@ func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
 		src := filepath.Join(nativeRef, entry.Name())
 		dst := filepath.Join(workspacePath, entry.Name())
 
-		cmd := exec.Command("cp", "-c", "-R", "-p", src, dst)
+		cmd := exec.Command("cp", "-c", "-R", "-p", "--", src, dst)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			if gitBackup != "" {
 				_ = os.Rename(gitBackup, gitDir)
@@ -178,7 +178,7 @@ func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
 		src := filepath.Join(nativeRef, entry.Name())
 		dst := filepath.Join(destPath, entry.Name())
 
-		cmd := exec.Command("cp", "-c", "-R", "-p", src, dst)
+		cmd := exec.Command("cp", "-c", "-R", "-p", "--", src, dst)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("copy %s: %w\noutput: %s", entry.Name(), err, string(output))
 		}
