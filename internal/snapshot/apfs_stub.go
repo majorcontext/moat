@@ -9,11 +9,16 @@ var ErrAPFSNotAvailable = fmt.Errorf("APFS snapshots are only available on macOS
 
 // APFSBackend is a stub for non-darwin platforms.
 // On non-darwin systems, all methods return errors to indicate APFS is unavailable.
-type APFSBackend struct{}
+type APFSBackend struct {
+	snapshotDir string
+}
 
 // NewAPFSBackend returns a stub APFSBackend on non-darwin platforms.
-func NewAPFSBackend() *APFSBackend {
-	return &APFSBackend{}
+// The snapshotDir parameter is accepted for API compatibility but not used.
+func NewAPFSBackend(snapshotDir string) *APFSBackend {
+	return &APFSBackend{
+		snapshotDir: snapshotDir,
+	}
 }
 
 // Name returns the backend identifier.

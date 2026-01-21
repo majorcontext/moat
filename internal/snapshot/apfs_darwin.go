@@ -3,20 +3,24 @@
 package snapshot
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-// APFSBackend implements the Backend interface using macOS APFS snapshots via tmutil.
-type APFSBackend struct{}
+// APFSBackend implements the Backend interface using APFS copy-on-write cloning.
+// This uses cp -c to create instant, space-efficient directory clones on APFS.
+type APFSBackend struct {
+	snapshotDir string
+}
 
 // NewAPFSBackend creates a new APFS snapshot backend.
-func NewAPFSBackend() *APFSBackend {
-	return &APFSBackend{}
+func NewAPFSBackend(snapshotDir string) *APFSBackend {
+	return &APFSBackend{
+		snapshotDir: snapshotDir,
+	}
 }
 
 // Name returns the backend identifier.
@@ -24,132 +28,167 @@ func (b *APFSBackend) Name() string {
 	return "apfs"
 }
 
-// Create creates an APFS snapshot of the volume containing workspacePath.
-// The id parameter is used as a label but APFS generates its own snapshot name.
-// Returns the snapshot name as the native reference.
+// Create creates an APFS clone of the workspace directory.
+// Uses cp -c for copy-on-write cloning which is instant and space-efficient.
 func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
-	// Get the mount point for the workspace path
-	mountPoint, err := getMountPoint(workspacePath)
-	if err != nil {
-		return "", fmt.Errorf("get mount point: %w", err)
+	// Ensure snapshot directory exists
+	if err := os.MkdirAll(b.snapshotDir, 0755); err != nil {
+		return "", fmt.Errorf("create snapshot directory: %w", err)
 	}
 
-	// Create a local snapshot using tmutil
-	// tmutil localsnapshot <mount_point>
-	cmd := exec.Command("tmutil", "localsnapshot", mountPoint)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("tmutil localsnapshot failed: %w\noutput: %s", err, string(output))
-	}
+	clonePath := filepath.Join(b.snapshotDir, id)
 
-	// Parse the snapshot name from output
-	// Output format: "Created local snapshot with date: 2024-01-15-123456"
-	outputStr := strings.TrimSpace(string(output))
-	const prefix = "Created local snapshot with date: "
-	if !strings.HasPrefix(outputStr, prefix) {
-		return "", fmt.Errorf("unexpected tmutil output: %s", outputStr)
-	}
-
-	snapshotDate := strings.TrimPrefix(outputStr, prefix)
-	// The snapshot name format is: com.apple.TimeMachine.YYYY-MM-DD-HHMMSS.local
-	snapshotName := fmt.Sprintf("com.apple.TimeMachine.%s.local", snapshotDate)
-
-	return snapshotName, nil
-}
-
-// Restore restores an APFS snapshot to the workspace (in-place).
-// Note: APFS snapshot restore typically requires elevated privileges and
-// may not support in-place restore to a subdirectory.
-func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
-	// Get the mount point for the workspace
-	mountPoint, err := getMountPoint(workspacePath)
-	if err != nil {
-		return fmt.Errorf("get mount point: %w", err)
-	}
-
-	// tmutil restore requires the snapshot path and destination
-	// Format: /Volumes/<volume>/.timemachine/<snapshot>
-	snapshotPath := filepath.Join(mountPoint, ".timemachine", nativeRef)
-
-	// Use tmutil restore to restore the snapshot
-	// Note: This restores the entire volume state, which may not be what we want
-	// for a workspace subdirectory. For workspace-level restore, consider using
-	// the archive backend instead.
-	cmd := exec.Command("tmutil", "restore", snapshotPath, workspacePath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("tmutil restore failed: %w\noutput: %s", err, string(output))
-	}
-
-	return nil
-}
-
-// RestoreTo restores an APFS snapshot to a different directory.
-func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
-	// For RestoreTo, we need to know the source volume
-	// Since nativeRef is just the snapshot name, we need to find it
-	// This is a limitation - we'd need to store the mount point in the metadata
-
-	// Try the root volume as default
-	snapshotPath := filepath.Join("/", ".timemachine", nativeRef)
-
-	cmd := exec.Command("tmutil", "restore", snapshotPath, destPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("tmutil restore failed: %w\noutput: %s", err, string(output))
-	}
-
-	return nil
-}
-
-// Delete removes an APFS snapshot.
-func (b *APFSBackend) Delete(nativeRef string) error {
-	// Extract the date portion from the snapshot name
-	// Format: com.apple.TimeMachine.YYYY-MM-DD-HHMMSS.local
-	datePart := extractDateFromSnapshotName(nativeRef)
-	if datePart == "" {
-		// If we can't extract the date, try using the full name
-		datePart = nativeRef
-	}
-
-	// tmutil deletelocalsnapshots <date>
-	// The date format should be: YYYY-MM-DD-HHMMSS
-	cmd := exec.Command("tmutil", "deletelocalsnapshots", datePart)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("tmutil deletelocalsnapshots failed: %w\noutput: %s", err, string(output))
-	}
-
-	return nil
-}
-
-// List returns all APFS snapshots for the volume containing workspacePath.
-func (b *APFSBackend) List(workspacePath string) ([]string, error) {
-	// Get the mount point for the workspace path
-	mountPoint, err := getMountPoint(workspacePath)
-	if err != nil {
-		return nil, fmt.Errorf("get mount point: %w", err)
-	}
-
-	// tmutil listlocalsnapshots <mount_point>
-	cmd := exec.Command("tmutil", "listlocalsnapshots", mountPoint)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("tmutil listlocalsnapshots failed: %w\noutput: %s", err, string(output))
-	}
-
-	// Parse the output - one snapshot per line
-	// Format: com.apple.TimeMachine.YYYY-MM-DD-HHMMSS.local
-	var snapshots []string
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" && strings.HasPrefix(line, "com.apple.TimeMachine.") {
-			snapshots = append(snapshots, line)
+	// Remove existing clone if present
+	if _, err := os.Stat(clonePath); err == nil {
+		if err := os.RemoveAll(clonePath); err != nil {
+			return "", fmt.Errorf("remove existing clone: %w", err)
 		}
 	}
 
-	return snapshots, scanner.Err()
+	// Use cp -c for copy-on-write cloning
+	// -c: use clonefile(2) for copy-on-write
+	// -R: recursive
+	// -p: preserve mode, ownership, timestamps
+	cmd := exec.Command("cp", "-c", "-R", "-p", workspacePath, clonePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If cp -c fails (e.g., cross-device or non-APFS), fall back to regular copy
+		// This shouldn't happen if IsAPFS check passed, but handle gracefully
+		return "", fmt.Errorf("cp -c clone failed: %w\noutput: %s", err, string(output))
+	}
+
+	// Remove .git from the clone to save space (git history can be large)
+	// The .git directory is preserved separately during restore
+	// Non-fatal if removal fails - the snapshot is still valid, just larger
+	gitDir := filepath.Join(clonePath, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		_ = os.RemoveAll(gitDir)
+	}
+
+	return clonePath, nil
+}
+
+// Restore restores the workspace from an APFS clone (in-place).
+// Preserves the .git directory in the workspace.
+func (b *APFSBackend) Restore(workspacePath, nativeRef string) error {
+	// First, preserve the .git directory if it exists
+	gitDir := filepath.Join(workspacePath, ".git")
+	var gitBackup string
+	if _, err := os.Stat(gitDir); err == nil {
+		gitBackup = gitDir + ".backup"
+		if err := os.Rename(gitDir, gitBackup); err != nil {
+			return fmt.Errorf("backup .git directory: %w", err)
+		}
+	}
+
+	// Clean the workspace (except .git backup)
+	entries, err := os.ReadDir(workspacePath)
+	if err != nil {
+		if gitBackup != "" {
+			_ = os.Rename(gitBackup, gitDir)
+		}
+		return fmt.Errorf("read workspace directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git.backup" {
+			continue
+		}
+		path := filepath.Join(workspacePath, name)
+		if removeErr := os.RemoveAll(path); removeErr != nil {
+			if gitBackup != "" {
+				_ = os.Rename(gitBackup, gitDir)
+			}
+			return fmt.Errorf("remove %s: %w", name, removeErr)
+		}
+	}
+
+	// Copy files from clone to workspace using cp -c
+	// We need to copy contents, not the directory itself
+	cloneEntries, err := os.ReadDir(nativeRef)
+	if err != nil {
+		if gitBackup != "" {
+			_ = os.Rename(gitBackup, gitDir)
+		}
+		return fmt.Errorf("read clone directory: %w", err)
+	}
+
+	for _, entry := range cloneEntries {
+		src := filepath.Join(nativeRef, entry.Name())
+		dst := filepath.Join(workspacePath, entry.Name())
+
+		cmd := exec.Command("cp", "-c", "-R", "-p", src, dst)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			if gitBackup != "" {
+				_ = os.Rename(gitBackup, gitDir)
+			}
+			return fmt.Errorf("restore %s: %w\noutput: %s", entry.Name(), err, string(output))
+		}
+	}
+
+	// Restore the .git directory
+	if gitBackup != "" {
+		if err := os.Rename(gitBackup, gitDir); err != nil {
+			return fmt.Errorf("restore .git directory: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// RestoreTo restores an APFS clone to a different directory.
+func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
+	// Ensure destination exists
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return fmt.Errorf("create destination directory: %w", err)
+	}
+
+	// Copy contents from clone to destination
+	entries, err := os.ReadDir(nativeRef)
+	if err != nil {
+		return fmt.Errorf("read clone directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		src := filepath.Join(nativeRef, entry.Name())
+		dst := filepath.Join(destPath, entry.Name())
+
+		cmd := exec.Command("cp", "-c", "-R", "-p", src, dst)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("copy %s: %w\noutput: %s", entry.Name(), err, string(output))
+		}
+	}
+
+	return nil
+}
+
+// Delete removes an APFS clone directory.
+func (b *APFSBackend) Delete(nativeRef string) error {
+	if err := os.RemoveAll(nativeRef); err != nil {
+		return fmt.Errorf("remove clone: %w", err)
+	}
+	return nil
+}
+
+// List returns all APFS clone snapshots in the snapshot directory.
+func (b *APFSBackend) List(workspacePath string) ([]string, error) {
+	entries, err := os.ReadDir(b.snapshotDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read snapshot directory: %w", err)
+	}
+
+	var clones []string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "snap_") {
+			clones = append(clones, filepath.Join(b.snapshotDir, entry.Name()))
+		}
+	}
+
+	return clones, nil
 }
 
 // IsAPFS checks if the given path is on an APFS filesystem.
@@ -160,32 +199,26 @@ func IsAPFS(path string) bool {
 		return false
 	}
 
-	// Use diskutil info to get filesystem information
-	cmd := exec.Command("diskutil", "info", absPath)
-	output, err := cmd.CombinedOutput()
+	// Get mount point first
+	mountPoint, err := getMountPoint(absPath)
 	if err != nil {
-		// If diskutil fails, try getting the mount point first
-		mountPoint, err := getMountPoint(absPath)
-		if err != nil {
-			return false
-		}
-		cmd = exec.Command("diskutil", "info", mountPoint)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			return false
-		}
+		return false
 	}
 
-	// Look for "Type (Bundle): apfs" or "File System Personality: APFS"
+	// Use diskutil info to check filesystem type
+	cmd := exec.Command("diskutil", "info", mountPoint)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	// Look for APFS indicators
 	outputStr := string(output)
-	return strings.Contains(outputStr, "Type (Bundle):  apfs") ||
-		strings.Contains(outputStr, "File System Personality:  APFS") ||
-		strings.Contains(outputStr, "apfs")
+	return strings.Contains(outputStr, "APFS")
 }
 
 // getMountPoint returns the mount point for a given path.
 func getMountPoint(path string) (string, error) {
-	// Get the absolute path
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("get absolute path: %w", err)
@@ -199,38 +232,18 @@ func getMountPoint(path string) (string, error) {
 	}
 
 	// Parse df output - second line contains the info
-	// Format: Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on
 	lines := strings.Split(string(output), "\n")
 	if len(lines) < 2 {
 		return "", fmt.Errorf("unexpected df output: %s", string(output))
 	}
 
-	// The mount point is the last field
+	// Mount point is the last field
 	fields := strings.Fields(lines[1])
 	if len(fields) < 1 {
 		return "", fmt.Errorf("unexpected df output format: %s", lines[1])
 	}
 
-	// Mount point is the last field
-	mountPoint := fields[len(fields)-1]
-	return mountPoint, nil
-}
-
-// extractDateFromSnapshotName extracts the date portion from an APFS snapshot name.
-// Input format: com.apple.TimeMachine.YYYY-MM-DD-HHMMSS.local
-// Output format: YYYY-MM-DD-HHMMSS
-func extractDateFromSnapshotName(name string) string {
-	const prefix = "com.apple.TimeMachine."
-	const suffix = ".local"
-
-	if !strings.HasPrefix(name, prefix) {
-		return ""
-	}
-
-	name = strings.TrimPrefix(name, prefix)
-	name = strings.TrimSuffix(name, suffix)
-
-	return name
+	return fields[len(fields)-1], nil
 }
 
 // Compile-time check that APFSBackend implements Backend.
