@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write  # Required to update previous review comments
       issues: read
       id-token: write
 
@@ -30,6 +30,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Collapse previous Claude reviews
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./.github/scripts/collapse-previous-reviews.sh
 
       - name: Run Claude Code Review
         id: claude-review
@@ -48,6 +55,8 @@ jobs:
             - Test coverage
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            IMPORTANT: When posting your review comment, you MUST include the marker `<!-- claude-code-review -->` at the very beginning of your comment body. This marker is used to identify your reviews so they can be collapsed when superseded by newer reviews.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
