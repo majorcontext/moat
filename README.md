@@ -8,7 +8,9 @@ Run AI agents locally with one command. Zero Docker knowledge. Zero secret copyi
 
 **Moat is the execution substrate. Orchestration lives above it.**
 
-Moat is a single-run execution environment for agents or processes. One command runs one agent against one workspace. Focus on isolation, auditability, reproducibility, and safe credentials.
+Moat is a single-run execution environment for agents or processes. One command runs one agent against one workspace.
+
+The primary use case is **local execution**: exploring new codebases, packaging dependencies easily, and running agents with full observability. By default, you stay attached and monitor the process in real-time—detaching to background is optional.
 
 ```
 moat claude ./path/to/workspace
@@ -19,15 +21,17 @@ What happens when you run this:
 - Claude Code is pre-installed and ready to go
 - Credentials are injected at the network layer (the agent never sees your tokens)
 - Every API call, log line, and network request is captured
+- You see output in real-time (attached by default)
 - When it's done, the workspace is disposable—or you can keep the artifacts
 
 ### Scope and Non-Goals
 
 **Moat does:**
-- Run a single agent in an isolated environment
+- Run a single agent in an isolated environment (attached by default)
+- Package dependencies automatically based on runtime detection
 - Inject credentials securely at the network layer
 - Capture full observability (logs, network, audit trail)
-- Support detached runs, attach/reattach, and replay
+- Support detach/reattach for background execution
 
 **Moat does not:**
 - Orchestrate multiple agents

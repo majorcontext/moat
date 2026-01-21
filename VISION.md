@@ -8,12 +8,20 @@ Moat provides a single, well-defined primitive: the isolated run. Higher-level c
 
 ## Core Purpose
 
-Moat is a **single-run execution environment** for agents or processes.
+Moat is a **single-run execution environment** for agents or processes, designed primarily for **local execution**.
 
-- **One command** runs **one agent** against **one workspace**
+The typical workflow:
+- You're exploring a new codebase or starting a project
+- You want to run an agent with proper isolation and credential security
+- Dependencies are packaged automatically—no manual Docker configuration
+- You run `moat claude ./workspace` and stay attached, watching output in real-time
+- Full observability is captured: logs, network requests, audit trail
+
+**One command. One agent. One workspace.**
+
 - Each run is isolated, auditable, and reproducible
 - Credentials are injected securely without exposure to the agent
-- Full observability is captured by default
+- By default, you're attached and monitoring—detach is optional for background work
 
 This focus on the single-run primitive keeps moat simple, predictable, and composable.
 
@@ -31,17 +39,36 @@ Each invocation of `moat run` or `moat claude` creates a **run**—an isolated e
 
 Runs are independent and self-contained. They do not share state, communicate with each other, or depend on external coordination.
 
+### Default Behavior: Attached Monitoring
+
+By default, `moat run` and `moat claude` **attach** to the container—you see output in real-time and can interact if needed.
+
+```bash
+moat claude ./workspace  # Attached by default, you see everything
+```
+
+This is the primary workflow for local development. You stay connected, monitor progress, and see exactly what's happening.
+
+### Optional: Detach for Background Execution
+
+Use `-d` to start detached and let the run continue in the background:
+
+```bash
+moat claude -d ./workspace  # Runs in background
+moat attach <run-id>         # Reattach later to see output
+```
+
 ### Lifecycle Operations
 
 Runs support these operations:
 
-- **Attach**: Connect to a running container to see output or interact
-- **Detach**: Disconnect without stopping the run (it continues in background)
+- **Attach** (default): Stay connected to see output in real-time
+- **Detach**: Disconnect without stopping (run continues in background)
 - **Stop**: Halt execution (container stopped, artifacts preserved)
 - **Destroy**: Remove the run and its artifacts
 - **Replay**: Re-run with the same configuration (future capability)
 
-Critically: **Detach ≠ Stop**. Detaching leaves the run active. This enables background execution and reattachment.
+Critically: **Detach ≠ Stop**. Detaching leaves the run active. This enables background execution and reattachment when needed.
 
 ## Explicit Non-Goals
 
@@ -222,44 +249,88 @@ done
 
 ## Examples: What Moat Enables
 
-### Parallel Testing Across Branches
+### Exploring a New Codebase
+
+You clone a repository and want to understand it:
 
 ```bash
-for branch in feature-1 feature-2 feature-3; do
-  git worktree add /tmp/$branch $branch
-  moat run /tmp/$branch --name "test-$branch" -d -- npm test
-done
+git clone https://github.com/example/new-project
+cd new-project
 
-moat list  # See all tests running in parallel
+# Run Claude Code with GitHub access, stay attached, see everything
+moat claude --grant github
 ```
+
+Moat automatically:
+- Detects dependencies (Node, Python, Go, etc.)
+- Pulls the appropriate base image
+- Injects your GitHub credentials securely
+- Captures all API calls for audit
+
+You see Claude's work in real-time. No Docker configuration needed.
+
+### Packaging Dependencies Easily
+
+You have a Python project with complex dependencies:
+
+```bash
+# Create agent.yaml
+cat > agent.yaml <<EOF
+dependencies:
+  - python@3.11
+grants:
+  - github
+EOF
+
+# Run with automatic dependency packaging
+moat claude
+```
+
+Moat handles the container setup. You focus on the task.
 
 ### Isolated Development Environments
 
 ```bash
-# Developer A works on authentication
+# Work on authentication feature
 moat claude ./app --name auth-work
 
-# Developer B works on checkout flow (same repo, different container)
+# Separately, work on checkout flow (same repo, different container)
 moat claude ./app --name checkout-work
 ```
 
 No conflicts, no shared state. Each run is independent.
 
-### Credential Isolation for Security Research
+### Credential Isolation for Security Testing
 
 ```bash
-# Grant access to staging environment
-moat grant github:repo --scope staging
+# Grant limited GitHub access
+moat grant github:repo
 
-# Run untrusted agent with limited credentials
+# Run an untrusted agent with scoped credentials
 moat run ./untrusted-agent --grant github
 
-# Audit exactly what the agent did
+# After completion, audit exactly what it accessed
 moat audit
 moat trace --network
 ```
 
-The agent gets scoped access. Full observability shows exactly what it accessed.
+The agent gets scoped access. Full observability shows exactly what it did.
+
+### Parallel Testing (Optional Advanced Use)
+
+For users who need it, moat composes with shell for parallel execution:
+
+```bash
+# Fan out across branches (detached for parallel execution)
+for branch in feature-1 feature-2 feature-3; do
+  git worktree add /tmp/$branch $branch
+  moat run /tmp/$branch --name "test-$branch" -d -- npm test
+done
+
+moat list  # See all tests running
+```
+
+This is advanced usage—most users stay attached for interactive, local work.
 
 ## Comparison to Other Tools
 
@@ -292,12 +363,19 @@ These belong in the orchestration layer, not the execution substrate.
 
 ## Summary
 
-Moat is a **single-run execution environment** with a clear, constrained scope:
+Moat is a **single-run execution environment** designed for **local development**:
 
-- ✅ Isolation, auditability, reproducibility, safe credentials
+**Primary use case:**
+- Exploring new codebases
+- Easy dependency packaging
+- Running agents with full observability
+- Attached by default—you see output in real-time
+
+**Clear scope:**
+- ✅ Single-run isolation, auditability, reproducibility, safe credentials
 - ✅ Composable with shell, orchestrators, and frameworks
 - ❌ No orchestration, coordination, or planning
 
 **One command. One agent. One workspace.**
 
-The rest is composition.
+Detach to background if needed. Compose with shell for parallel execution. The rest is composition.
