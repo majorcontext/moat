@@ -28,25 +28,27 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   # Create ~/.claude directory
   mkdir -p "$HOME/.claude"
 
-  # Copy settings.json if present
+  # Copy settings.json if present (preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
-    cp "$MOAT_CLAUDE_INIT/settings.json" "$HOME/.claude/"
+    cp -p "$MOAT_CLAUDE_INIT/settings.json" "$HOME/.claude/"
 
-  # Copy credentials if present
-  [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ] && \
-    cp "$MOAT_CLAUDE_INIT/.credentials.json" "$HOME/.claude/"
+  # Copy credentials if present (ensure restricted permissions for security)
+  if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then
+    cp -p "$MOAT_CLAUDE_INIT/.credentials.json" "$HOME/.claude/"
+    chmod 600 "$HOME/.claude/.credentials.json"
+  fi
 
-  # Copy statsig directory if present (feature flags)
+  # Copy statsig directory if present (feature flags, preserve permissions)
   [ -d "$MOAT_CLAUDE_INIT/statsig" ] && \
-    cp -r "$MOAT_CLAUDE_INIT/statsig" "$HOME/.claude/"
+    cp -rp "$MOAT_CLAUDE_INIT/statsig" "$HOME/.claude/"
 
-  # Copy stats-cache.json if present (usage stats)
+  # Copy stats-cache.json if present (usage stats, preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/stats-cache.json" ] && \
-    cp "$MOAT_CLAUDE_INIT/stats-cache.json" "$HOME/.claude/"
+    cp -p "$MOAT_CLAUDE_INIT/stats-cache.json" "$HOME/.claude/"
 
-  # Copy .claude.json to home directory (onboarding state)
+  # Copy .claude.json to home directory (onboarding state, preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
-    cp "$MOAT_CLAUDE_INIT/.claude.json" "$HOME/"
+    cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$HOME/"
 fi
 
 # Execute the user's command

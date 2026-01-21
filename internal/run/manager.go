@@ -820,10 +820,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 				return nil, fmt.Errorf("creating Claude staging directory: %w", stagingErr)
 			}
-			// Ensure staging directory is cleaned up on error before claudeGenerated is set.
-			// Once claudeGenerated is assigned, it takes over cleanup responsibility.
+			// Use a flag to track cleanup responsibility. The defer cleans up on error.
+			// Once claudeGenerated is assigned, it takes over cleanup, so we set the flag false.
+			stagingNeedsCleanup := true
 			defer func() {
-				if claudeStagingDir != "" && claudeGenerated == nil {
+				if stagingNeedsCleanup && claudeStagingDir != "" {
 					os.RemoveAll(claudeStagingDir)
 				}
 			}()
@@ -837,7 +838,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						if cred, err := store.Get(credential.ProviderAnthropic); err == nil {
 							anthropicSetup := &claude.AnthropicSetup{}
 							if err := anthropicSetup.PopulateStagingDir(cred, claudeStagingDir); err != nil {
-								os.RemoveAll(claudeStagingDir)
 								if proxyServer != nil {
 									_ = proxyServer.Stop(context.Background())
 								}
@@ -855,7 +855,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 				// Validate SSH access early - fail fast if private marketplaces need SSH
 				if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
-					os.RemoveAll(claudeStagingDir)
 					if proxyServer != nil {
 						_ = proxyServer.Stop(context.Background())
 					}
@@ -865,7 +864,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Set up marketplace manager and ensure all marketplaces are cloned
 				cacheDir, cacheErr := claude.DefaultCacheDir()
 				if cacheErr != nil {
-					os.RemoveAll(claudeStagingDir)
 					if proxyServer != nil {
 						_ = proxyServer.Stop(context.Background())
 					}
@@ -874,7 +872,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 				marketplaceManager := claude.NewMarketplaceManager(cacheDir)
 				if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
-					os.RemoveAll(claudeStagingDir)
 					if proxyServer != nil {
 						_ = proxyServer.Stop(context.Background())
 					}
@@ -884,14 +881,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Generate settings.json and write to staging directory
 				settingsJSON, genErr := claude.GenerateSettings(claudeSettings, "/moat/claude-plugins")
 				if genErr != nil {
-					os.RemoveAll(claudeStagingDir)
 					if proxyServer != nil {
 						_ = proxyServer.Stop(context.Background())
 					}
 					return nil, fmt.Errorf("generating Claude settings: %w", genErr)
 				}
 				if err := os.WriteFile(filepath.Join(claudeStagingDir, "settings.json"), settingsJSON, 0644); err != nil {
-					os.RemoveAll(claudeStagingDir)
 					if proxyServer != nil {
 						_ = proxyServer.Stop(context.Background())
 					}
@@ -913,7 +908,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
 			}
 
-			// Create GeneratedConfig to track the staging directory for cleanup
+			// Transfer cleanup responsibility to claudeGenerated.
+			// The defer no longer needs to clean up since claudeGenerated.Cleanup() will handle it.
+			stagingNeedsCleanup = false
 			claudeGenerated = &claude.GeneratedConfig{
 				StagingDir: claudeStagingDir,
 				TempDir:    claudeStagingDir,

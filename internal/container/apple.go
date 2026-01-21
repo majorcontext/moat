@@ -454,7 +454,7 @@ func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string
 
 	// If not configured, try to detect host DNS
 	if len(dnsServers) == 0 {
-		detected, err := detectHostDNS()
+		detected, err := detectHostDNS(ctx)
 		if err != nil {
 			return fmt.Errorf("cannot detect host DNS for Apple container builder\n\n"+
 				"Set DNS explicitly in agent.yaml:\n\n"+
@@ -559,8 +559,9 @@ func (r *AppleRuntime) isBuilderRunning(ctx context.Context) bool {
 }
 
 // detectHostDNS attempts to detect the host's DNS servers from macOS system config.
-func detectHostDNS() ([]string, error) {
-	cmd := exec.Command("scutil", "--dns")
+// Uses the provided context for timeout/cancellation.
+func detectHostDNS(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "scutil", "--dns")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("running scutil --dns: %w", err)
