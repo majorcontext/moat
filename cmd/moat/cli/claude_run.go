@@ -24,6 +24,7 @@ var (
 	claudeFlags        ExecFlags
 	claudePromptFlag   string
 	claudeAllowedHosts []string
+	claudeNoYolo       bool
 )
 
 func init() {
@@ -37,6 +38,9 @@ func init() {
 
 Your workspace is mounted at /workspace inside the container. API credentials
 are injected transparently via the Moat proxy - Claude Code never sees raw tokens.
+
+By default, Claude runs with --dangerously-skip-permissions since the container
+provides isolation. Use --noyolo to require manual approval for each tool use.
 
 Without a workspace argument, uses the current directory.
 
@@ -63,6 +67,9 @@ Examples:
   # Force rebuild of container image
   moat claude --rebuild
 
+  # Require manual approval for each tool use (disable yolo mode)
+  moat claude --noyolo
+
 Subcommands:
   moat claude plugins list         List configured plugins
   moat claude marketplace list     List marketplaces
@@ -74,6 +81,7 @@ Subcommands:
 	// Add Claude-specific flags
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
+	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
 }
 
 func runClaudeCode(cmd *cobra.Command, args []string) error {
@@ -142,6 +150,14 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	// Build container command
 	// claude-code is installed globally via the dependency system
 	containerCmd := []string{"claude"}
+
+	// By default, skip permission prompts since Moat provides isolation.
+	// The container environment itself is the security boundary.
+	// Use --noyolo to restore default Claude behavior with manual approvals.
+	if !claudeNoYolo {
+		containerCmd = append(containerCmd, "--dangerously-skip-permissions")
+	}
+
 	if claudePromptFlag != "" {
 		containerCmd = append(containerCmd, "-p", claudePromptFlag)
 	}

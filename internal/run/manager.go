@@ -1075,8 +1075,8 @@ region = %s
 		// Enable TLS on the routing proxy
 		if _, tlsErr := m.proxyLifecycle.EnableTLS(); tlsErr != nil {
 			// Clean up container
-			if err := m.runtime.RemoveContainer(ctx, containerID); err != nil {
-				log.Debug("failed to remove container during cleanup", "error", err)
+			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupProxy(proxyServer)
 			cleanupClaude(claudeGenerated)
@@ -1084,8 +1084,8 @@ region = %s
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
-			if err := m.runtime.RemoveContainer(ctx, containerID); err != nil {
-				log.Debug("failed to remove container during cleanup", "error", err)
+			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupProxy(proxyServer)
 			cleanupClaude(claudeGenerated)

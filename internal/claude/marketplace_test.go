@@ -28,12 +28,12 @@ func TestIsSSHURL(t *testing.T) {
 		{"github.com/org/repo", false},
 
 		// Security edge cases - malformed URLs
-		{"ssh://", true},                           // Empty ssh URL
-		{"git@:foo", true},                         // Missing host
-		{"git@@github.com:org/repo.git", true},     // Double @
-		{"git@github.com:", true},                  // Empty path
-		{"ssh://git@", true},                       // No host after @
-		{"file://git@github.com:foo", false},       // Wrong scheme with @ and :
+		{"ssh://", true},                             // Empty ssh URL
+		{"git@:foo", true},                           // Missing host
+		{"git@@github.com:org/repo.git", true},       // Double @
+		{"git@github.com:", true},                    // Empty path
+		{"ssh://git@", true},                         // No host after @
+		{"file://git@github.com:foo", false},         // Wrong scheme with @ and :
 		{"ftp://git@github.com/org/repo.git", false}, // Wrong scheme
 	}
 
@@ -67,16 +67,16 @@ func TestExtractHost(t *testing.T) {
 		{"", ""},
 
 		// Security edge cases - malformed URLs that should be handled gracefully
-		{"ssh://", ""},                               // Empty ssh URL
-		{"git@:foo", ""},                             // Missing host
-		{"git@@github.com:org/repo.git", "@github.com"}, // Double @ returns malformed host
-		{"git@github.com:", "github.com"},            // Empty path
-		{"ssh://git@", ""},                           // No host after @
-		{"ssh://git@host:22/path", "host"},           // Port and path
-		{"ssh://git@host:22", "host"},                // Just port
+		{"ssh://", ""},   // Empty ssh URL
+		{"git@:foo", ""}, // Missing host
+		{"git@@github.com:org/repo.git", "@github.com"},                   // Double @ returns malformed host
+		{"git@github.com:", "github.com"},                                 // Empty path
+		{"ssh://git@", ""},                                                // No host after @
+		{"ssh://git@host:22/path", "host"},                                // Port and path
+		{"ssh://git@host:22", "host"},                                     // Just port
 		{"https://user:pass@github.com/org/repo", "user:pass@github.com"}, // Auth in HTTPS (unusual)
-		{"git@[::1]:repo.git", "["},                  // IPv6 literal (SCP format) - imperfect, returns first char before :
-		{"ssh://git@[::1]:22/repo", "["},             // IPv6 in ssh:// - imperfect, stops at first : in IPv6
+		{"git@[::1]:repo.git", "["},                                       // IPv6 literal (SCP format) - imperfect, returns first char before :
+		{"ssh://git@[::1]:22/repo", "["},                                  // IPv6 in ssh:// - imperfect, stops at first : in IPv6
 	}
 
 	for _, tt := range tests {
