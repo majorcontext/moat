@@ -56,12 +56,8 @@ jobs:
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-            IMPORTANT: Your review comment MUST start with a title in exactly this format:
-            ## Pull Request Review: <brief title>
-
-            For example: "## Pull Request Review: AWS Credential Support"
-
-            This title format is used to identify your reviews so previous ones can be collapsed when superseded.
+            Start your review comment with a markdown heading containing "Review" (e.g., "## Code Review" or "### Pull Request Review: <title>").
+            Previous reviews are automatically collapsed when new ones are posted.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
