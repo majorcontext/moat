@@ -134,7 +134,7 @@ func TestLogWriter(t *testing.T) {
 
 func TestReadLogsWithOffset(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run_logs1234-offset")
+	s, _ := NewRunStore(dir, "run_logsoffset1")
 
 	w, _ := s.LogWriter()
 	for i := 0; i < 10; i++ {
@@ -251,7 +251,7 @@ func TestWriteExecEvent(t *testing.T) {
 
 func TestReadExecEventsMultiple(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run_exec1234-multi")
+	s, err := NewRunStore(dir, "run_execmulti1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestReadExecEventsMultiple(t *testing.T) {
 
 func TestReadExecEventsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run_exec1234-empty")
+	s, err := NewRunStore(dir, "run_execempty1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}

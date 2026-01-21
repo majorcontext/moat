@@ -34,7 +34,8 @@ type Metadata struct {
 	NativeRef string    `json:"native_ref,omitempty"`
 }
 
-// NewID generates a new snapshot ID in the format snap_<random>.
+// NewID generates a new snapshot ID using id.Generate with the "snap" prefix,
+// producing values like "snap_a1b2c3d4e5f6" (12-character hex suffix).
 func NewID() string {
 	return id.Generate("snap")
 }
