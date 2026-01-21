@@ -158,15 +158,18 @@ func copyFile(src, dst string) error {
 	defer dstFile.Close()
 
 	if _, copyErr := io.Copy(dstFile, srcFile); copyErr != nil {
-		return copyErr
+		return fmt.Errorf("copying %s to %s: %w", src, dst, copyErr)
 	}
 
 	// Preserve permissions
 	srcInfo, err := os.Stat(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("stat %s: %w", src, err)
 	}
-	return os.Chmod(dst, srcInfo.Mode())
+	if chmodErr := os.Chmod(dst, srcInfo.Mode()); chmodErr != nil {
+		return fmt.Errorf("setting permissions on %s: %w", dst, chmodErr)
+	}
+	return nil
 }
 
 // copyDir recursively copies a directory from src to dst.
