@@ -26,14 +26,22 @@ if [ -n "$MOAT_SSH_TCP_ADDR" ]; then
     # Start socat to bridge TCP to Unix socket
     # Socket created with mode 0660 - accessible by owner and group only
     socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork,mode=0660 TCP:"$MOAT_SSH_TCP_ADDR" &
+    SOCAT_PID=$!
     # Wait for socket to be created
     for i in 1 2 3 4 5; do
       [ -S /run/moat/ssh/agent.sock ] && break
       sleep 0.1
     done
-    # Ensure socket is owned by moatuser if it exists
-    if id moatuser >/dev/null 2>&1; then
-      chown moatuser:moatuser /run/moat/ssh/agent.sock 2>/dev/null || true
+    # Verify socat is still running and socket was created
+    if ! kill -0 "$SOCAT_PID" 2>/dev/null; then
+      echo "Warning: SSH agent bridge (socat) failed to start" >&2
+    elif [ ! -S /run/moat/ssh/agent.sock ]; then
+      echo "Warning: SSH agent socket was not created" >&2
+    else
+      # Ensure socket is owned by moatuser if it exists
+      if id moatuser >/dev/null 2>&1; then
+        chown moatuser:moatuser /run/moat/ssh/agent.sock 2>/dev/null || true
+      fi
     fi
   fi
 fi

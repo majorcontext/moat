@@ -291,9 +291,14 @@ func hasAnthropicCredential() bool {
 }
 
 // hasDependency checks if a dependency prefix exists in the list.
+// Matches exact name (e.g., "node") or name with version (e.g., "node@20").
 func hasDependency(deps []string, prefix string) bool {
 	for _, d := range deps {
-		if d == prefix || strings.HasPrefix(d, prefix+"@") {
+		if d == prefix {
+			return true
+		}
+		// Check for prefix@version format, ensuring there's actually a version
+		if strings.HasPrefix(d, prefix+"@") && len(d) > len(prefix)+1 {
 			return true
 		}
 	}

@@ -75,8 +75,10 @@ func TestExtractHost(t *testing.T) {
 		{"ssh://git@host:22/path", "host"},                                // Port and path
 		{"ssh://git@host:22", "host"},                                     // Just port
 		{"https://user:pass@github.com/org/repo", "user:pass@github.com"}, // Auth in HTTPS (unusual)
-		{"git@[::1]:repo.git", "["},                                       // IPv6 literal (SCP format) - imperfect, returns first char before :
-		{"ssh://git@[::1]:22/repo", "["},                                  // IPv6 in ssh:// - imperfect, stops at first : in IPv6
+		{"git@[::1]:repo.git", "::1"},                                     // IPv6 literal (SCP format)
+		{"ssh://git@[::1]:22/repo", "::1"},                                // IPv6 in ssh://
+		{"ssh://git@[2001:db8::1]/repo", "2001:db8::1"},                   // IPv6 with path
+		{"git@[fe80::1%eth0]:repo.git", "fe80::1%eth0"},                   // IPv6 with zone ID
 	}
 
 	for _, tt := range tests {
@@ -359,9 +361,9 @@ func TestMarketplaceManager_MarketplacePath_PathTraversal(t *testing.T) {
 			wantPath: "",
 		},
 		{
-			name:     "double dots embedded (rejected due to .. check)",
+			name:     "double dots embedded (valid filename)",
 			input:    "foo..bar",
-			wantPath: "", // Note: overly restrictive but safe
+			wantPath: "/home/user/.moat/claude/plugins/marketplaces/foo..bar",
 		},
 		{
 			name:     "current dir",
