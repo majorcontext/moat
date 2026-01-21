@@ -30,7 +30,7 @@ requested via the --grant flag on 'agent run'.
 
 Supported providers:
   github      GitHub OAuth (uses device flow for authentication)
-  anthropic   Anthropic API key (for Claude Code and Claude API)
+  anthropic   Anthropic API key or Claude Code OAuth credentials
 
 Scope format:
   provider              Use default scopes
@@ -56,15 +56,19 @@ Examples:
   # Use the credential in a run
   moat run my-agent . --grant github
 
-  # Grant Anthropic API access (interactive prompt)
+  # Grant Anthropic access (will auto-detect Claude Code credentials)
   moat grant anthropic
 
-  # Grant Anthropic API access (from environment variable)
+  # Grant Anthropic API access from environment variable
   export ANTHROPIC_API_KEY="sk-ant-..."  # set in your shell profile
   moat grant anthropic
 
   # Use Anthropic credential for Claude Code
-  moat run claude-code-test . --grant anthropic`,
+  moat run my-agent . --grant anthropic
+
+If you have Claude Code installed and logged in, 'moat grant anthropic' will
+offer to import your existing OAuth credentials. This is the easiest way to
+get started - no API key required.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }
@@ -176,6 +180,57 @@ See README.md for detailed setup instructions.`)
 }
 
 func grantAnthropic() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Check if Claude Code credentials are available
+	claudeCode := &credential.ClaudeCodeCredentials{}
+	if claudeCode.HasClaudeCodeCredentials() {
+		token, _ := claudeCode.GetClaudeCodeCredentials()
+
+		fmt.Println("Found Claude Code credentials.")
+		if token.SubscriptionType != "" {
+			fmt.Printf("  Subscription: %s\n", token.SubscriptionType)
+		}
+		if !token.ExpiresAtTime().IsZero() {
+			if token.IsExpired() {
+				fmt.Printf("  Status: Expired (was valid until %s)\n", token.ExpiresAtTime().Format(time.RFC3339))
+			} else {
+				fmt.Printf("  Expires: %s\n", token.ExpiresAtTime().Format(time.RFC3339))
+			}
+		}
+
+		fmt.Print("\nUse Claude Code credentials? [Y/n]: ")
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+
+		if response == "" || response == "y" || response == "yes" {
+			if token.IsExpired() {
+				fmt.Println("\nWarning: Token has expired. You may need to re-authenticate in Claude Code.")
+				fmt.Println("Run 'claude' to refresh your credentials, then try again.")
+				return fmt.Errorf("Claude Code token has expired")
+			}
+
+			cred := claudeCode.CreateCredentialFromOAuth(token)
+			credPath, err := saveCredential(cred)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("\nClaude Code credentials imported to %s\n", credPath)
+			fmt.Println("\nNote: These are OAuth tokens from your Claude Code session.")
+			fmt.Println("They will be injected as Authorization headers for api.anthropic.com.")
+			if !token.ExpiresAtTime().IsZero() {
+				remaining := time.Until(token.ExpiresAtTime())
+				if remaining > 24*time.Hour {
+					fmt.Printf("Token expires in %d days. Re-run 'moat grant anthropic' if it expires.\n", int(remaining.Hours()/24))
+				} else {
+					fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant anthropic' if it expires.\n", remaining.Hours())
+				}
+			}
+			return nil
+		}
+		fmt.Println() // Add spacing before API key prompt
+	}
+
 	auth := &credential.AnthropicAuth{}
 
 	// Get API key from environment variable or interactive prompt
@@ -194,7 +249,6 @@ func grantAnthropic() error {
 
 	// Ask user if they want to validate the key (costs a small API call)
 	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
-	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(strings.ToLower(response))
 

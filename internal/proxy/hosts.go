@@ -95,6 +95,10 @@ var grantHosts = map[string][]string{
 		"*.githubusercontent.com",
 		"*.github.com",
 	},
+	"anthropic": {
+		"api.anthropic.com",
+		"*.anthropic.com",
+	},
 }
 
 // GetHostsForGrant returns the host patterns for a given grant name.

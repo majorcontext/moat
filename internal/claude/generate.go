@@ -185,13 +185,16 @@ func GenerateMCPConfig(servers map[string]config.MCPServerSpec, grants []string)
 func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheDir, containerHome string) []MountInfo {
 	var mounts []MountInfo
 
-	// Mount plugin cache (read-only)
+	// Mount plugin cache (read-only) - only if directory exists
 	if settings != nil && settings.HasPluginsOrMarketplaces() {
-		mounts = append(mounts, MountInfo{
-			Source:   filepath.Join(cacheDir, "marketplaces"),
-			Target:   "/moat/claude-plugins/marketplaces",
-			ReadOnly: true,
-		})
+		marketplacesDir := filepath.Join(cacheDir, "marketplaces")
+		if _, err := os.Stat(marketplacesDir); err == nil {
+			mounts = append(mounts, MountInfo{
+				Source:   marketplacesDir,
+				Target:   "/moat/claude-plugins/marketplaces",
+				ReadOnly: true,
+			})
+		}
 	}
 
 	// Mount generated settings.json

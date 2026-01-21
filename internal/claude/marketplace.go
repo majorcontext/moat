@@ -40,6 +40,11 @@ func (m *MarketplaceManager) MarketplacePath(name string) string {
 	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
 		return ""
 	}
+	// Verify the cleaned name is the same (catches edge cases)
+	cleaned := filepath.Clean(name)
+	if cleaned != name || cleaned == "." {
+		return ""
+	}
 	return filepath.Join(m.MarketplacesDir(), name)
 }
 
