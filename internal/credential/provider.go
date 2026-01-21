@@ -105,6 +105,13 @@ func GetProviderSetup(provider Provider) ProviderSetup {
 }
 
 // IsOAuthToken returns true if the token appears to be a Claude Code OAuth token.
+//
+// This uses a prefix-based heuristic: OAuth tokens from Claude Code start with
+// "sk-ant-oat" (Anthropic OAuth Token). This prefix format is based on observed
+// token structure as of 2025. If Anthropic changes their token format in the
+// future, this function may need to be updated.
+//
+// Note: API keys typically start with "sk-ant-api" for comparison.
 func IsOAuthToken(token string) bool {
 	return len(token) > 10 && token[:10] == "sk-ant-oat"
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/claude"
+	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
@@ -66,7 +67,9 @@ func runSessionsList(cmd *cobra.Command, args []string) error {
 			// Run no longer exists
 			if s.State == claude.SessionStateRunning {
 				s.State = claude.SessionStateCompleted
-				_ = sessionMgr.UpdateState(s.ID, claude.SessionStateCompleted)
+				if updateErr := sessionMgr.UpdateState(s.ID, claude.SessionStateCompleted); updateErr != nil {
+					log.Debug("failed to update session state", "session", s.ID, "error", updateErr)
+				}
 			}
 			continue
 		}
@@ -84,7 +87,9 @@ func runSessionsList(cmd *cobra.Command, args []string) error {
 
 		if s.State != newState {
 			s.State = newState
-			_ = sessionMgr.UpdateState(s.ID, newState)
+			if updateErr := sessionMgr.UpdateState(s.ID, newState); updateErr != nil {
+				log.Debug("failed to update session state", "session", s.ID, "newState", newState, "error", updateErr)
+			}
 		}
 	}
 

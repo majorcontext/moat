@@ -239,6 +239,34 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 
+	// cleanupProxy is a helper to stop the proxy server and log any errors.
+	// Used in error paths during run creation.
+	cleanupProxy := func(ps *proxy.Server) {
+		if ps != nil {
+			if err := ps.Stop(context.Background()); err != nil {
+				log.Debug("failed to stop proxy during cleanup", "error", err)
+			}
+		}
+	}
+
+	// cleanupSSH is a helper to stop the SSH agent server and log any errors.
+	cleanupSSH := func(ss *sshagent.Server) {
+		if ss != nil {
+			if err := ss.Stop(); err != nil {
+				log.Debug("failed to stop SSH agent during cleanup", "error", err)
+			}
+		}
+	}
+
+	// cleanupClaude is a helper to clean up Claude generated config and log any errors.
+	cleanupClaude := func(cg *claude.GeneratedConfig) {
+		if cg != nil {
+			if err := cg.Cleanup(); err != nil {
+				log.Debug("failed to cleanup Claude config during cleanup", "error", err)
+			}
+		}
+	}
+
 	if needsProxyForGrants || needsProxyForFirewall {
 		p := proxy.NewProxy()
 
@@ -494,9 +522,7 @@ region = %s
 		upstreamSocket := os.Getenv("SSH_AUTH_SOCK")
 		if upstreamSocket == "" {
 			// Clean up HTTP proxy if it was started
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("SSH grants require SSH_AUTH_SOCK to be set\n\n" +
 				"Start your SSH agent with: eval \"$(ssh-agent -s)\" && ssh-add")
 		}
@@ -504,30 +530,22 @@ region = %s
 		// Load SSH mappings for granted hosts
 		key, keyErr := credential.DefaultEncryptionKey()
 		if keyErr != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
 		}
 		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 		if err != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("opening credential store: %w", err)
 		}
 
 		sshMappings, err := store.GetSSHMappingsForHosts(sshGrants)
 		if err != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("loading SSH mappings: %w", err)
 		}
 		if len(sshMappings) == 0 {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("no SSH keys configured for hosts: %v\n\n"+
 				"Grant SSH access first:\n"+
 				"  moat grant ssh --host %s", sshGrants, sshGrants[0])
@@ -536,9 +554,7 @@ region = %s
 		// Connect to upstream SSH agent
 		upstreamAgent, err := sshagent.ConnectAgent(upstreamSocket)
 		if err != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("connecting to SSH agent: %w", err)
 		}
 
@@ -559,9 +575,7 @@ region = %s
 			sshServer = sshagent.NewTCPServer(sshProxy, "127.0.0.1:0") // :0 picks random port
 			if err := sshServer.Start(); err != nil {
 				upstreamAgent.Close()
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("starting SSH agent proxy (TCP): %w", err)
 			}
 
@@ -573,11 +587,9 @@ region = %s
 			// Extract port from TCP address (format is "host:port" or "[::]:port")
 			_, tcpPort, err := net.SplitHostPort(tcpAddr)
 			if err != nil {
-				_ = sshServer.Stop()
+				cleanupSSH(sshServer)
 				upstreamAgent.Close()
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("parsing SSH proxy address %q: %w", tcpAddr, err)
 			}
 			containerTCPAddr := hostAddr + ":" + tcpPort
@@ -600,9 +612,7 @@ region = %s
 			sshSocketDir = filepath.Join(homeDir, ".moat", "sockets", r.ID)
 			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
 				upstreamAgent.Close()
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("creating SSH socket directory: %w", err)
 			}
 			socketPath := filepath.Join(sshSocketDir, "agent.sock")
@@ -611,9 +621,7 @@ region = %s
 			if err := sshServer.Start(); err != nil {
 				upstreamAgent.Close()
 				os.RemoveAll(sshSocketDir)
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("starting SSH agent proxy: %w", err)
 			}
 
@@ -677,9 +685,7 @@ region = %s
 	if opts.Config != nil && len(opts.Config.Secrets) > 0 {
 		resolved, err := secrets.ResolveAll(ctx, opts.Config.Secrets)
 		if err != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, err
 		}
 		for k, v := range resolved {
@@ -728,17 +734,11 @@ region = %s
 		var err error
 		depList, err = deps.ParseAll(opts.Config.Dependencies)
 		if err != nil {
-			// Clean up proxy server if parsing fails
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("parsing dependencies: %w", err)
 		}
 		if err := deps.Validate(depList); err != nil {
-			// Clean up proxy server if validation fails
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("validating dependencies: %w", err)
 		}
 	}
@@ -795,9 +795,7 @@ region = %s
 	if needsCustomImage {
 		exists, err := m.runtime.ImageExists(ctx, containerImage)
 		if err != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
-			}
+			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("checking image: %w", err)
 		}
 
@@ -807,9 +805,7 @@ region = %s
 				NeedsClaudeInit: needsClaudeInit,
 			})
 			if err != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("generating Dockerfile: %w", err)
 			}
 
@@ -825,9 +821,7 @@ region = %s
 			}
 
 			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
 					strings.Join(depNames, ", "), err)
 			}
@@ -929,9 +923,7 @@ region = %s
 			var loadErr error
 			claudeSettings, loadErr = claude.LoadAllSettings(opts.Workspace, opts.Config)
 			if loadErr != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
 			}
 		}
@@ -945,9 +937,7 @@ region = %s
 			var stagingErr error
 			claudeStagingDir, stagingErr = os.MkdirTemp("", "moat-claude-staging-*")
 			if stagingErr != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
-				}
+				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("creating Claude staging directory: %w", stagingErr)
 			}
 			// Use a flag to track cleanup responsibility. The defer cleans up on error.
@@ -968,9 +958,7 @@ region = %s
 						if cred, err := store.Get(credential.ProviderAnthropic); err == nil {
 							anthropicSetup := &claude.AnthropicSetup{}
 							if err := anthropicSetup.PopulateStagingDir(cred, claudeStagingDir); err != nil {
-								if proxyServer != nil {
-									_ = proxyServer.Stop(context.Background())
-								}
+								cleanupProxy(proxyServer)
 								return nil, fmt.Errorf("populating Claude staging directory: %w", err)
 							}
 						}
@@ -985,41 +973,31 @@ region = %s
 
 				// Validate SSH access early - fail fast if private marketplaces need SSH
 				if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
+					cleanupProxy(proxyServer)
 					return nil, err
 				}
 
 				// Set up marketplace manager and ensure all marketplaces are cloned
 				cacheDir, cacheErr := claude.DefaultCacheDir()
 				if cacheErr != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
+					cleanupProxy(proxyServer)
 					return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
 				}
 
 				marketplaceManager := claude.NewMarketplaceManager(cacheDir)
 				if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
+					cleanupProxy(proxyServer)
 					return nil, fmt.Errorf("setting up marketplaces: %w", err)
 				}
 
 				// Generate settings.json and write to staging directory
 				settingsJSON, genErr := claude.GenerateSettings(claudeSettings, "/moat/claude-plugins")
 				if genErr != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
+					cleanupProxy(proxyServer)
 					return nil, fmt.Errorf("generating Claude settings: %w", genErr)
 				}
 				if err := os.WriteFile(filepath.Join(claudeStagingDir, "settings.json"), settingsJSON, 0644); err != nil {
-					if proxyServer != nil {
-						_ = proxyServer.Stop(context.Background())
-					}
+					cleanupProxy(proxyServer)
 					return nil, fmt.Errorf("writing Claude settings: %w", err)
 				}
 
@@ -1079,45 +1057,38 @@ region = %s
 	})
 	if err != nil {
 		// Clean up proxy servers if container creation fails
-		if proxyServer != nil {
-			_ = proxyServer.Stop(context.Background())
-		}
-		if sshServer != nil {
-			_ = sshServer.Stop()
-		}
-		if claudeGenerated != nil {
-			_ = claudeGenerated.Cleanup()
-		}
+		cleanupProxy(proxyServer)
+		cleanupSSH(sshServer)
+		cleanupClaude(claudeGenerated)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
 	r.SSHAgentServer = sshServer
+	if claudeGenerated != nil {
+		r.ClaudeConfigTempDir = claudeGenerated.TempDir
+	}
 
 	// Ensure proxy is running if we have ports to expose
 	if len(ports) > 0 {
 		// Enable TLS on the routing proxy
 		if _, tlsErr := m.proxyLifecycle.EnableTLS(); tlsErr != nil {
 			// Clean up container
-			_ = m.runtime.RemoveContainer(ctx, containerID)
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
+			if err := m.runtime.RemoveContainer(ctx, containerID); err != nil {
+				log.Debug("failed to remove container during cleanup", "error", err)
 			}
-			if claudeGenerated != nil {
-				_ = claudeGenerated.Cleanup()
-			}
+			cleanupProxy(proxyServer)
+			cleanupClaude(claudeGenerated)
 			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
-			_ = m.runtime.RemoveContainer(ctx, containerID)
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
+			if err := m.runtime.RemoveContainer(ctx, containerID); err != nil {
+				log.Debug("failed to remove container during cleanup", "error", err)
 			}
-			if claudeGenerated != nil {
-				_ = claudeGenerated.Cleanup()
-			}
+			cleanupProxy(proxyServer)
+			cleanupClaude(claudeGenerated)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
 	}
@@ -1126,13 +1097,11 @@ region = %s
 	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 	if err != nil {
 		// Clean up container and proxy if storage creation fails
-		_ = m.runtime.RemoveContainer(ctx, containerID)
-		if proxyServer != nil {
-			_ = proxyServer.Stop(context.Background())
+		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		if claudeGenerated != nil {
-			_ = claudeGenerated.Cleanup()
-		}
+		cleanupProxy(proxyServer)
+		cleanupClaude(claudeGenerated)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
@@ -1145,13 +1114,11 @@ region = %s
 	auditStore, err := audit.OpenStore(filepath.Join(store.Dir(), "audit.db"))
 	if err != nil {
 		// Clean up container, proxy, and storage if audit store fails
-		_ = m.runtime.RemoveContainer(ctx, containerID)
-		if proxyServer != nil {
-			_ = proxyServer.Stop(context.Background())
+		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		if claudeGenerated != nil {
-			_ = claudeGenerated.Cleanup()
-		}
+		cleanupProxy(proxyServer)
+		cleanupClaude(claudeGenerated)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -1387,6 +1354,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Claude config temp directory
+	m.mu.RLock()
+	claudeConfigTempDir := r.ClaudeConfigTempDir
+	m.mu.RUnlock()
+	if claudeConfigTempDir != "" {
+		if err := os.RemoveAll(claudeConfigTempDir); err != nil {
+			log.Debug("failed to remove Claude config temp dir", "path", claudeConfigTempDir, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1479,6 +1456,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if r.awsTempDir != "" {
 			if rmErr := os.RemoveAll(r.awsTempDir); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", rmErr)
+			}
+		}
+
+		// Clean up Claude config temp directory
+		if r.ClaudeConfigTempDir != "" {
+			if rmErr := os.RemoveAll(r.ClaudeConfigTempDir); rmErr != nil {
+				log.Debug("failed to remove Claude config temp dir", "path", r.ClaudeConfigTempDir, "error", rmErr)
 			}
 		}
 
@@ -1582,6 +1566,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Claude config temp directory
+	if r.ClaudeConfigTempDir != "" {
+		if err := os.RemoveAll(r.ClaudeConfigTempDir); err != nil {
+			log.Debug("failed to remove Claude config temp dir", "path", r.ClaudeConfigTempDir, "error", err)
+		}
+	}
+
 	m.mu.Lock()
 	delete(m.runs, runID)
 	m.mu.Unlock()
@@ -1679,10 +1670,14 @@ func (m *Manager) Close() error {
 	m.mu.RLock()
 	for _, r := range m.runs {
 		if r.ProxyServer != nil {
-			_ = r.ProxyServer.Stop(context.Background())
+			if err := r.ProxyServer.Stop(context.Background()); err != nil {
+				log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
+			}
 		}
 		if r.SSHAgentServer != nil {
-			_ = r.SSHAgentServer.Stop()
+			if err := r.SSHAgentServer.Stop(); err != nil {
+				log.Debug("failed to stop SSH agent during manager close", "run", r.ID, "error", err)
+			}
 		}
 	}
 	m.mu.RUnlock()

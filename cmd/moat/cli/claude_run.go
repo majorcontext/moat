@@ -244,14 +244,20 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 func hasAnthropicCredential() bool {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
+		log.Debug("no anthropic credential: failed to get encryption key", "error", err)
 		return false
 	}
 	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	if err != nil {
+		log.Debug("no anthropic credential: failed to open credential store", "error", err)
 		return false
 	}
 	_, err = store.Get(credential.ProviderAnthropic)
-	return err == nil
+	if err != nil {
+		log.Debug("no anthropic credential: not found in store", "error", err)
+		return false
+	}
+	return true
 }
 
 // hasDependency checks if a dependency prefix exists in the list.
