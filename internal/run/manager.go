@@ -903,8 +903,14 @@ region = %s
 		// Determine if we need to set up plugins/marketplaces
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 
-		// We need a staging directory if we have OAuth init or plugins
-		if needsClaudeInit || hasPlugins {
+		// Check if we're running Claude Code (need to copy onboarding state)
+		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
+
+		// We need a staging directory if:
+		// - needsClaudeInit (OAuth credentials to set up)
+		// - hasPlugins (plugin settings to configure)
+		// - isClaudeCode (need to copy onboarding state from host)
+		if needsClaudeInit || hasPlugins || isClaudeCode {
 			// Create staging directory
 			var stagingErr error
 			claudeStagingDir, stagingErr = os.MkdirTemp("", "moat-claude-staging-*")
@@ -921,7 +927,11 @@ region = %s
 				}
 			}()
 
-			// Populate with OAuth credentials and host files if needed
+			// Always copy host Claude files (onboarding state, preferences, feature flags)
+			// This ensures users don't have to re-complete onboarding in each container
+			claude.CopyHostClaudeFiles(claudeStagingDir)
+
+			// Populate with OAuth credentials if needed (only for OAuth tokens)
 			if needsClaudeInit {
 				key, keyErr := credential.DefaultEncryptionKey()
 				if keyErr == nil {

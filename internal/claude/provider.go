@@ -62,21 +62,19 @@ func (a *AnthropicSetup) Cleanup(cleanupPath string) {
 	// Nothing to clean up - staging directory is handled by the caller
 }
 
-// PopulateStagingDir populates the Claude staging directory with files needed for
-// Claude Code to run properly. The staging directory will be copied to the container's
-// home directory at startup by the moat-init script.
+// PopulateStagingDir populates the Claude staging directory with OAuth credentials.
+// This should only be called for OAuth tokens - API keys don't need credential files.
 //
 // Files added:
 // - .credentials.json (placeholder token - real auth is via proxy)
-// - .claude.json (copied from host, if exists)
-// - statsig/ (copied from host, if exists)
-// - stats-cache.json (copied from host, if exists)
 //
 // SECURITY: The real OAuth token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
+//
+// Note: Use CopyHostClaudeFiles to copy onboarding state and other host files.
 func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, stagingDir string) error {
 	if !credential.IsOAuthToken(cred.Token) {
-		// API keys don't need special files
+		// API keys don't need credential files
 		return nil
 	}
 
@@ -102,13 +100,25 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 		return fmt.Errorf("writing credentials file: %w", writeErr)
 	}
 
-	// Copy optional files from host's ~/.claude directory.
-	// Note: The essential credentials file has already been written above.
-	// Everything below is optional host file copying that enhances the experience
-	// but is not required for Claude Code to function.
+	return nil
+}
+
+// CopyHostClaudeFiles copies Claude Code state files from the host to the staging directory.
+// These files are needed to preserve onboarding state, preferences, and feature flags
+// when running Claude Code in a container.
+//
+// Files copied (all optional - missing files are skipped):
+// - ~/.claude.json (onboarding state and user preferences)
+// - ~/.claude/statsig/ (feature flags)
+// - ~/.claude/stats-cache.json (usage stats, firstSessionDate)
+//
+// This function should be called whenever setting up a Claude staging directory,
+// regardless of authentication method (OAuth or API key).
+func CopyHostClaudeFiles(stagingDir string) {
 	hostHome, err := os.UserHomeDir()
 	if err != nil {
-		return nil // Non-fatal: credentials written, just skip optional host files
+		log.Debug("failed to get home directory, skipping host file copy", "error", err)
+		return
 	}
 
 	hostClaudeDir := filepath.Join(hostHome, ".claude")
@@ -139,8 +149,6 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 			log.Warn("failed to copy stats-cache.json, usage stats may reset", "error", err)
 		}
 	}
-
-	return nil
 }
 
 // copyFile copies a single file from src to dst.

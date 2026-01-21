@@ -181,6 +181,79 @@ func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
 	}
 }
 
+func TestCopyHostClaudeFiles(t *testing.T) {
+	// Create a temp "home" directory with Claude files
+	tmpHome := t.TempDir()
+
+	// Create ~/.claude.json
+	claudeJSON := filepath.Join(tmpHome, ".claude.json")
+	if err := os.WriteFile(claudeJSON, []byte(`{"hasCompletedOnboarding": true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create ~/.claude/statsig/ with a file
+	statsigDir := filepath.Join(tmpHome, ".claude", "statsig")
+	if err := os.MkdirAll(statsigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statsigDir, "flags.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create ~/.claude/stats-cache.json
+	statsCache := filepath.Join(tmpHome, ".claude", "stats-cache.json")
+	if err := os.WriteFile(statsCache, []byte(`{"firstSessionDate": "2025-01-01"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override HOME for the test
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", oldHome)
+
+	// Create staging directory
+	stagingDir := t.TempDir()
+
+	// Call CopyHostClaudeFiles
+	CopyHostClaudeFiles(stagingDir)
+
+	// Verify files were copied
+	if _, err := os.Stat(filepath.Join(stagingDir, ".claude.json")); err != nil {
+		t.Errorf(".claude.json should have been copied: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(stagingDir, "statsig", "flags.json")); err != nil {
+		t.Errorf("statsig/flags.json should have been copied: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(stagingDir, "stats-cache.json")); err != nil {
+		t.Errorf("stats-cache.json should have been copied: %v", err)
+	}
+}
+
+func TestCopyHostClaudeFiles_MissingFiles(t *testing.T) {
+	// Create empty home directory (no Claude files)
+	tmpHome := t.TempDir()
+
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", oldHome)
+
+	stagingDir := t.TempDir()
+
+	// Should not panic or error when files don't exist
+	CopyHostClaudeFiles(stagingDir)
+
+	// Staging dir should still be empty (no files to copy)
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("staging dir should be empty when no host files exist, got %d entries", len(entries))
+	}
+}
+
 // mockProxyConfigurer implements credential.ProxyConfigurer for testing.
 type mockProxyConfigurer struct {
 	credentials  map[string]string

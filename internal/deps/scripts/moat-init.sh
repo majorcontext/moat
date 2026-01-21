@@ -51,31 +51,48 @@ fi
 # from the staging area to their final locations. This is needed because:
 # 1. Apple containers only support directory mounts, not file mounts
 # 2. We need ~/.claude to be a real directory so projects/ can be mounted inside it
+#
+# IMPORTANT: We determine the target home directory based on whether we'll drop
+# privileges to moatuser. If running as root with moatuser available, files go
+# to /home/moatuser. Otherwise, files go to the current $HOME.
 if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
+  # Determine target home directory
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    TARGET_HOME="/home/moatuser"
+  else
+    TARGET_HOME="$HOME"
+  fi
+
   # Create ~/.claude directory
-  mkdir -p "$HOME/.claude"
+  mkdir -p "$TARGET_HOME/.claude"
 
   # Copy settings.json if present (preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
-    cp -p "$MOAT_CLAUDE_INIT/settings.json" "$HOME/.claude/"
+    cp -p "$MOAT_CLAUDE_INIT/settings.json" "$TARGET_HOME/.claude/"
 
   # Copy credentials if present (ensure restricted permissions for security)
   if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then
-    cp -p "$MOAT_CLAUDE_INIT/.credentials.json" "$HOME/.claude/"
-    chmod 600 "$HOME/.claude/.credentials.json"
+    cp -p "$MOAT_CLAUDE_INIT/.credentials.json" "$TARGET_HOME/.claude/"
+    chmod 600 "$TARGET_HOME/.claude/.credentials.json"
   fi
 
   # Copy statsig directory if present (feature flags, preserve permissions)
   [ -d "$MOAT_CLAUDE_INIT/statsig" ] && \
-    cp -rp "$MOAT_CLAUDE_INIT/statsig" "$HOME/.claude/"
+    cp -rp "$MOAT_CLAUDE_INIT/statsig" "$TARGET_HOME/.claude/"
 
   # Copy stats-cache.json if present (usage stats, preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/stats-cache.json" ] && \
-    cp -p "$MOAT_CLAUDE_INIT/stats-cache.json" "$HOME/.claude/"
+    cp -p "$MOAT_CLAUDE_INIT/stats-cache.json" "$TARGET_HOME/.claude/"
 
   # Copy .claude.json to home directory (onboarding state, preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
-    cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$HOME/"
+    cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$TARGET_HOME/"
+
+  # Ensure moatuser owns all the files if we're running as root
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown -R moatuser:moatuser "$TARGET_HOME/.claude" 2>/dev/null || true
+    [ -f "$TARGET_HOME/.claude.json" ] && chown moatuser:moatuser "$TARGET_HOME/.claude.json" 2>/dev/null || true
+  fi
 fi
 
 # Execute the user's command
