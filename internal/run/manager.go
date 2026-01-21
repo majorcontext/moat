@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1013,6 +1014,23 @@ region = %s
 		capAdd = []string{"NET_ADMIN"}
 	}
 
+	// Determine container user
+	// On Linux with native Docker, we need to run as the host user's UID to ensure
+	// workspace file permissions work correctly. On macOS/Windows, Docker Desktop
+	// handles UID translation automatically, so we can use the default moatuser (1000).
+	var containerUser string
+	if goruntime.GOOS == "linux" {
+		hostUID := os.Getuid()
+		hostGID := os.Getgid()
+		if hostUID != 1000 {
+			// Run as host user's UID:GID for correct workspace permissions
+			containerUser = fmt.Sprintf("%d:%d", hostUID, hostGID)
+			log.Debug("using host UID for container", "uid", hostUID, "gid", hostGID)
+		}
+		// If host UID is 1000, we can use the image's default moatuser
+	}
+	// On macOS/Windows, leave containerUser empty to use the image default (moatuser)
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1020,6 +1038,7 @@ region = %s
 		Cmd:          cmd,
 		WorkingDir:   "/workspace",
 		Env:          proxyEnv,
+		User:         containerUser,
 		ExtraHosts:   extraHosts,
 		NetworkMode:  networkMode,
 		Mounts:       mounts,

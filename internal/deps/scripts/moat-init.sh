@@ -2,6 +2,11 @@
 # moat-init.sh - Container initialization script
 # This script runs before the user's command to set up moat features.
 # Features are enabled via environment variables.
+#
+# When running as root, this script performs privileged setup (SSH socket),
+# then drops to moatuser for command execution. When already running as a
+# non-root user (e.g., on Linux with host UID mapping), it skips privilege
+# dropping since the user is already non-root.
 
 set -e
 
@@ -10,13 +15,19 @@ set -e
 # TCP-based SSH agent proxy running on the host. This is needed for Docker
 # on macOS where Unix sockets can't be shared via bind mounts.
 if [ -n "$MOAT_SSH_TCP_ADDR" ]; then
-  mkdir -p /run/moat/ssh
-  socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork TCP:"$MOAT_SSH_TCP_ADDR" &
-  # Wait for socket to be created
-  for i in 1 2 3 4 5; do
-    [ -S /run/moat/ssh/agent.sock ] && break
-    sleep 0.1
-  done
+  # Create socket directory - may need root for /run
+  mkdir -p /run/moat/ssh 2>/dev/null || true
+  if [ -d /run/moat/ssh ]; then
+    # Start socat to bridge TCP to Unix socket
+    socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork,mode=0777 TCP:"$MOAT_SSH_TCP_ADDR" &
+    # Wait for socket to be created
+    for i in 1 2 3 4 5; do
+      [ -S /run/moat/ssh/agent.sock ] && break
+      sleep 0.1
+    done
+    # Make socket accessible to all users
+    chmod 777 /run/moat/ssh/agent.sock 2>/dev/null || true
+  fi
 fi
 
 # Claude Code Setup
@@ -52,4 +63,17 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
 fi
 
 # Execute the user's command
-exec "$@"
+# If we're already running as a non-root user (UID != 0), just exec directly.
+# This happens when Docker is started with --user to match host UID on Linux.
+# If we're root and moatuser exists, drop privileges with gosu.
+# Otherwise, run as current user.
+if [ "$(id -u)" != "0" ]; then
+  # Already non-root (e.g., --user was passed to docker run)
+  exec "$@"
+elif id moatuser >/dev/null 2>&1; then
+  # Running as root, moatuser exists - drop privileges
+  exec gosu moatuser "$@"
+else
+  # Running as root, no moatuser - run as root (custom image)
+  exec "$@"
+fi

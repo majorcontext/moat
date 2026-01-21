@@ -96,6 +96,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			Cmd:          cfg.Cmd,
 			WorkingDir:   cfg.WorkingDir,
 			Env:          cfg.Env,
+			User:         cfg.User,
 			Tty:          true,
 			OpenStdin:    true,
 			ExposedPorts: exposedPorts,

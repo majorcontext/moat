@@ -40,6 +40,11 @@ func runtimeBaseImage(name, version string) string {
 	}
 }
 
+// containerUser is the non-root user created in generated images.
+// Using UID 1000 as it's the standard first non-root user on most systems.
+const containerUser = "moatuser"
+const containerUID = "1000"
+
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
 func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
 	if opts == nil {
@@ -104,7 +109,7 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		aptPkgs = append(aptPkgs, "openssh-client", "socat")
 	}
 
-	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall)
+	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall, gosu for privilege drop)
 	// Note: Official runtime images are Debian-based and support apt
 	b.WriteString("# Base packages\n")
 	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
@@ -113,7 +118,16 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	b.WriteString("    gnupg \\\n")
 	b.WriteString("    unzip \\\n")
 	b.WriteString("    iptables \\\n")
+	b.WriteString("    gosu \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+
+	// Create non-root user for security
+	// Claude Code and other tools refuse certain flags when running as root
+	// Also create .claude directory structure for Claude Code state (todos, settings, logs, etc.)
+	b.WriteString("# Create non-root user\n")
+	b.WriteString(fmt.Sprintf("RUN useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
+	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects && \\\n", containerUser))
+	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))
 
 	// User-specified apt packages
 	if len(aptPkgs) > 0 {
@@ -194,16 +208,22 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	}
 
 	// Install the moat-init entrypoint script if any features require it
-	// Features: SSH agent forwarding, Claude Code file setup
+	// Features: SSH agent forwarding, Claude Code file setup, privilege drop to moatuser
 	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit
 	if needsInit {
 		// Base64 encode the embedded script to avoid shell escaping issues
 		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
 
-		b.WriteString("# Moat initialization script\n")
+		b.WriteString("# Moat initialization script (SSH agent forwarding + privilege drop)\n")
 		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
+		// Note: USER is not set here because entrypoint runs as root and drops privileges itself
+	} else {
+		// No SSH needed - run directly as non-root user
+		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}
+
+	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
 
 	return b.String(), nil
 }
