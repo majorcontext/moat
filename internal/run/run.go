@@ -9,6 +9,7 @@ import (
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
@@ -40,6 +41,7 @@ type Run struct {
 	Store          *storage.RunStore // Run data storage
 	storeRef       *atomic.Value     // Atomic reference for concurrent logger access
 	AuditStore     *audit.Store      // Tamper-proof audit log
+	SnapEngine     *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer  bool              // If true, don't auto-remove container after run
 	Interactive    bool              // If true, run was started in interactive mode
 	CreatedAt      time.Time
@@ -51,6 +53,9 @@ type Run struct {
 	FirewallEnabled bool
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
+
+	// Snapshot settings
+	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
 }
 
 // Options configures a new run.

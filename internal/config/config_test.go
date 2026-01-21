@@ -845,3 +845,150 @@ claude:
 		t.Errorf("error should mention missing command: %v", err)
 	}
 }
+
+func TestSnapshotConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test-agent
+snapshots:
+  disabled: false
+  triggers:
+    disable_pre_run: false
+    disable_git_commits: true
+    disable_builds: false
+    disable_idle: false
+    idle_threshold_seconds: 60
+  exclude:
+    ignore_gitignore: false
+    additional:
+      - "secrets/"
+      - ".env.local"
+  retention:
+    max_count: 5
+    delete_initial: false
+tracing:
+  disable_exec: false
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Verify snapshot config
+	if cfg.Snapshots.Disabled {
+		t.Error("Snapshots.Disabled should be false")
+	}
+
+	// Verify triggers
+	if cfg.Snapshots.Triggers.DisablePreRun {
+		t.Error("Snapshots.Triggers.DisablePreRun should be false")
+	}
+	if !cfg.Snapshots.Triggers.DisableGitCommits {
+		t.Error("Snapshots.Triggers.DisableGitCommits should be true")
+	}
+	if cfg.Snapshots.Triggers.DisableBuilds {
+		t.Error("Snapshots.Triggers.DisableBuilds should be false")
+	}
+	if cfg.Snapshots.Triggers.DisableIdle {
+		t.Error("Snapshots.Triggers.DisableIdle should be false")
+	}
+	if cfg.Snapshots.Triggers.IdleThresholdSeconds != 60 {
+		t.Errorf("Snapshots.Triggers.IdleThresholdSeconds = %d, want 60", cfg.Snapshots.Triggers.IdleThresholdSeconds)
+	}
+
+	// Verify exclude
+	if cfg.Snapshots.Exclude.IgnoreGitignore {
+		t.Error("Snapshots.Exclude.IgnoreGitignore should be false")
+	}
+	if len(cfg.Snapshots.Exclude.Additional) != 2 {
+		t.Fatalf("Snapshots.Exclude.Additional = %d, want 2", len(cfg.Snapshots.Exclude.Additional))
+	}
+	if cfg.Snapshots.Exclude.Additional[0] != "secrets/" {
+		t.Errorf("Snapshots.Exclude.Additional[0] = %q, want %q", cfg.Snapshots.Exclude.Additional[0], "secrets/")
+	}
+	if cfg.Snapshots.Exclude.Additional[1] != ".env.local" {
+		t.Errorf("Snapshots.Exclude.Additional[1] = %q, want %q", cfg.Snapshots.Exclude.Additional[1], ".env.local")
+	}
+
+	// Verify retention
+	if cfg.Snapshots.Retention.MaxCount != 5 {
+		t.Errorf("Snapshots.Retention.MaxCount = %d, want 5", cfg.Snapshots.Retention.MaxCount)
+	}
+	if cfg.Snapshots.Retention.DeleteInitial {
+		t.Error("Snapshots.Retention.DeleteInitial should be false")
+	}
+
+	// Verify tracing
+	if cfg.Tracing.DisableExec {
+		t.Error("Tracing.DisableExec should be false")
+	}
+}
+
+func TestSnapshotConfigDefaults(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test-agent
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Verify snapshot defaults
+	if cfg.Snapshots.Disabled {
+		t.Error("Snapshots.Disabled should default to false")
+	}
+	if cfg.Snapshots.Triggers.IdleThresholdSeconds != 30 {
+		t.Errorf("Snapshots.Triggers.IdleThresholdSeconds = %d, want 30 (default)", cfg.Snapshots.Triggers.IdleThresholdSeconds)
+	}
+	if cfg.Snapshots.Retention.MaxCount != 10 {
+		t.Errorf("Snapshots.Retention.MaxCount = %d, want 10 (default)", cfg.Snapshots.Retention.MaxCount)
+	}
+
+	// Verify other snapshot defaults are false/empty
+	if cfg.Snapshots.Triggers.DisablePreRun {
+		t.Error("Snapshots.Triggers.DisablePreRun should default to false")
+	}
+	if cfg.Snapshots.Triggers.DisableGitCommits {
+		t.Error("Snapshots.Triggers.DisableGitCommits should default to false")
+	}
+	if cfg.Snapshots.Triggers.DisableBuilds {
+		t.Error("Snapshots.Triggers.DisableBuilds should default to false")
+	}
+	if cfg.Snapshots.Triggers.DisableIdle {
+		t.Error("Snapshots.Triggers.DisableIdle should default to false")
+	}
+	if cfg.Snapshots.Exclude.IgnoreGitignore {
+		t.Error("Snapshots.Exclude.IgnoreGitignore should default to false")
+	}
+	if len(cfg.Snapshots.Exclude.Additional) != 0 {
+		t.Errorf("Snapshots.Exclude.Additional = %d, want 0 (default)", len(cfg.Snapshots.Exclude.Additional))
+	}
+	if cfg.Snapshots.Retention.DeleteInitial {
+		t.Error("Snapshots.Retention.DeleteInitial should default to false")
+	}
+
+	// Verify tracing defaults
+	if cfg.Tracing.DisableExec {
+		t.Error("Tracing.DisableExec should default to false")
+	}
+}
+
+func TestDefaultConfigSnapshotDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Snapshots.Triggers.IdleThresholdSeconds != 30 {
+		t.Errorf("DefaultConfig() Snapshots.Triggers.IdleThresholdSeconds = %d, want 30", cfg.Snapshots.Triggers.IdleThresholdSeconds)
+	}
+	if cfg.Snapshots.Retention.MaxCount != 10 {
+		t.Errorf("DefaultConfig() Snapshots.Retention.MaxCount = %d, want 10", cfg.Snapshots.Retention.MaxCount)
+	}
+}

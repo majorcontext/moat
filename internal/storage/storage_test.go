@@ -192,3 +192,135 @@ func TestTraceSpans(t *testing.T) {
 		t.Errorf("Name = %q, want %q", spans[0].Name, "http.request")
 	}
 }
+
+func TestWriteExecEvent(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run-exec")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	exitCode := 0
+	duration := 100 * time.Millisecond
+	event := ExecEvent{
+		Timestamp:  time.Now().UTC(),
+		PID:        1234,
+		PPID:       1,
+		Command:    "git",
+		Args:       []string{"status"},
+		WorkingDir: "/workspace",
+		ExitCode:   &exitCode,
+		Duration:   &duration,
+	}
+
+	if err := s.WriteExecEvent(event); err != nil {
+		t.Fatalf("WriteExecEvent: %v", err)
+	}
+
+	events, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+
+	got := events[0]
+	if got.PID != event.PID {
+		t.Errorf("PID = %d, want %d", got.PID, event.PID)
+	}
+	if got.PPID != event.PPID {
+		t.Errorf("PPID = %d, want %d", got.PPID, event.PPID)
+	}
+	if got.Command != event.Command {
+		t.Errorf("Command = %q, want %q", got.Command, event.Command)
+	}
+	if len(got.Args) != len(event.Args) || got.Args[0] != event.Args[0] {
+		t.Errorf("Args = %v, want %v", got.Args, event.Args)
+	}
+	if got.WorkingDir != event.WorkingDir {
+		t.Errorf("WorkingDir = %q, want %q", got.WorkingDir, event.WorkingDir)
+	}
+	if got.ExitCode == nil || *got.ExitCode != *event.ExitCode {
+		t.Errorf("ExitCode = %v, want %v", got.ExitCode, event.ExitCode)
+	}
+	if got.Duration == nil || *got.Duration != *event.Duration {
+		t.Errorf("Duration = %v, want %v", got.Duration, event.Duration)
+	}
+}
+
+func TestReadExecEventsMultiple(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run-exec-multi")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Write multiple events
+	events := []ExecEvent{
+		{
+			Timestamp: time.Now().UTC(),
+			PID:       100,
+			PPID:      1,
+			Command:   "npm",
+			Args:      []string{"install"},
+		},
+		{
+			Timestamp: time.Now().UTC().Add(time.Second),
+			PID:       101,
+			PPID:      100,
+			Command:   "node",
+			Args:      []string{"index.js"},
+		},
+		{
+			Timestamp: time.Now().UTC().Add(2 * time.Second),
+			PID:       102,
+			PPID:      1,
+			Command:   "git",
+			Args:      []string{"commit", "-m", "test"},
+		},
+	}
+
+	for _, event := range events {
+		if err := s.WriteExecEvent(event); err != nil {
+			t.Fatalf("WriteExecEvent: %v", err)
+		}
+	}
+
+	// Read all back
+	readEvents, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if len(readEvents) != len(events) {
+		t.Fatalf("got %d events, want %d", len(readEvents), len(events))
+	}
+
+	// Verify order and content
+	for i, got := range readEvents {
+		want := events[i]
+		if got.PID != want.PID {
+			t.Errorf("event[%d].PID = %d, want %d", i, got.PID, want.PID)
+		}
+		if got.Command != want.Command {
+			t.Errorf("event[%d].Command = %q, want %q", i, got.Command, want.Command)
+		}
+	}
+}
+
+func TestReadExecEventsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run-exec-empty")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Read from non-existent file should return nil, nil
+	events, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if events != nil {
+		t.Errorf("expected nil events, got %v", events)
+	}
+}
