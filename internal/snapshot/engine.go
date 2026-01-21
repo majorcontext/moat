@@ -66,11 +66,13 @@ func NewEngine(workspace, snapshotDir string, opts EngineOptions) (*Engine, erro
 }
 
 // detectBackend selects the appropriate backend based on options and filesystem.
-func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
+func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend { //nolint:unparam // workspace kept for future APFS clone implementation
 	// If ForceBackend is set, use that
 	if opts.ForceBackend != "" {
 		switch opts.ForceBackend {
 		case "apfs":
+			// WARNING: APFS backend uses tmutil which creates volume-level snapshots,
+			// not directory-level. Use with caution - archive backend is recommended.
 			return NewAPFSBackend()
 		case "archive":
 			return NewArchiveBackend(snapshotDir, ArchiveOptions{
@@ -82,10 +84,12 @@ func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
 		}
 	}
 
-	// Auto-detect: prefer APFS on darwin if available
-	if IsAPFS(workspace) {
-		return NewAPFSBackend()
-	}
+	// Auto-detect: always use archive backend for now
+	// NOTE: The APFS backend currently uses tmutil (Time Machine) which creates
+	// volume-level snapshots, not directory-level. This is incorrect for workspace
+	// snapshots. A proper APFS implementation would use cp -c for copy-on-write
+	// directory cloning. Until that's implemented, we default to archive backend.
+	// See: https://github.com/andybons/moat/issues/XX
 
 	// Default to archive backend
 	return NewArchiveBackend(snapshotDir, ArchiveOptions{
