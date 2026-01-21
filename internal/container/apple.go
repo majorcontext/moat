@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/andybons/moat/internal/log"
@@ -422,15 +423,32 @@ func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag st
 	return nil
 }
 
+// builderDNSLockPath is the file used for advisory locking during builder DNS configuration.
+// This prevents race conditions when multiple moat processes configure DNS simultaneously.
+const builderDNSLockPath = "/tmp/moat-builder-dns.lock"
+
 // fixBuilderDNS ensures the Apple container builder has working DNS.
 // This works around apple/container#656 where the builder's default DNS
 // (the gateway) doesn't forward queries.
 //
-// Note: If multiple moat processes run concurrently, they may race to configure
-// the builder's DNS. This is generally safe because they'll write the same or
-// similar DNS servers, and the buildkit builder handles resolv.conf updates
-// gracefully. A file lock could be added if this becomes problematic.
+// Uses a file lock to prevent race conditions when multiple moat processes
+// attempt to configure the builder DNS simultaneously.
 func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
+	// Acquire file lock to prevent concurrent DNS configuration
+	lockFile, err := os.OpenFile(builderDNSLockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("opening DNS lock file: %w", err)
+	}
+	defer lockFile.Close()
+
+	// Use blocking flock - will wait if another process holds the lock
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("acquiring DNS lock: %w", err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	}()
+
 	// Use configured DNS if provided
 	dnsServers := configuredDNS
 
