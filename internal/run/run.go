@@ -57,7 +57,7 @@ type Run struct {
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
 	ProviderCleanupPaths map[string]string
 
-  // Snapshot settings
+	// Snapshot settings
 	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
 }
 
