@@ -11,14 +11,15 @@
 #
 set -euo pipefail
 
-# Claude's review comments start with "## Pull Request Review:"
-# We use this as the marker since HTML comments get escaped by Claude
-REVIEW_TITLE_PREFIX="## Pull Request Review:"
+# Claude's review comments are identified by:
+# 1. Being posted by the claude-code-action bot (github-actions[bot])
+# 2. Having a title matching "## ... Review" or "### ... Review" pattern
+# This is more robust than checking exact title format since Claude sometimes varies
 COLLAPSED_MARKER="<!-- collapsed -->"
 
-# Get all comments that start with the review title but haven't been collapsed yet
+# Get all comments from github-actions[bot] that contain a review heading and haven't been collapsed
 comments=$(gh api "/repos/${REPO}/issues/${PR_NUMBER}/comments" \
-  --jq ".[] | select(.body | startswith(\"${REVIEW_TITLE_PREFIX}\")) | select(.body | contains(\"${COLLAPSED_MARKER}\") | not) | {id: .id, body: .body}")
+  --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | test("^##+ .*Review")) | select(.body | contains("<!-- collapsed -->") | not) | {id: .id, body: .body}')
 
 if [ -z "$comments" ]; then
   echo "No previous Claude reviews to collapse"
