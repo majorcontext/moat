@@ -6,12 +6,12 @@ Run AI agents locally with one command. Zero Docker knowledge. Zero secret copyi
 
 ## Philosophy
 
-**Don't manage containers. Manage runs.**
+**Moat is the execution substrate. Orchestration lives above it.**
 
-A "run" is a sealed workspace: your code, dependencies, credentials, and observability—all managed as one unit. You shouldn't need to understand Docker, copy tokens around, or piece together logs from different places. Moat handles the infrastructure so you can focus on what the agent actually does.
+Moat is a single-run execution environment for agents or processes. One command runs one agent against one workspace. Focus on isolation, auditability, reproducibility, and safe credentials.
 
 ```
-moat claude
+moat claude ./path/to/workspace
 ```
 
 What happens when you run this:
@@ -20,6 +20,38 @@ What happens when you run this:
 - Credentials are injected at the network layer (the agent never sees your tokens)
 - Every API call, log line, and network request is captured
 - When it's done, the workspace is disposable—or you can keep the artifacts
+
+### Scope and Non-Goals
+
+**Moat does:**
+- Run a single agent in an isolated environment
+- Inject credentials securely at the network layer
+- Capture full observability (logs, network, audit trail)
+- Support detached runs, attach/reattach, and replay
+
+**Moat does not:**
+- Orchestrate multiple agents
+- Coordinate parallel runs
+- Perform task planning or delegation
+- Manage shared state across runs
+
+### Composition Philosophy
+
+Moat is designed to be composed with:
+- Shell scripting (loops, `parallel`, etc.)
+- External orchestrators
+- Agent frameworks
+
+Parallel execution and workflow coordination are intentionally left to the shell or higher-level tools.
+
+### Design Principles
+
+- **Small surface area**: One command, one run, clear semantics
+- **Predictable behavior**: Runs are independent and self-contained
+- **Unix composability**: Compose moat with existing tools
+- **Clear trust boundaries**: Explicit about what has access to credentials
+
+For more on design philosophy and decision rationale, see [VISION.md](VISION.md).
 
 ## Installation
 
