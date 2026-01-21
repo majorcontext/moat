@@ -102,10 +102,13 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 		return fmt.Errorf("writing credentials file: %w", writeErr)
 	}
 
-	// Copy files from host's ~/.claude directory
+	// Copy optional files from host's ~/.claude directory.
+	// Note: The essential credentials file has already been written above.
+	// Everything below is optional host file copying that enhances the experience
+	// but is not required for Claude Code to function.
 	hostHome, err := os.UserHomeDir()
 	if err != nil {
-		return nil // Non-fatal, just skip host files
+		return nil // Non-fatal: credentials written, just skip optional host files
 	}
 
 	hostClaudeDir := filepath.Join(hostHome, ".claude")

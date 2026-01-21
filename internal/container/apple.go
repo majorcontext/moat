@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/andybons/moat/internal/log"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.
@@ -542,6 +544,8 @@ func detectHostDNS() ([]string, error) {
 	}
 
 	var servers []string
+	var skippedIPv6 []string
+	var skippedLocalhost []string
 	seen := make(map[string]bool)
 
 	for _, line := range strings.Split(string(out), "\n") {
@@ -553,10 +557,18 @@ func detectHostDNS() ([]string, error) {
 				server := strings.TrimSpace(parts[1])
 				// Skip IPv6 for now (container networking may not support it well)
 				if strings.Contains(server, ":") {
+					if !seen[server] {
+						skippedIPv6 = append(skippedIPv6, server)
+						seen[server] = true
+					}
 					continue
 				}
 				// Skip localhost (won't work from container)
 				if server == "127.0.0.1" {
+					if !seen[server] {
+						skippedLocalhost = append(skippedLocalhost, server)
+						seen[server] = true
+					}
 					continue
 				}
 				// Deduplicate
@@ -566,6 +578,17 @@ func detectHostDNS() ([]string, error) {
 				}
 			}
 		}
+	}
+
+	// Log what was found/skipped to help debug DNS detection issues
+	if len(skippedIPv6) > 0 {
+		log.Debug("DNS detection skipped IPv6 servers", "servers", skippedIPv6)
+	}
+	if len(skippedLocalhost) > 0 {
+		log.Debug("DNS detection skipped localhost", "servers", skippedLocalhost)
+	}
+	if len(servers) > 0 {
+		log.Debug("DNS detection found usable servers", "servers", servers)
 	}
 
 	if len(servers) == 0 {
