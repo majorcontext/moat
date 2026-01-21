@@ -727,3 +727,81 @@ func TestArchiveBackendEmptyWorkspace(t *testing.T) {
 		t.Fatalf("RestoreTo() error: %v", err)
 	}
 }
+
+// TestArchiveBackendFileCountLimit verifies that extraction fails if the archive
+// contains more files than maxArchiveFiles (compression bomb protection).
+func TestArchiveBackendFileCountLimit(t *testing.T) {
+	snapshotDir := t.TempDir()
+	restoreDir := t.TempDir()
+
+	// Create a malicious archive with more files than the limit
+	// We'll create a small archive that claims to have many files
+	archivePath := filepath.Join(snapshotDir, "bomb.tar.gz")
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatalf("failed to create archive: %v", err)
+	}
+
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	// Create maxArchiveFiles + 1 entries to trigger the limit
+	// For test efficiency, we'll create a smaller number and verify the logic
+	// by temporarily checking against a known threshold
+	const testFileCount = 100001 // Just over the 100k limit
+
+	for i := 0; i < testFileCount; i++ {
+		header := &tar.Header{
+			Name: "file" + string(rune('0'+i%10)) + ".txt",
+			Mode: 0644,
+			Size: 0,
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			tw.Close()
+			gw.Close()
+			f.Close()
+			t.Fatalf("failed to write header %d: %v", i, err)
+		}
+	}
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	// Attempt to restore - should fail with file count error
+	backend := NewArchiveBackend(snapshotDir, ArchiveOptions{})
+	err = backend.RestoreTo(archivePath, restoreDir)
+	if err == nil {
+		t.Fatal("RestoreTo() should have failed with file count limit")
+	}
+	if !strings.Contains(err.Error(), "too many files") {
+		t.Errorf("error should mention file count limit, got: %v", err)
+	}
+}
+
+// TestArchiveBackendLimitsExist verifies that archive extraction limits are
+// configured with reasonable values to prevent compression bomb attacks.
+func TestArchiveBackendLimitsExist(t *testing.T) {
+	// Verify the limits are reasonable values (not zero or excessively large)
+	// These constants protect against compression bomb attacks
+
+	// File count limit should be reasonable (between 1k and 1M)
+	if maxArchiveFiles < 1000 || maxArchiveFiles > 1000000 {
+		t.Errorf("maxArchiveFiles = %d, expected between 1000 and 1000000", maxArchiveFiles)
+	}
+
+	// Per-file size limit should be around 1GB
+	if maxArchiveFileSize != 1<<30 {
+		t.Errorf("maxArchiveFileSize = %d, expected %d (1GB)", maxArchiveFileSize, 1<<30)
+	}
+
+	// Total size limit should be around 10GB
+	if maxArchiveTotalSize != 10<<30 {
+		t.Errorf("maxArchiveTotalSize = %d, expected %d (10GB)", maxArchiveTotalSize, 10<<30)
+	}
+
+	// Verify limits have proper relationship
+	if maxArchiveTotalSize < maxArchiveFileSize {
+		t.Error("maxArchiveTotalSize should be >= maxArchiveFileSize")
+	}
+}
