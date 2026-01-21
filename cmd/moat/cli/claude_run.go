@@ -263,7 +263,7 @@ func hasAnthropicCredential() bool {
 // hasDependency checks if a dependency prefix exists in the list.
 func hasDependency(deps []string, prefix string) bool {
 	for _, d := range deps {
-		if d == prefix || len(d) > len(prefix) && d[:len(prefix)+1] == prefix+"@" {
+		if d == prefix || strings.HasPrefix(d, prefix+"@") {
 			return true
 		}
 	}
