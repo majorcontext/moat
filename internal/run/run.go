@@ -1,13 +1,12 @@
 package run
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"sync/atomic"
 	"time"
 
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/id"
 	"github.com/andybons/moat/internal/proxy"
 	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
@@ -74,12 +73,7 @@ type Options struct {
 
 // generateID creates a unique run identifier.
 func generateID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails (extremely unlikely)
-		return "run-" + hex.EncodeToString([]byte(time.Now().Format("150405.000")))
-	}
-	return "run-" + hex.EncodeToString(b)
+	return id.Generate("run")
 }
 
 // SaveMetadata persists the run's current state to disk.

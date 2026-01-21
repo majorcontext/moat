@@ -2,9 +2,9 @@
 package snapshot
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"time"
+
+	"github.com/andybons/moat/internal/id"
 )
 
 // Type represents the trigger type for a snapshot.
@@ -35,14 +35,8 @@ type Metadata struct {
 }
 
 // NewID generates a new snapshot ID in the format snap_<random>.
-// Uses 4 random bytes encoded as 8 hex characters.
 func NewID() string {
-	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails (extremely unlikely)
-		return "snap_" + hex.EncodeToString([]byte(time.Now().Format("150405.0")))[:8]
-	}
-	return "snap_" + hex.EncodeToString(b)
+	return id.Generate("snap")
 }
 
 // Backend defines the interface for snapshot storage backends.

@@ -46,13 +46,13 @@ Interactive mode (-i):
 
 Examples:
   # Attach to see output (or interactive if run was started with -i)
-  moat attach run-abc123
+  moat attach run_abc12345
 
   # Force interactive mode
-  moat attach -i run-abc123
+  moat attach -i run_abc12345
 
   # Force output-only mode even if run was started interactively
-  moat attach -i=false run-abc123`,
+  moat attach -i=false run_abc12345`,
 	Args: cobra.ExactArgs(1),
 	RunE: attachToRun,
 }

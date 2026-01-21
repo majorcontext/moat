@@ -21,11 +21,11 @@ var traceCmd = &cobra.Command{
 	Long: `View trace spans from a run. If no run-id is specified, shows traces from the most recent run.
 
 Examples:
-  agent trace                   # Traces from most recent run
-  agent trace run-abc123        # Traces from specific run
-  agent trace --network         # Show network requests
-  agent trace --network -v      # Show network requests with headers and bodies
-  agent trace --json            # Output as JSON`,
+  moat trace                   # Traces from most recent run
+  moat trace run_abc12345      # Traces from specific run
+  moat trace --network         # Show network requests
+  moat trace --network -v      # Show network requests with headers and bodies
+  moat trace --json            # Output as JSON`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTrace,
 }

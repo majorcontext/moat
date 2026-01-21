@@ -28,9 +28,9 @@ restoring in-place. This is useful for comparing states or recovering
 specific files without modifying the current workspace.
 
 Examples:
-  moat rollback run-abc123                      # Restore most recent snapshot
-  moat rollback run-abc123 snap_12ab34cd       # Restore specific snapshot
-  moat rollback run-abc123 --to /tmp/recovery   # Extract to different directory`,
+  moat rollback run_abc12345                      # Restore most recent snapshot
+  moat rollback run_abc12345 snap_12ab34cd        # Restore specific snapshot
+  moat rollback run_abc12345 --to /tmp/recovery   # Extract to different directory`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runRollback,
 }

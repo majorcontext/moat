@@ -22,10 +22,10 @@ var logsCmd = &cobra.Command{
 	Long: `View logs from a run. If no run-id is specified, shows logs from the most recent run.
 
 Examples:
-  agent logs                    # Logs from most recent run
-  agent logs run-abc123         # Logs from specific run
-  agent logs -f                 # Follow logs (like tail -f)
-  agent logs -n 50              # Show last 50 lines`,
+  moat logs                    # Logs from most recent run
+  moat logs run_abc12345       # Logs from specific run
+  moat logs -f                 # Follow logs (like tail -f)
+  moat logs -n 50              # Show last 50 lines`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runLogs,
 }
