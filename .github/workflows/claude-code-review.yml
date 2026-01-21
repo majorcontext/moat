@@ -56,7 +56,12 @@ jobs:
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-            IMPORTANT: When posting your review comment, you MUST include the marker `<!-- claude-code-review -->` at the very beginning of your comment body. This marker is used to identify your reviews so they can be collapsed when superseded by newer reviews.
+            IMPORTANT: Your review comment MUST start with a title in exactly this format:
+            ## Pull Request Review: <brief title>
+
+            For example: "## Pull Request Review: AWS Credential Support"
+
+            This title format is used to identify your reviews so previous ones can be collapsed when superseded.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
