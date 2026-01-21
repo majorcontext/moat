@@ -884,35 +884,6 @@ region = %s
 		}
 	}
 
-	// Set up provider-specific container mounts (e.g., credential files, state files)
-	if containerHome != "" {
-		key, keyErr := credential.DefaultEncryptionKey()
-		if keyErr == nil {
-			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-			if storeErr == nil {
-				for _, grant := range opts.Grants {
-					provider := credential.Provider(strings.Split(grant, ":")[0])
-					if cred, err := store.Get(provider); err == nil {
-						if setup := credential.GetProviderSetup(provider); setup != nil {
-							providerMounts, cleanupPath, mountErr := setup.ContainerMounts(cred, containerHome)
-							if mountErr != nil {
-								log.Debug("failed to set up provider mounts", "provider", provider, "error", mountErr)
-							} else {
-								mounts = append(mounts, providerMounts...)
-								if cleanupPath != "" {
-									if r.ProviderCleanupPaths == nil {
-										r.ProviderCleanupPaths = make(map[string]string)
-									}
-									r.ProviderCleanupPaths[string(provider)] = cleanupPath
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
 	// Set up Claude staging directory for init script
 	// This includes OAuth credentials, host files, and optionally plugin settings
 	var claudeGenerated *claude.GeneratedConfig
