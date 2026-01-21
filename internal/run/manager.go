@@ -27,6 +27,7 @@ import (
 	"github.com/andybons/moat/internal/proxy"
 	"github.com/andybons/moat/internal/routing"
 	"github.com/andybons/moat/internal/secrets"
+	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
@@ -923,6 +924,23 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 	r.AuditStore = auditStore
 
+	// Initialize snapshot engine if not disabled
+	if opts.Config != nil && !opts.Config.Snapshots.Disabled {
+		snapshotDir := filepath.Join(store.Dir(), "snapshots")
+		snapEngine, snapErr := snapshot.NewEngine(opts.Workspace, snapshotDir, snapshot.EngineOptions{
+			UseGitignore: !opts.Config.Snapshots.Exclude.IgnoreGitignore,
+			Additional:   opts.Config.Snapshots.Exclude.Additional,
+		})
+		if snapErr != nil {
+			// Log warning but don't fail - snapshots are best-effort
+			log.Warn("failed to initialize snapshot engine", "error", snapErr)
+		} else {
+			r.SnapEngine = snapEngine
+		}
+		// Track trigger settings for use in Start()
+		r.DisablePreRunSnapshot = opts.Config.Snapshots.Triggers.DisablePreRun
+	}
+
 	// Save initial metadata (best-effort; non-fatal if it fails)
 	_ = r.SaveMetadata()
 
@@ -1039,6 +1057,13 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 
 	// Save state to disk
 	_ = r.SaveMetadata()
+
+	// Create pre-run snapshot
+	if r.SnapEngine != nil && !r.DisablePreRunSnapshot {
+		if _, err := r.SnapEngine.Create(snapshot.TypePreRun, ""); err != nil {
+			log.Warn("failed to create pre-run snapshot", "error", err)
+		}
+	}
 
 	// Stream logs to stdout (unless disabled for interactive mode)
 	if opts.StreamLogs {

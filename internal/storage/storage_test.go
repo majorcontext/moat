@@ -10,16 +10,16 @@ import (
 
 func TestNewRunStore(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-test123")
+	s, err := NewRunStore(dir, "run_test1234")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
-	if s.RunID() != "run-test123" {
-		t.Errorf("RunID = %q, want %q", s.RunID(), "run-test123")
+	if s.RunID() != "run_test1234" {
+		t.Errorf("RunID = %q, want %q", s.RunID(), "run_test1234")
 	}
 
 	// Check directory was created
-	runDir := filepath.Join(dir, "run-test123")
+	runDir := filepath.Join(dir, "run_test1234")
 	if _, err := os.Stat(runDir); os.IsNotExist(err) {
 		t.Error("run directory was not created")
 	}
@@ -27,7 +27,7 @@ func TestNewRunStore(t *testing.T) {
 
 func TestRunStoreMetadata(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-test456")
+	s, _ := NewRunStore(dir, "run_test4567")
 
 	meta := Metadata{
 		Name:      "claude-code",
@@ -49,12 +49,12 @@ func TestRunStoreMetadata(t *testing.T) {
 
 func TestRunStoreDir(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-dirtest")
+	s, err := NewRunStore(dir, "run_dirtest1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
 
-	expectedDir := filepath.Join(dir, "run-dirtest")
+	expectedDir := filepath.Join(dir, "run_dirtest1")
 	if s.Dir() != expectedDir {
 		t.Errorf("Dir = %q, want %q", s.Dir(), expectedDir)
 	}
@@ -75,7 +75,7 @@ func TestDefaultBaseDir(t *testing.T) {
 
 func TestLoadMetadataPreservesAllFields(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-allfields")
+	s, _ := NewRunStore(dir, "run_allfield")
 
 	meta := Metadata{
 		Name:      "test-agent",
@@ -105,7 +105,7 @@ func TestLoadMetadataPreservesAllFields(t *testing.T) {
 
 func TestLogWriter(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-logs")
+	s, _ := NewRunStore(dir, "run_logs1234")
 
 	w, err := s.LogWriter()
 	if err != nil {
@@ -134,7 +134,7 @@ func TestLogWriter(t *testing.T) {
 
 func TestReadLogsWithOffset(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-logs-offset")
+	s, _ := NewRunStore(dir, "run_logsoffset1")
 
 	w, _ := s.LogWriter()
 	for i := 0; i < 10; i++ {
@@ -154,7 +154,7 @@ func TestReadLogsWithOffset(t *testing.T) {
 
 func TestTraceSpans(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-traces")
+	s, _ := NewRunStore(dir, "run_traces12")
 
 	span1 := Span{
 		TraceID:   "trace-123",
@@ -190,5 +190,137 @@ func TestTraceSpans(t *testing.T) {
 	}
 	if spans[0].Name != "http.request" {
 		t.Errorf("Name = %q, want %q", spans[0].Name, "http.request")
+	}
+}
+
+func TestWriteExecEvent(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_exec1234")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	exitCode := 0
+	duration := 100 * time.Millisecond
+	event := ExecEvent{
+		Timestamp:  time.Now().UTC(),
+		PID:        1234,
+		PPID:       1,
+		Command:    "git",
+		Args:       []string{"status"},
+		WorkingDir: "/workspace",
+		ExitCode:   &exitCode,
+		Duration:   &duration,
+	}
+
+	if err := s.WriteExecEvent(event); err != nil {
+		t.Fatalf("WriteExecEvent: %v", err)
+	}
+
+	events, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+
+	got := events[0]
+	if got.PID != event.PID {
+		t.Errorf("PID = %d, want %d", got.PID, event.PID)
+	}
+	if got.PPID != event.PPID {
+		t.Errorf("PPID = %d, want %d", got.PPID, event.PPID)
+	}
+	if got.Command != event.Command {
+		t.Errorf("Command = %q, want %q", got.Command, event.Command)
+	}
+	if len(got.Args) != len(event.Args) || got.Args[0] != event.Args[0] {
+		t.Errorf("Args = %v, want %v", got.Args, event.Args)
+	}
+	if got.WorkingDir != event.WorkingDir {
+		t.Errorf("WorkingDir = %q, want %q", got.WorkingDir, event.WorkingDir)
+	}
+	if got.ExitCode == nil || *got.ExitCode != *event.ExitCode {
+		t.Errorf("ExitCode = %v, want %v", got.ExitCode, event.ExitCode)
+	}
+	if got.Duration == nil || *got.Duration != *event.Duration {
+		t.Errorf("Duration = %v, want %v", got.Duration, event.Duration)
+	}
+}
+
+func TestReadExecEventsMultiple(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_execmulti1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Write multiple events
+	events := []ExecEvent{
+		{
+			Timestamp: time.Now().UTC(),
+			PID:       100,
+			PPID:      1,
+			Command:   "npm",
+			Args:      []string{"install"},
+		},
+		{
+			Timestamp: time.Now().UTC().Add(time.Second),
+			PID:       101,
+			PPID:      100,
+			Command:   "node",
+			Args:      []string{"index.js"},
+		},
+		{
+			Timestamp: time.Now().UTC().Add(2 * time.Second),
+			PID:       102,
+			PPID:      1,
+			Command:   "git",
+			Args:      []string{"commit", "-m", "test"},
+		},
+	}
+
+	for _, event := range events {
+		if err := s.WriteExecEvent(event); err != nil {
+			t.Fatalf("WriteExecEvent: %v", err)
+		}
+	}
+
+	// Read all back
+	readEvents, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if len(readEvents) != len(events) {
+		t.Fatalf("got %d events, want %d", len(readEvents), len(events))
+	}
+
+	// Verify order and content
+	for i, got := range readEvents {
+		want := events[i]
+		if got.PID != want.PID {
+			t.Errorf("event[%d].PID = %d, want %d", i, got.PID, want.PID)
+		}
+		if got.Command != want.Command {
+			t.Errorf("event[%d].Command = %q, want %q", i, got.Command, want.Command)
+		}
+	}
+}
+
+func TestReadExecEventsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_execempty1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Read from non-existent file should return nil, nil
+	events, err := s.ReadExecEvents()
+	if err != nil {
+		t.Fatalf("ReadExecEvents: %v", err)
+	}
+	if events != nil {
+		t.Errorf("expected nil events, got %v", events)
 	}
 }

@@ -368,3 +368,69 @@ func (s *RunStore) ReadSecretResolutions() ([]SecretResolution, error) {
 	}
 	return resolutions, nil
 }
+
+// ExecEvent represents a command execution captured by the tracer.
+// This is a duplicate of trace.ExecEvent to avoid circular imports.
+type ExecEvent struct {
+	Timestamp  time.Time      `json:"timestamp"`
+	PID        int            `json:"pid"`
+	PPID       int            `json:"ppid"`
+	Command    string         `json:"command"`
+	Args       []string       `json:"args"`
+	WorkingDir string         `json:"working_dir,omitempty"`
+	ExitCode   *int           `json:"exit_code,omitempty"`
+	Duration   *time.Duration `json:"duration,omitempty"`
+}
+
+// WriteExecEvent writes an execution event to exec.jsonl.
+func (s *RunStore) WriteExecEvent(event ExecEvent) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "exec.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return fmt.Errorf("opening exec file: %w", err)
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("marshaling exec event: %w", err)
+	}
+	if _, writeErr := f.Write(data); writeErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing exec event: %w", writeErr)
+	}
+	if _, writeErr := f.Write([]byte("\n")); writeErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing exec event newline: %w", writeErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		return fmt.Errorf("closing exec file: %w", closeErr)
+	}
+	return nil
+}
+
+// ReadExecEvents reads all execution events from exec.jsonl.
+func (s *RunStore) ReadExecEvents() ([]ExecEvent, error) {
+	f, err := os.Open(filepath.Join(s.dir, "exec.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("opening exec file: %w", err)
+	}
+	defer f.Close()
+
+	var events []ExecEvent
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var event ExecEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue // Skip malformed entries
+		}
+		events = append(events, event)
+	}
+	return events, scanner.Err()
+}

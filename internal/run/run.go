@@ -1,14 +1,14 @@
 package run
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"sync/atomic"
 	"time"
 
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/id"
 	"github.com/andybons/moat/internal/proxy"
+	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
 )
@@ -40,6 +40,7 @@ type Run struct {
 	Store          *storage.RunStore // Run data storage
 	storeRef       *atomic.Value     // Atomic reference for concurrent logger access
 	AuditStore     *audit.Store      // Tamper-proof audit log
+	SnapEngine     *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer  bool              // If true, don't auto-remove container after run
 	Interactive    bool              // If true, run was started in interactive mode
 	CreatedAt      time.Time
@@ -55,6 +56,9 @@ type Run struct {
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
 	ProviderCleanupPaths map[string]string
+
+  // Snapshot settings
+	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
 }
 
 // Options configures a new run.
@@ -73,12 +77,7 @@ type Options struct {
 
 // generateID creates a unique run identifier.
 func generateID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails (extremely unlikely)
-		return "run-" + hex.EncodeToString([]byte(time.Now().Format("150405.000")))
-	}
-	return "run-" + hex.EncodeToString(b)
+	return id.Generate("run")
 }
 
 // SaveMetadata persists the run's current state to disk.

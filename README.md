@@ -383,9 +383,9 @@ $ moat run --name dark-mode ./my-app &
 $ moat run --name checkout-flow ./my-app &
 
 $ moat list
-NAME            RUN ID       STATE     SERVICES
-dark-mode       run-a1b2...  running   web, api
-checkout-flow   run-c3d4...  running   web, api
+NAME            RUN ID           STATE     SERVICES
+dark-mode       run_a1b2c3...    running   web, api
+checkout-flow   run_d4e5f6...    running   web, api
 ```
 
 Both agents expose the same ports internally, but each gets its own hostname namespace. Access via the proxy (default port 8080):
@@ -412,8 +412,8 @@ MOAT_URL_WEB=http://web.checkout-flow.localhost:8080
 When done, stop both agents by run ID (from `moat list`):
 
 ```bash
-$ moat stop run-a1b2...
-$ moat stop run-c3d4...
+$ moat stop run_a1b2c3...
+$ moat stop run_d4e5f6...
 ```
 
 ## Observability
@@ -473,9 +473,9 @@ moat run -e DEBUG=true          # Set env variable
 moat run -- npm test            # Custom command (overrides agent.yaml)
 moat run -d ./my-project        # Run detached (in background)
 moat run -i -- bash             # Interactive shell
-moat attach run-abc123          # Attach (uses run's original mode)
-moat attach -i run-abc123       # Force interactive mode
-moat attach -i=false run-abc123 # Force output-only mode
+moat attach run_a1b2c3d4e5f6          # Attach (uses run's original mode)
+moat attach -i run_a1b2c3d4e5f6       # Force interactive mode
+moat attach -i=false run_a1b2c3d4e5f6 # Force output-only mode
 moat logs -n 50                 # Last N lines
 ```
 

@@ -9,9 +9,9 @@ func TestGenerateID(t *testing.T) {
 	id1 := generateID()
 	id2 := generateID()
 
-	// IDs should have the correct prefix
-	if !strings.HasPrefix(id1, "run-") {
-		t.Errorf("expected ID to start with 'run-', got %s", id1)
+	// IDs should have the correct prefix (run_ with underscore)
+	if !strings.HasPrefix(id1, "run_") {
+		t.Errorf("expected ID to start with 'run_', got %s", id1)
 	}
 
 	// IDs should be unique
@@ -19,7 +19,7 @@ func TestGenerateID(t *testing.T) {
 		t.Errorf("expected unique IDs, got %s and %s", id1, id2)
 	}
 
-	// IDs should have expected length (run- + 12 hex chars)
+	// IDs should have expected length (run_ + 12 hex chars = 16 total)
 	if len(id1) != 16 {
 		t.Errorf("expected ID length 16, got %d (%s)", len(id1), id1)
 	}
