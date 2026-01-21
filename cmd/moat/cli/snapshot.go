@@ -22,8 +22,8 @@ rollback or analysis. Manual snapshots are useful for creating checkpoints
 before risky operations or to mark important milestones.
 
 Examples:
-  moat snapshot run-abc123                        # Create snapshot
-  moat snapshot run-abc123 --label "before refactor"  # Create with label`,
+  moat snapshot run_a1b2c3d4e5f6                            # Create snapshot
+  moat snapshot run_a1b2c3d4e5f6 --label "before refactor"  # Create with label`,
 	Args: cobra.ExactArgs(1),
 	RunE: createSnapshot,
 }

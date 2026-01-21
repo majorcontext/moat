@@ -10,16 +10,16 @@ import (
 
 func TestNewRunStore(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-test123")
+	s, err := NewRunStore(dir, "run_test1234")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
-	if s.RunID() != "run-test123" {
-		t.Errorf("RunID = %q, want %q", s.RunID(), "run-test123")
+	if s.RunID() != "run_test1234" {
+		t.Errorf("RunID = %q, want %q", s.RunID(), "run_test1234")
 	}
 
 	// Check directory was created
-	runDir := filepath.Join(dir, "run-test123")
+	runDir := filepath.Join(dir, "run_test1234")
 	if _, err := os.Stat(runDir); os.IsNotExist(err) {
 		t.Error("run directory was not created")
 	}
@@ -27,7 +27,7 @@ func TestNewRunStore(t *testing.T) {
 
 func TestRunStoreMetadata(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-test456")
+	s, _ := NewRunStore(dir, "run_test4567")
 
 	meta := Metadata{
 		Name:      "claude-code",
@@ -49,12 +49,12 @@ func TestRunStoreMetadata(t *testing.T) {
 
 func TestRunStoreDir(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-dirtest")
+	s, err := NewRunStore(dir, "run_dirtest1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
 
-	expectedDir := filepath.Join(dir, "run-dirtest")
+	expectedDir := filepath.Join(dir, "run_dirtest1")
 	if s.Dir() != expectedDir {
 		t.Errorf("Dir = %q, want %q", s.Dir(), expectedDir)
 	}
@@ -75,7 +75,7 @@ func TestDefaultBaseDir(t *testing.T) {
 
 func TestLoadMetadataPreservesAllFields(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-allfields")
+	s, _ := NewRunStore(dir, "run_allfield")
 
 	meta := Metadata{
 		Name:      "test-agent",
@@ -105,7 +105,7 @@ func TestLoadMetadataPreservesAllFields(t *testing.T) {
 
 func TestLogWriter(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-logs")
+	s, _ := NewRunStore(dir, "run_logs1234")
 
 	w, err := s.LogWriter()
 	if err != nil {
@@ -134,7 +134,7 @@ func TestLogWriter(t *testing.T) {
 
 func TestReadLogsWithOffset(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-logs-offset")
+	s, _ := NewRunStore(dir, "run_logsoffset1")
 
 	w, _ := s.LogWriter()
 	for i := 0; i < 10; i++ {
@@ -154,7 +154,7 @@ func TestReadLogsWithOffset(t *testing.T) {
 
 func TestTraceSpans(t *testing.T) {
 	dir := t.TempDir()
-	s, _ := NewRunStore(dir, "run-traces")
+	s, _ := NewRunStore(dir, "run_traces12")
 
 	span1 := Span{
 		TraceID:   "trace-123",
@@ -195,7 +195,7 @@ func TestTraceSpans(t *testing.T) {
 
 func TestWriteExecEvent(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-exec")
+	s, err := NewRunStore(dir, "run_exec1234")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestWriteExecEvent(t *testing.T) {
 
 func TestReadExecEventsMultiple(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-exec-multi")
+	s, err := NewRunStore(dir, "run_execmulti1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestReadExecEventsMultiple(t *testing.T) {
 
 func TestReadExecEventsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewRunStore(dir, "run-exec-empty")
+	s, err := NewRunStore(dir, "run_execempty1")
 	if err != nil {
 		t.Fatalf("NewRunStore: %v", err)
 	}
