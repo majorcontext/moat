@@ -147,6 +147,9 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	}
 	claudeFlags.Grants = grants
 
+	// Determine interactive mode
+	interactive := claudePromptFlag == ""
+
 	// Build container command
 	// claude-code is installed globally via the dependency system
 	containerCmd := []string{"claude"}
@@ -161,9 +164,6 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	if claudePromptFlag != "" {
 		containerCmd = append(containerCmd, "-p", claudePromptFlag)
 	}
-
-	// Determine interactive mode
-	interactive := claudePromptFlag == ""
 
 	// Use name from flag, or config, or let manager generate one
 	if claudeFlags.Name == "" && cfg != nil && cfg.Name != "" {

@@ -41,9 +41,12 @@ func runtimeBaseImage(name, version string) string {
 }
 
 // containerUser is the non-root user created in generated images.
-// Using UID 1000 as it's the standard first non-root user on most systems.
+// Using UID 5000 to avoid collision with existing users in base images.
+// Many base images have a default user at UID 1000, and deleting that user
+// doesn't change ownership of their files - the new user would inherit access.
+// UID 5000 is safely above the typical user range (1000-4999).
 const containerUser = "moatuser"
-const containerUID = "1000"
+const containerUID = "5000"
 
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
 func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
@@ -124,7 +127,6 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	// Create non-root user for security
 	// Claude Code and other tools refuse certain flags when running as root
 	// Also create .claude directory structure for Claude Code state (todos, settings, logs, etc.)
-	// Note: We delete any existing user with UID 1000 first to avoid conflicts with base images
 	b.WriteString("# Create non-root user\n")
 	b.WriteString(fmt.Sprintf("RUN existing_user=$(getent passwd %s | cut -d: -f1) && \\\n", containerUID))
 	b.WriteString("    if [ -n \"$existing_user\" ]; then userdel -r \"$existing_user\" 2>/dev/null || true; fi && \\\n")

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -340,6 +341,11 @@ func grantAnthropicViaSetupToken() error {
 	return nil
 }
 
+// oauthTokenRegex validates OAuth token format.
+// Format: sk-ant-oat01-<base64-encoded-data> where data is alphanumeric plus _ and -.
+// The token typically has 3-4 parts separated by hyphens after the prefix.
+var oauthTokenRegex = regexp.MustCompile(`^sk-ant-oat01-[A-Za-z0-9_-]{20,}$`)
+
 // extractOAuthToken extracts the OAuth token from claude setup-token output.
 // The output contains ASCII art, messages, and ANSI color codes. The token
 // is on its own line and starts with "sk-ant-oat01-".
@@ -351,7 +357,10 @@ func extractOAuthToken(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "sk-ant-oat01-") {
-			return line
+			// Validate format to avoid partial or malformed tokens
+			if oauthTokenRegex.MatchString(line) {
+				return line
+			}
 		}
 	}
 	return ""

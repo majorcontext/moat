@@ -99,7 +99,7 @@ fi
 # If we're already running as a non-root user (UID != 0), just exec directly.
 # This happens when Docker is started with --user to match host UID on Linux.
 # If we're root and moatuser exists, drop privileges with gosu.
-# Otherwise, run as current user.
+# If moatuser doesn't exist, fail - running as root defeats the security model.
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)
   exec "$@"
@@ -107,6 +107,15 @@ elif id moatuser >/dev/null 2>&1; then
   # Running as root, moatuser exists - drop privileges
   exec gosu moatuser "$@"
 else
-  # Running as root, no moatuser - run as root (custom image)
-  exec "$@"
+  # Running as root, no moatuser - fail with clear error
+  # Running as root defeats the container security model
+  echo "Error: Container started as root but moatuser does not exist." >&2
+  echo "This is a security issue - running as root defeats container isolation." >&2
+  echo "" >&2
+  echo "If you're using a custom image, ensure it creates a 'moatuser' account:" >&2
+  echo "  RUN useradd -m -u 5000 -s /bin/bash moatuser" >&2
+  echo "" >&2
+  echo "Or run the container with a non-root user:" >&2
+  echo "  docker run --user 1000:1000 ..." >&2
+  exit 1
 fi
