@@ -19,8 +19,9 @@ const ProxyInjectedPlaceholder = "moat-proxy-injected"
 
 // GeneratedConfig holds the paths to generated configuration files.
 type GeneratedConfig struct {
-	// SettingsPath is the path to the generated settings.json file
-	SettingsPath string
+	// StagingDir is the directory containing all files to copy to ~/.claude at container startup.
+	// This directory is mounted to /moat/claude-init and copied by moat-init script.
+	StagingDir string
 
 	// MCPConfigPath is the path to the generated .mcp.json file (empty if no MCP config)
 	MCPConfigPath string
@@ -38,11 +39,12 @@ func (g *GeneratedConfig) Cleanup() error {
 }
 
 // GenerateContainerConfig generates Claude configuration files for a container.
-// It creates:
+// It creates a staging directory containing:
 // - settings.json with plugin configuration (marketplaces converted to directory sources)
 // - .mcp.json with MCP server configuration (if any)
 //
-// The files are written to a temporary directory and should be mounted into the container.
+// The staging directory is mounted to /moat/claude-init and copied to ~/.claude
+// at container startup by the moat-init script.
 func GenerateContainerConfig(settings *Settings, cfg *config.Config, cacheMountPath string, grants []string) (*GeneratedConfig, error) {
 	// Create temporary directory for generated files
 	tempDir, err := os.MkdirTemp("", "moat-claude-*")
@@ -59,10 +61,12 @@ func GenerateContainerConfig(settings *Settings, cfg *config.Config, cacheMountP
 	}()
 
 	result := &GeneratedConfig{
-		TempDir: tempDir,
+		TempDir:    tempDir,
+		StagingDir: tempDir, // Staging dir is the temp dir itself
 	}
 
-	// Generate settings.json
+	// Generate settings.json directly in the staging directory
+	// This will be copied to ~/.claude/settings.json by moat-init
 	settingsJSON, err := GenerateSettings(settings, cacheMountPath)
 	if err != nil {
 		return nil, fmt.Errorf("generating settings: %w", err)
@@ -72,7 +76,6 @@ func GenerateContainerConfig(settings *Settings, cfg *config.Config, cacheMountP
 	if err := os.WriteFile(settingsPath, settingsJSON, 0644); err != nil {
 		return nil, fmt.Errorf("writing settings.json: %w", err)
 	}
-	result.SettingsPath = settingsPath
 
 	// Generate .mcp.json if MCP servers are configured
 	if cfg != nil && len(cfg.Claude.MCP) > 0 {
@@ -181,6 +184,10 @@ func GenerateMCPConfig(servers map[string]config.MCPServerSpec, grants []string)
 	return json.MarshalIndent(mcpConfig, "", "  ")
 }
 
+// ClaudeInitMountPath is the path where the Claude staging directory is mounted.
+// The moat-init script reads from this path and copies files to ~/.claude.
+const ClaudeInitMountPath = "/moat/claude-init"
+
 // RequiredMounts returns the container mounts needed for Claude plugin support.
 func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheDir, containerHome string) []MountInfo {
 	var mounts []MountInfo
@@ -197,11 +204,12 @@ func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheD
 		}
 	}
 
-	// Mount generated settings.json
-	if generatedConfig != nil && generatedConfig.SettingsPath != "" {
+	// Mount staging directory for Claude init
+	// The moat-init script copies files from here to ~/.claude at container startup
+	if generatedConfig != nil && generatedConfig.StagingDir != "" {
 		mounts = append(mounts, MountInfo{
-			Source:   generatedConfig.SettingsPath,
-			Target:   filepath.Join(containerHome, ".claude", "settings.json"),
+			Source:   generatedConfig.StagingDir,
+			Target:   ClaudeInitMountPath,
 			ReadOnly: true,
 		})
 	}

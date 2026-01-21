@@ -890,8 +890,8 @@ func TestSSHGrantWithoutMapping(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error when SSH grants are used without mapping")
 	}
-	if !strings.Contains(err.Error(), "no SSH mapping") {
-		t.Errorf("Error should mention missing SSH mapping, got: %v", err)
+	if !strings.Contains(err.Error(), "no SSH keys configured") {
+		t.Errorf("Error should mention missing SSH keys, got: %v", err)
 	}
 }
 

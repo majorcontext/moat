@@ -12,6 +12,9 @@ import (
 type ImageTagOptions struct {
 	// NeedsSSH indicates the image needs SSH packages and init script.
 	NeedsSSH bool
+
+	// NeedsClaudeInit indicates the image needs the init script for Claude setup.
+	NeedsClaudeInit bool
 }
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
@@ -36,6 +39,9 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	hashInput := strings.Join(sorted, ",")
 	if opts.NeedsSSH {
 		hashInput += ",ssh:agent"
+	}
+	if opts.NeedsClaudeInit {
+		hashInput += ",claude:init"
 	}
 
 	// Hash the combined input

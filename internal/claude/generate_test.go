@@ -209,11 +209,12 @@ func TestGenerateContainerConfig(t *testing.T) {
 	}
 	defer result.Cleanup()
 
-	// Check settings.json was created
-	if result.SettingsPath == "" {
-		t.Error("SettingsPath should be set")
+	// Check staging directory and settings.json were created
+	if result.StagingDir == "" {
+		t.Error("StagingDir should be set")
 	}
-	if _, err := os.Stat(result.SettingsPath); err != nil {
+	settingsPath := filepath.Join(result.StagingDir, "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
 		t.Errorf("settings.json should exist: %v", err)
 	}
 
@@ -226,7 +227,7 @@ func TestGenerateContainerConfig(t *testing.T) {
 	}
 
 	// Verify settings.json content
-	settingsContent, err := os.ReadFile(result.SettingsPath)
+	settingsContent, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("reading settings.json: %v", err)
 	}
@@ -266,8 +267,12 @@ func TestGenerateContainerConfigNoMCP(t *testing.T) {
 	defer result.Cleanup()
 
 	// Settings should be created
-	if result.SettingsPath == "" {
-		t.Error("SettingsPath should be set")
+	if result.StagingDir == "" {
+		t.Error("StagingDir should be set")
+	}
+	settingsPath := filepath.Join(result.StagingDir, "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		t.Errorf("settings.json should exist: %v", err)
 	}
 
 	// MCP config should NOT be created
@@ -313,7 +318,7 @@ func TestRequiredMounts(t *testing.T) {
 	}
 
 	generatedConfig := &GeneratedConfig{
-		SettingsPath: "/tmp/moat-claude-123/settings.json",
+		StagingDir: "/tmp/moat-claude-staging-123",
 	}
 
 	mounts := RequiredMounts(settings, generatedConfig, cacheDir, "/home/container")
@@ -332,18 +337,21 @@ func TestRequiredMounts(t *testing.T) {
 		t.Error("should have plugin cache mount")
 	}
 
-	// Should have settings mount
-	var hasSettingsMount bool
+	// Should have staging directory mount for claude init
+	var hasStagingMount bool
 	for _, m := range mounts {
-		if strings.Contains(m.Target, "settings.json") {
-			hasSettingsMount = true
-			if m.Target != filepath.Join("/home/container", ".claude", "settings.json") {
-				t.Errorf("settings mount target = %q, want %q", m.Target, filepath.Join("/home/container", ".claude", "settings.json"))
+		if m.Target == ClaudeInitMountPath {
+			hasStagingMount = true
+			if m.Source != "/tmp/moat-claude-staging-123" {
+				t.Errorf("staging mount source = %q, want %q", m.Source, "/tmp/moat-claude-staging-123")
+			}
+			if !m.ReadOnly {
+				t.Error("staging mount should be read-only")
 			}
 		}
 	}
-	if !hasSettingsMount {
-		t.Error("should have settings mount")
+	if !hasStagingMount {
+		t.Error("should have staging directory mount")
 	}
 }
 
@@ -358,7 +366,7 @@ func TestRequiredMounts_NoMarketplacesDir(t *testing.T) {
 	}
 
 	generatedConfig := &GeneratedConfig{
-		SettingsPath: "/tmp/moat-claude-123/settings.json",
+		StagingDir: "/tmp/moat-claude-staging-123",
 	}
 
 	mounts := RequiredMounts(settings, generatedConfig, cacheDir, "/home/container")
@@ -370,15 +378,15 @@ func TestRequiredMounts_NoMarketplacesDir(t *testing.T) {
 		}
 	}
 
-	// Should still have settings mount
-	var hasSettingsMount bool
+	// Should still have staging mount
+	var hasStagingMount bool
 	for _, m := range mounts {
-		if strings.Contains(m.Target, "settings.json") {
-			hasSettingsMount = true
+		if m.Target == ClaudeInitMountPath {
+			hasStagingMount = true
 		}
 	}
-	if !hasSettingsMount {
-		t.Error("should have settings mount even when cache dir doesn't exist")
+	if !hasStagingMount {
+		t.Error("should have staging mount even when cache dir doesn't exist")
 	}
 }
 
@@ -414,7 +422,7 @@ func TestFilesToWrite(t *testing.T) {
 
 func TestFilesToWriteNoMCP(t *testing.T) {
 	generatedConfig := &GeneratedConfig{
-		SettingsPath: "/tmp/settings.json",
+		StagingDir: "/tmp/moat-claude-staging-123",
 		// MCPConfigPath is empty
 	}
 

@@ -642,14 +642,37 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Resolve container image based on dependencies and SSH grants
+	// Determine if we need Claude init (for OAuth credentials and host files)
+	// This is triggered by an anthropic grant with an OAuth token
+	var needsClaudeInit bool
+	var claudeStagingDir string
+	for _, grant := range opts.Grants {
+		provider := credential.Provider(strings.Split(grant, ":")[0])
+		if provider == credential.ProviderAnthropic {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if cred, err := store.Get(provider); err == nil {
+						if credential.IsOAuthToken(cred.Token) {
+							needsClaudeInit = true
+						}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	// Resolve container image based on dependencies, SSH grants, and Claude init needs
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(depList, &image.ResolveOptions{
-		NeedsSSH: hasSSHGrants,
+		NeedsSSH:        hasSSHGrants,
+		NeedsClaudeInit: needsClaudeInit,
 	})
 
 	// Determine if we need a custom image
-	needsCustomImage := len(depList) > 0 || hasSSHGrants
+	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit
 
 	// Handle --rebuild: delete existing image to force fresh build (Docker only)
 	if opts.Rebuild {
@@ -666,10 +689,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Build custom image if we have dependencies or SSH grants (Docker only)
-	// Apple containers don't support custom image builds; dependencies would need
-	// to be installed via install scripts at container start (not yet implemented).
-	if needsCustomImage && m.runtime.Type() == container.RuntimeDocker {
+	// Build custom image if we have dependencies or SSH grants.
+	// Both Docker and Apple containers support Dockerfile builds.
+	if needsCustomImage {
 		exists, err := m.runtime.ImageExists(ctx, containerImage)
 		if err != nil {
 			if proxyServer != nil {
@@ -680,7 +702,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		if !exists {
 			dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
-				NeedsSSH: hasSSHGrants,
+				NeedsSSH:        hasSSHGrants,
+				NeedsClaudeInit: needsClaudeInit,
 			})
 			if err != nil {
 				if proxyServer != nil {
@@ -693,7 +716,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			for i, d := range depList {
 				depNames[i] = d.Name
 			}
-			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
+
+			// Build options from config
+			buildOpts := container.BuildOptions{}
+			if opts.Config != nil {
+				buildOpts.DNS = opts.Config.Container.Apple.BuilderDNS
+			}
+
+			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
@@ -759,70 +789,142 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Set up Claude plugins if configured in settings or agent.yaml
+	// Set up Claude staging directory for init script
+	// This includes OAuth credentials, host files, and optionally plugin settings
 	var claudeGenerated *claude.GeneratedConfig
-	if opts.Config != nil {
-		// Load and merge Claude settings from all sources
-		claudeSettings, loadErr := claude.LoadAllSettings(opts.Workspace, opts.Config)
-		if loadErr != nil {
-			if proxyServer != nil {
-				_ = proxyServer.Stop(context.Background())
+	if needsClaudeInit || (opts.Config != nil) {
+		// Load Claude settings (may be empty if no plugins configured)
+		var claudeSettings *claude.Settings
+		if opts.Config != nil {
+			var loadErr error
+			claudeSettings, loadErr = claude.LoadAllSettings(opts.Workspace, opts.Config)
+			if loadErr != nil {
+				if proxyServer != nil {
+					_ = proxyServer.Stop(context.Background())
+				}
+				return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
 			}
-			return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
 		}
 
-		// Only proceed if there are plugins or marketplaces configured
-		if claudeSettings.HasPluginsOrMarketplaces() {
-			// Extract SSH grants for marketplace access validation
-			sshHosts := claude.FilterSSHGrants(opts.Grants)
+		// Determine if we need to set up plugins/marketplaces
+		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 
-			// Validate SSH access early - fail fast if private marketplaces need SSH
-			if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
+		// We need a staging directory if we have OAuth init or plugins
+		if needsClaudeInit || hasPlugins {
+			// Create staging directory
+			var stagingErr error
+			claudeStagingDir, stagingErr = os.MkdirTemp("", "moat-claude-staging-*")
+			if stagingErr != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
-				return nil, err
+				return nil, fmt.Errorf("creating Claude staging directory: %w", stagingErr)
 			}
-
-			// Set up marketplace manager and ensure all marketplaces are cloned
-			cacheDir, cacheErr := claude.DefaultCacheDir()
-			if cacheErr != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
+			// Use a flag to track cleanup responsibility. The defer cleans up on error.
+			// Once claudeGenerated is assigned, it takes over cleanup, so we set the flag false.
+			stagingNeedsCleanup := true
+			defer func() {
+				if stagingNeedsCleanup && claudeStagingDir != "" {
+					os.RemoveAll(claudeStagingDir)
 				}
-				return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
-			}
+			}()
 
-			marketplaceManager := claude.NewMarketplaceManager(cacheDir)
-			if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
+			// Populate with OAuth credentials and host files if needed
+			if needsClaudeInit {
+				key, keyErr := credential.DefaultEncryptionKey()
+				if keyErr == nil {
+					store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+					if storeErr == nil {
+						if cred, err := store.Get(credential.ProviderAnthropic); err == nil {
+							anthropicSetup := &claude.AnthropicSetup{}
+							if err := anthropicSetup.PopulateStagingDir(cred, claudeStagingDir); err != nil {
+								if proxyServer != nil {
+									_ = proxyServer.Stop(context.Background())
+								}
+								return nil, fmt.Errorf("populating Claude staging directory: %w", err)
+							}
+						}
+					}
 				}
-				return nil, fmt.Errorf("setting up marketplaces: %w", err)
 			}
 
-			// Generate container configuration
-			var genErr error
-			claudeGenerated, genErr = claude.GenerateContainerConfig(claudeSettings, opts.Config, "/moat/claude-plugins", opts.Grants)
-			if genErr != nil {
-				if proxyServer != nil {
-					_ = proxyServer.Stop(context.Background())
+			// Handle plugins if configured
+			if hasPlugins {
+				// Extract SSH grants for marketplace access validation
+				sshHosts := claude.FilterSSHGrants(opts.Grants)
+
+				// Validate SSH access early - fail fast if private marketplaces need SSH
+				if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
+					if proxyServer != nil {
+						_ = proxyServer.Stop(context.Background())
+					}
+					return nil, err
 				}
-				return nil, fmt.Errorf("generating Claude config: %w", genErr)
+
+				// Set up marketplace manager and ensure all marketplaces are cloned
+				cacheDir, cacheErr := claude.DefaultCacheDir()
+				if cacheErr != nil {
+					if proxyServer != nil {
+						_ = proxyServer.Stop(context.Background())
+					}
+					return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
+				}
+
+				marketplaceManager := claude.NewMarketplaceManager(cacheDir)
+				if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
+					if proxyServer != nil {
+						_ = proxyServer.Stop(context.Background())
+					}
+					return nil, fmt.Errorf("setting up marketplaces: %w", err)
+				}
+
+				// Generate settings.json and write to staging directory
+				settingsJSON, genErr := claude.GenerateSettings(claudeSettings, "/moat/claude-plugins")
+				if genErr != nil {
+					if proxyServer != nil {
+						_ = proxyServer.Stop(context.Background())
+					}
+					return nil, fmt.Errorf("generating Claude settings: %w", genErr)
+				}
+				if err := os.WriteFile(filepath.Join(claudeStagingDir, "settings.json"), settingsJSON, 0644); err != nil {
+					if proxyServer != nil {
+						_ = proxyServer.Stop(context.Background())
+					}
+					return nil, fmt.Errorf("writing Claude settings: %w", err)
+				}
+
+				// Mount plugin cache
+				marketplacesDir := filepath.Join(cacheDir, "marketplaces")
+				if _, err := os.Stat(marketplacesDir); err == nil {
+					mounts = append(mounts, container.MountConfig{
+						Source:   marketplacesDir,
+						Target:   "/moat/claude-plugins/marketplaces",
+						ReadOnly: true,
+					})
+				}
+
+				log.Debug("configured Claude plugins",
+					"plugins", len(claudeSettings.EnabledPlugins),
+					"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
 			}
 
-			// Add mounts for plugin cache and settings
-			for _, mount := range claude.RequiredMounts(claudeSettings, claudeGenerated, cacheDir, containerHome) {
-				mounts = append(mounts, container.MountConfig{
-					Source:   mount.Source,
-					Target:   mount.Target,
-					ReadOnly: mount.ReadOnly,
-				})
+			// Transfer cleanup responsibility to claudeGenerated.
+			// The defer no longer needs to clean up since claudeGenerated.Cleanup() will handle it.
+			stagingNeedsCleanup = false
+			claudeGenerated = &claude.GeneratedConfig{
+				StagingDir: claudeStagingDir,
+				TempDir:    claudeStagingDir,
 			}
 
-			log.Debug("configured Claude plugins",
-				"plugins", len(claudeSettings.EnabledPlugins),
-				"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
+			// Mount staging directory
+			mounts = append(mounts, container.MountConfig{
+				Source:   claudeStagingDir,
+				Target:   claude.ClaudeInitMountPath,
+				ReadOnly: true,
+			})
+
+			// Set env var for moat-init script
+			proxyEnv = append(proxyEnv, "MOAT_CLAUDE_INIT="+claude.ClaudeInitMountPath)
 		}
 	}
 

@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -119,24 +121,63 @@ func TestAnthropicSetup_ContainerMounts_OAuth(t *testing.T) {
 		Scopes:    []string{"user:read"},
 	}
 
+	// ContainerMounts now returns empty because we use PopulateStagingDir instead
 	mounts, cleanupPath, err := setup.ContainerMounts(cred, "/home/user")
 	if err != nil {
 		t.Errorf("ContainerMounts() error = %v", err)
 	}
 
-	// Should have at least the credentials file mount
-	if len(mounts) < 1 {
-		t.Errorf("ContainerMounts() for OAuth returned %d mounts, want >= 1", len(mounts))
+	// Should return empty - staging directory approach is used instead
+	if len(mounts) != 0 {
+		t.Errorf("ContainerMounts() for OAuth returned %d mounts, want 0 (uses staging dir)", len(mounts))
 	}
 
-	// Should have a cleanup path
-	if cleanupPath == "" {
-		t.Error("ContainerMounts() cleanupPath should not be empty for OAuth")
-	}
-
-	// Clean up
+	// Should return empty cleanup path - staging directory is cleaned up by caller
 	if cleanupPath != "" {
-		setup.Cleanup(cleanupPath)
+		t.Error("ContainerMounts() cleanupPath should be empty (staging dir cleanup handled by caller)")
+	}
+}
+
+func TestAnthropicSetup_PopulateStagingDir(t *testing.T) {
+	setup := &AnthropicSetup{}
+	cred := &credential.Credential{
+		Token:     "sk-ant-oat01-abc123",
+		ExpiresAt: time.Now().Add(time.Hour),
+		Scopes:    []string{"user:read"},
+	}
+
+	// Create temp staging directory
+	stagingDir := t.TempDir()
+
+	err := setup.PopulateStagingDir(cred, stagingDir)
+	if err != nil {
+		t.Fatalf("PopulateStagingDir() error = %v", err)
+	}
+
+	// Check credentials file was created
+	credsFile := filepath.Join(stagingDir, ".credentials.json")
+	if _, err := os.Stat(credsFile); err != nil {
+		t.Errorf("credentials file should exist: %v", err)
+	}
+}
+
+func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
+	setup := &AnthropicSetup{}
+	cred := &credential.Credential{
+		Token: "sk-ant-api01-abc123", // API key, not OAuth
+	}
+
+	stagingDir := t.TempDir()
+
+	err := setup.PopulateStagingDir(cred, stagingDir)
+	if err != nil {
+		t.Fatalf("PopulateStagingDir() error = %v", err)
+	}
+
+	// API keys don't need credentials file
+	credsFile := filepath.Join(stagingDir, ".credentials.json")
+	if _, err := os.Stat(credsFile); err == nil {
+		t.Error("credentials file should NOT exist for API keys")
 	}
 }
 

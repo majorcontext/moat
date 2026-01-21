@@ -4,6 +4,7 @@ package id
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"time"
 )
 
@@ -24,4 +25,29 @@ func Generate(prefix string) string {
 		return prefix + "_" + hex.EncodeToString(fallback)
 	}
 	return prefix + "_" + hex.EncodeToString(b)
+}
+
+// IsValid checks if an ID has the expected format: <prefix>_<12 hex chars>.
+// Returns true if the ID matches the format, false otherwise.
+// Returns false if prefix is empty or contains whitespace.
+func IsValid(id string, prefix string) bool {
+	// Validate prefix is non-empty and has no whitespace
+	if prefix == "" || strings.TrimSpace(prefix) != prefix {
+		return false
+	}
+	expectedPrefix := prefix + "_"
+	if !strings.HasPrefix(id, expectedPrefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(id, expectedPrefix)
+	if len(suffix) != 12 {
+		return false
+	}
+	// Validate all characters are lowercase hex
+	for _, c := range suffix {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }

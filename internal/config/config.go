@@ -27,9 +27,31 @@ type Config struct {
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
+	Container    ContainerConfig   `yaml:"container,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
+}
+
+// ContainerConfig configures runtime-specific container options.
+type ContainerConfig struct {
+	Apple AppleContainerConfig `yaml:"apple,omitempty"`
+}
+
+// AppleContainerConfig configures Apple container-specific options.
+type AppleContainerConfig struct {
+	// BuilderDNS specifies DNS servers for the Apple container builder.
+	// If not set, moat will attempt to detect the host's DNS servers.
+	// If detection fails, an error is returned with instructions to set this explicitly.
+	//
+	// Example:
+	//   container:
+	//     apple:
+	//       builder_dns: ["192.168.1.1"]
+	//
+	// Note: Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that
+	// provider, potentially leaking information about dependencies being installed.
+	BuilderDNS []string `yaml:"builder_dns,omitempty"`
 }
 
 // NetworkConfig configures network access policies for the agent.
