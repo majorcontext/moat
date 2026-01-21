@@ -342,9 +342,13 @@ moat run --grant aws ./my-agent
 
 **How it works:**
 - Your host AWS credentials assume the specified role at runtime
-- The agent receives short-lived credentials (15 minutes by default)
-- Credentials auto-refresh via AWS SDK's built-in mechanism
+- The agent receives short-lived session credentials (15 minutes by default)
+- Credentials auto-refresh via a credential helper that fetches from the proxy
 - Your long-lived credentials never enter the container
+
+**Note:** Unlike GitHub and Anthropic grants where tokens are injected at the network layer and never visible to the container, AWS uses `credential_process`—a standard AWS mechanism where the SDK calls a helper script to fetch credentials on demand. This means short-lived session credentials are available to the container, but your long-lived IAM credentials remain on the host.
+
+**Security note:** Any code in the container can access the session credentials. Use an IAM role with minimal permissions scoped to what the agent actually needs.
 
 **Required IAM setup:**
 1. Create an IAM role with appropriate permissions for the agent
