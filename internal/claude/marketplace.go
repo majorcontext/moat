@@ -34,8 +34,21 @@ func (m *MarketplaceManager) MarketplacesDir() string {
 }
 
 // MarketplacePath returns the path to a specific marketplace.
-// Returns empty string if name contains path traversal characters.
+// Returns empty string if name is invalid:
+// - Contains path traversal characters (/, \, ..)
+// - Is empty or whitespace-only
+// - Contains control characters (newlines, tabs, etc.)
 func (m *MarketplaceManager) MarketplacePath(name string) string {
+	// Reject empty or whitespace-only names
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	// Reject names with control characters (newlines, tabs, carriage returns, etc.)
+	for _, r := range name {
+		if r < 32 || r == 127 {
+			return ""
+		}
+	}
 	// Prevent path traversal attacks
 	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
 		return ""

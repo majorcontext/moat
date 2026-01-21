@@ -18,15 +18,23 @@ if [ -n "$MOAT_SSH_TCP_ADDR" ]; then
   # Create socket directory - may need root for /run
   mkdir -p /run/moat/ssh 2>/dev/null || true
   if [ -d /run/moat/ssh ]; then
+    # Set directory permissions so moatuser can access it
+    chmod 755 /run/moat/ssh 2>/dev/null || true
+    if id moatuser >/dev/null 2>&1; then
+      chown moatuser:moatuser /run/moat/ssh 2>/dev/null || true
+    fi
     # Start socat to bridge TCP to Unix socket
-    socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork,mode=0777 TCP:"$MOAT_SSH_TCP_ADDR" &
+    # Socket created with mode 0660 - accessible by owner and group only
+    socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork,mode=0660 TCP:"$MOAT_SSH_TCP_ADDR" &
     # Wait for socket to be created
     for i in 1 2 3 4 5; do
       [ -S /run/moat/ssh/agent.sock ] && break
       sleep 0.1
     done
-    # Make socket accessible to all users
-    chmod 777 /run/moat/ssh/agent.sock 2>/dev/null || true
+    # Ensure socket is owned by moatuser if it exists
+    if id moatuser >/dev/null 2>&1; then
+      chown moatuser:moatuser /run/moat/ssh/agent.sock 2>/dev/null || true
+    fi
   fi
 fi
 

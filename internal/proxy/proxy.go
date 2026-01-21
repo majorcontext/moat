@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/andybons/moat/internal/log"
 )
 
 // MaxBodySize is the maximum size of request/response bodies to capture (8KB).
@@ -221,7 +223,8 @@ func (p *Proxy) SetCredential(host, authHeader string) {
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 	if !isValidHost(host) {
-		return // Silently ignore invalid hosts to avoid breaking callers
+		log.Debug("ignoring invalid host for credential injection", "host", host, "header", headerName)
+		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -234,7 +237,8 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 	if !isValidHost(host) {
-		return // Silently ignore invalid hosts to avoid breaking callers
+		log.Debug("ignoring invalid host for extra header injection", "host", host, "header", headerName)
+		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

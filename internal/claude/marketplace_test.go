@@ -384,14 +384,29 @@ func TestMarketplaceManager_MarketplacePath_PathTraversal(t *testing.T) {
 			wantPath: "",
 		},
 		{
-			name:     "space only (valid but unusual)",
+			name:     "space only (rejected)",
 			input:    "   ",
-			wantPath: "/home/user/.moat/claude/plugins/marketplaces/   ",
+			wantPath: "",
 		},
 		{
-			name:     "newline attempt",
+			name:     "newline attempt (rejected)",
 			input:    "foo\nbar",
-			wantPath: "/home/user/.moat/claude/plugins/marketplaces/foo\nbar",
+			wantPath: "",
+		},
+		{
+			name:     "tab character (rejected)",
+			input:    "foo\tbar",
+			wantPath: "",
+		},
+		{
+			name:     "carriage return (rejected)",
+			input:    "foo\rbar",
+			wantPath: "",
+		},
+		{
+			name:     "null byte (rejected)",
+			input:    "foo\x00bar",
+			wantPath: "",
 		},
 	}
 
