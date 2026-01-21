@@ -74,3 +74,59 @@ func TestGenerateUniqueness(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestIsValid(t *testing.T) {
+	tests := []struct {
+		name   string
+		id     string
+		prefix string
+		want   bool
+	}{
+		// Valid IDs
+		{"valid run ID", "run_abc123def456", "run", true},
+		{"valid snap ID", "snap_000000000000", "snap", true},
+		{"valid with all digits", "test_012345678901", "test", true},
+		{"valid with all letters", "run_abcdefabcdef", "run", true},
+
+		// Invalid prefix
+		{"wrong prefix", "run_abc123def456", "snap", false},
+		{"missing prefix", "_abc123def456", "run", false},
+		{"no underscore", "runabc123def456", "run", false},
+
+		// Invalid suffix length
+		{"suffix too short", "run_abc123", "run", false},
+		{"suffix too long", "run_abc123def4567", "run", false},
+		{"empty suffix", "run_", "run", false},
+
+		// Invalid characters
+		{"uppercase hex", "run_ABC123DEF456", "run", false},
+		{"non-hex characters", "run_ghijklmnopqr", "run", false},
+		{"special characters", "run_abc!23def456", "run", false},
+		{"spaces", "run_abc 23def456", "run", false},
+
+		// Edge cases
+		{"empty ID", "", "run", false},
+		{"just prefix", "run", "run", false},
+		{"empty prefix", "run_abc123def456", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValid(tt.id, tt.prefix)
+			if got != tt.want {
+				t.Errorf("IsValid(%q, %q) = %v, want %v", tt.id, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValidWithGenerate(t *testing.T) {
+	// Generated IDs should always be valid
+	prefixes := []string{"run", "snap", "task", "test"}
+	for _, prefix := range prefixes {
+		id := Generate(prefix)
+		if !IsValid(id, prefix) {
+			t.Errorf("Generated ID %q should be valid for prefix %q", id, prefix)
+		}
+	}
+}

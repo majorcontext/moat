@@ -489,7 +489,16 @@ func (r *AppleRuntime) ensureBuilderRunning(ctx context.Context) error {
 	}
 
 	// Wait for builder to be ready and accessible via exec
-	for i := 0; i < 30; i++ {
+	fmt.Println("Waiting for Apple container builder to start...")
+	const maxRetries = 30
+	for i := 0; i < maxRetries; i++ {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if r.isBuilderRunning(ctx) {
 			// Also verify exec works (builder may take a moment to be accessible)
 			testCmd := exec.CommandContext(ctx, r.containerBin, "exec", "buildkit", "true")
@@ -497,9 +506,13 @@ func (r *AppleRuntime) ensureBuilderRunning(ctx context.Context) error {
 				return nil
 			}
 		}
-		time.Sleep(time.Second)
+
+		// Don't sleep on last iteration
+		if i < maxRetries-1 {
+			time.Sleep(time.Second)
+		}
 	}
-	return fmt.Errorf("builder did not become ready in time")
+	return fmt.Errorf("builder did not become ready in 30 seconds")
 }
 
 // isBuilderRunning checks if the builder container is in running state.

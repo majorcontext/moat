@@ -97,8 +97,8 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 		return fmt.Errorf("marshaling credentials: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(stagingDir, ".credentials.json"), credsJSON, 0600); err != nil {
-		return fmt.Errorf("writing credentials file: %w", err)
+	if writeErr := os.WriteFile(filepath.Join(stagingDir, ".credentials.json"), credsJSON, 0600); writeErr != nil {
+		return fmt.Errorf("writing credentials file: %w", writeErr)
 	}
 
 	// Copy files from host's ~/.claude directory
@@ -153,8 +153,8 @@ func copyFile(src, dst string) error {
 	}
 	defer dstFile.Close()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return err
+	if _, copyErr := io.Copy(dstFile, srcFile); copyErr != nil {
+		return copyErr
 	}
 
 	// Preserve permissions
@@ -172,8 +172,8 @@ func copyDir(src, dst string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
-		return err
+	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
+		return mkdirErr
 	}
 
 	entries, err := os.ReadDir(src)
