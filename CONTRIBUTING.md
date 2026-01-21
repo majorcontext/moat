@@ -77,6 +77,74 @@ The credential-injecting proxy has different security configurations per runtime
 
 See [`internal/proxy/proxy.go`](internal/proxy/proxy.go) for the full security model documentation.
 
+## Manual Testing
+
+### Claude Code credential injection
+
+Credential injection for Claude Code requires manual verification:
+
+```bash
+# 1. Grant Anthropic credentials
+moat grant anthropic
+
+# 2. Start Claude Code in a test directory
+moat claude ./examples/claude-code
+
+# 3. Verify Claude Code starts and can make API calls
+#    - Claude should authenticate successfully
+#    - Try a simple prompt to confirm API access works
+
+# 4. Check that the token was injected (not in environment)
+#    In another terminal while Claude is running:
+moat run --grant anthropic -- env | grep -i anthropic
+#    Should show ANTHROPIC_API_KEY=moat-proxy-injected (placeholder, not real token)
+
+# 5. Verify network trace shows API calls
+moat trace --network
+#    Should show requests to api.anthropic.com with 200 status
+```
+
+### Codex credential injection
+
+```bash
+# 1. Grant OpenAI credentials
+moat grant openai
+
+# 2. Start Codex in a test directory
+moat codex ./examples/agent-codex
+
+# 3. Verify Codex starts and can make API calls
+#    - Codex should authenticate successfully
+#    - Try a simple prompt to confirm API access works
+
+# 4. Check that the token was injected (not in environment)
+moat run --grant openai -- env | grep -i openai
+#    Should show OPENAI_API_KEY=moat-proxy-injected (placeholder, not real token)
+
+# 5. Verify network trace shows API calls
+moat trace --network
+#    Should show requests to api.openai.com with 200 status
+```
+
+### GitHub credential injection
+
+```bash
+# 1. Grant GitHub credentials
+moat grant github
+
+# 2. Test credential injection
+moat run --grant github -- curl -s https://api.github.com/user
+#    Should return your GitHub user info
+
+# 3. Verify token is not in environment
+moat run --grant github -- env | grep -i token
+#    Should show GH_TOKEN=moat-proxy-injected (placeholder, not real token)
+
+# 4. Verify network trace
+moat trace --network
+#    Should show GET https://api.github.com/user with 200 status
+```
+
 ## Code Style & Guidelines
 
 For code style, error messages, documentation standards, and commit conventions, see [CLAUDE.md](CLAUDE.md).

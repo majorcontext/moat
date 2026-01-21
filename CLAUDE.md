@@ -85,10 +85,24 @@ golangci-lint run
 
 ## Documentation
 
-- Use generic placeholder names in examples (e.g., `my-agent`, `my-project`) rather than product-specific names that imply dependencies
-- Examples should tell a story: explain the problem being solved, show what happens at each step, and include sample output
-- When showing CLI commands, include the expected output so users know what to expect
+See [docs/STYLE-GUIDE.md](docs/STYLE-GUIDE.md) for tone, voice, and formatting guidelines. Key principles:
+
+- **Be objective** — State facts, avoid marketing language
+- **Be factual** — Make specific, verifiable claims
+- **Be practical** — Show working examples first, explain after
 - **Documentation must match actual behavior.** When writing or updating docs, verify claims against the code. Check output formats, confirm flows work as described, and test sample commands. Inaccurate docs erode trust.
+
+### Keeping docs up to date
+
+When you add or change functionality, update the relevant documentation:
+
+- **CLI commands/flags** — Update `docs/content/reference/01-cli.md`
+- **agent.yaml fields** — Update `docs/content/reference/02-agent-yaml.md`
+- **New features** — Add or update the relevant guide in `docs/content/guides/`
+- **Architectural changes** — Update concept pages in `docs/content/concepts/`
+- **Examples** — Keep `examples/` directories current with working code
+
+Documentation is part of the feature. A feature without docs is incomplete.
 
 ## Git Commits
 
