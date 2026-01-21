@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,9 +65,14 @@ func TestAnthropicSetup_ContainerEnv_OAuth(t *testing.T) {
 
 	env := setup.ContainerEnv(cred)
 
-	// OAuth should not set ANTHROPIC_API_KEY
-	if len(env) != 0 {
-		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 0", len(env))
+	// OAuth should set CLAUDE_CODE_OAUTH_TOKEN with a placeholder
+	// The real token is injected by the proxy at the network layer
+	if len(env) != 1 {
+		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
+		return
+	}
+	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
 	}
 }
 
@@ -181,76 +187,31 @@ func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
 	}
 }
 
-func TestCopyHostClaudeFiles(t *testing.T) {
-	// Create a temp "home" directory with Claude files
-	tmpHome := t.TempDir()
-
-	// Create ~/.claude.json
-	claudeJSON := filepath.Join(tmpHome, ".claude.json")
-	if err := os.WriteFile(claudeJSON, []byte(`{"hasCompletedOnboarding": true}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create ~/.claude/statsig/ with a file
-	statsigDir := filepath.Join(tmpHome, ".claude", "statsig")
-	if err := os.MkdirAll(statsigDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(statsigDir, "flags.json"), []byte(`{}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create ~/.claude/stats-cache.json
-	statsCache := filepath.Join(tmpHome, ".claude", "stats-cache.json")
-	if err := os.WriteFile(statsCache, []byte(`{"firstSessionDate": "2025-01-01"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Override HOME for the test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
-
-	// Create staging directory
+func TestWriteClaudeConfig(t *testing.T) {
 	stagingDir := t.TempDir()
 
-	// Call CopyHostClaudeFiles
-	CopyHostClaudeFiles(stagingDir)
-
-	// Verify files were copied
-	if _, err := os.Stat(filepath.Join(stagingDir, ".claude.json")); err != nil {
-		t.Errorf(".claude.json should have been copied: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(stagingDir, "statsig", "flags.json")); err != nil {
-		t.Errorf("statsig/flags.json should have been copied: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(stagingDir, "stats-cache.json")); err != nil {
-		t.Errorf("stats-cache.json should have been copied: %v", err)
-	}
-}
-
-func TestCopyHostClaudeFiles_MissingFiles(t *testing.T) {
-	// Create empty home directory (no Claude files)
-	tmpHome := t.TempDir()
-
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
-
-	stagingDir := t.TempDir()
-
-	// Should not panic or error when files don't exist
-	CopyHostClaudeFiles(stagingDir)
-
-	// Staging dir should still be empty (no files to copy)
-	entries, err := os.ReadDir(stagingDir)
+	err := WriteClaudeConfig(stagingDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("WriteClaudeConfig() error = %v", err)
 	}
-	if len(entries) != 0 {
-		t.Errorf("staging dir should be empty when no host files exist, got %d entries", len(entries))
+
+	// Read and parse the file
+	data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	// Verify required fields
+	if config["hasCompletedOnboarding"] != true {
+		t.Error("hasCompletedOnboarding should be true")
+	}
+	if config["theme"] != "dark" {
+		t.Error("theme should be dark")
 	}
 }
 

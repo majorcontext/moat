@@ -927,9 +927,11 @@ region = %s
 				}
 			}()
 
-			// Always copy host Claude files (onboarding state, preferences, feature flags)
-			// This ensures users don't have to re-complete onboarding in each container
-			claude.CopyHostClaudeFiles(claudeStagingDir)
+			// Write minimal Claude config to skip onboarding
+			if err := claude.WriteClaudeConfig(claudeStagingDir); err != nil {
+				cleanupProxy(proxyServer)
+				return nil, fmt.Errorf("writing Claude config: %w", err)
+			}
 
 			// Populate with OAuth credentials if needed (only for OAuth tokens)
 			if needsClaudeInit {

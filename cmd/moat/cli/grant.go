@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -221,72 +222,180 @@ See README.md for detailed setup instructions.`)
 func grantAnthropic() error {
 	reader := bufio.NewReader(os.Stdin)
 
-	// Check if Claude Code credentials are available
+	// Check if claude is available for setup-token
+	claudeAvailable := isClaudeAvailable()
+
+	// Offer choices to user
+	fmt.Println("Choose authentication method:")
+	fmt.Println()
+	if claudeAvailable {
+		fmt.Println("  1. Claude subscription (recommended)")
+		fmt.Println("     Uses 'claude setup-token' to get a long-lived OAuth token.")
+		fmt.Println("     Requires a Claude Pro/Max subscription.")
+		fmt.Println()
+	}
+	fmt.Println("  2. Anthropic API key")
+	fmt.Println("     Use an API key from console.anthropic.com")
+	fmt.Println("     Billed per token to your API account.")
+	fmt.Println()
+
+	// Check for existing Claude Code credentials as option 3
 	claudeCode := &credential.ClaudeCodeCredentials{}
-	if claudeCode.HasClaudeCodeCredentials() {
-		token, _ := claudeCode.GetClaudeCodeCredentials()
-
-		fmt.Println("Found Claude Code credentials.")
-		if token.SubscriptionType != "" {
-			fmt.Printf("  Subscription: %s\n", token.SubscriptionType)
-		}
-		if !token.ExpiresAtTime().IsZero() {
-			if token.IsExpired() {
-				fmt.Printf("  Status: Expired (was valid until %s)\n", token.ExpiresAtTime().Format(time.RFC3339))
-			} else {
-				fmt.Printf("  Expires: %s\n", token.ExpiresAtTime().Format(time.RFC3339))
-			}
-		}
-
-		fmt.Print("\nUse Claude Code credentials? [Y/n]: ")
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-
-		if response == "" || response == "y" || response == "yes" {
-			if token.IsExpired() {
-				fmt.Println("\nWarning: Token has expired. You may need to re-authenticate in Claude Code.")
-				fmt.Println("Run 'claude' to refresh your credentials, then try again.")
-				return fmt.Errorf("Claude Code token has expired")
-			}
-
-			cred := claudeCode.CreateCredentialFromOAuth(token)
-			credPath, err := saveCredential(cred)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("\nClaude Code credentials imported to %s\n", credPath)
-			fmt.Println("\nNote: These are OAuth tokens from your Claude Code session.")
-			fmt.Println("They will be injected as Authorization headers for api.anthropic.com.")
-			if !token.ExpiresAtTime().IsZero() {
-				remaining := time.Until(token.ExpiresAtTime())
-				if remaining > 24*time.Hour {
-					fmt.Printf("Token expires in %d days. Re-run 'moat grant anthropic' if it expires.\n", int(remaining.Hours()/24))
-				} else {
-					fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant anthropic' if it expires.\n", remaining.Hours())
-				}
-			}
-			return nil
-		}
-		fmt.Println() // Add spacing before API key prompt
+	hasExistingCreds := claudeCode.HasClaudeCodeCredentials()
+	if hasExistingCreds {
+		fmt.Println("  3. Import existing Claude Code credentials")
+		fmt.Println("     Use OAuth tokens from your local Claude Code installation.")
+		fmt.Println()
 	}
 
+	var validChoices string
+	if claudeAvailable && hasExistingCreds {
+		validChoices = "1, 2, or 3"
+	} else if claudeAvailable {
+		validChoices = "1 or 2"
+	} else if hasExistingCreds {
+		validChoices = "2 or 3"
+	} else {
+		validChoices = "2"
+	}
+
+	fmt.Printf("Enter choice [%s]: ", validChoices)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(response)
+
+	// Default to option 1 if claude available, otherwise 2
+	if response == "" {
+		if claudeAvailable {
+			response = "1"
+		} else {
+			response = "2"
+		}
+	}
+
+	switch response {
+	case "1":
+		if !claudeAvailable {
+			fmt.Println("Claude Code is not installed. Please choose another option.")
+			return grantAnthropic() // Recurse to show menu again
+		}
+		return grantAnthropicViaSetupToken()
+
+	case "2":
+		return grantAnthropicViaAPIKey(reader)
+
+	case "3":
+		if !hasExistingCreds {
+			fmt.Println("No existing Claude Code credentials found. Please choose another option.")
+			return grantAnthropic() // Recurse to show menu again
+		}
+		return grantAnthropicViaExistingCreds(claudeCode)
+
+	default:
+		fmt.Printf("Invalid choice: %s\n", response)
+		return grantAnthropic() // Recurse to show menu again
+	}
+}
+
+// isClaudeAvailable checks if the claude CLI is installed.
+func isClaudeAvailable() bool {
+	cmd := exec.Command("claude", "--version")
+	return cmd.Run() == nil
+}
+
+// grantAnthropicViaSetupToken uses `claude setup-token` to get an OAuth token.
+func grantAnthropicViaSetupToken() error {
+	fmt.Println()
+	fmt.Println("Running 'claude setup-token' to obtain authentication token...")
+	fmt.Println("This may open a browser for authentication.")
+	fmt.Println()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "claude", "setup-token")
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("claude setup-token failed: %w", err)
+	}
+
+	token := extractOAuthToken(string(output))
+	if token == "" {
+		return fmt.Errorf("could not find OAuth token in claude setup-token output")
+	}
+
+	cred := credential.Credential{
+		Provider:  credential.ProviderAnthropic,
+		Token:     token,
+		CreatedAt: time.Now(),
+	}
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nAnthropic credential saved to %s\n", credPath)
+	fmt.Println("\nYou can now run 'moat claude' to start Claude Code.")
+	return nil
+}
+
+// extractOAuthToken extracts the OAuth token from claude setup-token output.
+// The output contains ASCII art, messages, and ANSI color codes. The token
+// is on its own line and starts with "sk-ant-oat01-".
+func extractOAuthToken(output string) string {
+	// Strip ANSI escape codes
+	output = stripANSI(output)
+
+	// Look for a line containing the OAuth token pattern
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "sk-ant-oat01-") {
+			return line
+		}
+	}
+	return ""
+}
+
+// stripANSI removes ANSI escape sequences from a string.
+func stripANSI(s string) string {
+	var result strings.Builder
+	inEscape := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			// ANSI sequences end with a letter
+			if (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		result.WriteByte(s[i])
+	}
+	return result.String()
+}
+
+// grantAnthropicViaAPIKey prompts for an API key.
+func grantAnthropicViaAPIKey(reader *bufio.Reader) error {
 	auth := &credential.AnthropicAuth{}
 
 	// Get API key from environment variable or interactive prompt
-	// Environment variable is preferred for non-interactive/CI use
 	var apiKey string
-	var err error
 	if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
 		apiKey = envKey
 		fmt.Println("Using API key from ANTHROPIC_API_KEY environment variable")
 	} else {
+		var err error
 		apiKey, err = auth.PromptForAPIKey()
 		if err != nil {
 			return fmt.Errorf("reading API key: %w", err)
 		}
 	}
 
-	// Ask user if they want to validate the key (costs a small API call)
+	// Ask user if they want to validate the key
 	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(strings.ToLower(response))
@@ -298,8 +407,8 @@ func grantAnthropic() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		if validateErr := auth.ValidateKey(ctx, apiKey); validateErr != nil {
-			return fmt.Errorf("validating API key: %w", validateErr)
+		if err := auth.ValidateKey(ctx, apiKey); err != nil {
+			return fmt.Errorf("validating API key: %w", err)
 		}
 		fmt.Println("API key is valid.")
 	} else {
@@ -312,6 +421,43 @@ func grantAnthropic() error {
 		return err
 	}
 	fmt.Printf("Anthropic API key saved to %s\n", credPath)
+	return nil
+}
+
+// grantAnthropicViaExistingCreds imports existing Claude Code credentials.
+func grantAnthropicViaExistingCreds(claudeCode *credential.ClaudeCodeCredentials) error {
+	token, _ := claudeCode.GetClaudeCodeCredentials()
+
+	fmt.Println()
+	fmt.Println("Found Claude Code credentials.")
+	if token.SubscriptionType != "" {
+		fmt.Printf("  Subscription: %s\n", token.SubscriptionType)
+	}
+	if !token.ExpiresAtTime().IsZero() {
+		if token.IsExpired() {
+			fmt.Printf("  Status: Expired (was valid until %s)\n", token.ExpiresAtTime().Format(time.RFC3339))
+			fmt.Println("\nWarning: Token has expired. You may need to re-authenticate in Claude Code.")
+			fmt.Println("Run 'claude' to refresh your credentials, then try again.")
+			return fmt.Errorf("Claude Code token has expired")
+		}
+		fmt.Printf("  Expires: %s\n", token.ExpiresAtTime().Format(time.RFC3339))
+	}
+
+	cred := claudeCode.CreateCredentialFromOAuth(token)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nClaude Code credentials imported to %s\n", credPath)
+	fmt.Println("\nYou can now run 'moat claude' to start Claude Code.")
+	if !token.ExpiresAtTime().IsZero() {
+		remaining := time.Until(token.ExpiresAtTime())
+		if remaining > 24*time.Hour {
+			fmt.Printf("Token expires in %d days. Re-run 'moat grant anthropic' if it expires.\n", int(remaining.Hours()/24))
+		} else {
+			fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant anthropic' if it expires.\n", remaining.Hours())
+		}
+	}
 	return nil
 }
 

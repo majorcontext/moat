@@ -3,13 +3,11 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/log"
 )
 
 // OAuthBetaHeader is the Anthropic beta header required for OAuth authentication.
@@ -27,7 +25,8 @@ func (a *AnthropicSetup) Provider() credential.Provider {
 // ConfigureProxy sets up proxy headers for Anthropic API.
 func (a *AnthropicSetup) ConfigureProxy(p credential.ProxyConfigurer, cred *credential.Credential) {
 	if credential.IsOAuthToken(cred.Token) {
-		// OAuth token from Claude Code - use Bearer auth
+		// OAuth token - use Bearer auth with the real token
+		// The proxy injects this at the network layer
 		// Also requires anthropic-beta header for OAuth support
 		p.SetCredential("api.anthropic.com", "Bearer "+cred.Token)
 		p.AddExtraHeader("api.anthropic.com", "anthropic-beta", OAuthBetaHeader)
@@ -40,8 +39,10 @@ func (a *AnthropicSetup) ConfigureProxy(p credential.ProxyConfigurer, cred *cred
 // ContainerEnv returns environment variables for Anthropic.
 func (a *AnthropicSetup) ContainerEnv(cred *credential.Credential) []string {
 	if credential.IsOAuthToken(cred.Token) {
-		// For OAuth, don't set ANTHROPIC_API_KEY - Claude Code should use OAuth
-		return nil
+		// For OAuth tokens, set CLAUDE_CODE_OAUTH_TOKEN with a placeholder.
+		// This tells Claude Code it's authenticated (skips login prompts).
+		// The real token is injected by the proxy at the network layer.
+		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
 	}
 	// For API keys, set a placeholder so Claude Code doesn't error
 	// The real key is injected by the proxy at the network layer
@@ -71,7 +72,7 @@ func (a *AnthropicSetup) Cleanup(cleanupPath string) {
 // SECURITY: The real OAuth token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
 //
-// Note: Use CopyHostClaudeFiles to copy onboarding state and other host files.
+// Note: Use WriteClaudeConfig to write the .claude.json config file.
 func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, stagingDir string) error {
 	if !credential.IsOAuthToken(cred.Token) {
 		// API keys don't need credential files
@@ -103,112 +104,21 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	return nil
 }
 
-// CopyHostClaudeFiles copies Claude Code state files from the host to the staging directory.
-// These files are needed to preserve onboarding state, preferences, and feature flags
-// when running Claude Code in a container.
-//
-// Files copied (all optional - missing files are skipped):
-// - ~/.claude.json (onboarding state and user preferences)
-// - ~/.claude/statsig/ (feature flags)
-// - ~/.claude/stats-cache.json (usage stats, firstSessionDate)
-//
-// This function should be called whenever setting up a Claude staging directory,
-// regardless of authentication method (OAuth or API key).
-func CopyHostClaudeFiles(stagingDir string) {
-	hostHome, err := os.UserHomeDir()
+// WriteClaudeConfig writes a minimal ~/.claude.json to the staging directory.
+// This skips the onboarding flow and sets dark theme.
+func WriteClaudeConfig(stagingDir string) error {
+	config := map[string]any{
+		"hasCompletedOnboarding": true,
+		"theme":                  "dark",
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		log.Debug("failed to get home directory, skipping host file copy", "error", err)
-		return
+		return fmt.Errorf("marshaling claude config: %w", err)
 	}
 
-	hostClaudeDir := filepath.Join(hostHome, ".claude")
-
-	// Copy ~/.claude.json (onboarding state and user preferences)
-	hostClaudeJSON := filepath.Join(hostHome, ".claude.json")
-	if _, err := os.Stat(hostClaudeJSON); err == nil {
-		if err := copyFile(hostClaudeJSON, filepath.Join(stagingDir, ".claude.json")); err != nil {
-			// Non-fatal, just log and continue
-			log.Warn("failed to copy .claude.json, onboarding state may reset", "error", err)
-		}
-	}
-
-	// Copy statsig directory (feature flags)
-	hostStatsig := filepath.Join(hostClaudeDir, "statsig")
-	if info, err := os.Stat(hostStatsig); err == nil && info.IsDir() {
-		if err := copyDir(hostStatsig, filepath.Join(stagingDir, "statsig")); err != nil {
-			// Non-fatal, just log and continue
-			log.Warn("failed to copy statsig directory, feature flags may differ", "error", err)
-		}
-	}
-
-	// Copy stats-cache.json (usage stats, firstSessionDate)
-	hostStatsCache := filepath.Join(hostClaudeDir, "stats-cache.json")
-	if _, err := os.Stat(hostStatsCache); err == nil {
-		if err := copyFile(hostStatsCache, filepath.Join(stagingDir, "stats-cache.json")); err != nil {
-			// Non-fatal, just log and continue
-			log.Warn("failed to copy stats-cache.json, usage stats may reset", "error", err)
-		}
-	}
-}
-
-// copyFile copies a single file from src to dst.
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	if _, copyErr := io.Copy(dstFile, srcFile); copyErr != nil {
-		return fmt.Errorf("copying %s to %s: %w", src, dst, copyErr)
-	}
-
-	// Preserve permissions
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", src, err)
-	}
-	if chmodErr := os.Chmod(dst, srcInfo.Mode()); chmodErr != nil {
-		return fmt.Errorf("setting permissions on %s: %w", dst, chmodErr)
-	}
-	return nil
-}
-
-// copyDir recursively copies a directory from src to dst.
-func copyDir(src, dst string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
-		return mkdirErr
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(srcPath, dstPath); err != nil {
-				return err
-			}
-		} else {
-			if err := copyFile(srcPath, dstPath); err != nil {
-				return err
-			}
-		}
+	if err := os.WriteFile(filepath.Join(stagingDir, ".claude.json"), data, 0644); err != nil {
+		return fmt.Errorf("writing .claude.json: %w", err)
 	}
 
 	return nil
