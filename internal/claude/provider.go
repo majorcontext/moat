@@ -9,6 +9,7 @@ import (
 
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
+	"github.com/andybons/moat/internal/log"
 )
 
 // OAuthBetaHeader is the Anthropic beta header required for OAuth authentication.
@@ -114,7 +115,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if _, err := os.Stat(hostClaudeJSON); err == nil {
 		if err := copyFile(hostClaudeJSON, filepath.Join(stagingDir, ".claude.json")); err != nil {
 			// Non-fatal, just log and continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to copy .claude.json: %v\n", err)
+			log.Debug("failed to copy .claude.json", "error", err)
 		}
 	}
 
@@ -123,7 +124,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if info, err := os.Stat(hostStatsig); err == nil && info.IsDir() {
 		if err := copyDir(hostStatsig, filepath.Join(stagingDir, "statsig")); err != nil {
 			// Non-fatal, just log and continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to copy statsig directory: %v\n", err)
+			log.Debug("failed to copy statsig directory", "error", err)
 		}
 	}
 
@@ -132,7 +133,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	if _, err := os.Stat(hostStatsCache); err == nil {
 		if err := copyFile(hostStatsCache, filepath.Join(stagingDir, "stats-cache.json")); err != nil {
 			// Non-fatal, just log and continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to copy stats-cache.json: %v\n", err)
+			log.Debug("failed to copy stats-cache.json", "error", err)
 		}
 	}
 

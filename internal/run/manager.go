@@ -820,6 +820,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 				return nil, fmt.Errorf("creating Claude staging directory: %w", stagingErr)
 			}
+			// Ensure staging directory is cleaned up on error before claudeGenerated is set.
+			// Once claudeGenerated is assigned, it takes over cleanup responsibility.
+			defer func() {
+				if claudeStagingDir != "" && claudeGenerated == nil {
+					os.RemoveAll(claudeStagingDir)
+				}
+			}()
 
 			// Populate with OAuth credentials and host files if needed
 			if needsClaudeInit {
