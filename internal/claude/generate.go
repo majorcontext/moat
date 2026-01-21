@@ -22,6 +22,10 @@ type GeneratedConfig struct {
 	// SettingsPath is the path to the generated settings.json file
 	SettingsPath string
 
+	// SettingsDir is the directory containing settings.json (for mounting)
+	// Apple containers only support directory mounts, not file mounts.
+	SettingsDir string
+
 	// MCPConfigPath is the path to the generated .mcp.json file (empty if no MCP config)
 	MCPConfigPath string
 
@@ -62,17 +66,25 @@ func GenerateContainerConfig(settings *Settings, cfg *config.Config, cacheMountP
 		TempDir: tempDir,
 	}
 
-	// Generate settings.json
+	// Generate settings.json in a .claude subdirectory
+	// Apple containers only support directory mounts, not file mounts,
+	// so we create the directory structure that will be mounted to ~/.claude/
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if mkdirErr := os.MkdirAll(claudeDir, 0755); mkdirErr != nil {
+		return nil, fmt.Errorf("creating .claude directory: %w", mkdirErr)
+	}
+
 	settingsJSON, err := GenerateSettings(settings, cacheMountPath)
 	if err != nil {
 		return nil, fmt.Errorf("generating settings: %w", err)
 	}
 
-	settingsPath := filepath.Join(tempDir, "settings.json")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 	if err := os.WriteFile(settingsPath, settingsJSON, 0644); err != nil {
 		return nil, fmt.Errorf("writing settings.json: %w", err)
 	}
 	result.SettingsPath = settingsPath
+	result.SettingsDir = claudeDir
 
 	// Generate .mcp.json if MCP servers are configured
 	if cfg != nil && len(cfg.Claude.MCP) > 0 {
@@ -197,11 +209,12 @@ func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheD
 		}
 	}
 
-	// Mount generated settings.json
-	if generatedConfig != nil && generatedConfig.SettingsPath != "" {
+	// Mount generated settings directory (contains settings.json)
+	// Apple containers only support directory mounts, not file mounts.
+	if generatedConfig != nil && generatedConfig.SettingsDir != "" {
 		mounts = append(mounts, MountInfo{
-			Source:   generatedConfig.SettingsPath,
-			Target:   filepath.Join(containerHome, ".claude", "settings.json"),
+			Source:   generatedConfig.SettingsDir,
+			Target:   filepath.Join(containerHome, ".claude"),
 			ReadOnly: true,
 		})
 	}

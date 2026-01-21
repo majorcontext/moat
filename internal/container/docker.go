@@ -325,7 +325,8 @@ func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, erro
 }
 
 // BuildImage builds a Docker image from Dockerfile content.
-func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string) error {
+// Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
+func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
 	// Create a tar archive with the Dockerfile
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)

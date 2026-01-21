@@ -15,7 +15,25 @@ type DockerfileOptions struct {
 	NeedsSSH bool
 }
 
-const baseImage = "ubuntu:22.04"
+const defaultBaseImage = "ubuntu:22.04"
+
+// runtimeBaseImage returns the official Docker image for a runtime, or empty string
+// if we should fall back to installing on Ubuntu.
+func runtimeBaseImage(name, version string) string {
+	switch name {
+	case "python":
+		// Use slim variant - Debian-based, has apt, much smaller than full image
+		return fmt.Sprintf("python:%s-slim", version)
+	case "node":
+		// Use slim variant - Debian-based, has apt
+		return fmt.Sprintf("node:%s-slim", version)
+	case "go":
+		// Official golang image is Debian-based
+		return fmt.Sprintf("golang:%s", version)
+	default:
+		return ""
+	}
+}
 
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
 func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
@@ -23,9 +41,6 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		opts = &DockerfileOptions{}
 	}
 	var b strings.Builder
-
-	b.WriteString("FROM " + baseImage + "\n\n")
-	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
 
 	// Sort dependencies into categories for optimal layer caching
 	var (
@@ -58,12 +73,34 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		}
 	}
 
+	// Determine base image: use official runtime image if we have exactly one runtime
+	// This is much faster than installing runtimes via apt on Ubuntu
+	baseImage := defaultBaseImage
+	var baseRuntime *Dependency // The runtime provided by the base image (skip installing it)
+
+	if len(runtimes) == 1 {
+		rt := runtimes[0]
+		spec, _ := GetSpec(rt.Name)
+		version := rt.Version
+		if version == "" {
+			version = spec.Default
+		}
+		if img := runtimeBaseImage(rt.Name, version); img != "" {
+			baseImage = img
+			baseRuntime = &rt
+		}
+	}
+
+	b.WriteString("FROM " + baseImage + "\n\n")
+	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
+
 	// Add SSH packages if SSH grants are present
 	if opts.NeedsSSH {
 		aptPkgs = append(aptPkgs, "openssh-client", "socat")
 	}
 
 	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall)
+	// Note: Official runtime images are Debian-based and support apt
 	b.WriteString("# Base packages\n")
 	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
 	b.WriteString("    curl \\\n")
@@ -84,8 +121,14 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 	}
 
-	// Runtimes (node, python, go)
+	// Runtimes (node, python, go) - skip if already provided by base image
 	for _, dep := range runtimes {
+		// Skip if this runtime is provided by the base image
+		if baseRuntime != nil && dep.Name == baseRuntime.Name {
+			b.WriteString(fmt.Sprintf("# %s runtime (provided by base image)\n\n", dep.Name))
+			continue
+		}
+
 		spec, _ := GetSpec(dep.Name)
 		version := dep.Version
 		if version == "" {

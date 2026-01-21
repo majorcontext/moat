@@ -313,7 +313,8 @@ func TestRequiredMounts(t *testing.T) {
 	}
 
 	generatedConfig := &GeneratedConfig{
-		SettingsPath: "/tmp/moat-claude-123/settings.json",
+		SettingsPath: "/tmp/moat-claude-123/.claude/settings.json",
+		SettingsDir:  "/tmp/moat-claude-123/.claude",
 	}
 
 	mounts := RequiredMounts(settings, generatedConfig, cacheDir, "/home/container")
@@ -332,18 +333,21 @@ func TestRequiredMounts(t *testing.T) {
 		t.Error("should have plugin cache mount")
 	}
 
-	// Should have settings mount
+	// Should have settings directory mount (not file mount - Apple containers only support directories)
 	var hasSettingsMount bool
 	for _, m := range mounts {
-		if strings.Contains(m.Target, "settings.json") {
+		if strings.HasSuffix(m.Target, ".claude") {
 			hasSettingsMount = true
-			if m.Target != filepath.Join("/home/container", ".claude", "settings.json") {
-				t.Errorf("settings mount target = %q, want %q", m.Target, filepath.Join("/home/container", ".claude", "settings.json"))
+			if m.Target != filepath.Join("/home/container", ".claude") {
+				t.Errorf("settings mount target = %q, want %q", m.Target, filepath.Join("/home/container", ".claude"))
+			}
+			if m.Source != "/tmp/moat-claude-123/.claude" {
+				t.Errorf("settings mount source = %q, want %q", m.Source, "/tmp/moat-claude-123/.claude")
 			}
 		}
 	}
 	if !hasSettingsMount {
-		t.Error("should have settings mount")
+		t.Error("should have settings directory mount")
 	}
 }
 

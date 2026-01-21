@@ -82,8 +82,14 @@ func TestServerSocketPermissions(t *testing.T) {
 }
 
 func TestServerRemovesExistingSocket(t *testing.T) {
-	dir := t.TempDir()
-	socketPath := filepath.Join(dir, "agent.sock")
+	// Use /tmp directly with short name to avoid exceeding macOS's
+	// 104-char limit for Unix socket paths (t.TempDir() paths are too long)
+	dir, err := os.MkdirTemp("/tmp", "sock")
+	if err != nil {
+		t.Fatalf("Creating temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "a.sock")
 
 	// Create a stale socket file
 	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {

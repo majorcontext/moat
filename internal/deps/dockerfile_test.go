@@ -19,9 +19,9 @@ func TestGenerateDockerfile(t *testing.T) {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
-	// Check base image
-	if !strings.HasPrefix(dockerfile, "FROM ubuntu:22.04") {
-		t.Error("Dockerfile should start with FROM ubuntu:22.04")
+	// With single runtime (node), should use official node image as base
+	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should start with FROM node:20-slim, got:\n%s", dockerfile[:100])
 	}
 
 	// Check apt packages are batched
@@ -32,9 +32,12 @@ func TestGenerateDockerfile(t *testing.T) {
 		t.Error("Dockerfile should install postgresql-client")
 	}
 
-	// Check node setup
-	if !strings.Contains(dockerfile, "nodesource") || !strings.Contains(dockerfile, "setup_20") {
-		t.Error("Dockerfile should set up Node.js 20")
+	// Node should be provided by base image, not installed
+	if strings.Contains(dockerfile, "nodesource") {
+		t.Error("Dockerfile should NOT install Node.js when using node base image")
+	}
+	if !strings.Contains(dockerfile, "provided by base image") {
+		t.Error("Dockerfile should note that node is provided by base image")
 	}
 
 	// Check npm globals
@@ -67,6 +70,10 @@ func TestGenerateDockerfilePlaywright(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
+	// Should use node as base
+	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	}
 	if !strings.Contains(dockerfile, "npm install -g playwright") {
 		t.Error("Dockerfile should install playwright")
 	}
@@ -81,11 +88,16 @@ func TestGenerateDockerfileGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.Contains(dockerfile, "go.dev/dl/go1.22") {
-		t.Error("Dockerfile should install Go 1.22")
+	// Should use official golang image as base
+	if !strings.HasPrefix(dockerfile, "FROM golang:1.22") {
+		t.Errorf("Dockerfile should start with FROM golang:1.22, got:\n%s", dockerfile[:100])
 	}
-	if !strings.Contains(dockerfile, "/usr/local/go/bin") {
-		t.Error("Dockerfile should set Go PATH")
+	// Go should be provided by base image, not installed
+	if strings.Contains(dockerfile, "go.dev/dl") {
+		t.Error("Dockerfile should NOT install Go when using golang base image")
+	}
+	if !strings.Contains(dockerfile, "provided by base image") {
+		t.Error("Dockerfile should note that go is provided by base image")
 	}
 }
 
@@ -95,14 +107,16 @@ func TestGenerateDockerfilePython(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.Contains(dockerfile, "python3") {
-		t.Error("Dockerfile should install python3")
+	// Should use official python image as base
+	if !strings.HasPrefix(dockerfile, "FROM python:3.10-slim") {
+		t.Errorf("Dockerfile should start with FROM python:3.10-slim, got:\n%s", dockerfile[:100])
 	}
-	if !strings.Contains(dockerfile, "python3-pip") {
-		t.Error("Dockerfile should install python3-pip")
+	// Python should be provided by base image, not installed
+	if strings.Contains(dockerfile, "apt-get install -y python3") {
+		t.Error("Dockerfile should NOT install python3 when using python base image")
 	}
-	if !strings.Contains(dockerfile, "update-alternatives") {
-		t.Error("Dockerfile should set up Python alternatives for PATH")
+	if !strings.Contains(dockerfile, "provided by base image") {
+		t.Error("Dockerfile should note that python is provided by base image")
 	}
 }
 
@@ -141,9 +155,12 @@ func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
-	// Check node is installed
-	if !strings.Contains(dockerfile, "nodesource") {
-		t.Error("Dockerfile should install Node.js")
+	// Node should be provided by base image
+	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	}
+	if !strings.Contains(dockerfile, "provided by base image") {
+		t.Error("Dockerfile should note that node is provided by base image")
 	}
 
 	// Check SSH is also installed
@@ -152,5 +169,30 @@ func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 	}
 	if !strings.Contains(dockerfile, "ENTRYPOINT") {
 		t.Error("Dockerfile should set ENTRYPOINT")
+	}
+}
+
+func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
+	// With multiple runtimes, should fall back to Ubuntu and install both
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "python", Version: "3.10"},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should use Ubuntu as base when multiple runtimes
+	if !strings.HasPrefix(dockerfile, "FROM ubuntu:22.04") {
+		t.Errorf("Dockerfile should use ubuntu:22.04 for multiple runtimes, got:\n%s", dockerfile[:100])
+	}
+
+	// Both runtimes should be installed
+	if !strings.Contains(dockerfile, "nodesource") {
+		t.Error("Dockerfile should install Node.js")
+	}
+	if !strings.Contains(dockerfile, "python3") {
+		t.Error("Dockerfile should install Python")
 	}
 }

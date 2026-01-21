@@ -63,7 +63,7 @@ type Runtime interface {
 
 	// BuildImage builds an image from a Dockerfile content.
 	// Returns the image ID. The tag is applied to the built image.
-	BuildImage(ctx context.Context, dockerfile string, tag string) error
+	BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error
 
 	// ImageExists checks if an image with the given tag exists locally.
 	ImageExists(ctx context.Context, tag string) (bool, error)
@@ -143,4 +143,11 @@ type Info struct {
 	Image   string
 	Status  string // "running", "exited", "created"
 	Created time.Time
+}
+
+// BuildOptions configures image building.
+type BuildOptions struct {
+	// DNS servers to use during build (Apple containers only).
+	// If empty, host DNS is auto-detected.
+	DNS []string
 }

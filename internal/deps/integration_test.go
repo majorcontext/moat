@@ -19,16 +19,17 @@ func TestFullPipeline(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	// Generate Dockerfile
+	// Generate Dockerfile - with single runtime (node), uses official image as base
 	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
-	if !strings.Contains(dockerfile, "FROM ubuntu:22.04") {
-		t.Error("Dockerfile missing base image")
+	if !strings.Contains(dockerfile, "FROM node:20-slim") {
+		t.Error("Dockerfile should use node:20-slim as base image")
 	}
-	if !strings.Contains(dockerfile, "nodejs") {
-		t.Error("Dockerfile missing node install")
+	// Node is provided by base image, not installed via apt
+	if !strings.Contains(dockerfile, "provided by base image") {
+		t.Error("Dockerfile should note node is provided by base image")
 	}
 	if !strings.Contains(dockerfile, "postgresql") {
 		t.Error("Dockerfile missing postgresql install")
@@ -37,7 +38,7 @@ func TestFullPipeline(t *testing.T) {
 		t.Error("Dockerfile missing typescript install")
 	}
 
-	// Generate script
+	// Generate script (still installs runtimes for upgrading existing containers)
 	script, err := GenerateInstallScript(depList)
 	if err != nil {
 		t.Fatalf("GenerateInstallScript: %v", err)
@@ -198,13 +199,14 @@ func TestPipelineWithDefaultVersions(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	// Generate Dockerfile - should use default versions from registry
+	// Generate Dockerfile - with single runtime (node), uses official image with default version
 	dockerfile, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
-	if !strings.Contains(dockerfile, "FROM ubuntu:22.04") {
-		t.Error("Dockerfile missing base image")
+	// Should use node:<default-version>-slim as base
+	if !strings.Contains(dockerfile, "FROM node:") || !strings.Contains(dockerfile, "-slim") {
+		t.Error("Dockerfile should use official node image as base")
 	}
 
 	// Generate script
@@ -309,7 +311,9 @@ func TestGoInstallDependencies(t *testing.T) {
 	}
 }
 
-// TestDockerfileAndScriptConsistency tests that Dockerfile and install script generate similar output.
+// TestDockerfileAndScriptConsistency tests that Dockerfile and install script handle deps correctly.
+// Note: Dockerfile uses official runtime images when possible (faster), while scripts always
+// include runtime install commands (for upgrading existing containers).
 func TestDockerfileAndScriptConsistency(t *testing.T) {
 	deps := []string{"node@20", "typescript", "psql"}
 	depList, err := ParseAll(deps)
@@ -327,15 +331,15 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 		t.Fatalf("GenerateInstallScript: %v", err)
 	}
 
-	// Both should install nodejs
-	if !strings.Contains(dockerfile, "nodejs") {
-		t.Error("Dockerfile missing nodejs")
+	// Dockerfile uses node as base image, script installs nodejs via apt
+	if !strings.Contains(dockerfile, "FROM node:20-slim") {
+		t.Error("Dockerfile should use node:20-slim as base")
 	}
 	if !strings.Contains(script, "nodejs") {
-		t.Error("Script missing nodejs")
+		t.Error("Script missing nodejs install")
 	}
 
-	// Both should install postgresql
+	// Both should install postgresql (not provided by node image)
 	if !strings.Contains(dockerfile, "postgresql") {
 		t.Error("Dockerfile missing postgresql")
 	}
@@ -343,7 +347,7 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 		t.Error("Script missing postgresql")
 	}
 
-	// Both should install typescript
+	// Both should install typescript via npm
 	if !strings.Contains(dockerfile, "typescript") {
 		t.Error("Dockerfile missing typescript")
 	}

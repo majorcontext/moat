@@ -666,10 +666,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Build custom image if we have dependencies or SSH grants (Docker only)
-	// Apple containers don't support custom image builds; dependencies would need
-	// to be installed via install scripts at container start (not yet implemented).
-	if needsCustomImage && m.runtime.Type() == container.RuntimeDocker {
+	// Build custom image if we have dependencies or SSH grants.
+	// Both Docker and Apple containers support Dockerfile builds.
+	if needsCustomImage {
 		exists, err := m.runtime.ImageExists(ctx, containerImage)
 		if err != nil {
 			if proxyServer != nil {
@@ -693,7 +692,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			for i, d := range depList {
 				depNames[i] = d.Name
 			}
-			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage); err != nil {
+
+			// Build options from config
+			buildOpts := container.BuildOptions{}
+			if opts.Config != nil {
+				buildOpts.DNS = opts.Config.Container.Apple.BuilderDNS
+			}
+
+			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
 				if proxyServer != nil {
 					_ = proxyServer.Stop(context.Background())
 				}
