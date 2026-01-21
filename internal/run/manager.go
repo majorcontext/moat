@@ -270,33 +270,31 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					} else if provider == credential.ProviderAWS {
 						// AWS credentials are handled via credential endpoint, not header injection
 						// Parse stored config: Token=roleARN, Scopes=[region, sessionDuration, externalID]
-						roleARN := cred.Token
-						region := "us-east-1"
-						sessionDurationStr := ""
-						externalID := ""
+						awsConfig := credential.AWSConfig{
+							RoleARN: cred.Token,
+							Region:  "us-east-1",
+						}
 						if len(cred.Scopes) > 0 && cred.Scopes[0] != "" {
-							region = cred.Scopes[0]
+							awsConfig.Region = cred.Scopes[0]
 						}
 						if len(cred.Scopes) > 1 {
-							sessionDurationStr = cred.Scopes[1]
+							awsConfig.SessionDurationStr = cred.Scopes[1]
 						}
 						if len(cred.Scopes) > 2 {
-							externalID = cred.Scopes[2]
+							awsConfig.ExternalID = cred.Scopes[2]
 						}
 
-						sessionDuration := 15 * time.Minute
-						if sessionDurationStr != "" {
-							if d, err := time.ParseDuration(sessionDurationStr); err == nil {
-								sessionDuration = d
-							}
+						sessionDuration, err := awsConfig.SessionDuration()
+						if err != nil {
+							return nil, fmt.Errorf("invalid AWS session duration: %w", err)
 						}
 
 						awsProvider, err := proxy.NewAWSCredentialProvider(
 							ctx,
-							roleARN,
-							region,
+							awsConfig.RoleARN,
+							awsConfig.Region,
 							sessionDuration,
-							externalID,
+							awsConfig.ExternalID,
 							"moat-"+r.ID,
 						)
 						if err != nil {
@@ -440,8 +438,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			r.awsTempDir = awsDir // Track for cleanup
 
 			// Write the credential helper script
+			// Use 0700 permissions since the script contains the credential endpoint URL
 			helperPath := filepath.Join(awsDir, "credentials")
-			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0755); err != nil {
+			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0700); err != nil {
 				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
 			}
 

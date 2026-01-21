@@ -3,8 +3,10 @@ package run
 // AWSCredentialHelperScript is a shell script that fetches AWS credentials
 // from the AgentOps proxy. It implements the AWS credential_process interface.
 //
-// This requires curl, which is available in containers that have the AWS CLI
-// installed (the aws dependency includes curl as part of its installation).
+// This requires curl, which is always installed as a base package in containers
+// built with the dependency system (see internal/deps/dockerfile.go). Since
+// --grant aws requires the aws dependency for the AWS CLI, curl is guaranteed
+// to be present in any container using AWS credentials.
 const AWSCredentialHelperScript = `#!/bin/sh
 set -e
 if [ -z "$AGENTOPS_CREDENTIAL_URL" ]; then

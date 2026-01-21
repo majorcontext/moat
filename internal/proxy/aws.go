@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
+
+// credentialRefreshBuffer is the time before expiration when credentials should be refreshed.
+const credentialRefreshBuffer = 5 * time.Minute
 
 // AWSCredentials holds temporary AWS credentials.
 type AWSCredentials struct {
@@ -33,7 +37,9 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	// Verify auth token if required
 	if h.authToken != "" {
 		auth := r.Header.Get("Authorization")
-		if auth == "" || auth != "Bearer "+h.authToken {
+		expectedAuth := "Bearer " + h.authToken
+		// Use constant-time comparison to prevent timing attacks
+		if auth == "" || subtle.ConstantTimeCompare([]byte(auth), []byte(expectedAuth)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -41,7 +47,9 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	creds, err := h.getCredentials(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to get credentials: %v", err), http.StatusInternalServerError)
+		// Log detailed error server-side but return generic message to prevent leaking sensitive info
+		fmt.Fprintf(os.Stderr, "AWS credential fetch error: %v\n", err)
+		http.Error(w, "failed to get credentials", http.StatusInternalServerError)
 		return
 	}
 
@@ -127,9 +135,14 @@ func (p *AWSCredentialProvider) RoleARN() string {
 
 // GetCredentials returns cached credentials or fetches new ones.
 func (p *AWSCredentialProvider) GetCredentials(ctx context.Context) (*AWSCredentials, error) {
+	// Check context before proceeding
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	p.mu.RLock()
-	// Return cached if valid with 5-minute buffer
-	if p.cached != nil && time.Now().Add(5*time.Minute).Before(p.expiration) {
+	// Return cached if valid with buffer before expiration
+	if p.cached != nil && time.Now().Add(credentialRefreshBuffer).Before(p.expiration) {
 		creds := p.cached
 		p.mu.RUnlock()
 		return creds, nil
@@ -141,7 +154,7 @@ func (p *AWSCredentialProvider) GetCredentials(ctx context.Context) (*AWSCredent
 	defer p.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	if p.cached != nil && time.Now().Add(5*time.Minute).Before(p.expiration) {
+	if p.cached != nil && time.Now().Add(credentialRefreshBuffer).Before(p.expiration) {
 		return p.cached, nil
 	}
 

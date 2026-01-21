@@ -68,6 +68,8 @@ func TestAWSConfig_SessionDuration(t *testing.T) {
 		{"too long", "13h", 0, true},
 		{"empty uses default", "", 15 * time.Minute, false},
 		{"invalid format", "abc", 0, true},
+		{"negative duration", "-1h", 0, true},
+		{"zero duration", "0s", 0, true},
 	}
 
 	for _, tt := range tests {

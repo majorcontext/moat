@@ -76,6 +76,85 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 			t.Errorf("status = %d, want 500", w.Code)
 		}
 	})
+
+	t.Run("returns 401 when auth token required but missing", func(t *testing.T) {
+		handler := &AWSCredentialHandler{
+			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
+				return &AWSCredentials{
+					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+					SecretAccessKey: "secret",
+					SessionToken:    "token",
+					Expiration:      time.Now().Add(15 * time.Minute),
+				}, nil
+			},
+			authToken: "secret-token",
+		}
+
+		req := httptest.NewRequest("GET", "/_aws/credentials", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", w.Code)
+		}
+	})
+
+	t.Run("returns 401 when auth token is invalid", func(t *testing.T) {
+		handler := &AWSCredentialHandler{
+			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
+				return &AWSCredentials{
+					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+					SecretAccessKey: "secret",
+					SessionToken:    "token",
+					Expiration:      time.Now().Add(15 * time.Minute),
+				}, nil
+			},
+			authToken: "secret-token",
+		}
+
+		req := httptest.NewRequest("GET", "/_aws/credentials", nil)
+		req.Header.Set("Authorization", "Bearer wrong-token")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", w.Code)
+		}
+	})
+
+	t.Run("returns credentials when auth token is valid", func(t *testing.T) {
+		handler := &AWSCredentialHandler{
+			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
+				return &AWSCredentials{
+					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
+					SecretAccessKey: "secret",
+					SessionToken:    "token",
+					Expiration:      time.Now().Add(15 * time.Minute),
+				}, nil
+			},
+			authToken: "secret-token",
+		}
+
+		req := httptest.NewRequest("GET", "/_aws/credentials", nil)
+		req.Header.Set("Authorization", "Bearer secret-token")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", w.Code)
+		}
+
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp["AccessKeyId"] != "AKIAIOSFODNN7EXAMPLE" {
+			t.Errorf("AccessKeyId = %v, want AKIAIOSFODNN7EXAMPLE", resp["AccessKeyId"])
+		}
+	})
 }
 
 func TestAWSCredentialProvider_Caching(t *testing.T) {

@@ -53,6 +53,9 @@ func (c *AWSConfig) SessionDuration() (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid session duration %q: %w", c.SessionDurationStr, err)
 	}
+	if d <= 0 {
+		return 0, fmt.Errorf("session duration %v must be positive", d)
+	}
 	if d < 15*time.Minute {
 		return 0, fmt.Errorf("session duration %v is less than minimum 15m", d)
 	}
