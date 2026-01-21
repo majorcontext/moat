@@ -2,6 +2,8 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -46,98 +48,45 @@ func (a *AnthropicSetup) ContainerEnv(cred *credential.Credential) []string {
 }
 
 // ContainerMounts returns mounts needed for Anthropic/Claude Code.
+// This method returns empty because Claude Code setup uses the staging directory
+// approach instead of direct mounts. The staging directory is populated by
+// PopulateStagingDir and copied to the container at startup by moat-init.
 func (a *AnthropicSetup) ContainerMounts(cred *credential.Credential, containerHome string) ([]container.MountConfig, string, error) {
-	if !credential.IsOAuthToken(cred.Token) {
-		// API keys don't need special mounts
-		return nil, "", nil
-	}
-
-	// Create credentials directory for OAuth
-	credsDir, err := a.createCredentialsDir(cred)
-	if err != nil {
-		return nil, "", err
-	}
-
-	var mounts []container.MountConfig
-	containerClaudeDir := filepath.Join(containerHome, ".claude")
-
-	// Mount our generated credentials file
-	credsFile := filepath.Join(credsDir, ".credentials.json")
-	mounts = append(mounts, container.MountConfig{
-		Source:   credsFile,
-		Target:   filepath.Join(containerClaudeDir, ".credentials.json"),
-		ReadOnly: true,
-	})
-
-	// Mount host's ~/.claude.json for onboarding state and user preferences
-	// This file contains hasCompletedOnboarding and other important state
-	// Must be writable as Claude Code updates it during operation
-	if hostHome, err := os.UserHomeDir(); err == nil {
-		hostClaudeJSON := filepath.Join(hostHome, ".claude.json")
-		if _, err := os.Stat(hostClaudeJSON); err == nil {
-			mounts = append(mounts, container.MountConfig{
-				Source:   hostClaudeJSON,
-				Target:   filepath.Join(containerHome, ".claude.json"),
-				ReadOnly: false,
-			})
-		}
-
-		hostClaudeDir := filepath.Join(hostHome, ".claude")
-
-		// Mount statsig directory for feature flags
-		hostStatsig := filepath.Join(hostClaudeDir, "statsig")
-		if info, err := os.Stat(hostStatsig); err == nil && info.IsDir() {
-			mounts = append(mounts, container.MountConfig{
-				Source:   hostStatsig,
-				Target:   filepath.Join(containerClaudeDir, "statsig"),
-				ReadOnly: true,
-			})
-		}
-
-		// Mount stats-cache.json which contains firstSessionDate (onboarding state)
-		hostStatsCache := filepath.Join(hostClaudeDir, "stats-cache.json")
-		if _, err := os.Stat(hostStatsCache); err == nil {
-			mounts = append(mounts, container.MountConfig{
-				Source:   hostStatsCache,
-				Target:   filepath.Join(containerClaudeDir, "stats-cache.json"),
-				ReadOnly: true,
-			})
-		}
-	}
-
-	return mounts, credsDir, nil
+	// No direct mounts - we use the staging directory approach instead
+	return nil, "", nil
 }
 
 // Cleanup cleans up Anthropic resources.
 func (a *AnthropicSetup) Cleanup(cleanupPath string) {
-	if cleanupPath != "" {
-		_ = os.RemoveAll(cleanupPath)
-	}
+	// Nothing to clean up - staging directory is handled by the caller
 }
 
-// createCredentialsDir creates a temp directory with a Claude credentials file.
-// Returns the directory path (caller is responsible for cleanup).
-func (a *AnthropicSetup) createCredentialsDir(cred *credential.Credential) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+// PopulateStagingDir populates the Claude staging directory with files needed for
+// Claude Code to run properly. The staging directory will be copied to the container's
+// home directory at startup by the moat-init script.
+//
+// Files added:
+// - .credentials.json (placeholder token - real auth is via proxy)
+// - .claude.json (copied from host, if exists)
+// - statsig/ (copied from host, if exists)
+// - stats-cache.json (copied from host, if exists)
+//
+// SECURITY: The real OAuth token is NEVER written to the container filesystem.
+// Authentication is handled by the TLS-intercepting proxy at the network layer.
+func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, stagingDir string) error {
+	if !credential.IsOAuthToken(cred.Token) {
+		// API keys don't need special files
+		return nil
 	}
 
-	baseDir := filepath.Join(home, ".moat", "claude-creds")
-	if mkdirErr := os.MkdirAll(baseDir, 0700); mkdirErr != nil {
-		return "", mkdirErr
-	}
-
-	// Create a unique subdirectory for this run
-	credsDir, err := os.MkdirTemp(baseDir, "run-")
-	if err != nil {
-		return "", err
-	}
-
-	// Build credentials JSON matching Claude Code's format
+	// Write credentials file with a placeholder token.
+	// The real token is NEVER written to the container - it's injected by
+	// the proxy at the network layer. Claude Code needs this file to exist
+	// with valid structure to function, but the actual authentication is
+	// handled transparently by the TLS-intercepting proxy.
 	creds := credential.ClaudeOAuthCredentials{
 		ClaudeAiOauth: &credential.ClaudeOAuthToken{
-			AccessToken: cred.Token,
+			AccessToken: ProxyInjectedPlaceholder,
 			ExpiresAt:   cred.ExpiresAt.UnixMilli(),
 			Scopes:      cred.Scopes,
 		},
@@ -145,18 +94,109 @@ func (a *AnthropicSetup) createCredentialsDir(cred *credential.Credential) (stri
 
 	credsJSON, err := json.Marshal(creds)
 	if err != nil {
-		os.RemoveAll(credsDir)
-		return "", err
+		return fmt.Errorf("marshaling credentials: %w", err)
 	}
 
-	// Write credentials file
-	credsFile := filepath.Join(credsDir, ".credentials.json")
-	if err := os.WriteFile(credsFile, credsJSON, 0600); err != nil {
-		os.RemoveAll(credsDir)
-		return "", err
+	if err := os.WriteFile(filepath.Join(stagingDir, ".credentials.json"), credsJSON, 0600); err != nil {
+		return fmt.Errorf("writing credentials file: %w", err)
 	}
 
-	return credsDir, nil
+	// Copy files from host's ~/.claude directory
+	hostHome, err := os.UserHomeDir()
+	if err != nil {
+		return nil // Non-fatal, just skip host files
+	}
+
+	hostClaudeDir := filepath.Join(hostHome, ".claude")
+
+	// Copy ~/.claude.json (onboarding state and user preferences)
+	hostClaudeJSON := filepath.Join(hostHome, ".claude.json")
+	if _, err := os.Stat(hostClaudeJSON); err == nil {
+		if err := copyFile(hostClaudeJSON, filepath.Join(stagingDir, ".claude.json")); err != nil {
+			// Non-fatal, just log and continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to copy .claude.json: %v\n", err)
+		}
+	}
+
+	// Copy statsig directory (feature flags)
+	hostStatsig := filepath.Join(hostClaudeDir, "statsig")
+	if info, err := os.Stat(hostStatsig); err == nil && info.IsDir() {
+		if err := copyDir(hostStatsig, filepath.Join(stagingDir, "statsig")); err != nil {
+			// Non-fatal, just log and continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to copy statsig directory: %v\n", err)
+		}
+	}
+
+	// Copy stats-cache.json (usage stats, firstSessionDate)
+	hostStatsCache := filepath.Join(hostClaudeDir, "stats-cache.json")
+	if _, err := os.Stat(hostStatsCache); err == nil {
+		if err := copyFile(hostStatsCache, filepath.Join(stagingDir, "stats-cache.json")); err != nil {
+			// Non-fatal, just log and continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to copy stats-cache.json: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	// Preserve permissions
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(dst, srcInfo.Mode())
+}
+
+// copyDir recursively copies a directory from src to dst.
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // init registers the Anthropic provider setup.

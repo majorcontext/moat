@@ -13,6 +13,11 @@ type DockerfileOptions struct {
 	// NeedsSSH indicates SSH grants are present and the image needs
 	// openssh-client, socat, and the moat-init entrypoint for agent forwarding.
 	NeedsSSH bool
+
+	// NeedsClaudeInit indicates Claude Code configuration files need to be
+	// copied from a staging directory at container startup. This requires
+	// the moat-init entrypoint script.
+	NeedsClaudeInit bool
 }
 
 const defaultBaseImage = "ubuntu:22.04"
@@ -188,13 +193,14 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		b.WriteString("\n")
 	}
 
-	// If SSH is needed, install the moat-init entrypoint script
-	// This script sets up the SSH agent bridge when MOAT_SSH_TCP_ADDR is set
-	if opts.NeedsSSH {
+	// Install the moat-init entrypoint script if any features require it
+	// Features: SSH agent forwarding, Claude Code file setup
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit
+	if needsInit {
 		// Base64 encode the embedded script to avoid shell escaping issues
 		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
 
-		b.WriteString("# Moat initialization script (SSH agent forwarding)\n")
+		b.WriteString("# Moat initialization script\n")
 		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	}

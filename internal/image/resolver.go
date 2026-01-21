@@ -10,6 +10,9 @@ const DefaultImage = "ubuntu:22.04"
 type ResolveOptions struct {
 	// NeedsSSH indicates the image needs SSH packages and init script.
 	NeedsSSH bool
+
+	// NeedsClaudeInit indicates the image needs the init script for Claude setup.
+	NeedsClaudeInit bool
 }
 
 // Resolve determines the image to use based on dependencies and options.
@@ -20,13 +23,14 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		opts = &ResolveOptions{}
 	}
 
-	// Need custom image if we have dependencies or SSH
-	needsCustomImage := len(depList) > 0 || opts.NeedsSSH
+	// Need custom image if we have dependencies, SSH, or Claude init
+	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit
 	if !needsCustomImage {
 		return DefaultImage
 	}
 
 	return deps.ImageTag(depList, &deps.ImageTagOptions{
-		NeedsSSH: opts.NeedsSSH,
+		NeedsSSH:        opts.NeedsSSH,
+		NeedsClaudeInit: opts.NeedsClaudeInit,
 	})
 }

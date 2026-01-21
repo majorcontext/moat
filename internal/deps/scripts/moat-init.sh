@@ -19,5 +19,35 @@ if [ -n "$MOAT_SSH_TCP_ADDR" ]; then
   done
 fi
 
+# Claude Code Setup
+# When MOAT_CLAUDE_INIT is set to the staging directory path, copy files
+# from the staging area to their final locations. This is needed because:
+# 1. Apple containers only support directory mounts, not file mounts
+# 2. We need ~/.claude to be a real directory so projects/ can be mounted inside it
+if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
+  # Create ~/.claude directory
+  mkdir -p "$HOME/.claude"
+
+  # Copy settings.json if present
+  [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
+    cp "$MOAT_CLAUDE_INIT/settings.json" "$HOME/.claude/"
+
+  # Copy credentials if present
+  [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ] && \
+    cp "$MOAT_CLAUDE_INIT/.credentials.json" "$HOME/.claude/"
+
+  # Copy statsig directory if present (feature flags)
+  [ -d "$MOAT_CLAUDE_INIT/statsig" ] && \
+    cp -r "$MOAT_CLAUDE_INIT/statsig" "$HOME/.claude/"
+
+  # Copy stats-cache.json if present (usage stats)
+  [ -f "$MOAT_CLAUDE_INIT/stats-cache.json" ] && \
+    cp "$MOAT_CLAUDE_INIT/stats-cache.json" "$HOME/.claude/"
+
+  # Copy .claude.json to home directory (onboarding state)
+  [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
+    cp "$MOAT_CLAUDE_INIT/.claude.json" "$HOME/"
+fi
+
 # Execute the user's command
 exec "$@"
