@@ -15,7 +15,7 @@ to a persistent state.
 
 Examples:
   moat promote                 # Promote latest run
-  moat promote run_abc12345    # Promote specific run`,
+  moat promote run_a1b2c3d4e5f6    # Promote specific run`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("promote command not yet implemented")

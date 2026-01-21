@@ -23,7 +23,7 @@ Checks:
   - Signatures: All attestations have valid signatures
 
 Example:
-  moat audit run_abc12345`,
+  moat audit run_a1b2c3d4e5f6`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAudit,
 }
@@ -36,7 +36,7 @@ var verifyBundleCmd = &cobra.Command{
 This allows offline verification of audit logs that were exported using 'agent audit --export'.
 
 Example:
-  moat verify-bundle ./run_abc12345.proof.json`,
+  moat verify-bundle ./run_a1b2c3d4e5f6.proof.json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runVerifyBundle,
 }

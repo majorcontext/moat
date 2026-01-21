@@ -23,7 +23,7 @@ var logsCmd = &cobra.Command{
 
 Examples:
   moat logs                    # Logs from most recent run
-  moat logs run_abc12345       # Logs from specific run
+  moat logs run_a1b2c3d4e5f6       # Logs from specific run
   moat logs -f                 # Follow logs (like tail -f)
   moat logs -n 50              # Show last 50 lines`,
 	Args: cobra.MaximumNArgs(1),

@@ -22,7 +22,7 @@ var traceCmd = &cobra.Command{
 
 Examples:
   moat trace                   # Traces from most recent run
-  moat trace run_abc12345      # Traces from specific run
+  moat trace run_a1b2c3d4e5f6      # Traces from specific run
   moat trace --network         # Show network requests
   moat trace --network -v      # Show network requests with headers and bodies
   moat trace --json            # Output as JSON`,

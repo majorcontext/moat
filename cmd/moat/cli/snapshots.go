@@ -27,8 +27,8 @@ for rollback or analysis. They are created automatically (pre-run) and
 can also be created manually or triggered by events (git commits, builds).
 
 Examples:
-  moat snapshots run_abc12345          # List all snapshots for this run
-  moat snapshots run_abc12345 --json   # Output as JSON`,
+  moat snapshots run_a1b2c3d4e5f6          # List all snapshots for this run
+  moat snapshots run_a1b2c3d4e5f6 --json   # Output as JSON`,
 	Args: cobra.ExactArgs(1),
 	RunE: listSnapshots,
 }
@@ -42,9 +42,9 @@ The pre-run snapshot is always preserved regardless of the --keep value.
 This ensures you can always roll back to the original workspace state.
 
 Examples:
-  moat snapshots prune run_abc12345            # Keep 5 most recent (default)
-  moat snapshots prune run_abc12345 --keep=3   # Keep 3 most recent
-  moat snapshots prune run_abc12345 --dry-run  # Show what would be deleted`,
+  moat snapshots prune run_a1b2c3d4e5f6            # Keep 5 most recent (default)
+  moat snapshots prune run_a1b2c3d4e5f6 --keep=3   # Keep 3 most recent
+  moat snapshots prune run_a1b2c3d4e5f6 --dry-run  # Show what would be deleted`,
 	Args: cobra.ExactArgs(1),
 	RunE: pruneSnapshots,
 }

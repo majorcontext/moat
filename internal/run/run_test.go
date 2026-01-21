@@ -19,9 +19,9 @@ func TestGenerateID(t *testing.T) {
 		t.Errorf("expected unique IDs, got %s and %s", id1, id2)
 	}
 
-	// IDs should have expected length (run_ + 8 hex chars = 12 total)
-	if len(id1) != 12 {
-		t.Errorf("expected ID length 12, got %d (%s)", len(id1), id1)
+	// IDs should have expected length (run_ + 12 hex chars = 16 total)
+	if len(id1) != 16 {
+		t.Errorf("expected ID length 16, got %d (%s)", len(id1), id1)
 	}
 }
 

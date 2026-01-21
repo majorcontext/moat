@@ -9,8 +9,8 @@ import (
 
 func TestSnapshotID(t *testing.T) {
 	id := NewID()
-	if len(id) != 13 { // "snap_" + 8 hex chars
-		t.Errorf("expected ID length 13, got %d: %s", len(id), id)
+	if len(id) != 17 { // "snap_" + 12 hex chars
+		t.Errorf("expected ID length 17, got %d: %s", len(id), id)
 	}
 	if id[:5] != "snap_" {
 		t.Errorf("expected prefix 'snap_', got %s", id[:5])
