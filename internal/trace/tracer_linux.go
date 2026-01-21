@@ -16,23 +16,20 @@ import (
 	"time"
 )
 
-// Netlink connector constants for process events
+// Netlink connector constants for process events.
+// These mirror values from linux/connector.h and linux/cn_proc.h.
 const (
-	// Connector multicast group for process events
-	_CN_IDX_PROC = 0x1
-	_CN_VAL_PROC = 0x1
+	cnIdxProc = 0x1 // Connector multicast group for process events
+	cnValProc = 0x1
 
-	// Process event types from linux/cn_proc.h
-	_PROC_EVENT_FORK = 0x00000001
-	_PROC_EVENT_EXEC = 0x00000002
-	_PROC_EVENT_EXIT = 0x80000000
+	procEventFork = 0x00000001 // Process event types from linux/cn_proc.h
+	procEventExec = 0x00000002
+	procEventExit = 0x80000000
 
-	// Connector subscription operations
-	_PROC_CN_MCAST_LISTEN = 1
-	_PROC_CN_MCAST_IGNORE = 2
+	procCnMcastListen = 1 // Connector subscription operations
+	procCnMcastIgnore = 2
 
-	// NETLINK_CONNECTOR protocol number
-	_NETLINK_CONNECTOR = 11
+	netlinkConnector = 11 // NETLINK_CONNECTOR protocol number
 )
 
 // ProcConnectorTracer implements process tracing using Linux proc connector.
@@ -90,7 +87,7 @@ func (t *ProcConnectorTracer) Start() error {
 	}
 
 	// Create netlink socket
-	sock, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_DGRAM, _NETLINK_CONNECTOR)
+	sock, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_DGRAM, netlinkConnector)
 	if err != nil {
 		return fmt.Errorf("create netlink socket: %w (requires CAP_NET_ADMIN or root)", err)
 	}
@@ -99,8 +96,8 @@ func (t *ProcConnectorTracer) Start() error {
 	// Bind to process events group
 	addr := &syscall.SockaddrNetlink{
 		Family: syscall.AF_NETLINK,
-		Groups: _CN_IDX_PROC,
-		Pid:    uint32(syscall.Getpid()),
+		Groups: cnIdxProc,
+		Pid:    uint32(syscall.Getpid()), //nolint:gosec // G115: PID is always positive and fits in uint32
 	}
 	if err := syscall.Bind(sock, addr); err != nil {
 		syscall.Close(sock)
@@ -161,9 +158,9 @@ func (t *ProcConnectorTracer) OnExec(cb func(ExecEvent)) {
 
 // subscribe sends a message to subscribe/unsubscribe from process events.
 func (t *ProcConnectorTracer) subscribe(listen bool) error {
-	op := uint32(_PROC_CN_MCAST_IGNORE)
+	op := uint32(procCnMcastIgnore)
 	if listen {
-		op = uint32(_PROC_CN_MCAST_LISTEN)
+		op = uint32(procCnMcastListen)
 	}
 
 	// Build message: nlmsghdr + cn_msg + op
@@ -175,15 +172,15 @@ func (t *ProcConnectorTracer) subscribe(listen bool) error {
 	binary.LittleEndian.PutUint16(buf[4:], syscall.NLMSG_DONE)        // type
 	binary.LittleEndian.PutUint16(buf[6:], 0)                         // flags
 	binary.LittleEndian.PutUint32(buf[8:], 1)                         // seq
-	binary.LittleEndian.PutUint32(buf[12:], uint32(syscall.Getpid())) // pid
+	binary.LittleEndian.PutUint32(buf[12:], uint32(syscall.Getpid())) //nolint:gosec // G115: PID fits in uint32
 
 	// Connector header
-	binary.LittleEndian.PutUint32(buf[16:], _CN_IDX_PROC) // id.idx
-	binary.LittleEndian.PutUint32(buf[20:], _CN_VAL_PROC) // id.val
-	binary.LittleEndian.PutUint32(buf[24:], 1)            // seq
-	binary.LittleEndian.PutUint32(buf[28:], 0)            // ack
-	binary.LittleEndian.PutUint16(buf[32:], 4)            // len (op size)
-	binary.LittleEndian.PutUint16(buf[34:], 0)            // flags
+	binary.LittleEndian.PutUint32(buf[16:], cnIdxProc) // id.idx
+	binary.LittleEndian.PutUint32(buf[20:], cnValProc) // id.val
+	binary.LittleEndian.PutUint32(buf[24:], 1)         // seq
+	binary.LittleEndian.PutUint32(buf[28:], 0)         // ack
+	binary.LittleEndian.PutUint16(buf[32:], 4)         // len (op size)
+	binary.LittleEndian.PutUint16(buf[34:], 0)         // flags
 
 	// Operation
 	binary.LittleEndian.PutUint32(buf[36:], op)
@@ -191,7 +188,7 @@ func (t *ProcConnectorTracer) subscribe(listen bool) error {
 	// Send to kernel (pid=0)
 	addr := &syscall.SockaddrNetlink{
 		Family: syscall.AF_NETLINK,
-		Groups: _CN_IDX_PROC,
+		Groups: cnIdxProc,
 		Pid:    0,
 	}
 	return syscall.Sendto(t.sock, buf, 0, addr)
@@ -263,7 +260,7 @@ func (t *ProcConnectorTracer) parseMessage(buf []byte) {
 	offset += 16 // Skip: what(4) + cpu(4) + timestamp(8)
 
 	switch what {
-	case _PROC_EVENT_EXEC:
+	case procEventExec:
 		if len(buf) < offset+8 {
 			return
 		}
@@ -275,7 +272,7 @@ func (t *ProcConnectorTracer) parseMessage(buf []byte) {
 			}
 		}
 
-	case _PROC_EVENT_FORK:
+	case procEventFork:
 		if len(buf) < offset+16 {
 			return
 		}
@@ -292,7 +289,7 @@ func (t *ProcConnectorTracer) parseMessage(buf []byte) {
 			t.pidMu.Unlock()
 		}
 
-	case _PROC_EVENT_EXIT:
+	case procEventExit:
 		if len(buf) < offset+8 {
 			return
 		}
