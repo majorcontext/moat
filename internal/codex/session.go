@@ -1,242 +1,42 @@
 package codex
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"time"
+
+	"github.com/andybons/moat/internal/session"
 )
 
-// Session represents a Codex CLI session.
-type Session struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Workspace      string    `json:"workspace"`
-	RunID          string    `json:"runId"`
-	Grants         []string  `json:"grants"`
-	CreatedAt      time.Time `json:"createdAt"`
-	LastAccessedAt time.Time `json:"lastAccessedAt"`
-	State          string    `json:"state"` // "running", "stopped", "completed"
-}
+// Session type aliases for backward compatibility.
+// New code should use session.Session directly.
+type Session = session.Session
 
-// SessionState constants
+// SessionState constants for backward compatibility.
 const (
-	SessionStateRunning   = "running"
-	SessionStateStopped   = "stopped"
-	SessionStateCompleted = "completed"
+	SessionStateRunning   = session.StateRunning
+	SessionStateStopped   = session.StateStopped
+	SessionStateCompleted = session.StateCompleted
 )
 
-// validSessionID matches safe session IDs (alphanumeric with hyphens).
-var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
-
-// SessionManager handles session persistence and lookup.
+// SessionManager wraps session.Manager for Codex CLI sessions.
 type SessionManager struct {
-	dir string
+	*session.Manager
 }
 
-// NewSessionManager creates a session manager using the default directory.
+// NewSessionManager creates a session manager for Codex CLI sessions.
 func NewSessionManager() (*SessionManager, error) {
 	dir, err := DefaultSessionDir()
 	if err != nil {
 		return nil, err
 	}
-	return &SessionManager{dir: dir}, nil
+	return &SessionManager{Manager: session.NewManager(dir)}, nil
 }
 
-// DefaultSessionDir returns the default session storage directory.
+// DefaultSessionDir returns the default Codex session storage directory.
 func DefaultSessionDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(homeDir, ".moat", "codex", "sessions"), nil
-}
-
-// Create creates a new session.
-func (m *SessionManager) Create(workspace, runID, name string, grants []string) (*Session, error) {
-	session := &Session{
-		ID:             runID, // Use run ID as session ID for simplicity
-		Name:           name,
-		Workspace:      workspace,
-		RunID:          runID,
-		Grants:         grants,
-		CreatedAt:      time.Now(),
-		LastAccessedAt: time.Now(),
-		State:          SessionStateRunning,
-	}
-
-	if err := m.save(session); err != nil {
-		return nil, err
-	}
-
-	return session, nil
-}
-
-// Get retrieves a session by ID or name.
-func (m *SessionManager) Get(idOrName string) (*Session, error) {
-	sessions, err := m.List()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, s := range sessions {
-		if s.ID == idOrName || s.Name == idOrName {
-			return s, nil
-		}
-	}
-
-	return nil, fmt.Errorf("session not found: %s", idOrName)
-}
-
-// GetByWorkspace returns the most recent session for a workspace.
-func (m *SessionManager) GetByWorkspace(workspace string) (*Session, error) {
-	sessions, err := m.List()
-	if err != nil {
-		return nil, err
-	}
-
-	var match *Session
-	for _, s := range sessions {
-		if s.Workspace == workspace {
-			if match == nil || s.LastAccessedAt.After(match.LastAccessedAt) {
-				match = s
-			}
-		}
-	}
-
-	if match == nil {
-		return nil, fmt.Errorf("no session found for workspace: %s", workspace)
-	}
-
-	return match, nil
-}
-
-// List returns all sessions, sorted by last accessed time (most recent first).
-func (m *SessionManager) List() ([]*Session, error) {
-	if err := os.MkdirAll(m.dir, 0755); err != nil {
-		return nil, fmt.Errorf("creating sessions directory: %w", err)
-	}
-
-	entries, err := os.ReadDir(m.dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading sessions directory: %w", err)
-	}
-
-	sessions := make([]*Session, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		session, err := m.load(entry.Name())
-		if err != nil {
-			continue // Skip corrupted sessions
-		}
-		sessions = append(sessions, session)
-	}
-
-	// Sort by last accessed time, most recent first
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].LastAccessedAt.After(sessions[j].LastAccessedAt)
-	})
-
-	return sessions, nil
-}
-
-// UpdateState updates the state of a session.
-func (m *SessionManager) UpdateState(id, state string) error {
-	session, err := m.load(id)
-	if err != nil {
-		return err
-	}
-
-	session.State = state
-	session.LastAccessedAt = time.Now()
-
-	return m.save(session)
-}
-
-// Touch updates the last accessed time of a session.
-func (m *SessionManager) Touch(id string) error {
-	session, err := m.load(id)
-	if err != nil {
-		return err
-	}
-
-	session.LastAccessedAt = time.Now()
-	return m.save(session)
-}
-
-// Delete removes a session.
-func (m *SessionManager) Delete(id string) error {
-	if !validSessionID.MatchString(id) {
-		return fmt.Errorf("invalid session ID: %s", id)
-	}
-	sessionDir := filepath.Join(m.dir, id)
-	return os.RemoveAll(sessionDir)
-}
-
-// save persists a session to disk.
-func (m *SessionManager) save(session *Session) error {
-	if !validSessionID.MatchString(session.ID) {
-		return fmt.Errorf("invalid session ID: %s", session.ID)
-	}
-	sessionDir := filepath.Join(m.dir, session.ID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return fmt.Errorf("creating session directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(session, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling session: %w", err)
-	}
-
-	metadataPath := filepath.Join(sessionDir, "metadata.json")
-	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
-		return fmt.Errorf("writing session metadata: %w", err)
-	}
-
-	return nil
-}
-
-// load reads a session from disk.
-func (m *SessionManager) load(id string) (*Session, error) {
-	if !validSessionID.MatchString(id) {
-		return nil, fmt.Errorf("invalid session ID: %s", id)
-	}
-	metadataPath := filepath.Join(m.dir, id, "metadata.json")
-	data, err := os.ReadFile(metadataPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading session metadata: %w", err)
-	}
-
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("parsing session metadata: %w", err)
-	}
-
-	return &session, nil
-}
-
-// CleanupOldSessions removes sessions older than the given duration.
-func (m *SessionManager) CleanupOldSessions(maxAge time.Duration) error {
-	sessions, err := m.List()
-	if err != nil {
-		return err
-	}
-
-	cutoff := time.Now().Add(-maxAge)
-	for _, s := range sessions {
-		if s.LastAccessedAt.Before(cutoff) && s.State != SessionStateRunning {
-			if err := m.Delete(s.ID); err != nil {
-				// Log but continue
-				continue
-			}
-		}
-	}
-
-	return nil
 }
