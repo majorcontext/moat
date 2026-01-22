@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,7 +235,7 @@ func TestOpenAIAuth_ValidateKey(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Error("ValidateKey() expected error, got nil")
-				} else if tt.errContain != "" && !contains(err.Error(), tt.errContain) {
+				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
 					t.Errorf("ValidateKey() error = %v, want error containing %q", err, tt.errContain)
 				}
 			} else if err != nil {
@@ -376,19 +377,4 @@ func TestCodexCredentials_CreateCredentialFromCodex(t *testing.T) {
 			}
 		})
 	}
-}
-
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && containsHelper(s, substr)))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

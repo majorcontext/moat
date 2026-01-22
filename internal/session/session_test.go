@@ -354,8 +354,11 @@ func TestValidSessionID(t *testing.T) {
 		{"abc123", true},
 		{"session-name", true},
 		{"A1B2C3", true},
+		{"a", true},                  // single character is valid
+		{"a1", true},                 // two characters
 		{"", false},                  // empty
 		{"-starts-with-dash", false}, // starts with dash
+		{"ends-with-dash-", false},   // ends with dash
 		{"has spaces", false},
 		{"has/slash", false},
 		{"../traversal", false},

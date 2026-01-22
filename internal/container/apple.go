@@ -952,8 +952,26 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	// Start the container - attach command is waiting for it
 	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
 	if err := startCmd.Run(); err != nil {
-		// Try to kill the orphaned attach process
-		_ = attachCmd.Process.Kill()
+		// Clean up the orphaned attach process gracefully
+		if attachCmd.Process != nil {
+			// First try SIGTERM for graceful shutdown
+			if termErr := attachCmd.Process.Signal(syscall.SIGTERM); termErr != nil {
+				log.Debug("failed to send SIGTERM to attach process", "error", termErr)
+			}
+			// Give it a moment to exit gracefully, then force kill if needed
+			done := make(chan error, 1)
+			go func() { done <- attachCmd.Wait() }()
+			select {
+			case <-done:
+				// Process exited
+			case <-time.After(100 * time.Millisecond):
+				// Force kill after timeout
+				if killErr := attachCmd.Process.Kill(); killErr != nil {
+					log.Debug("failed to kill orphaned attach process", "error", killErr)
+				}
+				<-done // Wait for process to fully exit
+			}
+		}
 		return fmt.Errorf("starting container: %w", err)
 	}
 

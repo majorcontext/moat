@@ -64,23 +64,32 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	// Otherwise, Codex will prompt for login on first run
 	grantSet := make(map[string]bool)
 	var grants []string
-	addGrant := func(g string) {
-		if !grantSet[g] {
-			grantSet[g] = true
-			grants = append(grants, g)
+	addGrant := func(g string) error {
+		if grantSet[g] {
+			return nil // Already added
 		}
+		if validateErr := credential.ValidateGrant(g); validateErr != nil {
+			return fmt.Errorf("invalid grant %q: %w", g, validateErr)
+		}
+		grantSet[g] = true
+		grants = append(grants, g)
+		return nil
 	}
 
 	if hasCredential(credential.ProviderOpenAI) {
-		addGrant("openai")
+		_ = addGrant("openai") // Known valid grant
 	}
 	if cfg != nil {
 		for _, g := range cfg.Grants {
-			addGrant(g)
+			if grantErr := addGrant(g); grantErr != nil {
+				return grantErr
+			}
 		}
 	}
 	for _, g := range codexFlags.Grants {
-		addGrant(g)
+		if grantErr := addGrant(g); grantErr != nil {
+			return grantErr
+		}
 	}
 	codexFlags.Grants = grants
 

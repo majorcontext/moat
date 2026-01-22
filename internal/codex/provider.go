@@ -1,3 +1,6 @@
+// Package codex provides integration with the OpenAI Codex CLI agent.
+// It handles credential setup, configuration file generation, and MCP
+// (Model Context Protocol) configuration for running Codex in containers.
 package codex
 
 import (

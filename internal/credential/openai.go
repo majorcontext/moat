@@ -192,8 +192,13 @@ func (c *CodexCredentials) GetCodexCredentials() (*CodexAuthToken, error) {
 
 // getFromKeychain retrieves Codex credentials from macOS Keychain.
 func (c *CodexCredentials) getFromKeychain() (*CodexAuthToken, error) {
+	return c.getFromKeychainWithContext(context.Background())
+}
+
+// getFromKeychainWithContext retrieves Codex credentials from macOS Keychain with context support.
+func (c *CodexCredentials) getFromKeychainWithContext(ctx context.Context) (*CodexAuthToken, error) {
 	// Use the security command to retrieve the password
-	cmd := exec.Command("security", "find-generic-password",
+	cmd := exec.CommandContext(ctx, "security", "find-generic-password",
 		"-s", codexKeychainService,
 		"-w", // Output only the password
 	)
@@ -267,10 +272,25 @@ func (c *CodexCredentials) HasCodexCredentials() bool {
 	return err == nil
 }
 
+// jwtPrefix is the standard prefix for base64-encoded JWT headers.
+// JWTs start with a base64-encoded JSON object containing {"alg":...,"typ":"JWT"}
+// which typically encodes to "eyJ" (base64 for '{"').
+const jwtPrefix = "eyJ"
+
+// minAPIKeyLength is the minimum length for a valid OpenAI API key.
+// Real API keys are 40+ characters, but we use a lower bound to avoid
+// false negatives on truncated or test tokens.
+const minAPIKeyLength = 20
+
 // IsCodexToken returns true if the token appears to be a Codex ChatGPT subscription token.
 // ChatGPT tokens are typically longer than API keys and have a different format.
 // API keys start with "sk-" (including "sk-proj-", "sk-svcacct-", etc.) regardless of length.
 // Subscription tokens are OAuth tokens that don't have the sk- prefix.
+//
+// Detection logic:
+// 1. API keys always start with "sk-" - if present, it's an API key
+// 2. JWT-format tokens (starting with "eyJ") are subscription tokens
+// 3. Other tokens of sufficient length are assumed to be subscription tokens
 //
 // Returns false for empty strings and whitespace-only strings (invalid tokens).
 func IsCodexToken(token string) bool {
@@ -280,18 +300,30 @@ func IsCodexToken(token string) bool {
 		return false // Empty/whitespace tokens are invalid, not subscription tokens
 	}
 
-	// Minimum length check - real tokens are much longer
-	// OAuth tokens are typically 100+ characters, API keys are 40+ characters
-	if len(token) < 10 {
-		return false // Too short to be any valid OpenAI token
-	}
-
 	// API keys always start with "sk-" regardless of length
 	// This includes newer formats like sk-proj-..., sk-svcacct-..., etc.
 	if strings.HasPrefix(token, openaiKeyPrefix) {
 		return false // It's an API key
 	}
 
-	// If it doesn't start with sk-, it's likely a subscription/OAuth token
+	// Check for JWT structure (subscription tokens are typically JWTs)
+	// JWTs have three base64-encoded parts separated by dots: header.payload.signature
+	// The header always starts with "eyJ" (base64 for '{"')
+	if strings.HasPrefix(token, jwtPrefix) {
+		// Verify it has the JWT structure (three dot-separated parts)
+		parts := strings.Split(token, ".")
+		if len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0 && len(parts[2]) > 0 {
+			return true // Valid JWT structure - it's a subscription token
+		}
+	}
+
+	// Minimum length check for non-JWT tokens
+	// Real OAuth tokens are typically 100+ characters, API keys are 40+ characters
+	// We use minAPIKeyLength as a reasonable threshold to filter out garbage
+	if len(token) < minAPIKeyLength {
+		return false // Too short to be any valid OpenAI token
+	}
+
+	// If it doesn't start with sk- and is long enough, assume it's a subscription token
 	return true
 }

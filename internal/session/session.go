@@ -6,6 +6,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +35,9 @@ const (
 )
 
 // validSessionID matches safe session IDs (alphanumeric with hyphens).
-var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+// Must start with alphanumeric, can contain hyphens but not end with one,
+// and cannot have consecutive hyphens.
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 
 // Manager handles session persistence and lookup.
 type Manager struct {
@@ -146,7 +149,10 @@ func (m *Manager) listLocked() ([]*Session, error) {
 
 		session, err := m.loadLocked(entry.Name())
 		if err != nil {
-			continue // Skip corrupted sessions
+			// Log at Warn level since corrupted sessions may indicate a problem
+			// that needs attention (e.g., disk issues, incomplete writes)
+			slog.Warn("skipping corrupted session", "id", entry.Name(), "error", err)
+			continue
 		}
 		sessions = append(sessions, session)
 	}

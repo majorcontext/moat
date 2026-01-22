@@ -35,6 +35,16 @@ import (
 	"github.com/andybons/moat/internal/storage"
 )
 
+// Timing constants for run lifecycle operations.
+const (
+	// containerStartDelay is how long to wait after StartAttached begins before
+	// updating run state to "running". This delay ensures the container process
+	// has started and the TTY is attached before we report it as running.
+	// The value is chosen to be long enough for the attach to establish but
+	// short enough to not noticeably delay state updates.
+	containerStartDelay = 100 * time.Millisecond
+)
+
 // getWorkspaceOwner returns the UID and GID of the workspace directory owner.
 // This is used on Linux to run containers as the workspace owner, ensuring
 // file permissions work correctly even when moat is run with sudo.
@@ -1438,9 +1448,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		attachDone <- m.runtime.StartAttached(ctx, containerID, attachOpts)
 	}()
 
-	// Give the container a moment to start before checking state
-	// This is needed because StartAttached may start the container synchronously
-	time.Sleep(100 * time.Millisecond)
+	// Give the container a moment to start before checking state.
+	// See containerStartDelay for rationale.
+	time.Sleep(containerStartDelay)
 
 	// Update state to running (the container has started)
 	m.mu.Lock()

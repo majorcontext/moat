@@ -67,6 +67,40 @@ func (c *AWSConfig) SessionDuration() (time.Duration, error) {
 	return d, nil
 }
 
+// KnownProviders returns a list of all known credential providers.
+func KnownProviders() []Provider {
+	return []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI}
+}
+
+// IsKnownProvider returns true if the provider is a known credential provider.
+func IsKnownProvider(p Provider) bool {
+	switch p {
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateGrant validates a grant string and returns an error if invalid.
+// Grants must be a known provider, optionally with a scope suffix (e.g., "github:repo").
+func ValidateGrant(grant string) error {
+	if grant == "" {
+		return fmt.Errorf("grant cannot be empty")
+	}
+
+	provider := ParseGrantProvider(grant)
+	if !IsKnownProvider(provider) {
+		known := make([]string, 0, 4)
+		for _, p := range KnownProviders() {
+			known = append(known, string(p))
+		}
+		return fmt.Errorf("unknown provider %q; known providers: %s", provider, strings.Join(known, ", "))
+	}
+
+	return nil
+}
+
 // ParseGrantProvider extracts the provider from a grant string.
 // Grants can be "provider" or "provider:scope" format.
 // For example, "github:repo" returns ProviderGitHub.
