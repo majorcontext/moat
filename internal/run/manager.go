@@ -804,8 +804,8 @@ region = %s
 		}
 	}
 
-	// Determine if we need Codex init (for ChatGPT subscription tokens)
-	// This is triggered by an openai grant with a subscription token
+	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
+	// This is triggered by an openai grant
 	var needsCodexInit bool
 	var codexStagingDir string
 	for _, grant := range opts.Grants {
@@ -815,10 +815,9 @@ region = %s
 			if keyErr == nil {
 				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 				if storeErr == nil {
-					if cred, err := store.Get(provider); err == nil {
-						if credential.IsCodexToken(cred.Token) {
-							needsCodexInit = true
-						}
+					if _, err := store.Get(provider); err == nil {
+						// We have OpenAI credentials - need Codex init for auth.json
+						needsCodexInit = true
 					}
 				}
 			}

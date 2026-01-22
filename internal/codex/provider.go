@@ -51,31 +51,34 @@ func (o *OpenAISetup) Cleanup(cleanupPath string) {
 }
 
 // PopulateStagingDir populates the Codex staging directory with auth configuration.
-// This is only needed for ChatGPT subscription tokens - API keys don't need auth files.
 //
 // Files added:
-// - auth.json (placeholder token - real auth is via proxy)
+// - auth.json (placeholder credentials - real auth is via proxy)
 //
 // SECURITY: The real token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
 func (o *OpenAISetup) PopulateStagingDir(cred *credential.Credential, stagingDir string) error {
-	// For ChatGPT subscription tokens, write auth.json with placeholder
+	var authFile credential.CodexAuthFile
+
 	if credential.IsCodexToken(cred.Token) {
-		authFile := credential.CodexAuthFile{
-			Token: &credential.CodexAuthToken{
-				AccessToken: credential.ProxyInjectedPlaceholder,
-				ExpiresAt:   cred.ExpiresAt.Unix(),
-			},
+		// ChatGPT subscription token - use the token structure
+		authFile.Token = &credential.CodexAuthToken{
+			AccessToken: credential.ProxyInjectedPlaceholder,
+			ExpiresAt:   cred.ExpiresAt.Unix(),
 		}
+	} else {
+		// API key - use the api_key field with placeholder
+		// The proxy will inject the real key in the Authorization header
+		authFile.APIKey = credential.ProxyInjectedPlaceholder
+	}
 
-		authJSON, err := json.MarshalIndent(authFile, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshaling auth file: %w", err)
-		}
+	authJSON, err := json.MarshalIndent(authFile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling auth file: %w", err)
+	}
 
-		if writeErr := os.WriteFile(filepath.Join(stagingDir, "auth.json"), authJSON, 0600); writeErr != nil {
-			return fmt.Errorf("writing auth file: %w", writeErr)
-		}
+	if writeErr := os.WriteFile(filepath.Join(stagingDir, "auth.json"), authJSON, 0600); writeErr != nil {
+		return fmt.Errorf("writing auth file: %w", writeErr)
 	}
 
 	return nil
