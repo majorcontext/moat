@@ -48,10 +48,14 @@ func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([
 		return nil, "", nil // No config to copy
 	}
 
-	// Create temp directory for gh config
+	// Create temp directory for gh config with restrictive permissions
 	tmpDir, err := os.MkdirTemp("", "moat-gh-config-*")
 	if err != nil {
 		return nil, "", fmt.Errorf("creating gh config dir: %w", err)
+	}
+	if chmodErr := os.Chmod(tmpDir, 0700); chmodErr != nil {
+		os.RemoveAll(tmpDir)
+		return nil, "", fmt.Errorf("setting permissions on gh config dir: %w", chmodErr)
 	}
 
 	// Use defer to ensure cleanup on any error after temp dir creation
@@ -62,7 +66,7 @@ func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([
 		}
 	}()
 
-	// Create gh subdirectory
+	// Create gh subdirectory (inherits restrictive permissions from parent)
 	ghDir := filepath.Join(tmpDir, "gh")
 	if mkdirErr := os.MkdirAll(ghDir, 0700); mkdirErr != nil {
 		return nil, "", fmt.Errorf("creating gh dir: %w", mkdirErr)

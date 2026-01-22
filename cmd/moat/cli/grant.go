@@ -215,6 +215,8 @@ func isGHCLIInstalled() bool {
 func saveGitHubToken(token string) error {
 	// Validate token with a simple API call
 	fmt.Println("Validating token...")
+
+	client := &http.Client{Timeout: 10 * time.Second}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -226,16 +228,20 @@ func saveGitHubToken(token string) error {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "moat")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("validating token: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 {
+	switch resp.StatusCode {
+	case 200:
+		// Success - continue
+	case 401:
 		return fmt.Errorf("invalid token (401 Unauthorized)")
-	}
-	if resp.StatusCode != 200 {
+	case 403:
+		return fmt.Errorf("token validation failed (403 Forbidden) - token may lack permissions or you may be rate limited")
+	default:
 		return fmt.Errorf("unexpected status validating token: %d", resp.StatusCode)
 	}
 
