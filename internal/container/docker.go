@@ -237,31 +237,34 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	// 5. Drop everything else
 
 	// We run these as a single script to minimize exec calls
+	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention)
+	// Use conntrack module instead of state for better container compatibility
 	_ = proxyHost // See function comment for why this is unused
 	script := fmt.Sprintf(`
 		# Flush existing rules
-		iptables -F OUTPUT 2>/dev/null || true
+		iptables -w -F OUTPUT 2>/dev/null || true
 
 		# Allow loopback
-		iptables -A OUTPUT -o lo -j ACCEPT
+		iptables -w -A OUTPUT -o lo -j ACCEPT
 
-		# Allow established/related connections
-		iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+		# Allow established/related connections (conntrack more reliable than state in containers)
+		iptables -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 		# Allow DNS (UDP 53) - needed for initial hostname resolution
-		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+		iptables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
 
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
-		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
+		iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
 		# Drop all other outbound traffic
-		iptables -A OUTPUT -j DROP
+		iptables -w -A OUTPUT -j DROP
 	`, proxyPort)
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", script},
 		AttachStdout: true,
 		AttachStderr: true,
+		User:         "root", // iptables requires root privileges
 	}
 
 	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execConfig)
@@ -275,8 +278,9 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	}
 	defer resp.Close()
 
-	// Read output to completion
-	_, _ = io.Copy(io.Discard, resp.Reader)
+	// Read output to capture error messages
+	var output bytes.Buffer
+	_, _ = io.Copy(&output, resp.Reader)
 
 	// Check exit code
 	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
@@ -285,7 +289,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	}
 
 	if inspect.ExitCode != 0 {
-		return fmt.Errorf("firewall setup failed with exit code %d (iptables may not be available in container)", inspect.ExitCode)
+		return fmt.Errorf("firewall setup failed with exit code %d: %s", inspect.ExitCode, output.String())
 	}
 
 	return nil

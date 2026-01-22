@@ -57,7 +57,13 @@ func getRuntimeCommands(name, version string) InstallCommands {
 }
 
 // getGithubBinaryCommands returns install commands for GitHub binary dependencies.
+// Supports ARM64 via architecture detection at build time when AssetARM64 is specified.
 func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands {
+	// If ARM64 asset is specified, use architecture detection
+	if spec.AssetARM64 != "" {
+		return getGithubBinaryCommandsMultiArch(name, version, spec)
+	}
+
 	asset := strings.ReplaceAll(spec.Asset, "{version}", version)
 	binPath := strings.ReplaceAll(spec.Bin, "{version}", version)
 	if binPath == "" {
@@ -78,14 +84,99 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 		}
 	}
 
-	// tar.gz
+	if strings.HasSuffix(asset, ".tar.gz") || strings.HasSuffix(asset, ".tgz") {
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("curl -fsSL %s | tar -xz -C /tmp", url),
+				fmt.Sprintf("mv /tmp/%s /usr/local/bin/%s", binPath, name),
+				fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
+			},
+		}
+	}
+
+	// Raw binary (no archive extension)
 	return InstallCommands{
 		Commands: []string{
-			fmt.Sprintf("curl -fsSL %s | tar -xz -C /tmp", url),
-			fmt.Sprintf("mv /tmp/%s /usr/local/bin/%s", binPath, name),
+			fmt.Sprintf("curl -fsSL %s -o /usr/local/bin/%s", url, name),
 			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
 		},
 	}
+}
+
+// archBinarySpec holds architecture-specific binary details.
+type archBinarySpec struct {
+	url string
+	bin string
+}
+
+// getGithubBinaryCommandsMultiArch generates install commands with architecture detection.
+func getGithubBinaryCommandsMultiArch(name, version string, spec DepSpec) InstallCommands {
+	amd64 := archBinarySpec{
+		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.Asset, version)),
+		bin: orDefault(replaceVersion(spec.Bin, version), name),
+	}
+	arm64 := archBinarySpec{
+		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.AssetARM64, version)),
+		bin: orDefault(replaceVersion(spec.BinARM64, version), amd64.bin),
+	}
+
+	isZip := strings.HasSuffix(spec.Asset, ".zip")
+	downloadCmd := buildArchDetectCommand(name, amd64, arm64, isZip)
+
+	return InstallCommands{
+		Commands: []string{
+			downloadCmd,
+			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
+			fmt.Sprintf("rm -rf /tmp/%s*", name),
+		},
+	}
+}
+
+// githubReleaseURL constructs a GitHub release download URL.
+func githubReleaseURL(repo, version, asset string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", repo, version, asset)
+}
+
+// replaceVersion replaces {version} placeholder in a string.
+func replaceVersion(s, version string) string {
+	return strings.ReplaceAll(s, "{version}", version)
+}
+
+// orDefault returns s if non-empty, otherwise def.
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// buildArchDetectCommand generates a shell command that downloads the correct binary for the architecture.
+func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, isZip bool) string {
+	if isZip {
+		return fmt.Sprintf(`ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        curl -fsSL "%s" -o /tmp/%s.zip && \
+        unzip -q /tmp/%s.zip -d /tmp/%s && \
+        mv /tmp/%s/%s /usr/local/bin/%s; \
+    else \
+        curl -fsSL "%s" -o /tmp/%s.zip && \
+        unzip -q /tmp/%s.zip -d /tmp/%s && \
+        mv /tmp/%s/%s /usr/local/bin/%s; \
+    fi`,
+			amd64.url, name, name, name, name, amd64.bin, name,
+			arm64.url, name, name, name, name, arm64.bin, name)
+	}
+	// tar.gz
+	return fmt.Sprintf(`ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        curl -fsSL "%s" | tar -xz -C /tmp && \
+        mv /tmp/%s /usr/local/bin/%s; \
+    else \
+        curl -fsSL "%s" | tar -xz -C /tmp && \
+        mv /tmp/%s /usr/local/bin/%s; \
+    fi`,
+		amd64.url, amd64.bin, name,
+		arm64.url, arm64.bin, name)
 }
 
 // getGoInstallCommands returns install commands for go-install dependencies.
@@ -126,6 +217,83 @@ func getCustomCommands(name, _ string) InstallCommands {
 			},
 			EnvVars: map[string]string{
 				"PATH": "/opt/google-cloud-sdk/bin:$PATH",
+			},
+		}
+	case "rust":
+		// Install Rust via rustup
+		return InstallCommands{
+			Commands: []string{
+				"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable",
+			},
+			EnvVars: map[string]string{
+				"PATH": "/root/.cargo/bin:$PATH",
+			},
+		}
+	case "kubectl":
+		// Install kubectl - detects architecture
+		return InstallCommands{
+			Commands: []string{
+				`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" -o /usr/local/bin/kubectl`,
+				"chmod +x /usr/local/bin/kubectl",
+			},
+		}
+	default:
+		return InstallCommands{}
+	}
+}
+
+// getDynamicPackageCommands returns install commands for dynamic dependencies.
+func getDynamicPackageCommands(dep Dependency) InstallCommands {
+	switch dep.Type {
+	case TypeDynamicNpm:
+		pkg := dep.Package
+		if dep.Version != "" {
+			pkg = pkg + "@" + dep.Version
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("npm install -g %s", pkg),
+			},
+		}
+	case TypeDynamicPip:
+		pkg := dep.Package
+		if dep.Version != "" {
+			pkg = pkg + "==" + dep.Version
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("pip install %s", pkg),
+			},
+		}
+	case TypeDynamicUv:
+		pkg := dep.Package
+		if dep.Version != "" {
+			pkg = pkg + "==" + dep.Version
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("uv tool install %s", pkg),
+			},
+		}
+	case TypeDynamicCargo:
+		pkg := dep.Package
+		if dep.Version != "" {
+			pkg = pkg + "@" + dep.Version
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("cargo install %s", pkg),
+			},
+		}
+	case TypeDynamicGo:
+		pkg := dep.Package
+		version := "latest"
+		if dep.Version != "" {
+			version = "v" + dep.Version
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", pkg, version),
 			},
 		}
 	default:

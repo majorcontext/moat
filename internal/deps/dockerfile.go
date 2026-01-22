@@ -53,6 +53,91 @@ func runtimeBaseImage(name, version string) string {
 const containerUser = "moatuser"
 const containerUID = "5000"
 
+// categorizedDeps holds dependencies sorted by type for Dockerfile generation.
+type categorizedDeps struct {
+	aptPkgs       []string
+	runtimes      []Dependency
+	githubBins    []Dependency
+	npmPkgs       []Dependency
+	goInstallPkgs []Dependency
+	uvToolPkgs    []Dependency
+	customDeps    []Dependency
+	dynamicNpm    []Dependency
+	dynamicPip    []Dependency
+	dynamicUv     []Dependency
+	dynamicCargo  []Dependency
+	dynamicGo     []Dependency
+}
+
+// categorizeDeps sorts dependencies into categories for optimal Dockerfile layer caching.
+func categorizeDeps(deps []Dependency) categorizedDeps {
+	var c categorizedDeps
+	for _, dep := range deps {
+		if dep.IsDynamic() {
+			switch dep.Type {
+			case TypeDynamicNpm:
+				c.dynamicNpm = append(c.dynamicNpm, dep)
+			case TypeDynamicPip:
+				c.dynamicPip = append(c.dynamicPip, dep)
+			case TypeDynamicUv:
+				c.dynamicUv = append(c.dynamicUv, dep)
+			case TypeDynamicCargo:
+				c.dynamicCargo = append(c.dynamicCargo, dep)
+			case TypeDynamicGo:
+				c.dynamicGo = append(c.dynamicGo, dep)
+			}
+			continue
+		}
+
+		spec, _ := GetSpec(dep.Name)
+		switch spec.Type {
+		case TypeApt:
+			c.aptPkgs = append(c.aptPkgs, spec.Package)
+		case TypeRuntime:
+			c.runtimes = append(c.runtimes, dep)
+		case TypeGithubBinary:
+			c.githubBins = append(c.githubBins, dep)
+		case TypeNpm:
+			c.npmPkgs = append(c.npmPkgs, dep)
+		case TypeGoInstall:
+			c.goInstallPkgs = append(c.goInstallPkgs, dep)
+		case TypeUvTool:
+			c.uvToolPkgs = append(c.uvToolPkgs, dep)
+		case TypeCustom:
+			c.customDeps = append(c.customDeps, dep)
+		case TypeMeta:
+			// Meta dependencies are expanded during parsing/validation
+		}
+	}
+	return c
+}
+
+// writeSection writes a comment and content to the builder if content is non-empty.
+func writeSection(b *strings.Builder, comment, content string) {
+	if content == "" {
+		return
+	}
+	b.WriteString("# ")
+	b.WriteString(comment)
+	b.WriteString("\n")
+	b.WriteString(content)
+	b.WriteString("\n")
+}
+
+// writeDynamicDeps writes install commands for a slice of dynamic dependencies.
+func writeDynamicDeps(b *strings.Builder, comment string, deps []Dependency) {
+	if len(deps) == 0 {
+		return
+	}
+	b.WriteString("# ")
+	b.WriteString(comment)
+	b.WriteString("\n")
+	for _, dep := range deps {
+		b.WriteString(getDynamicPackageCommands(dep).FormatForDockerfile())
+	}
+	b.WriteString("\n")
+}
+
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
 func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
 	if opts == nil {
@@ -60,65 +145,63 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	}
 	var b strings.Builder
 
-	// Sort dependencies into categories for optimal layer caching
-	var (
-		aptPkgs       []string
-		runtimes      []Dependency
-		githubBins    []Dependency
-		npmPkgs       []Dependency
-		goInstallPkgs []Dependency
-		customDeps    []Dependency
-	)
-
-	for _, dep := range deps {
-		spec, _ := GetSpec(dep.Name)
-		switch spec.Type {
-		case TypeApt:
-			aptPkgs = append(aptPkgs, spec.Package)
-		case TypeRuntime:
-			runtimes = append(runtimes, dep)
-		case TypeGithubBinary:
-			githubBins = append(githubBins, dep)
-		case TypeNpm:
-			npmPkgs = append(npmPkgs, dep)
-		case TypeGoInstall:
-			goInstallPkgs = append(goInstallPkgs, dep)
-		case TypeCustom:
-			customDeps = append(customDeps, dep)
-		case TypeMeta:
-			// Meta dependencies are expanded during parsing/validation
-			// They should not appear here
-		}
-	}
-
-	// Determine base image: use official runtime image if we have exactly one runtime
-	// This is much faster than installing runtimes via apt on Ubuntu
-	baseImage := defaultBaseImage
-	var baseRuntime *Dependency // The runtime provided by the base image (skip installing it)
-
-	if len(runtimes) == 1 {
-		rt := runtimes[0]
-		spec, _ := GetSpec(rt.Name)
-		version := rt.Version
-		if version == "" {
-			version = spec.Default
-		}
-		if img := runtimeBaseImage(rt.Name, version); img != "" {
-			baseImage = img
-			baseRuntime = &rt
-		}
-	}
-
-	b.WriteString("FROM " + baseImage + "\n\n")
-	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
+	c := categorizeDeps(deps)
 
 	// Add SSH packages if SSH grants are present
 	if opts.NeedsSSH {
-		aptPkgs = append(aptPkgs, "openssh-client", "socat")
+		c.aptPkgs = append(c.aptPkgs, "openssh-client", "socat")
 	}
 
-	// Base packages (curl, ca-certificates for HTTPS, gnupg for apt keys, unzip for archives, iptables for firewall, gosu for privilege drop)
-	// Note: Official runtime images are Debian-based and support apt
+	// Determine base image and write header
+	baseImage, baseRuntime := selectBaseImage(c.runtimes)
+	b.WriteString("FROM " + baseImage + "\n\n")
+	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
+
+	// Write all sections
+	writeBasePackages(&b)
+	writeUserSetup(&b)
+	writeAptPackages(&b, c.aptPkgs)
+	writeRuntimes(&b, c.runtimes, baseRuntime)
+	writeGithubBinaries(&b, c.githubBins)
+	writeNpmPackages(&b, c.npmPkgs)
+	writeGoInstallPackages(&b, c.goInstallPkgs)
+	writeCustomDeps(&b, c.customDeps)
+	writeUvToolPackages(&b, c.uvToolPkgs)
+
+	// Dynamic package manager dependencies
+	writeDynamicDeps(&b, "npm packages (dynamic)", c.dynamicNpm)
+	writeDynamicDeps(&b, "pip packages (dynamic)", c.dynamicPip)
+	writeDynamicDeps(&b, "uv packages (dynamic)", c.dynamicUv)
+	writeDynamicDeps(&b, "cargo packages (dynamic)", c.dynamicCargo)
+	writeDynamicDeps(&b, "go packages (dynamic)", c.dynamicGo)
+
+	// Finalize with entrypoint and user setup
+	writeEntrypoint(&b, opts)
+
+	return b.String(), nil
+}
+
+// selectBaseImage determines the base image based on runtime dependencies.
+// Returns the image name and the runtime dependency provided by it (if any).
+func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
+	if len(runtimes) != 1 {
+		return defaultBaseImage, nil
+	}
+
+	rt := runtimes[0]
+	spec, _ := GetSpec(rt.Name)
+	version := rt.Version
+	if version == "" {
+		version = spec.Default
+	}
+	if img := runtimeBaseImage(rt.Name, version); img != "" {
+		return img, &rt
+	}
+	return defaultBaseImage, nil
+}
+
+// writeBasePackages writes the base package installation.
+func writeBasePackages(b *strings.Builder) {
 	b.WriteString("# Base packages\n")
 	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
 	b.WriteString("    curl \\\n")
@@ -128,12 +211,10 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	b.WriteString("    iptables \\\n")
 	b.WriteString("    gosu \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+}
 
-	// Create non-root user for security
-	// Claude Code and other tools refuse certain flags when running as root
-	// Also create .claude directory structure for Claude Code state (todos, settings, logs, etc.)
-	// Note: We check if UID 5000 exists and delete it first. This is unlikely since UID 5000
-	// is above the typical user range, but we handle it for robustness.
+// writeUserSetup writes the non-root user creation commands.
+func writeUserSetup(b *strings.Builder) {
 	b.WriteString("# Create non-root user\n")
 	b.WriteString(fmt.Sprintf("RUN existing_user=$(getent passwd %s | cut -d: -f1) && \\\n", containerUID))
 	b.WriteString("    if [ -n \"$existing_user\" ]; then \\\n")
@@ -143,21 +224,25 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	b.WriteString(fmt.Sprintf("    useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
 	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects && \\\n", containerUser))
 	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))
+}
 
-	// User-specified apt packages
-	if len(aptPkgs) > 0 {
-		sort.Strings(aptPkgs)
-		b.WriteString("# Apt packages\n")
-		b.WriteString("RUN apt-get update && apt-get install -y \\\n")
-		for _, pkg := range aptPkgs {
-			b.WriteString("    " + pkg + " \\\n")
-		}
-		b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+// writeAptPackages writes user-specified apt package installation.
+func writeAptPackages(b *strings.Builder, pkgs []string) {
+	if len(pkgs) == 0 {
+		return
 	}
+	sort.Strings(pkgs)
+	b.WriteString("# Apt packages\n")
+	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
+	for _, pkg := range pkgs {
+		b.WriteString("    " + pkg + " \\\n")
+	}
+	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+}
 
-	// Runtimes (node, python, go) - skip if already provided by base image
+// writeRuntimes writes runtime installation commands, skipping those provided by base image.
+func writeRuntimes(b *strings.Builder, runtimes []Dependency, baseRuntime *Dependency) {
 	for _, dep := range runtimes {
-		// Skip if this runtime is provided by the base image
 		if baseRuntime != nil && dep.Name == baseRuntime.Name {
 			b.WriteString(fmt.Sprintf("# %s runtime (provided by base image)\n\n", dep.Name))
 			continue
@@ -172,9 +257,11 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		b.WriteString(getRuntimeCommands(dep.Name, version).FormatForDockerfile())
 		b.WriteString("\n")
 	}
+}
 
-	// GitHub binary downloads
-	for _, dep := range githubBins {
+// writeGithubBinaries writes GitHub binary download commands.
+func writeGithubBinaries(b *strings.Builder, deps []Dependency) {
+	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
 		version := dep.Version
 		if version == "" {
@@ -184,34 +271,42 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		b.WriteString(getGithubBinaryCommands(dep.Name, version, spec).FormatForDockerfile())
 		b.WriteString("\n")
 	}
+}
 
-	// npm global packages
-	if len(npmPkgs) > 0 {
-		var pkgNames []string
-		for _, dep := range npmPkgs {
-			spec, _ := GetSpec(dep.Name)
-			pkg := spec.Package
-			if pkg == "" {
-				pkg = dep.Name
-			}
-			pkgNames = append(pkgNames, pkg)
-		}
-		b.WriteString("# npm packages\n")
-		b.WriteString("RUN npm install -g " + strings.Join(pkgNames, " ") + "\n\n")
+// writeNpmPackages writes npm global package installation.
+func writeNpmPackages(b *strings.Builder, deps []Dependency) {
+	if len(deps) == 0 {
+		return
 	}
-
-	// go install packages (requires Go runtime)
-	if len(goInstallPkgs) > 0 {
-		b.WriteString("# go install packages\n")
-		for _, dep := range goInstallPkgs {
-			spec, _ := GetSpec(dep.Name)
-			b.WriteString(getGoInstallCommands(spec).FormatForDockerfile())
+	var pkgNames []string
+	for _, dep := range deps {
+		spec, _ := GetSpec(dep.Name)
+		pkg := spec.Package
+		if pkg == "" {
+			pkg = dep.Name
 		}
-		b.WriteString("\n")
+		pkgNames = append(pkgNames, pkg)
 	}
+	b.WriteString("# npm packages\n")
+	b.WriteString("RUN npm install -g " + strings.Join(pkgNames, " ") + "\n\n")
+}
 
-	// Custom installs (playwright, aws, gcloud)
-	for _, dep := range customDeps {
+// writeGoInstallPackages writes go install commands.
+func writeGoInstallPackages(b *strings.Builder, deps []Dependency) {
+	if len(deps) == 0 {
+		return
+	}
+	b.WriteString("# go install packages\n")
+	for _, dep := range deps {
+		spec, _ := GetSpec(dep.Name)
+		b.WriteString(getGoInstallCommands(spec).FormatForDockerfile())
+	}
+	b.WriteString("\n")
+}
+
+// writeCustomDeps writes custom dependency installation commands.
+func writeCustomDeps(b *strings.Builder, deps []Dependency) {
+	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
 		version := dep.Version
 		if version == "" {
@@ -221,24 +316,36 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		b.WriteString(getCustomCommands(dep.Name, version).FormatForDockerfile())
 		b.WriteString("\n")
 	}
+}
 
-	// Install the moat-init entrypoint script if any features require it
+// writeUvToolPackages writes uv tool package installation.
+func writeUvToolPackages(b *strings.Builder, deps []Dependency) {
+	if len(deps) == 0 {
+		return
+	}
+	b.WriteString("# uv tool packages\n")
+	for _, dep := range deps {
+		spec, _ := GetSpec(dep.Name)
+		pkg := spec.Package
+		if pkg == "" {
+			pkg = dep.Name
+		}
+		b.WriteString(fmt.Sprintf("RUN uv tool install %s\n", pkg))
+	}
+	b.WriteString("\n")
+}
+
+// writeEntrypoint writes the entrypoint configuration and working directory.
+func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions) {
 	// Features: SSH agent forwarding, Claude Code file setup, Codex file setup, privilege drop to moatuser
 	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit
 	if needsInit {
-		// Base64 encode the embedded script to avoid shell escaping issues
 		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
-
 		b.WriteString("# Moat initialization script (SSH agent forwarding + privilege drop)\n")
 		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
-		// Note: USER is not set here because entrypoint runs as root and drops privileges itself
 	} else {
-		// No SSH needed - run directly as non-root user
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}
-
 	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
-
-	return b.String(), nil
 }
