@@ -16,7 +16,7 @@ Your workspace is mounted at /workspace inside the container. API credentials
 are injected transparently via the Moat proxy - Codex never sees raw tokens.
 
 By default, Codex runs with --full-auto since the container provides isolation.
-Use --noyolo to require manual approval for each tool use.
+Use --full-auto=false to require manual approval for each tool use.
 
 Without a workspace argument, uses the current directory.
 
@@ -44,7 +44,7 @@ Examples:
   moat codex --rebuild
 
   # Require manual approval for each tool use (disable full-auto mode)
-  moat codex --noyolo
+  moat codex --full-auto=false
 
 Subcommands:
   moat codex sessions        List Codex sessions`,

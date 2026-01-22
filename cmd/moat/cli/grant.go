@@ -638,7 +638,7 @@ func grantOpenAIViaCodexLogin() error {
 	fmt.Println("This may open a browser for authentication.")
 	fmt.Println()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "codex", "login")

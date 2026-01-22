@@ -16,7 +16,7 @@ var (
 	codexFlags        ExecFlags
 	codexPromptFlag   string
 	codexAllowedHosts []string
-	codexNoYolo       bool
+	codexFullAuto     bool
 )
 
 func init() {
@@ -33,7 +33,7 @@ func init() {
 	// Add Codex-specific flags
 	codexCmd.Flags().StringVarP(&codexPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	codexCmd.Flags().StringSliceVar(&codexAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
-	codexCmd.Flags().BoolVar(&codexNoYolo, "noyolo", false, "disable --full-auto (require manual approval for each tool use)")
+	codexCmd.Flags().BoolVar(&codexFullAuto, "full-auto", true, "enable full-auto mode (auto-approve tool use); set to false for manual approval")
 }
 
 func runCodex(cmd *cobra.Command, args []string) error {
@@ -95,7 +95,7 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		// Non-interactive mode: use `codex exec` with the prompt
 		// --full-auto allows edits during execution (safe since we're in a container)
 		containerCmd = []string{"codex", "exec"}
-		if !codexNoYolo {
+		if codexFullAuto {
 			containerCmd = append(containerCmd, "--full-auto")
 		}
 		containerCmd = append(containerCmd, codexPromptFlag)
@@ -138,8 +138,13 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		"*.chatgpt.com",
 	)
 
-	// Add allowed hosts if specified
-	cfg.Network.Allow = append(cfg.Network.Allow, codexAllowedHosts...)
+	// Add allowed hosts if specified, with validation
+	for _, host := range codexAllowedHosts {
+		if hostErr := validateHost(host); hostErr != nil {
+			return fmt.Errorf("invalid --allow-host %q: %w", host, hostErr)
+		}
+		cfg.Network.Allow = append(cfg.Network.Allow, host)
+	}
 
 	// Add environment variables from flags
 	if envErr := parseEnvFlags(codexFlags.Env, cfg); envErr != nil {
@@ -193,9 +198,15 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if r != nil && !codexFlags.Detach {
-		fmt.Printf("Starting Codex in %s\n", absPath)
-		fmt.Printf("Session: %s (run %s)\n", r.Name, r.ID)
+	if r != nil {
+		if codexFlags.Detach {
+			fmt.Printf("Started Codex in background: %s (run %s)\n", r.Name, r.ID)
+			fmt.Printf("  Workspace: %s\n", absPath)
+			fmt.Printf("  Attach with: moat attach %s\n", r.ID)
+		} else {
+			fmt.Printf("Starting Codex in %s\n", absPath)
+			fmt.Printf("Session: %s (run %s)\n", r.Name, r.ID)
+		}
 	}
 
 	return nil

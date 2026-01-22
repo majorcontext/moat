@@ -917,19 +917,52 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 }
 
 // StartAttached starts a container with stdin/stdout/stderr already attached.
-// For Apple containers, we use the run command which handles attach during start.
+// This is required for TUI applications that need the terminal connected
+// before the process starts.
+//
+// For Apple containers, we start the attach command first (which blocks until
+// the container is running), then start the container. This ensures the I/O
+// streams are ready when the container's process begins.
 func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Apple container's attach command should work with a started container.
-	// We start and then immediately attach, but Apple container tool may
-	// handle this atomically if using the right flags.
-	// For now, start then attach (similar to Attach but starts first).
+	// Build attach command arguments
+	args := []string{"attach"}
+	if opts.Stdin != nil {
+		args = append(args, "--stdin")
+	}
+	args = append(args, containerID)
 
-	// Start the container
+	attachCmd := exec.CommandContext(ctx, r.containerBin, args...)
+
+	// Connect stdin/stdout/stderr
+	if opts.Stdin != nil {
+		attachCmd.Stdin = opts.Stdin
+	}
+	if opts.Stdout != nil {
+		attachCmd.Stdout = opts.Stdout
+	}
+	if opts.Stderr != nil {
+		attachCmd.Stderr = opts.Stderr
+	}
+
+	// Start the attach command (it will wait for the container to be running)
+	if err := attachCmd.Start(); err != nil {
+		return fmt.Errorf("starting attach: %w", err)
+	}
+
+	// Start the container - attach command is waiting for it
 	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
 	if err := startCmd.Run(); err != nil {
+		// Try to kill the orphaned attach process
+		_ = attachCmd.Process.Kill()
 		return fmt.Errorf("starting container: %w", err)
 	}
 
-	// Attach immediately after start
-	return r.Attach(ctx, containerID, opts)
+	// Wait for attach to complete (it will exit when the container exits)
+	if err := attachCmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("attaching to container: %w", err)
+	}
+	return nil
 }

@@ -271,12 +271,27 @@ func (c *CodexCredentials) HasCodexCredentials() bool {
 // ChatGPT tokens are typically longer than API keys and have a different format.
 // API keys start with "sk-" (including "sk-proj-", "sk-svcacct-", etc.) regardless of length.
 // Subscription tokens are OAuth tokens that don't have the sk- prefix.
+//
+// Returns false for empty strings and whitespace-only strings (invalid tokens).
 func IsCodexToken(token string) bool {
+	// Validate the token has content
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false // Empty/whitespace tokens are invalid, not subscription tokens
+	}
+
+	// Minimum length check - real tokens are much longer
+	// OAuth tokens are typically 100+ characters, API keys are 40+ characters
+	if len(token) < 10 {
+		return false // Too short to be any valid OpenAI token
+	}
+
 	// API keys always start with "sk-" regardless of length
 	// This includes newer formats like sk-proj-..., sk-svcacct-..., etc.
 	if strings.HasPrefix(token, openaiKeyPrefix) {
 		return false // It's an API key
 	}
+
 	// If it doesn't start with sk-, it's likely a subscription/OAuth token
 	return true
 }

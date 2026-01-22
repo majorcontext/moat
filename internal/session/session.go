@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,7 @@ var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
 // Manager handles session persistence and lookup.
 type Manager struct {
 	dir string
+	mu  sync.RWMutex // protects file operations
 }
 
 // NewManager creates a session manager for the given directory.
@@ -52,6 +54,9 @@ func (m *Manager) Dir() string {
 
 // Create creates a new session.
 func (m *Manager) Create(workspace, runID, name string, grants []string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	session := &Session{
 		ID:             runID, // Use run ID as session ID for simplicity
 		Name:           name,
@@ -63,7 +68,7 @@ func (m *Manager) Create(workspace, runID, name string, grants []string) (*Sessi
 		State:          StateRunning,
 	}
 
-	if err := m.save(session); err != nil {
+	if err := m.saveLocked(session); err != nil {
 		return nil, err
 	}
 
@@ -72,7 +77,10 @@ func (m *Manager) Create(workspace, runID, name string, grants []string) (*Sessi
 
 // Get retrieves a session by ID or name.
 func (m *Manager) Get(idOrName string) (*Session, error) {
-	sessions, err := m.List()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sessions, err := m.listLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +96,10 @@ func (m *Manager) Get(idOrName string) (*Session, error) {
 
 // GetByWorkspace returns the most recent session for a workspace.
 func (m *Manager) GetByWorkspace(workspace string) (*Session, error) {
-	sessions, err := m.List()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sessions, err := m.listLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +122,13 @@ func (m *Manager) GetByWorkspace(workspace string) (*Session, error) {
 
 // List returns all sessions, sorted by last accessed time (most recent first).
 func (m *Manager) List() ([]*Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.listLocked()
+}
+
+// listLocked is the internal implementation of List that assumes the lock is held.
+func (m *Manager) listLocked() ([]*Session, error) {
 	if err := os.MkdirAll(m.dir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sessions directory: %w", err)
 	}
@@ -126,7 +144,7 @@ func (m *Manager) List() ([]*Session, error) {
 			continue
 		}
 
-		session, err := m.load(entry.Name())
+		session, err := m.loadLocked(entry.Name())
 		if err != nil {
 			continue // Skip corrupted sessions
 		}
@@ -143,7 +161,10 @@ func (m *Manager) List() ([]*Session, error) {
 
 // UpdateState updates the state of a session.
 func (m *Manager) UpdateState(id, state string) error {
-	session, err := m.load(id)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, err := m.loadLocked(id)
 	if err != nil {
 		return err
 	}
@@ -151,22 +172,28 @@ func (m *Manager) UpdateState(id, state string) error {
 	session.State = state
 	session.LastAccessedAt = time.Now()
 
-	return m.save(session)
+	return m.saveLocked(session)
 }
 
 // Touch updates the last accessed time of a session.
 func (m *Manager) Touch(id string) error {
-	session, err := m.load(id)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, err := m.loadLocked(id)
 	if err != nil {
 		return err
 	}
 
 	session.LastAccessedAt = time.Now()
-	return m.save(session)
+	return m.saveLocked(session)
 }
 
 // Delete removes a session.
 func (m *Manager) Delete(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if !validSessionID.MatchString(id) {
 		return fmt.Errorf("invalid session ID: %s", id)
 	}
@@ -174,8 +201,17 @@ func (m *Manager) Delete(id string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-// save persists a session to disk.
+// save persists a session to disk. It acquires a write lock.
 func (m *Manager) save(session *Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveLocked(session)
+}
+
+// saveLocked persists a session to disk using atomic write-rename pattern.
+// This prevents corruption from concurrent writes or crashes during write.
+// Caller must hold m.mu.
+func (m *Manager) saveLocked(session *Session) error {
 	if !validSessionID.MatchString(session.ID) {
 		return fmt.Errorf("invalid session ID: %s", session.ID)
 	}
@@ -190,15 +226,33 @@ func (m *Manager) save(session *Session) error {
 	}
 
 	metadataPath := filepath.Join(sessionDir, "metadata.json")
-	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+
+	// Write to a temporary file first, then atomically rename.
+	// This ensures we never have a partial or corrupted metadata file.
+	tmpPath := metadataPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return fmt.Errorf("writing session metadata: %w", err)
+	}
+
+	// Atomically rename temp file to final path
+	if err := os.Rename(tmpPath, metadataPath); err != nil {
+		// Clean up temp file on failure
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("renaming session metadata: %w", err)
 	}
 
 	return nil
 }
 
-// load reads a session from disk.
+// load reads a session from disk. It acquires a read lock.
 func (m *Manager) load(id string) (*Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.loadLocked(id)
+}
+
+// loadLocked reads a session from disk. Caller must hold m.mu.
+func (m *Manager) loadLocked(id string) (*Session, error) {
 	if !validSessionID.MatchString(id) {
 		return nil, fmt.Errorf("invalid session ID: %s", id)
 	}
@@ -218,7 +272,10 @@ func (m *Manager) load(id string) (*Session, error) {
 
 // CleanupOldSessions removes sessions older than the given duration.
 func (m *Manager) CleanupOldSessions(maxAge time.Duration) error {
-	sessions, err := m.List()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sessions, err := m.listLocked()
 	if err != nil {
 		return err
 	}
@@ -226,7 +283,11 @@ func (m *Manager) CleanupOldSessions(maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge)
 	for _, s := range sessions {
 		if s.LastAccessedAt.Before(cutoff) && s.State != StateRunning {
-			if err := m.Delete(s.ID); err != nil {
+			if !validSessionID.MatchString(s.ID) {
+				continue
+			}
+			sessionDir := filepath.Join(m.dir, s.ID)
+			if err := os.RemoveAll(sessionDir); err != nil {
 				// Log but continue
 				continue
 			}
