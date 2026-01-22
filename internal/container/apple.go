@@ -99,6 +99,11 @@ func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
 		args = append(args, "--workdir", cfg.WorkingDir)
 	}
 
+	// User to run as
+	if cfg.User != "" {
+		args = append(args, "--user", cfg.User)
+	}
+
 	// DNS configuration - Apple container's default DNS (gateway) often doesn't work
 	// Use Google's public DNS as a reliable fallback
 	args = append(args, "--dns", "8.8.8.8")

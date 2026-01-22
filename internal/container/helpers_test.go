@@ -52,6 +52,7 @@ func TestIsValidUsername(t *testing.T) {
 		{"root", true},
 		{"node", true},
 		{"vscode", true},
+		{"moatuser", true},
 		{"user1", true},
 		{"my_user", true},
 		{"my-user", true},

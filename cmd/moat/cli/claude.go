@@ -309,18 +309,27 @@ func runMarketplacesUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Updating marketplaces...")
 	fmt.Println()
 
+	// Use MarketplaceManager for validation consistency
+	marketplaceManager := claude.NewMarketplaceManager(cacheDir)
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
 
-		// Skip entries with path traversal characters
-		if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		// Use MarketplacePath for consistent path validation
+		// This returns empty string if the name contains path traversal characters
+		path := marketplaceManager.MarketplacePath(name)
+		if path == "" {
 			continue
 		}
 
-		path := filepath.Join(marketplacesDir, name)
+		// Verify the path is within the expected marketplaces directory
+		// This is a defense-in-depth check against any path manipulation
+		if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(marketplacesDir)+string(filepath.Separator)) {
+			continue
+		}
 
 		// Check if it's a git repo
 		if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {

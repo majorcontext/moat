@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,9 +65,14 @@ func TestAnthropicSetup_ContainerEnv_OAuth(t *testing.T) {
 
 	env := setup.ContainerEnv(cred)
 
-	// OAuth should not set ANTHROPIC_API_KEY
-	if len(env) != 0 {
-		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 0", len(env))
+	// OAuth should set CLAUDE_CODE_OAUTH_TOKEN with a placeholder
+	// The real token is injected by the proxy at the network layer
+	if len(env) != 1 {
+		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
+		return
+	}
+	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
 	}
 }
 
@@ -178,6 +184,34 @@ func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
 	credsFile := filepath.Join(stagingDir, ".credentials.json")
 	if _, err := os.Stat(credsFile); err == nil {
 		t.Error("credentials file should NOT exist for API keys")
+	}
+}
+
+func TestWriteClaudeConfig(t *testing.T) {
+	stagingDir := t.TempDir()
+
+	err := WriteClaudeConfig(stagingDir)
+	if err != nil {
+		t.Fatalf("WriteClaudeConfig() error = %v", err)
+	}
+
+	// Read and parse the file
+	data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	// Verify required fields
+	if config["hasCompletedOnboarding"] != true {
+		t.Error("hasCompletedOnboarding should be true")
+	}
+	if config["theme"] != "dark" {
+		t.Error("theme should be dark")
 	}
 }
 

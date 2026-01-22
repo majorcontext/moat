@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/andybons/moat/internal/claude"
@@ -15,10 +16,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// validEnvKey matches valid environment variable names.
+// Must start with letter or underscore, followed by letters, digits, or underscores.
+var validEnvKey = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
 var (
 	claudeFlags        ExecFlags
 	claudePromptFlag   string
 	claudeAllowedHosts []string
+	claudeNoYolo       bool
 )
 
 func init() {
@@ -32,6 +38,9 @@ func init() {
 
 Your workspace is mounted at /workspace inside the container. API credentials
 are injected transparently via the Moat proxy - Claude Code never sees raw tokens.
+
+By default, Claude runs with --dangerously-skip-permissions since the container
+provides isolation. Use --noyolo to require manual approval for each tool use.
 
 Without a workspace argument, uses the current directory.
 
@@ -58,6 +67,9 @@ Examples:
   # Force rebuild of container image
   moat claude --rebuild
 
+  # Require manual approval for each tool use (disable yolo mode)
+  moat claude --noyolo
+
 Subcommands:
   moat claude plugins list         List configured plugins
   moat claude marketplace list     List marketplaces
@@ -69,6 +81,7 @@ Subcommands:
 	// Add Claude-specific flags
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
+	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
 }
 
 func runClaudeCode(cmd *cobra.Command, args []string) error {
@@ -88,7 +101,13 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolving workspace path: %w", err)
 	}
 
-	// Verify path exists and is a directory
+	// Resolve symlinks to get the real path
+	absPath, err = filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return fmt.Errorf("workspace path %q: %w", workspace, err)
+	}
+
+	// Verify path is a directory
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return fmt.Errorf("workspace path %q: %w", absPath, err)
@@ -128,15 +147,23 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	}
 	claudeFlags.Grants = grants
 
+	// Determine interactive mode
+	interactive := claudePromptFlag == ""
+
 	// Build container command
 	// claude-code is installed globally via the dependency system
 	containerCmd := []string{"claude"}
+
+	// By default, skip permission prompts since Moat provides isolation.
+	// The container environment itself is the security boundary.
+	// Use --noyolo to restore default Claude behavior with manual approvals.
+	if !claudeNoYolo {
+		containerCmd = append(containerCmd, "--dangerously-skip-permissions")
+	}
+
 	if claudePromptFlag != "" {
 		containerCmd = append(containerCmd, "-p", claudePromptFlag)
 	}
-
-	// Determine interactive mode
-	interactive := claudePromptFlag == ""
 
 	// Use name from flag, or config, or let manager generate one
 	if claudeFlags.Name == "" && cfg != nil && cfg.Name != "" {
@@ -180,6 +207,9 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 			key, value, ok := strings.Cut(e, "=")
 			if !ok {
 				return fmt.Errorf("invalid environment variable %q: expected KEY=VALUE format", e)
+			}
+			if !validEnvKey.MatchString(key) {
+				return fmt.Errorf("invalid environment variable name %q: must start with letter or underscore, contain only letters, digits, and underscores", key)
 			}
 			cfg.Env[key] = value
 		}
@@ -244,20 +274,31 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 func hasAnthropicCredential() bool {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
+		log.Debug("no anthropic credential: failed to get encryption key", "error", err)
 		return false
 	}
 	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	if err != nil {
+		log.Debug("no anthropic credential: failed to open credential store", "error", err)
 		return false
 	}
 	_, err = store.Get(credential.ProviderAnthropic)
-	return err == nil
+	if err != nil {
+		log.Debug("no anthropic credential: not found in store", "error", err)
+		return false
+	}
+	return true
 }
 
 // hasDependency checks if a dependency prefix exists in the list.
+// Matches exact name (e.g., "node") or name with version (e.g., "node@20").
 func hasDependency(deps []string, prefix string) bool {
 	for _, d := range deps {
-		if d == prefix || len(d) > len(prefix) && d[:len(prefix)+1] == prefix+"@" {
+		if d == prefix {
+			return true
+		}
+		// Check for prefix@version format, ensuring there's actually a version
+		if strings.HasPrefix(d, prefix+"@") && len(d) > len(prefix)+1 {
 			return true
 		}
 	}

@@ -165,10 +165,7 @@ func RunAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 				fmt.Printf("Run %s stopped\n", r.ID)
 				return nil
 			}
-			lastSigTime = now
-			_ = lastSigTime // Mark as used for linter (value read in next iteration)
-
-			// First Ctrl+C - detach
+			// First Ctrl+C - detach (double-press detection happens before this point)
 			log.Debug("received signal, detaching", "signal", sig)
 			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
 			fmt.Printf("Press Ctrl+C again within 500ms to stop, or use 'moat stop %s'\n", r.ID)

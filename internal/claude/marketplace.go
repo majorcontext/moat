@@ -34,10 +34,25 @@ func (m *MarketplaceManager) MarketplacesDir() string {
 }
 
 // MarketplacePath returns the path to a specific marketplace.
-// Returns empty string if name contains path traversal characters.
+// Returns empty string if name is invalid:
+// - Contains path traversal characters (/, \, ..)
+// - Is empty or whitespace-only
+// - Contains control characters (newlines, tabs, etc.)
 func (m *MarketplaceManager) MarketplacePath(name string) string {
+	// Reject empty or whitespace-only names
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	// Reject names with control characters (newlines, tabs, carriage returns, etc.)
+	for _, r := range name {
+		if r < 32 || r == 127 {
+			return ""
+		}
+	}
 	// Prevent path traversal attacks
-	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+	// Reject path separators and ".." as a complete name (since we reject / and \,
+	// ".." can only be a traversal if it's the entire name)
+	if strings.ContainsAny(name, "/\\") || name == ".." {
 		return ""
 	}
 	// Verify the cleaned name is the same (catches edge cases)
@@ -233,7 +248,7 @@ func IsSSHURL(url string) bool {
 }
 
 // ExtractHost extracts the hostname from a git URL.
-// Handles both HTTPS and SSH URL formats.
+// Handles both HTTPS and SSH URL formats, including IPv6 literals.
 func ExtractHost(url string) string {
 	// ssh://git@github.com/org/repo.git or ssh://git@gitlab.com:22/org/repo.git
 	if strings.HasPrefix(url, "ssh://") {
@@ -241,6 +256,13 @@ func ExtractHost(url string) string {
 		// Remove user@ if present
 		if idx := strings.Index(url, "@"); idx >= 0 {
 			url = url[idx+1:]
+		}
+		// Handle IPv6 literals like [::1] or [::1]:22
+		if strings.HasPrefix(url, "[") {
+			if endBracket := strings.Index(url, "]"); endBracket >= 0 {
+				return url[1:endBracket] // Return content inside brackets
+			}
+			return "" // Malformed IPv6 literal
 		}
 		// Get host (before / or :port)
 		// Handle both / (path) and : (port) - take whichever comes first
@@ -264,11 +286,19 @@ func ExtractHost(url string) string {
 
 	// git@github.com:org/repo.git (SCP-like syntax)
 	if strings.Contains(url, "@") && strings.Contains(url, ":") && !strings.Contains(url, "://") {
-		// Find @ and :
 		atIdx := strings.Index(url, "@")
-		colonIdx := strings.Index(url, ":")
-		if atIdx >= 0 && colonIdx > atIdx {
-			return url[atIdx+1 : colonIdx]
+		afterAt := url[atIdx+1:]
+		// Handle IPv6 literals like git@[::1]:repo.git
+		if strings.HasPrefix(afterAt, "[") {
+			if endBracket := strings.Index(afterAt, "]"); endBracket >= 0 {
+				return afterAt[1:endBracket] // Return content inside brackets
+			}
+			return "" // Malformed IPv6 literal
+		}
+		// Find : for SCP-style path separator
+		colonIdx := strings.Index(afterAt, ":")
+		if colonIdx >= 0 {
+			return afterAt[:colonIdx]
 		}
 	}
 
