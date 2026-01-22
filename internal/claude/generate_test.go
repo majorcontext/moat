@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/credential"
 )
 
 func TestGenerateSettings(t *testing.T) {
@@ -121,8 +122,8 @@ func TestGenerateMCPConfig(t *testing.T) {
 	if github.Command != "npx" {
 		t.Errorf("github.Command = %q, want %q", github.Command, "npx")
 	}
-	if github.Env["GITHUB_TOKEN"] != ProxyInjectedPlaceholder {
-		t.Errorf("github.Env[GITHUB_TOKEN] = %q, want %q", github.Env["GITHUB_TOKEN"], ProxyInjectedPlaceholder)
+	if github.Env["GITHUB_TOKEN"] != credential.ProxyInjectedPlaceholder {
+		t.Errorf("github.Env[GITHUB_TOKEN] = %q, want %q", github.Env["GITHUB_TOKEN"], credential.ProxyInjectedPlaceholder)
 	}
 
 	// Check filesystem server
@@ -180,7 +181,7 @@ func TestGenerateMCPConfigGrantWithScope(t *testing.T) {
 		t.Fatalf("unmarshaling result: %v", err)
 	}
 
-	if result.MCPServers["github"].Env["GITHUB_TOKEN"] != ProxyInjectedPlaceholder {
+	if result.MCPServers["github"].Env["GITHUB_TOKEN"] != credential.ProxyInjectedPlaceholder {
 		t.Error("github token should be injected even with scoped grant")
 	}
 }

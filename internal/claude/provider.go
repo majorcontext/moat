@@ -42,11 +42,11 @@ func (a *AnthropicSetup) ContainerEnv(cred *credential.Credential) []string {
 		// For OAuth tokens, set CLAUDE_CODE_OAUTH_TOKEN with a placeholder.
 		// This tells Claude Code it's authenticated (skips login prompts).
 		// The real token is injected by the proxy at the network layer.
-		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + credential.ProxyInjectedPlaceholder}
 	}
 	// For API keys, set a placeholder so Claude Code doesn't error
 	// The real key is injected by the proxy at the network layer
-	return []string{"ANTHROPIC_API_KEY=" + ProxyInjectedPlaceholder}
+	return []string{"ANTHROPIC_API_KEY=" + credential.ProxyInjectedPlaceholder}
 }
 
 // ContainerMounts returns mounts needed for Anthropic/Claude Code.
@@ -86,7 +86,7 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	// handled transparently by the TLS-intercepting proxy.
 	creds := credential.ClaudeOAuthCredentials{
 		ClaudeAiOauth: &credential.ClaudeOAuthToken{
-			AccessToken: ProxyInjectedPlaceholder,
+			AccessToken: credential.ProxyInjectedPlaceholder,
 			ExpiresAt:   cred.ExpiresAt.UnixMilli(),
 			Scopes:      cred.Scopes,
 		},

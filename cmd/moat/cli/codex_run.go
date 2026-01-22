@@ -1,0 +1,198 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/andybons/moat/internal/codex"
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/credential"
+	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/run"
+	"github.com/spf13/cobra"
+)
+
+var (
+	codexFlags        ExecFlags
+	codexPromptFlag   string
+	codexAllowedHosts []string
+	codexNoYolo       bool
+)
+
+func init() {
+	// Add the run functionality directly to codexCmd
+	codexCmd.RunE = runCodex
+	codexCmd.Args = cobra.MaximumNArgs(1)
+
+	// Update usage
+	codexCmd.Use = "codex [workspace] [flags]"
+
+	// Add shared execution flags
+	AddExecFlags(codexCmd, &codexFlags)
+
+	// Add Codex-specific flags
+	codexCmd.Flags().StringVarP(&codexPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
+	codexCmd.Flags().StringSliceVar(&codexAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
+	codexCmd.Flags().BoolVar(&codexNoYolo, "noyolo", false, "disable --full-auto (require manual approval for each tool use)")
+}
+
+func runCodex(cmd *cobra.Command, args []string) error {
+	// If subcommand is being run, don't execute this
+	if cmd.CalledAs() != "codex" || len(args) > 0 && args[0] == "sessions" {
+		return nil
+	}
+
+	// Determine workspace
+	workspace := "."
+	if len(args) > 0 {
+		workspace = args[0]
+	}
+
+	absPath, err := resolveWorkspacePath(workspace)
+	if err != nil {
+		return err
+	}
+
+	// Load agent.yaml if present, otherwise use defaults
+	cfg, err := config.Load(absPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Build grants list using a set for deduplication
+	// If user has an API key stored via `moat grant openai`, use proxy injection
+	// Otherwise, Codex will prompt for login on first run
+	grantSet := make(map[string]bool)
+	var grants []string
+	addGrant := func(g string) {
+		if !grantSet[g] {
+			grantSet[g] = true
+			grants = append(grants, g)
+		}
+	}
+
+	if hasCredential(credential.ProviderOpenAI) {
+		addGrant("openai")
+	}
+	if cfg != nil {
+		for _, g := range cfg.Grants {
+			addGrant(g)
+		}
+	}
+	for _, g := range codexFlags.Grants {
+		addGrant(g)
+	}
+	codexFlags.Grants = grants
+
+	// Determine interactive mode
+	interactive := codexPromptFlag == ""
+
+	// Build container command
+	// codex is installed globally via the dependency system
+	containerCmd := []string{"codex"}
+
+	// By default, use full-auto mode since Moat provides isolation.
+	// The container environment itself is the security boundary.
+	// Use --noyolo to restore default Codex behavior with manual approvals.
+	if !codexNoYolo {
+		containerCmd = append(containerCmd, "--full-auto")
+	}
+
+	if codexPromptFlag != "" {
+		containerCmd = append(containerCmd, codexPromptFlag)
+	}
+
+	// Use name from flag, or config, or let manager generate one
+	if codexFlags.Name == "" && cfg != nil && cfg.Name != "" {
+		codexFlags.Name = cfg.Name
+	}
+
+	// Ensure dependencies for Codex CLI
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	if !hasDependency(cfg.Dependencies, "node") {
+		cfg.Dependencies = append(cfg.Dependencies, "node@20")
+	}
+	if !hasDependency(cfg.Dependencies, "git") {
+		cfg.Dependencies = append(cfg.Dependencies, "git")
+	}
+	if !hasDependency(cfg.Dependencies, "codex-cli") {
+		cfg.Dependencies = append(cfg.Dependencies, "codex-cli")
+	}
+
+	// Always sync Codex logs for moat codex command
+	syncLogs := true
+	cfg.Codex.SyncLogs = &syncLogs
+
+	// Allow network access to OpenAI for API access and auth
+	cfg.Network.Allow = append(cfg.Network.Allow,
+		"api.openai.com",
+		"*.openai.com",
+		"auth.openai.com",
+		"platform.openai.com",
+	)
+
+	// Add allowed hosts if specified
+	cfg.Network.Allow = append(cfg.Network.Allow, codexAllowedHosts...)
+
+	// Add environment variables from flags
+	if err := parseEnvFlags(codexFlags.Env, cfg); err != nil {
+		return err
+	}
+
+	log.Debug("starting codex",
+		"workspace", absPath,
+		"grants", grants,
+		"interactive", interactive,
+		"prompt", codexPromptFlag,
+		"rebuild", codexFlags.Rebuild,
+	)
+
+	if dryRun {
+		fmt.Println("Dry run - would start Codex")
+		fmt.Printf("Workspace: %s\n", absPath)
+		fmt.Printf("Grants: %v\n", grants)
+		fmt.Printf("Interactive: %v\n", interactive)
+		fmt.Printf("Rebuild: %v\n", codexFlags.Rebuild)
+		if len(grants) == 0 {
+			fmt.Println("Note: No API key configured. Codex will prompt for login.")
+		}
+		return nil
+	}
+
+	ctx := context.Background()
+
+	opts := ExecOptions{
+		Flags:       codexFlags,
+		Workspace:   absPath,
+		Command:     containerCmd,
+		Config:      cfg,
+		Interactive: interactive,
+		TTY:         interactive,
+		OnRunCreated: func(r *run.Run) {
+			// Create session record
+			sessionMgr, sessionErr := codex.NewSessionManager()
+			if sessionErr != nil {
+				log.Debug("failed to create session manager", "error", sessionErr)
+				return
+			}
+			if _, sessionErr = sessionMgr.Create(absPath, r.ID, r.Name, grants); sessionErr != nil {
+				log.Debug("failed to create session", "error", sessionErr)
+			}
+		},
+	}
+
+	r, err := ExecuteRun(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	if r != nil && !codexFlags.Detach {
+		fmt.Printf("Starting Codex in %s\n", absPath)
+		fmt.Printf("Session: %s (run %s)\n", r.Name, r.ID)
+	}
+
+	return nil
+}
+

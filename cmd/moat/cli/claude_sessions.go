@@ -3,9 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
-	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/andybons/moat/internal/claude"
 	"github.com/andybons/moat/internal/log"
@@ -127,54 +125,4 @@ func runSessionsList(cmd *cobra.Command, args []string) error {
 	fmt.Println("Attach to a running session: moat attach <session>")
 
 	return nil
-}
-
-// shortenPath shortens a path for display, using ~ for home directory.
-func shortenPath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-
-	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-
-	// If still too long, truncate from the start
-	const maxLen = 40
-	if len(path) > maxLen {
-		return "..." + path[len(path)-maxLen+3:]
-	}
-
-	return path
-}
-
-// formatTimeAgo formats a time as a human-readable "X ago" string.
-func formatTimeAgo(t time.Time) string {
-	d := time.Since(t)
-
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		mins := int(d.Minutes())
-		if mins == 1 {
-			return "1 minute ago"
-		}
-		return fmt.Sprintf("%d minutes ago", mins)
-	case d < 24*time.Hour:
-		hours := int(d.Hours())
-		if hours == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", hours)
-	case d < 7*24*time.Hour:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	default:
-		return t.Format("Jan 2, 2006")
-	}
 }

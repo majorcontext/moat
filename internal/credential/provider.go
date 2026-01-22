@@ -7,6 +7,13 @@ import (
 	"github.com/andybons/moat/internal/container"
 )
 
+// ProxyInjectedPlaceholder is a placeholder value for credentials that will be
+// injected by the Moat proxy at runtime. The actual credential never reaches
+// the container; instead, the proxy intercepts requests and adds the real
+// Authorization header. This placeholder signals to tools that a credential
+// is expected without exposing the actual value.
+const ProxyInjectedPlaceholder = "moat-proxy-injected"
+
 // ProxyConfigurer is the interface for configuring proxy credentials.
 // This avoids importing the proxy package directly.
 type ProxyConfigurer interface {

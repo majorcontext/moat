@@ -95,6 +95,36 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   fi
 fi
 
+# Codex CLI Setup
+# When MOAT_CODEX_INIT is set to the staging directory path, copy files
+# from the staging area to their final locations (~/.codex).
+if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
+  # Determine target home directory
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    TARGET_HOME="/home/moatuser"
+  else
+    TARGET_HOME="$HOME"
+  fi
+
+  # Create ~/.codex directory
+  mkdir -p "$TARGET_HOME/.codex"
+
+  # Copy config.toml if present (preserve permissions)
+  [ -f "$MOAT_CODEX_INIT/config.toml" ] && \
+    cp -p "$MOAT_CODEX_INIT/config.toml" "$TARGET_HOME/.codex/"
+
+  # Copy auth.json if present (ensure restricted permissions for security)
+  if [ -f "$MOAT_CODEX_INIT/auth.json" ]; then
+    cp -p "$MOAT_CODEX_INIT/auth.json" "$TARGET_HOME/.codex/"
+    chmod 600 "$TARGET_HOME/.codex/auth.json"
+  fi
+
+  # Ensure moatuser owns all the files if we're running as root
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown -R moatuser:moatuser "$TARGET_HOME/.codex" 2>/dev/null || true
+  fi
+fi
+
 # Execute the user's command
 # If we're already running as a non-root user (UID != 0), just exec directly.
 # This happens when Docker is started with --user to match host UID on Linux.

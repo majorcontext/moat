@@ -14,6 +14,7 @@ const (
 	ProviderGitHub    Provider = "github"
 	ProviderAWS       Provider = "aws"
 	ProviderAnthropic Provider = "anthropic"
+	ProviderOpenAI    Provider = "openai"
 )
 
 // Credential represents a stored credential.

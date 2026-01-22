@@ -53,6 +53,12 @@ claude-code:
   package: "@anthropic-ai/claude-code"
   requires: [node]
 
+codex-cli:
+  description: OpenAI Codex CLI
+  type: npm
+  package: "@openai/codex"
+  requires: [node]
+
 # Build tools (github-binary)
 protoc:
   description: Protocol Buffers compiler

@@ -50,6 +50,7 @@ requested via the --grant flag on 'moat run'.
 Supported providers:
   github      GitHub token (from gh CLI, environment, or interactive prompt)
   anthropic   Anthropic API key or Claude Code OAuth credentials
+  openai      OpenAI API key or ChatGPT subscription credentials
   aws         AWS IAM role assumption (uses host credentials to assume role)
 
 GitHub authentication (in order of precedence):
@@ -82,9 +83,22 @@ Examples:
   moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole \
     --region=us-west-2 --session-duration=1h
 
+  # Use AWS credential in a run (credentials auto-refresh)
+  moat run my-agent . --grant aws
+
+  # Grant OpenAI access (will auto-detect Codex credentials)
+  moat grant openai
+
+  # Grant OpenAI API access from environment variable
+  export OPENAI_API_KEY="sk-..."  # set in your shell profile
+  moat grant openai
+
+  # Use OpenAI credential for Codex
+  moat run my-agent . --grant openai
+
 If you have Claude Code installed and logged in, 'moat grant anthropic' will
-offer to import your existing OAuth credentials. This is the easiest way to
-get started - no API key required.`,
+offer to import your existing OAuth credentials. Similarly, 'moat grant openai'
+will offer to import Codex credentials if available.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGrant,
 }
@@ -125,6 +139,8 @@ func runGrant(cmd *cobra.Command, args []string) error {
 		return grantGitHub()
 	case credential.ProviderAnthropic:
 		return grantAnthropic()
+	case credential.ProviderOpenAI:
+		return grantOpenAI()
 	case credential.ProviderAWS:
 		if awsRole == "" {
 			return fmt.Errorf(`--role is required for AWS grant
@@ -523,6 +539,204 @@ func grantAnthropicViaExistingCreds(claudeCode *credential.ClaudeCodeCredentials
 			fmt.Printf("Token expires in %d days. Re-run 'moat grant anthropic' if it expires.\n", int(remaining.Hours()/24))
 		} else {
 			fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant anthropic' if it expires.\n", remaining.Hours())
+		}
+	}
+	return nil
+}
+
+func grantOpenAI() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Check if codex CLI is available for device flow login
+	codexAvailable := isCodexAvailable()
+
+	// Offer choices to user
+	fmt.Println("Choose authentication method:")
+	fmt.Println()
+	if codexAvailable {
+		fmt.Println("  1. ChatGPT subscription (recommended)")
+		fmt.Println("     Uses 'codex login' for OAuth authentication.")
+		fmt.Println("     Requires a ChatGPT Pro/Teams subscription.")
+		fmt.Println()
+	}
+	fmt.Println("  2. OpenAI API key")
+	fmt.Println("     Use an API key from platform.openai.com")
+	fmt.Println("     Billed per token to your API account.")
+	fmt.Println()
+
+	// Check for existing Codex credentials as option 3
+	codexCreds := &credential.CodexCredentials{}
+	hasExistingCreds := codexCreds.HasCodexCredentials()
+	if hasExistingCreds {
+		fmt.Println("  3. Import existing Codex credentials")
+		fmt.Println("     Use OAuth tokens from your local Codex CLI installation.")
+		fmt.Println()
+	}
+
+	var validChoices string
+	if codexAvailable && hasExistingCreds {
+		validChoices = "1, 2, or 3"
+	} else if codexAvailable {
+		validChoices = "1 or 2"
+	} else if hasExistingCreds {
+		validChoices = "2 or 3"
+	} else {
+		validChoices = "2"
+	}
+
+	fmt.Printf("Enter choice [%s]: ", validChoices)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(response)
+
+	// Default to option 1 if codex available, otherwise 2
+	if response == "" {
+		if codexAvailable {
+			response = "1"
+		} else {
+			response = "2"
+		}
+	}
+
+	switch response {
+	case "1":
+		if !codexAvailable {
+			fmt.Println("Codex CLI is not installed. Please choose another option.")
+			return grantOpenAI() // Recurse to show menu again
+		}
+		return grantOpenAIViaCodexLogin()
+
+	case "2":
+		return grantOpenAIViaAPIKey(reader)
+
+	case "3":
+		if !hasExistingCreds {
+			fmt.Println("No existing Codex credentials found. Please choose another option.")
+			return grantOpenAI() // Recurse to show menu again
+		}
+		return grantOpenAIViaExistingCreds(codexCreds)
+
+	default:
+		fmt.Printf("Invalid choice: %s\n", response)
+		return grantOpenAI() // Recurse to show menu again
+	}
+}
+
+// isCodexAvailable checks if the codex CLI is installed.
+func isCodexAvailable() bool {
+	cmd := exec.Command("codex", "--version")
+	return cmd.Run() == nil
+}
+
+// grantOpenAIViaCodexLogin uses `codex login` for OAuth authentication.
+func grantOpenAIViaCodexLogin() error {
+	fmt.Println()
+	fmt.Println("Running 'codex login' for authentication...")
+	fmt.Println("This may open a browser for authentication.")
+	fmt.Println()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "codex", "login")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("codex login failed: %w", err)
+	}
+
+	// After successful login, import the credentials
+	codexCreds := &credential.CodexCredentials{}
+	token, err := codexCreds.GetCodexCredentials()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve credentials after login: %w", err)
+	}
+
+	cred := codexCreds.CreateCredentialFromCodex(token)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nOpenAI credential saved to %s\n", credPath)
+	fmt.Println("\nYou can now run 'moat codex' to start Codex.")
+	return nil
+}
+
+// grantOpenAIViaAPIKey prompts for an API key.
+func grantOpenAIViaAPIKey(reader *bufio.Reader) error {
+	auth := &credential.OpenAIAuth{}
+
+	// Get API key from environment variable or interactive prompt
+	var apiKey string
+	if envKey := os.Getenv("OPENAI_API_KEY"); envKey != "" {
+		apiKey = envKey
+		fmt.Println("Using API key from OPENAI_API_KEY environment variable")
+	} else {
+		var err error
+		apiKey, err = auth.PromptForAPIKey()
+		if err != nil {
+			return fmt.Errorf("reading API key: %w", err)
+		}
+	}
+
+	// Ask user if they want to validate the key
+	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "" || response == "y" || response == "yes" {
+		fmt.Println("\nValidating API key...")
+		fmt.Println("  GET https://api.openai.com/v1/models")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := auth.ValidateKey(ctx, apiKey); err != nil {
+			return fmt.Errorf("validating API key: %w", err)
+		}
+		fmt.Println("API key is valid.")
+	} else {
+		fmt.Println("Skipping validation.")
+	}
+
+	cred := auth.CreateCredential(apiKey)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("OpenAI API key saved to %s\n", credPath)
+	return nil
+}
+
+// grantOpenAIViaExistingCreds imports existing Codex credentials.
+func grantOpenAIViaExistingCreds(codexCreds *credential.CodexCredentials) error {
+	token, _ := codexCreds.GetCodexCredentials()
+
+	fmt.Println()
+	fmt.Println("Found Codex credentials.")
+	if !token.ExpiresAtTime().IsZero() {
+		if token.IsExpired() {
+			fmt.Printf("  Status: Expired (was valid until %s)\n", token.ExpiresAtTime().Format(time.RFC3339))
+			fmt.Println("\nWarning: Token has expired. You may need to re-authenticate in Codex.")
+			fmt.Println("Run 'codex login' to refresh your credentials, then try again.")
+			return fmt.Errorf("Codex token has expired")
+		}
+		fmt.Printf("  Expires: %s\n", token.ExpiresAtTime().Format(time.RFC3339))
+	}
+
+	cred := codexCreds.CreateCredentialFromCodex(token)
+	credPath, err := saveCredential(cred)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nCodex credentials imported to %s\n", credPath)
+	fmt.Println("\nYou can now run 'moat codex' to start Codex.")
+	if !token.ExpiresAtTime().IsZero() {
+		remaining := time.Until(token.ExpiresAtTime())
+		if remaining > 24*time.Hour {
+			fmt.Printf("Token expires in %d days. Re-run 'moat grant openai' if it expires.\n", int(remaining.Hours()/24))
+		} else {
+			fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant openai' if it expires.\n", remaining.Hours())
 		}
 	}
 	return nil
