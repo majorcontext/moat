@@ -4,7 +4,9 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // AWS grant flags
@@ -27,45 +30,40 @@ var (
 	awsExternalID      string
 )
 
-// getGitHubClientID returns the GitHub OAuth client ID from environment.
-// Returns empty string if not configured.
-func getGitHubClientID() string {
-	return os.Getenv("MOAT_GITHUB_CLIENT_ID")
+// getGitHubTokenFromEnv returns a GitHub token from environment variables.
+// Checks GITHUB_TOKEN first, then GH_TOKEN (used by gh CLI).
+func getGitHubTokenFromEnv() string {
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	return os.Getenv("GH_TOKEN")
 }
 
 var grantCmd = &cobra.Command{
-	Use:   "grant <provider>[:<scopes>]",
+	Use:   "grant <provider>",
 	Short: "Grant a credential for use in runs",
 	Long: `Grant a credential that can be used by agent runs.
 
 Credentials are stored securely and injected into agent containers when
-requested via the --grant flag on 'agent run'.
+requested via the --grant flag on 'moat run'.
 
 Supported providers:
-  github      GitHub OAuth (uses device flow for authentication)
+  github      GitHub token (from gh CLI, environment, or interactive prompt)
   anthropic   Anthropic API key or Claude Code OAuth credentials
   aws         AWS IAM role assumption (uses host credentials to assume role)
 
-Scope format:
-  provider              Use default scopes
-  provider:scope        Single scope
-  provider:s1,s2,s3     Multiple scopes (comma-separated)
-
-GitHub scopes (see https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps):
-  repo                  Full control of private repositories (default)
-  read:user             Read user profile data
-  user:email            Access user email addresses
-  workflow              Update GitHub Action workflows
+GitHub authentication (in order of precedence):
+  1. GITHUB_TOKEN or GH_TOKEN environment variable
+  2. gh CLI token (if gh is installed and authenticated)
+  3. Interactive prompt for Personal Access Token
 
 Examples:
-  # Grant GitHub access with default scopes (repo)
+  # Grant GitHub access (auto-detects gh CLI or prompts for token)
   moat grant github
 
-  # Grant GitHub access with repo scope only
-  moat grant github:repo
-
-  # Grant GitHub access with multiple scopes
-  moat grant github:repo,read:user,user:email
+  # Grant GitHub access from environment variable
+  export GITHUB_TOKEN="ghp_..."
+  moat grant github
 
   # Use the credential in a run
   moat run my-agent . --grant github
@@ -74,11 +72,8 @@ Examples:
   moat grant anthropic
 
   # Grant Anthropic API access from environment variable
-  export ANTHROPIC_API_KEY="sk-ant-..."  # set in your shell profile
+  export ANTHROPIC_API_KEY="sk-ant-..."
   moat grant anthropic
-
-  # Use Anthropic credential for Claude Code
-  moat run my-agent . --grant anthropic
 
   # Grant AWS access via IAM role
   moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole
@@ -86,9 +81,6 @@ Examples:
   # Grant AWS with custom session duration and region
   moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole \
     --region=us-west-2 --session-duration=1h
-
-  # Use AWS credential in a run (credentials auto-refresh)
-  moat run my-agent . --grant aws
 
 If you have Claude Code installed and logged in, 'moat grant anthropic' will
 offer to import your existing OAuth credentials. This is the easiest way to
@@ -125,21 +117,12 @@ func saveCredential(cred credential.Credential) (string, error) {
 }
 
 func runGrant(cmd *cobra.Command, args []string) error {
-	arg := args[0]
-
-	// Parse provider:scopes format
-	parts := strings.SplitN(arg, ":", 2)
-	providerStr := parts[0]
-	var scopes []string
-	if len(parts) > 1 {
-		scopes = strings.Split(parts[1], ",")
-	}
-
+	providerStr := args[0]
 	provider := credential.Provider(providerStr)
 
 	switch provider {
 	case credential.ProviderGitHub:
-		return grantGitHub(scopes)
+		return grantGitHub()
 	case credential.ProviderAnthropic:
 		return grantAnthropic()
 	case credential.ProviderAWS:
@@ -160,56 +143,101 @@ Options:
 	}
 }
 
-func grantGitHub(scopes []string) error {
-	clientID := getGitHubClientID()
-	if clientID == "" {
-		return fmt.Errorf(`GitHub OAuth App not configured
+func grantGitHub() error {
+	reader := bufio.NewReader(os.Stdin)
 
-To use 'moat grant github', set the MOAT_GITHUB_CLIENT_ID environment variable:
-
-  export MOAT_GITHUB_CLIENT_ID="your-client-id"
-
-To create a GitHub OAuth App:
-  1. Go to https://github.com/settings/developers
-  2. Click "New OAuth App"
-  3. Enable "Device Flow" in the app settings
-  4. Copy the Client ID
-
-See README.md for detailed setup instructions.`)
+	// Priority 1: Environment variable
+	if token := getGitHubTokenFromEnv(); token != "" {
+		fmt.Println("Using token from environment variable")
+		return saveGitHubToken(token)
 	}
 
-	if len(scopes) == 0 {
-		scopes = []string{"repo"}
+	// Priority 2: gh CLI
+	if token, err := getGHCLIToken(); err == nil && token != "" {
+		fmt.Println("Found gh CLI authentication")
+		fmt.Print("Use token from gh CLI? [Y/n]: ")
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+
+		if response == "" || response == "y" || response == "yes" {
+			return saveGitHubToken(token)
+		}
+		fmt.Println() // spacing before prompt
 	}
 
-	auth := &credential.GitHubDeviceAuth{
-		ClientID: clientID,
-		Scopes:   scopes,
+	// Priority 3: Interactive prompt
+	fmt.Println(`Enter a GitHub Personal Access Token.
+
+To create one:
+  1. Visit https://github.com/settings/tokens
+  2. Click "Generate new token" → "Fine-grained token" (recommended)
+  3. Set expiration and select repositories
+  4. Under "Repository permissions", grant "Contents" read/write access
+  5. Copy the generated token`)
+	fmt.Print("Token: ")
+	tokenBytes, err := readPassword()
+	if err != nil {
+		return fmt.Errorf("reading token: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	fmt.Println() // newline after hidden input
+
+	if token == "" {
+		return fmt.Errorf("no token provided")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	return saveGitHubToken(token)
+}
+
+// getGHCLIToken retrieves the GitHub token from gh CLI if available.
+func getGHCLIToken() (string, error) {
+	cmd := exec.Command("gh", "auth", "token")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// saveGitHubToken validates and saves a GitHub token.
+func saveGitHubToken(token string) error {
+	// Validate token with a simple API call
+	fmt.Println("Validating token...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	fmt.Println("Initiating GitHub device flow...")
-
-	deviceCode, err := auth.RequestDeviceCode(ctx)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
 	if err != nil {
-		return fmt.Errorf("requesting device code: %w", err)
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "moat")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("validating token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return fmt.Errorf("invalid token (401 Unauthorized)")
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unexpected status validating token: %d", resp.StatusCode)
 	}
 
-	fmt.Printf("\nTo authorize, visit: %s\n", deviceCode.VerificationURI)
-	fmt.Printf("Enter code: %s\n\n", deviceCode.UserCode)
-	fmt.Println("Waiting for authorization...")
-
-	token, err := auth.PollForToken(ctx, deviceCode.DeviceCode, deviceCode.Interval)
-	if err != nil {
-		return fmt.Errorf("getting token: %w", err)
+	// Parse response to show username
+	var user struct {
+		Login string `json:"login"`
+	}
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&user); decodeErr == nil && user.Login != "" {
+		fmt.Printf("Authenticated as: %s\n", user.Login)
 	}
 
 	cred := credential.Credential{
 		Provider:  credential.ProviderGitHub,
-		Token:     token.AccessToken,
-		Scopes:    scopes,
+		Token:     token,
 		CreatedAt: time.Now(),
 	}
 	credPath, err := saveCredential(cred)
@@ -218,6 +246,18 @@ See README.md for detailed setup instructions.`)
 	}
 	fmt.Printf("GitHub credential saved to %s\n", credPath)
 	return nil
+}
+
+// readPassword reads a password from stdin without echoing.
+func readPassword() ([]byte, error) {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		return term.ReadPassword(fd)
+	}
+	// Not a terminal, read normally (for piped input)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	return []byte(strings.TrimSuffix(line, "\n")), err
 }
 
 func grantAnthropic() error {

@@ -64,3 +64,39 @@ func (c *AWSConfig) SessionDuration() (time.Duration, error) {
 	}
 	return d, nil
 }
+
+// ImpliedDependencies returns the dependencies implied by a list of grants.
+// For example, a "github" grant implies "gh" and "git" dependencies.
+func ImpliedDependencies(grants []string) []string {
+	seen := make(map[string]bool)
+	var deps []string
+
+	for _, grant := range grants {
+		// Parse provider from "provider" or "provider:scope" format
+		provider := Provider(grant)
+		for i, c := range grant {
+			if c == ':' {
+				provider = Provider(grant[:i])
+				break
+			}
+		}
+
+		// Get implied dependencies for this provider
+		var implied []string
+		switch provider {
+		case ProviderGitHub:
+			implied = GitHubImpliedDeps()
+		case ProviderAWS:
+			implied = AWSImpliedDeps()
+		}
+
+		for _, dep := range implied {
+			if !seen[dep] {
+				seen[dep] = true
+				deps = append(deps, dep)
+			}
+		}
+	}
+
+	return deps
+}

@@ -39,18 +39,18 @@ go build -o moat ./cmd/moat
 
 ## Quick Start
 
-> **First time?** You'll need a GitHub OAuth App with device flow enabled. See [Setup Notes](#setup-notes) for a 2-minute setup.
+> **First time?** If you have `gh` CLI installed and authenticated, GitHub credentials work automatically. Otherwise, you can use a Personal Access Token.
 
 ### 1. Grant credentials (one time)
 
 ```bash
 $ moat grant github
 
-To authorize, visit: https://github.com/login/device
-Enter code: ABCD-1234
-
-Waiting for authorization...
-GitHub credential saved successfully
+Found gh CLI authentication
+Use token from gh CLI? [Y/n]: y
+Validating token...
+Authenticated as: your-username
+GitHub credential saved to ~/.moat/credentials/github.enc
 ```
 
 ### 2. Run a command with injected credentials
@@ -243,9 +243,7 @@ The credential broker is the security core. Agents request scoped capabilitiesâ€
 ### Granting access
 
 ```bash
-moat grant github              # GitHub device flow
-moat grant github:repo         # Specific scope
-moat grant github:repo,user    # Multiple scopes
+moat grant github              # GitHub (from gh CLI, env var, or PAT prompt)
 moat grant aws --role=ARN      # AWS IAM role (see AWS credentials below)
 ```
 
@@ -577,12 +575,6 @@ In interactive mode, `Ctrl+C` is passed through to the container process (e.g., 
 **Audit logging**: Events are hash-chained and organized into a Merkle tree. Ed25519 attestations provide cryptographic proof of authenticity.
 
 ## Setup Notes
-
-### GitHub OAuth App (for `moat grant github`)
-
-1. Go to [GitHub Developer Settings](https://github.com/settings/developers) â†’ New OAuth App
-2. Enable **Device Flow** in the app settings
-3. Set `MOAT_GITHUB_CLIENT_ID` in your shell profile
 
 ### Trusting the CA certificate (for hostname routing)
 

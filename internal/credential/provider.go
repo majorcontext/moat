@@ -51,35 +51,6 @@ type ProviderResult struct {
 	CleanupPath string
 }
 
-// GitHubSetup implements ProviderSetup for GitHub credentials.
-type GitHubSetup struct{}
-
-// Provider returns the provider identifier.
-func (g *GitHubSetup) Provider() Provider {
-	return ProviderGitHub
-}
-
-// ConfigureProxy sets up proxy headers for GitHub.
-func (g *GitHubSetup) ConfigureProxy(p ProxyConfigurer, cred *Credential) {
-	p.SetCredential("api.github.com", "Bearer "+cred.Token)
-	p.SetCredential("github.com", "Bearer "+cred.Token)
-}
-
-// ContainerEnv returns environment variables for GitHub.
-func (g *GitHubSetup) ContainerEnv(cred *Credential) []string {
-	return nil // GitHub doesn't need special env vars
-}
-
-// ContainerMounts returns mounts for GitHub.
-func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([]container.MountConfig, string, error) {
-	return nil, "", nil // GitHub doesn't need special mounts
-}
-
-// Cleanup cleans up GitHub resources.
-func (g *GitHubSetup) Cleanup(cleanupPath string) {
-	// Nothing to clean up for GitHub
-}
-
 // providerSetups holds registered provider setups.
 var providerSetups = make(map[Provider]ProviderSetup)
 

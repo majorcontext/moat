@@ -1,0 +1,16 @@
+name: github-example
+
+# Request GitHub credentials - this automatically includes gh and git dependencies
+grants:
+  - github
+
+# Show authenticated user and top 3 open PRs
+command:
+  - sh
+  - -c
+  - |
+    echo "=== Authenticated User ==="
+    gh api /user --jq '{login, name, email}'
+    echo ""
+    echo "=== Your Open Pull Requests (top 3) ==="
+    gh search prs --author=@me --state=open --limit=3
