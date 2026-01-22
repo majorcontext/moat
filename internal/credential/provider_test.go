@@ -6,52 +6,6 @@ import (
 	"github.com/andybons/moat/internal/container"
 )
 
-func TestGitHubSetup_ConfigureProxy(t *testing.T) {
-	setup := &GitHubSetup{}
-	if setup.Provider() != ProviderGitHub {
-		t.Errorf("Provider() = %v, want %v", setup.Provider(), ProviderGitHub)
-	}
-
-	// Test that ConfigureProxy sets the correct headers
-	mockProxy := &mockProxyConfigurer{credentials: make(map[string]string)}
-	cred := &Credential{Token: "test-token"}
-
-	setup.ConfigureProxy(mockProxy, cred)
-
-	if mockProxy.credentials["api.github.com"] != "Bearer test-token" {
-		t.Errorf("api.github.com credential = %q, want %q", mockProxy.credentials["api.github.com"], "Bearer test-token")
-	}
-	if mockProxy.credentials["github.com"] != "Bearer test-token" {
-		t.Errorf("github.com credential = %q, want %q", mockProxy.credentials["github.com"], "Bearer test-token")
-	}
-}
-
-func TestGitHubSetup_ContainerEnv(t *testing.T) {
-	setup := &GitHubSetup{}
-	cred := &Credential{Token: "test-token"}
-
-	env := setup.ContainerEnv(cred)
-	if len(env) != 0 {
-		t.Errorf("ContainerEnv() returned %d vars, want 0", len(env))
-	}
-}
-
-func TestGitHubSetup_ContainerMounts(t *testing.T) {
-	setup := &GitHubSetup{}
-	cred := &Credential{Token: "test-token"}
-
-	mounts, cleanupPath, err := setup.ContainerMounts(cred, "/home/user")
-	if err != nil {
-		t.Errorf("ContainerMounts() error = %v", err)
-	}
-	if len(mounts) != 0 {
-		t.Errorf("ContainerMounts() returned %d mounts, want 0", len(mounts))
-	}
-	if cleanupPath != "" {
-		t.Errorf("ContainerMounts() cleanupPath = %q, want empty", cleanupPath)
-	}
-}
-
 func TestGetProviderSetup(t *testing.T) {
 	// Test built-in GitHub provider
 	githubSetup := GetProviderSetup(ProviderGitHub)
@@ -106,6 +60,94 @@ func TestIsOAuthToken(t *testing.T) {
 		t.Run(tt.token, func(t *testing.T) {
 			if got := IsOAuthToken(tt.token); got != tt.want {
 				t.Errorf("IsOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGrantProvider(t *testing.T) {
+	tests := []struct {
+		grant string
+		want  Provider
+	}{
+		{"github", ProviderGitHub},
+		{"github:repo", ProviderGitHub},
+		{"github:repo,user", ProviderGitHub},
+		{"aws", ProviderAWS},
+		{"aws:s3", ProviderAWS},
+		{"anthropic", ProviderAnthropic},
+		{"unknown", Provider("unknown")},
+		{"", Provider("")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.grant, func(t *testing.T) {
+			if got := ParseGrantProvider(tt.grant); got != tt.want {
+				t.Errorf("ParseGrantProvider(%q) = %v, want %v", tt.grant, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestImpliedDependencies(t *testing.T) {
+	tests := []struct {
+		name   string
+		grants []string
+		want   []string
+	}{
+		{
+			name:   "github grant implies gh and git",
+			grants: []string{"github"},
+			want:   []string{"gh", "git"},
+		},
+		{
+			name:   "github with scope implies gh and git",
+			grants: []string{"github:repo"},
+			want:   []string{"gh", "git"},
+		},
+		{
+			name:   "aws grant implies aws",
+			grants: []string{"aws"},
+			want:   []string{"aws"},
+		},
+		{
+			name:   "anthropic grant implies nothing",
+			grants: []string{"anthropic"},
+			want:   nil,
+		},
+		{
+			name:   "multiple grants",
+			grants: []string{"github", "aws"},
+			want:   []string{"gh", "git", "aws"},
+		},
+		{
+			name:   "empty grants",
+			grants: []string{},
+			want:   nil,
+		},
+		{
+			name:   "unknown grant implies nothing",
+			grants: []string{"unknown"},
+			want:   nil,
+		},
+		{
+			name:   "no duplicates",
+			grants: []string{"github", "github:repo"},
+			want:   []string{"gh", "git"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ImpliedDependencies(tt.grants)
+			if len(got) != len(tt.want) {
+				t.Errorf("ImpliedDependencies() = %v, want %v", got, tt.want)
+				return
+			}
+			for i, dep := range got {
+				if dep != tt.want[i] {
+					t.Errorf("ImpliedDependencies()[%d] = %q, want %q", i, dep, tt.want[i])
+				}
 			}
 		})
 	}

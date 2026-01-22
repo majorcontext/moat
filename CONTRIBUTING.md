@@ -38,7 +38,7 @@ internal/
   audit/             Tamper-proof audit logging with cryptographic verification
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
-  credential/        Secure credential storage, GitHub OAuth device flow
+  credential/        Secure credential storage (GitHub, Anthropic, AWS)
   image/             Runtime-based image selection (node/python/go → base image)
   log/               Structured logging (slog wrapper)
   proxy/             TLS-intercepting proxy for credential injection
@@ -49,7 +49,7 @@ internal/
 ### Key Flows
 
 **Credential Injection:**
-1. `moat grant github` → OAuth device flow → token stored encrypted
+1. `moat grant github` → token from gh CLI, env var, or PAT prompt → stored encrypted
 2. `moat run --grant github` → proxy started → container traffic routed through proxy
 3. Proxy intercepts HTTPS, injects `Authorization` headers for matching hosts
 

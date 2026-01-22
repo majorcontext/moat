@@ -3,6 +3,7 @@ package credential
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -63,4 +64,43 @@ func (c *AWSConfig) SessionDuration() (time.Duration, error) {
 		return 0, fmt.Errorf("session duration %v exceeds maximum 12h", d)
 	}
 	return d, nil
+}
+
+// ParseGrantProvider extracts the provider from a grant string.
+// Grants can be "provider" or "provider:scope" format.
+// For example, "github:repo" returns ProviderGitHub.
+func ParseGrantProvider(grant string) Provider {
+	if idx := strings.Index(grant, ":"); idx != -1 {
+		return Provider(grant[:idx])
+	}
+	return Provider(grant)
+}
+
+// ImpliedDependencies returns the dependencies implied by a list of grants.
+// For example, a "github" grant implies "gh" and "git" dependencies.
+func ImpliedDependencies(grants []string) []string {
+	seen := make(map[string]bool)
+	var deps []string
+
+	for _, grant := range grants {
+		provider := ParseGrantProvider(grant)
+
+		// Get implied dependencies for this provider
+		var implied []string
+		switch provider {
+		case ProviderGitHub:
+			implied = GitHubImpliedDeps()
+		case ProviderAWS:
+			implied = AWSImpliedDeps()
+		}
+
+		for _, dep := range implied {
+			if !seen[dep] {
+				seen[dep] = true
+				deps = append(deps, dep)
+			}
+		}
+	}
+
+	return deps
 }

@@ -85,6 +85,7 @@ gh:
   asset: "gh_{version}_linux_amd64.tar.gz"
   bin: "gh_{version}_linux_amd64/bin/gh"
   default: "2.40.0"
+  requires: [git]
 
 # Database clients (apt)
 psql:

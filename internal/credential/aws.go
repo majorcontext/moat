@@ -54,3 +54,8 @@ func ParseRoleARN(arn string) (*AWSConfig, error) {
 		Region:  "us-east-1", // default region
 	}, nil
 }
+
+// AWSImpliedDeps returns the dependencies implied by an AWS grant.
+func AWSImpliedDeps() []string {
+	return []string{"aws"}
+}

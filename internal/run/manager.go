@@ -750,9 +750,18 @@ region = %s
 
 	// Parse and validate dependencies
 	var depList []deps.Dependency
-	if opts.Config != nil && len(opts.Config.Dependencies) > 0 {
+	var allDeps []string
+	if opts.Config != nil {
+		allDeps = append(allDeps, opts.Config.Dependencies...)
+	}
+
+	// Add implied dependencies from grants (e.g., github grant implies gh and git)
+	impliedDeps := credential.ImpliedDependencies(opts.Grants)
+	allDeps = append(allDeps, impliedDeps...)
+
+	if len(allDeps) > 0 {
 		var err error
-		depList, err = deps.ParseAll(opts.Config.Dependencies)
+		depList, err = deps.ParseAll(allDeps)
 		if err != nil {
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("parsing dependencies: %w", err)
