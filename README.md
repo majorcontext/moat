@@ -1,61 +1,16 @@
 # Moat
 
-> **Early Release:** This project is in active development. APIs and configuration formats may change. Feedback and contributions welcome.
+> **Early Release:** This project is in active development. APIs and configuration formats may change.
 
-Run AI agents locally with one command. Zero Docker knowledge. Zero secret copying. Full visibility.
+Run agents in containers with credential injection and full observability.
 
-## Philosophy
-
-**Moat is the execution substrate. Orchestration lives above it.**
-
-Moat is a single-run execution environment for agents or processes. One command runs one agent against one workspace.
-
-The primary use case is **local execution**: exploring new codebases, packaging dependencies easily, and running agents with full observability. By default, you stay attached and monitor the process in real-time—detaching to background is optional.
-
-```
-moat claude ./path/to/workspace
+```bash
+moat claude ./workspace
 ```
 
-What happens when you run this:
-- An isolated container is created with your code mounted
-- Claude Code is pre-installed and ready to go
-- Credentials are injected at the network layer (the agent never sees your tokens)
-- Every API call, log line, and network request is captured
-- You see output in real-time (attached by default)
-- When it's done, the workspace is disposable—or you can keep the artifacts
+This starts Claude Code in an isolated container with your workspace mounted. Credentials are injected at runtime—Claude authenticates normally but never sees your tokens. Every API call, log line, and network request is captured.
 
-### Scope and Non-Goals
-
-**Moat does:**
-- Run a single agent in an isolated environment (attached by default)
-- Package dependencies automatically based on runtime detection
-- Inject credentials securely at the network layer
-- Capture full observability (logs, network, audit trail)
-- Support detach/reattach for background execution
-
-**Moat does not:**
-- Orchestrate multiple agents
-- Coordinate parallel runs
-- Perform task planning or delegation
-- Manage shared state across runs
-
-### Composition Philosophy
-
-Moat is designed to be composed with:
-- Shell scripting (loops, `parallel`, etc.)
-- External orchestrators
-- Agent frameworks
-
-Parallel execution and workflow coordination are intentionally left to the shell or higher-level tools.
-
-### Design Principles
-
-- **Small surface area**: One command, one run, clear semantics
-- **Predictable behavior**: Runs are independent and self-contained
-- **Unix composability**: Compose moat with existing tools
-- **Clear trust boundaries**: Explicit about what has access to credentials
-
-For more on design philosophy and decision rationale, see [VISION.md](VISION.md).
+For design rationale and principles, see [VISION.md](VISION.md).
 
 ## Installation
 
@@ -189,16 +144,6 @@ moat claude
 ```
 
 The API key is injected at the network layer—Claude Code never sees it directly.
-
-## Why This Matters
-
-| Traditional approach | With Moat |
-|---------------------|---------------|
-| `GITHUB_TOKEN=xxx` in env | Token never in container |
-| Agent could log/exfiltrate credentials | Token injected at network layer only |
-| No visibility into API calls | Full network trace for auditing |
-| Runs directly on your machine | Isolated container sandbox |
-| Manage Docker, volumes, networks | Just run the agent |
 
 ## Configuration
 
