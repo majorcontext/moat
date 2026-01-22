@@ -21,11 +21,17 @@ const (
 	// openaiKeyPrefix is the expected prefix for OpenAI API keys.
 	openaiKeyPrefix = "sk-"
 
-	// CodexKeychainService is the macOS Keychain service name for Codex credentials.
-	CodexKeychainService = "codex-credentials"
+	// codexKeychainService is the macOS Keychain service name for Codex credentials.
+	codexKeychainService = "codex-credentials"
 
-	// CodexCredentialsFile is the relative path to Codex's auth file.
-	CodexCredentialsFile = ".codex/auth.json"
+	// codexCredentialsFile is the relative path to Codex's auth file.
+	codexCredentialsFile = ".codex/auth.json"
+
+	// Token length thresholds for distinguishing API keys from OAuth tokens.
+	// OpenAI API keys are typically 50-60 characters.
+	// ChatGPT subscription tokens are longer JWT or opaque tokens.
+	apiKeyMaxLength         = 100
+	subscriptionTokenMinLen = 50
 )
 
 // OpenAIAuth handles OpenAI API key authentication.
@@ -194,7 +200,7 @@ func (c *CodexCredentials) GetCodexCredentials() (*CodexAuthToken, error) {
 func (c *CodexCredentials) getFromKeychain() (*CodexAuthToken, error) {
 	// Use the security command to retrieve the password
 	cmd := exec.Command("security", "find-generic-password",
-		"-s", CodexKeychainService,
+		"-s", codexKeychainService,
 		"-w", // Output only the password
 	)
 
@@ -223,7 +229,7 @@ func (c *CodexCredentials) getFromFile() (*CodexAuthToken, error) {
 		return nil, fmt.Errorf("getting home directory: %w", err)
 	}
 
-	credPath := filepath.Join(home, CodexCredentialsFile)
+	credPath := filepath.Join(home, codexCredentialsFile)
 	data, err := os.ReadFile(credPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -269,12 +275,10 @@ func (c *CodexCredentials) HasCodexCredentials() bool {
 
 // IsCodexToken returns true if the token appears to be a Codex ChatGPT subscription token.
 // ChatGPT tokens are typically longer than API keys and have a different format.
+// This is a heuristic based on token format - API keys start with "sk-" and are shorter.
 func IsCodexToken(token string) bool {
-	// OpenAI API keys start with sk- and are typically ~50-60 chars
-	// ChatGPT subscription tokens are typically longer JWTs or opaque tokens
-	// This is a heuristic - adjust as needed based on actual token formats
-	if strings.HasPrefix(token, "sk-") && len(token) < 100 {
+	if strings.HasPrefix(token, openaiKeyPrefix) && len(token) < apiKeyMaxLength {
 		return false // Likely an API key
 	}
-	return len(token) > 50 // Likely a subscription token
+	return len(token) > subscriptionTokenMinLen // Likely a subscription token
 }

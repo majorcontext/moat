@@ -300,74 +300,81 @@ func grantAnthropic() error {
 	// Check if claude is available for setup-token
 	claudeAvailable := isClaudeAvailable()
 
-	// Offer choices to user
-	fmt.Println("Choose authentication method:")
-	fmt.Println()
-	if claudeAvailable {
-		fmt.Println("  1. Claude subscription (recommended)")
-		fmt.Println("     Uses 'claude setup-token' to get a long-lived OAuth token.")
-		fmt.Println("     Requires a Claude Pro/Max subscription.")
-		fmt.Println()
-	}
-	fmt.Println("  2. Anthropic API key")
-	fmt.Println("     Use an API key from console.anthropic.com")
-	fmt.Println("     Billed per token to your API account.")
-	fmt.Println()
-
 	// Check for existing Claude Code credentials as option 3
 	claudeCode := &credential.ClaudeCodeCredentials{}
 	hasExistingCreds := claudeCode.HasClaudeCodeCredentials()
-	if hasExistingCreds {
-		fmt.Println("  3. Import existing Claude Code credentials")
-		fmt.Println("     Use OAuth tokens from your local Claude Code installation.")
-		fmt.Println()
-	}
 
-	var validChoices string
-	if claudeAvailable && hasExistingCreds {
-		validChoices = "1, 2, or 3"
-	} else if claudeAvailable {
-		validChoices = "1 or 2"
-	} else if hasExistingCreds {
-		validChoices = "2 or 3"
-	} else {
-		validChoices = "2"
-	}
-
-	fmt.Printf("Enter choice [%s]: ", validChoices)
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(response)
-
-	// Default to option 1 if claude available, otherwise 2
-	if response == "" {
-		if claudeAvailable {
-			response = "1"
-		} else {
-			response = "2"
-		}
-	}
-
-	switch response {
-	case "1":
-		if !claudeAvailable {
-			fmt.Println("Claude Code is not installed. Please choose another option.")
-			return grantAnthropic() // Recurse to show menu again
-		}
-		return grantAnthropicViaSetupToken()
-
-	case "2":
+	// If only API key is available, skip the menu
+	if !claudeAvailable && !hasExistingCreds {
 		return grantAnthropicViaAPIKey(reader)
+	}
 
-	case "3":
-		if !hasExistingCreds {
-			fmt.Println("No existing Claude Code credentials found. Please choose another option.")
-			return grantAnthropic() // Recurse to show menu again
+	for {
+		// Offer choices to user
+		fmt.Println("Choose authentication method:")
+		fmt.Println()
+		if claudeAvailable {
+			fmt.Println("  1. Claude subscription (recommended)")
+			fmt.Println("     Uses 'claude setup-token' to get a long-lived OAuth token.")
+			fmt.Println("     Requires a Claude Pro/Max subscription.")
+			fmt.Println()
 		}
-		return grantAnthropicViaExistingCreds(claudeCode)
+		fmt.Println("  2. Anthropic API key")
+		fmt.Println("     Use an API key from console.anthropic.com")
+		fmt.Println("     Billed per token to your API account.")
+		fmt.Println()
 
-	default:
-		fmt.Printf("Invalid choice: %s\n", response)
-		return grantAnthropic() // Recurse to show menu again
+		if hasExistingCreds {
+			fmt.Println("  3. Import existing Claude Code credentials")
+			fmt.Println("     Use OAuth tokens from your local Claude Code installation.")
+			fmt.Println()
+		}
+
+		var validChoices string
+		if claudeAvailable && hasExistingCreds {
+			validChoices = "1, 2, or 3"
+		} else if claudeAvailable {
+			validChoices = "1 or 2"
+		} else {
+			// hasExistingCreds must be true (we handled !claudeAvailable && !hasExistingCreds above)
+			validChoices = "2 or 3"
+		}
+
+		fmt.Printf("Enter choice [%s]: ", validChoices)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+
+		// Default to option 1 if claude available, otherwise 2
+		if response == "" {
+			if claudeAvailable {
+				response = "1"
+			} else {
+				response = "2"
+			}
+		}
+
+		switch response {
+		case "1":
+			if !claudeAvailable {
+				fmt.Println("Claude Code is not installed. Please choose another option.")
+				continue
+			}
+			return grantAnthropicViaSetupToken()
+
+		case "2":
+			return grantAnthropicViaAPIKey(reader)
+
+		case "3":
+			if !hasExistingCreds {
+				fmt.Println("No existing Claude Code credentials found. Please choose another option.")
+				continue
+			}
+			return grantAnthropicViaExistingCreds(claudeCode)
+
+		default:
+			fmt.Printf("Invalid choice: %s\n", response)
+			continue
+		}
 	}
 }
 
@@ -462,7 +469,7 @@ func stripANSI(s string) string {
 }
 
 // grantAnthropicViaAPIKey prompts for an API key.
-func grantAnthropicViaAPIKey(reader *bufio.Reader) error {
+func grantAnthropicViaAPIKey(_ *bufio.Reader) error {
 	auth := &credential.AnthropicAuth{}
 
 	// Get API key from environment variable or interactive prompt
@@ -478,32 +485,22 @@ func grantAnthropicViaAPIKey(reader *bufio.Reader) error {
 		}
 	}
 
-	// Ask user if they want to validate the key
-	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
+	// Validate the key
+	fmt.Println("\nValidating API key...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	if response == "" || response == "y" || response == "yes" {
-		fmt.Println("\nValidating API key...")
-		fmt.Println("  POST https://api.anthropic.com/v1/messages")
-		fmt.Println(`  {"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := auth.ValidateKey(ctx, apiKey); err != nil {
-			return fmt.Errorf("validating API key: %w", err)
-		}
-		fmt.Println("API key is valid.")
-	} else {
-		fmt.Println("Skipping validation.")
+	if err := auth.ValidateKey(ctx, apiKey); err != nil {
+		return fmt.Errorf("validating API key: %w", err)
 	}
+	fmt.Println("API key is valid.")
 
 	cred := auth.CreateCredential(apiKey)
 	credPath, err := saveCredential(cred)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Anthropic API key saved to %s\n", credPath)
+	fmt.Printf("\nAnthropic API key saved to %s\n", credPath)
 	return nil
 }
 
@@ -550,74 +547,81 @@ func grantOpenAI() error {
 	// Check if codex CLI is available for device flow login
 	codexAvailable := isCodexAvailable()
 
-	// Offer choices to user
-	fmt.Println("Choose authentication method:")
-	fmt.Println()
-	if codexAvailable {
-		fmt.Println("  1. ChatGPT subscription (recommended)")
-		fmt.Println("     Uses 'codex login' for OAuth authentication.")
-		fmt.Println("     Requires a ChatGPT Pro/Teams subscription.")
-		fmt.Println()
-	}
-	fmt.Println("  2. OpenAI API key")
-	fmt.Println("     Use an API key from platform.openai.com")
-	fmt.Println("     Billed per token to your API account.")
-	fmt.Println()
-
 	// Check for existing Codex credentials as option 3
 	codexCreds := &credential.CodexCredentials{}
 	hasExistingCreds := codexCreds.HasCodexCredentials()
-	if hasExistingCreds {
-		fmt.Println("  3. Import existing Codex credentials")
-		fmt.Println("     Use OAuth tokens from your local Codex CLI installation.")
-		fmt.Println()
-	}
 
-	var validChoices string
-	if codexAvailable && hasExistingCreds {
-		validChoices = "1, 2, or 3"
-	} else if codexAvailable {
-		validChoices = "1 or 2"
-	} else if hasExistingCreds {
-		validChoices = "2 or 3"
-	} else {
-		validChoices = "2"
-	}
-
-	fmt.Printf("Enter choice [%s]: ", validChoices)
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(response)
-
-	// Default to option 1 if codex available, otherwise 2
-	if response == "" {
-		if codexAvailable {
-			response = "1"
-		} else {
-			response = "2"
-		}
-	}
-
-	switch response {
-	case "1":
-		if !codexAvailable {
-			fmt.Println("Codex CLI is not installed. Please choose another option.")
-			return grantOpenAI() // Recurse to show menu again
-		}
-		return grantOpenAIViaCodexLogin()
-
-	case "2":
+	// If only API key is available, skip the menu
+	if !codexAvailable && !hasExistingCreds {
 		return grantOpenAIViaAPIKey(reader)
+	}
 
-	case "3":
-		if !hasExistingCreds {
-			fmt.Println("No existing Codex credentials found. Please choose another option.")
-			return grantOpenAI() // Recurse to show menu again
+	for {
+		// Offer choices to user
+		fmt.Println("Choose authentication method:")
+		fmt.Println()
+		if codexAvailable {
+			fmt.Println("  1. ChatGPT subscription (recommended)")
+			fmt.Println("     Uses 'codex login' for OAuth authentication.")
+			fmt.Println("     Requires a ChatGPT Pro/Teams subscription.")
+			fmt.Println()
 		}
-		return grantOpenAIViaExistingCreds(codexCreds)
+		fmt.Println("  2. OpenAI API key")
+		fmt.Println("     Use an API key from platform.openai.com")
+		fmt.Println("     Billed per token to your API account.")
+		fmt.Println()
 
-	default:
-		fmt.Printf("Invalid choice: %s\n", response)
-		return grantOpenAI() // Recurse to show menu again
+		if hasExistingCreds {
+			fmt.Println("  3. Import existing Codex credentials")
+			fmt.Println("     Use OAuth tokens from your local Codex CLI installation.")
+			fmt.Println()
+		}
+
+		var validChoices string
+		if codexAvailable && hasExistingCreds {
+			validChoices = "1, 2, or 3"
+		} else if codexAvailable {
+			validChoices = "1 or 2"
+		} else {
+			// hasExistingCreds must be true (we handled !codexAvailable && !hasExistingCreds above)
+			validChoices = "2 or 3"
+		}
+
+		fmt.Printf("Enter choice [%s]: ", validChoices)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+
+		// Default to option 1 if codex available, otherwise 2
+		if response == "" {
+			if codexAvailable {
+				response = "1"
+			} else {
+				response = "2"
+			}
+		}
+
+		switch response {
+		case "1":
+			if !codexAvailable {
+				fmt.Println("Codex CLI is not installed. Please choose another option.")
+				continue
+			}
+			return grantOpenAIViaCodexLogin()
+
+		case "2":
+			return grantOpenAIViaAPIKey(reader)
+
+		case "3":
+			if !hasExistingCreds {
+				fmt.Println("No existing Codex credentials found. Please choose another option.")
+				continue
+			}
+			return grantOpenAIViaExistingCreds(codexCreds)
+
+		default:
+			fmt.Printf("Invalid choice: %s\n", response)
+			continue
+		}
 	}
 }
 
@@ -664,7 +668,7 @@ func grantOpenAIViaCodexLogin() error {
 }
 
 // grantOpenAIViaAPIKey prompts for an API key.
-func grantOpenAIViaAPIKey(reader *bufio.Reader) error {
+func grantOpenAIViaAPIKey(_ *bufio.Reader) error {
 	auth := &credential.OpenAIAuth{}
 
 	// Get API key from environment variable or interactive prompt
@@ -680,31 +684,22 @@ func grantOpenAIViaAPIKey(reader *bufio.Reader) error {
 		}
 	}
 
-	// Ask user if they want to validate the key
-	fmt.Print("\nValidate API key with a test request? This makes a small API call. [Y/n]: ")
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
+	// Validate the key
+	fmt.Println("\nValidating API key...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	if response == "" || response == "y" || response == "yes" {
-		fmt.Println("\nValidating API key...")
-		fmt.Println("  GET https://api.openai.com/v1/models")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := auth.ValidateKey(ctx, apiKey); err != nil {
-			return fmt.Errorf("validating API key: %w", err)
-		}
-		fmt.Println("API key is valid.")
-	} else {
-		fmt.Println("Skipping validation.")
+	if err := auth.ValidateKey(ctx, apiKey); err != nil {
+		return fmt.Errorf("validating API key: %w", err)
 	}
+	fmt.Println("API key is valid.")
 
 	cred := auth.CreateCredential(apiKey)
 	credPath, err := saveCredential(cred)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("OpenAI API key saved to %s\n", credPath)
+	fmt.Printf("\nOpenAI API key saved to %s\n", credPath)
 	return nil
 }
 

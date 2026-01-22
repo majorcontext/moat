@@ -265,14 +265,14 @@ func Load(dir string) (*Config, error) {
 
 	// Validate Claude MCP server specs
 	for name, spec := range cfg.Claude.MCP {
-		if err := validateMCPServerSpec(name, spec); err != nil {
+		if err := validateMCPServerSpec("claude", name, spec); err != nil {
 			return nil, err
 		}
 	}
 
 	// Validate Codex MCP server specs
 	for name, spec := range cfg.Codex.MCP {
-		if err := validateMCPServerSpec(name, spec); err != nil {
+		if err := validateMCPServerSpec("codex", name, spec); err != nil {
 			return nil, err
 		}
 	}
@@ -315,9 +315,10 @@ func validateMarketplaceSpec(name string, spec MarketplaceSpec) error {
 }
 
 // validateMCPServerSpec validates an MCP server specification.
-func validateMCPServerSpec(name string, spec MCPServerSpec) error {
+// The section parameter is "claude" or "codex" for error messages.
+func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 	if spec.Command == "" {
-		return fmt.Errorf("claude.mcp.%s: 'command' is required", name)
+		return fmt.Errorf("%s.mcp.%s: 'command' is required", section, name)
 	}
 	return nil
 }
