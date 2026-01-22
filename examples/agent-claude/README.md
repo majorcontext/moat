@@ -4,24 +4,30 @@ Run Claude Code in an isolated container with automatic API key injection.
 
 ## Prerequisites
 
-1. An Anthropic API key (get one at https://console.anthropic.com/)
+1. An Anthropic API key (get one at https://console.anthropic.com/) or a Claude Pro/Max subscription
 2. Moat built and in your PATH
 
 ## Setup (One-Time)
 
-Store your Anthropic API key securely:
+Store your Anthropic credentials securely:
 
 ```bash
+# Option 1: API key
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
 moat grant anthropic
+
+# Option 2: Claude subscription (if claude CLI is installed)
+moat grant anthropic
+# Select option 1 for Claude subscription login
 ```
 
 Expected output:
 
 ```
-Validating Anthropic API key...
-✓ API key is valid
-✓ Credential stored for anthropic
+Validating API key...
+API key is valid.
+
+Anthropic API key saved to ~/.moat/credentials/anthropic
 ```
 
 This validates the key and stores it encrypted. The key is never passed to the container directly—it's injected at the network layer by the proxy.
@@ -33,21 +39,21 @@ This validates the key and stores it encrypted. The key is never passed to the c
 Start an interactive Claude Code session:
 
 ```bash
-moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code
+moat claude examples/agent-claude
 ```
 
 Claude Code will start in `/workspace` with your project files mounted.
 
 ### One-Shot Mode (Headless)
 
-Ask Claude to analyze or fix code without interaction using `-p` (print mode):
+Ask Claude to analyze or fix code without interaction using `-p`:
 
 ```bash
 # Analyze the code
-moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "what does this code do?"
+moat claude examples/agent-claude -p "what does this code do?"
 
 # Fix the bug
-moat run my-agent examples/claude-code --grant anthropic -- npx @anthropic-ai/claude-code -p "fix the bug in main.py"
+moat claude examples/agent-claude -p "fix the bug in main.py"
 ```
 
 ## The Test Project
@@ -75,7 +81,7 @@ Ask Claude Code to fix it and verify the output.
 
 ## What's Happening
 
-1. Moat creates an isolated container with Node.js 20
+1. Moat creates an isolated container with Node.js 20 and Claude Code
 2. A TLS-intercepting proxy starts and injects your API key into requests to `api.anthropic.com`
 3. Claude Code runs inside the container, unaware of the real API key
 4. All network requests are logged for observability
