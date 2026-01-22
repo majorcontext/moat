@@ -38,4 +38,5 @@
 //   - api.openai.com (API requests)
 //   - auth.openai.com (authentication)
 //   - platform.openai.com (account management)
+//   - chatgpt.com (subscription token validation)
 package codex

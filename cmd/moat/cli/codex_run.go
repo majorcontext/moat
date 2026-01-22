@@ -128,19 +128,22 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	cfg.Codex.SyncLogs = &syncLogs
 
 	// Allow network access to OpenAI for API access and auth
+	// chatgpt.com is needed for subscription token validation
 	cfg.Network.Allow = append(cfg.Network.Allow,
 		"api.openai.com",
 		"*.openai.com",
 		"auth.openai.com",
 		"platform.openai.com",
+		"chatgpt.com",
+		"*.chatgpt.com",
 	)
 
 	// Add allowed hosts if specified
 	cfg.Network.Allow = append(cfg.Network.Allow, codexAllowedHosts...)
 
 	// Add environment variables from flags
-	if err := parseEnvFlags(codexFlags.Env, cfg); err != nil {
-		return err
+	if envErr := parseEnvFlags(codexFlags.Env, cfg); envErr != nil {
+		return envErr
 	}
 
 	log.Debug("starting codex",
@@ -197,4 +200,3 @@ func runCodex(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-

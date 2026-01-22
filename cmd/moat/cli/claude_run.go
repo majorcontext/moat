@@ -175,8 +175,8 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	cfg.Network.Allow = append(cfg.Network.Allow, claudeAllowedHosts...)
 
 	// Add environment variables from flags
-	if err := parseEnvFlags(claudeFlags.Env, cfg); err != nil {
-		return err
+	if envErr := parseEnvFlags(claudeFlags.Env, cfg); envErr != nil {
+		return envErr
 	}
 
 	log.Debug("starting claude code",
@@ -233,4 +233,3 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-

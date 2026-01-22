@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
@@ -25,15 +26,19 @@ func (o *OpenAISetup) Provider() credential.Provider {
 // ConfigureProxy sets up proxy headers for OpenAI API.
 func (o *OpenAISetup) ConfigureProxy(p credential.ProxyConfigurer, cred *credential.Credential) {
 	// OpenAI uses Bearer token authentication
+	// api.openai.com is the main API endpoint
+	// chatgpt.com is used for subscription token validation
 	p.SetCredential("api.openai.com", "Bearer "+cred.Token)
+	p.SetCredential("chatgpt.com", "Bearer "+cred.Token)
 }
 
 // ContainerEnv returns environment variables for OpenAI.
 func (o *OpenAISetup) ContainerEnv(cred *credential.Credential) []string {
-	// Set OPENAI_API_KEY with a placeholder.
-	// This tells Codex CLI it's authenticated (skips login prompts).
+	// Set OPENAI_API_KEY with a placeholder that looks like a valid API key.
+	// This tells Codex CLI it's authenticated (skips login prompts) and
+	// bypasses local format validation.
 	// The real token is injected by the proxy at the network layer.
-	return []string{"OPENAI_API_KEY=" + credential.ProxyInjectedPlaceholder}
+	return []string{"OPENAI_API_KEY=" + credential.OpenAIAPIKeyPlaceholder}
 }
 
 // ContainerMounts returns mounts needed for OpenAI/Codex.
@@ -62,14 +67,21 @@ func (o *OpenAISetup) PopulateStagingDir(cred *credential.Credential, stagingDir
 
 	if credential.IsCodexToken(cred.Token) {
 		// ChatGPT subscription token - use the token structure
+		// If no expiration is set, use a far-future time to prevent local expiration checks
+		expiresAt := cred.ExpiresAt.Unix()
+		if cred.ExpiresAt.IsZero() || expiresAt < 0 {
+			// Set to 1 year from now - Codex CLI checks expiration locally
+			expiresAt = time.Now().Add(365 * 24 * time.Hour).Unix()
+		}
 		authFile.Token = &credential.CodexAuthToken{
 			AccessToken: credential.ProxyInjectedPlaceholder,
-			ExpiresAt:   cred.ExpiresAt.Unix(),
+			ExpiresAt:   expiresAt,
 		}
 	} else {
-		// API key - use the api_key field with placeholder
-		// The proxy will inject the real key in the Authorization header
-		authFile.APIKey = credential.ProxyInjectedPlaceholder
+		// API key - use a placeholder that looks like a valid API key
+		// This bypasses local format validation in Codex CLI.
+		// The proxy will inject the real key in the Authorization header.
+		authFile.APIKey = credential.OpenAIAPIKeyPlaceholder
 	}
 
 	authJSON, err := json.MarshalIndent(authFile, "", "  ")
@@ -96,7 +108,7 @@ func WriteCodexConfig(stagingDir string) error {
 inherit = "core"
 `
 
-	if err := os.WriteFile(filepath.Join(stagingDir, "config.toml"), []byte(config), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(stagingDir, "config.toml"), []byte(config), 0600); err != nil {
 		return fmt.Errorf("writing config.toml: %w", err)
 	}
 

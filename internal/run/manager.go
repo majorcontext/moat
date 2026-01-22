@@ -1408,6 +1408,66 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	return nil
 }
 
+// StartAttached starts a run with stdin/stdout/stderr attached from the beginning.
+// This is required for TUI applications (like Codex CLI) that need the terminal
+// connected before the process starts to properly detect terminal capabilities.
+// Unlike Start + Attach, this ensures the TTY is ready when the container command begins.
+func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
+	m.mu.Lock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	r.State = StateStarting
+	containerID := r.ContainerID
+	m.mu.Unlock()
+
+	// Start with attachment - this ensures TTY is connected before process starts
+	attachOpts := container.AttachOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		TTY:    true,
+	}
+
+	// Channel to receive the attach result
+	attachDone := make(chan error, 1)
+
+	go func() {
+		attachDone <- m.runtime.StartAttached(ctx, containerID, attachOpts)
+	}()
+
+	// Give the container a moment to start before checking state
+	// This is needed because StartAttached may start the container synchronously
+	time.Sleep(100 * time.Millisecond)
+
+	// Update state to running (the container has started)
+	m.mu.Lock()
+	if r.State == StateStarting {
+		r.State = StateRunning
+		r.StartedAt = time.Now()
+	}
+	m.mu.Unlock()
+
+	// Save state to disk
+	_ = r.SaveMetadata()
+
+	// Set up firewall if enabled (do this after container starts)
+	if r.FirewallEnabled && r.ProxyPort > 0 {
+		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+			// Firewall setup failed - this is fatal for strict policy
+			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+			}
+			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
+		}
+	}
+
+	// Wait for the attachment to complete (container exits or context canceled)
+	return <-attachDone
+}
+
 // streamLogs streams container logs to stdout for real-time feedback.
 // Note: Final log capture to storage is handled by Wait() using ContainerLogsAll
 // to ensure complete logs are captured even for fast-exiting containers.

@@ -26,12 +26,6 @@ const (
 
 	// codexCredentialsFile is the relative path to Codex's auth file.
 	codexCredentialsFile = ".codex/auth.json"
-
-	// Token length thresholds for distinguishing API keys from OAuth tokens.
-	// OpenAI API keys are typically 50-60 characters.
-	// ChatGPT subscription tokens are longer JWT or opaque tokens.
-	apiKeyMaxLength         = 100
-	subscriptionTokenMinLen = 50
 )
 
 // OpenAIAuth handles OpenAI API key authentication.
@@ -154,8 +148,8 @@ type CodexAuthFile struct {
 	// Token is the ChatGPT subscription token
 	Token *CodexAuthToken `json:"token,omitempty"`
 
-	// APIKey is an alternative storage for API key auth
-	APIKey string `json:"api_key,omitempty"`
+	// APIKey is the OpenAI API key (field name matches Codex CLI's format)
+	APIKey string `json:"OPENAI_API_KEY,omitempty"`
 }
 
 // ExpiresAtTime returns the expiration time as a time.Time.
@@ -275,10 +269,14 @@ func (c *CodexCredentials) HasCodexCredentials() bool {
 
 // IsCodexToken returns true if the token appears to be a Codex ChatGPT subscription token.
 // ChatGPT tokens are typically longer than API keys and have a different format.
-// This is a heuristic based on token format - API keys start with "sk-" and are shorter.
+// API keys start with "sk-" (including "sk-proj-", "sk-svcacct-", etc.) regardless of length.
+// Subscription tokens are OAuth tokens that don't have the sk- prefix.
 func IsCodexToken(token string) bool {
-	if strings.HasPrefix(token, openaiKeyPrefix) && len(token) < apiKeyMaxLength {
-		return false // Likely an API key
+	// API keys always start with "sk-" regardless of length
+	// This includes newer formats like sk-proj-..., sk-svcacct-..., etc.
+	if strings.HasPrefix(token, openaiKeyPrefix) {
+		return false // It's an API key
 	}
-	return len(token) > subscriptionTokenMinLen // Likely a subscription token
+	// If it doesn't start with sk-, it's likely a subscription/OAuth token
+	return true
 }

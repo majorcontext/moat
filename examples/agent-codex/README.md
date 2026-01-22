@@ -89,7 +89,7 @@ Ask Codex to fix it and verify the output.
 ## What's Happening
 
 1. Moat creates an isolated container with Node.js 20 and Codex CLI
-2. A TLS-intercepting proxy starts and injects your API key into requests to `api.openai.com`
+2. A TLS-intercepting proxy starts and injects your credentials into requests to `api.openai.com` and `chatgpt.com`
 3. Codex runs inside the container, unaware of the real API key
 4. All network requests are logged for observability
 

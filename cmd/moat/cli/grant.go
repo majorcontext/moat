@@ -306,7 +306,7 @@ func grantAnthropic() error {
 
 	// If only API key is available, skip the menu
 	if !claudeAvailable && !hasExistingCreds {
-		return grantAnthropicViaAPIKey(reader)
+		return grantAnthropicViaAPIKey()
 	}
 
 	for {
@@ -362,7 +362,7 @@ func grantAnthropic() error {
 			return grantAnthropicViaSetupToken()
 
 		case "2":
-			return grantAnthropicViaAPIKey(reader)
+			return grantAnthropicViaAPIKey()
 
 		case "3":
 			if !hasExistingCreds {
@@ -469,7 +469,7 @@ func stripANSI(s string) string {
 }
 
 // grantAnthropicViaAPIKey prompts for an API key.
-func grantAnthropicViaAPIKey(_ *bufio.Reader) error {
+func grantAnthropicViaAPIKey() error {
 	auth := &credential.AnthropicAuth{}
 
 	// Get API key from environment variable or interactive prompt
@@ -553,7 +553,7 @@ func grantOpenAI() error {
 
 	// If only API key is available, skip the menu
 	if !codexAvailable && !hasExistingCreds {
-		return grantOpenAIViaAPIKey(reader)
+		return grantOpenAIViaAPIKey()
 	}
 
 	for {
@@ -609,7 +609,7 @@ func grantOpenAI() error {
 			return grantOpenAIViaCodexLogin()
 
 		case "2":
-			return grantOpenAIViaAPIKey(reader)
+			return grantOpenAIViaAPIKey()
 
 		case "3":
 			if !hasExistingCreds {
@@ -668,7 +668,7 @@ func grantOpenAIViaCodexLogin() error {
 }
 
 // grantOpenAIViaAPIKey prompts for an API key.
-func grantOpenAIViaAPIKey(_ *bufio.Reader) error {
+func grantOpenAIViaAPIKey() error {
 	auth := &credential.OpenAIAuth{}
 
 	// Get API key from environment variable or interactive prompt

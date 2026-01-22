@@ -915,3 +915,21 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 	// The TTY size is typically inherited from the terminal running the attach command.
 	return nil
 }
+
+// StartAttached starts a container with stdin/stdout/stderr already attached.
+// For Apple containers, we use the run command which handles attach during start.
+func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
+	// Apple container's attach command should work with a started container.
+	// We start and then immediately attach, but Apple container tool may
+	// handle this atomically if using the right flags.
+	// For now, start then attach (similar to Attach but starts first).
+
+	// Start the container
+	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
+	if err := startCmd.Run(); err != nil {
+		return fmt.Errorf("starting container: %w", err)
+	}
+
+	// Attach immediately after start
+	return r.Attach(ctx, containerID, opts)
+}
