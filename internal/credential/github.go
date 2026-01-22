@@ -44,7 +44,7 @@ func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([
 	}
 
 	userGhConfig := filepath.Join(homeDir, ".config", "gh", "config.yml")
-	if _, err := os.Stat(userGhConfig); os.IsNotExist(err) {
+	if _, statErr := os.Stat(userGhConfig); os.IsNotExist(statErr) {
 		return nil, "", nil // No config to copy
 	}
 
@@ -54,24 +54,29 @@ func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([
 		return nil, "", fmt.Errorf("creating gh config dir: %w", err)
 	}
 
+	// Use defer to ensure cleanup on any error after temp dir creation
+	success := false
+	defer func() {
+		if !success {
+			os.RemoveAll(tmpDir)
+		}
+	}()
+
 	// Create gh subdirectory
 	ghDir := filepath.Join(tmpDir, "gh")
-	if err := os.MkdirAll(ghDir, 0700); err != nil {
-		os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("creating gh dir: %w", err)
+	if mkdirErr := os.MkdirAll(ghDir, 0700); mkdirErr != nil {
+		return nil, "", fmt.Errorf("creating gh dir: %w", mkdirErr)
 	}
 
 	// Copy user's config.yml (contains aliases, preferences, etc.)
 	configContent, err := os.ReadFile(userGhConfig)
 	if err != nil {
-		os.RemoveAll(tmpDir)
 		return nil, "", fmt.Errorf("reading user gh config: %w", err)
 	}
 
 	configPath := filepath.Join(ghDir, "config.yml")
-	if err := os.WriteFile(configPath, configContent, 0600); err != nil {
-		os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("writing config.yml: %w", err)
+	if writeErr := os.WriteFile(configPath, configContent, 0600); writeErr != nil {
+		return nil, "", fmt.Errorf("writing config.yml: %w", writeErr)
 	}
 
 	// Note: We intentionally do NOT copy hosts.yml - authentication is
@@ -86,6 +91,7 @@ func (g *GitHubSetup) ContainerMounts(cred *Credential, containerHome string) ([
 		},
 	}
 
+	success = true // Disable cleanup, caller takes ownership
 	return mounts, tmpDir, nil
 }
 

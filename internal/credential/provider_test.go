@@ -65,6 +65,30 @@ func TestIsOAuthToken(t *testing.T) {
 	}
 }
 
+func TestParseGrantProvider(t *testing.T) {
+	tests := []struct {
+		grant string
+		want  Provider
+	}{
+		{"github", ProviderGitHub},
+		{"github:repo", ProviderGitHub},
+		{"github:repo,user", ProviderGitHub},
+		{"aws", ProviderAWS},
+		{"aws:s3", ProviderAWS},
+		{"anthropic", ProviderAnthropic},
+		{"unknown", Provider("unknown")},
+		{"", Provider("")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.grant, func(t *testing.T) {
+			if got := ParseGrantProvider(tt.grant); got != tt.want {
+				t.Errorf("ParseGrantProvider(%q) = %v, want %v", tt.grant, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestImpliedDependencies(t *testing.T) {
 	tests := []struct {
 		name   string

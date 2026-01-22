@@ -153,7 +153,8 @@ func grantGitHub() error {
 	}
 
 	// Priority 2: gh CLI
-	if token, err := getGHCLIToken(); err == nil && token != "" {
+	token, ghErr := getGHCLIToken()
+	if ghErr == nil && token != "" {
 		fmt.Println("Found gh CLI authentication")
 		fmt.Print("Use token from gh CLI? [Y/n]: ")
 		response, _ := reader.ReadString('\n')
@@ -163,6 +164,11 @@ func grantGitHub() error {
 			return saveGitHubToken(token)
 		}
 		fmt.Println() // spacing before prompt
+	} else if ghErr != nil && isGHCLIInstalled() {
+		// gh CLI is installed but failed - warn user
+		fmt.Printf("Note: gh CLI found but 'gh auth token' failed: %v\n", ghErr)
+		fmt.Println("You may need to run 'gh auth login' first.")
+		fmt.Println()
 	}
 
 	// Priority 3: Interactive prompt
@@ -179,14 +185,14 @@ To create one:
 	if err != nil {
 		return fmt.Errorf("reading token: %w", err)
 	}
-	token := strings.TrimSpace(string(tokenBytes))
+	inputToken := strings.TrimSpace(string(tokenBytes))
 	fmt.Println() // newline after hidden input
 
-	if token == "" {
+	if inputToken == "" {
 		return fmt.Errorf("no token provided")
 	}
 
-	return saveGitHubToken(token)
+	return saveGitHubToken(inputToken)
 }
 
 // getGHCLIToken retrieves the GitHub token from gh CLI if available.
@@ -197,6 +203,12 @@ func getGHCLIToken() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// isGHCLIInstalled checks if the gh CLI is available in PATH.
+func isGHCLIInstalled() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
 }
 
 // saveGitHubToken validates and saves a GitHub token.
