@@ -89,17 +89,19 @@ func runCodex(cmd *cobra.Command, args []string) error {
 
 	// Build container command
 	// codex is installed globally via the dependency system
-	containerCmd := []string{"codex"}
-
-	// By default, use full-auto mode since Moat provides isolation.
-	// The container environment itself is the security boundary.
-	// Use --noyolo to restore default Codex behavior with manual approvals.
-	if !codexNoYolo {
-		containerCmd = append(containerCmd, "--full-auto")
-	}
+	var containerCmd []string
 
 	if codexPromptFlag != "" {
+		// Non-interactive mode: use `codex exec` with the prompt
+		// --full-auto allows edits during execution (safe since we're in a container)
+		containerCmd = []string{"codex", "exec"}
+		if !codexNoYolo {
+			containerCmd = append(containerCmd, "--full-auto")
+		}
 		containerCmd = append(containerCmd, codexPromptFlag)
+	} else {
+		// Interactive mode: just run `codex` for the TUI
+		containerCmd = []string{"codex"}
 	}
 
 	// Use name from flag, or config, or let manager generate one

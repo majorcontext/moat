@@ -585,3 +585,11 @@ func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts Att
 		}
 	}
 }
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+func (r *DockerRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
+	return r.cli.ContainerResize(ctx, containerID, container.ResizeOptions{
+		Height: height,
+		Width:  width,
+	})
+}

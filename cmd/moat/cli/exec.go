@@ -189,6 +189,16 @@ func RunAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
 func RunInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error {
 	fmt.Printf("%s\n\n", term.EscapeHelpText())
 
+	// Resize container TTY to match terminal size
+	if term.IsTerminal(os.Stdout) {
+		width, height := term.GetSize(os.Stdout)
+		if width > 0 && height > 0 {
+			if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+				log.Debug("failed to resize TTY", "error", err)
+			}
+		}
+	}
+
 	// Put terminal in raw mode to capture escape sequences without echo
 	if term.IsTerminal(os.Stdin) {
 		rawState, err := term.EnableRawMode(os.Stdin)

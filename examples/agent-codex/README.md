@@ -42,7 +42,7 @@ Start an interactive Codex session:
 moat codex examples/agent-codex
 ```
 
-Codex will start in `/workspace` with your project files mounted. By default, Codex runs with `--full-auto` since the container provides isolation.
+Codex will start in `/workspace` with your project files mounted.
 
 ### One-Shot Mode (Headless)
 
@@ -56,12 +56,11 @@ moat codex examples/agent-codex -p "what does this code do?"
 moat codex examples/agent-codex -p "fix the bug in main.py"
 ```
 
-### Disable Full-Auto Mode
-
-If you want Codex to ask for approval before each tool use:
+By default, one-shot mode uses `--full-auto` since the container provides isolation.
+Use `--noyolo` to require manual approval for each action:
 
 ```bash
-moat codex examples/agent-codex --noyolo
+moat codex examples/agent-codex -p "fix the bug" --noyolo
 ```
 
 ## The Test Project

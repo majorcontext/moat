@@ -460,6 +460,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"HTTPS_PROXY=" + proxyURL,
 			"http_proxy=" + proxyURL,
 			"https_proxy=" + proxyURL,
+			// Terminal settings for TUI applications
+			"TERM=xterm-256color",
 		}
 
 		// Mount CA directory for container to trust
@@ -1746,6 +1748,20 @@ func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, std
 		Stderr: stderr,
 		TTY:    true, // Default to TTY mode for now
 	})
+}
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uint) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	return m.runtime.ResizeTTY(ctx, containerID, height, width)
 }
 
 // FollowLogs streams container logs to the provided writer.

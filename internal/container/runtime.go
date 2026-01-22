@@ -97,6 +97,9 @@ type Runtime interface {
 	// Attach connects stdin/stdout/stderr to a running container.
 	// Returns when the attachment ends (container exits or context canceled).
 	Attach(ctx context.Context, id string, opts AttachOptions) error
+
+	// ResizeTTY resizes the container's TTY to the given dimensions.
+	ResizeTTY(ctx context.Context, id string, height, width uint) error
 }
 
 // AttachOptions configures container attachment.

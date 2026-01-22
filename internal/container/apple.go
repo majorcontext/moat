@@ -907,3 +907,11 @@ func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts Atta
 	}
 	return nil
 }
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+// Note: Apple container CLI may not support dynamic resize.
+func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
+	// Apple container doesn't have a direct resize command.
+	// The TTY size is typically inherited from the terminal running the attach command.
+	return nil
+}

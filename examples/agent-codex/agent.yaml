@@ -16,7 +16,7 @@ dependencies:
 grants:
   - openai
 
-command: ["codex", "--full-auto"]
+command: ["codex"]
 interactive: true
 
 # Codex session logs are automatically synced to the host when "openai" grant
