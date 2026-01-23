@@ -252,7 +252,7 @@ func TestEmptyDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
-	if !strings.Contains(dockerfile, "FROM ubuntu:22.04") {
+	if !strings.Contains(dockerfile, "FROM debian:bookworm-slim") {
 		t.Error("Dockerfile missing base image")
 	}
 

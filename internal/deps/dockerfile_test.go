@@ -56,7 +56,7 @@ func TestGenerateDockerfileEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.HasPrefix(dockerfile, "FROM ubuntu:22.04") {
+	if !strings.HasPrefix(dockerfile, "FROM debian:bookworm-slim") {
 		t.Error("Empty deps should still have base image")
 	}
 }
@@ -187,7 +187,7 @@ func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 }
 
 func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
-	// With multiple runtimes, should fall back to Ubuntu and install both
+	// With multiple runtimes, should fall back to Debian and install both
 	deps := []Dependency{
 		{Name: "node", Version: "20"},
 		{Name: "python", Version: "3.10"},
@@ -197,9 +197,9 @@ func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
-	// Should use Ubuntu as base when multiple runtimes
-	if !strings.HasPrefix(dockerfile, "FROM ubuntu:22.04") {
-		t.Errorf("Dockerfile should use ubuntu:22.04 for multiple runtimes, got:\n%s", dockerfile[:100])
+	// Should use Debian as base when multiple runtimes
+	if !strings.HasPrefix(dockerfile, "FROM debian:bookworm-slim") {
+		t.Errorf("Dockerfile should use debian:bookworm-slim for multiple runtimes, got:\n%s", dockerfile[:100])
 	}
 
 	// Both runtimes should be installed
@@ -439,6 +439,53 @@ func TestGenerateDockerfileMultiArchBinary(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileWithoutBuildKit(t *testing.T) {
+	// Test that disabling BuildKit removes cache mounts
+	deps := []Dependency{
+		{Name: "git"},
+		{Name: "curl"},
+	}
+	useBuildKit := false
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		UseBuildKit: &useBuildKit,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should NOT have BuildKit-specific cache mounts
+	if strings.Contains(dockerfile, "--mount=type=cache") {
+		t.Error("Dockerfile should not contain --mount=type=cache when BuildKit is disabled")
+	}
+
+	// Should still have apt-get commands
+	if !strings.Contains(dockerfile, "apt-get update") {
+		t.Error("Dockerfile should have apt-get update")
+	}
+	if !strings.Contains(dockerfile, "apt-get install") {
+		t.Error("Dockerfile should have apt-get install")
+	}
+}
+
+func TestGenerateDockerfileWithBuildKit(t *testing.T) {
+	// Test that enabling BuildKit includes cache mounts (default behavior)
+	deps := []Dependency{
+		{Name: "git"},
+	}
+	useBuildKit := true
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		UseBuildKit: &useBuildKit,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have BuildKit-specific cache mounts
+	if !strings.Contains(dockerfile, "--mount=type=cache") {
+		t.Error("Dockerfile should contain --mount=type=cache when BuildKit is enabled")
+	}
+}
+
 // Test helper functions
 
 func TestCategorizeDeps(t *testing.T) {
@@ -485,12 +532,12 @@ func TestSelectBaseImage(t *testing.T) {
 		wantImg  string
 		wantRT   bool // whether baseRuntime should be non-nil
 	}{
-		{"empty", nil, "ubuntu:22.04", false},
-		{"multiple", []Dependency{{Name: "node"}, {Name: "python"}}, "ubuntu:22.04", false},
+		{"empty", nil, "debian:bookworm-slim", false},
+		{"multiple", []Dependency{{Name: "node"}, {Name: "python"}}, "debian:bookworm-slim", false},
 		{"node only", []Dependency{{Name: "node", Version: "20"}}, "node:20-slim", true},
 		{"python only", []Dependency{{Name: "python", Version: "3.11"}}, "python:3.11-slim", true},
 		{"go only", []Dependency{{Name: "go", Version: "1.22"}}, "golang:1.22", true},
-		{"unknown runtime", []Dependency{{Name: "rust"}}, "ubuntu:22.04", false},
+		{"unknown runtime", []Dependency{{Name: "rust"}}, "debian:bookworm-slim", false},
 	}
 
 	for _, tt := range tests {

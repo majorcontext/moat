@@ -870,7 +870,24 @@ region = %s
 
 	// Build custom image if we have dependencies or SSH grants.
 	// Both Docker and Apple containers support Dockerfile builds.
+	var generatedDockerfile string
 	if needsCustomImage {
+		// Check if BuildKit is disabled (for CI compatibility)
+		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
+
+		// Always generate the Dockerfile so we can save it to the run directory
+		dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
+			NeedsSSH:        hasSSHGrants,
+			NeedsClaudeInit: needsClaudeInit,
+			NeedsCodexInit:  needsCodexInit,
+			UseBuildKit:     &useBuildKit,
+		})
+		if err != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("generating Dockerfile: %w", err)
+		}
+		generatedDockerfile = dockerfile
+
 		exists, err := m.runtime.ImageExists(ctx, containerImage)
 		if err != nil {
 			cleanupProxy(proxyServer)
@@ -878,16 +895,6 @@ region = %s
 		}
 
 		if !exists {
-			dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
-				NeedsSSH:        hasSSHGrants,
-				NeedsClaudeInit: needsClaudeInit,
-				NeedsCodexInit:  needsCodexInit,
-			})
-			if err != nil {
-				cleanupProxy(proxyServer)
-				return nil, fmt.Errorf("generating Dockerfile: %w", err)
-			}
-
 			depNames := make([]string, len(depList))
 			for i, d := range depList {
 				depNames[i] = d.Name
@@ -1260,6 +1267,13 @@ region = %s
 	// Update atomic reference for concurrent logger access
 	if r.storeRef != nil {
 		r.storeRef.Store(store)
+	}
+
+	// Save the generated Dockerfile to the run directory for debugging/inspection
+	if generatedDockerfile != "" {
+		if saveErr := store.SaveDockerfile(generatedDockerfile); saveErr != nil {
+			log.Debug("failed to save Dockerfile to run directory", "error", saveErr)
+		}
 	}
 
 	// Open audit store for tamper-proof logging

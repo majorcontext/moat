@@ -23,12 +23,26 @@ type DockerfileOptions struct {
 	// copied from a staging directory at container startup. This requires
 	// the moat-init entrypoint script.
 	NeedsCodexInit bool
+
+	// UseBuildKit enables BuildKit-specific features like cache mounts.
+	// When false, generates Dockerfiles compatible with the legacy builder.
+	// Defaults to true if not explicitly set (checked via useBuildKit method).
+	UseBuildKit *bool
 }
 
-const defaultBaseImage = "ubuntu:22.04"
+// useBuildKit returns whether to use BuildKit features.
+// Defaults to true if UseBuildKit is nil.
+func (o *DockerfileOptions) useBuildKit() bool {
+	if o == nil || o.UseBuildKit == nil {
+		return true
+	}
+	return *o.UseBuildKit
+}
+
+const defaultBaseImage = "debian:bookworm-slim"
 
 // runtimeBaseImage returns the official Docker image for a runtime, or empty string
-// if we should fall back to installing on Ubuntu.
+// if we should fall back to installing on Debian.
 func runtimeBaseImage(name, version string) string {
 	switch name {
 	case "python":
@@ -146,9 +160,9 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
 
 	// Write all sections
-	writeBasePackages(&b)
+	writeBasePackages(&b, opts.useBuildKit())
 	writeUserSetup(&b)
-	writeAptPackages(&b, c.aptPkgs)
+	writeAptPackages(&b, c.aptPkgs, opts.useBuildKit())
 	writeRuntimes(&b, c.runtimes, baseRuntime)
 	writeGithubBinaries(&b, c.githubBins)
 	writeNpmPackages(&b, c.npmPkgs)
@@ -189,15 +203,23 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 }
 
 // writeBasePackages writes the base package installation.
-func writeBasePackages(b *strings.Builder) {
+// Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
+func writeBasePackages(b *strings.Builder, useBuildKit bool) {
 	b.WriteString("# Base packages\n")
-	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
-	b.WriteString("    curl \\\n")
-	b.WriteString("    ca-certificates \\\n")
-	b.WriteString("    gnupg \\\n")
-	b.WriteString("    unzip \\\n")
-	b.WriteString("    iptables \\\n")
-	b.WriteString("    gosu \\\n")
+	if useBuildKit {
+		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
+		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
+		b.WriteString("    apt-get update \\\n")
+	} else {
+		b.WriteString("RUN apt-get update \\\n")
+	}
+	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
+	b.WriteString("       ca-certificates \\\n")
+	b.WriteString("       curl \\\n")
+	b.WriteString("       gnupg \\\n")
+	b.WriteString("       gosu \\\n")
+	b.WriteString("       iptables \\\n")
+	b.WriteString("       unzip \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
 
@@ -215,15 +237,23 @@ func writeUserSetup(b *strings.Builder) {
 }
 
 // writeAptPackages writes user-specified apt package installation.
-func writeAptPackages(b *strings.Builder, pkgs []string) {
+// Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
+func writeAptPackages(b *strings.Builder, pkgs []string, useBuildKit bool) {
 	if len(pkgs) == 0 {
 		return
 	}
 	sort.Strings(pkgs)
 	b.WriteString("# Apt packages\n")
-	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
+	if useBuildKit {
+		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
+		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
+		b.WriteString("    apt-get update \\\n")
+	} else {
+		b.WriteString("RUN apt-get update \\\n")
+	}
+	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
 	for _, pkg := range pkgs {
-		b.WriteString("    " + pkg + " \\\n")
+		b.WriteString("       " + pkg + " \\\n")
 	}
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
