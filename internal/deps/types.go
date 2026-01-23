@@ -42,10 +42,16 @@ type DepSpec struct {
 
 	// For github-binary type
 	Repo  string `yaml:"repo,omitempty"`
-	Asset string `yaml:"asset,omitempty"`
-	Bin   string `yaml:"bin,omitempty"`
+	Asset string `yaml:"asset,omitempty"` // Supports {version}, {arch}, {target} placeholders
+	Bin   string `yaml:"bin,omitempty"`   // Supports {version}, {arch}, {target} placeholders
 
-	// For github-binary with ARM64 support
+	// Targets maps Go architecture names to project-specific target strings.
+	// Used for {target} placeholder substitution in Asset/Bin fields.
+	// Example: {"amd64": "x86_64-unknown-linux-musl", "arm64": "aarch64-unknown-linux-gnu"}
+	// If empty and {arch} is used, standard arch name mapping is applied.
+	Targets map[string]string `yaml:"targets,omitempty"`
+
+	// Legacy ARM64 support (deprecated, use Targets instead)
 	AssetARM64 string `yaml:"asset-arm64,omitempty"`
 	BinARM64   string `yaml:"bin-arm64,omitempty"`
 

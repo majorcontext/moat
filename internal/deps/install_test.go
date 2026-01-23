@@ -94,7 +94,7 @@ func TestGetGithubBinaryCommandsMultiArch(t *testing.T) {
 		Bin:        "bun",
 	}
 
-	cmds := getGithubBinaryCommandsMultiArch("bun", "1.1.0", spec)
+	cmds := getGithubBinaryCommandsLegacy("bun", "1.1.0", spec)
 	combined := strings.Join(cmds.Commands, " ")
 
 	// Check architecture detection
@@ -124,7 +124,7 @@ func TestGetGithubBinaryCommandsMultiArchTarGz(t *testing.T) {
 		Bin:        "fzf",
 	}
 
-	cmds := getGithubBinaryCommandsMultiArch("fzf", "0.56.0", spec)
+	cmds := getGithubBinaryCommandsLegacy("fzf", "0.56.0", spec)
 	combined := strings.Join(cmds.Commands, " ")
 
 	// Should use tar for .tar.gz
@@ -171,6 +171,47 @@ func TestGetGithubBinaryCommandsRawBinary(t *testing.T) {
 	// Check chmod
 	if !strings.Contains(combined, "chmod +x /usr/local/bin/gofumpt") {
 		t.Error("missing chmod command")
+	}
+}
+
+func TestGetGithubBinaryCommandsWithTargets(t *testing.T) {
+	// Test the new targets-based approach for Rust-style target triples
+	spec := DepSpec{
+		Repo:  "BurntSushi/ripgrep",
+		Asset: "ripgrep-{version}-{target}.tar.gz",
+		Bin:   "ripgrep-{version}-{target}/rg",
+		Targets: map[string]string{
+			"amd64": "x86_64-unknown-linux-musl",
+			"arm64": "aarch64-unknown-linux-gnu",
+		},
+	}
+
+	cmds := getGithubBinaryCommandsWithTargets("ripgrep", "14.1.1", spec)
+	combined := strings.Join(cmds.Commands, " ")
+
+	// Check architecture detection
+	if !strings.Contains(combined, "ARCH=$(uname -m)") {
+		t.Error("missing architecture detection")
+	}
+
+	// Check amd64 URL with target substitution
+	if !strings.Contains(combined, "ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz") {
+		t.Error("missing amd64 target substitution in URL")
+	}
+
+	// Check arm64 URL with target substitution
+	if !strings.Contains(combined, "ripgrep-14.1.1-aarch64-unknown-linux-gnu.tar.gz") {
+		t.Error("missing arm64 target substitution in URL")
+	}
+
+	// Check bin path substitution for amd64
+	if !strings.Contains(combined, "ripgrep-14.1.1-x86_64-unknown-linux-musl/rg") {
+		t.Error("missing amd64 target substitution in bin path")
+	}
+
+	// Check bin path substitution for arm64
+	if !strings.Contains(combined, "ripgrep-14.1.1-aarch64-unknown-linux-gnu/rg") {
+		t.Error("missing arm64 target substitution in bin path")
 	}
 }
 

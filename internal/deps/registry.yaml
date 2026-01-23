@@ -29,20 +29,24 @@ bun:
   description: JavaScript runtime and package manager
   type: github-binary
   repo: oven-sh/bun
-  asset: "bun-linux-x64.zip"
-  asset-arm64: "bun-linux-aarch64.zip"
+  asset: "bun-linux-{target}.zip"
   bin: bun
   default: "1.1.0"
+  targets:
+    amd64: x64
+    arm64: aarch64
 
 uv:
   description: Fast Python package manager
   type: github-binary
   repo: astral-sh/uv
-  asset: "uv-x86_64-unknown-linux-gnu.tar.gz"
-  asset-arm64: "uv-aarch64-unknown-linux-gnu.tar.gz"
+  asset: "uv-{target}.tar.gz"
   bin: uv
   default: "0.5.14"
   requires: [python]
+  targets:
+    amd64: x86_64-unknown-linux-gnu
+    arm64: aarch64-unknown-linux-gnu
 
 # npm packages
 typescript:
@@ -217,69 +221,78 @@ yq:
   description: YAML processor
   type: github-binary
   repo: mikefarah/yq
-  asset: "yq_linux_amd64.tar.gz"
-  asset-arm64: "yq_linux_arm64.tar.gz"
-  bin: yq_linux_amd64
-  bin-arm64: yq_linux_arm64
+  asset: "yq_linux_{arch}.tar.gz"
+  bin: "yq_linux_{arch}"
   default: "4.45.4"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 ripgrep:
   description: Fast grep alternative
   type: github-binary
   repo: BurntSushi/ripgrep
-  asset: "ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz"
-  asset-arm64: "ripgrep-{version}-aarch64-unknown-linux-gnu.tar.gz"
-  bin: "ripgrep-{version}-x86_64-unknown-linux-musl/rg"
-  bin-arm64: "ripgrep-{version}-aarch64-unknown-linux-gnu/rg"
-  default: "14.1.0"
+  asset: "ripgrep-{version}-{target}.tar.gz"
+  bin: "ripgrep-{version}-{target}/rg"
+  default: "14.1.1"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
 
 fd:
   description: Fast find alternative
   type: github-binary
   repo: sharkdp/fd
-  asset: "fd-v{version}-x86_64-unknown-linux-musl.tar.gz"
-  asset-arm64: "fd-v{version}-aarch64-unknown-linux-gnu.tar.gz"
-  bin: "fd-v{version}-x86_64-unknown-linux-musl/fd"
-  bin-arm64: "fd-v{version}-aarch64-unknown-linux-gnu/fd"
+  asset: "fd-v{version}-{target}.tar.gz"
+  bin: "fd-v{version}-{target}/fd"
   default: "10.2.0"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
 
 bat:
   description: Cat with syntax highlighting
   type: github-binary
   repo: sharkdp/bat
-  asset: "bat-v{version}-x86_64-unknown-linux-musl.tar.gz"
-  asset-arm64: "bat-v{version}-aarch64-unknown-linux-gnu.tar.gz"
-  bin: "bat-v{version}-x86_64-unknown-linux-musl/bat"
-  bin-arm64: "bat-v{version}-aarch64-unknown-linux-gnu/bat"
+  asset: "bat-v{version}-{target}.tar.gz"
+  bin: "bat-v{version}-{target}/bat"
   default: "0.24.0"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
 
 fzf:
   description: Fuzzy finder
   type: github-binary
   repo: junegunn/fzf
-  asset: "fzf-{version}-linux_amd64.tar.gz"
-  asset-arm64: "fzf-{version}-linux_arm64.tar.gz"
+  asset: "fzf-{version}-linux_{arch}.tar.gz"
   bin: fzf
   default: "0.56.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 delta:
   description: Better git diff viewer
   type: github-binary
   repo: dandavison/delta
-  asset: "delta-{version}-x86_64-unknown-linux-musl.tar.gz"
-  asset-arm64: "delta-{version}-aarch64-unknown-linux-gnu.tar.gz"
-  bin: "delta-{version}-x86_64-unknown-linux-musl/delta"
-  bin-arm64: "delta-{version}-aarch64-unknown-linux-gnu/delta"
+  asset: "delta-{version}-{target}.tar.gz"
+  bin: "delta-{version}-{target}/delta"
   default: "0.18.0"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
 
 lazygit:
   description: Terminal UI for git
   type: github-binary
   repo: jesseduffield/lazygit
-  asset: "lazygit_{version}_Linux_x86_64.tar.gz"
-  asset-arm64: "lazygit_{version}_Linux_arm64.tar.gz"
+  asset: "lazygit_{version}_Linux_{target}.tar.gz"
   bin: lazygit
   default: "0.44.0"
+  targets:
+    amd64: x86_64
+    arm64: arm64
 
 # Node.js dev tools
 prettier:
@@ -335,10 +348,12 @@ terraform:
   description: Infrastructure as Code
   type: github-binary
   repo: hashicorp/terraform
-  asset: "terraform_{version}_linux_amd64.zip"
-  asset-arm64: "terraform_{version}_linux_arm64.zip"
+  asset: "terraform_{version}_linux_{arch}.zip"
   bin: terraform
   default: "1.10.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 kubectl:
   description: Kubernetes CLI
@@ -349,11 +364,12 @@ helm:
   description: Kubernetes package manager
   type: github-binary
   repo: helm/helm
-  asset: "helm-v{version}-linux-amd64.tar.gz"
-  asset-arm64: "helm-v{version}-linux-arm64.tar.gz"
-  bin: "linux-amd64/helm"
-  bin-arm64: "linux-arm64/helm"
+  asset: "helm-v{version}-linux-{arch}.tar.gz"
+  bin: "linux-{arch}/helm"
   default: "3.16.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 # Meta dependencies (bundles)
 go-extras:
