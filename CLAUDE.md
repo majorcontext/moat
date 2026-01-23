@@ -39,7 +39,7 @@ internal/
 
 **Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
 
-**Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
+**Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 
 ### Proxy Security Model
 

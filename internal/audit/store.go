@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
 
@@ -17,12 +16,10 @@ var ErrNotFound = errors.New("entry not found")
 
 // Store provides tamper-proof log storage using SQLite.
 type Store struct {
-	db         *sql.DB
-	mu         sync.Mutex
-	lastHash   string
-	lastSeq    uint64
-	merkleRoot string                 // Current Merkle tree root hash
-	merkleTree *IncrementalMerkleTree // In-memory tree for O(log n) appends
+	db       *sql.DB
+	mu       sync.Mutex
+	lastHash string
+	lastSeq  uint64
 }
 
 // OpenStore opens or creates a log store at the given path.
@@ -96,10 +93,6 @@ func createTables(db *sql.DB) error {
 }
 
 func (s *Store) loadLastEntry() error {
-	// Initialize incremental tree
-	s.merkleTree = NewIncrementalMerkleTree()
-
-	// Load last entry state
 	row := s.db.QueryRow(`
 		SELECT seq, hash FROM entries ORDER BY seq DESC LIMIT 1
 	`)
@@ -116,40 +109,6 @@ func (s *Store) loadLastEntry() error {
 		s.lastSeq = seq
 		s.lastHash = hash
 	}
-
-	// Load stored merkle root from database (may be tampered - auditor will verify)
-	row = s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'merkle_root'`)
-	var root string
-	err = row.Scan(&root)
-	switch {
-	case err == sql.ErrNoRows:
-		// No root yet
-	case err != nil:
-		return fmt.Errorf("loading merkle root: %w", err)
-	default:
-		s.merkleRoot = root
-	}
-
-	// Rebuild incremental tree from all entries (one-time O(n) on open)
-	// This is used for future O(log n) appends, not for verification
-	rows, err := s.db.Query(`SELECT seq, hash FROM entries ORDER BY seq`)
-	if err != nil {
-		return fmt.Errorf("loading entries for merkle tree: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var entrySeq uint64
-		var entryHash string
-		if err := rows.Scan(&entrySeq, &entryHash); err != nil {
-			return fmt.Errorf("scanning entry for merkle tree: %w", err)
-		}
-		s.merkleTree.Append(entrySeq, entryHash)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating entries for merkle tree: %w", err)
-	}
-
 	return nil
 }
 
@@ -177,30 +136,14 @@ func (s *Store) Append(entryType EntryType, data any) (*Entry, error) {
 	s.lastSeq = entry.Sequence
 	s.lastHash = entry.Hash
 
-	// Update merkle tree incrementally - O(log n) instead of O(n)
-	s.merkleTree.Append(entry.Sequence, entry.Hash)
-	s.merkleRoot = s.merkleTree.RootHash()
-
-	// Persist merkle root to metadata.
-	// If this fails, the auditor will detect a mismatch between stored and
-	// computed roots during verification. We log the error but don't fail
-	// the append - the entry is already committed and the in-memory tree
-	// is correct. Verification will catch any persistence issues.
-	if _, err := s.db.Exec(`
-		INSERT INTO metadata (key, value) VALUES ('merkle_root', ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, s.merkleRoot); err != nil {
-		log.Warn("failed to persist merkle root", "error", err)
-	}
-
 	return entry, nil
 }
 
-// MerkleRoot returns the current Merkle tree root hash.
-func (s *Store) MerkleRoot() string {
+// LastHash returns the hash of the most recent entry.
+func (s *Store) LastHash() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.merkleRoot
+	return s.lastHash
 }
 
 // Close closes the database connection.
@@ -325,21 +268,6 @@ type VerifyResult struct {
 	Error           string
 }
 
-// ProveEntry generates an inclusion proof for the given sequence number.
-func (s *Store) ProveEntry(seq uint64) (*InclusionProof, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Rebuild tree from entries
-	entries, err := s.Range(1, s.lastSeq)
-	if err != nil {
-		return nil, fmt.Errorf("loading entries: %w", err)
-	}
-
-	tree := BuildMerkleTree(entries)
-	return tree.ProveInclusion(seq)
-}
-
 // SaveAttestation saves an attestation to the store.
 func (s *Store) SaveAttestation(att *Attestation) error {
 	_, err := s.db.Exec(`
@@ -452,31 +380,11 @@ func (s *Store) Export() (*ProofBundle, error) {
 	return &ProofBundle{
 		Version:      BundleVersion,
 		CreatedAt:    time.Now().UTC(),
-		MerkleRoot:   s.merkleRoot,
+		LastHash:     s.lastHash,
 		Entries:      entries,
 		Attestations: attestations,
 		RekorProofs:  rekorProofs,
 	}, nil
-}
-
-// ExportWithProofs creates a proof bundle with inclusion proofs for specific entries.
-// This is useful for proving specific entries without including the full log.
-func (s *Store) ExportWithProofs(seqs []uint64) (*ProofBundle, error) {
-	bundle, err := s.Export()
-	if err != nil {
-		return nil, err
-	}
-
-	// Generate inclusion proofs for requested entries
-	for _, seq := range seqs {
-		proof, err := s.ProveEntry(seq)
-		if err != nil {
-			return nil, fmt.Errorf("proving entry %d: %w", seq, err)
-		}
-		bundle.Proofs = append(bundle.Proofs, proof)
-	}
-
-	return bundle, nil
 }
 
 // VerifyChain verifies the integrity of the entire hash chain.
