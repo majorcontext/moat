@@ -42,14 +42,42 @@ Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>
 }
 
 func TestExtractOAuthToken_WithANSI(t *testing.T) {
-	// Token with ANSI color codes around it (must be at least 20 chars after prefix)
-	output := "Some text\n\x1b[32msk-ant-oat01-abc123xyz890abcdefghijk\x1b[0m\nMore text"
+	// Token with ANSI color codes around it - realistic length and structure
+	// The token block ends with a blank line before "Store this token"
+	output := "Your OAuth token:\n\n\x1b[32msk-ant-oat01-abc123xyz890abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGH\x1b[0m\n\nStore this token securely."
 
 	token := extractOAuthToken(output)
-	expected := "sk-ant-oat01-abc123xyz890abcdefghijk"
+	expected := "sk-ant-oat01-abc123xyz890abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGH"
 
 	if token != expected {
 		t.Errorf("extractOAuthToken() with ANSI = %q, want %q", token, expected)
+	}
+}
+
+func TestExtractOAuthToken_WithANSICursorMovement(t *testing.T) {
+	// Real-world case: Claude CLI uses ANSI cursor movement codes
+	// \x1b[1C = cursor right (instead of space)
+	// \x1b[1B = cursor down 1 line
+	// \x1b[2B = cursor down 2 lines (blank line separator)
+	output := "Header\r\x1b[1Bsk-ant-oat01-abc123\x1b[1Cxyz890\x1b[1Cdefghijklmnopqrstuvwxyz1234567890ABCDEFGH\r\x1b[2BStore this token"
+
+	token := extractOAuthToken(output)
+	expected := "sk-ant-oat01-abc123xyz890defghijklmnopqrstuvwxyz1234567890ABCDEFGH"
+
+	if token != expected {
+		t.Errorf("extractOAuthToken() with cursor movement = %q, want %q", token, expected)
+	}
+}
+
+func TestExtractOAuthToken_MultiLineWithCR(t *testing.T) {
+	// Token wrapped across lines using \r and \x1b[1B (cursor down 1)
+	output := "sk-ant-oat01-firstpart12345678901234567890\r\x1b[1Bsecondpart1234567890ABCDEFGH\r\x1b[2BStore"
+
+	token := extractOAuthToken(output)
+	expected := "sk-ant-oat01-firstpart12345678901234567890secondpart1234567890ABCDEFGH"
+
+	if token != expected {
+		t.Errorf("extractOAuthToken() multiline = %q, want %q", token, expected)
 	}
 }
 

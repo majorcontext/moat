@@ -331,6 +331,73 @@ func TestCodexCredentials_GetFromFile(t *testing.T) {
 	})
 }
 
+func TestCodexAuthFile_GetToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		authFile CodexAuthFile
+		wantNil  bool
+		wantVal  string
+	}{
+		{
+			name: "old format with token field",
+			authFile: CodexAuthFile{
+				Token: &CodexAuthToken{AccessToken: "old-format-token"},
+			},
+			wantNil: false,
+			wantVal: "old-format-token",
+		},
+		{
+			name: "new format with tokens field",
+			authFile: CodexAuthFile{
+				Tokens: &CodexAuthToken{AccessToken: "new-format-token"},
+			},
+			wantNil: false,
+			wantVal: "new-format-token",
+		},
+		{
+			name: "both formats present - prefer new",
+			authFile: CodexAuthFile{
+				Token:  &CodexAuthToken{AccessToken: "old-format-token"},
+				Tokens: &CodexAuthToken{AccessToken: "new-format-token"},
+			},
+			wantNil: false,
+			wantVal: "new-format-token",
+		},
+		{
+			name: "new format with empty access_token falls back to old",
+			authFile: CodexAuthFile{
+				Token:  &CodexAuthToken{AccessToken: "old-format-token"},
+				Tokens: &CodexAuthToken{AccessToken: ""},
+			},
+			wantNil: false,
+			wantVal: "old-format-token",
+		},
+		{
+			name:     "neither format present",
+			authFile: CodexAuthFile{},
+			wantNil:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.authFile.GetToken()
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("GetToken() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("GetToken() = nil, want non-nil")
+			}
+			if got.AccessToken != tt.wantVal {
+				t.Errorf("GetToken().AccessToken = %q, want %q", got.AccessToken, tt.wantVal)
+			}
+		})
+	}
+}
+
 func TestCodexCredentials_CreateCredentialFromCodex(t *testing.T) {
 	tests := []struct {
 		name        string

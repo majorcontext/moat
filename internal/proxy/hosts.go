@@ -99,6 +99,11 @@ var grantHosts = map[string][]string{
 		"api.anthropic.com",
 		"*.anthropic.com",
 	},
+	"openai": {
+		"api.openai.com", // API key endpoint
+		"chatgpt.com",    // ChatGPT subscription endpoint
+		"*.openai.com",   // Other OpenAI services
+	},
 	"aws": {
 		"sts.amazonaws.com",
 		"sts.*.amazonaws.com",

@@ -19,11 +19,12 @@ const (
 
 // Credential represents a stored credential.
 type Credential struct {
-	Provider  Provider  `json:"provider"`
-	Token     string    `json:"token"`
-	Scopes    []string  `json:"scopes,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Provider  Provider          `json:"provider"`
+	Token     string            `json:"token"`
+	Scopes    []string          `json:"scopes,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	Metadata  map[string]string `json:"metadata,omitempty"` // Provider-specific extra data (e.g., account_id for OpenAI)
 }
 
 // Store defines the credential storage interface.
