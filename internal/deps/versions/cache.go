@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -89,7 +90,11 @@ func NewCache(ttl time.Duration, path string) *Cache {
 	}
 
 	if path != "" {
-		_ = c.load() // Ignore errors on load, start fresh if corrupt
+		if err := c.load(); err != nil && !os.IsNotExist(err) {
+			slog.Warn("failed to load version cache, starting fresh",
+				"path", path,
+				"error", err)
+		}
 	}
 
 	return c
@@ -113,17 +118,34 @@ func (c *Cache) Get(key string) (string, bool) {
 }
 
 // Set stores a resolved version in the cache.
+//
+// Concurrency note: When multiple goroutines call Set concurrently, the in-memory
+// cache is always consistent (protected by mutex), but the persisted file may not
+// reflect the exact final state if writes interleave. This is acceptable for a
+// cache with 24h TTL - on next startup, the cache will be reloaded and stale
+// entries will be re-resolved as needed.
 func (c *Cache) Set(key, version string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	c.entries[key] = cacheEntry{
 		Version:    version,
 		ResolvedAt: time.Now(),
 	}
 
+	// Copy data for persistence outside the lock
+	var data []byte
+	var err error
 	if c.path != "" {
-		_ = c.save() // Best effort persist
+		data, err = c.marshalLocked()
+	}
+	c.mu.Unlock()
+
+	// Persist outside the lock to avoid blocking readers during I/O
+	if c.path != "" && err == nil {
+		if err := c.saveData(data); err != nil {
+			slog.Warn("failed to persist version cache",
+				"path", c.path,
+				"error", err)
+		}
 	}
 }
 
@@ -150,27 +172,38 @@ func (c *Cache) load() error {
 		return err
 	}
 
+	c.mu.Lock()
 	c.entries = cf.Entries
+	c.mu.Unlock()
 	return nil
 }
 
-func (c *Cache) save() error {
+// marshalLocked serializes the cache entries while holding the lock.
+// Must be called with c.mu held.
+func (c *Cache) marshalLocked() ([]byte, error) {
 	cf := cacheFile{
 		Entries: c.entries,
 		TTL:     c.ttl.String(),
 	}
+	return json.MarshalIndent(cf, "", "  ")
+}
 
-	data, err := json.MarshalIndent(cf, "", "  ")
-	if err != nil {
-		return err
-	}
-
+// saveData writes data to the cache file atomically.
+// Uses write-to-temp-and-rename pattern to prevent corruption.
+func (c *Cache) saveData(data []byte) error {
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
+	dir := filepath.Dir(c.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
-	return os.WriteFile(c.path, data, 0o644)
+	// Write to temp file and rename atomically
+	tmpFile := c.path + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0o644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpFile, c.path)
 }
 
 // DefaultCache returns a cache using the default moat cache directory.

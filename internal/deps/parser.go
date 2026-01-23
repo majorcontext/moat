@@ -99,9 +99,9 @@ func parseDynamicDep(s, prefix string, depType InstallType) (Dependency, error) 
 }
 
 // packageDisplayName returns a display name for a dynamic package.
+// For Go packages, returns just the binary name (last path component).
+// For other types, returns the full package name.
 func packageDisplayName(pkg string, depType InstallType) string {
-	// Use the package name directly, but strip scope for display if desired
-	// For now, just return the full package name
 	switch depType {
 	case TypeDynamicNpm:
 		// For npm, show full package name including scope
@@ -205,8 +205,9 @@ func validateGoPackage(pkg string) error {
 		}
 	}
 	// Must have at least one slash for a valid module path
+	// Standard library packages (fmt, io, etc.) are not installable via go install
 	if !strings.Contains(pkg, "/") {
-		return fmt.Errorf("invalid Go package path %q: must be a full module path (e.g., github.com/user/repo)", pkg)
+		return fmt.Errorf("invalid Go package path %q: must be a full module path (e.g., github.com/user/repo), not a standard library package", pkg)
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const nodeVersionsURL = "https://nodejs.org/dist/index.json"
@@ -28,10 +27,14 @@ type nodeRelease struct {
 }
 
 // Resolve resolves a Node.js version specification to a full version.
-// Examples:
+// Accepts partial versions that are expanded to the latest matching release:
 //   - "20" -> "20.11.0" (latest in major 20)
-//   - "20.11" -> "20.11.1" (latest patch)
+//   - "20.11" -> "20.11.1" (latest patch in 20.11.x)
 //   - "20.11.0" -> "20.11.0" (exact, verified to exist)
+//
+// Pre-release versions are not filtered out but are not specially handled.
+// The resolver returns stable releases; nightly or RC builds should use
+// exact version syntax if needed.
 func (r *NodeResolver) Resolve(ctx context.Context, version string) (string, error) {
 	releases, err := r.fetchReleases(ctx)
 	if err != nil {
@@ -39,27 +42,28 @@ func (r *NodeResolver) Resolve(ctx context.Context, version string) (string, err
 	}
 
 	// Parse the requested version
+	// Accepts: "20" (major only), "20.11" (major.minor), "20.11.0" (full)
 	parts := strings.Split(version, ".")
 	if len(parts) < 1 || len(parts) > 3 {
-		return "", fmt.Errorf("invalid Node.js version format %q", version)
+		return "", fmt.Errorf("invalid Node.js version format %q: expected N, N.N, or N.N.N (e.g., 20, 20.11, 20.11.0)", version)
 	}
 
 	major, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid Node.js major version %q", parts[0])
+		return "", fmt.Errorf("invalid Node.js major version %q: must be a number", parts[0])
 	}
 
 	var minor, patch int = -1, -1
 	if len(parts) >= 2 {
 		minor, err = strconv.Atoi(parts[1])
 		if err != nil {
-			return "", fmt.Errorf("invalid Node.js minor version %q", parts[1])
+			return "", fmt.Errorf("invalid Node.js minor version %q: must be a number", parts[1])
 		}
 	}
 	if len(parts) == 3 {
 		patch, err = strconv.Atoi(parts[2])
 		if err != nil {
-			return "", fmt.Errorf("invalid Node.js patch version %q", parts[2])
+			return "", fmt.Errorf("invalid Node.js patch version %q: must be a number", parts[2])
 		}
 	}
 
@@ -138,7 +142,7 @@ func (r *NodeResolver) LatestStable(ctx context.Context) (string, error) {
 
 	// Find first LTS release (API returns newest first)
 	for _, rel := range releases {
-		if rel.LTS != false && rel.LTS != nil {
+		if isLTS(rel.LTS) {
 			return strings.TrimPrefix(rel.Version, "v"), nil
 		}
 	}
@@ -154,8 +158,13 @@ func (r *NodeResolver) LatestStable(ctx context.Context) (string, error) {
 func (r *NodeResolver) fetchReleases(ctx context.Context) ([]nodeRelease, error) {
 	client := r.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = http.DefaultClient
 	}
+
+	// Always create a bounded context to prevent hangs.
+	// Use the minimum of existing deadline and our timeout.
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", nodeVersionsURL, nil)
 	if err != nil {
@@ -178,6 +187,19 @@ func (r *NodeResolver) fetchReleases(ctx context.Context) ([]nodeRelease, error)
 	}
 
 	return releases, nil
+}
+
+// isLTS checks if the LTS field indicates an LTS release.
+// The Node.js API returns false for non-LTS releases and a string (codename) for LTS releases.
+func isLTS(lts any) bool {
+	switch v := lts.(type) {
+	case bool:
+		return v
+	case string:
+		return v != ""
+	default:
+		return false
+	}
 }
 
 // compareVersions compares two semver strings.

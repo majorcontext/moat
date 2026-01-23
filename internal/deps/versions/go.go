@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 const goVersionsURL = "https://go.dev/dl/?mode=json&include=all"
@@ -39,6 +38,10 @@ type goFile struct {
 //   - "1.22" -> "1.22.12" (latest patch)
 //   - "1.25" -> "1.25.6" (latest patch)
 //   - "1.22.5" -> "1.22.5" (exact, verified to exist)
+//
+// Pre-release versions (e.g., "1.23rc1", "1.23beta1") are not supported.
+// Only stable releases are resolved. Requesting a pre-release version will
+// return an error. Use exact version syntax for pre-release builds.
 func (r *GoResolver) Resolve(ctx context.Context, version string) (string, error) {
 	releases, err := r.fetchReleases(ctx)
 	if err != nil {
@@ -48,7 +51,7 @@ func (r *GoResolver) Resolve(ctx context.Context, version string) (string, error
 	// Parse the requested version
 	major, minor, patch, ok := parseSemver(version)
 	if !ok {
-		return "", fmt.Errorf("invalid Go version format %q: expected X.Y or X.Y.Z", version)
+		return "", fmt.Errorf("invalid Go version format %q: expected X.Y or X.Y.Z (e.g., 1.22 or 1.22.5)", version)
 	}
 
 	// If patch is specified, verify it exists
@@ -138,8 +141,13 @@ func (r *GoResolver) LatestStable(ctx context.Context) (string, error) {
 func (r *GoResolver) fetchReleases(ctx context.Context) ([]goRelease, error) {
 	client := r.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = http.DefaultClient
 	}
+
+	// Always create a bounded context to prevent hangs.
+	// Use the minimum of existing deadline and our timeout.
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", goVersionsURL, nil)
 	if err != nil {

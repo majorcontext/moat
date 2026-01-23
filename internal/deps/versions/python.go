@@ -21,6 +21,13 @@ type PythonResolver struct{}
 // - pyenv
 //
 // Sorted newest first within each minor version.
+//
+// MAINTENANCE: This list should be updated when new Python versions are released.
+// Check https://www.python.org/downloads/ for new releases, typically:
+//   - New patch versions every 1-2 months
+//   - New minor versions annually (October)
+//   - EOL versions can be removed after their end-of-life date
+//     See https://devguide.python.org/versions/ for EOL schedule.
 var pythonVersions = []string{
 	// 3.13 series
 	"3.13.1", "3.13.0",

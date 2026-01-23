@@ -156,7 +156,7 @@ func (r *testNodeResolver) LatestStable(ctx context.Context) (string, error) {
 
 	// Find first LTS
 	for _, rel := range releases {
-		if rel.LTS != false && rel.LTS != nil {
+		if isLTS(rel.LTS) {
 			return rel.Version[1:], nil // trim 'v'
 		}
 	}

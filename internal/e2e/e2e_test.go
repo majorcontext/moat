@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 }
 
 // skipIfNoAppleContainer skips the test if Apple container is not available.
-// Apple container requires macOS 26+ on Apple Silicon.
+// Apple container requires macOS 15+ on Apple Silicon.
 func skipIfNoAppleContainer(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "darwin" {

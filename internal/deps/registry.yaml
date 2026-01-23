@@ -220,7 +220,8 @@ yq:
   asset: "yq_linux_amd64.tar.gz"
   asset-arm64: "yq_linux_arm64.tar.gz"
   bin: yq_linux_amd64
-  default: "4.44.0"
+  bin-arm64: yq_linux_arm64
+  default: "4.45.4"
 
 ripgrep:
   description: Fast grep alternative
@@ -229,6 +230,7 @@ ripgrep:
   asset: "ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz"
   asset-arm64: "ripgrep-{version}-aarch64-unknown-linux-gnu.tar.gz"
   bin: "ripgrep-{version}-x86_64-unknown-linux-musl/rg"
+  bin-arm64: "ripgrep-{version}-aarch64-unknown-linux-gnu/rg"
   default: "14.1.0"
 
 fd:
@@ -238,6 +240,7 @@ fd:
   asset: "fd-v{version}-x86_64-unknown-linux-musl.tar.gz"
   asset-arm64: "fd-v{version}-aarch64-unknown-linux-gnu.tar.gz"
   bin: "fd-v{version}-x86_64-unknown-linux-musl/fd"
+  bin-arm64: "fd-v{version}-aarch64-unknown-linux-gnu/fd"
   default: "10.2.0"
 
 bat:
@@ -247,6 +250,7 @@ bat:
   asset: "bat-v{version}-x86_64-unknown-linux-musl.tar.gz"
   asset-arm64: "bat-v{version}-aarch64-unknown-linux-gnu.tar.gz"
   bin: "bat-v{version}-x86_64-unknown-linux-musl/bat"
+  bin-arm64: "bat-v{version}-aarch64-unknown-linux-gnu/bat"
   default: "0.24.0"
 
 fzf:
@@ -265,6 +269,7 @@ delta:
   asset: "delta-{version}-x86_64-unknown-linux-musl.tar.gz"
   asset-arm64: "delta-{version}-aarch64-unknown-linux-gnu.tar.gz"
   bin: "delta-{version}-x86_64-unknown-linux-musl/delta"
+  bin-arm64: "delta-{version}-aarch64-unknown-linux-gnu/delta"
   default: "0.18.0"
 
 lazygit:
@@ -347,6 +352,7 @@ helm:
   asset: "helm-v{version}-linux-amd64.tar.gz"
   asset-arm64: "helm-v{version}-linux-arm64.tar.gz"
   bin: "linux-amd64/helm"
+  bin-arm64: "linux-arm64/helm"
   default: "3.16.0"
 
 # Meta dependencies (bundles)

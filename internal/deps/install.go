@@ -3,8 +3,32 @@ package deps
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// validPackageName matches safe package names for shell commands.
+// Allows alphanumeric, dash, underscore, dot, @, /, =, and limited special chars.
+// This prevents shell injection while allowing:
+// - Scoped npm packages: @org/pkg, @org/pkg@1.0.0
+// - Python packages with version: pkg==1.0.0, pkg>=1.0.0
+// - Go packages: golang.org/x/tools/gopls@latest
+// - Cargo packages: pkg@1.0.0
+//
+// The version separator can be @ (npm/go/cargo) or comparison operators (pip: ==, >=, <=, ~=).
+// Single = is intentionally not allowed for pip as it's not valid pip syntax.
+var validPackageName = regexp.MustCompile(`^[@a-zA-Z0-9._/-]+([@~<>=][=]?[a-zA-Z0-9._/-]+)?$`)
+
+// shellQuote returns a shell-safe quoted string.
+// For package names that pass validation, returns as-is.
+// For others, wraps in single quotes with proper escaping.
+func shellQuote(s string) string {
+	if validPackageName.MatchString(s) {
+		return s
+	}
+	// Escape single quotes by ending quote, adding escaped quote, starting new quote
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
 
 // InstallCommands holds the commands needed to install a dependency.
 type InstallCommands struct {
@@ -32,19 +56,16 @@ func getRuntimeCommands(name, version string) InstallCommands {
 			},
 		}
 	case "python":
-		// Use Ubuntu's default python3 packages - more reliable than deadsnakes PPA
-		// For 3.10 (Ubuntu 22.04 default), use python3 packages directly
-		// For other versions, we'd need a different approach (e.g., pyenv or official docker images)
-		if version == "3.10" || version == "" {
-			return InstallCommands{
-				Commands: []string{
-					"apt-get update && apt-get install -y python3 python3-pip python3-venv",
-					"update-alternatives --install /usr/bin/python python /usr/bin/python3 1",
-				},
-			}
-		}
-		// For specific versions, use the official Python docker image approach via multi-stage
-		// or fall back to trying the system package manager
+		// Python version handling strategy:
+		// - When a base image provides the runtime (python:X.Y-slim), this code is not used
+		// - When installing on Ubuntu, we use the system python3 (3.10 on Ubuntu 22.04)
+		//
+		// For specific Python versions, prefer using the official Docker base image
+		// by specifying python as a dependency in agent.yaml. The dockerfile generator
+		// will select python:X.Y-slim as the base image.
+		//
+		// This fallback installs Ubuntu's system Python for cases where Python is
+		// needed alongside other runtimes (e.g., node + python).
 		return InstallCommands{
 			Commands: []string{
 				"apt-get update && apt-get install -y python3 python3-pip python3-venv",
@@ -243,6 +264,7 @@ func getCustomCommands(name, _ string) InstallCommands {
 }
 
 // getDynamicPackageCommands returns install commands for dynamic dependencies.
+// Package names are shell-quoted to prevent command injection.
 func getDynamicPackageCommands(dep Dependency) InstallCommands {
 	switch dep.Type {
 	case TypeDynamicNpm:
@@ -252,7 +274,7 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("npm install -g %s", pkg),
+				fmt.Sprintf("npm install -g %s", shellQuote(pkg)),
 			},
 		}
 	case TypeDynamicPip:
@@ -262,7 +284,7 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("pip install %s", pkg),
+				fmt.Sprintf("pip install %s", shellQuote(pkg)),
 			},
 		}
 	case TypeDynamicUv:
@@ -272,7 +294,7 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("uv tool install %s", pkg),
+				fmt.Sprintf("uv tool install %s", shellQuote(pkg)),
 			},
 		}
 	case TypeDynamicCargo:
@@ -282,7 +304,7 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("cargo install %s", pkg),
+				fmt.Sprintf("cargo install %s", shellQuote(pkg)),
 			},
 		}
 	case TypeDynamicGo:
@@ -293,7 +315,7 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", pkg, version),
+				fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", shellQuote(pkg), shellQuote(version)),
 			},
 		}
 	default:

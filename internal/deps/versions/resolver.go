@@ -7,7 +7,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"time"
 )
+
+// httpTimeout is the default timeout for HTTP requests to version APIs.
+const httpTimeout = 30 * time.Second
 
 // Resolver resolves partial version specifications to full versions.
 type Resolver interface {
@@ -39,7 +43,9 @@ func ResolverFor(dep string) Resolver {
 	}
 }
 
-// semverRegex matches semantic version patterns
+// semverRegex matches semantic version patterns: MAJOR.MINOR or MAJOR.MINOR.PATCH
+// Examples: "1.22", "1.22.5", "20.11.0"
+// Does not match pre-release suffixes (e.g., "1.22-rc1")
 var semverRegex = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?$`)
 
 // parseSemver extracts major, minor, patch from a version string.

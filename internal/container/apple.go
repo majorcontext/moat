@@ -357,7 +357,13 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 	// Use conntrack module instead of state for better container compatibility
 	_ = proxyHost // See function comment for why this is unused
 	script := fmt.Sprintf(`
-		# Flush existing rules
+		# Verify iptables is available
+		if ! command -v iptables >/dev/null 2>&1; then
+			echo "ERROR: iptables not found - container will not be firewalled" >&2
+			exit 1
+		fi
+
+		# Flush existing rules (may fail if no rules exist, that's OK)
 		iptables -w -F OUTPUT 2>/dev/null || true
 
 		# Allow loopback
