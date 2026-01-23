@@ -19,7 +19,6 @@ var auditCmd = &cobra.Command{
 
 Checks:
   - Hash chain: All entries are properly linked
-  - Merkle tree: Root matches computed root from entries
   - Signatures: All attestations have valid signatures
 
 Example:
@@ -109,12 +108,6 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  [FAIL] Hash chain: INVALID\n")
 	}
 
-	if result.MerkleRootValid {
-		fmt.Println("  [ok] Merkle tree: root matches computed root")
-	} else {
-		fmt.Println("  [FAIL] Merkle tree: INVALID")
-	}
-
 	fmt.Println()
 	fmt.Println("Local Signatures")
 	if result.AttestationCount == 0 {
@@ -187,18 +180,13 @@ func runVerifyBundle(cmd *cobra.Command, args []string) error {
 	fmt.Println("Log Integrity")
 	if result.HashChainValid {
 		fmt.Printf("  [ok] Hash chain: %d entries verified\n", result.EntryCount)
-	} else {
-		fmt.Println("  [FAIL] Hash chain: INVALID")
-	}
-
-	if result.MerkleRootValid {
-		if len(bundle.MerkleRoot) >= 16 {
-			fmt.Printf("  [ok] Merkle root: %s...\n", bundle.MerkleRoot[:16])
-		} else {
-			fmt.Printf("  [ok] Merkle root: %s\n", bundle.MerkleRoot)
+		if len(bundle.LastHash) >= 16 {
+			fmt.Printf("  [ok] Last hash: %s...\n", bundle.LastHash[:16])
+		} else if bundle.LastHash != "" {
+			fmt.Printf("  [ok] Last hash: %s\n", bundle.LastHash)
 		}
 	} else {
-		fmt.Println("  [FAIL] Merkle root: MISMATCH")
+		fmt.Println("  [FAIL] Hash chain: INVALID")
 	}
 
 	fmt.Println()

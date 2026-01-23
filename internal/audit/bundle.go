@@ -12,13 +12,12 @@ const BundleVersion = 1
 // It contains everything needed to verify an audit log without
 // access to the original database.
 type ProofBundle struct {
-	Version      int               `json:"version"`
-	CreatedAt    time.Time         `json:"created_at"`
-	MerkleRoot   string            `json:"merkle_root"`
-	Entries      []*Entry          `json:"entries"`
-	Attestations []*Attestation    `json:"attestations,omitempty"`
-	RekorProofs  []*RekorProof     `json:"rekor_proofs,omitempty"`
-	Proofs       []*InclusionProof `json:"inclusion_proofs,omitempty"`
+	Version      int            `json:"version"`
+	CreatedAt    time.Time      `json:"created_at"`
+	LastHash     string         `json:"last_hash"`
+	Entries      []*Entry       `json:"entries"`
+	Attestations []*Attestation `json:"attestations,omitempty"`
+	RekorProofs  []*RekorProof  `json:"rekor_proofs,omitempty"`
 }
 
 // Verify performs a full integrity verification on the proof bundle.
@@ -27,7 +26,6 @@ func (b *ProofBundle) Verify() *Result {
 	result := &Result{
 		Valid:              true,
 		HashChainValid:     true,
-		MerkleRootValid:    true,
 		AttestationsValid:  true,
 		RekorProofsPresent: len(b.RekorProofs) > 0,
 		EntryCount:         uint64(len(b.Entries)),
@@ -70,12 +68,11 @@ func (b *ProofBundle) Verify() *Result {
 		prevHash = entry.Hash
 	}
 
-	// Verify Merkle root
-	tree := BuildMerkleTree(b.Entries)
-	if tree.RootHash() != b.MerkleRoot {
+	// Verify last hash matches
+	if prevHash != b.LastHash {
 		result.Valid = false
-		result.MerkleRootValid = false
-		result.Error = "merkle root mismatch: stored root doesn't match computed root"
+		result.HashChainValid = false
+		result.Error = "last hash mismatch: stored hash doesn't match computed chain"
 		return result
 	}
 

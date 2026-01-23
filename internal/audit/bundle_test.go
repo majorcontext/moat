@@ -2,7 +2,6 @@ package audit
 
 import (
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,9 +9,9 @@ import (
 
 func TestProofBundle_Structure(t *testing.T) {
 	bundle := &ProofBundle{
-		Version:    1,
-		CreatedAt:  time.Now().UTC(),
-		MerkleRoot: "abc123",
+		Version:   1,
+		CreatedAt: time.Now().UTC(),
+		LastHash:  "abc123",
 		Entries: []*Entry{
 			{Sequence: 1, Type: EntryConsole, Hash: "hash1"},
 			{Sequence: 2, Type: EntryConsole, Hash: "hash2"},
@@ -54,11 +53,11 @@ func TestStore_Export(t *testing.T) {
 	if len(bundle.Entries) != 3 {
 		t.Errorf("Entries = %d, want 3", len(bundle.Entries))
 	}
-	if bundle.MerkleRoot == "" {
-		t.Error("MerkleRoot should not be empty")
+	if bundle.LastHash == "" {
+		t.Error("LastHash should not be empty")
 	}
-	if bundle.MerkleRoot != store.MerkleRoot() {
-		t.Errorf("MerkleRoot mismatch")
+	if bundle.LastHash != store.LastHash() {
+		t.Errorf("LastHash mismatch")
 	}
 }
 
@@ -75,7 +74,7 @@ func TestProofBundle_Verify_Valid(t *testing.T) {
 	signer, _ := NewSigner(filepath.Join(dir, "test.key"))
 	att := &Attestation{
 		Sequence:  5,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -140,8 +139,8 @@ func TestProofBundle_MarshalUnmarshal(t *testing.T) {
 	}
 
 	// Verify restored bundle
-	if restored.MerkleRoot != bundle.MerkleRoot {
-		t.Errorf("MerkleRoot mismatch after round-trip")
+	if restored.LastHash != bundle.LastHash {
+		t.Errorf("LastHash mismatch after round-trip")
 	}
 	if len(restored.Entries) != len(bundle.Entries) {
 		t.Errorf("Entries count mismatch: %d != %d", len(restored.Entries), len(bundle.Entries))
@@ -151,33 +150,5 @@ func TestProofBundle_MarshalUnmarshal(t *testing.T) {
 	result := restored.Verify()
 	if !result.Valid {
 		t.Errorf("Restored bundle invalid: %s", result.Error)
-	}
-}
-
-func TestStore_ExportWithProofs(t *testing.T) {
-	dir := t.TempDir()
-	store, _ := OpenStore(filepath.Join(dir, "test.db"))
-	defer store.Close()
-
-	// Add entries
-	for i := 0; i < 10; i++ {
-		store.AppendConsole(fmt.Sprintf("line %d", i))
-	}
-
-	// Export with inclusion proofs for specific entries
-	bundle, err := store.ExportWithProofs([]uint64{1, 5, 10})
-	if err != nil {
-		t.Fatalf("ExportWithProofs: %v", err)
-	}
-
-	if len(bundle.Proofs) != 3 {
-		t.Errorf("Proofs = %d, want 3", len(bundle.Proofs))
-	}
-
-	// Verify each proof
-	for _, proof := range bundle.Proofs {
-		if !proof.Verify() {
-			t.Errorf("Inclusion proof for seq %d invalid", proof.EntrySeq)
-		}
 	}
 }

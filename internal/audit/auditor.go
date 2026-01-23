@@ -6,7 +6,6 @@ import "fmt"
 type Result struct {
 	Valid              bool   `json:"valid"`
 	HashChainValid     bool   `json:"hash_chain_valid"`
-	MerkleRootValid    bool   `json:"merkle_root_valid"`
 	AttestationsValid  bool   `json:"attestations_valid"`
 	RekorProofsPresent bool   `json:"rekor_proofs_present"` // Presence only; verification requires network
 	EntryCount         uint64 `json:"entry_count"`
@@ -39,7 +38,6 @@ func (a *Auditor) Verify() (*Result, error) {
 	result := &Result{
 		Valid:             true,
 		HashChainValid:    true,
-		MerkleRootValid:   true,
 		AttestationsValid: true,
 	}
 
@@ -53,20 +51,6 @@ func (a *Auditor) Verify() (*Result, error) {
 		result.Valid = false
 		result.HashChainValid = false
 		result.Error = chainResult.Error
-		return result, nil
-	}
-
-	// Verify Merkle root
-	entries, err := a.store.Range(1, chainResult.EntryCount)
-	if err != nil {
-		return nil, fmt.Errorf("loading entries: %w", err)
-	}
-	tree := BuildMerkleTree(entries)
-	storedRoot := a.store.MerkleRoot()
-	if tree.RootHash() != storedRoot {
-		result.Valid = false
-		result.MerkleRootValid = false
-		result.Error = "merkle root mismatch: stored root doesn't match computed root"
 		return result, nil
 	}
 

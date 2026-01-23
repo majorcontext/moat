@@ -14,7 +14,7 @@ func TestAttestation_CreateAndSave(t *testing.T) {
 
 	// Add some entries
 	store.AppendConsole("test log")
-	root := store.MerkleRoot()
+	root := store.LastHash()
 
 	// Create attestation
 	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
@@ -45,7 +45,7 @@ func TestAttestation_LoadAll(t *testing.T) {
 
 	att1 := &Attestation{
 		Sequence:  1,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -55,7 +55,7 @@ func TestAttestation_LoadAll(t *testing.T) {
 	store.AppendConsole("test 2")
 	att2 := &Attestation{
 		Sequence:  2,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
