@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -396,14 +395,44 @@ func grantAnthropicViaSetupToken() error {
 
 	cmd := exec.CommandContext(ctx, "claude", "setup-token")
 	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
 
-	output, err := cmd.Output()
+	// Capture both stdout and stderr since the token might be on either stream
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Set environment to disable fancy terminal output
+	// This helps get clean token output without ANSI cursor movement codes
+	cmd.Env = append(os.Environ(),
+		"TERM=dumb",
+		"NO_COLOR=1",
+		"CI=1",
+	)
+
+	err := cmd.Run()
+
+	// Debug output when MOAT_DEBUG_ANTHROPIC is set
+	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
+	if debug {
+		fmt.Println("--- DEBUG: claude setup-token stdout ---")
+		fmt.Println(stdout.String())
+		fmt.Println("--- DEBUG: end stdout ---")
+		fmt.Println("--- DEBUG: claude setup-token stderr ---")
+		fmt.Println(stderr.String())
+		fmt.Println("--- DEBUG: end stderr ---")
+	}
+
 	if err != nil {
+		// Show stderr to user on failure
+		if stderr.Len() > 0 {
+			fmt.Fprintln(os.Stderr, stderr.String())
+		}
 		return fmt.Errorf("claude setup-token failed: %w", err)
 	}
 
-	token := extractOAuthToken(string(output))
+	// Try to extract token from stdout first, then stderr
+	combined := stdout.String() + "\n" + stderr.String()
+	token := extractOAuthToken(combined)
 	if token == "" {
 		return fmt.Errorf("could not find OAuth token in claude setup-token output")
 	}
@@ -422,58 +451,131 @@ func grantAnthropicViaSetupToken() error {
 	return nil
 }
 
-// oauthTokenRegex validates OAuth token format.
-// Format: sk-ant-oat01-<base64-encoded-data> where data is alphanumeric plus _ and -.
-// The token typically has 3-4 parts separated by hyphens after the prefix.
-var oauthTokenRegex = regexp.MustCompile(`^sk-ant-oat01-[A-Za-z0-9_-]{20,}$`)
-
 // extractOAuthToken extracts the OAuth token from claude setup-token output.
-// The output contains ASCII art, messages, and ANSI color codes. The token
-// starts with "sk-ant-oat01-" and may be wrapped across multiple lines.
+//
+// The token format is: sk-ant-oat01-<base64-data>
+// The token appears on its own line(s) between descriptive text.
+//
+// The Claude CLI output varies:
+// - Sometimes uses \n for newlines with blank lines as \n\n or \n<spaces>\n
+// - Sometimes uses \r with ANSI cursor codes: \x1b[1B (down 1), \x1b[2B (down 2 = blank line)
+//
+// Strategy:
+// 1. Find "sk-ant-oat01-" in the raw output
+// 2. Extract until we hit a "blank line" indicator:
+//    - \x1b[2B (ANSI cursor down 2+)
+//    - \n followed by whitespace-only line followed by \n
+// 3. Clean the extracted block (strip ANSI codes and whitespace)
 func extractOAuthToken(output string) string {
-	// Strip ANSI escape codes
-	output = stripANSI(output)
+	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
 
-	lines := strings.Split(output, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "sk-ant-oat01-") {
-			// Token may be wrapped across multiple lines - concatenate continuation lines
-			token := line
-			for j := i + 1; j < len(lines); j++ {
-				nextLine := strings.TrimSpace(lines[j])
-				// Continuation lines contain only token characters (no spaces, no other text)
-				if nextLine == "" {
-					break
+	// Find the start of the token in raw output
+	const prefix = "sk-ant-oat01-"
+	startIdx := strings.Index(output, prefix)
+	if startIdx == -1 {
+		if debug {
+			fmt.Println("--- DEBUG: No token prefix found in output")
+		}
+		return ""
+	}
+
+	// Extract until we hit a "blank line" indicator
+	endIdx := len(output)
+	for i := startIdx; i < len(output); i++ {
+		// Check for ANSI cursor down 2+ lines: \x1b[NB where N >= 2
+		// This is used by Claude CLI to create visual blank lines
+		if output[i] == '\x1b' && i+3 < len(output) && output[i+1] == '[' {
+			// Parse the number before 'B'
+			j := i + 2
+			for j < len(output) && output[j] >= '0' && output[j] <= '9' {
+				j++
+			}
+			if j < len(output) && output[j] == 'B' && j > i+2 {
+				n := 0
+				for k := i + 2; k < j; k++ {
+					n = n*10 + int(output[k]-'0')
 				}
-				// Check if this looks like a token continuation (alphanumeric, _, -)
-				if isTokenContinuation(nextLine) {
-					token += nextLine
-				} else {
-					break
+				if n >= 2 {
+					// Find the \r or start of this escape sequence
+					endIdx = i
+					// Back up past any preceding \r
+					for endIdx > startIdx && output[endIdx-1] == '\r' {
+						endIdx--
+					}
+					if debug {
+						fmt.Printf("--- DEBUG: Found ANSI cursor down %d at index %d, endIdx=%d\n", n, i, endIdx)
+					}
+					goto done
 				}
 			}
-			// Validate the complete token
-			if oauthTokenRegex.MatchString(token) {
-				return token
+		}
+
+		// Check for blank line: \n followed by only whitespace until next \n
+		if output[i] == '\n' {
+			lineStart := i + 1
+			isBlank := true
+			for j := lineStart; j < len(output); j++ {
+				c := output[j]
+				if c == '\n' {
+					// Found end of line
+					if isBlank {
+						endIdx = i
+						if debug {
+							fmt.Printf("--- DEBUG: Found blank line at index %d\n", i)
+						}
+						goto done
+					}
+					break
+				}
+				if c != ' ' && c != '\t' && c != '\r' {
+					isBlank = false
+					break
+				}
 			}
 		}
 	}
-	return ""
+done:
+
+	tokenBlock := output[startIdx:endIdx]
+	if debug {
+		fmt.Printf("--- DEBUG: Raw token block: %q\n", tokenBlock)
+	}
+
+	// Now clean the token block: strip ANSI and extract only token characters
+	cleaned := stripANSI(tokenBlock)
+	if debug {
+		fmt.Printf("--- DEBUG: After ANSI strip: %q\n", cleaned)
+	}
+
+	// Extract only valid token characters
+	var token strings.Builder
+	for i := 0; i < len(cleaned); i++ {
+		c := cleaned[i]
+		if isTokenChar(c) {
+			token.WriteByte(c)
+		}
+	}
+
+	result := token.String()
+	if debug {
+		fmt.Printf("--- DEBUG: Extracted token: %q (length: %d)\n", result, len(result))
+	}
+
+	// Validate the token looks reasonable
+	if len(result) < 60 {
+		if debug {
+			fmt.Printf("--- DEBUG: Token too short: %d chars\n", len(result))
+		}
+		return ""
+	}
+
+	return result
 }
 
-// isTokenContinuation checks if a line looks like a continuation of an OAuth token.
-// Token continuations contain only alphanumeric characters, underscores, and hyphens.
-func isTokenContinuation(line string) bool {
-	if line == "" {
-		return false
-	}
-	for _, c := range line {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
-			return false
-		}
-	}
-	return true
+// isTokenChar returns true if c is a valid OAuth token character.
+func isTokenChar(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9') || c == '_' || c == '-'
 }
 
 // stripANSI removes ANSI escape sequences from a string.
@@ -674,6 +776,13 @@ func grantOpenAIViaCodexLogin() error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// Set environment to disable fancy terminal output
+	cmd.Env = append(os.Environ(),
+		"TERM=dumb",
+		"NO_COLOR=1",
+		"CI=1",
+	)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("codex login failed: %w", err)
