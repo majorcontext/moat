@@ -31,7 +31,7 @@ func TestAuditor_VerifyAll_Valid(t *testing.T) {
 	}
 	att := &Attestation{
 		Sequence:  10,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -60,9 +60,6 @@ func TestAuditor_VerifyAll_Valid(t *testing.T) {
 	}
 	if !result.HashChainValid {
 		t.Error("Hash chain should be valid")
-	}
-	if !result.MerkleRootValid {
-		t.Error("Merkle root should be valid")
 	}
 	if !result.AttestationsValid {
 		t.Error("Attestations should be valid")
@@ -124,58 +121,6 @@ func TestAuditor_VerifyAll_TamperedEntry(t *testing.T) {
 	}
 }
 
-func TestAuditor_VerifyAll_TamperedMerkleRoot(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenStore: %v", err)
-	}
-
-	for i := 0; i < 5; i++ {
-		if _, err := store.AppendConsole("log line"); err != nil {
-			t.Fatalf("AppendConsole: %v", err)
-		}
-	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("store.Close: %v", err)
-	}
-
-	// Tamper with the merkle root directly in the database
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	if _, err := db.Exec(`UPDATE metadata SET value = 'tampered_root_hash' WHERE key = 'merkle_root'`); err != nil {
-		t.Fatalf("Exec: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("db.Close: %v", err)
-	}
-
-	// Audit should detect tampering
-	auditor, err := NewAuditor(dbPath)
-	if err != nil {
-		t.Fatalf("NewAuditor: %v", err)
-	}
-	defer auditor.Close()
-
-	result, err := auditor.Verify()
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-
-	if result.Valid {
-		t.Error("Should detect tampered merkle root")
-	}
-	if !result.HashChainValid {
-		t.Error("Hash chain should still be valid (tampering was on merkle root)")
-	}
-	if result.MerkleRootValid {
-		t.Error("Merkle root should be invalid")
-	}
-}
-
 func TestAuditor_VerifyAll_InvalidAttestation(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -197,7 +142,7 @@ func TestAuditor_VerifyAll_InvalidAttestation(t *testing.T) {
 	}
 	att := &Attestation{
 		Sequence:  5,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 		Signature: []byte("invalid signature bytes that won't verify"),
@@ -226,9 +171,6 @@ func TestAuditor_VerifyAll_InvalidAttestation(t *testing.T) {
 	}
 	if !result.HashChainValid {
 		t.Error("Hash chain should be valid")
-	}
-	if !result.MerkleRootValid {
-		t.Error("Merkle root should be valid")
 	}
 	if result.AttestationsValid {
 		t.Error("Attestations should be invalid")
@@ -338,7 +280,7 @@ func TestAuditor_VerifyAll_WithRekorProofs(t *testing.T) {
 		LogIndex:  12345,
 		LogID:     "test-log-id",
 		TreeSize:  98765,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		EntryUUID: "test-uuid",
 	}

@@ -64,7 +64,7 @@ internal/
 - `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
 
 **Audit Logging:**
-- Events → `audit.Store.Append()` → hash-chained entries in SQLite → Merkle tree updated
+- Events → `audit.Store.Append()` → hash-chained entries in SQLite
 - `moat audit <run-id>` displays chain with verification
 - `--export` creates portable proof bundle
 

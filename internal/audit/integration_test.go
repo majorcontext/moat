@@ -142,82 +142,6 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	}
 }
 
-func TestIntegration_MerkleProofs(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "logs.db")
-
-	// Create store
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("OpenStore: %v", err)
-	}
-
-	// Add entries
-	for i := 0; i < 10; i++ {
-		_, err := store.AppendConsole(fmt.Sprintf("log line %d", i))
-		if err != nil {
-			t.Fatalf("AppendConsole: %v", err)
-		}
-	}
-
-	// Verify merkle root exists
-	root := store.MerkleRoot()
-	if root == "" {
-		t.Fatal("MerkleRoot should not be empty")
-	}
-
-	// Generate and verify proofs for all entries
-	for seq := uint64(1); seq <= 10; seq++ {
-		proof, err := store.ProveEntry(seq)
-		if err != nil {
-			t.Fatalf("ProveEntry(%d): %v", seq, err)
-		}
-
-		if !proof.Verify() {
-			t.Errorf("Proof for entry %d should verify", seq)
-		}
-
-		if proof.RootHash != root {
-			t.Errorf("Proof root should match store root")
-		}
-	}
-
-	// Close and reopen - proofs should still work
-	store.Close()
-
-	store2, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatalf("Reopen: %v", err)
-	}
-	defer store2.Close()
-
-	// Root should persist
-	if store2.MerkleRoot() != root {
-		t.Error("MerkleRoot should persist across reopen")
-	}
-
-	// Proofs should still verify
-	proof, _ := store2.ProveEntry(5)
-	if !proof.Verify() {
-		t.Error("Proof should still verify after reopen")
-	}
-
-	// Add more entries and verify new proofs
-	store2.AppendConsole("after reopen")
-	newRoot := store2.MerkleRoot()
-	if newRoot == root {
-		t.Error("Root should change after new entry")
-	}
-
-	proof2, _ := store2.ProveEntry(11)
-	if !proof2.Verify() {
-		t.Error("New entry proof should verify")
-	}
-	if proof2.RootHash != newRoot {
-		t.Error("New proof should use new root")
-	}
-}
-
 func TestIntegration_RekorWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "logs.db")
@@ -244,7 +168,7 @@ func TestIntegration_RekorWorkflow(t *testing.T) {
 	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
 	att := &Attestation{
 		Sequence:  11,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -256,7 +180,7 @@ func TestIntegration_RekorWorkflow(t *testing.T) {
 		LogIndex:  12345678,
 		LogID:     "c0d23d6ad406973f9ef8b320e5e4e4692e0e65e5419ad4e30c9a8b912a8a3b5c",
 		TreeSize:  98765432,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Hashes:    []string{"hash1", "hash2"},
 		Timestamp: time.Now().UTC(),
 		EntryUUID: "24296fb24b8ad77a8c6e7c4b2e5ac5d8e9f0a1b2c3d4e5f6",
@@ -323,7 +247,7 @@ func TestIntegration_AuditWorkflow(t *testing.T) {
 	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
 	att := &Attestation{
 		Sequence:  22,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -387,7 +311,7 @@ func TestIntegration_BundleWorkflow(t *testing.T) {
 	signer, _ := NewSigner(filepath.Join(dir, "run.key"))
 	att := &Attestation{
 		Sequence:  22,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		PublicKey: signer.PublicKey(),
 	}
@@ -399,16 +323,16 @@ func TestIntegration_BundleWorkflow(t *testing.T) {
 		LogIndex:  99999,
 		LogID:     "test-log-id",
 		TreeSize:  1000000,
-		RootHash:  store.MerkleRoot(),
+		RootHash:  store.LastHash(),
 		Timestamp: time.Now().UTC(),
 		EntryUUID: "test-uuid",
 	}
 	store.SaveRekorProof(22, rekorProof)
 
-	// Export with proofs for high-value entries
-	bundle, err := store.ExportWithProofs([]uint64{21, 22}) // Network + credential
+	// Export bundle
+	bundle, err := store.Export()
 	if err != nil {
-		t.Fatalf("ExportWithProofs: %v", err)
+		t.Fatalf("Export: %v", err)
 	}
 	store.Close()
 
@@ -441,15 +365,5 @@ func TestIntegration_BundleWorkflow(t *testing.T) {
 	}
 	if result.RekorProofCount != 1 {
 		t.Errorf("RekorProofCount = %d, want 1", result.RekorProofCount)
-	}
-
-	// Verify inclusion proofs
-	if len(received.Proofs) != 2 {
-		t.Errorf("Proofs = %d, want 2", len(received.Proofs))
-	}
-	for _, proof := range received.Proofs {
-		if !proof.Verify() {
-			t.Errorf("Inclusion proof for seq %d failed", proof.EntrySeq)
-		}
 	}
 }
