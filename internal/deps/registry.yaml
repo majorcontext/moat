@@ -132,6 +132,11 @@ git:
   type: apt
   package: git
 
+make:
+  description: Build automation tool
+  type: apt
+  package: make
+
 # Custom installers (complex logic)
 playwright:
   description: Browser testing framework

@@ -2,7 +2,9 @@ name: moat
 
 dependencies:
   - go@1.25.6
+  - go-extras
   - git
+  - make
 
 grants:
   - anthropic
