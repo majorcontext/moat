@@ -429,22 +429,51 @@ var oauthTokenRegex = regexp.MustCompile(`^sk-ant-oat01-[A-Za-z0-9_-]{20,}$`)
 
 // extractOAuthToken extracts the OAuth token from claude setup-token output.
 // The output contains ASCII art, messages, and ANSI color codes. The token
-// is on its own line and starts with "sk-ant-oat01-".
+// starts with "sk-ant-oat01-" and may be wrapped across multiple lines.
 func extractOAuthToken(output string) string {
 	// Strip ANSI escape codes
 	output = stripANSI(output)
 
-	// Look for a line containing the OAuth token pattern
-	for _, line := range strings.Split(output, "\n") {
+	lines := strings.Split(output, "\n")
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "sk-ant-oat01-") {
-			// Validate format to avoid partial or malformed tokens
-			if oauthTokenRegex.MatchString(line) {
-				return line
+			// Token may be wrapped across multiple lines - concatenate continuation lines
+			token := line
+			for j := i + 1; j < len(lines); j++ {
+				nextLine := strings.TrimSpace(lines[j])
+				// Continuation lines contain only token characters (no spaces, no other text)
+				if nextLine == "" {
+					break
+				}
+				// Check if this looks like a token continuation (alphanumeric, _, -)
+				if isTokenContinuation(nextLine) {
+					token += nextLine
+				} else {
+					break
+				}
+			}
+			// Validate the complete token
+			if oauthTokenRegex.MatchString(token) {
+				return token
 			}
 		}
 	}
 	return ""
+}
+
+// isTokenContinuation checks if a line looks like a continuation of an OAuth token.
+// Token continuations contain only alphanumeric characters, underscores, and hyphens.
+func isTokenContinuation(line string) bool {
+	if line == "" {
+		return false
+	}
+	for _, c := range line {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // stripANSI removes ANSI escape sequences from a string.
