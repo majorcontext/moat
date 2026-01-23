@@ -173,6 +173,10 @@ func (r *DockerRuntime) RemoveContainer(ctx context.Context, containerID string)
 	if err := r.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force: true,
 	}); err != nil {
+		// Ignore "not found" errors - container may have already been removed
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("removing container: %w", err)
 	}
 	return nil

@@ -786,9 +786,16 @@ region = %s
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("parsing dependencies: %w", err)
 		}
-		if err := deps.Validate(depList); err != nil {
+		if err = deps.Validate(depList); err != nil {
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("validating dependencies: %w", err)
+		}
+		// Resolve partial runtime versions (e.g., "go@1.22" -> "go@1.22.12")
+		// Uses cached API results to avoid repeated network calls
+		depList, err = deps.ResolveVersions(ctx, depList)
+		if err != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("resolving versions: %w", err)
 		}
 	}
 

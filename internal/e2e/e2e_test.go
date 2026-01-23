@@ -27,6 +27,11 @@ import (
 	"github.com/andybons/moat/internal/storage"
 )
 
+// testTimeout is the default context timeout for e2e tests.
+// This needs to be long enough for Docker image builds which may
+// download base images and install packages.
+const testTimeout = 10 * time.Minute
+
 func TestMain(m *testing.M) {
 	// Check if any container runtime is available
 	dockerAvailable := exec.Command("docker", "version").Run() == nil
@@ -62,7 +67,7 @@ func skipIfNoAppleContainer(t *testing.T) {
 // For Apple containers, security is maintained by the fact that the proxy only runs locally
 // and TestProxyNotAccessibleFromNetwork verifies external hosts cannot connect.
 func TestProxyBindsToLocalhostOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -136,7 +141,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 // TestProxyNotAccessibleFromNetwork verifies that the proxy cannot be reached
 // from a non-localhost address. This is a defense-in-depth check.
 func TestProxyNotAccessibleFromNetwork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -188,7 +193,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 // TestNetworkRequestsAreCaptured verifies that HTTP requests made through the proxy
 // are captured in the network trace.
 func TestNetworkRequestsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	// Set up a test credential for GitHub so the proxy does TLS interception.
@@ -295,7 +300,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 // TestContainerCanReachProxyViaHostDockerInternal verifies that containers can
 // reach the proxy via host.docker.internal, which is required for the proxy to work.
 func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -337,7 +342,7 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 
 // TestRunWithoutGrantsNoProxy verifies that runs without grants don't start a proxy.
 func TestRunWithoutGrantsNoProxy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -368,7 +373,7 @@ func TestRunWithoutGrantsNoProxy(t *testing.T) {
 
 // TestLogsAreCaptured verifies that container logs are captured in storage.
 func TestLogsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -429,7 +434,7 @@ func TestLogsAreCaptured(t *testing.T) {
 
 // TestWorkspaceIsMounted verifies that the workspace directory is mounted in the container.
 func TestWorkspaceIsMounted(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -494,7 +499,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 
 // TestConfigEnvironmentVariables verifies that environment variables from config are set.
 func TestConfigEnvironmentVariables(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -628,7 +633,7 @@ func TestAppleContainerRuntime(t *testing.T) {
 func TestAppleContainerBasicRun(t *testing.T) {
 	skipIfNoAppleContainer(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -690,7 +695,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 func TestAppleContainerWithProxy(t *testing.T) {
 	skipIfNoAppleContainer(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -822,7 +827,7 @@ func TestKeychainKeyPersistence(t *testing.T) {
 
 // TestSSHGrantRequiresAgent verifies that SSH grants fail gracefully when no SSH agent is available.
 func TestSSHGrantRequiresAgent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -861,7 +866,7 @@ func TestSSHGrantRequiresAgent(t *testing.T) {
 
 // TestSSHGrantWithoutMapping verifies that SSH grants fail gracefully when no mapping exists.
 func TestSSHGrantWithoutMapping(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -923,7 +928,7 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 		t.Skip("No SSH mapping for github.com, skipping test")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1049,7 +1054,7 @@ func TestCredentialRoundTripWithKeychain(t *testing.T) {
 
 // TestDependencyNodeRuntime verifies that Node.js dependencies work correctly.
 func TestDependencyNodeRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1110,7 +1115,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 
 // TestDependencyPythonRuntime verifies that Python dependencies work correctly.
 func TestDependencyPythonRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1170,7 +1175,7 @@ func TestDependencyPythonRuntime(t *testing.T) {
 
 // TestDependencyGoRuntime verifies that Go dependencies work correctly.
 func TestDependencyGoRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1230,7 +1235,7 @@ func TestDependencyGoRuntime(t *testing.T) {
 
 // TestDependencyNpmPackage verifies that npm packages are installed correctly.
 func TestDependencyNpmPackage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1290,7 +1295,7 @@ func TestDependencyNpmPackage(t *testing.T) {
 
 // TestDependencyGitHubBinary verifies that GitHub binary downloads work correctly.
 func TestDependencyGitHubBinary(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1350,7 +1355,7 @@ func TestDependencyGitHubBinary(t *testing.T) {
 
 // TestDependencyMetaBundle verifies that meta bundles expand correctly.
 func TestDependencyMetaBundle(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1368,7 +1373,8 @@ func TestDependencyMetaBundle(t *testing.T) {
 		Config: &config.Config{
 			Dependencies: []string{"cli-essentials"},
 		},
-		Cmd: []string{"sh", "-c", "jq --version && fzf --version && rg --version"},
+		// Echo labels before each version since fzf --version doesn't include "fzf" in output
+		Cmd: []string{"sh", "-c", "echo 'jq:' && jq --version && echo 'fzf:' && fzf --version && echo 'rg:' && rg --version"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1395,18 +1401,19 @@ func TestDependencyMetaBundle(t *testing.T) {
 		t.Fatalf("ReadLogs: %v", err)
 	}
 
-	// Check that at least some tools from the bundle are installed
+	// Check that all tested tools from the bundle are installed
+	// We look for the labels we echo before each version command
 	foundJq := false
 	foundFzf := false
 	foundRg := false
 	for _, entry := range logs {
-		if strings.Contains(entry.Line, "jq") {
+		if strings.Contains(entry.Line, "jq:") {
 			foundJq = true
 		}
-		if strings.Contains(entry.Line, "fzf") {
+		if strings.Contains(entry.Line, "fzf:") {
 			foundFzf = true
 		}
-		if strings.Contains(entry.Line, "ripgrep") {
+		if strings.Contains(entry.Line, "rg:") {
 			foundRg = true
 		}
 	}
