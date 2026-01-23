@@ -77,25 +77,10 @@ func getRuntimeCommands(name, version string) InstallCommands {
 	}
 }
 
-// Standard architecture name mappings from uname -m to common naming conventions.
-// Used when {arch} placeholder is present but no Targets map is defined.
-var defaultArchMap = map[string]map[string]string{
-	"x86_64": {
-		"arch":   "amd64",
-		"uname":  "x86_64",
-		"golang": "amd64",
-	},
-	"aarch64": {
-		"arch":   "arm64",
-		"uname":  "aarch64",
-		"golang": "arm64",
-	},
-}
-
 // getGithubBinaryCommands returns install commands for GitHub binary dependencies.
-// Supports multi-arch via {target} placeholder with Targets map, or legacy AssetARM64 field.
+// Supports multi-arch via {target}/{arch} placeholder with Targets map, or legacy AssetARM64 field.
 func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands {
-	// New style: use Targets map with {target} placeholder
+	// New style: use Targets map with {target} or {arch} placeholder
 	if len(spec.Targets) > 0 {
 		return getGithubBinaryCommandsWithTargets(name, version, spec)
 	}
@@ -103,11 +88,6 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 	// Legacy style: separate ARM64 asset/bin fields
 	if spec.AssetARM64 != "" {
 		return getGithubBinaryCommandsLegacy(name, version, spec)
-	}
-
-	// Simple case: no multi-arch support, or {arch} placeholder for standard naming
-	if strings.Contains(spec.Asset, "{arch}") {
-		return getGithubBinaryCommandsWithArch(name, version, spec)
 	}
 
 	// Single architecture only
@@ -156,41 +136,19 @@ type archBinarySpec struct {
 	bin string
 }
 
-// getGithubBinaryCommandsWithTargets uses the Targets map for {target} substitution.
+// getGithubBinaryCommandsWithTargets uses the Targets map for {target} and {arch} substitution.
+// Both placeholders are replaced with the architecture-specific target value from the map.
 func getGithubBinaryCommandsWithTargets(name, version string, spec DepSpec) InstallCommands {
 	amd64Target := spec.Targets["amd64"]
 	arm64Target := spec.Targets["arm64"]
 
 	amd64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteAll(spec.Asset, version, amd64Target)),
-		bin: orDefault(substituteAll(spec.Bin, version, amd64Target), name),
+		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, amd64Target)),
+		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, amd64Target), name),
 	}
 	arm64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteAll(spec.Asset, version, arm64Target)),
-		bin: orDefault(substituteAll(spec.Bin, version, arm64Target), name),
-	}
-
-	isZip := strings.HasSuffix(spec.Asset, ".zip")
-	downloadCmd := buildArchDetectCommand(name, amd64, arm64, isZip)
-
-	return InstallCommands{
-		Commands: []string{
-			downloadCmd,
-			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
-			fmt.Sprintf("rm -rf /tmp/%s*", name),
-		},
-	}
-}
-
-// getGithubBinaryCommandsWithArch uses {arch} placeholder with standard naming.
-func getGithubBinaryCommandsWithArch(name, version string, spec DepSpec) InstallCommands {
-	amd64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteArch(spec.Asset, version, "amd64")),
-		bin: orDefault(substituteArch(spec.Bin, version, "amd64"), name),
-	}
-	arm64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteArch(spec.Asset, version, "arm64")),
-		bin: orDefault(substituteArch(spec.Bin, version, "arm64"), name),
+		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, arm64Target)),
+		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, arm64Target), name),
 	}
 
 	isZip := strings.HasSuffix(spec.Asset, ".zip")
@@ -238,17 +196,13 @@ func replaceVersion(s, version string) string {
 	return strings.ReplaceAll(s, "{version}", version)
 }
 
-// substituteAll replaces {version} and {target} placeholders.
-func substituteAll(s, version, target string) string {
+// substituteAllPlaceholders replaces {version}, {target}, and {arch} placeholders.
+// Both {target} and {arch} are replaced with the same target value, allowing
+// registry entries to use whichever is more semantically appropriate.
+func substituteAllPlaceholders(s, version, target string) string {
 	s = strings.ReplaceAll(s, "{version}", version)
 	s = strings.ReplaceAll(s, "{target}", target)
-	return s
-}
-
-// substituteArch replaces {version} and {arch} placeholders.
-func substituteArch(s, version, arch string) string {
-	s = strings.ReplaceAll(s, "{version}", version)
-	s = strings.ReplaceAll(s, "{arch}", arch)
+	s = strings.ReplaceAll(s, "{arch}", target)
 	return s
 }
 
