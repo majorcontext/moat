@@ -70,7 +70,7 @@ func GenerateAccessTokenPlaceholder(accountID string) string {
 	payload := map[string]interface{}{
 		"aud":       []string{"https://api.openai.com/v1"},
 		"client_id": "app_EMoamEEZ73f0CkXaXp7hrann", // Codex CLI client ID
-		"exp":       9999999999,                      // Far future expiration
+		"exp":       9999999999,                     // Far future expiration
 		"iat":       time.Now().Unix(),
 		"iss":       "https://auth.openai.com",
 		"sub":       "moat-proxy-placeholder",

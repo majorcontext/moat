@@ -141,8 +141,8 @@ type CodexAuthToken struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 	ExpiresAt    int64  `json:"expires_at,omitempty"` // Unix timestamp in seconds
 	TokenType    string `json:"token_type,omitempty"`
-	IDToken      string `json:"id_token,omitempty"`      // New format includes id_token
-	AccountID    string `json:"account_id,omitempty"`    // New format includes account_id
+	IDToken      string `json:"id_token,omitempty"`   // New format includes id_token
+	AccountID    string `json:"account_id,omitempty"` // New format includes account_id
 }
 
 // CodexAuthFile represents the auth.json file structure.

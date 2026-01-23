@@ -463,8 +463,9 @@ func grantAnthropicViaSetupToken() error {
 // Strategy:
 // 1. Find "sk-ant-oat01-" in the raw output
 // 2. Extract until we hit a "blank line" indicator:
-//    - \x1b[2B (ANSI cursor down 2+)
-//    - \n followed by whitespace-only line followed by \n
+//   - \x1b[2B (ANSI cursor down 2+)
+//   - \n followed by whitespace-only line followed by \n
+//
 // 3. Clean the extracted block (strip ANSI codes and whitespace)
 func extractOAuthToken(output string) string {
 	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
@@ -528,8 +529,7 @@ func extractOAuthToken(output string) string {
 					break
 				}
 				if c != ' ' && c != '\t' && c != '\r' {
-					isBlank = false
-					break
+					break // Non-whitespace found, not a blank line
 				}
 			}
 		}
