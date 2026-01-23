@@ -237,19 +237,22 @@ func TestGetGoInstallCommands(t *testing.T) {
 func TestGetCustomCommands(t *testing.T) {
 	tests := []struct {
 		name     string
+		version  string
 		contains []string
 		envVars  []string
 	}{
-		{"playwright", []string{"npm install -g playwright", "npx playwright install"}, nil},
-		{"aws", []string{"awscli", "uname -m", "unzip"}, nil},
-		{"gcloud", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
-		{"rust", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},
-		{"kubectl", []string{"dl.k8s.io", "uname -m", "chmod"}, nil},
+		{"playwright", "", []string{"npm install -g playwright", "npx playwright install"}, nil},
+		{"aws", "", []string{"awscli", "uname -m", "unzip"}, nil},
+		{"gcloud", "", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
+		{"rust", "", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},
+		{"kubectl", "", []string{"dl.k8s.io", "uname -m", "chmod"}, nil},
+		{"terraform", "1.10.0", []string{"releases.hashicorp.com", "terraform_1.10.0", "unzip"}, nil},
+		{"helm", "3.16.0", []string{"get.helm.sh", "helm-v3.16.0", "tar"}, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmds := getCustomCommands(tt.name, "")
+			cmds := getCustomCommands(tt.name, tt.version)
 			if len(cmds.Commands) == 0 {
 				t.Fatal("expected commands, got none")
 			}
@@ -410,9 +413,54 @@ func TestOrDefault(t *testing.T) {
 }
 
 func TestGithubReleaseURL(t *testing.T) {
-	url := githubReleaseURL("owner/repo", "1.2.3", "asset.tar.gz")
-	want := "https://github.com/owner/repo/releases/download/v1.2.3/asset.tar.gz"
-	if url != want {
-		t.Errorf("got %q, want %q", url, want)
+	tests := []struct {
+		name      string
+		repo      string
+		version   string
+		asset     string
+		tagPrefix string
+		want      string
+	}{
+		{
+			name:      "default v prefix",
+			repo:      "owner/repo",
+			version:   "1.2.3",
+			asset:     "asset.tar.gz",
+			tagPrefix: "",
+			want:      "https://github.com/owner/repo/releases/download/v1.2.3/asset.tar.gz",
+		},
+		{
+			name:      "explicit v prefix",
+			repo:      "owner/repo",
+			version:   "1.2.3",
+			asset:     "asset.tar.gz",
+			tagPrefix: "v",
+			want:      "https://github.com/owner/repo/releases/download/v1.2.3/asset.tar.gz",
+		},
+		{
+			name:      "no prefix (none)",
+			repo:      "BurntSushi/ripgrep",
+			version:   "14.1.1",
+			asset:     "ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz",
+			tagPrefix: "none",
+			want:      "https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz",
+		},
+		{
+			name:      "custom prefix (bun-v)",
+			repo:      "oven-sh/bun",
+			version:   "1.1.38",
+			asset:     "bun-linux-x64.zip",
+			tagPrefix: "bun-v",
+			want:      "https://github.com/oven-sh/bun/releases/download/bun-v1.1.38/bun-linux-x64.zip",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := githubReleaseURL(tt.repo, tt.version, tt.asset, tt.tagPrefix)
+			if url != tt.want {
+				t.Errorf("got %q, want %q", url, tt.want)
+			}
+		})
 	}
 }

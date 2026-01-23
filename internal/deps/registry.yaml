@@ -30,8 +30,9 @@ bun:
   type: github-binary
   repo: oven-sh/bun
   asset: "bun-linux-{target}.zip"
-  bin: bun
-  default: "1.1.0"
+  bin: "bun-linux-{target}/bun"
+  default: "1.1.38"
+  tag-prefix: "bun-v"
   targets:
     amd64: x64
     arm64: aarch64
@@ -43,6 +44,7 @@ uv:
   asset: "uv-{target}.tar.gz"
   bin: uv
   default: "0.5.14"
+  tag-prefix: none
   requires: [python]
   targets:
     amd64: x86_64-unknown-linux-gnu
@@ -235,6 +237,7 @@ ripgrep:
   asset: "ripgrep-{version}-{target}.tar.gz"
   bin: "ripgrep-{version}-{target}/rg"
   default: "14.1.1"
+  tag-prefix: none
   targets:
     amd64: x86_64-unknown-linux-musl
     arm64: aarch64-unknown-linux-gnu
@@ -279,6 +282,7 @@ delta:
   asset: "delta-{version}-{target}.tar.gz"
   bin: "delta-{version}-{target}/delta"
   default: "0.18.0"
+  tag-prefix: none
   targets:
     amd64: x86_64-unknown-linux-musl
     arm64: aarch64-unknown-linux-gnu
@@ -346,14 +350,8 @@ sqlite3:
 # Cloud tools
 terraform:
   description: Infrastructure as Code
-  type: github-binary
-  repo: hashicorp/terraform
-  asset: "terraform_{version}_linux_{arch}.zip"
-  bin: terraform
+  type: custom
   default: "1.10.0"
-  targets:
-    amd64: amd64
-    arm64: arm64
 
 kubectl:
   description: Kubernetes CLI
@@ -362,14 +360,8 @@ kubectl:
 
 helm:
   description: Kubernetes package manager
-  type: github-binary
-  repo: helm/helm
-  asset: "helm-v{version}-linux-{arch}.tar.gz"
-  bin: "linux-{arch}/helm"
+  type: custom
   default: "3.16.0"
-  targets:
-    amd64: amd64
-    arm64: arm64
 
 # Meta dependencies (bundles)
 go-extras:

@@ -51,6 +51,11 @@ type DepSpec struct {
 	// If empty and {arch} is used, standard arch name mapping is applied.
 	Targets map[string]string `yaml:"targets,omitempty"`
 
+	// TagPrefix is the prefix used for release tags. Defaults to "v" if empty.
+	// Set to "none" for repos that don't use a prefix (e.g., ripgrep uses "14.1.1" not "v14.1.1").
+	// Set to a custom value for repos with non-standard prefixes (e.g., "bun-v" for bun).
+	TagPrefix string `yaml:"tag-prefix,omitempty"`
+
 	// Legacy ARM64 support (deprecated, use Targets instead)
 	AssetARM64 string `yaml:"asset-arm64,omitempty"`
 	BinARM64   string `yaml:"bin-arm64,omitempty"`

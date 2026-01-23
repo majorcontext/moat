@@ -97,7 +97,7 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 		binPath = name
 	}
 
-	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", spec.Repo, version, asset)
+	url := githubReleaseURL(spec.Repo, version, asset, spec.TagPrefix)
 
 	if strings.HasSuffix(asset, ".zip") {
 		return InstallCommands{
@@ -143,11 +143,11 @@ func getGithubBinaryCommandsWithTargets(name, version string, spec DepSpec) Inst
 	arm64Target := spec.Targets["arm64"]
 
 	amd64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, amd64Target)),
+		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, amd64Target), spec.TagPrefix),
 		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, amd64Target), name),
 	}
 	arm64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, arm64Target)),
+		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, arm64Target), spec.TagPrefix),
 		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, arm64Target), name),
 	}
 
@@ -166,11 +166,11 @@ func getGithubBinaryCommandsWithTargets(name, version string, spec DepSpec) Inst
 // getGithubBinaryCommandsLegacy handles the deprecated AssetARM64/BinARM64 fields.
 func getGithubBinaryCommandsLegacy(name, version string, spec DepSpec) InstallCommands {
 	amd64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.Asset, version)),
+		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.Asset, version), spec.TagPrefix),
 		bin: orDefault(replaceVersion(spec.Bin, version), name),
 	}
 	arm64 := archBinarySpec{
-		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.AssetARM64, version)),
+		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.AssetARM64, version), spec.TagPrefix),
 		bin: orDefault(replaceVersion(spec.BinARM64, version), amd64.bin),
 	}
 
@@ -187,8 +187,21 @@ func getGithubBinaryCommandsLegacy(name, version string, spec DepSpec) InstallCo
 }
 
 // githubReleaseURL constructs a GitHub release download URL.
-func githubReleaseURL(repo, version, asset string) string {
-	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", repo, version, asset)
+// The tagPrefix parameter controls the version prefix in the URL:
+// - "" or "v" results in "v{version}" (default for most projects)
+// - "none" results in "{version}" (for repos like ripgrep that don't use v prefix)
+// - any other value is used as-is (e.g., "bun-v" for bun releases)
+func githubReleaseURL(repo, version, asset, tagPrefix string) string {
+	var tag string
+	switch tagPrefix {
+	case "", "v":
+		tag = "v" + version
+	case "none":
+		tag = version
+	default:
+		tag = tagPrefix + version
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, asset)
 }
 
 // replaceVersion replaces {version} placeholder in a string.
@@ -254,7 +267,7 @@ func getGoInstallCommands(spec DepSpec) InstallCommands {
 }
 
 // getCustomCommands returns install commands for custom dependencies.
-func getCustomCommands(name, _ string) InstallCommands {
+func getCustomCommands(name, version string) InstallCommands {
 	switch name {
 	case "playwright":
 		return InstallCommands{
@@ -299,6 +312,27 @@ func getCustomCommands(name, _ string) InstallCommands {
 			Commands: []string{
 				`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" -o /usr/local/bin/kubectl`,
 				"chmod +x /usr/local/bin/kubectl",
+			},
+		}
+	case "terraform":
+		// Install terraform from releases.hashicorp.com (not GitHub releases)
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://releases.hashicorp.com/terraform/%s/terraform_%s_linux_${ARCH}.zip" -o /tmp/terraform.zip`, version, version),
+				"unzip -q /tmp/terraform.zip -d /tmp",
+				"mv /tmp/terraform /usr/local/bin/terraform",
+				"chmod +x /usr/local/bin/terraform",
+				"rm -f /tmp/terraform.zip",
+			},
+		}
+	case "helm":
+		// Install helm from get.helm.sh (not GitHub releases)
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://get.helm.sh/helm-v%s-linux-${ARCH}.tar.gz" | tar -xz -C /tmp`, version),
+				`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && mv /tmp/linux-${ARCH}/helm /usr/local/bin/helm`,
+				"chmod +x /usr/local/bin/helm",
+				"rm -rf /tmp/linux-*",
 			},
 		}
 	default:
