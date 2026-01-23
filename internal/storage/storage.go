@@ -434,3 +434,17 @@ func (s *RunStore) ReadExecEvents() ([]ExecEvent, error) {
 	}
 	return events, scanner.Err()
 }
+
+// SaveDockerfile saves the Dockerfile used to build the container image.
+func (s *RunStore) SaveDockerfile(dockerfile string) error {
+	return os.WriteFile(filepath.Join(s.dir, "Dockerfile"), []byte(dockerfile), 0644)
+}
+
+// ReadDockerfile reads the Dockerfile from the run directory.
+func (s *RunStore) ReadDockerfile() (string, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, "Dockerfile"))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}

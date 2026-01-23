@@ -370,12 +370,13 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 		platform = "linux/arm64"
 	}
 
-	// Build the image
+	// Build the image using BuildKit for better caching and performance
 	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
 		Platform:   platform,
+		Version:    build.BuilderBuildKit,
 	})
 	if err != nil {
 		return fmt.Errorf("building image: %w", err)

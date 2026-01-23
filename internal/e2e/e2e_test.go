@@ -1233,6 +1233,75 @@ func TestDependencyGoRuntime(t *testing.T) {
 	}
 }
 
+// TestDependencyMultipleRuntimes verifies that multiple runtimes can be installed together.
+// This tests the fallback to Debian base image when multiple runtimes are specified,
+// and ensures Node.js major version extraction works correctly for NodeSource URLs.
+func TestDependencyMultipleRuntimes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "python@3.11"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-multi-runtime",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"node@20", "python@3.11"},
+		},
+		Cmd: []string{"sh", "-c", "node --version && python --version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	foundNode := false
+	foundPython := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "v20") {
+			foundNode = true
+			t.Logf("Node version: %s", entry.Line)
+		}
+		if strings.Contains(entry.Line, "Python 3.11") {
+			foundPython = true
+			t.Logf("Python version: %s", entry.Line)
+		}
+	}
+
+	if !foundNode {
+		t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+	}
+	if !foundPython {
+		t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+	}
+}
+
 // TestDependencyNpmPackage verifies that npm packages are installed correctly.
 func TestDependencyNpmPackage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)

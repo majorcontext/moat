@@ -25,10 +25,10 @@ type DockerfileOptions struct {
 	NeedsCodexInit bool
 }
 
-const defaultBaseImage = "ubuntu:22.04"
+const defaultBaseImage = "debian:bookworm-slim"
 
 // runtimeBaseImage returns the official Docker image for a runtime, or empty string
-// if we should fall back to installing on Ubuntu.
+// if we should fall back to installing on Debian.
 func runtimeBaseImage(name, version string) string {
 	switch name {
 	case "python":
@@ -189,15 +189,19 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 }
 
 // writeBasePackages writes the base package installation.
+// Uses BuildKit cache mounts for apt to speed up rebuilds.
 func writeBasePackages(b *strings.Builder) {
 	b.WriteString("# Base packages\n")
-	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
-	b.WriteString("    curl \\\n")
-	b.WriteString("    ca-certificates \\\n")
-	b.WriteString("    gnupg \\\n")
-	b.WriteString("    unzip \\\n")
-	b.WriteString("    iptables \\\n")
-	b.WriteString("    gosu \\\n")
+	b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
+	b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
+	b.WriteString("    apt-get update \\\n")
+	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
+	b.WriteString("       ca-certificates \\\n")
+	b.WriteString("       curl \\\n")
+	b.WriteString("       gnupg \\\n")
+	b.WriteString("       gosu \\\n")
+	b.WriteString("       iptables \\\n")
+	b.WriteString("       unzip \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
 
@@ -215,15 +219,19 @@ func writeUserSetup(b *strings.Builder) {
 }
 
 // writeAptPackages writes user-specified apt package installation.
+// Uses BuildKit cache mounts for apt to speed up rebuilds.
 func writeAptPackages(b *strings.Builder, pkgs []string) {
 	if len(pkgs) == 0 {
 		return
 	}
 	sort.Strings(pkgs)
 	b.WriteString("# Apt packages\n")
-	b.WriteString("RUN apt-get update && apt-get install -y \\\n")
+	b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
+	b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
+	b.WriteString("    apt-get update \\\n")
+	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
 	for _, pkg := range pkgs {
-		b.WriteString("    " + pkg + " \\\n")
+		b.WriteString("       " + pkg + " \\\n")
 	}
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
