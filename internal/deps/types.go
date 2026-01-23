@@ -56,6 +56,10 @@ type DepSpec struct {
 	// Set to a custom value for repos with non-standard prefixes (e.g., "bun-v" for bun).
 	TagPrefix string `yaml:"tag-prefix,omitempty"`
 
+	// Command is the name of the installed command if different from the dependency name.
+	// For example, ripgrep installs as "rg", not "ripgrep".
+	Command string `yaml:"command,omitempty"`
+
 	// Legacy ARM64 support (deprecated, use Targets instead)
 	AssetARM64 string `yaml:"asset-arm64,omitempty"`
 	BinARM64   string `yaml:"bin-arm64,omitempty"`

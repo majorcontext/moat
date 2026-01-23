@@ -236,6 +236,7 @@ ripgrep:
   repo: BurntSushi/ripgrep
   asset: "ripgrep-{version}-{target}.tar.gz"
   bin: "ripgrep-{version}-{target}/rg"
+  command: rg
   default: "14.1.1"
   tag-prefix: none
   targets:

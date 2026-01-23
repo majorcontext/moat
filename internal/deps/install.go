@@ -91,10 +91,13 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 	}
 
 	// Single architecture only
+	// Use Command field if specified, otherwise fall back to name
+	cmdName := orDefault(spec.Command, name)
+
 	asset := strings.ReplaceAll(spec.Asset, "{version}", version)
 	binPath := strings.ReplaceAll(spec.Bin, "{version}", version)
 	if binPath == "" {
-		binPath = name
+		binPath = cmdName
 	}
 
 	url := githubReleaseURL(spec.Repo, version, asset, spec.TagPrefix)
@@ -102,11 +105,11 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 	if strings.HasSuffix(asset, ".zip") {
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("curl -fsSL %s -o /tmp/%s.zip", url, name),
-				fmt.Sprintf("unzip -q /tmp/%s.zip -d /tmp/%s", name, name),
-				fmt.Sprintf("mv /tmp/%s/%s /usr/local/bin/%s", name, binPath, name),
-				fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
-				fmt.Sprintf("rm -rf /tmp/%s*", name),
+				fmt.Sprintf("curl -fsSL %s -o /tmp/%s.zip", url, cmdName),
+				fmt.Sprintf("unzip -q /tmp/%s.zip -d /tmp/%s", cmdName, cmdName),
+				fmt.Sprintf("mv /tmp/%s/%s /usr/local/bin/%s", cmdName, binPath, cmdName),
+				fmt.Sprintf("chmod +x /usr/local/bin/%s", cmdName),
+				fmt.Sprintf("rm -rf /tmp/%s*", cmdName),
 			},
 		}
 	}
@@ -115,8 +118,8 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 		return InstallCommands{
 			Commands: []string{
 				fmt.Sprintf("curl -fsSL %s | tar -xz -C /tmp", url),
-				fmt.Sprintf("mv /tmp/%s /usr/local/bin/%s", binPath, name),
-				fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
+				fmt.Sprintf("mv /tmp/%s /usr/local/bin/%s", binPath, cmdName),
+				fmt.Sprintf("chmod +x /usr/local/bin/%s", cmdName),
 			},
 		}
 	}
@@ -124,8 +127,8 @@ func getGithubBinaryCommands(name, version string, spec DepSpec) InstallCommands
 	// Raw binary (no archive extension)
 	return InstallCommands{
 		Commands: []string{
-			fmt.Sprintf("curl -fsSL %s -o /usr/local/bin/%s", url, name),
-			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
+			fmt.Sprintf("curl -fsSL %s -o /usr/local/bin/%s", url, cmdName),
+			fmt.Sprintf("chmod +x /usr/local/bin/%s", cmdName),
 		},
 	}
 }
@@ -142,32 +145,38 @@ func getGithubBinaryCommandsWithTargets(name, version string, spec DepSpec) Inst
 	amd64Target := spec.Targets["amd64"]
 	arm64Target := spec.Targets["arm64"]
 
+	// Use Command field if specified, otherwise fall back to name
+	cmdName := orDefault(spec.Command, name)
+
 	amd64 := archBinarySpec{
 		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, amd64Target), spec.TagPrefix),
-		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, amd64Target), name),
+		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, amd64Target), cmdName),
 	}
 	arm64 := archBinarySpec{
 		url: githubReleaseURL(spec.Repo, version, substituteAllPlaceholders(spec.Asset, version, arm64Target), spec.TagPrefix),
-		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, arm64Target), name),
+		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, arm64Target), cmdName),
 	}
 
 	isZip := strings.HasSuffix(spec.Asset, ".zip")
-	downloadCmd := buildArchDetectCommand(name, amd64, arm64, isZip)
+	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, isZip)
 
 	return InstallCommands{
 		Commands: []string{
 			downloadCmd,
-			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
-			fmt.Sprintf("rm -rf /tmp/%s*", name),
+			fmt.Sprintf("chmod +x /usr/local/bin/%s", cmdName),
+			fmt.Sprintf("rm -rf /tmp/%s*", cmdName),
 		},
 	}
 }
 
 // getGithubBinaryCommandsLegacy handles the deprecated AssetARM64/BinARM64 fields.
 func getGithubBinaryCommandsLegacy(name, version string, spec DepSpec) InstallCommands {
+	// Use Command field if specified, otherwise fall back to name
+	cmdName := orDefault(spec.Command, name)
+
 	amd64 := archBinarySpec{
 		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.Asset, version), spec.TagPrefix),
-		bin: orDefault(replaceVersion(spec.Bin, version), name),
+		bin: orDefault(replaceVersion(spec.Bin, version), cmdName),
 	}
 	arm64 := archBinarySpec{
 		url: githubReleaseURL(spec.Repo, version, replaceVersion(spec.AssetARM64, version), spec.TagPrefix),
@@ -175,13 +184,13 @@ func getGithubBinaryCommandsLegacy(name, version string, spec DepSpec) InstallCo
 	}
 
 	isZip := strings.HasSuffix(spec.Asset, ".zip")
-	downloadCmd := buildArchDetectCommand(name, amd64, arm64, isZip)
+	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, isZip)
 
 	return InstallCommands{
 		Commands: []string{
 			downloadCmd,
-			fmt.Sprintf("chmod +x /usr/local/bin/%s", name),
-			fmt.Sprintf("rm -rf /tmp/%s*", name),
+			fmt.Sprintf("chmod +x /usr/local/bin/%s", cmdName),
+			fmt.Sprintf("rm -rf /tmp/%s*", cmdName),
 		},
 	}
 }
