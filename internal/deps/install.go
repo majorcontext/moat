@@ -40,9 +40,14 @@ type InstallCommands struct {
 func getRuntimeCommands(name, version string) InstallCommands {
 	switch name {
 	case "node":
+		// NodeSource setup scripts use major versions only (e.g., setup_20.x, not setup_20.11.0.x)
+		majorVersion := version
+		if idx := strings.Index(version, "."); idx > 0 {
+			majorVersion = version[:idx]
+		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("curl -fsSL https://deb.nodesource.com/setup_%s.x | bash -", version),
+				fmt.Sprintf("curl -fsSL https://deb.nodesource.com/setup_%s.x | bash -", majorVersion),
 				"apt-get install -y nodejs",
 			},
 		}
