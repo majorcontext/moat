@@ -70,6 +70,13 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/settings.json" "$TARGET_HOME/.claude/"
 
+  # Copy installed_plugins.json if present (for plugin installation records)
+  # This goes to ~/.claude/plugins/ not ~/.claude/
+  if [ -f "$MOAT_CLAUDE_INIT/installed_plugins.json" ]; then
+    mkdir -p "$TARGET_HOME/.claude/plugins"
+    cp -p "$MOAT_CLAUDE_INIT/installed_plugins.json" "$TARGET_HOME/.claude/plugins/"
+  fi
+
   # Copy credentials if present (ensure restricted permissions for security)
   if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then
     cp -p "$MOAT_CLAUDE_INIT/.credentials.json" "$TARGET_HOME/.claude/"

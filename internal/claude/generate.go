@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/credential"
@@ -35,6 +36,7 @@ func (g *GeneratedConfig) Cleanup() error {
 // GenerateContainerConfig generates Claude configuration files for a container.
 // It creates a staging directory containing:
 // - settings.json with plugin configuration (marketplaces converted to directory sources)
+// - installed_plugins.json with plugin installation records
 // - .mcp.json with MCP server configuration (if any)
 //
 // The staging directory is mounted to /moat/claude-init and copied to ~/.claude
@@ -69,6 +71,20 @@ func GenerateContainerConfig(settings *Settings, cfg *config.Config, cacheMountP
 	settingsPath := filepath.Join(tempDir, "settings.json")
 	if err := os.WriteFile(settingsPath, settingsJSON, 0644); err != nil {
 		return nil, fmt.Errorf("writing settings.json: %w", err)
+	}
+
+	// Generate installed_plugins.json if plugins are configured
+	// This will be copied to ~/.claude/plugins/installed_plugins.json by moat-init
+	if settings != nil && len(settings.EnabledPlugins) > 0 {
+		installedJSON, err := GenerateInstalledPlugins(settings, cacheMountPath)
+		if err != nil {
+			return nil, fmt.Errorf("generating installed plugins: %w", err)
+		}
+
+		installedPath := filepath.Join(tempDir, "installed_plugins.json")
+		if err := os.WriteFile(installedPath, installedJSON, 0644); err != nil {
+			return nil, fmt.Errorf("writing installed_plugins.json: %w", err)
+		}
 	}
 
 	// Generate .mcp.json if MCP servers are configured
@@ -108,6 +124,60 @@ func GenerateSettings(settings *Settings, cacheMountPath string) ([]byte, error)
 	}
 
 	return json.MarshalIndent(containerSettings, "", "  ")
+}
+
+// GenerateInstalledPlugins generates an installed_plugins.json for container use.
+// This file tells Claude Code which plugins are "installed" and where to find them.
+// Without this file, plugins in enabledPlugins won't be loaded.
+func GenerateInstalledPlugins(settings *Settings, cacheMountPath string) ([]byte, error) {
+	installedPlugins := &InstalledPluginsFile{
+		Version: 2,
+		Plugins: make(map[string][]InstalledPlugin),
+	}
+
+	if settings == nil || len(settings.EnabledPlugins) == 0 {
+		return json.MarshalIndent(installedPlugins, "", "  ")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for pluginKey, enabled := range settings.EnabledPlugins {
+		if !enabled {
+			continue
+		}
+
+		// Parse plugin@marketplace format
+		pluginName, marketplace := parsePluginKey(pluginKey)
+		if pluginName == "" || marketplace == "" {
+			continue
+		}
+
+		// Build install path pointing to our mounted marketplace
+		// Format: {cacheMountPath}/marketplaces/{marketplace}/{plugin}
+		installPath := filepath.Join(cacheMountPath, "marketplaces", marketplace, pluginName)
+
+		installedPlugins.Plugins[pluginKey] = []InstalledPlugin{
+			{
+				Scope:       "user",
+				InstallPath: installPath,
+				Version:     "unknown",
+				InstalledAt: now,
+				LastUpdated: now,
+			},
+		}
+	}
+
+	return json.MarshalIndent(installedPlugins, "", "  ")
+}
+
+// parsePluginKey splits "plugin@marketplace" into its components.
+// Returns empty strings if the format is invalid.
+func parsePluginKey(key string) (plugin, marketplace string) {
+	idx := strings.LastIndexByte(key, '@')
+	if idx <= 0 || idx >= len(key)-1 {
+		return "", ""
+	}
+	return key[:idx], key[idx+1:]
 }
 
 // MCPConfig represents the .mcp.json file format.

@@ -15,9 +15,24 @@ dependencies:
 
 grants:
   - anthropic
+  - github
+  - ssh:github.com  # Required for Anthropic marketplace (cloned via SSH)
 
 command: ["claude"]
 interactive: true
 
 # Claude session logs are automatically synced to the host when "anthropic" grant
 # is configured. To disable, set: claude: { sync_logs: false }
+
+# Plugin configuration
+claude:
+  # Enable plugins from marketplaces
+  plugins:
+    "context7-docs-fetcher@ccplugins": true  # Fetch up-to-date library documentation
+    "code-review@ccplugins": true             # Code review assistant
+
+  # Define custom marketplaces (in addition to the built-in Anthropic marketplace)
+  marketplaces:
+    ccplugins:
+      source: github
+      repo: ccplugins/marketplace

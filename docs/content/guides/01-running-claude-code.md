@@ -357,6 +357,28 @@ Check that you're not running in a directory without an `agent.yaml` that specif
 moat claude --name test ~/empty-dir
 ```
 
+### "Failed to install Anthropic marketplace"
+
+Claude Code needs SSH access to GitHub to clone the official Anthropic plugin marketplace. Grant SSH access:
+
+```bash
+moat grant ssh --host github.com
+```
+
+Then add the grant to your `agent.yaml`:
+
+```yaml
+grants:
+  - anthropic
+  - ssh:github.com
+```
+
+Or pass it on the command line:
+
+```bash
+moat claude --grant ssh:github.com ./my-project
+```
+
 ### Network errors
 
 Verify the Anthropic credential is granted:
