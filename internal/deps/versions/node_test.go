@@ -196,7 +196,7 @@ func resolveNodeVersion(version string, releases []nodeRelease) (string, error) 
 		return "", fmt.Errorf("Node.js version %s not found", version)
 	}
 
-	var candidates []string
+	candidates := make([]string, 0, len(releases))
 	for _, rel := range releases {
 		v := strings.TrimPrefix(rel.Version, "v")
 		relParts := strings.Split(v, ".")

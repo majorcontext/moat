@@ -443,14 +443,14 @@ func TestGenerateDockerfileMultiArchBinary(t *testing.T) {
 
 func TestCategorizeDeps(t *testing.T) {
 	deps := []Dependency{
-		{Name: "git"},                                              // apt
-		{Name: "node", Version: "20"},                              // runtime
-		{Name: "gh"},                                               // github binary
-		{Name: "typescript"},                                       // npm
-		{Name: "go", Version: "1.22"},                              // runtime
-		{Name: "govulncheck"},                                      // go-install
-		{Type: TypeDynamicNpm, Package: "eslint", Name: "eslint"},  // dynamic npm
-		{Type: TypeDynamicPip, Package: "pytest", Name: "pytest"},  // dynamic pip
+		{Name: "git"},                 // apt
+		{Name: "node", Version: "20"}, // runtime
+		{Name: "gh"},                  // github binary
+		{Name: "typescript"},          // npm
+		{Name: "go", Version: "1.22"}, // runtime
+		{Name: "govulncheck"},         // go-install
+		{Type: TypeDynamicNpm, Package: "eslint", Name: "eslint"}, // dynamic npm
+		{Type: TypeDynamicPip, Package: "pytest", Name: "pytest"}, // dynamic pip
 	}
 
 	c := categorizeDeps(deps)

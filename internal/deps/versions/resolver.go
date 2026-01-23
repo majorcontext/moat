@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strings"
 )
 
 // Resolver resolves partial version specifications to full versions.
@@ -40,14 +39,6 @@ func ResolverFor(dep string) Resolver {
 	}
 }
 
-// isFullVersion checks if a version string appears to be fully specified.
-// For Go: 1.22.12 is full, 1.22 is partial
-// For Node: 20.11.0 is full, 20 is partial
-func isFullVersion(version string, minParts int) bool {
-	parts := strings.Split(version, ".")
-	return len(parts) >= minParts
-}
-
 // semverRegex matches semantic version patterns
 var semverRegex = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?$`)
 
@@ -59,11 +50,17 @@ func parseSemver(version string) (major, minor, patch int, ok bool) {
 		return 0, 0, 0, false
 	}
 
-	fmt.Sscanf(matches[1], "%d", &major)
-	fmt.Sscanf(matches[2], "%d", &minor)
+	if _, err := fmt.Sscanf(matches[1], "%d", &major); err != nil {
+		return 0, 0, 0, false
+	}
+	if _, err := fmt.Sscanf(matches[2], "%d", &minor); err != nil {
+		return 0, 0, 0, false
+	}
 
 	if matches[3] != "" {
-		fmt.Sscanf(matches[3], "%d", &patch)
+		if _, err := fmt.Sscanf(matches[3], "%d", &patch); err != nil {
+			return 0, 0, 0, false
+		}
 	} else {
 		patch = -1
 	}

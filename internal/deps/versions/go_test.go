@@ -142,7 +142,7 @@ func (r *testGoResolver) Resolve(ctx context.Context, version string) (string, e
 
 	// Find latest patch
 	var best string
-	var bestPatch int = -1
+	bestPatch := -1
 	prefix := fmt.Sprintf("go%d.%d.", major, minor)
 	exact := fmt.Sprintf("go%d.%d", major, minor)
 

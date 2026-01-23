@@ -75,7 +75,7 @@ func (r *NodeResolver) Resolve(ctx context.Context, version string) (string, err
 	}
 
 	// Find latest matching version
-	var candidates []string
+	candidates := make([]string, 0, len(releases))
 	for _, rel := range releases {
 		v := strings.TrimPrefix(rel.Version, "v")
 		relParts := strings.Split(v, ".")
@@ -120,7 +120,7 @@ func (r *NodeResolver) Available(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("fetching Node.js releases: %w", err)
 	}
 
-	var versions []string
+	versions := make([]string, 0, len(releases))
 	for _, rel := range releases {
 		v := strings.TrimPrefix(rel.Version, "v")
 		versions = append(versions, v)

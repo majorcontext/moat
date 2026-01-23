@@ -58,7 +58,7 @@ func (r *PythonResolver) Resolve(ctx context.Context, version string) (string, e
 		return "", fmt.Errorf("invalid Python minor version %q", parts[1])
 	}
 
-	var patch int = -1
+	patch := -1
 	if len(parts) == 3 {
 		patch, err = strconv.Atoi(parts[2])
 		if err != nil {

@@ -112,18 +112,6 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 	return c
 }
 
-// writeSection writes a comment and content to the builder if content is non-empty.
-func writeSection(b *strings.Builder, comment, content string) {
-	if content == "" {
-		return
-	}
-	b.WriteString("# ")
-	b.WriteString(comment)
-	b.WriteString("\n")
-	b.WriteString(content)
-	b.WriteString("\n")
-}
-
 // writeDynamicDeps writes install commands for a slice of dynamic dependencies.
 func writeDynamicDeps(b *strings.Builder, comment string, deps []Dependency) {
 	if len(deps) == 0 {
@@ -278,7 +266,7 @@ func writeNpmPackages(b *strings.Builder, deps []Dependency) {
 	if len(deps) == 0 {
 		return
 	}
-	var pkgNames []string
+	pkgNames := make([]string, 0, len(deps))
 	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
 		pkg := spec.Package
