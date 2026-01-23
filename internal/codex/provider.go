@@ -33,6 +33,15 @@ func (o *OpenAISetup) ConfigureProxy(p credential.ProxyConfigurer, cred *credent
 	// chatgpt.com is used for subscription token validation
 	p.SetCredential("api.openai.com", "Bearer "+cred.Token)
 	p.SetCredential("chatgpt.com", "Bearer "+cred.Token)
+
+	// For ChatGPT subscription tokens, add the ChatGPT-Account-ID header
+	// This is required by the Codex CLI for subscription-based authentication
+	if cred.Metadata != nil {
+		if accountID, ok := cred.Metadata["account_id"]; ok && accountID != "" {
+			p.AddExtraHeader("api.openai.com", "ChatGPT-Account-ID", accountID)
+			p.AddExtraHeader("chatgpt.com", "ChatGPT-Account-ID", accountID)
+		}
+	}
 }
 
 // ContainerEnv returns environment variables for OpenAI.
@@ -69,17 +78,42 @@ func (o *OpenAISetup) PopulateStagingDir(cred *credential.Credential, stagingDir
 	var authFile credential.CodexAuthFile
 
 	if credential.IsCodexToken(cred.Token) {
-		// ChatGPT subscription token - use the token structure
+		// ChatGPT subscription token - use the tokens structure (new format)
 		// If no expiration is set, use a far-future time to prevent local expiration checks
 		expiresAt := cred.ExpiresAt.Unix()
 		if cred.ExpiresAt.IsZero() || expiresAt < 0 {
 			// Set to 1 year from now - Codex CLI checks expiration locally
 			expiresAt = time.Now().Add(365 * 24 * time.Hour).Unix()
 		}
-		authFile.Token = &credential.CodexAuthToken{
-			AccessToken: credential.ProxyInjectedPlaceholder,
-			ExpiresAt:   expiresAt,
+
+		// Extract account_id from credential metadata if available
+		var accountID string
+		if cred.Metadata != nil {
+			accountID = cred.Metadata["account_id"]
 		}
+
+		// Generate JWT placeholders that contain the account_id in claims.
+		// Codex CLI extracts chatgpt_account_id from both id_token AND access_token locally
+		// before making API calls. Without valid claims, it fails with "Token data is not available".
+		idToken := credential.JWTPlaceholder
+		accessToken := credential.ProxyInjectedPlaceholder
+		if accountID != "" {
+			idToken = credential.GenerateIDTokenPlaceholder(accountID)
+			// access_token also needs to be a JWT with account info for local validation
+			accessToken = credential.GenerateAccessTokenPlaceholder(accountID)
+		}
+
+		// Use Tokens (new format) for compatibility with current Codex CLI
+		// Codex CLI requires id_token, access_token, and refresh_token fields
+		authFile.Tokens = &credential.CodexAuthToken{
+			AccessToken:  accessToken,
+			IDToken:      idToken,
+			RefreshToken: credential.ProxyInjectedPlaceholder,
+			ExpiresAt:    expiresAt,
+			AccountID:    accountID,
+		}
+		// Also set Token (old format) for backwards compatibility
+		authFile.Token = authFile.Tokens
 	} else {
 		// API key - use a placeholder that looks like a valid API key
 		// This bypasses local format validation in Codex CLI.

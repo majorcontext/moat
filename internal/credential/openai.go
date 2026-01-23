@@ -141,15 +141,32 @@ type CodexAuthToken struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 	ExpiresAt    int64  `json:"expires_at,omitempty"` // Unix timestamp in seconds
 	TokenType    string `json:"token_type,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`      // New format includes id_token
+	AccountID    string `json:"account_id,omitempty"`    // New format includes account_id
 }
 
 // CodexAuthFile represents the auth.json file structure.
+// Supports both old format (token field) and new format (tokens field).
 type CodexAuthFile struct {
-	// Token is the ChatGPT subscription token
+	// Token is the ChatGPT subscription token (old format)
 	Token *CodexAuthToken `json:"token,omitempty"`
+
+	// Tokens is the ChatGPT subscription token (new format)
+	Tokens *CodexAuthToken `json:"tokens,omitempty"`
 
 	// APIKey is the OpenAI API key (field name matches Codex CLI's format)
 	APIKey string `json:"OPENAI_API_KEY,omitempty"`
+
+	// LastRefresh is the timestamp of the last token refresh (new format)
+	LastRefresh string `json:"last_refresh,omitempty"`
+}
+
+// GetToken returns the token from either the old or new format.
+func (f *CodexAuthFile) GetToken() *CodexAuthToken {
+	if f.Tokens != nil && f.Tokens.AccessToken != "" {
+		return f.Tokens
+	}
+	return f.Token
 }
 
 // ExpiresAtTime returns the expiration time as a time.Time.
@@ -214,11 +231,12 @@ func (c *CodexCredentials) getFromKeychainWithContext(ctx context.Context) (*Cod
 		return nil, fmt.Errorf("parsing keychain credentials: %w", err)
 	}
 
-	if authFile.Token == nil {
+	token := authFile.GetToken()
+	if token == nil || token.AccessToken == "" {
 		return nil, fmt.Errorf("no OAuth token found in keychain")
 	}
 
-	return authFile.Token, nil
+	return token, nil
 }
 
 // getFromFile retrieves Codex credentials from ~/.codex/auth.json.
@@ -243,11 +261,12 @@ func (c *CodexCredentials) getFromFile() (*CodexAuthToken, error) {
 		return nil, fmt.Errorf("parsing credentials file: %w", err)
 	}
 
-	if authFile.Token == nil {
+	token := authFile.GetToken()
+	if token == nil || token.AccessToken == "" {
 		return nil, fmt.Errorf("no OAuth token found in %s", credPath)
 	}
 
-	return authFile.Token, nil
+	return token, nil
 }
 
 // CreateCredentialFromCodex creates a Moat Credential from Codex OAuth token.
@@ -261,6 +280,14 @@ func (c *CodexCredentials) CreateCredentialFromCodex(token *CodexAuthToken) Cred
 	// Set expiration if available
 	if token.ExpiresAt > 0 {
 		cred.ExpiresAt = token.ExpiresAtTime()
+	}
+
+	// Store account_id in metadata if available
+	// This is required for ChatGPT subscription authentication
+	if token.AccountID != "" {
+		cred.Metadata = map[string]string{
+			"account_id": token.AccountID,
+		}
 	}
 
 	return cred
