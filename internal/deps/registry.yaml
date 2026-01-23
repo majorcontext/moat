@@ -19,14 +19,36 @@ python:
   default: "3.11"
   versions: ["3.9", "3.10", "3.11", "3.12"]
 
+rust:
+  description: Rust programming language
+  type: custom
+  default: "stable"
+
 # Package managers / runtimes
 bun:
   description: JavaScript runtime and package manager
   type: github-binary
   repo: oven-sh/bun
-  asset: "bun-linux-x64.zip"
-  bin: bun
-  default: "1.1.0"
+  asset: "bun-linux-{target}.zip"
+  bin: "bun-linux-{target}/bun"
+  default: "1.1.38"
+  tag-prefix: "bun-v"
+  targets:
+    amd64: x64
+    arm64: aarch64
+
+uv:
+  description: Fast Python package manager
+  type: github-binary
+  repo: astral-sh/uv
+  asset: "uv-{target}.tar.gz"
+  bin: uv
+  default: "0.5.14"
+  tag-prefix: none
+  requires: [python]
+  targets:
+    amd64: x86_64-unknown-linux-gnu
+    arm64: aarch64-unknown-linux-gnu
 
 # npm packages
 typescript:
@@ -191,8 +213,179 @@ act:
   bin: act
   default: "0.2.70"
 
+# CLI essentials
+jq:
+  description: JSON processor
+  type: apt
+  package: jq
+
+yq:
+  description: YAML processor
+  type: github-binary
+  repo: mikefarah/yq
+  asset: "yq_linux_{arch}.tar.gz"
+  bin: "yq_linux_{arch}"
+  default: "4.45.4"
+  targets:
+    amd64: amd64
+    arm64: arm64
+
+ripgrep:
+  description: Fast grep alternative
+  type: github-binary
+  repo: BurntSushi/ripgrep
+  asset: "ripgrep-{version}-{target}.tar.gz"
+  bin: "ripgrep-{version}-{target}/rg"
+  command: rg
+  default: "14.1.1"
+  tag-prefix: none
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
+
+fd:
+  description: Fast find alternative
+  type: github-binary
+  repo: sharkdp/fd
+  asset: "fd-v{version}-{target}.tar.gz"
+  bin: "fd-v{version}-{target}/fd"
+  default: "10.2.0"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
+
+bat:
+  description: Cat with syntax highlighting
+  type: github-binary
+  repo: sharkdp/bat
+  asset: "bat-v{version}-{target}.tar.gz"
+  bin: "bat-v{version}-{target}/bat"
+  default: "0.24.0"
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
+
+fzf:
+  description: Fuzzy finder
+  type: github-binary
+  repo: junegunn/fzf
+  asset: "fzf-{version}-linux_{arch}.tar.gz"
+  bin: fzf
+  default: "0.56.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
+
+delta:
+  description: Better git diff viewer
+  type: github-binary
+  repo: dandavison/delta
+  asset: "delta-{version}-{target}.tar.gz"
+  bin: "delta-{version}-{target}/delta"
+  default: "0.18.0"
+  tag-prefix: none
+  targets:
+    amd64: x86_64-unknown-linux-musl
+    arm64: aarch64-unknown-linux-gnu
+
+lazygit:
+  description: Terminal UI for git
+  type: github-binary
+  repo: jesseduffield/lazygit
+  asset: "lazygit_{version}_Linux_{target}.tar.gz"
+  bin: lazygit
+  default: "0.44.0"
+  targets:
+    amd64: x86_64
+    arm64: arm64
+
+# Node.js dev tools
+prettier:
+  description: Code formatter
+  type: npm
+  package: prettier
+  requires: [node]
+
+eslint:
+  description: JavaScript linter
+  type: npm
+  package: eslint
+  requires: [node]
+
+# Python dev tools (installed via uv)
+ruff:
+  description: Fast Python linter
+  type: uv-tool
+  package: ruff
+  requires: [uv]
+
+black:
+  description: Python formatter
+  type: uv-tool
+  package: black
+  requires: [uv]
+
+mypy:
+  description: Python type checker
+  type: uv-tool
+  package: mypy
+  requires: [uv]
+
+pytest:
+  description: Python testing framework
+  type: uv-tool
+  package: pytest
+  requires: [uv]
+
+# Database tools
+redis-cli:
+  description: Redis client
+  type: apt
+  package: redis-tools
+
+sqlite3:
+  description: SQLite client
+  type: apt
+  package: sqlite3
+
+# Cloud tools
+terraform:
+  description: Infrastructure as Code
+  type: custom
+  default: "1.10.0"
+
+kubectl:
+  description: Kubernetes CLI
+  type: custom
+  default: "stable"
+
+helm:
+  description: Kubernetes package manager
+  type: custom
+  default: "3.16.0"
+
 # Meta dependencies (bundles)
 go-extras:
   description: Common Go development tools (gofumpt, govulncheck, goreleaser)
   type: meta
   requires: [gofumpt, govulncheck, goreleaser]
+
+cli-essentials:
+  description: Essential CLI tools (jq, yq, fzf, ripgrep, fd, bat)
+  type: meta
+  requires: [jq, yq, fzf, ripgrep, fd, bat]
+
+python-dev:
+  description: Python development tools (uv, ruff, black, mypy, pytest)
+  type: meta
+  requires: [uv, ruff, black, mypy, pytest]
+
+node-dev:
+  description: Node.js development tools (typescript, prettier, eslint)
+  type: meta
+  requires: [typescript, prettier, eslint]
+
+k8s:
+  description: Kubernetes tools (kubectl, helm)
+  type: meta
+  requires: [kubectl, helm]

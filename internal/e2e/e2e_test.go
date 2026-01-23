@@ -27,6 +27,11 @@ import (
 	"github.com/andybons/moat/internal/storage"
 )
 
+// testTimeout is the default context timeout for e2e tests.
+// This needs to be long enough for Docker image builds which may
+// download base images and install packages.
+const testTimeout = 10 * time.Minute
+
 func TestMain(m *testing.M) {
 	// Check if any container runtime is available
 	dockerAvailable := exec.Command("docker", "version").Run() == nil
@@ -41,7 +46,7 @@ func TestMain(m *testing.M) {
 }
 
 // skipIfNoAppleContainer skips the test if Apple container is not available.
-// Apple container requires macOS 26+ on Apple Silicon.
+// Apple container requires macOS 15+ on Apple Silicon.
 func skipIfNoAppleContainer(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "darwin" {
@@ -62,7 +67,7 @@ func skipIfNoAppleContainer(t *testing.T) {
 // For Apple containers, security is maintained by the fact that the proxy only runs locally
 // and TestProxyNotAccessibleFromNetwork verifies external hosts cannot connect.
 func TestProxyBindsToLocalhostOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -136,7 +141,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 // TestProxyNotAccessibleFromNetwork verifies that the proxy cannot be reached
 // from a non-localhost address. This is a defense-in-depth check.
 func TestProxyNotAccessibleFromNetwork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -188,7 +193,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 // TestNetworkRequestsAreCaptured verifies that HTTP requests made through the proxy
 // are captured in the network trace.
 func TestNetworkRequestsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	// Set up a test credential for GitHub so the proxy does TLS interception.
@@ -295,7 +300,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 // TestContainerCanReachProxyViaHostDockerInternal verifies that containers can
 // reach the proxy via host.docker.internal, which is required for the proxy to work.
 func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -337,7 +342,7 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 
 // TestRunWithoutGrantsNoProxy verifies that runs without grants don't start a proxy.
 func TestRunWithoutGrantsNoProxy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -368,7 +373,7 @@ func TestRunWithoutGrantsNoProxy(t *testing.T) {
 
 // TestLogsAreCaptured verifies that container logs are captured in storage.
 func TestLogsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -429,7 +434,7 @@ func TestLogsAreCaptured(t *testing.T) {
 
 // TestWorkspaceIsMounted verifies that the workspace directory is mounted in the container.
 func TestWorkspaceIsMounted(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -494,7 +499,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 
 // TestConfigEnvironmentVariables verifies that environment variables from config are set.
 func TestConfigEnvironmentVariables(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -628,7 +633,7 @@ func TestAppleContainerRuntime(t *testing.T) {
 func TestAppleContainerBasicRun(t *testing.T) {
 	skipIfNoAppleContainer(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -690,7 +695,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 func TestAppleContainerWithProxy(t *testing.T) {
 	skipIfNoAppleContainer(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -822,7 +827,7 @@ func TestKeychainKeyPersistence(t *testing.T) {
 
 // TestSSHGrantRequiresAgent verifies that SSH grants fail gracefully when no SSH agent is available.
 func TestSSHGrantRequiresAgent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -861,7 +866,7 @@ func TestSSHGrantRequiresAgent(t *testing.T) {
 
 // TestSSHGrantWithoutMapping verifies that SSH grants fail gracefully when no mapping exists.
 func TestSSHGrantWithoutMapping(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -923,7 +928,7 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 		t.Skip("No SSH mapping for github.com, skipping test")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	mgr, err := run.NewManager()
@@ -1041,4 +1046,401 @@ func TestCredentialRoundTripWithKeychain(t *testing.T) {
 	}
 
 	t.Log("Credential round-trip with keychain-stored key successful")
+}
+
+// =============================================================================
+// Dependency System Tests
+// =============================================================================
+
+// TestDependencyNodeRuntime verifies that Node.js dependencies work correctly.
+func TestDependencyNodeRuntime(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"node@20"})
+
+	// Verify node is installed
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-node",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"node@20"},
+		},
+		Cmd: []string{"node", "--version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "v20") {
+			found = true
+			t.Logf("Node version: %s", entry.Line)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+	}
+}
+
+// TestDependencyPythonRuntime verifies that Python dependencies work correctly.
+func TestDependencyPythonRuntime(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"python@3.11"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-python",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"python@3.11"},
+		},
+		Cmd: []string{"python", "--version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "3.11") {
+			found = true
+			t.Logf("Python version: %s", entry.Line)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+	}
+}
+
+// TestDependencyGoRuntime verifies that Go dependencies work correctly.
+func TestDependencyGoRuntime(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"go@1.22"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-go",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"go@1.22"},
+		},
+		Cmd: []string{"go", "version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "go1.22") {
+			found = true
+			t.Logf("Go version: %s", entry.Line)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Go 1.22 not found in output\nLogs: %v", logs)
+	}
+}
+
+// TestDependencyNpmPackage verifies that npm packages are installed correctly.
+func TestDependencyNpmPackage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "typescript"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-npm",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"node@20", "typescript"},
+		},
+		Cmd: []string{"tsc", "--version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "Version") {
+			found = true
+			t.Logf("TypeScript version: %s", entry.Line)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("TypeScript not found in output\nLogs: %v", logs)
+	}
+}
+
+// TestDependencyGitHubBinary verifies that GitHub binary downloads work correctly.
+func TestDependencyGitHubBinary(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"jq"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-github-binary",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"jq"},
+		},
+		Cmd: []string{"jq", "--version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	found := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "jq") {
+			found = true
+			t.Logf("jq version: %s", entry.Line)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("jq not found in output\nLogs: %v", logs)
+	}
+}
+
+// TestDependencyMetaBundle verifies that meta bundles expand correctly.
+func TestDependencyMetaBundle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	// cli-essentials includes jq, fzf, ripgrep, fd, bat
+	workspace := createTestWorkspaceWithDeps(t, []string{"cli-essentials"})
+
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dep-meta-bundle",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"cli-essentials"},
+		},
+		// Echo labels before each version since fzf --version doesn't include "fzf" in output
+		Cmd: []string{"sh", "-c", "echo 'jq:' && jq --version && echo 'fzf:' && fzf --version && echo 'rg:' && rg --version"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	// Check that all tested tools from the bundle are installed
+	// We look for the labels we echo before each version command
+	foundJq := false
+	foundFzf := false
+	foundRg := false
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "jq:") {
+			foundJq = true
+		}
+		if strings.Contains(entry.Line, "fzf:") {
+			foundFzf = true
+		}
+		if strings.Contains(entry.Line, "rg:") {
+			foundRg = true
+		}
+	}
+
+	if !foundJq || !foundFzf || !foundRg {
+		t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs: %v",
+			foundJq, foundFzf, foundRg, logs)
+	}
+}
+
+// createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
+// that specifies dependencies.
+func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	// Create agent.yaml with dependencies
+	var depLines string
+	for _, d := range deps {
+		depLines += "  - " + d + "\n"
+	}
+
+	yaml := "agent: e2e-test\nversion: 1.0.0\ndependencies:\n" + depLines
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile agent.yaml: %v", err)
+	}
+
+	return dir
 }

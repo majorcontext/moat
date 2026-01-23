@@ -353,28 +353,37 @@ func (r *AppleRuntime) Close() error {
 // filtering and prevents unauthorized access even if another service runs on the same port.
 func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
 	// Apple containers run Linux VMs, so iptables should work
+	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention)
+	// Use conntrack module instead of state for better container compatibility
 	_ = proxyHost // See function comment for why this is unused
 	script := fmt.Sprintf(`
-		# Flush existing rules
-		iptables -F OUTPUT 2>/dev/null || true
+		# Verify iptables is available
+		if ! command -v iptables >/dev/null 2>&1; then
+			echo "ERROR: iptables not found - container will not be firewalled" >&2
+			exit 1
+		fi
+
+		# Flush existing rules (may fail if no rules exist, that's OK)
+		iptables -w -F OUTPUT 2>/dev/null || true
 
 		# Allow loopback
-		iptables -A OUTPUT -o lo -j ACCEPT
+		iptables -w -A OUTPUT -o lo -j ACCEPT
 
-		# Allow established/related connections
-		iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+		# Allow established/related connections (conntrack more reliable than state in containers)
+		iptables -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 		# Allow DNS (UDP 53) - needed for initial hostname resolution
-		iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+		iptables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
 
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
-		iptables -A OUTPUT -p tcp --dport %d -j ACCEPT
+		iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
 		# Drop all other outbound traffic
-		iptables -A OUTPUT -j DROP
+		iptables -w -A OUTPUT -j DROP
 	`, proxyPort)
 
-	cmd := exec.CommandContext(ctx, r.containerBin, "exec", containerID, "sh", "-c", script)
+	// Run as root since iptables requires root privileges
+	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 

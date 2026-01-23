@@ -1,18 +1,28 @@
-# Example: Interactive Python REPL
+# Example: Interactive Python REPL with development tools
 #
 # This example demonstrates running an interactive Python REPL
-# with your workspace available for imports and exploration.
+# with modern development tools pre-installed via the python-dev
+# meta dependency (includes uv, ruff, black, mypy, pytest).
 #
 # Run with:
 #   moat run examples/interactive-python
 #
 # The Python interpreter starts automatically in interactive mode.
 # Type 'exit()' or press Ctrl+D to end the session.
+#
+# Available tools:
+#   - uv: Fast package manager (uv pip install, uv run)
+#   - ruff: Fast linter (ruff check .)
+#   - black: Code formatter (black .)
+#   - mypy: Type checker (mypy .)
+#   - pytest: Test runner (pytest)
 
 name: interactive-python
 
 dependencies:
-  - python@3.11
+  - python@3.12      # Latest Python
+  - python-dev       # Meta: uv, ruff, black, mypy, pytest
+  - pip:ipython      # Dynamic: install IPython for better REPL
 
-command: ["python3"]
+command: ["ipython"]
 interactive: true

@@ -273,3 +273,391 @@ func TestVersionConstraintValidation(t *testing.T) {
 		})
 	}
 }
+
+// Tests for dynamic package manager prefixes
+
+func TestParseDynamicNpm(t *testing.T) {
+	tests := []struct {
+		input   string
+		pkg     string
+		version string
+		wantErr bool
+	}{
+		// Simple packages
+		{"npm:eslint", "eslint", "", false},
+		{"npm:eslint@8.0.0", "eslint", "8.0.0", false},
+		{"npm:prettier", "prettier", "", false},
+
+		// Scoped packages
+		{"npm:@anthropic-ai/claude-code", "@anthropic-ai/claude-code", "", false},
+		{"npm:@anthropic-ai/claude-code@1.0.0", "@anthropic-ai/claude-code", "1.0.0", false},
+		{"npm:@types/node", "@types/node", "", false},
+		{"npm:@types/node@20.0.0", "@types/node", "20.0.0", false},
+
+		// Invalid
+		{"npm:", "", "", true},
+		{"npm:@invalid", "", "", true}, // scoped without name
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Package != tt.pkg {
+				t.Errorf("Package = %q, want %q", dep.Package, tt.pkg)
+			}
+			if dep.Version != tt.version {
+				t.Errorf("Version = %q, want %q", dep.Version, tt.version)
+			}
+			if dep.Type != TypeDynamicNpm {
+				t.Errorf("Type = %v, want TypeDynamicNpm", dep.Type)
+			}
+			if !dep.IsDynamic() {
+				t.Error("IsDynamic() should be true")
+			}
+		})
+	}
+}
+
+func TestParseDynamicPip(t *testing.T) {
+	tests := []struct {
+		input   string
+		pkg     string
+		version string
+		wantErr bool
+	}{
+		{"pip:pytest", "pytest", "", false},
+		{"pip:pytest@7.0.0", "pytest", "7.0.0", false},
+		{"pip:requests", "requests", "", false},
+		{"pip:", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Package != tt.pkg {
+				t.Errorf("Package = %q, want %q", dep.Package, tt.pkg)
+			}
+			if dep.Type != TypeDynamicPip {
+				t.Errorf("Type = %v, want TypeDynamicPip", dep.Type)
+			}
+		})
+	}
+}
+
+func TestParseDynamicUv(t *testing.T) {
+	tests := []struct {
+		input   string
+		pkg     string
+		version string
+		wantErr bool
+	}{
+		{"uv:ruff", "ruff", "", false},
+		{"uv:ruff@0.1.0", "ruff", "0.1.0", false},
+		{"uv:black", "black", "", false},
+		{"uv:", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Package != tt.pkg {
+				t.Errorf("Package = %q, want %q", dep.Package, tt.pkg)
+			}
+			if dep.Type != TypeDynamicUv {
+				t.Errorf("Type = %v, want TypeDynamicUv", dep.Type)
+			}
+		})
+	}
+}
+
+func TestParseDynamicGo(t *testing.T) {
+	tests := []struct {
+		input   string
+		pkg     string
+		name    string // display name (last component)
+		version string
+		wantErr bool
+	}{
+		{"go:golang.org/x/tools/gopls", "golang.org/x/tools/gopls", "gopls", "", false},
+		{"go:github.com/user/repo/cmd/tool@1.0.0", "github.com/user/repo/cmd/tool", "tool", "1.0.0", false},
+		{"go:invalid", "", "", "", true}, // no slash
+		{"go:", "", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Package != tt.pkg {
+				t.Errorf("Package = %q, want %q", dep.Package, tt.pkg)
+			}
+			if dep.Name != tt.name {
+				t.Errorf("Name = %q, want %q", dep.Name, tt.name)
+			}
+			if dep.Type != TypeDynamicGo {
+				t.Errorf("Type = %v, want TypeDynamicGo", dep.Type)
+			}
+		})
+	}
+}
+
+func TestParseDynamicCargo(t *testing.T) {
+	tests := []struct {
+		input   string
+		pkg     string
+		version string
+		wantErr bool
+	}{
+		{"cargo:ripgrep", "ripgrep", "", false},
+		{"cargo:ripgrep@14.0.0", "ripgrep", "14.0.0", false},
+		{"cargo:fd-find", "fd-find", "", false},
+		{"cargo:", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Package != tt.pkg {
+				t.Errorf("Package = %q, want %q", dep.Package, tt.pkg)
+			}
+			if dep.Type != TypeDynamicCargo {
+				t.Errorf("Type = %v, want TypeDynamicCargo", dep.Type)
+			}
+		})
+	}
+}
+
+func TestDynamicDepImplicitRequires(t *testing.T) {
+	tests := []struct {
+		input    string
+		requires []string
+	}{
+		{"npm:eslint", []string{"node"}},
+		{"pip:pytest", []string{"python"}},
+		{"uv:ruff", []string{"python", "uv"}},
+		{"cargo:ripgrep", []string{"rust"}},
+		{"go:golang.org/x/tools/gopls", []string{"go"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			reqs := dep.ImplicitRequires()
+			if len(reqs) != len(tt.requires) {
+				t.Errorf("ImplicitRequires() = %v, want %v", reqs, tt.requires)
+				return
+			}
+			for i, r := range reqs {
+				if r != tt.requires[i] {
+					t.Errorf("ImplicitRequires()[%d] = %q, want %q", i, r, tt.requires[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDynamicDepValidation(t *testing.T) {
+	tests := []struct {
+		deps    []string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid: has required runtime
+		{[]string{"node", "npm:eslint"}, false, ""},
+		{[]string{"python", "pip:pytest"}, false, ""},
+		{[]string{"python", "uv", "uv:ruff"}, false, ""},
+		{[]string{"go", "go:golang.org/x/tools/gopls"}, false, ""},
+
+		// Invalid: missing required runtime
+		{[]string{"npm:eslint"}, true, "requires node"},
+		{[]string{"pip:pytest"}, true, "requires python"},
+		{[]string{"uv:ruff"}, true, "requires python"},
+		{[]string{"python", "uv:ruff"}, true, "requires uv"}, // uv: needs both python and uv
+		{[]string{"go:golang.org/x/tools/gopls"}, true, "requires go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.deps, ","), func(t *testing.T) {
+			deps, parseErr := ParseAll(tt.deps)
+			if parseErr != nil {
+				t.Fatalf("ParseAll error: %v", parseErr)
+			}
+			err := Validate(deps)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate(%v) should error", tt.deps)
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Validate(%v) error: %v", tt.deps, err)
+			}
+		})
+	}
+}
+
+func TestParseAllWithDynamicDeps(t *testing.T) {
+	// Mix of registry and dynamic deps
+	deps, err := ParseAll([]string{"node@20", "npm:eslint", "npm:prettier", "git"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	if len(deps) != 4 {
+		t.Fatalf("expected 4 deps, got %d", len(deps))
+	}
+
+	// Check types
+	if deps[0].Type != "" { // registry deps have no type set
+		t.Errorf("node should have empty Type, got %v", deps[0].Type)
+	}
+	if deps[1].Type != TypeDynamicNpm {
+		t.Errorf("eslint should be TypeDynamicNpm, got %v", deps[1].Type)
+	}
+}
+
+func TestDynamicDepDeduplication(t *testing.T) {
+	// Same package specified twice should be deduplicated
+	deps, err := ParseAll([]string{"node", "npm:eslint", "npm:eslint"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	// Should have node + 1 eslint (not 2)
+	if len(deps) != 2 {
+		t.Errorf("expected 2 deps (deduplicated), got %d: %v", len(deps), deps)
+	}
+}
+
+func TestCliEssentialsMetaBundle(t *testing.T) {
+	// cli-essentials expands to jq, yq, fzf, ripgrep, fd, bat
+	deps, err := ParseAll([]string{"cli-essentials"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	expected := []string{"jq", "yq", "fzf", "ripgrep", "fd", "bat"}
+	if len(deps) != len(expected) {
+		t.Errorf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
+	}
+
+	names := make(map[string]bool)
+	for _, d := range deps {
+		names[d.Name] = true
+	}
+	for _, exp := range expected {
+		if !names[exp] {
+			t.Errorf("expected %q in expanded deps", exp)
+		}
+	}
+
+	// Validate should pass (no requirements)
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+}
+
+func TestPythonDevMetaBundle(t *testing.T) {
+	// python-dev expands to uv, ruff, black, mypy, pytest
+	// Needs python as dependency since uv requires python
+	deps, err := ParseAll([]string{"python", "python-dev"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	expected := []string{"python", "uv", "ruff", "black", "mypy", "pytest"}
+	if len(deps) != len(expected) {
+		t.Errorf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
+	}
+
+	// Validate should pass
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+}
+
+func TestNodeDevMetaBundle(t *testing.T) {
+	// node-dev expands to typescript, prettier, eslint
+	// All require node
+	deps, err := ParseAll([]string{"node", "node-dev"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	expected := []string{"node", "typescript", "prettier", "eslint"}
+	if len(deps) != len(expected) {
+		t.Errorf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
+	}
+
+	// Validate should pass
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+}
+
+func TestK8sMetaBundle(t *testing.T) {
+	// k8s expands to kubectl, helm
+	deps, err := ParseAll([]string{"k8s"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	expected := []string{"kubectl", "helm"}
+	if len(deps) != len(expected) {
+		t.Errorf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
+	}
+
+	// Validate should pass
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+}
