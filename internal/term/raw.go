@@ -38,3 +38,13 @@ func RestoreTerminal(state *RawModeState) error {
 func IsTerminal(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
+
+// GetSize returns the terminal dimensions (width, height).
+// Returns (0, 0) if the file is not a terminal or size cannot be determined.
+func GetSize(f *os.File) (width, height int) {
+	w, h, err := term.GetSize(int(f.Fd()))
+	if err != nil {
+		return 0, 0
+	}
+	return w, h
+}

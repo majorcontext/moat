@@ -97,6 +97,15 @@ type Runtime interface {
 	// Attach connects stdin/stdout/stderr to a running container.
 	// Returns when the attachment ends (container exits or context canceled).
 	Attach(ctx context.Context, id string, opts AttachOptions) error
+
+	// StartAttached starts a container with stdin/stdout/stderr already attached.
+	// This is required for TUI applications that need the terminal connected
+	// before the process starts (e.g., to read cursor position).
+	// The attachment runs until the container exits or context is canceled.
+	StartAttached(ctx context.Context, id string, opts AttachOptions) error
+
+	// ResizeTTY resizes the container's TTY to the given dimensions.
+	ResizeTTY(ctx context.Context, id string, height, width uint) error
 }
 
 // AttachOptions configures container attachment.

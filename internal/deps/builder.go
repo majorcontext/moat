@@ -15,6 +15,9 @@ type ImageTagOptions struct {
 
 	// NeedsClaudeInit indicates the image needs the init script for Claude setup.
 	NeedsClaudeInit bool
+
+	// NeedsCodexInit indicates the image needs the init script for Codex setup.
+	NeedsCodexInit bool
 }
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
@@ -42,6 +45,9 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 	if opts.NeedsClaudeInit {
 		hashInput += ",claude:init"
+	}
+	if opts.NeedsCodexInit {
+		hashInput += ",codex:init"
 	}
 
 	// Hash the combined input

@@ -585,3 +585,84 @@ func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts Att
 		}
 	}
 }
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+func (r *DockerRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
+	return r.cli.ContainerResize(ctx, containerID, container.ResizeOptions{
+		Height: height,
+		Width:  width,
+	})
+}
+
+// StartAttached starts a container with stdin/stdout/stderr already attached.
+// This is required for TUI applications that need the terminal connected
+// before the process starts. The attach happens first, then start, ensuring
+// the I/O streams are ready when the container's process begins.
+func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
+	// Attach first (before starting) - this is the key difference from Attach()
+	resp, err := r.cli.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  opts.Stdin != nil,
+		Stdout: opts.Stdout != nil,
+		Stderr: opts.Stderr != nil,
+	})
+	if err != nil {
+		return fmt.Errorf("attaching to container: %w", err)
+	}
+	defer resp.Close()
+
+	// Start the container while we're attached
+	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting container: %w", err)
+	}
+
+	// Set up bidirectional copy
+	outputDone := make(chan error, 1)
+	stdinDone := make(chan error, 1)
+
+	// Copy container output to stdout/stderr
+	go func() {
+		if opts.TTY {
+			// In TTY mode, stdout and stderr are multiplexed
+			_, err := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- err
+		} else {
+			// In non-TTY mode, we need to demux the stream
+			_, err := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- err
+		}
+	}()
+
+	// Copy stdin to container (if provided)
+	if opts.Stdin != nil {
+		go func() {
+			_, err := io.Copy(resp.Conn, opts.Stdin)
+			// Close write side when stdin ends
+			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
+					err = closeErr
+				}
+			}
+			stdinDone <- err
+		}()
+	}
+
+	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-stdinDone:
+			// Stdin error - could be escape sequence or EOF
+			if err != nil && err != io.EOF {
+				return err
+			}
+			// Normal stdin EOF - continue waiting for output
+		case err := <-outputDone:
+			if err != nil && err != io.EOF {
+				return err
+			}
+			return nil
+		}
+	}
+}

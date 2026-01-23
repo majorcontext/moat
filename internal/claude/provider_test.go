@@ -71,8 +71,8 @@ func TestAnthropicSetup_ContainerEnv_OAuth(t *testing.T) {
 		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
 		return
 	}
-	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
+	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+credential.ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+credential.ProxyInjectedPlaceholder)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestAnthropicSetup_ContainerEnv_APIKey(t *testing.T) {
 		t.Errorf("ContainerEnv() for API key returned %d vars, want 1", len(env))
 		return
 	}
-	if env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder)
+	if env[0] != "ANTHROPIC_API_KEY="+credential.ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+credential.ProxyInjectedPlaceholder)
 	}
 }
 

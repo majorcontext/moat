@@ -20,6 +20,9 @@ const (
 	doublePressWindow = 500 * time.Millisecond
 	// containerExitCheckDelay is how long to wait for container exit detection
 	containerExitCheckDelay = 200 * time.Millisecond
+	// ttyStartupDelay is how long to wait before resizing TTY after container starts
+	// This allows the container process to initialize before we resize.
+	ttyStartupDelay = 200 * time.Millisecond
 )
 
 var attachInteractive bool

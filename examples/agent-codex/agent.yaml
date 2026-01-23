@@ -1,0 +1,23 @@
+# Example: OpenAI Codex agent
+#
+# Run Codex CLI in an isolated container with credential injection.
+#
+# Run with:
+#   moat codex examples/agent-codex
+#   moat codex examples/agent-codex -p "fix the bug in main.py"
+
+name: codex-test
+
+dependencies:
+  - node@20
+  - codex-cli
+  - git
+
+grants:
+  - openai
+
+command: ["codex"]
+interactive: true
+
+# Codex session logs are automatically synced to the host when "openai" grant
+# is configured. To disable, set: codex: { sync_logs: false }

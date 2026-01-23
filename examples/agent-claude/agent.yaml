@@ -1,0 +1,23 @@
+# Example: Claude Code agent
+#
+# Run Claude Code in an isolated container with credential injection.
+#
+# Run with:
+#   moat claude examples/agent-claude
+#   moat claude examples/agent-claude -p "fix the bug in main.py"
+
+name: claude-test
+
+dependencies:
+  - node@20
+  - claude-code
+  - git
+
+grants:
+  - anthropic
+
+command: ["claude"]
+interactive: true
+
+# Claude session logs are automatically synced to the host when "anthropic" grant
+# is configured. To disable, set: claude: { sync_logs: false }

@@ -3,10 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/andybons/moat/internal/claude"
 	"github.com/andybons/moat/internal/config"
@@ -15,10 +11,6 @@ import (
 	"github.com/andybons/moat/internal/run"
 	"github.com/spf13/cobra"
 )
-
-// validEnvKey matches valid environment variable names.
-// Must start with letter or underscore, followed by letters, digits, or underscores.
-var validEnvKey = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 var (
 	claudeFlags        ExecFlags
@@ -96,24 +88,9 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		workspace = args[0]
 	}
 
-	absPath, err := filepath.Abs(workspace)
+	absPath, err := resolveWorkspacePath(workspace)
 	if err != nil {
-		return fmt.Errorf("resolving workspace path: %w", err)
-	}
-
-	// Resolve symlinks to get the real path
-	absPath, err = filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return fmt.Errorf("workspace path %q: %w", workspace, err)
-	}
-
-	// Verify path is a directory
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return fmt.Errorf("workspace path %q: %w", absPath, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("workspace path %q is not a directory", absPath)
+		return err
 	}
 
 	// Load agent.yaml if present, otherwise use defaults
@@ -134,7 +111,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if hasAnthropicCredential() {
+	if hasCredential(credential.ProviderAnthropic) {
 		addGrant("anthropic")
 	}
 	if cfg != nil {
@@ -198,21 +175,8 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	cfg.Network.Allow = append(cfg.Network.Allow, claudeAllowedHosts...)
 
 	// Add environment variables from flags
-	if len(claudeFlags.Env) > 0 {
-		// Merge into config (env from flags takes precedence)
-		if cfg.Env == nil {
-			cfg.Env = make(map[string]string)
-		}
-		for _, e := range claudeFlags.Env {
-			key, value, ok := strings.Cut(e, "=")
-			if !ok {
-				return fmt.Errorf("invalid environment variable %q: expected KEY=VALUE format", e)
-			}
-			if !validEnvKey.MatchString(key) {
-				return fmt.Errorf("invalid environment variable name %q: must start with letter or underscore, contain only letters, digits, and underscores", key)
-			}
-			cfg.Env[key] = value
-		}
+	if envErr := parseEnvFlags(claudeFlags.Env, cfg); envErr != nil {
+		return envErr
 	}
 
 	log.Debug("starting claude code",
@@ -268,39 +232,4 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// hasAnthropicCredential checks if an anthropic credential is stored via Moat grant.
-func hasAnthropicCredential() bool {
-	key, err := credential.DefaultEncryptionKey()
-	if err != nil {
-		log.Debug("no anthropic credential: failed to get encryption key", "error", err)
-		return false
-	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
-	if err != nil {
-		log.Debug("no anthropic credential: failed to open credential store", "error", err)
-		return false
-	}
-	_, err = store.Get(credential.ProviderAnthropic)
-	if err != nil {
-		log.Debug("no anthropic credential: not found in store", "error", err)
-		return false
-	}
-	return true
-}
-
-// hasDependency checks if a dependency prefix exists in the list.
-// Matches exact name (e.g., "node") or name with version (e.g., "node@20").
-func hasDependency(deps []string, prefix string) bool {
-	for _, d := range deps {
-		if d == prefix {
-			return true
-		}
-		// Check for prefix@version format, ensuring there's actually a version
-		if strings.HasPrefix(d, prefix+"@") && len(d) > len(prefix)+1 {
-			return true
-		}
-	}
-	return false
 }

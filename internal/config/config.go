@@ -24,6 +24,7 @@ type Config struct {
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
+	Codex        CodexConfig       `yaml:"codex,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
@@ -73,6 +74,17 @@ type ClaudeConfig struct {
 
 	// Marketplaces defines additional plugin marketplaces for this run.
 	Marketplaces map[string]MarketplaceSpec `yaml:"marketplaces,omitempty"`
+
+	// MCP defines MCP (Model Context Protocol) server configurations.
+	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
+// CodexConfig configures OpenAI Codex CLI integration options.
+type CodexConfig struct {
+	// SyncLogs enables mounting Codex's session logs directory so logs from
+	// inside the container appear on the host at the correct project location.
+	// Default: false, unless the "openai" grant is configured (then true).
+	SyncLogs *bool `yaml:"sync_logs,omitempty"`
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
@@ -168,6 +180,23 @@ func (c *Config) ShouldSyncClaudeLogs() bool {
 	return false
 }
 
+// ShouldSyncCodexLogs returns true if Codex session logs should be synced.
+// The logic is:
+// - If codex.sync_logs is explicitly set, use that value
+// - Otherwise, enable sync_logs if "openai" is in grants (Codex integration)
+func (c *Config) ShouldSyncCodexLogs() bool {
+	if c.Codex.SyncLogs != nil {
+		return *c.Codex.SyncLogs
+	}
+	// Default: enable if openai grant is configured
+	for _, grant := range c.Grants {
+		if grant == "openai" || strings.HasPrefix(grant, "openai:") {
+			return true
+		}
+	}
+	return false
+}
+
 // deprecatedRuntime is kept only to detect and reject old configs.
 type deprecatedRuntime struct {
 	Node   string `yaml:"node,omitempty"`
@@ -236,7 +265,14 @@ func Load(dir string) (*Config, error) {
 
 	// Validate Claude MCP server specs
 	for name, spec := range cfg.Claude.MCP {
-		if err := validateMCPServerSpec(name, spec); err != nil {
+		if err := validateMCPServerSpec("claude", name, spec); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate Codex MCP server specs
+	for name, spec := range cfg.Codex.MCP {
+		if err := validateMCPServerSpec("codex", name, spec); err != nil {
 			return nil, err
 		}
 	}
@@ -279,9 +315,10 @@ func validateMarketplaceSpec(name string, spec MarketplaceSpec) error {
 }
 
 // validateMCPServerSpec validates an MCP server specification.
-func validateMCPServerSpec(name string, spec MCPServerSpec) error {
+// The section parameter is "claude" or "codex" for error messages.
+func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 	if spec.Command == "" {
-		return fmt.Errorf("claude.mcp.%s: 'command' is required", name)
+		return fmt.Errorf("%s.mcp.%s: 'command' is required", section, name)
 	}
 	return nil
 }

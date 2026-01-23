@@ -1,4 +1,4 @@
-package claude
+package codex
 
 import (
 	"os"
@@ -18,12 +18,12 @@ const (
 	SessionStateCompleted = session.StateCompleted
 )
 
-// SessionManager wraps session.Manager for Claude Code sessions.
+// SessionManager wraps session.Manager for Codex CLI sessions.
 type SessionManager struct {
 	*session.Manager
 }
 
-// NewSessionManager creates a session manager for Claude Code sessions.
+// NewSessionManager creates a session manager for Codex CLI sessions.
 func NewSessionManager() (*SessionManager, error) {
 	dir, err := DefaultSessionDir()
 	if err != nil {
@@ -32,11 +32,11 @@ func NewSessionManager() (*SessionManager, error) {
 	return &SessionManager{Manager: session.NewManager(dir)}, nil
 }
 
-// DefaultSessionDir returns the default Claude session storage directory.
+// DefaultSessionDir returns the default Codex session storage directory.
 func DefaultSessionDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(homeDir, ".moat", "claude", "sessions"), nil
+	return filepath.Join(homeDir, ".moat", "codex", "sessions"), nil
 }

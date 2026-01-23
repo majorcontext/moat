@@ -8,14 +8,8 @@ import (
 	"strings"
 
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/credential"
 )
-
-// ProxyInjectedPlaceholder is a placeholder value for credentials that will be
-// injected by the Moat proxy at runtime. The actual credential never reaches
-// the container; instead, the proxy intercepts requests and adds the real
-// Authorization header. This placeholder signals to MCP servers that a credential
-// is expected without exposing the actual value.
-const ProxyInjectedPlaceholder = "moat-proxy-injected"
 
 // GeneratedConfig holds the paths to generated configuration files.
 type GeneratedConfig struct {
@@ -172,9 +166,9 @@ func GenerateMCPConfig(servers map[string]config.MCPServerSpec, grants []string)
 			// The proxy will inject the actual token at the network layer
 			switch grantBase {
 			case "github":
-				serverConfig.Env["GITHUB_TOKEN"] = ProxyInjectedPlaceholder
+				serverConfig.Env["GITHUB_TOKEN"] = credential.ProxyInjectedPlaceholder
 			case "anthropic":
-				serverConfig.Env["ANTHROPIC_API_KEY"] = ProxyInjectedPlaceholder
+				serverConfig.Env["ANTHROPIC_API_KEY"] = credential.ProxyInjectedPlaceholder
 			}
 		}
 

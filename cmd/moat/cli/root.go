@@ -1,3 +1,6 @@
+// Package cli implements the moat command-line interface using Cobra.
+// It provides commands for managing AI agent runs, credentials, containers,
+// and observability features.
 package cli
 
 import (

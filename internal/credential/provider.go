@@ -7,6 +7,19 @@ import (
 	"github.com/andybons/moat/internal/container"
 )
 
+// ProxyInjectedPlaceholder is a placeholder value for credentials that will be
+// injected by the Moat proxy at runtime. The actual credential never reaches
+// the container; instead, the proxy intercepts requests and adds the real
+// Authorization header. This placeholder signals to tools that a credential
+// is expected without exposing the actual value.
+const ProxyInjectedPlaceholder = "moat-proxy-injected"
+
+// OpenAIAPIKeyPlaceholder is a placeholder that looks like a valid OpenAI API key.
+// Some tools validate the API key format locally before making requests.
+// Using a valid-looking placeholder bypasses these checks while still allowing
+// the proxy to inject the real key at the network layer.
+const OpenAIAPIKeyPlaceholder = "sk-moat-proxy-injected-placeholder-0000000000000000000000000000000000000000"
+
 // ProxyConfigurer is the interface for configuring proxy credentials.
 // This avoids importing the proxy package directly.
 type ProxyConfigurer interface {

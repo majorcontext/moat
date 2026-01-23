@@ -907,3 +907,80 @@ func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts Atta
 	}
 	return nil
 }
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+// Note: Apple container CLI may not support dynamic resize.
+func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
+	// Apple container doesn't have a direct resize command.
+	// The TTY size is typically inherited from the terminal running the attach command.
+	return nil
+}
+
+// StartAttached starts a container with stdin/stdout/stderr already attached.
+// This is required for TUI applications that need the terminal connected
+// before the process starts.
+//
+// For Apple containers, we start the attach command first (which blocks until
+// the container is running), then start the container. This ensures the I/O
+// streams are ready when the container's process begins.
+func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
+	// Build attach command arguments
+	args := []string{"attach"}
+	if opts.Stdin != nil {
+		args = append(args, "--stdin")
+	}
+	args = append(args, containerID)
+
+	attachCmd := exec.CommandContext(ctx, r.containerBin, args...)
+
+	// Connect stdin/stdout/stderr
+	if opts.Stdin != nil {
+		attachCmd.Stdin = opts.Stdin
+	}
+	if opts.Stdout != nil {
+		attachCmd.Stdout = opts.Stdout
+	}
+	if opts.Stderr != nil {
+		attachCmd.Stderr = opts.Stderr
+	}
+
+	// Start the attach command (it will wait for the container to be running)
+	if err := attachCmd.Start(); err != nil {
+		return fmt.Errorf("starting attach: %w", err)
+	}
+
+	// Start the container - attach command is waiting for it
+	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
+	if err := startCmd.Run(); err != nil {
+		// Clean up the orphaned attach process gracefully
+		if attachCmd.Process != nil {
+			// First try SIGTERM for graceful shutdown
+			if termErr := attachCmd.Process.Signal(syscall.SIGTERM); termErr != nil {
+				log.Debug("failed to send SIGTERM to attach process", "error", termErr)
+			}
+			// Give it a moment to exit gracefully, then force kill if needed
+			done := make(chan error, 1)
+			go func() { done <- attachCmd.Wait() }()
+			select {
+			case <-done:
+				// Process exited
+			case <-time.After(100 * time.Millisecond):
+				// Force kill after timeout
+				if killErr := attachCmd.Process.Kill(); killErr != nil {
+					log.Debug("failed to kill orphaned attach process", "error", killErr)
+				}
+				<-done // Wait for process to fully exit
+			}
+		}
+		return fmt.Errorf("starting container: %w", err)
+	}
+
+	// Wait for attach to complete (it will exit when the container exits)
+	if err := attachCmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("attaching to container: %w", err)
+	}
+	return nil
+}

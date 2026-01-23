@@ -19,6 +19,7 @@ import (
 
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/claude"
+	"github.com/andybons/moat/internal/codex"
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
@@ -32,6 +33,16 @@ import (
 	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
+)
+
+// Timing constants for run lifecycle operations.
+const (
+	// containerStartDelay is how long to wait after StartAttached begins before
+	// updating run state to "running". This delay ensures the container process
+	// has started and the TTY is attached before we report it as running.
+	// The value is chosen to be long enough for the attach to establish but
+	// short enough to not noticeably delay state updates.
+	containerStartDelay = 100 * time.Millisecond
 )
 
 // getWorkspaceOwner returns the UID and GID of the workspace directory owner.
@@ -287,6 +298,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// cleanupCodex is a helper to clean up Codex generated config and log any errors.
+	cleanupCodex := func(cg *codex.GeneratedConfig) {
+		if cg != nil {
+			cg.Cleanup()
+		}
+	}
+
 	if needsProxyForGrants || needsProxyForFirewall {
 		p := proxy.NewProxy()
 
@@ -452,6 +470,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"HTTPS_PROXY=" + proxyURL,
 			"http_proxy=" + proxyURL,
 			"https_proxy=" + proxyURL,
+			// Terminal settings for TUI applications
+			"TERM=xterm-256color",
 		}
 
 		// Mount CA directory for container to trust
@@ -794,15 +814,37 @@ region = %s
 		}
 	}
 
-	// Resolve container image based on dependencies, SSH grants, and Claude init needs
+	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
+	// This is triggered by an openai grant
+	var needsCodexInit bool
+	var codexStagingDir string
+	for _, grant := range opts.Grants {
+		provider := credential.Provider(strings.Split(grant, ":")[0])
+		if provider == credential.ProviderOpenAI {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if _, err := store.Get(provider); err == nil {
+						// We have OpenAI credentials - need Codex init for auth.json
+						needsCodexInit = true
+					}
+				}
+			}
+			break
+		}
+	}
+
+	// Resolve container image based on dependencies, SSH grants, and init needs
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(depList, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
 		NeedsClaudeInit: needsClaudeInit,
+		NeedsCodexInit:  needsCodexInit,
 	})
 
 	// Determine if we need a custom image
-	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit
+	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit
 
 	// Handle --rebuild: delete existing image to force fresh build (Docker only)
 	if opts.Rebuild {
@@ -832,6 +874,7 @@ region = %s
 			dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
 				NeedsSSH:        hasSSHGrants,
 				NeedsClaudeInit: needsClaudeInit,
+				NeedsCodexInit:  needsCodexInit,
 			})
 			if err != nil {
 				cleanupProxy(proxyServer)
@@ -1048,6 +1091,69 @@ region = %s
 		}
 	}
 
+	// Set up Codex staging directory for init script
+	// This includes auth config for ChatGPT subscription tokens
+	var codexGenerated *codex.GeneratedConfig
+	if needsCodexInit || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
+		// Create staging directory
+		var stagingErr error
+		codexStagingDir, stagingErr = os.MkdirTemp("", "moat-codex-staging-*")
+		if stagingErr != nil {
+			cleanupProxy(proxyServer)
+			cleanupClaude(claudeGenerated)
+			return nil, fmt.Errorf("creating Codex staging directory: %w", stagingErr)
+		}
+		// Use a flag to track cleanup responsibility. The defer cleans up on error.
+		codexStagingNeedsCleanup := true
+		defer func() {
+			if codexStagingNeedsCleanup && codexStagingDir != "" {
+				os.RemoveAll(codexStagingDir)
+			}
+		}()
+
+		// Write minimal Codex config
+		if err := codex.WriteCodexConfig(codexStagingDir); err != nil {
+			cleanupProxy(proxyServer)
+			cleanupClaude(claudeGenerated)
+			return nil, fmt.Errorf("writing Codex config: %w", err)
+		}
+
+		// Populate with auth credentials if needed (only for ChatGPT subscription tokens)
+		if needsCodexInit {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
+						openaiSetup := &codex.OpenAISetup{}
+						if err := openaiSetup.PopulateStagingDir(cred, codexStagingDir); err != nil {
+							cleanupProxy(proxyServer)
+							cleanupClaude(claudeGenerated)
+							return nil, fmt.Errorf("populating Codex staging directory: %w", err)
+						}
+					}
+				}
+			}
+		}
+
+		// Transfer cleanup responsibility to codexGenerated
+		codexStagingNeedsCleanup = false
+		codexGenerated = &codex.GeneratedConfig{
+			StagingDir: codexStagingDir,
+			TempDir:    codexStagingDir,
+		}
+
+		// Mount staging directory
+		mounts = append(mounts, container.MountConfig{
+			Source:   codexStagingDir,
+			Target:   codex.CodexInitMountPath,
+			ReadOnly: true,
+		})
+
+		// Set env var for moat-init script
+		proxyEnv = append(proxyEnv, "MOAT_CODEX_INIT="+codex.CodexInitMountPath)
+	}
+
 	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
 	var capAdd []string
 	if r.FirewallEnabled {
@@ -1092,6 +1198,7 @@ region = %s
 		cleanupProxy(proxyServer)
 		cleanupSSH(sshServer)
 		cleanupClaude(claudeGenerated)
+		cleanupCodex(codexGenerated)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -1100,6 +1207,9 @@ region = %s
 	r.SSHAgentServer = sshServer
 	if claudeGenerated != nil {
 		r.ClaudeConfigTempDir = claudeGenerated.TempDir
+	}
+	if codexGenerated != nil {
+		r.CodexConfigTempDir = codexGenerated.TempDir
 	}
 
 	// Ensure proxy is running if we have ports to expose
@@ -1112,6 +1222,7 @@ region = %s
 			}
 			cleanupProxy(proxyServer)
 			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
 			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
@@ -1121,6 +1232,7 @@ region = %s
 			}
 			cleanupProxy(proxyServer)
 			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
 	}
@@ -1134,6 +1246,7 @@ region = %s
 		}
 		cleanupProxy(proxyServer)
 		cleanupClaude(claudeGenerated)
+		cleanupCodex(codexGenerated)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
@@ -1151,6 +1264,7 @@ region = %s
 		}
 		cleanupProxy(proxyServer)
 		cleanupClaude(claudeGenerated)
+		cleanupCodex(codexGenerated)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -1302,6 +1416,66 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 
 	return nil
+}
+
+// StartAttached starts a run with stdin/stdout/stderr attached from the beginning.
+// This is required for TUI applications (like Codex CLI) that need the terminal
+// connected before the process starts to properly detect terminal capabilities.
+// Unlike Start + Attach, this ensures the TTY is ready when the container command begins.
+func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
+	m.mu.Lock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	r.State = StateStarting
+	containerID := r.ContainerID
+	m.mu.Unlock()
+
+	// Start with attachment - this ensures TTY is connected before process starts
+	attachOpts := container.AttachOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		TTY:    true,
+	}
+
+	// Channel to receive the attach result
+	attachDone := make(chan error, 1)
+
+	go func() {
+		attachDone <- m.runtime.StartAttached(ctx, containerID, attachOpts)
+	}()
+
+	// Give the container a moment to start before checking state.
+	// See containerStartDelay for rationale.
+	time.Sleep(containerStartDelay)
+
+	// Update state to running (the container has started)
+	m.mu.Lock()
+	if r.State == StateStarting {
+		r.State = StateRunning
+		r.StartedAt = time.Now()
+	}
+	m.mu.Unlock()
+
+	// Save state to disk
+	_ = r.SaveMetadata()
+
+	// Set up firewall if enabled (do this after container starts)
+	if r.FirewallEnabled && r.ProxyPort > 0 {
+		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+			// Firewall setup failed - this is fatal for strict policy
+			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+			}
+			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
+		}
+	}
+
+	// Wait for the attachment to complete (container exits or context canceled)
+	return <-attachDone
 }
 
 // streamLogs streams container logs to stdout for real-time feedback.
@@ -1498,6 +1672,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			}
 		}
 
+		// Clean up Codex config temp directory
+		if r.CodexConfigTempDir != "" {
+			if rmErr := os.RemoveAll(r.CodexConfigTempDir); rmErr != nil {
+				log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", rmErr)
+			}
+		}
+
 		return err
 	case <-ctx.Done():
 		// Context canceled - caller chose to detach, don't stop the run
@@ -1605,6 +1786,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Codex config temp directory
+	if r.CodexConfigTempDir != "" {
+		if err := os.RemoveAll(r.CodexConfigTempDir); err != nil {
+			log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", err)
+		}
+	}
+
 	m.mu.Lock()
 	delete(m.runs, runID)
 	m.mu.Unlock()
@@ -1629,6 +1817,20 @@ func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, std
 		Stderr: stderr,
 		TTY:    true, // Default to TTY mode for now
 	})
+}
+
+// ResizeTTY resizes the container's TTY to the given dimensions.
+func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uint) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	return m.runtime.ResizeTTY(ctx, containerID, height, width)
 }
 
 // FollowLogs streams container logs to the provided writer.

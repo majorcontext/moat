@@ -70,6 +70,11 @@ type Run struct {
 	// (settings.json, .mcp.json) that are mounted into the container. This should be
 	// cleaned up when the run is stopped or destroyed.
 	ClaudeConfigTempDir string
+
+	// CodexConfigTempDir is the temporary directory containing Codex configuration files
+	// (config.toml, auth.json) that are mounted into the container. This should be
+	// cleaned up when the run is stopped or destroyed.
+	CodexConfigTempDir string
 }
 
 // Options configures a new run.

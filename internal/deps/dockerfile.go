@@ -18,6 +18,11 @@ type DockerfileOptions struct {
 	// copied from a staging directory at container startup. This requires
 	// the moat-init entrypoint script.
 	NeedsClaudeInit bool
+
+	// NeedsCodexInit indicates Codex CLI configuration files need to be
+	// copied from a staging directory at container startup. This requires
+	// the moat-init entrypoint script.
+	NeedsCodexInit bool
 }
 
 const defaultBaseImage = "ubuntu:22.04"
@@ -218,8 +223,8 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	}
 
 	// Install the moat-init entrypoint script if any features require it
-	// Features: SSH agent forwarding, Claude Code file setup, privilege drop to moatuser
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit
+	// Features: SSH agent forwarding, Claude Code file setup, Codex file setup, privilege drop to moatuser
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit
 	if needsInit {
 		// Base64 encode the embedded script to avoid shell escaping issues
 		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
