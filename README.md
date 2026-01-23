@@ -422,7 +422,7 @@ Every run captures structured data:
 
 - **Logs**: Container stdout/stderr with timestamps
 - **Network**: All HTTP/HTTPS requests (method, URL, status, duration)
-- **Audit**: Tamper-proof log with hash chain and Merkle tree verification
+- **Audit**: Tamper-proof log with hash chain verification
 
 ```bash
 moat logs              # View container output
@@ -541,7 +541,7 @@ In interactive mode, `Ctrl+C` is passed through to the container process (e.g., 
 
 **Image selection**: The `dependencies` field maps to base images—`node@20` → `node:20`, `python@3.11` → `python:3.11`. No dependencies defaults to `ubuntu:22.04`.
 
-**Audit logging**: Events are hash-chained and organized into a Merkle tree. Ed25519 attestations provide cryptographic proof of authenticity.
+**Audit logging**: Events are hash-chained for tamper evidence. Ed25519 attestations provide cryptographic proof of authenticity.
 
 ## Setup Notes
 
