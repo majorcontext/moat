@@ -84,6 +84,138 @@ func TestGenerateSettingsNil(t *testing.T) {
 	}
 }
 
+func TestGenerateInstalledPlugins(t *testing.T) {
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{
+			"plugin-a@market":  true,
+			"plugin-b@market":  false, // disabled - should not appear
+			"other@different":  true,
+			"invalid-no-at":    true, // invalid format - should be skipped
+			"@invalid-empty":   true, // invalid format - should be skipped
+			"invalid-trailing@": true, // invalid format - should be skipped
+		},
+	}
+
+	jsonBytes, err := GenerateInstalledPlugins(settings, "/moat/claude-plugins")
+	if err != nil {
+		t.Fatalf("GenerateInstalledPlugins: %v", err)
+	}
+
+	var result InstalledPluginsFile
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		t.Fatalf("unmarshaling result: %v", err)
+	}
+
+	// Check version
+	if result.Version != 2 {
+		t.Errorf("Version = %d, want 2", result.Version)
+	}
+
+	// Check enabled plugins are included
+	if _, ok := result.Plugins["plugin-a@market"]; !ok {
+		t.Error("plugin-a@market should be in installed plugins")
+	}
+	if _, ok := result.Plugins["other@different"]; !ok {
+		t.Error("other@different should be in installed plugins")
+	}
+
+	// Check disabled plugin is NOT included
+	if _, ok := result.Plugins["plugin-b@market"]; ok {
+		t.Error("plugin-b@market should NOT be in installed plugins (disabled)")
+	}
+
+	// Check invalid formats are NOT included
+	if _, ok := result.Plugins["invalid-no-at"]; ok {
+		t.Error("invalid-no-at should NOT be in installed plugins (invalid format)")
+	}
+
+	// Check install paths
+	pluginA := result.Plugins["plugin-a@market"]
+	if len(pluginA) != 1 {
+		t.Fatalf("plugin-a should have 1 entry, got %d", len(pluginA))
+	}
+	expectedPath := "/moat/claude-plugins/marketplaces/market/plugin-a"
+	if pluginA[0].InstallPath != expectedPath {
+		t.Errorf("InstallPath = %q, want %q", pluginA[0].InstallPath, expectedPath)
+	}
+	if pluginA[0].Scope != "user" {
+		t.Errorf("Scope = %q, want %q", pluginA[0].Scope, "user")
+	}
+	if pluginA[0].Version != "unknown" {
+		t.Errorf("Version = %q, want %q", pluginA[0].Version, "unknown")
+	}
+	if pluginA[0].InstalledAt == "" {
+		t.Error("InstalledAt should be set")
+	}
+	if pluginA[0].LastUpdated == "" {
+		t.Error("LastUpdated should be set")
+	}
+}
+
+func TestGenerateInstalledPluginsNil(t *testing.T) {
+	jsonBytes, err := GenerateInstalledPlugins(nil, "/moat/claude-plugins")
+	if err != nil {
+		t.Fatalf("GenerateInstalledPlugins(nil): %v", err)
+	}
+
+	var result InstalledPluginsFile
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		t.Fatalf("unmarshaling result: %v", err)
+	}
+
+	if result.Version != 2 {
+		t.Errorf("Version = %d, want 2", result.Version)
+	}
+	if len(result.Plugins) > 0 {
+		t.Error("Plugins should be empty for nil input")
+	}
+}
+
+func TestGenerateInstalledPluginsEmpty(t *testing.T) {
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{},
+	}
+
+	jsonBytes, err := GenerateInstalledPlugins(settings, "/moat/claude-plugins")
+	if err != nil {
+		t.Fatalf("GenerateInstalledPlugins: %v", err)
+	}
+
+	var result InstalledPluginsFile
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		t.Fatalf("unmarshaling result: %v", err)
+	}
+
+	if len(result.Plugins) > 0 {
+		t.Error("Plugins should be empty for empty EnabledPlugins")
+	}
+}
+
+func TestParsePluginKey(t *testing.T) {
+	tests := []struct {
+		key        string
+		wantPlugin string
+		wantMarket string
+	}{
+		{"plugin@market", "plugin", "market"},
+		{"my-plugin@my-market", "my-plugin", "my-market"},
+		{"a@b", "a", "b"},
+		{"plugin@market@extra", "plugin@market", "extra"}, // last @ wins
+		{"", "", ""},
+		{"no-at-sign", "", ""},
+		{"@empty-plugin", "", ""},
+		{"empty-market@", "", ""},
+	}
+
+	for _, tt := range tests {
+		plugin, market := parsePluginKey(tt.key)
+		if plugin != tt.wantPlugin || market != tt.wantMarket {
+			t.Errorf("parsePluginKey(%q) = (%q, %q), want (%q, %q)",
+				tt.key, plugin, market, tt.wantPlugin, tt.wantMarket)
+		}
+	}
+}
+
 func TestGenerateMCPConfig(t *testing.T) {
 	servers := map[string]config.MCPServerSpec{
 		"github": {
@@ -219,6 +351,12 @@ func TestGenerateContainerConfig(t *testing.T) {
 		t.Errorf("settings.json should exist: %v", err)
 	}
 
+	// Check installed_plugins.json was created
+	installedPath := filepath.Join(result.StagingDir, "installed_plugins.json")
+	if _, err := os.Stat(installedPath); err != nil {
+		t.Errorf("installed_plugins.json should exist: %v", err)
+	}
+
 	// Check .mcp.json was created
 	if result.MCPConfigPath == "" {
 		t.Error("MCPConfigPath should be set when MCP servers configured")
@@ -238,6 +376,27 @@ func TestGenerateContainerConfig(t *testing.T) {
 	}
 	if !parsedSettings.EnabledPlugins["plugin@market"] {
 		t.Error("plugin should be enabled in generated settings")
+	}
+
+	// Verify installed_plugins.json content
+	installedContent, err := os.ReadFile(installedPath)
+	if err != nil {
+		t.Fatalf("reading installed_plugins.json: %v", err)
+	}
+	var parsedInstalled InstalledPluginsFile
+	if err := json.Unmarshal(installedContent, &parsedInstalled); err != nil {
+		t.Fatalf("parsing installed_plugins.json: %v", err)
+	}
+	if parsedInstalled.Version != 2 {
+		t.Errorf("installed_plugins.json version = %d, want 2", parsedInstalled.Version)
+	}
+	if _, ok := parsedInstalled.Plugins["plugin@market"]; !ok {
+		t.Error("plugin@market should be in installed_plugins.json")
+	}
+	if parsedInstalled.Plugins["plugin@market"][0].InstallPath != "/moat/claude-plugins/marketplaces/market/plugin" {
+		t.Errorf("install path = %q, want %q",
+			parsedInstalled.Plugins["plugin@market"][0].InstallPath,
+			"/moat/claude-plugins/marketplaces/market/plugin")
 	}
 
 	// Verify .mcp.json content
@@ -276,9 +435,39 @@ func TestGenerateContainerConfigNoMCP(t *testing.T) {
 		t.Errorf("settings.json should exist: %v", err)
 	}
 
+	// installed_plugins.json should be created (since plugins are configured)
+	installedPath := filepath.Join(result.StagingDir, "installed_plugins.json")
+	if _, err := os.Stat(installedPath); err != nil {
+		t.Errorf("installed_plugins.json should exist: %v", err)
+	}
+
 	// MCP config should NOT be created
 	if result.MCPConfigPath != "" {
 		t.Error("MCPConfigPath should be empty when no MCP servers configured")
+	}
+}
+
+func TestGenerateContainerConfigNoPlugins(t *testing.T) {
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{}, // Empty
+	}
+
+	result, err := GenerateContainerConfig(settings, nil, "/moat/claude-plugins", nil)
+	if err != nil {
+		t.Fatalf("GenerateContainerConfig: %v", err)
+	}
+	defer result.Cleanup()
+
+	// Settings should be created
+	settingsPath := filepath.Join(result.StagingDir, "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		t.Errorf("settings.json should exist: %v", err)
+	}
+
+	// installed_plugins.json should NOT be created when no plugins
+	installedPath := filepath.Join(result.StagingDir, "installed_plugins.json")
+	if _, err := os.Stat(installedPath); !os.IsNotExist(err) {
+		t.Error("installed_plugins.json should NOT exist when no plugins configured")
 	}
 }
 

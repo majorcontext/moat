@@ -54,6 +54,23 @@ type MarketplaceSource struct {
 	Path string `json:"path,omitempty"`
 }
 
+// InstalledPluginsFile represents the ~/.claude/plugins/installed_plugins.json format.
+// This file tracks which plugins are installed and where their files are located.
+type InstalledPluginsFile struct {
+	Version int                          `json:"version"`
+	Plugins map[string][]InstalledPlugin `json:"plugins"`
+}
+
+// InstalledPlugin represents a single installed plugin entry.
+type InstalledPlugin struct {
+	Scope        string `json:"scope"`                  // "user" or "project"
+	InstallPath  string `json:"installPath"`            // Path to plugin files
+	Version      string `json:"version"`                // Plugin version or "unknown"
+	InstalledAt  string `json:"installedAt"`            // ISO 8601 timestamp
+	LastUpdated  string `json:"lastUpdated"`            // ISO 8601 timestamp
+	GitCommitSha string `json:"gitCommitSha,omitempty"` // Optional git commit
+}
+
 // LoadSettings loads a single Claude settings.json file.
 // Returns nil, nil if the file doesn't exist.
 func LoadSettings(path string) (*Settings, error) {

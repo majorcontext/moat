@@ -9,9 +9,10 @@ Run Claude Code in an isolated container with automatic API key injection.
 
 ## Setup (One-Time)
 
-Store your Anthropic credentials securely:
+Store your credentials securely:
 
 ```bash
+# Anthropic credentials (choose one method)
 # Option 1: API key
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
 moat grant anthropic
@@ -19,9 +20,15 @@ moat grant anthropic
 # Option 2: Claude subscription (if claude CLI is installed)
 moat grant anthropic
 # Select option 1 for Claude subscription login
+
+# GitHub credentials (for repository access)
+moat grant github
+
+# SSH credentials (required for Anthropic marketplace)
+moat grant ssh --host github.com
 ```
 
-Expected output:
+Expected output for Anthropic:
 
 ```
 Validating API key...
@@ -85,6 +92,35 @@ Ask Claude Code to fix it and verify the output.
 2. A TLS-intercepting proxy starts and injects your API key into requests to `api.anthropic.com`
 3. Claude Code runs inside the container, unaware of the real API key
 4. All network requests are logged for observability
+
+## Plugins and Marketplaces
+
+This example includes plugin configuration to demonstrate how to extend Claude Code with custom skills.
+
+The `agent.yaml` configures:
+
+- **SSH grant for GitHub** — Required to clone the Anthropic marketplace (uses `git@github.com:...` URLs)
+- **Custom marketplaces** — Additional plugin sources beyond the built-in Anthropic marketplace
+- **Enabled plugins** — Specific plugins to activate in the session
+
+```yaml
+grants:
+  - ssh:github.com  # Required for marketplace access
+
+claude:
+  plugins:
+    "context7-docs-fetcher@ccplugins": true  # Fetch up-to-date library docs
+    "code-review@ccplugins": true             # Code review assistant
+  marketplaces:
+    ccplugins:
+      source: github
+      repo: ccplugins/marketplace
+```
+
+Without the `ssh:github.com` grant, you'll see:
+```
+Failed to install Anthropic marketplace · Will retry on next startup
+```
 
 ## Viewing Logs
 
