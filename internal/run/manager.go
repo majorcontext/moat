@@ -872,11 +872,15 @@ region = %s
 	// Both Docker and Apple containers support Dockerfile builds.
 	var generatedDockerfile string
 	if needsCustomImage {
+		// Check if BuildKit is disabled (for CI compatibility)
+		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
+
 		// Always generate the Dockerfile so we can save it to the run directory
 		dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
 			NeedsSSH:        hasSSHGrants,
 			NeedsClaudeInit: needsClaudeInit,
 			NeedsCodexInit:  needsCodexInit,
+			UseBuildKit:     &useBuildKit,
 		})
 		if err != nil {
 			cleanupProxy(proxyServer)

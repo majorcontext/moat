@@ -370,13 +370,20 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 		platform = "linux/arm64"
 	}
 
-	// Build the image using BuildKit for better caching and performance
+	// Use BuildKit by default, but allow disabling via MOAT_DISABLE_BUILDKIT=1
+	// This is useful in CI environments where BuildKit can have session issues.
+	builderVersion := build.BuilderBuildKit
+	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
+		builderVersion = build.BuilderV1
+	}
+
+	// Build the image
 	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
 		Platform:   platform,
-		Version:    build.BuilderBuildKit,
+		Version:    builderVersion,
 	})
 	if err != nil {
 		return fmt.Errorf("building image: %w", err)

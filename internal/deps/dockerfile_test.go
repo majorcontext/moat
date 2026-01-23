@@ -439,6 +439,53 @@ func TestGenerateDockerfileMultiArchBinary(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileWithoutBuildKit(t *testing.T) {
+	// Test that disabling BuildKit removes cache mounts
+	deps := []Dependency{
+		{Name: "git"},
+		{Name: "curl"},
+	}
+	useBuildKit := false
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		UseBuildKit: &useBuildKit,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should NOT have BuildKit-specific cache mounts
+	if strings.Contains(dockerfile, "--mount=type=cache") {
+		t.Error("Dockerfile should not contain --mount=type=cache when BuildKit is disabled")
+	}
+
+	// Should still have apt-get commands
+	if !strings.Contains(dockerfile, "apt-get update") {
+		t.Error("Dockerfile should have apt-get update")
+	}
+	if !strings.Contains(dockerfile, "apt-get install") {
+		t.Error("Dockerfile should have apt-get install")
+	}
+}
+
+func TestGenerateDockerfileWithBuildKit(t *testing.T) {
+	// Test that enabling BuildKit includes cache mounts (default behavior)
+	deps := []Dependency{
+		{Name: "git"},
+	}
+	useBuildKit := true
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		UseBuildKit: &useBuildKit,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have BuildKit-specific cache mounts
+	if !strings.Contains(dockerfile, "--mount=type=cache") {
+		t.Error("Dockerfile should contain --mount=type=cache when BuildKit is enabled")
+	}
+}
+
 // Test helper functions
 
 func TestCategorizeDeps(t *testing.T) {
