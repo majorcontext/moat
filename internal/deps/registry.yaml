@@ -86,34 +86,46 @@ protoc:
   description: Protocol Buffers compiler
   type: github-binary
   repo: protocolbuffers/protobuf
-  asset: "protoc-{version}-linux-x86_64.zip"
+  asset: "protoc-{version}-linux-{arch}.zip"
   bin: bin/protoc
   default: "25.1"
+  targets:
+    amd64: x86_64
+    arm64: aarch_64
 
 sqlc:
   description: SQL compiler for Go
   type: github-binary
   repo: sqlc-dev/sqlc
-  asset: "sqlc_{version}_linux_amd64.tar.gz"
+  asset: "sqlc_{version}_linux_{arch}.tar.gz"
   default: "1.25.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 golangci-lint:
   description: Go linter aggregator
   type: github-binary
   repo: golangci/golangci-lint
-  asset: "golangci-lint-{version}-linux-amd64.tar.gz"
-  bin: "golangci-lint-{version}-linux-amd64/golangci-lint"
+  asset: "golangci-lint-{version}-linux-{arch}.tar.gz"
+  bin: "golangci-lint-{version}-linux-{arch}/golangci-lint"
   default: "1.55.2"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 # CLI tools
 gh:
   description: GitHub CLI
   type: github-binary
   repo: cli/cli
-  asset: "gh_{version}_linux_amd64.tar.gz"
-  bin: "gh_{version}_linux_amd64/bin/gh"
+  asset: "gh_{version}_linux_{arch}.tar.gz"
+  bin: "gh_{version}_linux_{arch}/bin/gh"
   default: "2.40.0"
   requires: [git]
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 # Database clients (apt)
 psql:
@@ -159,19 +171,25 @@ task:
   description: Task runner / Make alternative
   type: github-binary
   repo: go-task/task
-  asset: "task_linux_amd64.tar.gz"
+  asset: "task_linux_{arch}.tar.gz"
   bin: task
   default: "3.40.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 # Go development tools
 gofumpt:
   description: Stricter gofmt
   type: github-binary
   repo: mvdan/gofumpt
-  asset: "gofumpt_v{version}_linux_amd64"
-  bin: "gofumpt_v{version}_linux_amd64"
+  asset: "gofumpt_v{version}_linux_{arch}"
+  bin: "gofumpt_v{version}_linux_{arch}"
   default: "0.7.0"
   requires: [go]
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 govulncheck:
   description: Go vulnerability scanner
@@ -183,18 +201,24 @@ goreleaser:
   description: Go release automation
   type: github-binary
   repo: goreleaser/goreleaser
-  asset: "goreleaser_Linux_x86_64.tar.gz"
+  asset: "goreleaser_Linux_{arch}.tar.gz"
   bin: goreleaser
   default: "2.5.0"
+  targets:
+    amd64: x86_64
+    arm64: arm64
 
 air:
   description: Live reload for Go apps
   type: github-binary
   repo: cosmtrek/air
-  asset: "air_{version}_linux_amd64.tar.gz"
+  asset: "air_{version}_linux_{arch}.tar.gz"
   bin: air
   default: "1.52.0"
   requires: [go]
+  targets:
+    amd64: amd64
+    arm64: arm64
 
 mockgen:
   description: Go mock generator
@@ -206,17 +230,23 @@ buf:
   description: Protocol Buffers tooling
   type: github-binary
   repo: bufbuild/buf
-  asset: "buf-Linux-x86_64.tar.gz"
+  asset: "buf-Linux-{arch}.tar.gz"
   bin: buf/bin/buf
   default: "1.47.0"
+  targets:
+    amd64: x86_64
+    arm64: aarch64
 
 act:
   description: Run GitHub Actions locally
   type: github-binary
   repo: nektos/act
-  asset: "act_Linux_x86_64.tar.gz"
+  asset: "act_Linux_{arch}.tar.gz"
   bin: act
   default: "0.2.70"
+  targets:
+    amd64: x86_64
+    arm64: arm64
 
 # CLI essentials
 jq:

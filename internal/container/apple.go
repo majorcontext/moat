@@ -19,10 +19,22 @@ import (
 	"github.com/andybons/moat/internal/log"
 )
 
+// interactiveInfo stores info needed for interactive container exec.
+type interactiveInfo struct {
+	cmd         []string // Original command to run
+	hasMoatUser bool     // Whether the image has moatuser
+}
+
 // AppleRuntime implements Runtime using Apple's container CLI tool.
 type AppleRuntime struct {
 	containerBin string
 	hostAddress  string
+
+	// interactiveCommands stores the original command for interactive containers.
+	// Key is container ID. This is needed because we create interactive containers
+	// with a placeholder command (sleep), then exec the real command in StartAttached.
+	interactiveCommands map[string]interactiveInfo
+	interactiveMu       sync.Mutex
 }
 
 // NewAppleRuntime creates a new Apple container runtime.
@@ -34,8 +46,9 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 	}
 
 	r := &AppleRuntime{
-		containerBin: binPath,
-		hostAddress:  "192.168.64.1", // Default gateway for Apple containers
+		containerBin:        binPath,
+		hostAddress:         "192.168.64.1", // Default gateway for Apple containers
+		interactiveCommands: make(map[string]interactiveInfo),
 	}
 
 	return r, nil
@@ -58,10 +71,21 @@ func (r *AppleRuntime) Ping(ctx context.Context) error {
 
 // CreateContainer creates a new Apple container.
 // Note: Apple's container CLI combines create+start in "run --detach".
+// For interactive containers, we use a placeholder command (sleep infinity)
+// and store the original command for later execution via exec in StartAttached.
+// This works around the missing "attach" plugin in Apple container CLI.
 func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Ensure image is available
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
 		return "", err
+	}
+
+	// For interactive containers, save the original command and use a placeholder.
+	// We'll run the actual command via exec in StartAttached.
+	var originalCmd []string
+	if cfg.Interactive && len(cfg.Cmd) > 0 {
+		originalCmd = cfg.Cmd
+		cfg.Cmd = []string{"sleep", "infinity"}
 	}
 
 	// Build command arguments
@@ -80,6 +104,16 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	containerID := strings.TrimSpace(stdout.String())
 	if containerID == "" {
 		return "", fmt.Errorf("container run returned empty ID")
+	}
+
+	// Store the original command and user info for interactive containers
+	if len(originalCmd) > 0 {
+		r.interactiveMu.Lock()
+		r.interactiveCommands[containerID] = interactiveInfo{
+			cmd:         originalCmd,
+			hasMoatUser: cfg.HasMoatUser,
+		}
+		r.interactiveMu.Unlock()
 	}
 
 	return containerID, nil
@@ -229,6 +263,11 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 
 // RemoveContainer removes a container.
 func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) error {
+	// Clean up any stored interactive command
+	r.interactiveMu.Lock()
+	delete(r.interactiveCommands, containerID)
+	r.interactiveMu.Unlock()
+
 	cmd := exec.CommandContext(ctx, r.containerBin, "rm", "--force", containerID)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -427,7 +466,13 @@ func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag st
 	fmt.Printf("Building image %s...\n", tag)
 
 	// Run container build
-	cmd := exec.CommandContext(ctx, r.containerBin, "build", "-f", dockerfilePath, "-t", tag, tmpDir)
+	args := []string{"build", "-f", dockerfilePath, "-t", tag}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, tmpDir)
+
+	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -780,7 +825,7 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 
 // RemoveImage removes an image by ID or tag.
 func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
-	cmd := exec.CommandContext(ctx, r.containerBin, "image", "rm", "--force", id)
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "delete", id)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -859,6 +904,25 @@ func BuildRunArgs(cfg Config) []string {
 	return r.buildRunArgs(cfg)
 }
 
+// BuildExecArgs constructs arguments for 'container exec'. Exported for testing.
+// If user is non-empty, adds --user flag (needed when exec bypasses ENTRYPOINT
+// which normally handles privilege dropping).
+func BuildExecArgs(containerID string, cmd []string, hasStdin, tty bool, user string) []string {
+	args := []string{"exec"}
+	if hasStdin {
+		args = append(args, "-i")
+	}
+	if tty {
+		args = append(args, "-t")
+	}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args, containerID)
+	args = append(args, cmd...)
+	return args
+}
+
 // ContainerState returns the state of a container ("running", "exited", "created", etc).
 // Returns an error if the container doesn't exist.
 func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (string, error) {
@@ -929,67 +993,51 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 // This is required for TUI applications that need the terminal connected
 // before the process starts.
 //
-// For Apple containers, we start the attach command first (which blocks until
-// the container is running), then start the container. This ensures the I/O
-// streams are ready when the container's process begins.
+// For Apple containers, we use `container exec -it` to run the command that
+// was stored during CreateContainer. This works around the missing "attach"
+// plugin in Apple container CLI.
 func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Build attach command arguments
-	args := []string{"attach"}
-	if opts.Stdin != nil {
-		args = append(args, "--stdin")
+	// Get the stored command for this interactive container
+	r.interactiveMu.Lock()
+	info, hasCmd := r.interactiveCommands[containerID]
+	if hasCmd {
+		delete(r.interactiveCommands, containerID)
 	}
-	args = append(args, containerID)
+	r.interactiveMu.Unlock()
 
-	attachCmd := exec.CommandContext(ctx, r.containerBin, args...)
+	if !hasCmd || len(info.cmd) == 0 {
+		return fmt.Errorf("no command stored for interactive container %s (was it created with Interactive=true and a non-empty Cmd?)", containerID)
+	}
+
+	// Build exec command arguments: exec -it [--user moatuser] <containerID> <cmd...>
+	// We use --user moatuser for moat-built images because exec bypasses the ENTRYPOINT,
+	// which normally handles privilege dropping via gosu. Without this, commands would run as root.
+	// For base images without moatuser, we omit the flag (runs as the image default user).
+	user := ""
+	if info.hasMoatUser {
+		user = "moatuser"
+	}
+	args := BuildExecArgs(containerID, info.cmd, opts.Stdin != nil, opts.TTY, user)
+
+	execCmd := exec.CommandContext(ctx, r.containerBin, args...)
 
 	// Connect stdin/stdout/stderr
 	if opts.Stdin != nil {
-		attachCmd.Stdin = opts.Stdin
+		execCmd.Stdin = opts.Stdin
 	}
 	if opts.Stdout != nil {
-		attachCmd.Stdout = opts.Stdout
+		execCmd.Stdout = opts.Stdout
 	}
 	if opts.Stderr != nil {
-		attachCmd.Stderr = opts.Stderr
+		execCmd.Stderr = opts.Stderr
 	}
 
-	// Start the attach command (it will wait for the container to be running)
-	if err := attachCmd.Start(); err != nil {
-		return fmt.Errorf("starting attach: %w", err)
-	}
-
-	// Start the container - attach command is waiting for it
-	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
-	if err := startCmd.Run(); err != nil {
-		// Clean up the orphaned attach process gracefully
-		if attachCmd.Process != nil {
-			// First try SIGTERM for graceful shutdown
-			if termErr := attachCmd.Process.Signal(syscall.SIGTERM); termErr != nil {
-				log.Debug("failed to send SIGTERM to attach process", "error", termErr)
-			}
-			// Give it a moment to exit gracefully, then force kill if needed
-			done := make(chan error, 1)
-			go func() { done <- attachCmd.Wait() }()
-			select {
-			case <-done:
-				// Process exited
-			case <-time.After(100 * time.Millisecond):
-				// Force kill after timeout
-				if killErr := attachCmd.Process.Kill(); killErr != nil {
-					log.Debug("failed to kill orphaned attach process", "error", killErr)
-				}
-				<-done // Wait for process to fully exit
-			}
-		}
-		return fmt.Errorf("starting container: %w", err)
-	}
-
-	// Wait for attach to complete (it will exit when the container exits)
-	if err := attachCmd.Wait(); err != nil {
+	// Run the command - this blocks until the command exits
+	if err := execCmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("attaching to container: %w", err)
+		return fmt.Errorf("exec in container: %w", err)
 	}
 	return nil
 }

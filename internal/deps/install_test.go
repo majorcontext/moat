@@ -465,3 +465,75 @@ func TestGithubReleaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectArchiveType(t *testing.T) {
+	tests := []struct {
+		asset string
+		want  archiveType
+	}{
+		// Zip archives
+		{"tool.zip", archiveZip},
+		{"tool-v1.0.0.zip", archiveZip},
+		{"tool-linux-amd64.zip", archiveZip},
+
+		// Tar.gz archives
+		{"tool.tar.gz", archiveTarGz},
+		{"tool-v1.0.0.tar.gz", archiveTarGz},
+		{"tool-linux-amd64.tar.gz", archiveTarGz},
+
+		// Tgz archives (alternate tar.gz extension)
+		{"tool.tgz", archiveTarGz},
+		{"tool-v1.0.0.tgz", archiveTarGz},
+
+		// Raw binaries (no archive)
+		{"tool", archiveRaw},
+		{"tool-v1.0.0", archiveRaw},
+		{"tool_v{version}_linux_amd64", archiveRaw},
+		{"gofumpt_v0.7.0_linux_amd64", archiveRaw},
+
+		// Edge cases
+		{"", archiveRaw},
+		{"tool.tar", archiveRaw}, // .tar alone is not supported
+		{"tool.gz", archiveRaw},  // .gz alone is raw
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.asset, func(t *testing.T) {
+			got := detectArchiveType(tt.asset)
+			if got != tt.want {
+				t.Errorf("detectArchiveType(%q) = %v, want %v", tt.asset, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGoRuntimeArchDetection(t *testing.T) {
+	// Verify Go runtime commands include architecture detection
+	cmds := getRuntimeCommands("go", "1.22.0")
+
+	if len(cmds.Commands) == 0 {
+		t.Fatal("expected Go install commands")
+	}
+
+	combined := strings.Join(cmds.Commands, " ")
+
+	// Should detect architecture at build time
+	if !strings.Contains(combined, "ARCH=$(uname -m") {
+		t.Error("missing architecture detection")
+	}
+
+	// Should handle x86_64 -> amd64 mapping
+	if !strings.Contains(combined, "x86_64/amd64") {
+		t.Error("missing x86_64 to amd64 mapping")
+	}
+
+	// Should handle aarch64 -> arm64 mapping
+	if !strings.Contains(combined, "aarch64/arm64") {
+		t.Error("missing aarch64 to arm64 mapping")
+	}
+
+	// Should use the ARCH variable in the URL
+	if !strings.Contains(combined, "linux-${ARCH}") {
+		t.Error("missing ARCH variable in URL")
+	}
+}

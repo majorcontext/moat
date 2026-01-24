@@ -270,30 +270,27 @@ func TestCodexCredentials_GetFromFile(t *testing.T) {
 	// Create a temp directory for test credentials
 	tempDir := t.TempDir()
 
-	// Create .codex directory
-	codexDir := filepath.Join(tempDir, ".codex")
-	if err := os.MkdirAll(codexDir, 0755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-
 	// Test case: valid credentials file with token
 	t.Run("valid credentials with token", func(t *testing.T) {
-		credFile := filepath.Join(codexDir, "auth.json")
+		credFile := filepath.Join(tempDir, "auth.json")
 		testCreds := `{"token": {"access_token": "test-access-token", "expires_at": 1768957840}}`
 		if err := os.WriteFile(credFile, []byte(testCreds), 0600); err != nil {
 			t.Fatalf("Failed to write test credentials: %v", err)
 		}
-		defer os.Remove(credFile)
 
-		// Note: This test is limited because getFromFile uses os.UserHomeDir()
-		// In a real scenario, we'd use dependency injection for the home directory
-		// For now, we just verify the file was created correctly
-		_ = &CodexCredentials{}
+		c := &CodexCredentials{CredentialsPath: credFile}
+		token, err := c.getFromFile()
+		if err != nil {
+			t.Fatalf("getFromFile() unexpected error: %v", err)
+		}
+		if token.AccessToken != "test-access-token" {
+			t.Errorf("AccessToken = %q, want %q", token.AccessToken, "test-access-token")
+		}
 	})
 
 	// Test case: missing auth.json file
 	t.Run("missing credentials file", func(t *testing.T) {
-		c := &CodexCredentials{}
+		c := &CodexCredentials{CredentialsPath: filepath.Join(tempDir, "nonexistent.json")}
 		_, err := c.getFromFile()
 		if err == nil {
 			t.Error("getFromFile() expected error for missing file, got nil")
@@ -302,13 +299,12 @@ func TestCodexCredentials_GetFromFile(t *testing.T) {
 
 	// Test case: invalid JSON in auth.json
 	t.Run("invalid JSON", func(t *testing.T) {
-		credFile := filepath.Join(codexDir, "auth.json")
+		credFile := filepath.Join(tempDir, "invalid.json")
 		if err := os.WriteFile(credFile, []byte("not valid json"), 0600); err != nil {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
-		defer os.Remove(credFile)
 
-		c := &CodexCredentials{}
+		c := &CodexCredentials{CredentialsPath: credFile}
 		_, err := c.getFromFile()
 		if err == nil {
 			t.Error("getFromFile() expected error for invalid JSON, got nil")
@@ -317,13 +313,12 @@ func TestCodexCredentials_GetFromFile(t *testing.T) {
 
 	// Test case: valid JSON but no token
 	t.Run("valid JSON but no token", func(t *testing.T) {
-		credFile := filepath.Join(codexDir, "auth.json")
+		credFile := filepath.Join(tempDir, "notoken.json")
 		if err := os.WriteFile(credFile, []byte(`{"OPENAI_API_KEY": "sk-test"}`), 0600); err != nil {
 			t.Fatalf("Failed to write test file: %v", err)
 		}
-		defer os.Remove(credFile)
 
-		c := &CodexCredentials{}
+		c := &CodexCredentials{CredentialsPath: credFile}
 		_, err := c.getFromFile()
 		if err == nil {
 			t.Error("getFromFile() expected error for missing token, got nil")

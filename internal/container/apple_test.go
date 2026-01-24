@@ -1,7 +1,10 @@
 package container
 
 import (
+	"context"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -136,5 +139,232 @@ func TestAppleRuntime_SupportsHostNetwork(t *testing.T) {
 
 	if r.SupportsHostNetwork() {
 		t.Error("SupportsHostNetwork() = true, want false")
+	}
+}
+
+func TestAppleRuntime_InteractiveCommandStorage(t *testing.T) {
+	r := &AppleRuntime{
+		interactiveCommands: make(map[string]interactiveInfo),
+	}
+
+	containerID := "test-container-123"
+	cmd := []string{"bash", "-c", "echo hello"}
+
+	// Store a command
+	r.interactiveMu.Lock()
+	r.interactiveCommands[containerID] = interactiveInfo{cmd: cmd, hasMoatUser: true}
+	r.interactiveMu.Unlock()
+
+	// Verify it can be retrieved
+	r.interactiveMu.Lock()
+	storedInfo, exists := r.interactiveCommands[containerID]
+	r.interactiveMu.Unlock()
+
+	if !exists {
+		t.Fatal("Expected command to exist in map")
+	}
+	if !reflect.DeepEqual(storedInfo.cmd, cmd) {
+		t.Errorf("Stored command = %v, want %v", storedInfo.cmd, cmd)
+	}
+
+	// Simulate retrieval with deletion (as done in StartAttached)
+	r.interactiveMu.Lock()
+	retrievedInfo, hasCmd := r.interactiveCommands[containerID]
+	if hasCmd {
+		delete(r.interactiveCommands, containerID)
+	}
+	r.interactiveMu.Unlock()
+
+	if !hasCmd {
+		t.Fatal("Expected command to exist before deletion")
+	}
+	if !reflect.DeepEqual(retrievedInfo.cmd, cmd) {
+		t.Errorf("Retrieved command = %v, want %v", retrievedInfo.cmd, cmd)
+	}
+
+	// Verify entry is gone after retrieval
+	r.interactiveMu.Lock()
+	_, stillExists := r.interactiveCommands[containerID]
+	r.interactiveMu.Unlock()
+
+	if stillExists {
+		t.Error("Command should be deleted after retrieval (one-time use)")
+	}
+}
+
+func TestAppleRuntime_InteractiveCommandCleanup(t *testing.T) {
+	r := &AppleRuntime{
+		interactiveCommands: make(map[string]interactiveInfo),
+	}
+
+	containerID := "test-container-456"
+	cmd := []string{"python", "main.py"}
+
+	// Store a command
+	r.interactiveMu.Lock()
+	r.interactiveCommands[containerID] = interactiveInfo{cmd: cmd, hasMoatUser: true}
+	r.interactiveMu.Unlock()
+
+	// Simulate cleanup (as done in RemoveContainer)
+	r.interactiveMu.Lock()
+	delete(r.interactiveCommands, containerID)
+	r.interactiveMu.Unlock()
+
+	// Verify the entry is gone
+	r.interactiveMu.Lock()
+	_, exists := r.interactiveCommands[containerID]
+	r.interactiveMu.Unlock()
+
+	if exists {
+		t.Error("Expected command to be cleaned up after RemoveContainer-style deletion")
+	}
+}
+
+func TestAppleRuntime_StartAttachedNoCommand(t *testing.T) {
+	r := &AppleRuntime{
+		containerBin:        "/bin/false", // Will fail if exec is actually attempted
+		interactiveCommands: make(map[string]interactiveInfo),
+	}
+
+	containerID := "test-container-789"
+
+	// Call StartAttached without storing a command first - should return an error
+	err := r.StartAttached(context.Background(), containerID, AttachOptions{})
+
+	if err == nil {
+		t.Fatal("Expected error when no command is stored")
+	}
+
+	// Verify the error message is helpful
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "no command stored") {
+		t.Errorf("Expected 'no command stored' in error, got: %v", err)
+	}
+	if !strings.Contains(errMsg, containerID) {
+		t.Errorf("Expected container ID in error, got: %v", err)
+	}
+	if !strings.Contains(errMsg, "Interactive=true") {
+		t.Errorf("Expected helpful hint about Interactive=true in error, got: %v", err)
+	}
+}
+
+func TestBuildExecArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		stdin       bool
+		tty         bool
+		containerID string
+		cmd         []string
+		user        string
+		want        []string
+	}{
+		{
+			name:        "stdin only no user",
+			stdin:       true,
+			tty:         false,
+			containerID: "abc123",
+			cmd:         []string{"cat"},
+			user:        "",
+			want:        []string{"exec", "-i", "abc123", "cat"},
+		},
+		{
+			name:        "tty only no user",
+			stdin:       false,
+			tty:         true,
+			containerID: "abc123",
+			cmd:         []string{"bash"},
+			user:        "",
+			want:        []string{"exec", "-t", "abc123", "bash"},
+		},
+		{
+			name:        "stdin and tty no user",
+			stdin:       true,
+			tty:         true,
+			containerID: "abc123",
+			cmd:         []string{"bash", "-l"},
+			user:        "",
+			want:        []string{"exec", "-i", "-t", "abc123", "bash", "-l"},
+		},
+		{
+			name:        "neither stdin nor tty",
+			stdin:       false,
+			tty:         false,
+			containerID: "abc123",
+			cmd:         []string{"echo", "hello"},
+			user:        "",
+			want:        []string{"exec", "abc123", "echo", "hello"},
+		},
+		{
+			name:        "with moatuser (matches StartAttached)",
+			stdin:       true,
+			tty:         true,
+			containerID: "abc123",
+			cmd:         []string{"bash", "-l"},
+			user:        "moatuser",
+			want:        []string{"exec", "-i", "-t", "--user", "moatuser", "abc123", "bash", "-l"},
+		},
+		{
+			name:        "complex command with user",
+			stdin:       true,
+			tty:         true,
+			containerID: "container-xyz",
+			cmd:         []string{"python", "-c", "print('hello world')"},
+			user:        "moatuser",
+			want:        []string{"exec", "-i", "-t", "--user", "moatuser", "container-xyz", "python", "-c", "print('hello world')"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test the exported BuildExecArgs function
+			got := BuildExecArgs(tt.containerID, tt.cmd, tt.stdin, tt.tty, tt.user)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("BuildExecArgs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppleRuntime_InteractiveCommandsConcurrentAccess(t *testing.T) {
+	r := &AppleRuntime{
+		interactiveCommands: make(map[string]interactiveInfo),
+	}
+
+	const numGoroutines = 100
+	var wg sync.WaitGroup
+
+	// Concurrent writes and reads to the interactive commands map
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			containerID := "test-container-" + string(rune('a'+id%26))
+			cmd := []string{"cmd", string(rune('a' + id%26))}
+
+			// Store a command
+			r.interactiveMu.Lock()
+			r.interactiveCommands[containerID] = interactiveInfo{cmd: cmd, hasMoatUser: true}
+			r.interactiveMu.Unlock()
+
+			// Read it back (simulating what StartAttached does)
+			r.interactiveMu.Lock()
+			_, exists := r.interactiveCommands[containerID]
+			if exists {
+				delete(r.interactiveCommands, containerID)
+			}
+			r.interactiveMu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify the map is empty after all goroutines complete
+	r.interactiveMu.Lock()
+	remaining := len(r.interactiveCommands)
+	r.interactiveMu.Unlock()
+
+	if remaining != 0 {
+		t.Errorf("Expected empty map after concurrent access, got %d entries", remaining)
 	}
 }

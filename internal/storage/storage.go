@@ -57,6 +57,11 @@ func (s *RunStore) Dir() string {
 	return s.dir
 }
 
+// Remove deletes the run's storage directory and all its contents.
+func (s *RunStore) Remove() error {
+	return os.RemoveAll(s.dir)
+}
+
 // SaveMetadata writes the metadata to metadata.json in the run directory.
 func (s *RunStore) SaveMetadata(m Metadata) error {
 	data, err := json.MarshalIndent(m, "", "  ")

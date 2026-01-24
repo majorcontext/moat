@@ -129,6 +129,8 @@ type Config struct {
 	NetworkMode  string         // "bridge", "host", "none" (Docker-specific)
 	PortBindings map[int]string // container port -> host bind address (e.g., 3000 -> "127.0.0.1")
 	CapAdd       []string       // Linux capabilities to add (e.g., "NET_ADMIN")
+	Interactive  bool           // If true, container will be attached interactively (Apple runtime: uses exec workaround; Docker: handled natively)
+	HasMoatUser  bool           // If true, image has moatuser (moat-built images); used for exec --user in Apple containers
 }
 
 // MountConfig describes a volume mount.
@@ -160,4 +162,7 @@ type BuildOptions struct {
 	// DNS servers to use during build (Apple containers only).
 	// If empty, host DNS is auto-detected.
 	DNS []string
+
+	// NoCache disables build cache, forcing a fresh build of all layers.
+	NoCache bool
 }

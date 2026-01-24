@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
+	"github.com/andybons/moat/internal/term"
 )
 
 // Timing constants for run lifecycle operations.
@@ -126,32 +128,33 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			continue
 		}
 
-		// Skip runs that are marked as stopped or have no container ID
-		if meta.State == string(StateStopped) || meta.ContainerID == "" {
+		// Skip runs with no container ID (incomplete/failed creation)
+		if meta.ContainerID == "" {
 			continue
 		}
 
 		// Check if the container actually exists and get its current state
+		var runState State
 		containerState, err := m.runtime.ContainerState(ctx, meta.ContainerID)
 		if err != nil {
-			// Container doesn't exist - mark run as stopped
+			// Container doesn't exist - mark run as stopped but still load it
+			// so it can be cleaned up (storage removal via destroy)
 			log.Debug("container not found", "id", runID, "container", meta.ContainerID)
-			meta.State = string(StateStopped)
-			_ = store.SaveMetadata(meta)
-			continue
-		}
-
-		// Map container state to run state
-		var runState State
-		switch containerState {
-		case "running":
-			runState = StateRunning
-		case "exited", "dead":
 			runState = StateStopped
-		case "created", "restarting":
-			runState = StateCreated
-		default:
-			runState = State(meta.State)
+		} else {
+			// Map container state to run state
+			// Note: Docker uses "exited"/"dead" for stopped containers,
+			// while Apple containers use "stopped"
+			switch containerState {
+			case "running":
+				runState = StateRunning
+			case "exited", "dead", "stopped":
+				runState = StateStopped
+			case "created", "restarting":
+				runState = StateCreated
+			default:
+				runState = State(meta.State)
+			}
 		}
 
 		// Create run object from metadata
@@ -474,11 +477,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"TERM=xterm-256color",
 		}
 
-		// Mount CA directory for container to trust
-		// We mount the directory (not just the file) because Apple container
+		// Mount CA certificate (not the private key) for container to trust.
+		// We mount a directory (not just the file) because Apple container
 		// only supports directory mounts, not individual file mounts.
+		// The private key stays on the host - only the proxy needs it for signing.
+		caCertOnlyDir := filepath.Join(caDir, "public")
+		if err := ensureCACertOnlyDir(caDir, caCertOnlyDir); err != nil {
+			return nil, fmt.Errorf("creating CA cert-only directory: %w", err)
+		}
 		mounts = append(mounts, container.MountConfig{
-			Source:   caDir,
+			Source:   caCertOnlyDir,
 			Target:   "/etc/ssl/certs/moat-ca",
 			ReadOnly: true,
 		})
@@ -604,15 +612,21 @@ region = %s
 			sshProxy.AllowKey(mapping.KeyFingerprint, []string{mapping.Host})
 		}
 
-		// For Docker on macOS, Unix sockets can't be shared via bind mounts because
-		// Docker Desktop runs containers in a Linux VM. We use TCP instead and have
-		// the container create a local Unix socket using socat.
-		// For Apple containers and Docker on Linux, Unix sockets work fine via mounts.
-		usesTCP := m.runtime.Type() == container.RuntimeDocker && !m.runtime.SupportsHostNetwork()
+		// Unix sockets can't be shared across VM boundaries. This affects:
+		// - Docker Desktop on macOS/Windows (containers run in a Linux VM)
+		// - Apple containers (containers run in Virtualization.framework VMs)
+		// For these cases, we use TCP instead: the host listens on TCP and the
+		// container's moat-init script uses socat to bridge TCP to a local Unix socket.
+		// For Docker on Linux, Unix sockets work fine via direct bind mounts.
+		usesTCP := !m.runtime.SupportsHostNetwork()
 
 		if usesTCP {
-			// Use TCP server - container will use socat to bridge
-			sshServer = sshagent.NewTCPServer(sshProxy, "127.0.0.1:0") // :0 picks random port
+			// Use TCP server - container will use socat to bridge.
+			// Apple containers access the host via gateway IP, so we must bind to all
+			// interfaces. Docker Desktop also runs containers in a VM, so same applies.
+			// Security: the SSH agent proxy filters keys by host, so binding to 0.0.0.0
+			// doesn't expose credentials - only allowed key+host combinations are usable.
+			sshServer = sshagent.NewTCPServer(sshProxy, "0.0.0.0:0") // :0 picks random port
 			if err := sshServer.Start(); err != nil {
 				upstreamAgent.Close()
 				cleanupProxy(proxyServer)
@@ -853,17 +867,13 @@ region = %s
 	// Determine if we need a custom image
 	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit
 
-	// Handle --rebuild: delete existing image to force fresh build (Docker only)
-	if opts.Rebuild {
-		if m.runtime.Type() != container.RuntimeDocker {
-			fmt.Fprintf(os.Stderr, "Note: --rebuild is ignored for %s runtime (no custom image builds)\n", m.runtime.Type())
-		} else if needsCustomImage {
-			exists, _ := m.runtime.ImageExists(ctx, containerImage)
-			if exists {
-				fmt.Printf("Removing cached image %s...\n", containerImage)
-				if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
-				}
+	// Handle --rebuild: delete existing image to force fresh build
+	if opts.Rebuild && needsCustomImage {
+		exists, _ := m.runtime.ImageExists(ctx, containerImage)
+		if exists {
+			fmt.Printf("Removing cached image %s...\n", containerImage)
+			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
 			}
 		}
 	}
@@ -878,6 +888,7 @@ region = %s
 		// Always generate the Dockerfile so we can save it to the run directory
 		dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
 			NeedsSSH:        hasSSHGrants,
+			SSHHosts:        sshGrants,
 			NeedsClaudeInit: needsClaudeInit,
 			NeedsCodexInit:  needsCodexInit,
 			UseBuildKit:     &useBuildKit,
@@ -901,7 +912,9 @@ region = %s
 			}
 
 			// Build options from config
-			buildOpts := container.BuildOptions{}
+			buildOpts := container.BuildOptions{
+				NoCache: opts.Rebuild,
+			}
 			if opts.Config != nil {
 				buildOpts.DNS = opts.Config.Container.Apple.BuilderDNS
 			}
@@ -1206,6 +1219,8 @@ region = %s
 		Mounts:       mounts,
 		PortBindings: portBindings,
 		CapAdd:       capAdd,
+		Interactive:  opts.Interactive,
+		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 	})
 	if err != nil {
 		// Clean up proxy servers if container creation fails
@@ -1454,12 +1469,19 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	m.mu.Unlock()
 
+	// Check if stdin is a terminal (TTY)
+	// Only use TTY mode if stdin is an actual terminal, not a pipe or buffer
+	isTTY := false
+	if f, ok := stdin.(*os.File); ok {
+		isTTY = term.IsTerminal(f)
+	}
+
 	// Start with attachment - this ensures TTY is connected before process starts
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
-		TTY:    true,
+		TTY:    isTTY,
 	}
 
 	// Channel to receive the attach result
@@ -1814,6 +1836,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Remove run storage directory (logs, traces, metadata)
+	if r.Store != nil {
+		if err := r.Store.Remove(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing storage: %v\n", err)
+		}
+	}
+
 	m.mu.Lock()
 	delete(m.runs, runID)
 	m.mu.Unlock()
@@ -1959,4 +1988,38 @@ func filterSSHGrants(grants []string) []string {
 		}
 	}
 	return hosts
+}
+
+// ensureCACertOnlyDir creates a directory containing only the CA certificate,
+// not the private key. This is used to mount into containers so they can trust
+// the proxy's TLS certificates without exposing the signing key.
+func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
+	certSrc := filepath.Join(caDir, "ca.crt")
+	certDst := filepath.Join(certOnlyDir, "ca.crt")
+
+	// Read source certificate
+	srcContent, err := os.ReadFile(certSrc)
+	if err != nil {
+		return fmt.Errorf("CA certificate not found: %w", err)
+	}
+	srcHash := sha256.Sum256(srcContent)
+
+	// Check if destination already has the same content (by hash)
+	if dstContent, err := os.ReadFile(certDst); err == nil {
+		dstHash := sha256.Sum256(dstContent)
+		if srcHash == dstHash {
+			return nil // Already up to date
+		}
+	}
+
+	// Create directory and copy certificate
+	if err := os.MkdirAll(certOnlyDir, 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	if err := os.WriteFile(certDst, srcContent, 0644); err != nil {
+		return fmt.Errorf("writing CA certificate: %w", err)
+	}
+
+	return nil
 }

@@ -52,9 +52,10 @@ func getRuntimeCommands(name, version string) InstallCommands {
 			},
 		}
 	case "go":
+		// Detect architecture at build time: x86_64 -> amd64, aarch64 -> arm64
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("curl -fsSL https://go.dev/dl/go%s.linux-amd64.tar.gz | tar -C /usr/local -xz", version),
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://go.dev/dl/go%s.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz`, version),
 			},
 			EnvVars: map[string]string{
 				"PATH": "/usr/local/go/bin:$PATH",
@@ -162,8 +163,8 @@ func getGithubBinaryCommandsWithTargets(name, version string, spec DepSpec) Inst
 		bin: orDefault(substituteAllPlaceholders(spec.Bin, version, arm64Target), cmdName),
 	}
 
-	isZip := strings.HasSuffix(spec.Asset, ".zip")
-	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, isZip)
+	archiveType := detectArchiveType(spec.Asset)
+	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, archiveType)
 
 	return InstallCommands{
 		Commands: []string{
@@ -188,8 +189,8 @@ func getGithubBinaryCommandsLegacy(name, version string, spec DepSpec) InstallCo
 		bin: orDefault(replaceVersion(spec.BinARM64, version), amd64.bin),
 	}
 
-	isZip := strings.HasSuffix(spec.Asset, ".zip")
-	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, isZip)
+	archiveType := detectArchiveType(spec.Asset)
+	downloadCmd := buildArchDetectCommand(cmdName, amd64, arm64, archiveType)
 
 	return InstallCommands{
 		Commands: []string{
@@ -241,9 +242,30 @@ func orDefault(s, def string) string {
 	return s
 }
 
+// archiveType represents the type of archive for a GitHub binary release.
+type archiveType int
+
+const (
+	archiveZip archiveType = iota
+	archiveTarGz
+	archiveRaw // raw binary, no archive
+)
+
+// detectArchiveType determines the archive type from an asset filename.
+func detectArchiveType(asset string) archiveType {
+	if strings.HasSuffix(asset, ".zip") {
+		return archiveZip
+	}
+	if strings.HasSuffix(asset, ".tar.gz") || strings.HasSuffix(asset, ".tgz") {
+		return archiveTarGz
+	}
+	return archiveRaw
+}
+
 // buildArchDetectCommand generates a shell command that downloads the correct binary for the architecture.
-func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, isZip bool) string {
-	if isZip {
+func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, atype archiveType) string {
+	switch atype {
+	case archiveZip:
 		return fmt.Sprintf(`ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         curl -fsSL "%s" -o /tmp/%s.zip && \
@@ -256,9 +278,8 @@ func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, isZip bool
     fi`,
 			amd64.url, name, name, name, name, amd64.bin, name,
 			arm64.url, name, name, name, name, arm64.bin, name)
-	}
-	// tar.gz
-	return fmt.Sprintf(`ARCH=$(uname -m) && \
+	case archiveTarGz:
+		return fmt.Sprintf(`ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         curl -fsSL "%s" | tar -xz -C /tmp && \
         mv /tmp/%s /usr/local/bin/%s; \
@@ -266,8 +287,18 @@ func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, isZip bool
         curl -fsSL "%s" | tar -xz -C /tmp && \
         mv /tmp/%s /usr/local/bin/%s; \
     fi`,
-		amd64.url, amd64.bin, name,
-		arm64.url, arm64.bin, name)
+			amd64.url, amd64.bin, name,
+			arm64.url, arm64.bin, name)
+	default: // archiveRaw - direct binary download
+		return fmt.Sprintf(`ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        curl -fsSL "%s" -o /usr/local/bin/%s; \
+    else \
+        curl -fsSL "%s" -o /usr/local/bin/%s; \
+    fi`,
+			amd64.url, name,
+			arm64.url, name)
+	}
 }
 
 // getGoInstallCommands returns install commands for go-install dependencies.
@@ -301,9 +332,10 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 		}
 	case "gcloud":
+		// Detect architecture at build time: x86_64 or arm (gcloud uses "arm" not "aarch64")
 		return InstallCommands{
 			Commands: []string{
-				"curl -fsSL https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz | tar -xz -C /opt",
+				`ARCH=$(uname -m | sed 's/aarch64/arm/') && curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-${ARCH}.tar.gz" | tar -xz -C /opt`,
 				"/opt/google-cloud-sdk/install.sh --quiet --path-update=true",
 			},
 			EnvVars: map[string]string{

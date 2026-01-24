@@ -384,6 +384,7 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 		Remove:     true,
 		Platform:   platform,
 		Version:    builderVersion,
+		NoCache:    opts.NoCache,
 	})
 	if err != nil {
 		return fmt.Errorf("building image: %w", err)
