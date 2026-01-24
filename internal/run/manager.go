@@ -498,6 +498,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
 		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
+		proxyEnv = append(proxyEnv, "GIT_SSL_CAINFO="+caCertInContainer)
 
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
@@ -1049,48 +1050,25 @@ region = %s
 			}
 
 			// Handle plugins if configured
+			// Plugins are installed inside the container by moat-init using
+			// `claude plugin marketplace add` and `claude plugin install`
 			if hasPlugins {
-				// Extract SSH grants for marketplace access validation
-				sshHosts := claude.FilterSSHGrants(opts.Grants)
-
-				// Validate SSH access early - fail fast if private marketplaces need SSH
-				if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, err
+				// Generate marketplaces.txt for moat-init to add marketplaces
+				marketplacesList := claude.GenerateMarketplacesList(claudeSettings)
+				if marketplacesList != nil {
+					if err := os.WriteFile(filepath.Join(claudeStagingDir, "marketplaces.txt"), marketplacesList, 0644); err != nil {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("writing marketplaces.txt: %w", err)
+					}
 				}
 
-				// Set up marketplace manager and ensure all marketplaces are cloned
-				cacheDir, cacheErr := claude.DefaultCacheDir()
-				if cacheErr != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
-				}
-
-				marketplaceManager := claude.NewMarketplaceManager(cacheDir)
-				if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("setting up marketplaces: %w", err)
-				}
-
-				// Generate settings.json and write to staging directory
-				settingsJSON, genErr := claude.GenerateSettings(claudeSettings, "/moat/claude-plugins")
-				if genErr != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("generating Claude settings: %w", genErr)
-				}
-				if err := os.WriteFile(filepath.Join(claudeStagingDir, "settings.json"), settingsJSON, 0644); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("writing Claude settings: %w", err)
-				}
-
-				// Mount plugin cache
-				marketplacesDir := filepath.Join(cacheDir, "marketplaces")
-				if _, err := os.Stat(marketplacesDir); err == nil {
-					mounts = append(mounts, container.MountConfig{
-						Source:   marketplacesDir,
-						Target:   "/moat/claude-plugins/marketplaces",
-						ReadOnly: true,
-					})
+				// Generate plugins.txt for moat-init to install via `claude plugin install`
+				pluginsList := claude.GeneratePluginsList(claudeSettings)
+				if pluginsList != nil {
+					if err := os.WriteFile(filepath.Join(claudeStagingDir, "plugins.txt"), pluginsList, 0644); err != nil {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("writing plugins.txt: %w", err)
+					}
 				}
 
 				log.Debug("configured Claude plugins",
