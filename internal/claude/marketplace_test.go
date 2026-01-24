@@ -279,13 +279,14 @@ func TestConvertToDirectorySource(t *testing.T) {
 			},
 		}
 
-		result := ConvertToDirectorySource("acme", entry, "/moat/claude-plugins")
+		result := ConvertToDirectorySource("acme", entry, ClaudePluginsPath)
 
 		if result.Source.Source != "directory" {
 			t.Errorf("Source.Source = %q, want %q", result.Source.Source, "directory")
 		}
-		if result.Source.Path != "/moat/claude-plugins/marketplaces/acme" {
-			t.Errorf("Source.Path = %q, want %q", result.Source.Path, "/moat/claude-plugins/marketplaces/acme")
+		expectedPath := ClaudePluginsPath + "/marketplaces/acme"
+		if result.Source.Path != expectedPath {
+			t.Errorf("Source.Path = %q, want %q", result.Source.Path, expectedPath)
 		}
 	})
 
@@ -297,7 +298,7 @@ func TestConvertToDirectorySource(t *testing.T) {
 			},
 		}
 
-		result := ConvertToDirectorySource("local", entry, "/moat/claude-plugins")
+		result := ConvertToDirectorySource("local", entry, ClaudePluginsPath)
 
 		if result.Source.Source != "directory" {
 			t.Errorf("Source.Source = %q, want %q", result.Source.Source, "directory")

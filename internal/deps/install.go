@@ -434,7 +434,12 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 		pkg := dep.Package
 		version := "latest"
 		if dep.Version != "" {
-			version = "v" + dep.Version
+			// Don't prefix "latest" with "v" - it's a special Go module specifier
+			if dep.Version == "latest" {
+				version = "latest"
+			} else {
+				version = "v" + dep.Version
+			}
 		}
 		return InstallCommands{
 			Commands: []string{

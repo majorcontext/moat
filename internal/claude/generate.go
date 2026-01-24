@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -129,6 +130,11 @@ func GenerateSettings(settings *Settings, cacheMountPath string) ([]byte, error)
 // GenerateInstalledPlugins generates an installed_plugins.json for container use.
 // This file tells Claude Code which plugins are "installed" and where to find them.
 // Without this file, plugins in enabledPlugins won't be loaded.
+//
+// Only plugins from marketplaces defined in ExtraKnownMarketplaces are included,
+// because those are the only ones we mount into the container. Plugins from
+// other sources (like the user's host ~/.claude/settings.json) are not included
+// since their marketplaces aren't available in the container.
 func GenerateInstalledPlugins(settings *Settings, cacheMountPath string) ([]byte, error) {
 	installedPlugins := &InstalledPluginsFile{
 		Version: 2,
@@ -137,6 +143,12 @@ func GenerateInstalledPlugins(settings *Settings, cacheMountPath string) ([]byte
 
 	if settings == nil || len(settings.EnabledPlugins) == 0 {
 		return json.MarshalIndent(installedPlugins, "", "  ")
+	}
+
+	// Build set of marketplaces we actually have mounted
+	knownMarketplaces := make(map[string]bool)
+	for name := range settings.ExtraKnownMarketplaces {
+		knownMarketplaces[name] = true
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -152,9 +164,16 @@ func GenerateInstalledPlugins(settings *Settings, cacheMountPath string) ([]byte
 			continue
 		}
 
+		// Only include plugins from marketplaces we configure and mount
+		// Skip plugins from host settings that reference marketplaces we don't have
+		if !knownMarketplaces[marketplace] {
+			continue
+		}
+
 		// Build install path pointing to our mounted marketplace
-		// Format: {cacheMountPath}/marketplaces/{marketplace}/{plugin}
-		installPath := filepath.Join(cacheMountPath, "marketplaces", marketplace, pluginName)
+		// Format: {cacheMountPath}/marketplaces/{marketplace}/plugins/{plugin}
+		// Claude Code marketplaces have a plugins/ subdirectory containing the actual plugins
+		installPath := filepath.Join(cacheMountPath, "marketplaces", marketplace, "plugins", pluginName)
 
 		installedPlugins.Plugins[pluginKey] = []InstalledPlugin{
 			{
@@ -178,6 +197,95 @@ func parsePluginKey(key string) (plugin, marketplace string) {
 		return "", ""
 	}
 	return key[:idx], key[idx+1:]
+}
+
+// GenerateMarketplacesList generates a marketplaces.txt file listing marketplaces to add.
+// Each line has the format:
+//   - github:owner/repo - for GitHub repositories
+//   - git:url - for other git URLs (SSH or non-GitHub HTTPS)
+// Directory sources are not included since they don't need to be added via CLI.
+func GenerateMarketplacesList(settings *Settings) []byte {
+	if settings == nil || len(settings.ExtraKnownMarketplaces) == 0 {
+		return nil
+	}
+
+	var lines []string
+	for _, entry := range settings.ExtraKnownMarketplaces {
+		if entry.Source.Source == "directory" {
+			// Directory sources don't need to be added via marketplace add
+			continue
+		}
+
+		url := entry.Source.URL
+		if url == "" {
+			continue
+		}
+
+		// Detect GitHub HTTPS URLs and convert to owner/repo format
+		// https://github.com/owner/repo.git -> github:owner/repo
+		if strings.HasPrefix(url, "https://github.com/") {
+			path := strings.TrimPrefix(url, "https://github.com/")
+			path = strings.TrimSuffix(path, ".git")
+			if path != "" {
+				lines = append(lines, "github:"+path)
+				continue
+			}
+		}
+
+		// All other git URLs (SSH or non-GitHub HTTPS)
+		lines = append(lines, "git:"+url)
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// Sort for deterministic output
+	sort.Strings(lines)
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// GeneratePluginsList generates a plugins.txt file listing plugins to install.
+// Each line is a plugin@marketplace that should be installed via `claude plugin install`.
+// Only plugins from configured marketplaces are included.
+func GeneratePluginsList(settings *Settings) []byte {
+	if settings == nil || len(settings.EnabledPlugins) == 0 {
+		return nil
+	}
+
+	// Build set of marketplaces we have configured
+	knownMarketplaces := make(map[string]bool)
+	for name := range settings.ExtraKnownMarketplaces {
+		knownMarketplaces[name] = true
+	}
+
+	var plugins []string
+	for pluginKey, enabled := range settings.EnabledPlugins {
+		if !enabled {
+			continue
+		}
+
+		// Parse and validate plugin key
+		_, marketplace := parsePluginKey(pluginKey)
+		if marketplace == "" {
+			continue
+		}
+
+		// Only include plugins from known marketplaces
+		if !knownMarketplaces[marketplace] {
+			continue
+		}
+
+		plugins = append(plugins, pluginKey)
+	}
+
+	if len(plugins) == 0 {
+		return nil
+	}
+
+	// Sort for deterministic output
+	sort.Strings(plugins)
+	return []byte(strings.Join(plugins, "\n") + "\n")
 }
 
 // MCPConfig represents the .mcp.json file format.
@@ -252,6 +360,14 @@ func GenerateMCPConfig(servers map[string]config.MCPServerSpec, grants []string)
 // The moat-init script reads from this path and copies files to ~/.claude.
 const ClaudeInitMountPath = "/moat/claude-init"
 
+// ClaudePluginsPath is the base path for Claude plugins in the container.
+// This matches Claude Code's expected location at ~/.claude/plugins.
+// We use the absolute path for moatuser since that's our standard container user.
+const ClaudePluginsPath = "/home/moatuser/.claude/plugins"
+
+// ClaudeMarketplacesPath is the path where marketplaces are mounted in the container.
+const ClaudeMarketplacesPath = ClaudePluginsPath + "/marketplaces"
+
 // RequiredMounts returns the container mounts needed for Claude plugin support.
 func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheDir, containerHome string) []MountInfo {
 	var mounts []MountInfo
@@ -262,7 +378,7 @@ func RequiredMounts(settings *Settings, generatedConfig *GeneratedConfig, cacheD
 		if _, err := os.Stat(marketplacesDir); err == nil {
 			mounts = append(mounts, MountInfo{
 				Source:   marketplacesDir,
-				Target:   "/moat/claude-plugins/marketplaces",
+				Target:   ClaudeMarketplacesPath,
 				ReadOnly: true,
 			})
 		}

@@ -16,7 +16,7 @@ dependencies:
 grants:
   - anthropic
   - github
-  - ssh:github.com  # Required for Anthropic marketplace (cloned via SSH)
+  - ssh:github.com  # For git operations (clone, push, etc.)
 
 command: ["claude"]
 interactive: true
@@ -27,12 +27,19 @@ interactive: true
 # Plugin configuration
 claude:
   # Enable plugins from marketplaces
+  # The marketplace name in plugin@marketplace must match the repo name
   plugins:
-    "context7-docs-fetcher@ccplugins": true  # Fetch up-to-date library documentation
-    "code-review@ccplugins": true             # Code review assistant
+    "claude-md-management@claude-plugins-official": true   # CLAUDE.md management
+    "aws-agent-skills@aws-agent-skills": true              # AWS agent skills
 
-  # Define custom marketplaces (in addition to the built-in Anthropic marketplace)
+  # Define custom marketplaces
+  # Plugins are installed inside the container via `claude plugin marketplace add`
+  # and `claude plugin install`
+  # The marketplace name (key) should match the repo name for consistency
   marketplaces:
-    ccplugins:
+    claude-plugins-official:
       source: github
-      repo: ccplugins/marketplace
+      repo: anthropics/claude-plugins-official
+    aws-agent-skills:
+      source: github
+      repo: itsmostafa/aws-agent-skills
