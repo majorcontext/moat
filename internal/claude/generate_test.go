@@ -88,13 +88,13 @@ func TestGenerateSettingsNil(t *testing.T) {
 func TestGenerateInstalledPlugins(t *testing.T) {
 	settings := &Settings{
 		EnabledPlugins: map[string]bool{
-			"plugin-a@market":   true,
-			"plugin-b@market":   false, // disabled - should not appear
-			"other@different":   true,  // different marketplace - not in ExtraKnownMarketplaces
-			"unknown@notmounted": true, // marketplace not mounted - should be skipped
-			"invalid-no-at":     true,  // invalid format - should be skipped
-			"@invalid-empty":    true,  // invalid format - should be skipped
-			"invalid-trailing@": true,  // invalid format - should be skipped
+			"plugin-a@market":    true,
+			"plugin-b@market":    false, // disabled - should not appear
+			"other@different":    true,  // different marketplace - not in ExtraKnownMarketplaces
+			"unknown@notmounted": true,  // marketplace not mounted - should be skipped
+			"invalid-no-at":      true,  // invalid format - should be skipped
+			"@invalid-empty":     true,  // invalid format - should be skipped
+			"invalid-trailing@":  true,  // invalid format - should be skipped
 		},
 		// Only include marketplaces we actually mount
 		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
@@ -230,140 +230,6 @@ func TestParsePluginKey(t *testing.T) {
 			t.Errorf("parsePluginKey(%q) = (%q, %q), want (%q, %q)",
 				tt.key, plugin, market, tt.wantPlugin, tt.wantMarket)
 		}
-	}
-}
-
-func TestGeneratePluginsList(t *testing.T) {
-	settings := &Settings{
-		EnabledPlugins: map[string]bool{
-			"plugin-a@market":    true,
-			"plugin-b@market":    false, // disabled
-			"unknown@notmounted": true,  // marketplace not configured
-			"plugin-c@other":     true,
-		},
-		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
-			"market": {Source: MarketplaceSource{Source: "git", URL: "https://example.com"}},
-			"other":  {Source: MarketplaceSource{Source: "git", URL: "https://example.com"}},
-		},
-	}
-
-	result := GeneratePluginsList(settings)
-	if result == nil {
-		t.Fatal("GeneratePluginsList should return content")
-	}
-
-	content := string(result)
-
-	// Should include enabled plugins from known marketplaces
-	if !strings.Contains(content, "plugin-a@market") {
-		t.Error("should include plugin-a@market")
-	}
-	if !strings.Contains(content, "plugin-c@other") {
-		t.Error("should include plugin-c@other")
-	}
-
-	// Should NOT include disabled plugins
-	if strings.Contains(content, "plugin-b@market") {
-		t.Error("should NOT include disabled plugin-b@market")
-	}
-
-	// Should NOT include plugins from unknown marketplaces
-	if strings.Contains(content, "unknown@notmounted") {
-		t.Error("should NOT include unknown@notmounted")
-	}
-}
-
-func TestGeneratePluginsListEmpty(t *testing.T) {
-	// Nil settings
-	if result := GeneratePluginsList(nil); result != nil {
-		t.Error("nil settings should return nil")
-	}
-
-	// Empty plugins
-	settings := &Settings{EnabledPlugins: map[string]bool{}}
-	if result := GeneratePluginsList(settings); result != nil {
-		t.Error("empty plugins should return nil")
-	}
-
-	// Only disabled plugins
-	settings = &Settings{
-		EnabledPlugins: map[string]bool{"plugin@market": false},
-		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
-			"market": {Source: MarketplaceSource{Source: "git"}},
-		},
-	}
-	if result := GeneratePluginsList(settings); result != nil {
-		t.Error("only disabled plugins should return nil")
-	}
-}
-
-func TestGenerateMarketplacesList(t *testing.T) {
-	settings := &Settings{
-		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
-			"aws-agent-skills": {
-				Source: MarketplaceSource{
-					Source: "git",
-					URL:    "https://github.com/itsmostafa/aws-agent-skills.git",
-				},
-			},
-			"internal-plugins": {
-				Source: MarketplaceSource{
-					Source: "git",
-					URL:    "git@github.com:myorg/internal-plugins.git",
-				},
-			},
-			"local-plugins": {
-				Source: MarketplaceSource{
-					Source: "directory",
-					Path:   "/opt/plugins",
-				},
-			},
-		},
-	}
-
-	result := GenerateMarketplacesList(settings)
-	if result == nil {
-		t.Fatal("GenerateMarketplacesList should return content")
-	}
-
-	content := string(result)
-
-	// GitHub HTTPS URLs should be converted to github:owner/repo format
-	if !strings.Contains(content, "github:itsmostafa/aws-agent-skills") {
-		t.Error("should include github:itsmostafa/aws-agent-skills")
-	}
-
-	// SSH URLs should be git:url format
-	if !strings.Contains(content, "git:git@github.com:myorg/internal-plugins.git") {
-		t.Error("should include git:git@github.com:myorg/internal-plugins.git")
-	}
-
-	// Directory sources should NOT be included
-	if strings.Contains(content, "directory") || strings.Contains(content, "/opt/plugins") {
-		t.Error("should NOT include directory sources")
-	}
-}
-
-func TestGenerateMarketplacesListEmpty(t *testing.T) {
-	// Nil settings
-	if result := GenerateMarketplacesList(nil); result != nil {
-		t.Error("nil settings should return nil")
-	}
-
-	// Empty marketplaces
-	settings := &Settings{ExtraKnownMarketplaces: map[string]MarketplaceEntry{}}
-	if result := GenerateMarketplacesList(settings); result != nil {
-		t.Error("empty marketplaces should return nil")
-	}
-
-	// Only directory sources (shouldn't produce output)
-	settings = &Settings{
-		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
-			"local": {Source: MarketplaceSource{Source: "directory", Path: "/opt"}},
-		},
-	}
-	if result := GenerateMarketplacesList(settings); result != nil {
-		t.Error("only directory sources should return nil")
 	}
 }
 
@@ -785,65 +651,5 @@ func TestFilesToWriteNoMCP(t *testing.T) {
 
 	if len(files) != 0 {
 		t.Errorf("expected 0 files when no MCP, got %d", len(files))
-	}
-}
-
-// TestRealPluginConfigs tests generation with real plugin configurations
-// that users would actually use (not made-up test plugins).
-func TestRealPluginConfigs(t *testing.T) {
-	// Configuration matching real Claude Code plugins
-	settings := &Settings{
-		EnabledPlugins: map[string]bool{
-			"aws-agent-skills@aws-agent-skills":        true,
-			"gopls-lsp@claude-plugin-directory":        true,
-			"claude-md-management@claude-plugin-directory": true,
-		},
-		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
-			"aws-agent-skills": {
-				Source: MarketplaceSource{
-					Source: "git",
-					URL:    "https://github.com/itsmostafa/aws-agent-skills.git",
-				},
-			},
-			"claude-plugin-directory": {
-				Source: MarketplaceSource{
-					Source: "git",
-					URL:    "https://github.com/anthropics/claude-code-plugins.git",
-				},
-			},
-		},
-	}
-
-	// Test marketplace list generation
-	marketplaces := GenerateMarketplacesList(settings)
-	if marketplaces == nil {
-		t.Fatal("GenerateMarketplacesList should return content")
-	}
-	marketplacesContent := string(marketplaces)
-
-	// Should have GitHub format for both
-	if !strings.Contains(marketplacesContent, "github:itsmostafa/aws-agent-skills") {
-		t.Errorf("missing aws-agent-skills marketplace: %s", marketplacesContent)
-	}
-	if !strings.Contains(marketplacesContent, "github:anthropics/claude-code-plugins") {
-		t.Errorf("missing claude-plugin-directory marketplace: %s", marketplacesContent)
-	}
-
-	// Test plugins list generation
-	plugins := GeneratePluginsList(settings)
-	if plugins == nil {
-		t.Fatal("GeneratePluginsList should return content")
-	}
-	pluginsContent := string(plugins)
-
-	// All three plugins should be listed
-	if !strings.Contains(pluginsContent, "aws-agent-skills@aws-agent-skills") {
-		t.Errorf("missing aws-agent-skills plugin: %s", pluginsContent)
-	}
-	if !strings.Contains(pluginsContent, "gopls-lsp@claude-plugin-directory") {
-		t.Errorf("missing gopls-lsp plugin: %s", pluginsContent)
-	}
-	if !strings.Contains(pluginsContent, "claude-md-management@claude-plugin-directory") {
-		t.Errorf("missing claude-md-management plugin: %s", pluginsContent)
 	}
 }

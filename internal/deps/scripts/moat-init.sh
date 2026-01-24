@@ -70,67 +70,11 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/settings.json" "$TARGET_HOME/.claude/"
 
-  # Copy installed_plugins.json if present (for plugin installation records)
-  # This goes to ~/.claude/plugins/ not ~/.claude/
-  if [ -f "$MOAT_CLAUDE_INIT/installed_plugins.json" ]; then
-    mkdir -p "$TARGET_HOME/.claude/plugins"
-    cp -p "$MOAT_CLAUDE_INIT/installed_plugins.json" "$TARGET_HOME/.claude/plugins/"
-  fi
-
-  # Add marketplaces listed in marketplaces.txt
-  # Format: github:owner/repo or git:url
-  # This registers marketplaces with Claude Code before installing plugins
-  if [ -f "$MOAT_CLAUDE_INIT/marketplaces.txt" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      # Skip empty lines and comments
-      case "$line" in
-        ''|'#'*) continue ;;
-      esac
-      # Parse type:value format
-      type="${line%%:*}"
-      value="${line#*:}"
-      case "$type" in
-        github)
-          echo "Adding marketplace from GitHub: $value" >&2
-          if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-            HOME="$TARGET_HOME" gosu moatuser claude plugin marketplace add "$value" || echo "Warning: Failed to add marketplace $value" >&2
-          else
-            claude plugin marketplace add "$value" || echo "Warning: Failed to add marketplace $value" >&2
-          fi
-          ;;
-        git)
-          echo "Adding marketplace from git: $value" >&2
-          if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-            HOME="$TARGET_HOME" gosu moatuser claude plugin marketplace add "$value" || echo "Warning: Failed to add marketplace $value" >&2
-          else
-            claude plugin marketplace add "$value" || echo "Warning: Failed to add marketplace $value" >&2
-          fi
-          ;;
-        *)
-          echo "Warning: Unknown marketplace type: $type" >&2
-          ;;
-      esac
-    done < "$MOAT_CLAUDE_INIT/marketplaces.txt"
-  fi
-
-  # Install plugins listed in plugins.txt (one plugin@marketplace per line)
-  # This uses Claude Code's native installation mechanism
-  if [ -f "$MOAT_CLAUDE_INIT/plugins.txt" ]; then
-    while IFS= read -r plugin || [ -n "$plugin" ]; do
-      # Skip empty lines and comments
-      case "$plugin" in
-        ''|'#'*) continue ;;
-      esac
-      echo "Installing plugin: $plugin" >&2
-      # Run as moatuser if we're root, otherwise run directly
-      # Note: gosu doesn't set HOME, so we must set it explicitly
-      if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-        HOME="$TARGET_HOME" gosu moatuser claude plugin install "$plugin" || echo "Warning: Failed to install plugin $plugin" >&2
-      else
-        claude plugin install "$plugin" || echo "Warning: Failed to install plugin $plugin" >&2
-      fi
-    done < "$MOAT_CLAUDE_INIT/plugins.txt"
-  fi
+  # Note: Plugins are now installed during image build via Dockerfile RUN commands,
+  # not at runtime. The old marketplaces.txt and plugins.txt staging files are no
+  # longer used. Old images that still have these files in the staging directory
+  # will have them ignored - this is harmless since plugin state lives in ~/.claude/
+  # which is managed by the claude CLI, not these staging files.
 
   # Copy credentials if present (ensure restricted permissions for security)
   if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then

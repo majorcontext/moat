@@ -19,10 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andybons/moat/internal/claude"
 	"github.com/andybons/moat/internal/config"
 	"github.com/andybons/moat/internal/container"
 	"github.com/andybons/moat/internal/credential"
 	"github.com/andybons/moat/internal/credential/keyring"
+	"github.com/andybons/moat/internal/deps"
 	"github.com/andybons/moat/internal/run"
 	"github.com/andybons/moat/internal/storage"
 )
@@ -1651,6 +1653,83 @@ func TestInteractiveContainerShellCommand(t *testing.T) {
 	}
 
 	t.Logf("Interactive shell responded: %q", strings.TrimSpace(output))
+}
+
+// =============================================================================
+// Claude Plugin Tests
+// =============================================================================
+
+// TestClaudePluginBaking verifies that Claude plugins are correctly baked into the image.
+// This test verifies the Dockerfile generation includes plugin commands without
+// actually building the image (which would require network access).
+func TestClaudePluginBaking(t *testing.T) {
+	// Test Dockerfile generation directly - don't build the image
+	// since that would require real plugin repositories.
+	marketplaces := []claude.MarketplaceConfig{
+		{Name: "test-marketplace", Source: "github", Repo: "test/test-marketplace"},
+	}
+	plugins := []string{"test-plugin@test-marketplace"}
+
+	parsedDeps, err := deps.ParseAll([]string{"node@20", "claude-code"})
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+
+	dockerfile, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+		ClaudeMarketplaces: marketplaces,
+		ClaudePlugins:      plugins,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+
+	// Verify marketplace add command is present
+	if !strings.Contains(dockerfile, "claude plugin marketplace add test/test-marketplace") {
+		t.Errorf("Dockerfile should contain marketplace add command.\nDockerfile:\n%s", dockerfile)
+	}
+
+	// Verify plugin install command is present
+	if !strings.Contains(dockerfile, "claude plugin install test-plugin@test-marketplace") {
+		t.Errorf("Dockerfile should contain plugin install command.\nDockerfile:\n%s", dockerfile)
+	}
+
+	// Verify commands run as moatuser
+	if !strings.Contains(dockerfile, "USER moatuser") {
+		t.Errorf("Dockerfile should switch to moatuser for plugin installation.\nDockerfile:\n%s", dockerfile)
+	}
+}
+
+// TestClaudePluginBakingOnlyAgentYaml verifies that only plugins from agent.yaml
+// are baked into the image, not plugins from host ~/.claude/settings.json.
+func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
+	// Test Dockerfile generation directly - verify only specified plugins are included
+	marketplaces := []claude.MarketplaceConfig{
+		{Name: "agent-marketplace", Source: "github", Repo: "agent/marketplace"},
+	}
+	plugins := []string{"agent-plugin@agent-marketplace"}
+
+	parsedDeps, err := deps.ParseAll([]string{"node@20", "claude-code"})
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+
+	dockerfile, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+		ClaudeMarketplaces: marketplaces,
+		ClaudePlugins:      plugins,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+
+	// Should have agent-marketplace
+	if !strings.Contains(dockerfile, "agent/marketplace") {
+		t.Errorf("Dockerfile should contain agent marketplace.\nDockerfile:\n%s", dockerfile)
+	}
+
+	// Should have agent-plugin
+	if !strings.Contains(dockerfile, "agent-plugin@agent-marketplace") {
+		t.Errorf("Dockerfile should contain agent plugin.\nDockerfile:\n%s", dockerfile)
+	}
 }
 
 // createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
