@@ -186,7 +186,11 @@ func (t *CodexAuthToken) IsExpired() bool {
 }
 
 // CodexCredentials handles extraction of Codex CLI OAuth credentials.
-type CodexCredentials struct{}
+type CodexCredentials struct {
+	// CredentialsPath allows overriding the path to auth.json for testing.
+	// If empty, uses the default ~/.codex/auth.json path.
+	CredentialsPath string
+}
 
 // GetCodexCredentials attempts to retrieve Codex CLI OAuth credentials.
 // It tries the following sources in order:
@@ -241,12 +245,15 @@ func (c *CodexCredentials) getFromKeychainWithContext(ctx context.Context) (*Cod
 
 // getFromFile retrieves Codex credentials from ~/.codex/auth.json.
 func (c *CodexCredentials) getFromFile() (*CodexAuthToken, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("getting home directory: %w", err)
+	credPath := c.CredentialsPath
+	if credPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("getting home directory: %w", err)
+		}
+		credPath = filepath.Join(home, codexCredentialsFile)
 	}
 
-	credPath := filepath.Join(home, codexCredentialsFile)
 	data, err := os.ReadFile(credPath)
 	if err != nil {
 		if os.IsNotExist(err) {

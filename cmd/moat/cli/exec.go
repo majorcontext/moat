@@ -32,7 +32,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringSliceVarP(&flags.Grants, "grant", "g", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	cmd.Flags().StringArrayVarP(&flags.Env, "env", "e", nil, "environment variables (KEY=VALUE)")
 	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from agent.yaml or random)")
-	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image (Docker only)")
+	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
 }

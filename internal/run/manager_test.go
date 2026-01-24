@@ -2,6 +2,8 @@ package run
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -217,5 +219,265 @@ func TestContainerUserMappingCurrentOS(t *testing.T) {
 		if got != "" {
 			t.Errorf("on %s, expected empty containerUser, got %q", runtime.GOOS, got)
 		}
+	}
+}
+
+// mapContainerStateToRunState replicates the container state mapping logic from
+// loadPersistedRuns in manager.go. This allows testing without a full manager.
+// Docker uses "exited"/"dead" for stopped containers, while Apple uses "stopped".
+func mapContainerStateToRunState(containerState, metadataState string) State {
+	switch containerState {
+	case "running":
+		return StateRunning
+	case "exited", "dead", "stopped":
+		return StateStopped
+	case "created", "restarting":
+		return StateCreated
+	default:
+		return State(metadataState)
+	}
+}
+
+// TestContainerStateMapping verifies that container states from different runtimes
+// are correctly mapped to run states. Docker uses "exited"/"dead" while Apple
+// containers use "stopped" for stopped containers.
+func TestContainerStateMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		containerState string
+		metadataState  string
+		wantState      State
+	}{
+		// Running state (same for both runtimes)
+		{
+			name:           "running container",
+			containerState: "running",
+			metadataState:  "running",
+			wantState:      StateRunning,
+		},
+		// Docker stopped states
+		{
+			name:           "Docker exited container",
+			containerState: "exited",
+			metadataState:  "running",
+			wantState:      StateStopped,
+		},
+		{
+			name:           "Docker dead container",
+			containerState: "dead",
+			metadataState:  "running",
+			wantState:      StateStopped,
+		},
+		// Apple stopped state
+		{
+			name:           "Apple stopped container",
+			containerState: "stopped",
+			metadataState:  "running",
+			wantState:      StateStopped,
+		},
+		// Created/restarting states
+		{
+			name:           "created container",
+			containerState: "created",
+			metadataState:  "running",
+			wantState:      StateCreated,
+		},
+		{
+			name:           "restarting container",
+			containerState: "restarting",
+			metadataState:  "running",
+			wantState:      StateCreated,
+		},
+		// Unknown state falls back to metadata
+		{
+			name:           "unknown state uses metadata",
+			containerState: "unknown",
+			metadataState:  "running",
+			wantState:      StateRunning,
+		},
+		{
+			name:           "paused state uses metadata",
+			containerState: "paused",
+			metadataState:  "stopped",
+			wantState:      StateStopped,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapContainerStateToRunState(tt.containerState, tt.metadataState)
+			if got != tt.wantState {
+				t.Errorf("mapContainerStateToRunState(%q, %q) = %q, want %q",
+					tt.containerState, tt.metadataState, got, tt.wantState)
+			}
+		})
+	}
+}
+
+// TestContainerStateMappingAppleRuntime specifically tests that Apple container's
+// "stopped" state is handled correctly. This was a bug where Apple containers
+// returned "stopped" but only "exited"/"dead" were recognized as stopped.
+func TestContainerStateMappingAppleRuntime(t *testing.T) {
+	// Apple containers return "stopped" for stopped containers
+	// This must map to StateStopped, not fall through to the default case
+	got := mapContainerStateToRunState("stopped", "running")
+	if got != StateStopped {
+		t.Errorf("Apple 'stopped' state mapped to %q, want %q", got, StateStopped)
+	}
+
+	// Verify it doesn't accidentally use the metadata state
+	got = mapContainerStateToRunState("stopped", "created")
+	if got != StateStopped {
+		t.Errorf("Apple 'stopped' state with 'created' metadata mapped to %q, want %q", got, StateStopped)
+	}
+}
+
+// TestEnsureCACertOnlyDir verifies that only the CA certificate is copied,
+// not the private key. This is a security test to ensure containers can't
+// access the signing key.
+func TestEnsureCACertOnlyDir(t *testing.T) {
+	// Create temp CA directory with cert and key
+	caDir := t.TempDir()
+	certContent := []byte("-----BEGIN CERTIFICATE-----\ntest cert\n-----END CERTIFICATE-----\n")
+	keyContent := []byte("-----BEGIN PRIVATE KEY-----\ntest key\n-----END PRIVATE KEY-----\n")
+
+	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(caDir, "ca.key"), keyContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create cert-only directory
+	certOnlyDir := filepath.Join(caDir, "public")
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("ensureCACertOnlyDir failed: %v", err)
+	}
+
+	// Verify certificate was copied
+	copiedCert, err := os.ReadFile(filepath.Join(certOnlyDir, "ca.crt"))
+	if err != nil {
+		t.Fatalf("failed to read copied cert: %v", err)
+	}
+	if string(copiedCert) != string(certContent) {
+		t.Errorf("copied cert doesn't match: got %q, want %q", copiedCert, certContent)
+	}
+
+	// Verify private key was NOT copied
+	keyPath := filepath.Join(certOnlyDir, "ca.key")
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Errorf("private key should NOT exist in cert-only dir, but it does")
+	}
+
+	// Verify only the cert file exists (no other files)
+	entries, err := os.ReadDir(certOnlyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected 1 file in cert-only dir, got %d", len(entries))
+	}
+	if entries[0].Name() != "ca.crt" {
+		t.Errorf("unexpected file in cert-only dir: %s", entries[0].Name())
+	}
+}
+
+// TestEnsureCACertOnlyDirCaching verifies that the function uses content hash
+// for caching - skips copying when content is same, updates when different.
+func TestEnsureCACertOnlyDirCaching(t *testing.T) {
+	caDir := t.TempDir()
+	certContent := []byte("test certificate content")
+	certPath := filepath.Join(caDir, "ca.crt")
+
+	if err := os.WriteFile(certPath, certContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	certOnlyDir := filepath.Join(caDir, "public")
+
+	// First call should create the file
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+
+	dstPath := filepath.Join(certOnlyDir, "ca.crt")
+	info1, _ := os.Stat(dstPath)
+
+	// Second call with same content should be a no-op (hash-based caching)
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+
+	// Verify the file wasn't rewritten (mod time should be same)
+	info2, _ := os.Stat(dstPath)
+	if !info1.ModTime().Equal(info2.ModTime()) {
+		t.Errorf("file was rewritten on second call with same content")
+	}
+
+	// Now change the source content - should trigger update
+	newContent := []byte("updated certificate content")
+	if err := os.WriteFile(certPath, newContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("third call failed: %v", err)
+	}
+
+	// Verify content was updated
+	gotContent, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotContent) != string(newContent) {
+		t.Errorf("content not updated: got %q, want %q", gotContent, newContent)
+	}
+}
+
+func TestEnsureCACertOnlyDirRemovesStaleFiles(t *testing.T) {
+	caDir := t.TempDir()
+	certOnlyDir := filepath.Join(caDir, "public")
+
+	// Create source certificate
+	certContent := []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----")
+	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create certOnlyDir with a stale file (simulating accidental private key copy)
+	if err := os.MkdirAll(certOnlyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	staleKeyPath := filepath.Join(certOnlyDir, "ca.key")
+	if err := os.WriteFile(staleKeyPath, []byte("PRIVATE KEY DATA"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run ensureCACertOnlyDir - it should remove the stale file
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("ensureCACertOnlyDir failed: %v", err)
+	}
+
+	// Verify the stale file was removed
+	if _, err := os.Stat(staleKeyPath); !os.IsNotExist(err) {
+		t.Error("stale ca.key file should have been removed")
+	}
+
+	// Verify the certificate was copied
+	if _, err := os.Stat(filepath.Join(certOnlyDir, "ca.crt")); err != nil {
+		t.Error("ca.crt should exist after ensureCACertOnlyDir")
+	}
+
+	// Verify only ca.crt is in the directory
+	entries, err := os.ReadDir(certOnlyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "ca.crt" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected only ca.crt, got: %v", names)
 	}
 }

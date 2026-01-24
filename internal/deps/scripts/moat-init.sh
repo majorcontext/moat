@@ -125,6 +125,15 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
   fi
 fi
 
+# Git Safe Directory
+# The workspace is mounted from the host with different ownership than the
+# container user. Git 2.35.2+ rejects operations on directories owned by
+# other users unless explicitly marked safe. We mark /workspace as safe
+# system-wide since it's always the moat workspace mount point.
+if command -v git >/dev/null 2>&1; then
+  git config --system --add safe.directory /workspace 2>/dev/null || true
+fi
+
 # Execute the user's command
 # If we're already running as a non-root user (UID != 0), just exec directly.
 # This happens when Docker is started with --user to match host UID on Linux.

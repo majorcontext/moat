@@ -552,3 +552,160 @@ func TestSelectBaseImage(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteSSHKnownHosts(t *testing.T) {
+	tests := []struct {
+		name      string
+		hosts     []string
+		wantEmpty bool
+		wantHosts []string // hosts that should appear in output
+	}{
+		{
+			name:      "empty hosts",
+			hosts:     nil,
+			wantEmpty: true,
+		},
+		{
+			name:      "empty slice",
+			hosts:     []string{},
+			wantEmpty: true,
+		},
+		{
+			name:      "unknown host",
+			hosts:     []string{"unknown.example.com"},
+			wantEmpty: true,
+		},
+		{
+			name:      "github only",
+			hosts:     []string{"github.com"},
+			wantEmpty: false,
+			wantHosts: []string{"github.com ssh-ed25519", "github.com ecdsa-sha2", "github.com ssh-rsa"},
+		},
+		{
+			name:      "gitlab only",
+			hosts:     []string{"gitlab.com"},
+			wantEmpty: false,
+			wantHosts: []string{"gitlab.com ssh-ed25519", "gitlab.com ecdsa-sha2", "gitlab.com ssh-rsa"},
+		},
+		{
+			name:      "multiple hosts",
+			hosts:     []string{"github.com", "gitlab.com"},
+			wantEmpty: false,
+			wantHosts: []string{"github.com ssh-ed25519", "gitlab.com ssh-ed25519"},
+		},
+		{
+			name:      "mixed known and unknown",
+			hosts:     []string{"github.com", "unknown.example.com"},
+			wantEmpty: false,
+			wantHosts: []string{"github.com ssh-ed25519"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b strings.Builder
+			writeSSHKnownHosts(&b, tt.hosts)
+			output := b.String()
+
+			if tt.wantEmpty {
+				if output != "" {
+					t.Errorf("expected empty output, got:\n%s", output)
+				}
+				return
+			}
+
+			// Should have mkdir and echo commands
+			if !strings.Contains(output, "mkdir -p /etc/ssh") {
+				t.Error("missing mkdir command")
+			}
+			if !strings.Contains(output, "/etc/ssh/ssh_known_hosts") {
+				t.Error("missing known_hosts path")
+			}
+
+			// Check expected hosts appear
+			for _, host := range tt.wantHosts {
+				if !strings.Contains(output, host) {
+					t.Errorf("missing expected host key: %s", host)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateDockerfileWithSSHHosts(t *testing.T) {
+	// Test that SSHHosts option adds known_hosts to the Dockerfile
+	opts := &DockerfileOptions{
+		NeedsSSH: true,
+		SSHHosts: []string{"github.com"},
+	}
+
+	dockerfile, err := GenerateDockerfile(nil, opts)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have SSH packages
+	if !strings.Contains(dockerfile, "openssh-client") {
+		t.Error("missing openssh-client")
+	}
+
+	// Should have known_hosts for github.com
+	if !strings.Contains(dockerfile, "github.com ssh-ed25519") {
+		t.Error("missing github.com ssh-ed25519 key")
+	}
+	if !strings.Contains(dockerfile, "/etc/ssh/ssh_known_hosts") {
+		t.Error("missing known_hosts path")
+	}
+}
+
+func TestGenerateDockerfileSSHHostsWithoutSSH(t *testing.T) {
+	// SSHHosts without NeedsSSH should still work (hosts are added regardless)
+	opts := &DockerfileOptions{
+		NeedsSSH: false,
+		SSHHosts: []string{"github.com"},
+	}
+
+	dockerfile, err := GenerateDockerfile(nil, opts)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have known_hosts even without SSH packages
+	if !strings.Contains(dockerfile, "github.com ssh-ed25519") {
+		t.Error("missing github.com ssh-ed25519 key")
+	}
+}
+
+func TestKnownSSHHostKeysComplete(t *testing.T) {
+	// Verify that all expected hosts have keys defined
+	expectedHosts := []string{"github.com", "gitlab.com", "bitbucket.org"}
+
+	for _, host := range expectedHosts {
+		keys, ok := knownSSHHostKeys[host]
+		if !ok {
+			t.Errorf("missing keys for %s", host)
+			continue
+		}
+		if len(keys) == 0 {
+			t.Errorf("empty keys for %s", host)
+		}
+
+		// Each host should have at least ed25519 and ecdsa keys
+		hasEd25519 := false
+		hasEcdsa := false
+		for _, key := range keys {
+			if strings.Contains(key, "ssh-ed25519") {
+				hasEd25519 = true
+			}
+			if strings.Contains(key, "ecdsa-sha2") {
+				hasEcdsa = true
+			}
+		}
+		if !hasEd25519 {
+			t.Errorf("%s missing ssh-ed25519 key", host)
+		}
+		if !hasEcdsa {
+			t.Errorf("%s missing ecdsa key", host)
+		}
+	}
+}

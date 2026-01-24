@@ -14,6 +14,10 @@ type DockerfileOptions struct {
 	// openssh-client, socat, and the moat-init entrypoint for agent forwarding.
 	NeedsSSH bool
 
+	// SSHHosts lists the hosts for which SSH access is granted (e.g., "github.com").
+	// Known host keys will be added to /etc/ssh/ssh_known_hosts for these hosts.
+	SSHHosts []string
+
 	// NeedsClaudeInit indicates Claude Code configuration files need to be
 	// copied from a staging directory at container startup. This requires
 	// the moat-init entrypoint script.
@@ -40,6 +44,31 @@ func (o *DockerfileOptions) useBuildKit() bool {
 }
 
 const defaultBaseImage = "debian:bookworm-slim"
+
+// knownSSHHostKeys maps hostnames to their SSH public keys.
+// These are embedded to avoid network calls during image build and to ensure
+// security (no TOFU - Trust On First Use vulnerability).
+// Keys sourced from official documentation:
+// - GitHub: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+// - GitLab: https://docs.gitlab.com/ee/user/gitlab_com/#ssh-host-keys-fingerprints
+// - Bitbucket: https://support.atlassian.com/bitbucket-cloud/docs/configure-ssh-and-two-step-verification/
+var knownSSHHostKeys = map[string][]string{
+	"github.com": {
+		"github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+		"github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=",
+		"github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=",
+	},
+	"gitlab.com": {
+		"gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf",
+		"gitlab.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFSMqzJeV9rUzU4kWitGjeR4PWSa29SPqJ1fVkhtj3Hw9xjLVXVYrU9QlYWrOLXBpQ6KWjbjTDTdDkoohFzgbEY=",
+		"gitlab.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsj2bNKTBSpIYDEGk9KxsGh3mySTRgMtXL583qmBpzeQ+jqCMRgBqB98u3z++J1sKlXHWfM9dyhSevkMwSbhoR8XIq/U0tCNyokEi/ueaBMCvbcTHhO7FcwzY92WK4Yt0aGROY5qX2UKSeOvuP4D6TPqKF1onrSzH9bx9XUf2lEdWT/ia1NEKjunUqu1xOB/StKDHMoX4/OKyIzuS0q/T1zOATthvasJFoPrAjkohTyaDUz2LN5JoH839hViyEG82yB+MjcFV5MU3N1l1QL3cVUCh93xSaua1N85qivl+siMkPGbO5xR/En4iEY6K2XPASUEMaieWVNTRCtJ4S8H+9",
+	},
+	"bitbucket.org": {
+		"bitbucket.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIazEu89wgQZ4bqs3d63QSMzYVa0MuJ2e2gKTKqu+UUO",
+		"bitbucket.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPIQmuzMBuKdWeF4+a2sjSSpBK0iqitSQ+5BM9KhpexuGt20JpTVM7u5BDZngncgrqDMbWdxMWWOGtZ9UgbqgZE=",
+		"bitbucket.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDQeJzhupRu0u0cdegZIa8e86EG2qOCsIsD1Xw0xSeiPDlCr7kq97NLmMbpKTX6Esc30NuoqEEHCuc7yWtwp8dI76EEEB1VqY9QJq6vk+aySyboD5QF61I/1WeTwu+deCbgKMGbUijeXhtfbxSxm6JwGrXrhBdofTsbKRUsrN1WoNgUa8uqN1Vx6WAJw1JHPhglEGGHea6QICwJOAr/6mrui/oB7pkaWKHj3z7d1IC4KWLtY47elvjbaTlkN04Kc/5LFEirorGYVbt15kAUlqGM65pk6ZBxtaO3+30LVlORZkxOh+LKL/BvbZ/iRNhItLqNyieoQj/uh/7Iv4uyH/cV/0b4WDSd3DptigWq84lJubb9t/DnZlrJazxyDCulTmKdOR7vs9gMTo+uoIrPSb8ScTtvw65+odKAlBj59dhnVp9zd7QUojOpXlL62Aw56U4oO+FALuevvMjiWeavKhJqlR7i5n9srYcrNV7ttmDw7kf/97P5zauIhxcjX+xHv4M=",
+	},
+}
 
 // runtimeBaseImage returns the official Docker image for a runtime, or empty string
 // if we should fall back to installing on Debian.
@@ -176,6 +205,9 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeDynamicDeps(&b, "uv packages (dynamic)", c.dynamicUv)
 	writeDynamicDeps(&b, "cargo packages (dynamic)", c.dynamicCargo)
 	writeDynamicDeps(&b, "go packages (dynamic)", c.dynamicGo)
+
+	// SSH known hosts for granted hosts
+	writeSSHKnownHosts(&b, opts.SSHHosts)
 
 	// Finalize with entrypoint and user setup
 	writeEntrypoint(&b, opts)
@@ -349,6 +381,39 @@ func writeUvToolPackages(b *strings.Builder, deps []Dependency) {
 			pkg = dep.Name
 		}
 		b.WriteString(fmt.Sprintf("RUN uv tool install %s\n", pkg))
+	}
+	b.WriteString("\n")
+}
+
+// writeSSHKnownHosts writes known SSH host keys to /etc/ssh/ssh_known_hosts.
+// Only hosts with known keys are written; unknown hosts are skipped.
+func writeSSHKnownHosts(b *strings.Builder, hosts []string) {
+	if len(hosts) == 0 {
+		return
+	}
+
+	// Collect keys for granted hosts
+	var keys []string
+	for _, host := range hosts {
+		if hostKeys, ok := knownSSHHostKeys[host]; ok {
+			keys = append(keys, hostKeys...)
+		}
+	}
+
+	if len(keys) == 0 {
+		return
+	}
+
+	// Write keys to /etc/ssh/ssh_known_hosts
+	b.WriteString("# SSH known hosts for granted SSH hosts\n")
+	b.WriteString("RUN mkdir -p /etc/ssh && \\\n")
+	for i, key := range keys {
+		escaped := strings.ReplaceAll(key, "'", "'\"'\"'")
+		if i < len(keys)-1 {
+			b.WriteString(fmt.Sprintf("    echo '%s' >> /etc/ssh/ssh_known_hosts && \\\n", escaped))
+		} else {
+			b.WriteString(fmt.Sprintf("    echo '%s' >> /etc/ssh/ssh_known_hosts\n", escaped))
+		}
 	}
 	b.WriteString("\n")
 }

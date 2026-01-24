@@ -103,12 +103,13 @@ func TestGenerateInstallScript_MultipleDependencies(t *testing.T) {
 	if !strings.Contains(script, "setup_20.x") {
 		t.Error("script should install Node.js")
 	}
-	if !strings.Contains(script, "go1.22.linux-amd64.tar.gz") {
+	// Go now detects architecture at build time via uname -m
+	if !strings.Contains(script, "go1.22.linux-${ARCH}") {
 		t.Error("script should install Go")
 	}
 
-	// Check github-binary
-	if !strings.Contains(script, "protoc-25.1-linux-x86_64.zip") {
+	// Check github-binary (protoc now uses {arch} placeholder with targets)
+	if !strings.Contains(script, "protoc-25.1-linux-") {
 		t.Error("script should install protoc")
 	}
 
@@ -231,8 +232,8 @@ func TestGenerateInstallScript_CustomGCloud(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should download and install gcloud
-	if !strings.Contains(script, "google-cloud-cli-linux-x86_64.tar.gz") {
+	// Should download and install gcloud (now detects architecture at build time)
+	if !strings.Contains(script, "google-cloud-cli-linux-${ARCH}") {
 		t.Error("script should download gcloud")
 	}
 	if !strings.Contains(script, "google-cloud-sdk/install.sh") {

@@ -56,8 +56,9 @@ func (r *AppleRuntime) Ping(ctx context.Context) error {
 	return nil
 }
 
-// CreateContainer creates a new Apple container.
-// Note: Apple's container CLI combines create+start in "run --detach".
+// CreateContainer creates a new Apple container without starting it.
+// The container can later be started with StartContainer (non-interactive)
+// or StartAttached (interactive with TTY).
 func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Ensure image is available
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
@@ -65,7 +66,7 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	}
 
 	// Build command arguments
-	args := r.buildRunArgs(cfg)
+	args := r.buildCreateArgs(cfg)
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 	var stdout, stderr bytes.Buffer
@@ -73,21 +74,21 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("container run: %w: %s", err, stderr.String())
+		return "", fmt.Errorf("container create: %w: %s", err, stderr.String())
 	}
 
 	// The container ID is returned on stdout
 	containerID := strings.TrimSpace(stdout.String())
 	if containerID == "" {
-		return "", fmt.Errorf("container run returned empty ID")
+		return "", fmt.Errorf("container create returned empty ID")
 	}
 
 	return containerID, nil
 }
 
-// buildRunArgs constructs the arguments for 'container run'.
-func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
-	args := []string{"run", "--detach"}
+// buildCreateArgs constructs the arguments for 'container create'.
+func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
+	args := []string{"create"}
 
 	// Container name
 	if cfg.Name != "" {
@@ -140,11 +141,15 @@ func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
 	return args
 }
 
-// StartContainer is a no-op for Apple container since run --detach already starts it.
+// StartContainer starts a created or stopped container.
 func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) error {
-	// Apple's "container run --detach" already starts the container
-	// If we need to start a stopped container, we'd use "container start"
-	// For now, this is a no-op since CreateContainer uses run --detach
+	cmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("starting container: %w: %s", err, stderr.String())
+	}
 	return nil
 }
 
@@ -427,7 +432,13 @@ func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag st
 	fmt.Printf("Building image %s...\n", tag)
 
 	// Run container build
-	cmd := exec.CommandContext(ctx, r.containerBin, "build", "-f", dockerfilePath, "-t", tag, tmpDir)
+	args := []string{"build", "-f", dockerfilePath, "-t", tag}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, tmpDir)
+
+	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -780,7 +791,7 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 
 // RemoveImage removes an image by ID or tag.
 func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
-	cmd := exec.CommandContext(ctx, r.containerBin, "image", "rm", "--force", id)
+	cmd := exec.CommandContext(ctx, r.containerBin, "image", "delete", id)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -853,10 +864,10 @@ func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) st
 	return "/home/" + user
 }
 
-// BuildRunArgs is exported for testing.
-func BuildRunArgs(cfg Config) []string {
+// BuildCreateArgs is exported for testing.
+func BuildCreateArgs(cfg Config) []string {
 	r := &AppleRuntime{}
-	return r.buildRunArgs(cfg)
+	return r.buildCreateArgs(cfg)
 }
 
 // ContainerState returns the state of a container ("running", "exited", "created", etc).
@@ -929,67 +940,36 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 // This is required for TUI applications that need the terminal connected
 // before the process starts.
 //
-// For Apple containers, we start the attach command first (which blocks until
-// the container is running), then start the container. This ensures the I/O
-// streams are ready when the container's process begins.
+// Uses `container start --attach` which starts the container and attaches
+// to its primary process. The ENTRYPOINT handles any initialization (SSH agent
+// bridge setup, config file copying, privilege dropping via gosu).
 func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Build attach command arguments
-	args := []string{"attach"}
+	// Build start command arguments
+	args := []string{"start", "--attach"}
 	if opts.Stdin != nil {
-		args = append(args, "--stdin")
+		args = append(args, "-i")
 	}
 	args = append(args, containerID)
 
-	attachCmd := exec.CommandContext(ctx, r.containerBin, args...)
+	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 
 	// Connect stdin/stdout/stderr
 	if opts.Stdin != nil {
-		attachCmd.Stdin = opts.Stdin
+		cmd.Stdin = opts.Stdin
 	}
 	if opts.Stdout != nil {
-		attachCmd.Stdout = opts.Stdout
+		cmd.Stdout = opts.Stdout
 	}
 	if opts.Stderr != nil {
-		attachCmd.Stderr = opts.Stderr
+		cmd.Stderr = opts.Stderr
 	}
 
-	// Start the attach command (it will wait for the container to be running)
-	if err := attachCmd.Start(); err != nil {
-		return fmt.Errorf("starting attach: %w", err)
-	}
-
-	// Start the container - attach command is waiting for it
-	startCmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
-	if err := startCmd.Run(); err != nil {
-		// Clean up the orphaned attach process gracefully
-		if attachCmd.Process != nil {
-			// First try SIGTERM for graceful shutdown
-			if termErr := attachCmd.Process.Signal(syscall.SIGTERM); termErr != nil {
-				log.Debug("failed to send SIGTERM to attach process", "error", termErr)
-			}
-			// Give it a moment to exit gracefully, then force kill if needed
-			done := make(chan error, 1)
-			go func() { done <- attachCmd.Wait() }()
-			select {
-			case <-done:
-				// Process exited
-			case <-time.After(100 * time.Millisecond):
-				// Force kill after timeout
-				if killErr := attachCmd.Process.Kill(); killErr != nil {
-					log.Debug("failed to kill orphaned attach process", "error", killErr)
-				}
-				<-done // Wait for process to fully exit
-			}
-		}
-		return fmt.Errorf("starting container: %w", err)
-	}
-
-	// Wait for attach to complete (it will exit when the container exits)
-	if err := attachCmd.Wait(); err != nil {
+	// Run the command - this blocks until the container exits
+	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("attaching to container: %w", err)
+		return fmt.Errorf("starting container attached: %w", err)
 	}
 	return nil
 }

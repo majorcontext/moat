@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestBuildRunArgs(t *testing.T) {
+func TestBuildCreateArgs(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  Config
@@ -16,7 +16,7 @@ func TestBuildRunArgs(t *testing.T) {
 			cfg: Config{
 				Image: "ubuntu:22.04",
 			},
-			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
 		{
 			name: "with name",
@@ -24,7 +24,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Name:  "my-container",
 				Image: "python:3.11",
 			},
-			want: []string{"run", "--detach", "--name", "my-container", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11"},
+			want: []string{"create", "--name", "my-container", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11"},
 		},
 		{
 			name: "with working directory",
@@ -32,7 +32,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image:      "node:20",
 				WorkingDir: "/workspace",
 			},
-			want: []string{"run", "--detach", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
+			want: []string{"create", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
 		},
 		{
 			name: "with environment variables",
@@ -40,7 +40,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image: "python:3.11",
 				Env:   []string{"DEBUG=true", "API_KEY=secret"},
 			},
-			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
+			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
 		},
 		{
 			name: "with volume mount",
@@ -50,7 +50,7 @@ func TestBuildRunArgs(t *testing.T) {
 					{Source: "/home/user/project", Target: "/workspace"},
 				},
 			},
-			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
+			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
 		},
 		{
 			name: "with read-only volume mount",
@@ -60,7 +60,7 @@ func TestBuildRunArgs(t *testing.T) {
 					{Source: "/home/user/data", Target: "/data", ReadOnly: true},
 				},
 			},
-			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
+			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
 		},
 		{
 			name: "with command",
@@ -68,7 +68,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Image: "python:3.11",
 				Cmd:   []string{"python", "-c", "print('hello')"},
 			},
-			want: []string{"run", "--detach", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11", "python", "-c", "print('hello')"},
+			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11", "python", "-c", "print('hello')"},
 		},
 		{
 			name: "full config",
@@ -84,7 +84,7 @@ func TestBuildRunArgs(t *testing.T) {
 				Cmd: []string{"python", "main.py"},
 			},
 			want: []string{
-				"run", "--detach",
+				"create",
 				"--name", "test-agent",
 				"--workdir", "/workspace",
 				"--dns", "8.8.8.8", "--dns", "8.8.4.4",
@@ -99,9 +99,9 @@ func TestBuildRunArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildRunArgs(tt.cfg)
+			got := BuildCreateArgs(tt.cfg)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("BuildRunArgs() = %v, want %v", got, tt.want)
+				t.Errorf("BuildCreateArgs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

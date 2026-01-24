@@ -384,6 +384,7 @@ func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag s
 		Remove:     true,
 		Platform:   platform,
 		Version:    builderVersion,
+		NoCache:    opts.NoCache,
 	})
 	if err != nil {
 		return fmt.Errorf("building image: %w", err)
@@ -560,18 +561,12 @@ func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts Att
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
-	// Copy container output to stdout/stderr
+	// Copy container output to stdout/stderr.
+	// Since containers are always created with Tty: true (see CreateContainer),
+	// output is always raw (not multiplexed). Use io.Copy unconditionally.
 	go func() {
-		if opts.TTY {
-			// In TTY mode, stdout and stderr are multiplexed
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		} else {
-			// In non-TTY mode, we need to demux the stream
-			// Docker uses a header to indicate stdout vs stderr
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		}
+		_, err := io.Copy(opts.Stdout, resp.Reader)
+		outputDone <- err
 	}()
 
 	// Copy stdin to container (if provided)
@@ -633,6 +628,9 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	}
 	defer resp.Close()
 
+	// Set up container wait BEFORE starting - this ensures we catch the exit
+	waitCh, waitErrCh := r.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+
 	// Start the container while we're attached
 	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("starting container: %w", err)
@@ -642,49 +640,66 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
-	// Copy container output to stdout/stderr
+	// Copy container output to stdout/stderr.
+	// Since containers are always created with Tty: true (see CreateContainer),
+	// output is always raw (not multiplexed). Use io.Copy unconditionally.
 	go func() {
-		if opts.TTY {
-			// In TTY mode, stdout and stderr are multiplexed
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		} else {
-			// In non-TTY mode, we need to demux the stream
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		}
+		_, err := io.Copy(opts.Stdout, resp.Reader)
+		outputDone <- err
 	}()
 
 	// Copy stdin to container (if provided)
 	if opts.Stdin != nil {
 		go func() {
 			_, err := io.Copy(resp.Conn, opts.Stdin)
-			// Close write side when stdin ends
+			// Small delay to allow the container to process input and generate output
+			// before we close the write side. This is needed because CloseWrite() on
+			// some Docker implementations can close the connection before output is
+			// fully transferred.
+			time.Sleep(100 * time.Millisecond)
+			// Close write side when stdin ends to signal EOF to the container.
 			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
-				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
-					err = closeErr
-				}
+				_ = closeWriter.CloseWrite()
 			}
 			stdinDone <- err
 		}()
 	}
 
-	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
+	// Wait for context cancellation, container exit, or output completion
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-stdinDone:
-			// Stdin error - could be escape sequence or EOF
-			if err != nil && err != io.EOF {
-				return err
+		case err := <-waitErrCh:
+			// Container wait error
+			if err != nil {
+				return fmt.Errorf("waiting for container: %w", err)
 			}
-			// Normal stdin EOF - continue waiting for output
-		case err := <-outputDone:
-			if err != nil && err != io.EOF {
-				return err
+		case status := <-waitCh:
+			// Container exited - wait for output to complete
+			select {
+			case <-outputDone:
+			case <-time.After(time.Second):
+				// Output didn't complete in time, but container is done
+			}
+			if status.Error != nil && status.Error.Message != "" {
+				return fmt.Errorf("container error: %s", status.Error.Message)
+			}
+			if status.StatusCode != 0 {
+				return fmt.Errorf("container exited with code %d", status.StatusCode)
 			}
 			return nil
+		case err := <-stdinDone:
+			// Stdin finished - continue waiting for container to exit
+			if err != nil && err != io.EOF {
+				return err
+			}
+		case err := <-outputDone:
+			// Output finished before container exit (shouldn't normally happen)
+			if err != nil && err != io.EOF {
+				return err
+			}
+			// Continue waiting for container to fully exit
 		}
 	}
 }

@@ -324,3 +324,108 @@ func TestReadExecEventsEmpty(t *testing.T) {
 		t.Errorf("expected nil events, got %v", events)
 	}
 }
+
+func TestRunStoreRemove(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run_remove123"
+	s, err := NewRunStore(dir, runID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Write some data to the store
+	meta := Metadata{
+		Name:      "test-agent",
+		Workspace: "/workspace",
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	// Verify directory exists
+	runDir := filepath.Join(dir, runID)
+	if _, err := os.Stat(runDir); os.IsNotExist(err) {
+		t.Fatal("run directory should exist before removal")
+	}
+
+	// Remove the store
+	if err := s.Remove(); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Verify directory is gone
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Error("run directory should not exist after removal")
+	}
+}
+
+func TestRunStoreRemoveWithContents(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run_removefull1"
+	s, err := NewRunStore(dir, runID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Write metadata
+	meta := Metadata{
+		Name:      "test-agent",
+		Workspace: "/workspace",
+		Grants:    []string{"github"},
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	// Write logs
+	w, err := s.LogWriter()
+	if err != nil {
+		t.Fatalf("LogWriter: %v", err)
+	}
+	w.Write([]byte("test log line\n"))
+	w.Close()
+
+	// Write a span
+	span := Span{
+		TraceID: "trace-1",
+		SpanID:  "span-1",
+		Name:    "test",
+	}
+	if err := s.WriteSpan(span); err != nil {
+		t.Fatalf("WriteSpan: %v", err)
+	}
+
+	// Verify files exist
+	runDir := filepath.Join(dir, runID)
+	files, _ := os.ReadDir(runDir)
+	if len(files) == 0 {
+		t.Fatal("expected files in run directory")
+	}
+
+	// Remove the store
+	if err := s.Remove(); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Verify directory and all contents are gone
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Error("run directory should not exist after removal")
+	}
+}
+
+func TestRunStoreRemoveEmptyRunID(t *testing.T) {
+	// Test that Remove() fails safely when runID is empty.
+	// This prevents accidental deletion of the base directory.
+	s := &RunStore{
+		dir:   "/some/base/dir",
+		runID: "",
+	}
+
+	err := s.Remove()
+	if err == nil {
+		t.Fatal("Remove() should fail with empty runID")
+	}
+	if err.Error() != "cannot remove run storage: empty run ID" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

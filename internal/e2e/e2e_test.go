@@ -628,6 +628,50 @@ func TestAppleContainerRuntime(t *testing.T) {
 	}
 }
 
+// TestAppleContainerSystemStart verifies that 'container system start' is idempotent
+// and the auto-start behavior works correctly. This tests the same code path as
+// startAppleContainerSystem() in detect.go.
+func TestAppleContainerSystemStart(t *testing.T) {
+	skipIfNoAppleContainer(t)
+
+	// 'container system start' should be idempotent - it succeeds even if already running
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "container", "system", "start")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("container system start failed: %v", err)
+	}
+
+	// Verify the system is responsive after start
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer checkCancel()
+
+	checkCmd := exec.CommandContext(checkCtx, "container", "list", "--quiet")
+	if err := checkCmd.Run(); err != nil {
+		t.Fatalf("container list failed after system start: %v", err)
+	}
+
+	// Verify NewRuntime works (this uses the same auto-start code path)
+	rt, err := container.NewRuntime()
+	if err != nil {
+		t.Fatalf("NewRuntime after system start: %v", err)
+	}
+	defer rt.Close()
+
+	if rt.Type() != container.RuntimeApple {
+		t.Errorf("Expected RuntimeApple, got %v", rt.Type())
+	}
+
+	// Verify ping works
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer pingCancel()
+
+	if err := rt.Ping(pingCtx); err != nil {
+		t.Errorf("Ping failed after system start: %v", err)
+	}
+}
+
 // TestAppleContainerBasicRun verifies that a simple container run works with Apple container.
 // This test only runs on macOS with Apple Silicon and the Apple container CLI installed.
 func TestAppleContainerBasicRun(t *testing.T) {
@@ -1491,6 +1535,110 @@ func TestDependencyMetaBundle(t *testing.T) {
 		t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs: %v",
 			foundJq, foundFzf, foundRg, logs)
 	}
+}
+
+// =============================================================================
+// Interactive Container Tests
+// =============================================================================
+
+// TestInteractiveContainer verifies that the interactive container flow works end-to-end.
+// This tests the Interactive=true option and StartAttached functionality.
+func TestInteractiveContainer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	// Create an interactive run with /bin/cat as the command
+	// cat echoes stdin to stdout and exits on EOF
+	r, err := mgr.Create(ctx, run.Options{
+		Name:        "e2e-interactive-test",
+		Workspace:   workspace,
+		Interactive: true,
+		Cmd:         []string{"/bin/cat"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	// Verify Interactive flag was set
+	if !r.Interactive {
+		t.Error("Expected Interactive=true on created run")
+	}
+
+	// Use strings.Reader as stdin with known input
+	testInput := "hello from e2e test\n"
+	stdinReader := strings.NewReader(testInput)
+
+	// Use bytes.Buffer to capture stdout
+	var stdoutBuf bytes.Buffer
+
+	// Run StartAttached - this should send input to cat and get it echoed back
+	// Note: cat exits when stdin reaches EOF, so this will complete
+	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf)
+	if err != nil {
+		t.Fatalf("StartAttached: %v", err)
+	}
+
+	// Verify the input was echoed back
+	output := stdoutBuf.String()
+	if !strings.Contains(output, "hello from e2e test") {
+		t.Errorf("Expected output to contain input, got: %q", output)
+	}
+
+	t.Logf("Interactive container echoed: %q", strings.TrimSpace(output))
+}
+
+// TestInteractiveContainerShellCommand verifies interactive mode with a shell command.
+// This tests that complex commands work through the interactive flow.
+func TestInteractiveContainerShellCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspace(t)
+
+	// Create an interactive run with a shell command that reads from stdin
+	r, err := mgr.Create(ctx, run.Options{
+		Name:        "e2e-interactive-shell",
+		Workspace:   workspace,
+		Interactive: true,
+		Cmd:         []string{"sh", "-c", "read line && echo \"You typed: $line\""},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	// Send input via stdin
+	testInput := "test123\n"
+	stdinReader := strings.NewReader(testInput)
+
+	var stdoutBuf bytes.Buffer
+
+	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf)
+	if err != nil {
+		t.Fatalf("StartAttached: %v", err)
+	}
+
+	output := stdoutBuf.String()
+	if !strings.Contains(output, "You typed: test123") {
+		t.Errorf("Expected shell to echo formatted output, got: %q", output)
+	}
+
+	t.Logf("Interactive shell responded: %q", strings.TrimSpace(output))
 }
 
 // createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
