@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/andybons/moat/internal/claude"
 )
 
 // DockerfileOptions configures Dockerfile generation.
@@ -32,6 +34,13 @@ type DockerfileOptions struct {
 	// When false, generates Dockerfiles compatible with the legacy builder.
 	// Defaults to true if not explicitly set (checked via useBuildKit method).
 	UseBuildKit *bool
+
+	// ClaudeMarketplaces are plugin marketplaces to register during image build.
+	ClaudeMarketplaces []claude.MarketplaceConfig
+
+	// ClaudePlugins are plugins to install during image build.
+	// Format: "plugin-name@marketplace-name"
+	ClaudePlugins []string
 }
 
 // useBuildKit returns whether to use BuildKit features.
@@ -198,6 +207,9 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeGoInstallPackages(&b, c.goInstallPkgs)
 	writeCustomDeps(&b, c.customDeps)
 	writeUvToolPackages(&b, c.uvToolPkgs)
+
+	// Claude Code plugins (after npm which installs claude-code)
+	b.WriteString(claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser))
 
 	// Dynamic package manager dependencies
 	writeDynamicDeps(&b, "npm packages (dynamic)", c.dynamicNpm)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -191,101 +190,17 @@ func GenerateInstalledPlugins(settings *Settings, cacheMountPath string) ([]byte
 
 // parsePluginKey splits "plugin@marketplace" into its components.
 // Returns empty strings if the format is invalid.
+// Uses LastIndexByte so that malformed keys like "plugin@market@extra" parse as
+// plugin="plugin@market", marketplace="extra". This provides more predictable
+// behavior when processing unvalidated settings data - the marketplace name is
+// always the part after the final @. Invalid keys are filtered out later by
+// checking against known marketplaces.
 func parsePluginKey(key string) (plugin, marketplace string) {
 	idx := strings.LastIndexByte(key, '@')
 	if idx <= 0 || idx >= len(key)-1 {
 		return "", ""
 	}
 	return key[:idx], key[idx+1:]
-}
-
-// GenerateMarketplacesList generates a marketplaces.txt file listing marketplaces to add.
-// Each line has the format:
-//   - github:owner/repo - for GitHub repositories
-//   - git:url - for other git URLs (SSH or non-GitHub HTTPS)
-// Directory sources are not included since they don't need to be added via CLI.
-func GenerateMarketplacesList(settings *Settings) []byte {
-	if settings == nil || len(settings.ExtraKnownMarketplaces) == 0 {
-		return nil
-	}
-
-	var lines []string
-	for _, entry := range settings.ExtraKnownMarketplaces {
-		if entry.Source.Source == "directory" {
-			// Directory sources don't need to be added via marketplace add
-			continue
-		}
-
-		url := entry.Source.URL
-		if url == "" {
-			continue
-		}
-
-		// Detect GitHub HTTPS URLs and convert to owner/repo format
-		// https://github.com/owner/repo.git -> github:owner/repo
-		if strings.HasPrefix(url, "https://github.com/") {
-			path := strings.TrimPrefix(url, "https://github.com/")
-			path = strings.TrimSuffix(path, ".git")
-			if path != "" {
-				lines = append(lines, "github:"+path)
-				continue
-			}
-		}
-
-		// All other git URLs (SSH or non-GitHub HTTPS)
-		lines = append(lines, "git:"+url)
-	}
-
-	if len(lines) == 0 {
-		return nil
-	}
-
-	// Sort for deterministic output
-	sort.Strings(lines)
-	return []byte(strings.Join(lines, "\n") + "\n")
-}
-
-// GeneratePluginsList generates a plugins.txt file listing plugins to install.
-// Each line is a plugin@marketplace that should be installed via `claude plugin install`.
-// Only plugins from configured marketplaces are included.
-func GeneratePluginsList(settings *Settings) []byte {
-	if settings == nil || len(settings.EnabledPlugins) == 0 {
-		return nil
-	}
-
-	// Build set of marketplaces we have configured
-	knownMarketplaces := make(map[string]bool)
-	for name := range settings.ExtraKnownMarketplaces {
-		knownMarketplaces[name] = true
-	}
-
-	var plugins []string
-	for pluginKey, enabled := range settings.EnabledPlugins {
-		if !enabled {
-			continue
-		}
-
-		// Parse and validate plugin key
-		_, marketplace := parsePluginKey(pluginKey)
-		if marketplace == "" {
-			continue
-		}
-
-		// Only include plugins from known marketplaces
-		if !knownMarketplaces[marketplace] {
-			continue
-		}
-
-		plugins = append(plugins, pluginKey)
-	}
-
-	if len(plugins) == 0 {
-		return nil
-	}
-
-	// Sort for deterministic output
-	sort.Strings(plugins)
-	return []byte(strings.Join(plugins, "\n") + "\n")
 }
 
 // MCPConfig represents the .mcp.json file format.

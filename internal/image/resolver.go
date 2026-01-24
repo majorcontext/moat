@@ -16,6 +16,10 @@ type ResolveOptions struct {
 
 	// NeedsCodexInit indicates the image needs the init script for Codex setup.
 	NeedsCodexInit bool
+
+	// ClaudePlugins are plugins baked into the image.
+	// Format: "plugin-name@marketplace-name"
+	ClaudePlugins []string
 }
 
 // Resolve determines the image to use based on dependencies and options.
@@ -26,8 +30,8 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		opts = &ResolveOptions{}
 	}
 
-	// Need custom image if we have dependencies, SSH, Claude init, or Codex init
-	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit
+	// Need custom image if we have dependencies, SSH, Claude init, Codex init, or plugins
+	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || len(opts.ClaudePlugins) > 0
 	if !needsCustomImage {
 		return DefaultImage
 	}
@@ -36,5 +40,6 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		NeedsSSH:        opts.NeedsSSH,
 		NeedsClaudeInit: opts.NeedsClaudeInit,
 		NeedsCodexInit:  opts.NeedsCodexInit,
+		ClaudePlugins:   opts.ClaudePlugins,
 	})
 }

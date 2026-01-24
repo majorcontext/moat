@@ -18,6 +18,10 @@ type ImageTagOptions struct {
 
 	// NeedsCodexInit indicates the image needs the init script for Codex setup.
 	NeedsCodexInit bool
+
+	// ClaudePlugins are plugins baked into the image.
+	// Format: "plugin-name@marketplace-name"
+	ClaudePlugins []string
 }
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
@@ -48,6 +52,19 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 	if opts.NeedsCodexInit {
 		hashInput += ",codex:init"
+	}
+
+	// Include plugins in hash (different plugins = different image).
+	// Note: Plugin format validation happens in claude.GenerateDockerfileSnippet()
+	// during Dockerfile generation. Invalid plugins will cause the build to fail
+	// with a clear error message rather than silently being included.
+	if len(opts.ClaudePlugins) > 0 {
+		sortedPlugins := make([]string, len(opts.ClaudePlugins))
+		copy(sortedPlugins, opts.ClaudePlugins)
+		sort.Strings(sortedPlugins)
+		for _, p := range sortedPlugins {
+			hashInput += ",plugin:" + p
+		}
 	}
 
 	// Hash the combined input

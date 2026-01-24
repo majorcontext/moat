@@ -4,6 +4,8 @@ package deps
 import (
 	"strings"
 	"testing"
+
+	"github.com/andybons/moat/internal/claude"
 )
 
 func TestGenerateDockerfile(t *testing.T) {
@@ -484,6 +486,144 @@ func TestGenerateDockerfileWithBuildKit(t *testing.T) {
 	if !strings.Contains(dockerfile, "--mount=type=cache") {
 		t.Error("Dockerfile should contain --mount=type=cache when BuildKit is enabled")
 	}
+}
+
+func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
+	// Test that Claude plugins are baked into the image
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "claude-code"},
+	}
+
+	marketplaces := []claude.MarketplaceConfig{
+		{Name: "claude-plugins-official", Source: "github", Repo: "anthropics/claude-plugins-official"},
+		{Name: "aws-agent-skills", Source: "github", Repo: "itsmostafa/aws-agent-skills"},
+	}
+	plugins := []string{
+		"claude-md-management@claude-plugins-official",
+		"aws-agent-skills@aws-agent-skills",
+	}
+
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		ClaudeMarketplaces: marketplaces,
+		ClaudePlugins:      plugins,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have section header
+	if !strings.Contains(dockerfile, "# Claude Code plugins") {
+		t.Error("Dockerfile should have Claude Code plugins section")
+	}
+
+	// Should switch to moatuser for plugin installation
+	if !strings.Contains(dockerfile, "USER moatuser") {
+		t.Error("Dockerfile should switch to moatuser for plugin installation")
+	}
+
+	// Should add marketplaces with error handling (in sorted order)
+	if !strings.Contains(dockerfile, "claude plugin marketplace add anthropics/claude-plugins-official || (echo") {
+		t.Error("Dockerfile should add claude-plugins-official marketplace with error handling")
+	}
+	if !strings.Contains(dockerfile, "claude plugin marketplace add itsmostafa/aws-agent-skills || (echo") {
+		t.Error("Dockerfile should add aws-agent-skills marketplace with error handling")
+	}
+
+	// Should install plugins with error handling (in sorted order)
+	if !strings.Contains(dockerfile, "claude plugin install aws-agent-skills@aws-agent-skills || (echo") {
+		t.Error("Dockerfile should install aws-agent-skills plugin with error handling")
+	}
+	if !strings.Contains(dockerfile, "claude plugin install claude-md-management@claude-plugins-official || (echo") {
+		t.Error("Dockerfile should install claude-md-management plugin with error handling")
+	}
+
+	// Should switch back to root after plugin installation
+	lines := strings.Split(dockerfile, "\n")
+	foundUserMoatuser := false
+	foundUserRoot := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "USER moatuser" {
+			foundUserMoatuser = true
+		}
+		if foundUserMoatuser && strings.TrimSpace(line) == "USER root" {
+			foundUserRoot = true
+			break
+		}
+	}
+	if !foundUserRoot {
+		t.Error("Dockerfile should switch back to USER root after plugin installation")
+	}
+}
+
+func TestGenerateDockerfileNoPlugins(t *testing.T) {
+	// Verify no plugin section when no plugins configured
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+	}
+
+	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	if strings.Contains(dockerfile, "Claude Code plugins") {
+		t.Error("Dockerfile should NOT have Claude plugins section when none configured")
+	}
+	if strings.Contains(dockerfile, "claude plugin") {
+		t.Error("Dockerfile should NOT have claude plugin commands when none configured")
+	}
+}
+
+func TestGenerateDockerfilePluginValidation(t *testing.T) {
+	// Test that invalid plugin/marketplace names are rejected
+	deps := []Dependency{{Name: "node", Version: "20"}}
+
+	t.Run("invalid marketplace repo", func(t *testing.T) {
+		marketplaces := []claude.MarketplaceConfig{
+			{Name: "good", Source: "github", Repo: "valid/repo"},
+			{Name: "evil", Source: "github", Repo: "; rm -rf /"},
+		}
+		dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+			ClaudeMarketplaces: marketplaces,
+		})
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		// Valid repo should be included
+		if !strings.Contains(dockerfile, "marketplace add valid/repo") {
+			t.Error("valid marketplace should be included")
+		}
+		// Invalid repo should trigger error message (note: uses marketplace name, not repo)
+		if !strings.Contains(dockerfile, "Invalid marketplace repo format: evil") {
+			t.Error("invalid marketplace should show error message with name")
+		}
+		// The malicious repo value should NOT appear in the dockerfile
+		if strings.Contains(dockerfile, "; rm -rf /") {
+			t.Error("invalid repo value should not appear in output")
+		}
+	})
+
+	t.Run("invalid plugin key", func(t *testing.T) {
+		plugins := []string{
+			"valid-plugin@valid-market",
+			"bad;rm -rf /@market",
+		}
+		dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+			ClaudePlugins: plugins,
+		})
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		// Valid plugin should be included
+		if !strings.Contains(dockerfile, "plugin install valid-plugin@valid-market") {
+			t.Error("valid plugin should be included")
+		}
+		// Invalid plugin should trigger error message
+		if !strings.Contains(dockerfile, "Invalid plugin format") {
+			t.Error("invalid plugin should show error message")
+		}
+	})
 }
 
 // Test helper functions
