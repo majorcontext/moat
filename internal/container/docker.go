@@ -652,10 +652,12 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	if opts.Stdin != nil {
 		go func() {
 			_, err := io.Copy(resp.Conn, opts.Stdin)
+			// Small delay to allow the container to process input and generate output
+			// before we close the write side. This is needed because CloseWrite() on
+			// some Docker implementations can close the connection before output is
+			// fully transferred.
+			time.Sleep(100 * time.Millisecond)
 			// Close write side when stdin ends to signal EOF to the container.
-			// Note: On some Docker implementations (e.g., Docker Desktop on macOS),
-			// CloseWrite may close the connection before output is fully read.
-			// We use ContainerWait to ensure the container finishes processing.
 			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
 				_ = closeWriter.CloseWrite()
 			}
