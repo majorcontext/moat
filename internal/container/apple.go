@@ -19,22 +19,10 @@ import (
 	"github.com/andybons/moat/internal/log"
 )
 
-// interactiveInfo stores info needed for interactive container exec.
-type interactiveInfo struct {
-	cmd         []string // Original command to run
-	hasMoatUser bool     // Whether the image has moatuser
-}
-
 // AppleRuntime implements Runtime using Apple's container CLI tool.
 type AppleRuntime struct {
 	containerBin string
 	hostAddress  string
-
-	// interactiveCommands stores the original command for interactive containers.
-	// Key is container ID. This is needed because we create interactive containers
-	// with a placeholder command (sleep), then exec the real command in StartAttached.
-	interactiveCommands map[string]interactiveInfo
-	interactiveMu       sync.Mutex
 }
 
 // NewAppleRuntime creates a new Apple container runtime.
@@ -46,9 +34,8 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 	}
 
 	r := &AppleRuntime{
-		containerBin:        binPath,
-		hostAddress:         "192.168.64.1", // Default gateway for Apple containers
-		interactiveCommands: make(map[string]interactiveInfo),
+		containerBin: binPath,
+		hostAddress:  "192.168.64.1", // Default gateway for Apple containers
 	}
 
 	return r, nil
@@ -69,27 +56,17 @@ func (r *AppleRuntime) Ping(ctx context.Context) error {
 	return nil
 }
 
-// CreateContainer creates a new Apple container.
-// Note: Apple's container CLI combines create+start in "run --detach".
-// For interactive containers, we use a placeholder command (sleep infinity)
-// and store the original command for later execution via exec in StartAttached.
-// This works around the missing "attach" plugin in Apple container CLI.
+// CreateContainer creates a new Apple container without starting it.
+// The container can later be started with StartContainer (non-interactive)
+// or StartAttached (interactive with TTY).
 func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Ensure image is available
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
 		return "", err
 	}
 
-	// For interactive containers, save the original command and use a placeholder.
-	// We'll run the actual command via exec in StartAttached.
-	var originalCmd []string
-	if cfg.Interactive && len(cfg.Cmd) > 0 {
-		originalCmd = cfg.Cmd
-		cfg.Cmd = []string{"sleep", "infinity"}
-	}
-
 	// Build command arguments
-	args := r.buildRunArgs(cfg)
+	args := r.buildCreateArgs(cfg)
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 	var stdout, stderr bytes.Buffer
@@ -97,31 +74,21 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("container run: %w: %s", err, stderr.String())
+		return "", fmt.Errorf("container create: %w: %s", err, stderr.String())
 	}
 
 	// The container ID is returned on stdout
 	containerID := strings.TrimSpace(stdout.String())
 	if containerID == "" {
-		return "", fmt.Errorf("container run returned empty ID")
-	}
-
-	// Store the original command and user info for interactive containers
-	if len(originalCmd) > 0 {
-		r.interactiveMu.Lock()
-		r.interactiveCommands[containerID] = interactiveInfo{
-			cmd:         originalCmd,
-			hasMoatUser: cfg.HasMoatUser,
-		}
-		r.interactiveMu.Unlock()
+		return "", fmt.Errorf("container create returned empty ID")
 	}
 
 	return containerID, nil
 }
 
-// buildRunArgs constructs the arguments for 'container run'.
-func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
-	args := []string{"run", "--detach"}
+// buildCreateArgs constructs the arguments for 'container create'.
+func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
+	args := []string{"create"}
 
 	// Container name
 	if cfg.Name != "" {
@@ -174,11 +141,15 @@ func (r *AppleRuntime) buildRunArgs(cfg Config) []string {
 	return args
 }
 
-// StartContainer is a no-op for Apple container since run --detach already starts it.
+// StartContainer starts a created or stopped container.
 func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) error {
-	// Apple's "container run --detach" already starts the container
-	// If we need to start a stopped container, we'd use "container start"
-	// For now, this is a no-op since CreateContainer uses run --detach
+	cmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("starting container: %w: %s", err, stderr.String())
+	}
 	return nil
 }
 
@@ -263,11 +234,6 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 
 // RemoveContainer removes a container.
 func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) error {
-	// Clean up any stored interactive command
-	r.interactiveMu.Lock()
-	delete(r.interactiveCommands, containerID)
-	r.interactiveMu.Unlock()
-
 	cmd := exec.CommandContext(ctx, r.containerBin, "rm", "--force", containerID)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -898,29 +864,10 @@ func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) st
 	return "/home/" + user
 }
 
-// BuildRunArgs is exported for testing.
-func BuildRunArgs(cfg Config) []string {
+// BuildCreateArgs is exported for testing.
+func BuildCreateArgs(cfg Config) []string {
 	r := &AppleRuntime{}
-	return r.buildRunArgs(cfg)
-}
-
-// BuildExecArgs constructs arguments for 'container exec'. Exported for testing.
-// If user is non-empty, adds --user flag (needed when exec bypasses ENTRYPOINT
-// which normally handles privilege dropping).
-func BuildExecArgs(containerID string, cmd []string, hasStdin, tty bool, user string) []string {
-	args := []string{"exec"}
-	if hasStdin {
-		args = append(args, "-i")
-	}
-	if tty {
-		args = append(args, "-t")
-	}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	args = append(args, containerID)
-	args = append(args, cmd...)
-	return args
+	return r.buildCreateArgs(cfg)
 }
 
 // ContainerState returns the state of a container ("running", "exited", "created", etc).
@@ -993,51 +940,36 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 // This is required for TUI applications that need the terminal connected
 // before the process starts.
 //
-// For Apple containers, we use `container exec -it` to run the command that
-// was stored during CreateContainer. This works around the missing "attach"
-// plugin in Apple container CLI.
+// Uses `container start --attach` which starts the container and attaches
+// to its primary process. The ENTRYPOINT handles any initialization (SSH agent
+// bridge setup, config file copying, privilege dropping via gosu).
 func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Get the stored command for this interactive container
-	r.interactiveMu.Lock()
-	info, hasCmd := r.interactiveCommands[containerID]
-	if hasCmd {
-		delete(r.interactiveCommands, containerID)
+	// Build start command arguments
+	args := []string{"start", "--attach"}
+	if opts.Stdin != nil {
+		args = append(args, "-i")
 	}
-	r.interactiveMu.Unlock()
+	args = append(args, containerID)
 
-	if !hasCmd || len(info.cmd) == 0 {
-		return fmt.Errorf("no command stored for interactive container %s (was it created with Interactive=true and a non-empty Cmd?)", containerID)
-	}
-
-	// Build exec command arguments: exec -it [--user moatuser] <containerID> <cmd...>
-	// We use --user moatuser for moat-built images because exec bypasses the ENTRYPOINT,
-	// which normally handles privilege dropping via gosu. Without this, commands would run as root.
-	// For base images without moatuser, we omit the flag (runs as the image default user).
-	user := ""
-	if info.hasMoatUser {
-		user = "moatuser"
-	}
-	args := BuildExecArgs(containerID, info.cmd, opts.Stdin != nil, opts.TTY, user)
-
-	execCmd := exec.CommandContext(ctx, r.containerBin, args...)
+	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 
 	// Connect stdin/stdout/stderr
 	if opts.Stdin != nil {
-		execCmd.Stdin = opts.Stdin
+		cmd.Stdin = opts.Stdin
 	}
 	if opts.Stdout != nil {
-		execCmd.Stdout = opts.Stdout
+		cmd.Stdout = opts.Stdout
 	}
 	if opts.Stderr != nil {
-		execCmd.Stderr = opts.Stderr
+		cmd.Stderr = opts.Stderr
 	}
 
-	// Run the command - this blocks until the command exits
-	if err := execCmd.Run(); err != nil {
+	// Run the command - this blocks until the container exits
+	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("exec in container: %w", err)
+		return fmt.Errorf("starting container attached: %w", err)
 	}
 	return nil
 }
