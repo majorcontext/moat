@@ -433,3 +433,51 @@ func TestEnsureCACertOnlyDirCaching(t *testing.T) {
 		t.Errorf("content not updated: got %q, want %q", gotContent, newContent)
 	}
 }
+
+func TestEnsureCACertOnlyDirRemovesStaleFiles(t *testing.T) {
+	caDir := t.TempDir()
+	certOnlyDir := filepath.Join(caDir, "public")
+
+	// Create source certificate
+	certContent := []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----")
+	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create certOnlyDir with a stale file (simulating accidental private key copy)
+	if err := os.MkdirAll(certOnlyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	staleKeyPath := filepath.Join(certOnlyDir, "ca.key")
+	if err := os.WriteFile(staleKeyPath, []byte("PRIVATE KEY DATA"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run ensureCACertOnlyDir - it should remove the stale file
+	if err := ensureCACertOnlyDir(caDir, certOnlyDir); err != nil {
+		t.Fatalf("ensureCACertOnlyDir failed: %v", err)
+	}
+
+	// Verify the stale file was removed
+	if _, err := os.Stat(staleKeyPath); !os.IsNotExist(err) {
+		t.Error("stale ca.key file should have been removed")
+	}
+
+	// Verify the certificate was copied
+	if _, err := os.Stat(filepath.Join(certOnlyDir, "ca.crt")); err != nil {
+		t.Error("ca.crt should exist after ensureCACertOnlyDir")
+	}
+
+	// Verify only ca.crt is in the directory
+	entries, err := os.ReadDir(certOnlyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "ca.crt" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected only ca.crt, got: %v", names)
+	}
+}

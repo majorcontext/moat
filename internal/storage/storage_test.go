@@ -412,3 +412,20 @@ func TestRunStoreRemoveWithContents(t *testing.T) {
 		t.Error("run directory should not exist after removal")
 	}
 }
+
+func TestRunStoreRemoveEmptyRunID(t *testing.T) {
+	// Test that Remove() fails safely when runID is empty.
+	// This prevents accidental deletion of the base directory.
+	s := &RunStore{
+		dir:   "/some/base/dir",
+		runID: "",
+	}
+
+	err := s.Remove()
+	if err == nil {
+		t.Fatal("Remove() should fail with empty runID")
+	}
+	if err.Error() != "cannot remove run storage: empty run ID" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

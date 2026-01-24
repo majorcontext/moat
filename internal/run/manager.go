@@ -1470,7 +1470,12 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	m.mu.Unlock()
 
 	// Check if stdin is a terminal (TTY)
-	// Only use TTY mode if stdin is an actual terminal, not a pipe or buffer
+	// Only use TTY mode if stdin is an actual terminal, not a pipe or buffer.
+	//
+	// Limitation: This detection fails if stdin is wrapped (e.g., EscapeProxy).
+	// Wrappers could implement an interface like `TTYDetector` with an `IsTTY() bool`
+	// method, or we could walk the wrapper chain to find the underlying *os.File.
+	// For now, callers using wrapped readers should handle TTY mode themselves.
 	isTTY := false
 	if f, ok := stdin.(*os.File); ok {
 		isTTY = term.IsTerminal(f)
@@ -1993,6 +1998,9 @@ func filterSSHGrants(grants []string) []string {
 // ensureCACertOnlyDir creates a directory containing only the CA certificate,
 // not the private key. This is used to mount into containers so they can trust
 // the proxy's TLS certificates without exposing the signing key.
+//
+// SECURITY: This function removes any files other than ca.crt from the directory
+// to prevent accidental exposure of the private key if it was mistakenly copied.
 func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	certSrc := filepath.Join(caDir, "ca.crt")
 	certDst := filepath.Join(certOnlyDir, "ca.crt")
@@ -2004,20 +2012,35 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	}
 	srcHash := sha256.Sum256(srcContent)
 
+	// Create directory if it doesn't exist
+	if err = os.MkdirAll(certOnlyDir, 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	// SECURITY: Remove any files that shouldn't be in this directory.
+	// This prevents accidental exposure of ca.key if it was mistakenly copied.
+	entries, err := os.ReadDir(certOnlyDir)
+	if err != nil {
+		return fmt.Errorf("reading directory: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "ca.crt" {
+			staleFile := filepath.Join(certOnlyDir, entry.Name())
+			if err = os.Remove(staleFile); err != nil {
+				return fmt.Errorf("removing stale file %s: %w", entry.Name(), err)
+			}
+		}
+	}
+
 	// Check if destination already has the same content (by hash)
-	if dstContent, err := os.ReadFile(certDst); err == nil {
+	if dstContent, readErr := os.ReadFile(certDst); readErr == nil {
 		dstHash := sha256.Sum256(dstContent)
 		if srcHash == dstHash {
 			return nil // Already up to date
 		}
 	}
 
-	// Create directory and copy certificate
-	if err := os.MkdirAll(certOnlyDir, 0755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-
-	if err := os.WriteFile(certDst, srcContent, 0644); err != nil {
+	if err = os.WriteFile(certDst, srcContent, 0644); err != nil {
 		return fmt.Errorf("writing CA certificate: %w", err)
 	}
 

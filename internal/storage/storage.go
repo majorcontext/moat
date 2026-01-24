@@ -58,7 +58,12 @@ func (s *RunStore) Dir() string {
 }
 
 // Remove deletes the run's storage directory and all its contents.
+// Returns an error if the run ID is empty to prevent accidental deletion
+// of the base directory.
 func (s *RunStore) Remove() error {
+	if s.runID == "" {
+		return fmt.Errorf("cannot remove run storage: empty run ID")
+	}
 	return os.RemoveAll(s.dir)
 }
 
