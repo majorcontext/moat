@@ -19,7 +19,6 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -562,18 +561,12 @@ func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts Att
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
-	// Copy container output to stdout/stderr
+	// Copy container output to stdout/stderr.
+	// Since containers are always created with Tty: true (see CreateContainer),
+	// output is always raw (not multiplexed). Use io.Copy unconditionally.
 	go func() {
-		if opts.TTY {
-			// In TTY mode, output is raw
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		} else {
-			// In non-TTY mode, Docker multiplexes stdout/stderr with headers.
-			// Use stdcopy to demux the stream.
-			_, err := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
-			outputDone <- err
-		}
+		_, err := io.Copy(opts.Stdout, resp.Reader)
+		outputDone <- err
 	}()
 
 	// Copy stdin to container (if provided)
@@ -647,19 +640,12 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
-	// Copy container output to stdout/stderr
+	// Copy container output to stdout/stderr.
+	// Since containers are always created with Tty: true (see CreateContainer),
+	// output is always raw (not multiplexed). Use io.Copy unconditionally.
 	go func() {
-		if opts.TTY {
-			// In TTY mode, output is raw (container created with Tty: true)
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		} else {
-			// In non-TTY mode, Docker multiplexes stdout/stderr with headers.
-			// Note: Currently containers are always created with Tty: true,
-			// so this branch may not be used.
-			_, err := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
-			outputDone <- err
-		}
+		_, err := io.Copy(opts.Stdout, resp.Reader)
+		outputDone <- err
 	}()
 
 	// Copy stdin to container (if provided)
