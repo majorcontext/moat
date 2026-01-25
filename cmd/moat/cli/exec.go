@@ -27,6 +27,7 @@ type ExecFlags struct {
 	KeepContainer bool
 	Detach        bool
 	Interactive   bool
+	NoSandbox     bool
 }
 
 // AddExecFlags adds the common execution flags to a command.
@@ -37,6 +38,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
+	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
 }
 
 // setupStatusBar creates a status bar for interactive container sessions.
