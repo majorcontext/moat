@@ -1031,29 +1031,13 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	select {
 	case err := <-stdinErr:
 		// Stdin copy finished (possibly with escape error)
-		// Close PTY to signal the CLI to exit gracefully
+		// Close PTY and kill CLI - this detaches from the container without stopping it
 		_ = ptmx.Close()
 		cancelCopy()
-		// Give the CLI a moment to exit gracefully
-		select {
-		case <-cmdDone:
-			// Exited cleanly
-		case <-time.After(50 * time.Millisecond):
-			// Still running, terminate it
-			if cmd.Process != nil {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-			select {
-			case <-cmdDone:
-			case <-time.After(50 * time.Millisecond):
-				// Force kill if SIGTERM didn't work
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
-				<-cmdDone
-			}
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
 		}
-		// Return the stdin error (which may be an escape error)
+		<-cmdDone
 		if err != nil {
 			result = err
 		}
@@ -1070,18 +1054,12 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		select {
-		case <-cmdDone:
-		case <-time.After(100 * time.Millisecond):
-		}
+		<-cmdDone
 		result = ctx.Err()
 	}
 
 	// Brief wait for output copy to finish
-	select {
-	case <-outputDone:
-	case <-time.After(100 * time.Millisecond):
-	}
+	<-outputDone
 
 	return result
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/run"
 	"github.com/andybons/moat/internal/term"
+	"github.com/andybons/moat/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +37,45 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
+}
+
+// setupStatusBar creates a status bar for interactive container sessions.
+// Returns the writer (which wraps stdout with status bar compositing), a cleanup
+// function that must be deferred, and the output writer to use for container output.
+// If stdout is not a TTY or setup fails, returns nil writer with os.Stdout as output.
+func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, cleanup func(), stdout io.Writer) {
+	stdout = os.Stdout
+	cleanup = func() {} // no-op by default
+
+	if !term.IsTerminal(os.Stdout) {
+		return nil, cleanup, stdout
+	}
+
+	width, height := term.GetSize(os.Stdout)
+	if width <= 0 || height <= 0 {
+		return nil, cleanup, stdout
+	}
+
+	runtimeType := manager.RuntimeType()
+	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
+	bar.SetDimensions(width, height)
+	writer = tui.NewWriter(os.Stdout, bar, runtimeType)
+
+	if err := writer.Setup(); err != nil {
+		log.Debug("failed to setup status bar", "error", err)
+		return nil, cleanup, os.Stdout
+	}
+
+	// Sync stdout to ensure terminal has processed setup before container starts
+	_ = os.Stdout.Sync()
+
+	cleanup = func() {
+		if err := writer.Cleanup(); err != nil {
+			log.Debug("failed to cleanup status bar", "error", err)
+		}
+	}
+
+	return writer, cleanup, writer
 }
 
 // ExecOptions contains all the options needed to execute a containerized command.
@@ -270,8 +311,18 @@ func RunInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error
 			switch action {
 			case term.EscapeDetach:
 				attachCancel()
-				fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
-				fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
+				// Wait for attach goroutine to complete before checking state
+				select {
+				case <-attachDone:
+				case <-time.After(500 * time.Millisecond):
+				}
+				currentRun, _ := manager.Get(r.ID)
+				if currentRun != nil && currentRun.State == run.StateRunning {
+					fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
+					fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
+				} else {
+					fmt.Printf("\r\nRun %s stopped\r\n", r.ID)
+				}
 				return nil
 
 			case term.EscapeStop:
@@ -350,9 +401,13 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	}()
 
+	// Set up status bar for interactive session
+	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
+	defer statusCleanup()
+
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
 
 	// Wrap stdin with escape proxy to detect detach/stop sequences
@@ -368,7 +423,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	// Start with attachment - this ensures TTY is connected before process starts
 	attachDone := make(chan error, 1)
 	go func() {
-		err := manager.StartAttached(attachCtx, r.ID, escapeProxy, os.Stdout, os.Stderr)
+		err := manager.StartAttached(attachCtx, r.ID, escapeProxy, stdout, os.Stderr)
 		// Check if the error is an escape sequence
 		if term.IsEscapeError(err) {
 			escapeCh <- term.GetEscapeAction(err)
@@ -378,7 +433,11 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	}()
 
-	// Give container a moment to start, then resize TTY
+	// Give container a moment to start, then resize TTY to match terminal.
+	// Note: We don't call statusWriter.Resize() here because Setup() already
+	// configured the scroll region and status bar with the correct dimensions.
+	// Calling Resize() again can interfere with the shell's cursor positioning
+	// during initialization. The status bar will be resized on SIGWINCH events.
 	go func() {
 		time.Sleep(ttyStartupDelay)
 		if term.IsTerminal(os.Stdout) {
@@ -392,11 +451,22 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	}()
 
-	log.Info("run started (attached)", "id", r.ID)
-
 	for {
 		select {
 		case sig := <-sigCh:
+			if sig == syscall.SIGWINCH {
+				// Handle terminal resize
+				if statusWriter != nil && term.IsTerminal(os.Stdout) {
+					width, height := term.GetSize(os.Stdout)
+					if width > 0 && height > 0 {
+						_ = statusWriter.Resize(width, height)
+						// Also resize container TTY
+						// #nosec G115 -- width/height are validated positive above
+						_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+					}
+				}
+				continue // Don't break out of loop
+			}
 			// In interactive mode, forward SIGINT to container (it will handle it)
 			// Only SIGTERM causes us to stop
 			if sig == syscall.SIGTERM {
@@ -414,8 +484,18 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			switch action {
 			case term.EscapeDetach:
 				attachCancel()
-				fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
-				fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
+				// Wait for attach goroutine to complete before checking state
+				select {
+				case <-attachDone:
+				case <-time.After(500 * time.Millisecond):
+				}
+				currentRun, _ := manager.Get(r.ID)
+				if currentRun != nil && currentRun.State == run.StateRunning {
+					fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
+					fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
+				} else {
+					fmt.Printf("\r\nRun %s stopped\r\n", r.ID)
+				}
 				return nil
 
 			case term.EscapeStop:
