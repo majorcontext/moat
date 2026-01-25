@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
@@ -24,18 +26,66 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+// ErrGVisorNotAvailable is returned when gVisor is required but not installed.
+var ErrGVisorNotAvailable = errors.New(`gVisor (runsc) is required but not available
+
+To install on Linux:
+  curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg
+  echo "deb [signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
+    sudo tee /etc/apt/sources.list.d/gvisor.list
+  sudo apt update && sudo apt install runsc
+  sudo runsc install
+
+To install on Docker Desktop (macOS/Windows):
+  See https://gvisor.dev/docs/user_guide/install/
+
+To bypass (reduced isolation):
+  moat run --no-sandbox`)
+
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
-	cli *client.Client
+	cli        *client.Client
+	ociRuntime string // "runsc" or "runc"
 }
 
 // NewDockerRuntime creates a new Docker runtime.
-func NewDockerRuntime() (*DockerRuntime, error) {
+// If sandbox is true, requires gVisor (runsc) and fails if unavailable.
+// If sandbox is false, uses standard runc runtime with a warning.
+func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
-	return &DockerRuntime{cli: cli}, nil
+
+	ociRuntime := "runsc"
+	if !sandbox {
+		log.Warn("running without gVisor sandbox - reduced isolation")
+		ociRuntime = "runc"
+	} else {
+		// Verify gVisor is available
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		info, err := cli.Info(ctx)
+		if err != nil {
+			cli.Close()
+			return nil, fmt.Errorf("checking Docker info: %w", err)
+		}
+
+		found := false
+		for name := range info.Runtimes {
+			if name == "runsc" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cli.Close()
+			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
+		}
+	}
+
+	return &DockerRuntime{cli: cli, ociRuntime: ociRuntime}, nil
 }
 
 // Type returns RuntimeDocker.

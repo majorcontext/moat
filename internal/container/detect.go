@@ -54,7 +54,7 @@ func NewRuntime() (Runtime, error) {
 
 // newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
 func newDockerRuntimeWithPing() (Runtime, error) {
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(true) // Default to sandbox enabled
 	if err != nil {
 		return nil, fmt.Errorf("no container runtime available: Docker error: %w", err)
 	}
