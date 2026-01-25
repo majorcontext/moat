@@ -34,7 +34,6 @@ import (
 	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
-	"github.com/andybons/moat/internal/term"
 )
 
 // Timing constants for run lifecycle operations.
@@ -1469,24 +1468,14 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	m.mu.Unlock()
 
-	// Check if stdin is a terminal (TTY)
-	// Only use TTY mode if stdin is an actual terminal, not a pipe or buffer.
-	//
-	// Limitation: This detection fails if stdin is wrapped (e.g., EscapeProxy).
-	// Wrappers could implement an interface like `TTYDetector` with an `IsTTY() bool`
-	// method, or we could walk the wrapper chain to find the underlying *os.File.
-	// For now, callers using wrapped readers should handle TTY mode themselves.
-	isTTY := false
-	if f, ok := stdin.(*os.File); ok {
-		isTTY = term.IsTerminal(f)
-	}
-
-	// Start with attachment - this ensures TTY is connected before process starts
+	// Start with attachment - this ensures TTY is connected before process starts.
+	// Always use TTY mode since StartAttached is only called for interactive sessions.
+	// Containers are created with Tty: true (see CreateContainer), so this must match.
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
-		TTY:    isTTY,
+		TTY:    true,
 	}
 
 	// Channel to receive the attach result
