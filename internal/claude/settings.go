@@ -5,10 +5,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/log"
 )
+
+// validRepoFormat validates marketplace repo strings to prevent malformed input.
+// This is defense-in-depth; dockerfile.go also validates before shell execution.
+var validRepoFormat = regexp.MustCompile(`^[a-zA-Z0-9._@:/-]+$`)
 
 // SettingSource identifies where a setting came from.
 type SettingSource string
@@ -73,7 +79,17 @@ func LoadSettings(path string) (*Settings, error) {
 	return &settings, nil
 }
 
-// KnownMarketplacesFile represents the ~/.claude/plugins/known_marketplaces.json format.
+// KnownMarketplacesFile documents the ~/.claude/plugins/known_marketplaces.json format.
+//
+// This file is created and maintained by Claude Code when users run
+// `claude plugin marketplace add <repo>`. It stores the repository URLs
+// for installed marketplaces, allowing moat to know where to fetch plugins from.
+//
+// Note: This is an internal Claude Code file format that may change between
+// versions. We parse only the fields we need (source info) and ignore others.
+//
+// This type is defined for documentation; LoadKnownMarketplaces() parses the JSON
+// directly into a map[string]KnownMarketplace.
 type KnownMarketplacesFile struct {
 	Marketplaces map[string]KnownMarketplace
 }
@@ -93,8 +109,17 @@ type KnownMarketplaceSource struct {
 }
 
 // LoadKnownMarketplaces loads Claude's known_marketplaces.json file.
-// This file contains marketplace URLs that Claude Code has registered.
-// Returns nil, nil if the file doesn't exist.
+// This file contains marketplace URLs that Claude Code has registered via
+// `claude plugin marketplace add`. Returns nil, nil if the file doesn't exist.
+//
+// URL normalization:
+// - "github" sources are normalized to git URLs (https://github.com/owner/repo.git)
+// - We assume repos don't contain trailing slashes or .git suffixes (Claude CLI standard)
+// - Git URLs are used as-is without normalization
+//
+// Entries are skipped (with debug logging) if they have:
+// - Empty repo/URL fields
+// - Invalid characters in repo format (shell injection protection)
 func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -122,9 +147,14 @@ func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
 		// Convert source to git URL format
 		switch km.Source.Source {
 		case "github":
-			if km.Source.Repo != "" {
+			// Validate repo format before URL construction (defense-in-depth)
+			if km.Source.Repo != "" && validRepoFormat.MatchString(km.Source.Repo) {
 				entry.Source.Source = "git"
 				entry.Source.URL = "https://github.com/" + km.Source.Repo + ".git"
+			} else if km.Source.Repo != "" {
+				log.Debug("skipping marketplace with invalid repo format",
+					"name", name, "repo", km.Source.Repo)
+				continue
 			}
 		case "git":
 			entry.Source.URL = km.Source.URL
@@ -132,6 +162,8 @@ func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
 
 		if entry.Source.URL != "" {
 			result[name] = entry
+		} else {
+			log.Debug("skipping marketplace with empty URL", "name", name)
 		}
 	}
 

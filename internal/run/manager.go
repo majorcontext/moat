@@ -838,16 +838,21 @@ region = %s
 	var claudePlugins []string
 
 	if claudeSettings != nil {
-		// Build a map of marketplace name -> repo URL from merged settings
+		// Build a map of marketplace name -> repo URL from merged settings.
+		// The claude CLI accepts marketplace repos in several formats:
+		// - GitHub shorthand: owner/repo
+		// - HTTPS URLs: https://github.com/owner/repo.git
+		// - SSH URLs: git@github.com:owner/repo.git
+		// We normalize GitHub HTTPS URLs to owner/repo format for cleaner output.
+		// Other URL formats are passed through unchanged.
 		marketplaceRepos := make(map[string]string)
 		for name, entry := range claudeSettings.ExtraKnownMarketplaces {
 			if entry.Source.URL != "" {
-				// Convert URL to repo format for the claude CLI
+				// Convert GitHub HTTPS URL to owner/repo format
 				repo := entry.Source.URL
 				if strings.HasPrefix(repo, "https://github.com/") {
 					repo = strings.TrimPrefix(repo, "https://github.com/")
-					repo = strings.TrimSuffix(repo, "/")
-					repo = strings.TrimSuffix(repo, ".git")
+					repo = strings.TrimSuffix(strings.TrimSuffix(repo, "/"), ".git")
 				}
 				marketplaceRepos[name] = repo
 				claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
@@ -858,7 +863,10 @@ region = %s
 			}
 		}
 
-		// Extract enabled plugins, but only those with known marketplace URLs
+		// Extract enabled plugins, but only those with known marketplace URLs.
+		// Note: We use LastIndexByte to handle the case where plugin names contain @.
+		// Invalid plugin key formats (e.g., missing @, multiple @) are caught later
+		// during Dockerfile generation by validPluginKey regex (defense-in-depth).
 		for pluginKey, enabled := range claudeSettings.EnabledPlugins {
 			if !enabled {
 				continue
@@ -869,10 +877,22 @@ region = %s
 				if _, hasRepo := marketplaceRepos[marketplace]; hasRepo {
 					claudePlugins = append(claudePlugins, pluginKey)
 				} else {
-					log.Debug("skipping plugin with unknown marketplace",
-						"plugin", pluginKey,
-						"marketplace", marketplace)
+					// Use warning for agent.yaml plugins, debug for auto-discovered host settings
+					if claudeSettings.PluginSources != nil &&
+						claudeSettings.PluginSources[pluginKey] == claude.SourceAgentYAML {
+						log.Warn("skipping plugin from agent.yaml with unknown marketplace",
+							"plugin", pluginKey,
+							"marketplace", marketplace,
+							"hint", "add the marketplace to agent.yaml claude.marketplaces")
+					} else {
+						log.Debug("skipping plugin with unknown marketplace",
+							"plugin", pluginKey,
+							"marketplace", marketplace)
+					}
 				}
+			} else {
+				log.Debug("skipping plugin with invalid format (missing @marketplace)",
+					"plugin", pluginKey)
 			}
 		}
 	}

@@ -220,7 +220,28 @@ Claude Code can use `git@github.com:...` URLs for cloning and pushing.
 
 ## Plugin management
 
-Moat supports Claude Code plugins. Configure them in `agent.yaml`:
+Moat supports Claude Code plugins, with automatic discovery of plugins installed on your host machine.
+
+### Host plugin inheritance
+
+Plugins you install via Claude Code on your host machine are automatically available in Moat containers:
+
+```bash
+# Install a plugin on your host
+claude plugin marketplace add owner/repo
+claude plugin enable plugin-name@repo
+```
+
+The next time you run `moat claude`, the plugin is available inside the container. Moat reads:
+
+- `~/.claude/plugins/known_marketplaces.json` — Marketplaces registered via `claude plugin marketplace add`
+- `~/.claude/settings.json` — Plugin enable/disable settings
+
+No additional configuration required. Use `--rebuild` to update the container image after installing new plugins.
+
+### Explicit plugin configuration
+
+For reproducible builds or CI environments, configure plugins explicitly in `agent.yaml`:
 
 ```yaml
 claude:
@@ -228,11 +249,7 @@ claude:
     "plugin-name@marketplace": true
 ```
 
-List configured plugins:
-
-```bash
-moat claude plugins list ./my-project
-```
+Settings in `agent.yaml` override host settings, giving you control over exactly which plugins are available.
 
 ### Marketplaces
 
@@ -248,6 +265,16 @@ claude:
 ```
 
 Marketplaces are cloned during image build. Use `--rebuild` to update after changing marketplace configuration.
+
+### List plugins
+
+View which plugins are configured:
+
+```bash
+moat claude plugins list ./my-project
+```
+
+This shows plugins from all sources: host settings, project settings, and `agent.yaml`.
 
 ## MCP servers
 
