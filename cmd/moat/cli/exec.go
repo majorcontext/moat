@@ -101,7 +101,9 @@ type ExecOptions struct {
 // Returns the run for further inspection if needed.
 func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	// Create manager
-	manager, err := run.NewManager()
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{
+		NoSandbox: opts.Flags.NoSandbox,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating run manager: %w", err)
 	}
