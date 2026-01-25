@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/log"
+	"github.com/andybons/moat/internal/term"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.
@@ -91,8 +92,15 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
 	args := []string{"create"}
 
 	// Interactive mode flags
+	// Apple's container CLI requires a real PTY when using -t (TTY) flag.
+	// We only add -t if os.Stdin is an actual terminal. This allows programmatic
+	// use (tests, scripts) to work with -i alone, while real interactive sessions
+	// get full TTY support.
 	if cfg.Interactive {
-		args = append(args, "-i", "-t") // Keep stdin open and allocate TTY
+		args = append(args, "-i") // Keep stdin open
+		if term.IsTerminal(os.Stdin) {
+			args = append(args, "-t") // Allocate TTY only if we have a real terminal
+		}
 	}
 
 	// Container name

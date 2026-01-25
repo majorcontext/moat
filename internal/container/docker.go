@@ -13,12 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -90,6 +92,11 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		}
 	}
 
+	// Only use TTY mode if os.Stdin is a real terminal.
+	// Docker returns "the input device is not a TTY" when you try to use
+	// TTY mode with non-TTY stdin (e.g., piped input, tests).
+	useTTY := cfg.Interactive && term.IsTerminal(os.Stdin)
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        cfg.Image,
@@ -97,8 +104,8 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			WorkingDir:   cfg.WorkingDir,
 			Env:          cfg.Env,
 			User:         cfg.User,
-			Tty:          true,
-			OpenStdin:    true,
+			Tty:          useTTY,
+			OpenStdin:    cfg.Interactive,
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
@@ -628,24 +635,30 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	}
 	defer resp.Close()
 
-	// Start the container while we're attached
-	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("starting container: %w", err)
+	// Set connection deadline from context to ensure I/O doesn't hang.
+	// This is particularly important for non-TTY mode where reads can stall.
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := resp.Conn.SetDeadline(deadline); err != nil {
+			return fmt.Errorf("setting connection deadline: %w", err)
+		}
 	}
 
-	// Set up bidirectional copy
+	// Set up bidirectional copy BEFORE starting the container.
+	// This ensures the goroutines are ready to receive output as soon as
+	// the container starts, avoiding race conditions with fast-exiting containers.
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
 	// Copy container output to stdout/stderr
 	go func() {
 		if opts.TTY {
-			// In TTY mode, stdout and stderr are multiplexed
+			// In TTY mode, output is raw (single stream)
 			_, err := io.Copy(opts.Stdout, resp.Reader)
 			outputDone <- err
 		} else {
-			// In non-TTY mode, we need to demux the stream
-			_, err := io.Copy(opts.Stdout, resp.Reader)
+			// In non-TTY mode, Docker multiplexes stdout/stderr with headers.
+			// Use stdcopy.StdCopy to demux the stream.
+			_, err := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
 			outputDone <- err
 		}
 	}()
@@ -662,6 +675,11 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 			}
 			stdinDone <- err
 		}()
+	}
+
+	// Start the container now that I/O streams are ready
+	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting container: %w", err)
 	}
 
 	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
