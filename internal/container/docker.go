@@ -159,6 +159,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
+			Runtime:      r.ociRuntime, // "runsc" or "runc"
 			Mounts:       mounts,
 			NetworkMode:  networkMode,
 			ExtraHosts:   cfg.ExtraHosts,
