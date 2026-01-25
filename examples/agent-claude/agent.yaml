@@ -15,9 +15,31 @@ dependencies:
 
 grants:
   - anthropic
+  - github
+  - ssh:github.com  # For git operations (clone, push, etc.)
 
 command: ["claude"]
 interactive: true
 
 # Claude session logs are automatically synced to the host when "anthropic" grant
 # is configured. To disable, set: claude: { sync_logs: false }
+
+# Plugin configuration
+claude:
+  # Enable plugins from marketplaces
+  # The marketplace name in plugin@marketplace must match the repo name
+  plugins:
+    "claude-md-management@claude-plugins-official": true   # CLAUDE.md management
+    "aws-agent-skills@aws-agent-skills": true              # AWS agent skills
+
+  # Define custom marketplaces
+  # Plugins are installed inside the container via `claude plugin marketplace add`
+  # and `claude plugin install`
+  # The marketplace name (key) should match the repo name for consistency
+  marketplaces:
+    claude-plugins-official:
+      source: github
+      repo: anthropics/claude-plugins-official
+    aws-agent-skills:
+      source: github
+      repo: itsmostafa/aws-agent-skills

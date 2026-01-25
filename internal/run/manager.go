@@ -491,13 +491,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			ReadOnly: true,
 		})
 
-		// Set env vars for tools that support custom CA bundles
-		// SSL_CERT_FILE is used by many tools (curl, wget, etc)
-		// The CA cert is at ca.crt within the mounted directory
+		// Set env vars for tools that support custom CA bundles.
+		// This tells various tools to trust our TLS-intercepting proxy's CA certificate
+		// so they can make HTTPS requests through the proxy for credential injection.
+		// The CA cert is at ca.crt within the mounted directory.
 		caCertInContainer := "/etc/ssl/certs/moat-ca/ca.crt"
-		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)
-		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)
-		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer)
+		proxyEnv = append(proxyEnv, "SSL_CERT_FILE="+caCertInContainer)       // curl, wget, many others
+		proxyEnv = append(proxyEnv, "REQUESTS_CA_BUNDLE="+caCertInContainer)  // Python requests
+		proxyEnv = append(proxyEnv, "NODE_EXTRA_CA_CERTS="+caCertInContainer) // Node.js
+		proxyEnv = append(proxyEnv, "GIT_SSL_CAINFO="+caCertInContainer)      // Git (for HTTPS clones)
 
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
@@ -813,6 +815,59 @@ region = %s
 		}
 	}
 
+	// Extract plugins from agent.yaml for image building.
+	// IMPORTANT: We only use agent.yaml config here, not merged host settings.
+	// Host settings should not be baked into container images - they are applied at runtime.
+	var claudeMarketplaces []claude.MarketplaceConfig
+	var claudePlugins []string
+	if opts.Config != nil {
+		// Extract marketplaces from agent.yaml
+		for name, spec := range opts.Config.Claude.Marketplaces {
+			if spec.Source == "directory" {
+				continue // Skip directory sources
+			}
+			// Determine repo path.
+			// If repo is not specified but URL is, extract the path from the URL.
+			// Currently only GitHub HTTPS URLs are converted to owner/repo format.
+			// Other URL formats (SSH, other hosts) are used as-is since the claude
+			// CLI handles them directly.
+			repo := spec.Repo
+			if repo == "" && spec.URL != "" {
+				repo = spec.URL
+				if strings.HasPrefix(repo, "https://github.com/") {
+					repo = strings.TrimPrefix(repo, "https://github.com/")
+					repo = strings.TrimSuffix(repo, "/")
+					repo = strings.TrimSuffix(repo, ".git")
+				}
+			}
+			if repo == "" {
+				continue
+			}
+			claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
+				Name:   name,
+				Source: spec.Source,
+				Repo:   repo,
+			})
+		}
+		// Extract enabled plugins from agent.yaml
+		for pluginKey, enabled := range opts.Config.Claude.Plugins {
+			if enabled {
+				claudePlugins = append(claudePlugins, pluginKey)
+			}
+		}
+	}
+
+	// Load merged Claude settings for runtime config (this includes host settings)
+	var claudeSettings *claude.Settings
+	if opts.Config != nil {
+		var loadErr error
+		claudeSettings, loadErr = claude.LoadAllSettings(opts.Workspace, opts.Config)
+		if loadErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
+		}
+	}
+
 	// Determine if we need Claude init (for OAuth credentials and host files)
 	// This is triggered by an anthropic grant with an OAuth token
 	var needsClaudeInit bool
@@ -856,16 +911,17 @@ region = %s
 		}
 	}
 
-	// Resolve container image based on dependencies, SSH grants, and init needs
+	// Resolve container image based on dependencies, SSH grants, init needs, and plugins
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(depList, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
 		NeedsClaudeInit: needsClaudeInit,
 		NeedsCodexInit:  needsCodexInit,
+		ClaudePlugins:   claudePlugins,
 	})
 
 	// Determine if we need a custom image
-	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit
+	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -887,11 +943,13 @@ region = %s
 
 		// Always generate the Dockerfile so we can save it to the run directory
 		dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
-			NeedsSSH:        hasSSHGrants,
-			SSHHosts:        sshGrants,
-			NeedsClaudeInit: needsClaudeInit,
-			NeedsCodexInit:  needsCodexInit,
-			UseBuildKit:     &useBuildKit,
+			NeedsSSH:           hasSSHGrants,
+			SSHHosts:           sshGrants,
+			NeedsClaudeInit:    needsClaudeInit,
+			NeedsCodexInit:     needsCodexInit,
+			UseBuildKit:        &useBuildKit,
+			ClaudeMarketplaces: claudeMarketplaces,
+			ClaudePlugins:      claudePlugins,
 		})
 		if err != nil {
 			cleanupProxy(proxyServer)
@@ -987,16 +1045,7 @@ region = %s
 	// This includes OAuth credentials, host files, and optionally plugin settings
 	var claudeGenerated *claude.GeneratedConfig
 	if needsClaudeInit || (opts.Config != nil) {
-		// Load Claude settings (may be empty if no plugins configured)
-		var claudeSettings *claude.Settings
-		if opts.Config != nil {
-			var loadErr error
-			claudeSettings, loadErr = claude.LoadAllSettings(opts.Workspace, opts.Config)
-			if loadErr != nil {
-				cleanupProxy(proxyServer)
-				return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
-			}
-		}
+		// claudeSettings was loaded earlier for plugin detection
 
 		// Determine if we need to set up plugins/marketplaces
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
@@ -1048,52 +1097,10 @@ region = %s
 				}
 			}
 
-			// Handle plugins if configured
+			// Note: Plugins are now installed during image build (via Dockerfile RUN commands),
+			// not at runtime. The hasPlugins flag is used only for logging.
 			if hasPlugins {
-				// Extract SSH grants for marketplace access validation
-				sshHosts := claude.FilterSSHGrants(opts.Grants)
-
-				// Validate SSH access early - fail fast if private marketplaces need SSH
-				if err := claude.ValidateSSHAccess(claudeSettings, sshHosts); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, err
-				}
-
-				// Set up marketplace manager and ensure all marketplaces are cloned
-				cacheDir, cacheErr := claude.DefaultCacheDir()
-				if cacheErr != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("getting plugin cache directory: %w", cacheErr)
-				}
-
-				marketplaceManager := claude.NewMarketplaceManager(cacheDir)
-				if err := marketplaceManager.EnsureAllMarketplaces(claudeSettings, sshHosts); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("setting up marketplaces: %w", err)
-				}
-
-				// Generate settings.json and write to staging directory
-				settingsJSON, genErr := claude.GenerateSettings(claudeSettings, "/moat/claude-plugins")
-				if genErr != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("generating Claude settings: %w", genErr)
-				}
-				if err := os.WriteFile(filepath.Join(claudeStagingDir, "settings.json"), settingsJSON, 0644); err != nil {
-					cleanupProxy(proxyServer)
-					return nil, fmt.Errorf("writing Claude settings: %w", err)
-				}
-
-				// Mount plugin cache
-				marketplacesDir := filepath.Join(cacheDir, "marketplaces")
-				if _, err := os.Stat(marketplacesDir); err == nil {
-					mounts = append(mounts, container.MountConfig{
-						Source:   marketplacesDir,
-						Target:   "/moat/claude-plugins/marketplaces",
-						ReadOnly: true,
-					})
-				}
-
-				log.Debug("configured Claude plugins",
+				log.Debug("plugins baked into image",
 					"plugins", len(claudeSettings.EnabledPlugins),
 					"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
 			}

@@ -387,7 +387,7 @@ claude:
 
 ### claude.plugins
 
-Enable or disable plugins.
+Enable or disable plugins. Plugins are installed during image build and cached in Docker layers, eliminating startup latency.
 
 ```yaml
 claude:
@@ -398,6 +398,8 @@ claude:
 
 - Type: `map[string]boolean`
 - Default: `{}`
+
+Note: Only plugins defined in `agent.yaml` are baked into the image. Host plugins from `~/.claude/settings.json` are not included. Use `--rebuild` to update plugins after changing this configuration.
 
 ### claude.marketplaces
 
