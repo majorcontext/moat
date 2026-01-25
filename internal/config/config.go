@@ -28,8 +28,14 @@ type Config struct {
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
-	Container    ContainerConfig   `yaml:"container,omitempty"`
-	MCP          []MCPServerConfig `yaml:"mcp,omitempty"`
+
+	// Sandbox configures container sandboxing.
+	// "none" disables gVisor sandbox (Docker only).
+	// Empty string or omitted uses default (gVisor enabled).
+	Sandbox string `yaml:"sandbox,omitempty"`
+
+	Container ContainerConfig   `yaml:"container,omitempty"`
+	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
