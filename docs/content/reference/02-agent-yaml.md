@@ -399,7 +399,19 @@ claude:
 - Type: `map[string]boolean`
 - Default: `{}`
 
-Note: Only plugins defined in `agent.yaml` are baked into the image. Host plugins from `~/.claude/settings.json` are not included. Use `--rebuild` to update plugins after changing this configuration.
+#### Host plugin inheritance
+
+Moat automatically discovers plugins you've installed on your host machine via Claude Code:
+
+1. **Host marketplaces**: Marketplaces registered via `claude plugin marketplace add` are read from `~/.claude/plugins/known_marketplaces.json`
+2. **Host plugins**: Plugin settings from `~/.claude/settings.json` are included
+3. **Moat defaults**: Settings from `~/.moat/claude/settings.json` (if present)
+4. **Project settings**: Settings from your workspace's `.claude/settings.json`
+5. **agent.yaml**: Explicit overrides in `claude.plugins` (highest priority)
+
+This means plugins you've enabled on your host are automatically available in Moat containers without additional configuration.
+
+Use `--rebuild` to update plugins after changing configuration or installing new plugins on the host.
 
 ### claude.marketplaces
 

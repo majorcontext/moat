@@ -56,17 +56,18 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		return sortedMarketplaces[i].Name < sortedMarketplaces[j].Name
 	})
 
-	// Add marketplaces
+	// Add marketplaces - failures are non-fatal (private repos may not be accessible during build)
 	for _, m := range sortedMarketplaces {
 		if m.Repo == "" {
 			continue
 		}
 		// Validate repo format to prevent command injection
 		if !validMarketplaceRepo.MatchString(m.Repo) {
-			b.WriteString(fmt.Sprintf("RUN echo 'ERROR: Invalid marketplace repo format: %s' && exit 1\n", m.Name))
+			b.WriteString(fmt.Sprintf("RUN echo 'WARNING: Invalid marketplace repo format: %s, skipping'\n", m.Name))
 			continue
 		}
-		b.WriteString(fmt.Sprintf("RUN claude plugin marketplace add %s || (echo 'Failed to add marketplace %s. Check SSH grants if this is a private repository.' && exit 1)\n", m.Repo, m.Name))
+		// Try to add marketplace, but don't fail build if it fails (e.g., private repo)
+		b.WriteString(fmt.Sprintf("RUN claude plugin marketplace add %s && echo 'Added marketplace %s' || echo 'WARNING: Could not add marketplace %s (may be private or inaccessible during build)'\n", m.Repo, m.Name, m.Name))
 	}
 
 	// Sort plugins for deterministic output
@@ -74,14 +75,15 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	copy(sortedPlugins, plugins)
 	sort.Strings(sortedPlugins)
 
-	// Install plugins
+	// Install plugins - failures are non-fatal (plugins from inaccessible marketplaces will fail)
 	for _, plugin := range sortedPlugins {
 		// Validate plugin format to prevent command injection
 		if !validPluginKey.MatchString(plugin) {
-			b.WriteString(fmt.Sprintf("RUN echo 'ERROR: Invalid plugin format: %s (expected plugin-name@marketplace-name)' && exit 1\n", plugin))
+			b.WriteString(fmt.Sprintf("RUN echo 'WARNING: Invalid plugin format: %s (expected plugin-name@marketplace-name), skipping'\n", plugin))
 			continue
 		}
-		b.WriteString(fmt.Sprintf("RUN claude plugin install %s || (echo 'Failed to install plugin %s. Verify the plugin exists in the marketplace.' && exit 1)\n", plugin, plugin))
+		// Try to install plugin, but don't fail build if it fails
+		b.WriteString(fmt.Sprintf("RUN claude plugin install %s && echo 'Installed plugin %s' || echo 'WARNING: Could not install plugin %s (marketplace may be inaccessible)'\n", plugin, plugin, plugin))
 	}
 
 	b.WriteString("USER root\n\n")

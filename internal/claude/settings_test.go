@@ -381,3 +381,202 @@ func TestGetMarketplaceNamesNil(t *testing.T) {
 		t.Error("GetMarketplaceNames() on nil should return nil")
 	}
 }
+
+func TestLoadKnownMarketplaces(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_marketplaces.json")
+
+	// Content matching real ~/.claude/plugins/known_marketplaces.json format
+	content := `{
+  "claude-plugins-official": {
+    "source": {
+      "source": "github",
+      "repo": "anthropics/claude-plugins-official"
+    },
+    "installLocation": "/Users/test/.claude/plugins/marketplaces/claude-plugins-official",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  },
+  "aws-agent-skills": {
+    "source": {
+      "source": "github",
+      "repo": "itsmostafa/aws-agent-skills"
+    },
+    "installLocation": "/Users/test/.claude/plugins/marketplaces/aws-agent-skills",
+    "lastUpdated": "2026-01-24T00:50:43.196Z"
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadKnownMarketplaces(path)
+	if err != nil {
+		t.Fatalf("LoadKnownMarketplaces: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("got %d marketplaces, want 2", len(result))
+	}
+
+	// Check claude-plugins-official
+	official := result["claude-plugins-official"]
+	if official.Source.Source != "git" {
+		t.Errorf("official.Source.Source = %q, want %q", official.Source.Source, "git")
+	}
+	if official.Source.URL != "https://github.com/anthropics/claude-plugins-official.git" {
+		t.Errorf("official.Source.URL = %q, want %q", official.Source.URL, "https://github.com/anthropics/claude-plugins-official.git")
+	}
+
+	// Check aws-agent-skills
+	aws := result["aws-agent-skills"]
+	if aws.Source.URL != "https://github.com/itsmostafa/aws-agent-skills.git" {
+		t.Errorf("aws.Source.URL = %q, want %q", aws.Source.URL, "https://github.com/itsmostafa/aws-agent-skills.git")
+	}
+}
+
+func TestLoadKnownMarketplacesNotFound(t *testing.T) {
+	result, err := LoadKnownMarketplaces("/nonexistent/known_marketplaces.json")
+	if err != nil {
+		t.Fatalf("LoadKnownMarketplaces should not error for missing file: %v", err)
+	}
+	if result != nil {
+		t.Error("Expected nil result for missing file")
+	}
+}
+
+func TestLoadKnownMarketplacesGitSource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_marketplaces.json")
+
+	// Test "git" source type (direct URL instead of "github" shorthand)
+	content := `{
+  "custom-marketplace": {
+    "source": {
+      "source": "git",
+      "url": "https://gitlab.com/org/plugins.git"
+    },
+    "installLocation": "/Users/test/.claude/plugins/marketplaces/custom-marketplace",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadKnownMarketplaces(path)
+	if err != nil {
+		t.Fatalf("LoadKnownMarketplaces: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Errorf("got %d marketplaces, want 1", len(result))
+	}
+
+	custom := result["custom-marketplace"]
+	if custom.Source.Source != "git" {
+		t.Errorf("custom.Source.Source = %q, want %q", custom.Source.Source, "git")
+	}
+	if custom.Source.URL != "https://gitlab.com/org/plugins.git" {
+		t.Errorf("custom.Source.URL = %q, want %q", custom.Source.URL, "https://gitlab.com/org/plugins.git")
+	}
+}
+
+func TestLoadKnownMarketplacesMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_marketplaces.json")
+
+	// Invalid JSON
+	content := `{ invalid json }`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadKnownMarketplaces(path)
+	if err == nil {
+		t.Error("expected error for malformed JSON, got nil")
+	}
+}
+
+func TestLoadKnownMarketplacesInvalidRepoFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_marketplaces.json")
+
+	// Repo with shell injection attempt (should be skipped)
+	content := `{
+  "malicious": {
+    "source": {
+      "source": "github",
+      "repo": "owner/repo; rm -rf /"
+    },
+    "installLocation": "/test",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  },
+  "valid": {
+    "source": {
+      "source": "github",
+      "repo": "owner/valid-repo"
+    },
+    "installLocation": "/test",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadKnownMarketplaces(path)
+	if err != nil {
+		t.Fatalf("LoadKnownMarketplaces: %v", err)
+	}
+
+	// Malicious entry should be skipped, valid one kept
+	if len(result) != 1 {
+		t.Errorf("got %d marketplaces, want 1 (malicious skipped)", len(result))
+	}
+
+	if _, ok := result["malicious"]; ok {
+		t.Error("malicious marketplace should have been skipped")
+	}
+
+	if _, ok := result["valid"]; !ok {
+		t.Error("valid marketplace should be present")
+	}
+}
+
+func TestLoadKnownMarketplacesEmptyURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_marketplaces.json")
+
+	// Entry with empty repo (should be skipped)
+	content := `{
+  "empty-repo": {
+    "source": {
+      "source": "github",
+      "repo": ""
+    },
+    "installLocation": "/test",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  },
+  "empty-url": {
+    "source": {
+      "source": "git",
+      "url": ""
+    },
+    "installLocation": "/test",
+    "lastUpdated": "2026-01-24T00:50:41.204Z"
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadKnownMarketplaces(path)
+	if err != nil {
+		t.Fatalf("LoadKnownMarketplaces: %v", err)
+	}
+
+	// Both entries should be skipped (empty URLs)
+	if len(result) != 0 {
+		t.Errorf("got %d marketplaces, want 0 (empty URLs skipped)", len(result))
+	}
+}
