@@ -217,9 +217,13 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 		}
 	}
 
+	// Set up status bar for interactive session
+	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
+	defer statusCleanup()
+
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
 
 	// Wrap stdin with escape proxy to detect detach/stop sequences
@@ -233,7 +237,7 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 
 	attachDone := make(chan error, 1)
 	go func() {
-		err := manager.Attach(attachCtx, r.ID, escapeProxy, os.Stdout, os.Stderr)
+		err := manager.Attach(attachCtx, r.ID, escapeProxy, stdout, os.Stderr)
 		// Check if the error is an escape sequence
 		if term.IsEscapeError(err) {
 			escapeCh <- term.GetEscapeAction(err)
@@ -251,6 +255,19 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 	for {
 		select {
 		case sig := <-sigCh:
+			if sig == syscall.SIGWINCH {
+				// Handle terminal resize
+				if statusWriter != nil && term.IsTerminal(os.Stdout) {
+					width, height := term.GetSize(os.Stdout)
+					if width > 0 && height > 0 {
+						_ = statusWriter.Resize(width, height)
+						// Also resize container TTY
+						// #nosec G115 -- width/height are validated positive above
+						_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+					}
+				}
+				continue // Don't break out of loop
+			}
 			if sig == syscall.SIGTERM {
 				fmt.Printf("\nStopping run %s...\n", r.ID)
 				attachCancel()

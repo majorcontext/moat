@@ -1952,6 +1952,11 @@ func lastNLines(s string, n int) string {
 	return s
 }
 
+// RuntimeType returns the container runtime type (docker or apple).
+func (m *Manager) RuntimeType() string {
+	return string(m.runtime.Type())
+}
+
 // Close releases manager resources.
 func (m *Manager) Close() error {
 	// Stop all proxy servers
