@@ -34,6 +34,7 @@ import (
 	"github.com/andybons/moat/internal/snapshot"
 	"github.com/andybons/moat/internal/sshagent"
 	"github.com/andybons/moat/internal/storage"
+	"github.com/andybons/moat/internal/term"
 )
 
 // Timing constants for run lifecycle operations.
@@ -1469,13 +1470,15 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	m.mu.Unlock()
 
 	// Start with attachment - this ensures TTY is connected before process starts.
-	// Always use TTY mode since StartAttached is only called for interactive sessions.
-	// Containers are created with Tty: true (see CreateContainer), so this must match.
+	// TTY mode must match how the container was created (see CreateContainer in
+	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
+	// real terminal, so we use the same check here.
+	useTTY := term.IsTerminal(os.Stdin)
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
-		TTY:    true,
+		TTY:    useTTY,
 	}
 
 	// Channel to receive the attach result

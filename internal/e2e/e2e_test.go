@@ -60,61 +60,6 @@ func skipIfNoAppleContainer(t *testing.T) {
 	}
 }
 
-// availableRuntimes returns the list of runtime names that are available for testing.
-func availableRuntimes() []string {
-	var runtimes []string
-
-	// Check Docker
-	if exec.Command("docker", "version").Run() == nil {
-		runtimes = append(runtimes, "docker")
-	}
-
-	// Check Apple container (macOS Apple Silicon only)
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		if exec.Command("container", "list", "--quiet").Run() == nil {
-			runtimes = append(runtimes, "apple")
-		}
-	}
-
-	return runtimes
-}
-
-// forEachRuntime runs a test function for each available container runtime.
-// The test function receives a Manager configured for that specific runtime.
-// This enables testing the same logic across Docker and Apple containers.
-func forEachRuntime(t *testing.T, testFn func(t *testing.T, mgr *run.Manager)) {
-	t.Helper()
-
-	runtimes := availableRuntimes()
-	if len(runtimes) == 0 {
-		t.Skip("No container runtime available")
-	}
-
-	for _, rt := range runtimes {
-		rt := rt // capture for closure
-		t.Run(rt, func(t *testing.T) {
-			// Set MOAT_RUNTIME to force the specific runtime
-			oldVal := os.Getenv("MOAT_RUNTIME")
-			os.Setenv("MOAT_RUNTIME", rt)
-			defer func() {
-				if oldVal == "" {
-					os.Unsetenv("MOAT_RUNTIME")
-				} else {
-					os.Setenv("MOAT_RUNTIME", oldVal)
-				}
-			}()
-
-			mgr, err := run.NewManager()
-			if err != nil {
-				t.Fatalf("NewManager for %s: %v", rt, err)
-			}
-			defer mgr.Close()
-
-			testFn(t, mgr)
-		})
-	}
-}
-
 // TestProxyBindsToLocalhostOnly verifies that when a run is started with grants,
 // the proxy server binds appropriately for the runtime:
 // - Docker: binds to 127.0.0.1 (localhost only)
