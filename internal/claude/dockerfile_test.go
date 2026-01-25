@@ -27,20 +27,20 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("should switch to moatuser")
 	}
 
-	// Should add marketplaces with error handling (in sorted order)
-	if !strings.Contains(result, "marketplace add anthropics/claude-plugins-official || (echo") {
-		t.Error("should add claude-plugins-official marketplace with error handling")
+	// Should add marketplaces (failures are non-fatal, in sorted order)
+	if !strings.Contains(result, "marketplace add anthropics/claude-plugins-official &&") {
+		t.Error("should add claude-plugins-official marketplace")
 	}
-	if !strings.Contains(result, "marketplace add itsmostafa/aws-agent-skills || (echo") {
-		t.Error("should add aws-agent-skills marketplace with error handling")
+	if !strings.Contains(result, "marketplace add itsmostafa/aws-agent-skills &&") {
+		t.Error("should add aws-agent-skills marketplace")
 	}
 
-	// Should install plugins with error handling (in sorted order)
-	if !strings.Contains(result, "plugin install aws-agent-skills@aws-agent-skills || (echo") {
-		t.Error("should install aws-agent-skills plugin with error handling")
+	// Should install plugins (failures are non-fatal, in sorted order)
+	if !strings.Contains(result, "plugin install aws-agent-skills@aws-agent-skills &&") {
+		t.Error("should install aws-agent-skills plugin")
 	}
-	if !strings.Contains(result, "plugin install claude-md-management@claude-plugins-official || (echo") {
-		t.Error("should install claude-md-management plugin with error handling")
+	if !strings.Contains(result, "plugin install claude-md-management@claude-plugins-official &&") {
+		t.Error("should install claude-md-management plugin")
 	}
 
 	// Should switch back to root
@@ -74,9 +74,9 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 		if !strings.Contains(result, "marketplace add valid/repo") {
 			t.Error("valid marketplace should be included")
 		}
-		// Invalid repo should trigger error message
-		if !strings.Contains(result, "Invalid marketplace repo format: evil") {
-			t.Error("invalid marketplace should show error message with name")
+		// Invalid repo should trigger warning message
+		if !strings.Contains(result, "WARNING: Invalid marketplace repo format: evil") {
+			t.Error("invalid marketplace should show warning message with name")
 		}
 		// The malicious repo value should NOT appear in the output
 		if strings.Contains(result, "; rm -rf /") {
@@ -96,9 +96,9 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 		if !strings.Contains(result, "plugin install valid-plugin@valid-market") {
 			t.Error("valid plugin should be included")
 		}
-		// Invalid plugin should trigger error message
-		if !strings.Contains(result, "Invalid plugin format") {
-			t.Error("invalid plugin should show error message")
+		// Invalid plugin should trigger warning message
+		if !strings.Contains(result, "WARNING: Invalid plugin format") {
+			t.Error("invalid plugin should show warning message")
 		}
 	})
 }
