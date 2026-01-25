@@ -3,8 +3,10 @@ package container
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/andybons/moat/internal/log"
@@ -13,7 +15,29 @@ import (
 // NewRuntime creates a new container runtime, auto-detecting the best available option.
 // On macOS with Apple Silicon, it prefers Apple's container tool if available,
 // falling back to Docker otherwise.
+//
+// The MOAT_RUNTIME environment variable can override auto-detection:
+//   - MOAT_RUNTIME=docker: force Docker runtime
+//   - MOAT_RUNTIME=apple: force Apple container runtime
 func NewRuntime() (Runtime, error) {
+	// Check for explicit runtime override
+	if override := os.Getenv("MOAT_RUNTIME"); override != "" {
+		switch strings.ToLower(override) {
+		case "docker":
+			log.Info("using Docker runtime (MOAT_RUNTIME=docker)")
+			return newDockerRuntimeWithPing()
+		case "apple":
+			log.Info("using Apple container runtime (MOAT_RUNTIME=apple)")
+			rt, reason := tryAppleRuntime()
+			if rt != nil {
+				return rt, nil
+			}
+			return nil, fmt.Errorf("Apple container runtime not available: %s", reason)
+		default:
+			return nil, fmt.Errorf("unknown MOAT_RUNTIME value %q (use 'docker' or 'apple')", override)
+		}
+	}
+
 	// On macOS with Apple Silicon, prefer Apple's container tool
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		if rt, reason := tryAppleRuntime(); rt != nil {
@@ -24,6 +48,11 @@ func NewRuntime() (Runtime, error) {
 	}
 
 	// Fall back to Docker
+	return newDockerRuntimeWithPing()
+}
+
+// newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
+func newDockerRuntimeWithPing() (Runtime, error) {
 	rt, err := NewDockerRuntime()
 	if err != nil {
 		return nil, fmt.Errorf("no container runtime available: Docker error: %w", err)

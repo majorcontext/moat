@@ -1469,24 +1469,16 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	m.mu.Unlock()
 
-	// Check if stdin is a terminal (TTY)
-	// Only use TTY mode if stdin is an actual terminal, not a pipe or buffer.
-	//
-	// Limitation: This detection fails if stdin is wrapped (e.g., EscapeProxy).
-	// Wrappers could implement an interface like `TTYDetector` with an `IsTTY() bool`
-	// method, or we could walk the wrapper chain to find the underlying *os.File.
-	// For now, callers using wrapped readers should handle TTY mode themselves.
-	isTTY := false
-	if f, ok := stdin.(*os.File); ok {
-		isTTY = term.IsTerminal(f)
-	}
-
-	// Start with attachment - this ensures TTY is connected before process starts
+	// Start with attachment - this ensures TTY is connected before process starts.
+	// TTY mode must match how the container was created (see CreateContainer in
+	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
+	// real terminal, so we use the same check here.
+	useTTY := term.IsTerminal(os.Stdin)
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
-		TTY:    isTTY,
+		TTY:    useTTY,
 	}
 
 	// Channel to receive the attach result

@@ -13,12 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -90,6 +92,11 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		}
 	}
 
+	// Only use TTY mode if os.Stdin is a real terminal.
+	// Docker returns "the input device is not a TTY" when you try to use
+	// TTY mode with non-TTY stdin (e.g., piped input, tests).
+	useTTY := cfg.Interactive && term.IsTerminal(os.Stdin)
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        cfg.Image,
@@ -97,8 +104,8 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			WorkingDir:   cfg.WorkingDir,
 			Env:          cfg.Env,
 			User:         cfg.User,
-			Tty:          true,
-			OpenStdin:    true,
+			Tty:          useTTY,
+			OpenStdin:    cfg.Interactive,
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
@@ -628,78 +635,69 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	}
 	defer resp.Close()
 
-	// Set up container wait BEFORE starting - this ensures we catch the exit
-	waitCh, waitErrCh := r.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
-
-	// Start the container while we're attached
-	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("starting container: %w", err)
+	// Set connection deadline from context to ensure I/O doesn't hang.
+	// This is particularly important for non-TTY mode where reads can stall.
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := resp.Conn.SetDeadline(deadline); err != nil {
+			return fmt.Errorf("setting connection deadline: %w", err)
+		}
 	}
 
-	// Set up bidirectional copy
+	// Set up bidirectional copy BEFORE starting the container.
+	// This ensures the goroutines are ready to receive output as soon as
+	// the container starts, avoiding race conditions with fast-exiting containers.
 	outputDone := make(chan error, 1)
 	stdinDone := make(chan error, 1)
 
-	// Copy container output to stdout/stderr.
-	// Since containers are always created with Tty: true (see CreateContainer),
-	// output is always raw (not multiplexed). Use io.Copy unconditionally.
+	// Copy container output to stdout/stderr
 	go func() {
-		_, err := io.Copy(opts.Stdout, resp.Reader)
-		outputDone <- err
+		if opts.TTY {
+			// In TTY mode, output is raw (single stream)
+			_, err := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- err
+		} else {
+			// In non-TTY mode, Docker multiplexes stdout/stderr with headers.
+			// Use stdcopy.StdCopy to demux the stream.
+			_, err := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
+			outputDone <- err
+		}
 	}()
 
 	// Copy stdin to container (if provided)
 	if opts.Stdin != nil {
 		go func() {
 			_, err := io.Copy(resp.Conn, opts.Stdin)
-			// Small delay to allow the container to process input and generate output
-			// before we close the write side. This is needed because CloseWrite() on
-			// some Docker implementations can close the connection before output is
-			// fully transferred.
-			time.Sleep(100 * time.Millisecond)
-			// Close write side when stdin ends to signal EOF to the container.
+			// Close write side when stdin ends
 			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
-				_ = closeWriter.CloseWrite()
+				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
+					err = closeErr
+				}
 			}
 			stdinDone <- err
 		}()
 	}
 
-	// Wait for context cancellation, container exit, or output completion
+	// Start the container now that I/O streams are ready
+	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting container: %w", err)
+	}
+
+	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-waitErrCh:
-			// Container wait error
-			if err != nil {
-				return fmt.Errorf("waiting for container: %w", err)
+		case err := <-stdinDone:
+			// Stdin error - could be escape sequence or EOF
+			if err != nil && err != io.EOF {
+				return err
 			}
-		case status := <-waitCh:
-			// Container exited - wait for output to complete
-			select {
-			case <-outputDone:
-			case <-time.After(time.Second):
-				// Output didn't complete in time, but container is done
-			}
-			if status.Error != nil && status.Error.Message != "" {
-				return fmt.Errorf("container error: %s", status.Error.Message)
-			}
-			if status.StatusCode != 0 {
-				return fmt.Errorf("container exited with code %d", status.StatusCode)
+			// Normal stdin EOF - continue waiting for output
+		case err := <-outputDone:
+			if err != nil && err != io.EOF {
+				return err
 			}
 			return nil
-		case err := <-stdinDone:
-			// Stdin finished - continue waiting for container to exit
-			if err != nil && err != io.EOF {
-				return err
-			}
-		case err := <-outputDone:
-			// Output finished before container exit (shouldn't normally happen)
-			if err != nil && err != io.EOF {
-				return err
-			}
-			// Continue waiting for container to fully exit
 		}
 	}
 }
