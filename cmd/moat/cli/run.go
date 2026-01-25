@@ -128,6 +128,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
 			containerCmd = cfg.Command
 		}
+		// Check sandbox setting from config
+		if cfg.Sandbox == "none" && !runFlags.NoSandbox {
+			runFlags.NoSandbox = true
+		}
 	}
 
 	// Determine interactive mode: CLI flags > config > default
