@@ -90,6 +90,11 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
 	args := []string{"create"}
 
+	// Interactive mode flags
+	if cfg.Interactive {
+		args = append(args, "-i", "-t") // Keep stdin open and allocate TTY
+	}
+
 	// Container name
 	if cfg.Name != "" {
 		args = append(args, "--name", cfg.Name)
