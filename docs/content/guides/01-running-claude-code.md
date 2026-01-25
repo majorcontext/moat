@@ -247,11 +247,7 @@ claude:
       ref: main
 ```
 
-Update marketplace caches:
-
-```bash
-moat claude marketplace update
-```
+Marketplaces are cloned during image build. Use `--rebuild` to update after changing marketplace configuration.
 
 ## MCP servers
 

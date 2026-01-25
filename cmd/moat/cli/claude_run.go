@@ -63,9 +63,7 @@ Examples:
   moat claude --noyolo
 
 Subcommands:
-  moat claude plugins list         List configured plugins
-  moat claude marketplace list     List marketplaces
-  moat claude marketplace update   Update marketplace caches`
+  moat claude plugins list         List configured plugins`
 
 	// Add shared execution flags
 	AddExecFlags(claudeCmd, &claudeFlags)
@@ -78,7 +76,7 @@ Subcommands:
 
 func runClaudeCode(cmd *cobra.Command, args []string) error {
 	// If subcommand is being run, don't execute this
-	if cmd.CalledAs() != "claude" || len(args) > 0 && (args[0] == "plugins" || args[0] == "marketplace") {
+	if cmd.CalledAs() != "claude" || len(args) > 0 && args[0] == "plugins" {
 		return nil
 	}
 
