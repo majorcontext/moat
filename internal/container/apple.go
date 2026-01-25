@@ -18,6 +18,7 @@ import (
 
 	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
+	"github.com/creack/pty"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.
@@ -956,6 +957,10 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 // Uses `container start --attach` which starts the container and attaches
 // to its primary process. The ENTRYPOINT handles any initialization (SSH agent
 // bridge setup, config file copying, privilege dropping via gosu).
+//
+// The Apple container CLI requires real PTY file descriptors for stdout/stderr.
+// To allow callers to intercept output (e.g., for a status bar), we create a
+// PTY pair and copy data from the PTY master to the provided writers.
 func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
 	// Build start command arguments
 	args := []string{"start", "--attach"}
@@ -966,23 +971,117 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 
-	// Connect stdin/stdout/stderr
-	if opts.Stdin != nil {
-		cmd.Stdin = opts.Stdin
+	// Create a PTY for the command. This gives the Apple container CLI
+	// real PTY file descriptors while allowing us to intercept output.
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return fmt.Errorf("starting container with pty: %w", err)
 	}
-	if opts.Stdout != nil {
-		cmd.Stdout = opts.Stdout
-	}
-	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
+	defer func() { _ = ptmx.Close() }()
+
+	// Set PTY size if we have terminal dimensions
+	if opts.TTY && term.IsTerminal(os.Stdout) {
+		width, height := term.GetSize(os.Stdout)
+		if width > 0 && height > 0 {
+			// #nosec G115 -- width/height are validated positive above and come from terminal
+			_ = pty.Setsize(ptmx, &pty.Winsize{
+				Rows: uint16(height), // #nosec G115
+				Cols: uint16(width),  // #nosec G115
+			})
+		}
 	}
 
-	// Run the command - this blocks until the container exits
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("starting container attached: %w", err)
+	// Create a cancellable context for the copy goroutines
+	copyCtx, cancelCopy := context.WithCancel(ctx)
+	defer cancelCopy()
+
+	// Channel to capture errors from stdin copy (e.g., escape sequences)
+	stdinErr := make(chan error, 1)
+
+	// Copy stdin to PTY master
+	if opts.Stdin != nil {
+		go func() {
+			_, err := io.Copy(ptmx, opts.Stdin)
+			select {
+			case stdinErr <- err:
+			case <-copyCtx.Done():
+			}
+		}()
 	}
-	return nil
+
+	// Copy PTY master to stdout (through the provided writer)
+	outputDone := make(chan struct{})
+	go func() {
+		defer close(outputDone)
+		if opts.Stdout != nil {
+			_, _ = io.Copy(opts.Stdout, ptmx)
+		} else {
+			_, _ = io.Copy(os.Stdout, ptmx)
+		}
+	}()
+
+	// Wait for command to finish
+	cmdDone := make(chan error, 1)
+	go func() {
+		cmdDone <- cmd.Wait()
+	}()
+
+	// Wait for either command completion, stdin error, or context cancellation
+	var result error
+	select {
+	case err := <-stdinErr:
+		// Stdin copy finished (possibly with escape error)
+		// Close PTY to signal the CLI to exit gracefully
+		_ = ptmx.Close()
+		cancelCopy()
+		// Give the CLI a moment to exit gracefully
+		select {
+		case <-cmdDone:
+			// Exited cleanly
+		case <-time.After(50 * time.Millisecond):
+			// Still running, terminate it
+			if cmd.Process != nil {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
+			select {
+			case <-cmdDone:
+			case <-time.After(50 * time.Millisecond):
+				// Force kill if SIGTERM didn't work
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				<-cmdDone
+			}
+		}
+		// Return the stdin error (which may be an escape error)
+		if err != nil {
+			result = err
+		}
+	case err := <-cmdDone:
+		// Command finished normally
+		cancelCopy()
+		if err != nil && ctx.Err() == nil {
+			result = fmt.Errorf("starting container attached: %w", err)
+		}
+	case <-ctx.Done():
+		// Context canceled
+		_ = ptmx.Close()
+		cancelCopy()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		select {
+		case <-cmdDone:
+		case <-time.After(100 * time.Millisecond):
+		}
+		result = ctx.Err()
+	}
+
+	// Brief wait for output copy to finish
+	select {
+	case <-outputDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	return result
 }

@@ -24,10 +24,10 @@ func NewRuntime() (Runtime, error) {
 	if override := os.Getenv("MOAT_RUNTIME"); override != "" {
 		switch strings.ToLower(override) {
 		case "docker":
-			log.Info("using Docker runtime (MOAT_RUNTIME=docker)")
+			log.Debug("using Docker runtime (MOAT_RUNTIME=docker)")
 			return newDockerRuntimeWithPing()
 		case "apple":
-			log.Info("using Apple container runtime (MOAT_RUNTIME=apple)")
+			log.Debug("using Apple container runtime (MOAT_RUNTIME=apple)")
 			rt, reason := tryAppleRuntime()
 			if rt != nil {
 				return rt, nil
@@ -43,7 +43,7 @@ func NewRuntime() (Runtime, error) {
 		if rt, reason := tryAppleRuntime(); rt != nil {
 			return rt, nil
 		} else if reason != "" {
-			log.Info(reason)
+			log.Debug(reason)
 		}
 	}
 
@@ -66,7 +66,7 @@ func newDockerRuntimeWithPing() (Runtime, error) {
 		return nil, fmt.Errorf("no container runtime available: %w", err)
 	}
 
-	log.Info("using Docker runtime")
+	log.Debug("using Docker runtime")
 	return rt, nil
 }
 
@@ -90,7 +90,7 @@ func tryAppleRuntime() (Runtime, string) {
 
 	if pingErr := rt.Ping(ctx); pingErr != nil {
 		// Try to start the Apple container system
-		log.Info("Apple container system not running, attempting to start...")
+		log.Debug("Apple container system not running, attempting to start...")
 		if startErr := startAppleContainerSystem(); startErr != nil {
 			return nil, fmt.Sprintf("Apple container system failed to start, falling back to Docker: %v", startErr)
 		}
@@ -104,7 +104,7 @@ func tryAppleRuntime() (Runtime, string) {
 		}
 	}
 
-	log.Info("using Apple container runtime")
+	log.Debug("using Apple container runtime")
 	return rt, ""
 }
 
