@@ -95,6 +95,16 @@ func TestBuildCreateArgs(t *testing.T) {
 				"python", "main.py",
 			},
 		},
+		{
+			name: "interactive mode",
+			cfg: Config{
+				Image:       "ubuntu:22.04",
+				Interactive: true,
+			},
+			// Note: -t flag is only added when os.Stdin is a real terminal,
+			// which it's not during tests, so we only expect -i here.
+			want: []string{"create", "-i", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
 	}
 
 	for _, tt := range tests {
