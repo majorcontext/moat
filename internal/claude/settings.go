@@ -73,6 +73,71 @@ func LoadSettings(path string) (*Settings, error) {
 	return &settings, nil
 }
 
+// KnownMarketplacesFile represents the ~/.claude/plugins/known_marketplaces.json format.
+type KnownMarketplacesFile struct {
+	Marketplaces map[string]KnownMarketplace
+}
+
+// KnownMarketplace represents a single marketplace entry in known_marketplaces.json.
+type KnownMarketplace struct {
+	Source          KnownMarketplaceSource `json:"source"`
+	InstallLocation string                 `json:"installLocation"`
+	LastUpdated     string                 `json:"lastUpdated"`
+}
+
+// KnownMarketplaceSource is the source info in known_marketplaces.json.
+type KnownMarketplaceSource struct {
+	Source string `json:"source"` // "github" or "git"
+	Repo   string `json:"repo,omitempty"`
+	URL    string `json:"url,omitempty"`
+}
+
+// LoadKnownMarketplaces loads Claude's known_marketplaces.json file.
+// This file contains marketplace URLs that Claude Code has registered.
+// Returns nil, nil if the file doesn't exist.
+func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// The file is a direct map, not wrapped in a struct
+	var raw map[string]KnownMarketplace
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	// Convert to our MarketplaceEntry format
+	result := make(map[string]MarketplaceEntry)
+	for name, km := range raw {
+		entry := MarketplaceEntry{
+			Source: MarketplaceSource{
+				Source: km.Source.Source,
+			},
+		}
+
+		// Convert source to git URL format
+		switch km.Source.Source {
+		case "github":
+			if km.Source.Repo != "" {
+				entry.Source.Source = "git"
+				entry.Source.URL = "https://github.com/" + km.Source.Repo + ".git"
+			}
+		case "git":
+			entry.Source.URL = km.Source.URL
+		}
+
+		if entry.Source.URL != "" {
+			result[name] = entry
+		}
+	}
+
+	return result, nil
+}
+
 // MergeSettings merges two settings objects with override taking precedence.
 // This implements the merge rules:
 // - enabledPlugins: Union all sources; later overrides earlier for same plugin
@@ -140,16 +205,30 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 
 // LoadAllSettings loads and merges settings from all sources.
 // Merge precedence (lowest to highest):
-// 1. ~/.claude/settings.json (Claude's native user settings)
-// 2. ~/.moat/claude/settings.json (user defaults for moat runs)
-// 3. <workspace>/.claude/settings.json (project defaults)
-// 4. agent.yaml claude.* fields (run overrides)
+// 1. ~/.claude/plugins/known_marketplaces.json (Claude's registered marketplaces)
+// 2. ~/.claude/settings.json (Claude's native user settings)
+// 3. ~/.moat/claude/settings.json (user defaults for moat runs)
+// 4. <workspace>/.claude/settings.json (project defaults)
+// 5. agent.yaml claude.* fields (run overrides)
 func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error) {
 	var result *Settings
 
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		// 1. Load Claude's native user settings from ~/.claude/settings.json
+		// 1. Load Claude's known marketplaces from ~/.claude/plugins/known_marketplaces.json
+		// This provides marketplace URLs for plugins enabled in settings.json
+		knownMarketplacesPath := filepath.Join(homeDir, ".claude", "plugins", "known_marketplaces.json")
+		knownMarketplaces, loadErr := LoadKnownMarketplaces(knownMarketplacesPath)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if len(knownMarketplaces) > 0 {
+			result = MergeSettings(result, &Settings{
+				ExtraKnownMarketplaces: knownMarketplaces,
+			}, SourceClaudeUser)
+		}
+
+		// 2. Load Claude's native user settings from ~/.claude/settings.json
 		claudeUserSettingsPath := filepath.Join(homeDir, ".claude", "settings.json")
 		claudeUserSettings, loadErr := LoadSettings(claudeUserSettingsPath)
 		if loadErr != nil {
@@ -157,7 +236,7 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 		}
 		result = MergeSettings(result, claudeUserSettings, SourceClaudeUser)
 
-		// 2. Load moat-specific user defaults from ~/.moat/claude/settings.json
+		// 3. Load moat-specific user defaults from ~/.moat/claude/settings.json
 		moatUserSettingsPath := filepath.Join(homeDir, ".moat", "claude", "settings.json")
 		moatUserSettings, loadErr := LoadSettings(moatUserSettingsPath)
 		if loadErr != nil {
@@ -166,7 +245,7 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 		result = MergeSettings(result, moatUserSettings, SourceMoatUser)
 	}
 
-	// 3. Load project settings from <workspace>/.claude/settings.json
+	// 4. Load project settings from <workspace>/.claude/settings.json
 	projectSettingsPath := filepath.Join(workspacePath, ".claude", "settings.json")
 	projectSettings, err := LoadSettings(projectSettingsPath)
 	if err != nil {
@@ -174,7 +253,7 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 	}
 	result = MergeSettings(result, projectSettings, SourceProject)
 
-	// 4. Apply agent.yaml overrides
+	// 5. Apply agent.yaml overrides
 	if cfg != nil {
 		agentOverrides := ConfigToSettings(cfg)
 		result = MergeSettings(result, agentOverrides, SourceAgentYAML)

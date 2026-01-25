@@ -815,49 +815,12 @@ region = %s
 		}
 	}
 
-	// Extract plugins from agent.yaml for image building.
-	// IMPORTANT: We only use agent.yaml config here, not merged host settings.
-	// Host settings should not be baked into container images - they are applied at runtime.
-	var claudeMarketplaces []claude.MarketplaceConfig
-	var claudePlugins []string
-	if opts.Config != nil {
-		// Extract marketplaces from agent.yaml
-		for name, spec := range opts.Config.Claude.Marketplaces {
-			if spec.Source == "directory" {
-				continue // Skip directory sources
-			}
-			// Determine repo path.
-			// If repo is not specified but URL is, extract the path from the URL.
-			// Currently only GitHub HTTPS URLs are converted to owner/repo format.
-			// Other URL formats (SSH, other hosts) are used as-is since the claude
-			// CLI handles them directly.
-			repo := spec.Repo
-			if repo == "" && spec.URL != "" {
-				repo = spec.URL
-				if strings.HasPrefix(repo, "https://github.com/") {
-					repo = strings.TrimPrefix(repo, "https://github.com/")
-					repo = strings.TrimSuffix(repo, "/")
-					repo = strings.TrimSuffix(repo, ".git")
-				}
-			}
-			if repo == "" {
-				continue
-			}
-			claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
-				Name:   name,
-				Source: spec.Source,
-				Repo:   repo,
-			})
-		}
-		// Extract enabled plugins from agent.yaml
-		for pluginKey, enabled := range opts.Config.Claude.Plugins {
-			if enabled {
-				claudePlugins = append(claudePlugins, pluginKey)
-			}
-		}
-	}
-
-	// Load merged Claude settings for runtime config (this includes host settings)
+	// Load merged Claude settings which includes:
+	// - ~/.claude/plugins/known_marketplaces.json (marketplace URLs)
+	// - ~/.claude/settings.json (enabled plugins)
+	// - ~/.moat/claude/settings.json (moat user defaults)
+	// - <workspace>/.claude/settings.json (project settings)
+	// - agent.yaml claude.* fields (run overrides)
 	var claudeSettings *claude.Settings
 	if opts.Config != nil {
 		var loadErr error
@@ -865,6 +828,52 @@ region = %s
 		if loadErr != nil {
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
+		}
+	}
+
+	// Extract plugins and marketplaces for image building.
+	// We use the merged settings which includes both agent.yaml config and host settings.
+	// This allows plugins configured on the host to work in containers.
+	var claudeMarketplaces []claude.MarketplaceConfig
+	var claudePlugins []string
+
+	if claudeSettings != nil {
+		// Build a map of marketplace name -> repo URL from merged settings
+		marketplaceRepos := make(map[string]string)
+		for name, entry := range claudeSettings.ExtraKnownMarketplaces {
+			if entry.Source.URL != "" {
+				// Convert URL to repo format for the claude CLI
+				repo := entry.Source.URL
+				if strings.HasPrefix(repo, "https://github.com/") {
+					repo = strings.TrimPrefix(repo, "https://github.com/")
+					repo = strings.TrimSuffix(repo, "/")
+					repo = strings.TrimSuffix(repo, ".git")
+				}
+				marketplaceRepos[name] = repo
+				claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
+					Name:   name,
+					Source: entry.Source.Source,
+					Repo:   repo,
+				})
+			}
+		}
+
+		// Extract enabled plugins, but only those with known marketplace URLs
+		for pluginKey, enabled := range claudeSettings.EnabledPlugins {
+			if !enabled {
+				continue
+			}
+			// Extract marketplace name from plugin key (format: "plugin@marketplace")
+			if idx := strings.LastIndexByte(pluginKey, '@'); idx >= 0 {
+				marketplace := pluginKey[idx+1:]
+				if _, hasRepo := marketplaceRepos[marketplace]; hasRepo {
+					claudePlugins = append(claudePlugins, pluginKey)
+				} else {
+					log.Debug("skipping plugin with unknown marketplace",
+						"plugin", pluginKey,
+						"marketplace", marketplace)
+				}
+			}
 		}
 	}
 
