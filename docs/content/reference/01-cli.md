@@ -139,22 +139,6 @@ List configured plugins for a workspace.
 moat claude plugins list [path]
 ```
 
-#### moat claude marketplace list
-
-List configured plugin marketplaces.
-
-```bash
-moat claude marketplace list
-```
-
-#### moat claude marketplace update
-
-Update marketplace caches.
-
-```bash
-moat claude marketplace update
-```
-
 ---
 
 ## moat attach

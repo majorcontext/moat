@@ -70,11 +70,9 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/settings.json" "$TARGET_HOME/.claude/"
 
-  # Note: Plugins are now installed during image build via Dockerfile RUN commands,
-  # not at runtime. The old marketplaces.txt and plugins.txt staging files are no
-  # longer used. Old images that still have these files in the staging directory
-  # will have them ignored - this is harmless since plugin state lives in ~/.claude/
-  # which is managed by the claude CLI, not these staging files.
+  # Note: Plugins are now installed during image build via `claude plugin install`
+  # commands in the Dockerfile. The claude CLI creates and manages installed_plugins.json
+  # itself during installation. Runtime plugin staging (the old approach) is no longer used.
 
   # Copy credentials if present (ensure restricted permissions for security)
   if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then
