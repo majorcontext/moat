@@ -190,6 +190,12 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		m.runs[runID] = r
 		m.mu.Unlock()
 
+		// For running containers, start background monitor to capture logs when they exit.
+		// This handles the case where moat restarts while containers are running.
+		if runState == StateRunning {
+			go m.monitorContainerExit(context.Background(), r)
+		}
+
 		log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
 	}
 
@@ -1676,14 +1682,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.State = StateStopping
 	m.mu.Unlock()
 
-	// NOTE: We don't call captureLogs here because monitorContainerExit (running in
-	// background) will capture logs when the container actually exits after StopContainer.
-	// Calling it here would capture incomplete logs (before container fully stops).
-
 	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
+
+	// Capture logs after container stops (defense-in-depth).
+	// monitorContainerExit should also capture these when exitCh is signaled,
+	// but capturing here provides a safety net if moat crashes before that.
+	// captureLogs is idempotent so multiple calls are safe.
+	m.captureLogs(r)
 
 	// Stop the proxy server if one was created
 	if r.ProxyServer != nil {
@@ -1791,18 +1799,15 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			_ = m.routes.Remove(r.Name)
 		}
 
-		m.mu.Lock()
-		r.State = StateStopped
-		r.StoppedAt = time.Now()
-		if err != nil {
-			r.Error = err.Error()
-		}
+		// NOTE: We don't update r.State, r.StoppedAt, or r.Error here because
+		// monitorContainerExit already set them when the container exited.
+		// Overwriting would lose StateFailed state and error details.
+
+		// Get values needed for cleanup
+		m.mu.RLock()
 		keepContainer := r.KeepContainer
 		providerCleanupPaths := r.ProviderCleanupPaths
-		m.mu.Unlock()
-
-		// Save state to disk
-		_ = r.SaveMetadata()
+		m.mu.RUnlock()
 
 		// Auto-remove container unless --keep was specified
 		if !keepContainer {
