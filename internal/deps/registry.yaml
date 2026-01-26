@@ -254,6 +254,11 @@ jq:
   type: apt
   package: jq
 
+curl:
+  description: Command-line HTTP client
+  type: apt
+  package: curl
+
 yq:
   description: YAML processor
   type: github-binary

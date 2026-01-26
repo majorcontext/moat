@@ -211,17 +211,10 @@ func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string
 	}
 	defer reader.Close()
 
-	// Check if container was created with TTY
+	// Check if container was created with TTY to determine if logs are multiplexed
 	inspect, err := r.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		// If we can't inspect, fall back to demuxing (safer default)
-		var stdout, stderr bytes.Buffer
-		if _, err := stdcopy.StdCopy(&stdout, &stderr, reader); err != nil {
-			return nil, fmt.Errorf("demuxing logs: %w", err)
-		}
-		// Combine stdout and stderr
-		combined := append(stdout.Bytes(), stderr.Bytes()...)
-		return combined, nil
+		return nil, fmt.Errorf("inspecting container to determine log format: %w", err)
 	}
 
 	if inspect.Config.Tty {

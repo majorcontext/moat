@@ -1881,7 +1881,7 @@ func (m *Manager) captureLogs(r *Run) {
 	// Use a background context since the container may already be stopped.
 	allLogs, logErr := m.runtime.ContainerLogsAll(context.Background(), r.ContainerID)
 	if logErr != nil {
-		log.Debug("failed to fetch container logs", "runID", r.ID, "error", logErr)
+		log.Warn("failed to fetch container logs - creating empty logs.jsonl for audit", "runID", r.ID, "error", logErr)
 		// Still create empty logs.jsonl for audit completeness
 		allLogs = []byte{}
 	}
