@@ -114,6 +114,12 @@ type AttachOptions struct {
 	Stdout io.Writer // If non-nil, receive stdout from container
 	Stderr io.Writer // If non-nil, receive stderr from container (may be same as Stdout)
 	TTY    bool      // If true, use TTY mode (raw terminal)
+
+	// InitialWidth and InitialHeight set the initial terminal size for TTY mode.
+	// If both are > 0, the TTY is resized immediately after the container starts,
+	// before the process has a chance to query terminal dimensions.
+	InitialWidth  uint
+	InitialHeight uint
 }
 
 // Config holds configuration for creating a container.

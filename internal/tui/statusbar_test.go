@@ -64,13 +64,13 @@ func TestStatusBar_RenderEscaped(t *testing.T) {
 	if !strings.Contains(rendered, "\x1b[2K") {
 		t.Errorf("expected clear line escape, got %q", rendered)
 	}
-	// Should contain save cursor
-	if !strings.Contains(rendered, "\x1b[s") {
-		t.Errorf("expected save cursor escape, got %q", rendered)
+	// Should NOT contain save/restore cursor - the caller (Writer.renderLocked)
+	// handles cursor positioning explicitly to avoid double cursor artifacts
+	if strings.Contains(rendered, "\x1b[s") {
+		t.Errorf("unexpected save cursor escape (caller handles cursor), got %q", rendered)
 	}
-	// Should contain restore cursor
-	if !strings.Contains(rendered, "\x1b[u") {
-		t.Errorf("expected restore cursor escape, got %q", rendered)
+	if strings.Contains(rendered, "\x1b[u") {
+		t.Errorf("unexpected restore cursor escape (caller handles cursor), got %q", rendered)
 	}
 	// Should contain the actual status bar content
 	if !strings.Contains(rendered, "moat") {

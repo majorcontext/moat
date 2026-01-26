@@ -19,6 +19,12 @@ const appleContainerReadyMarker = "Escape sequences:"
 // crashes during startup), this prevents unbounded memory growth.
 const maxInitBuffer = 64 * 1024 // 64KB
 
+// DECTCEM sequences for cursor visibility
+var (
+	cursorHide = []byte("\x1b[?25l")
+	cursorShow = []byte("\x1b[?25h")
+)
+
 // Writer wraps an io.Writer and composites a status bar at the bottom.
 // It uses a virtual terminal emulator to track the screen state, allowing
 // perfect rendering on resize without race conditions.
@@ -31,6 +37,10 @@ type Writer struct {
 	bar      *StatusBar
 	width    int
 	height   int // Total terminal height (content + status bar)
+
+	// Cursor visibility tracking - the vt emulator doesn't expose this,
+	// so we track DECTCEM sequences ourselves to forward to the real terminal.
+	cursorVisible bool
 
 	// Apple container specific
 	runtime     string // "apple" or "docker"
@@ -47,12 +57,13 @@ func NewWriter(w io.Writer, bar *StatusBar, runtime string) *Writer {
 	contentHeight := max(height-1, 1)
 
 	return &Writer{
-		out:      w,
-		emulator: vt.NewSafeEmulator(width, contentHeight),
-		bar:      bar,
-		width:    width,
-		height:   height,
-		runtime:  runtime,
+		out:           w,
+		emulator:      vt.NewSafeEmulator(width, contentHeight),
+		bar:           bar,
+		width:         width,
+		height:        height,
+		runtime:       runtime,
+		cursorVisible: true, // Terminal cursor starts visible
 	}
 }
 
@@ -76,6 +87,11 @@ func (w *Writer) Setup() error {
 func (w *Writer) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Track cursor visibility from DECTCEM sequences.
+	// The vt emulator parses these but doesn't expose the state, so we track
+	// it ourselves to forward to the real terminal in renderLocked().
+	w.trackCursorVisibility(p)
 
 	// For Apple containers, detect the ready marker and clear content area
 	if w.runtime == "apple" && !w.initialized {
@@ -113,6 +129,21 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	// Render: content from emulator + status bar
 	err = w.renderLocked()
 	return len(p), err
+}
+
+// trackCursorVisibility scans for DECTCEM sequences and updates cursorVisible.
+// This is called before passing data to the emulator.
+func (w *Writer) trackCursorVisibility(p []byte) {
+	// Scan for the last occurrence of each sequence to get final state
+	hideIdx := bytes.LastIndex(p, cursorHide)
+	showIdx := bytes.LastIndex(p, cursorShow)
+
+	if hideIdx > showIdx {
+		w.cursorVisible = false
+	} else if showIdx > hideIdx {
+		w.cursorVisible = true
+	}
+	// If neither found (both -1), state unchanged
 }
 
 // Cleanup resets the terminal state.
@@ -169,6 +200,14 @@ func (w *Writer) renderLocked() error {
 	// Restore cursor to its position in the content area
 	// ANSI positions are 1-indexed, vt positions are 0-indexed
 	fmt.Fprintf(&buf, "\x1b[%d;%dH", pos.Y+1, pos.X+1)
+
+	// Apply cursor visibility state. The vt emulator parses DECTCEM but doesn't
+	// expose the state, so we track it in Write() and apply it here.
+	if w.cursorVisible {
+		buf.Write(cursorShow)
+	} else {
+		buf.Write(cursorHide)
+	}
 
 	_, err := w.out.Write(buf.Bytes())
 	return err

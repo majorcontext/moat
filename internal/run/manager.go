@@ -1577,6 +1577,17 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		TTY:    useTTY,
 	}
 
+	// Pass initial terminal size so the container can be resized immediately
+	// after starting, before the process queries terminal dimensions.
+	if useTTY && term.IsTerminal(os.Stdout) {
+		width, height := term.GetSize(os.Stdout)
+		if width > 0 && height > 0 {
+			// #nosec G115 -- width/height are validated positive above
+			attachOpts.InitialWidth = uint(width)
+			attachOpts.InitialHeight = uint(height)
+		}
+	}
+
 	// Channel to receive the attach result
 	attachDone := make(chan error, 1)
 

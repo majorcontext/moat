@@ -979,9 +979,18 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	}
 	defer func() { _ = ptmx.Close() }()
 
-	// Set PTY size if we have terminal dimensions
-	if opts.TTY && term.IsTerminal(os.Stdout) {
-		width, height := term.GetSize(os.Stdout)
+	// Set PTY size. Prefer explicit initial size from opts, fall back to querying terminal.
+	if opts.TTY {
+		var width, height uint
+		if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+			width, height = opts.InitialWidth, opts.InitialHeight
+		} else if term.IsTerminal(os.Stdout) {
+			w, h := term.GetSize(os.Stdout)
+			if w > 0 && h > 0 {
+				// #nosec G115 -- width/height are validated positive above
+				width, height = uint(w), uint(h)
+			}
+		}
 		if width > 0 && height > 0 {
 			// #nosec G115 -- width/height are validated positive above and come from terminal
 			_ = pty.Setsize(ptmx, &pty.Winsize{
