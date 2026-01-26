@@ -225,6 +225,22 @@ moat grant anthropic
 moat grant openai
 ```
 
+### moat grant mcp <name>
+
+Store a credential for an MCP server.
+
+```bash
+moat grant mcp context7
+```
+
+The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in agent.yaml.
+
+**Interactive prompts:**
+- Credential (hidden input)
+
+**Storage:**
+- `~/.moat/credentials/mcp-<name>.enc`
+
 ### moat grant ssh
 
 Grant SSH access to a specific host.

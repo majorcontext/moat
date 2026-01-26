@@ -1,11 +1,14 @@
 package run
 
 import (
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/andybons/moat/internal/audit"
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/credential"
 	"github.com/andybons/moat/internal/id"
 	"github.com/andybons/moat/internal/proxy"
 	"github.com/andybons/moat/internal/snapshot"
@@ -115,4 +118,24 @@ func (r *Run) SaveMetadata() error {
 		StoppedAt:   r.StoppedAt,
 		Error:       r.Error,
 	})
+}
+
+// validateMCPGrants checks that all required MCP grants exist.
+func validateMCPGrants(cfg *config.Config, store *credential.FileStore) error {
+	for _, mcp := range cfg.MCP {
+		if mcp.Auth == nil {
+			continue // No auth required
+		}
+
+		_, err := store.Get(credential.Provider(mcp.Auth.Grant))
+		if err != nil {
+			return fmt.Errorf(`MCP server '%s' requires grant '%s' but it's not configured
+
+To fix:
+  moat grant mcp %s
+
+Then run again.`, mcp.Name, mcp.Auth.Grant, strings.TrimPrefix(mcp.Auth.Grant, "mcp-"))
+		}
+	}
+	return nil
 }

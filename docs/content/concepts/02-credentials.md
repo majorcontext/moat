@@ -253,6 +253,31 @@ Cloning into 'repo'...
 
 **Requirement:** Your SSH agent must be running (`SSH_AUTH_SOCK` must be set).
 
+### MCP servers
+
+MCP (Model Context Protocol) servers can require authentication credentials. Store them with:
+
+```bash
+$ moat grant mcp context7
+Enter credential for MCP server 'context7': ••••••••
+MCP credential 'mcp-context7' saved
+```
+
+Configure in agent.yaml:
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+```
+
+When the agent connects to the MCP server, the proxy injects the credential into the specified HTTP header. The agent never sees the raw credential.
+
+See the [MCP servers section](../guides/01-running-claude-code.md#remote-mcp-servers) in the Claude Code guide for complete setup instructions.
+
 ## Using credentials in runs
 
 ### Via CLI flag
@@ -284,6 +309,7 @@ Credentials are scoped by host. The proxy only injects credentials for requests 
 | `anthropic` | `api.anthropic.com` |
 | `aws` | `*.amazonaws.com` (all AWS service endpoints) |
 | `ssh:<host>` | The specified host only |
+| `mcp-<name>` | Host specified in MCP server's `url` field |
 
 Requests to other hosts pass through the proxy without credential injection.
 
@@ -309,6 +335,7 @@ Remove a stored credential:
 moat revoke github
 moat revoke anthropic
 moat revoke ssh:github.com
+moat revoke mcp-context7
 ```
 
 This deletes the encrypted credential file. Future runs cannot use the credential until you grant it again.

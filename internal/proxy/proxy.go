@@ -41,6 +41,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/credential"
 	"github.com/andybons/moat/internal/log"
 )
 
@@ -210,6 +212,8 @@ type Proxy struct {
 	policy       string        // "permissive" or "strict"
 	allowedHosts []hostPattern // parsed allow patterns for strict policy
 	awsHandler   http.Handler  // Optional handler for AWS credential endpoint
+	credStore    credential.Store
+	mcpServers   []config.MCPServerConfig
 }
 
 // NewProxy creates a new auth proxy.
@@ -239,6 +243,16 @@ func (p *Proxy) SetLogger(logger RequestLogger) {
 // SetAWSHandler sets the handler for AWS credential requests.
 func (p *Proxy) SetAWSHandler(h http.Handler) {
 	p.awsHandler = h
+}
+
+// SetMCPServers configures MCP servers for credential injection.
+func (p *Proxy) SetMCPServers(servers []config.MCPServerConfig) {
+	p.mcpServers = servers
+}
+
+// SetCredentialStore sets the credential store for MCP credential retrieval.
+func (p *Proxy) SetCredentialStore(store credential.Store) {
+	p.credStore = store
 }
 
 // SetCredential sets the credential for a host using the Authorization header.
@@ -356,6 +370,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.awsHandler.ServeHTTP(w, r)
 		return
 	}
+
+	// Handle MCP relay endpoint
+	if strings.HasPrefix(r.URL.Path, "/mcp/") {
+		p.handleMCPRelay(w, r)
+		return
+	}
+
+	// Inject MCP credentials if request matches configured server
+	p.injectMCPCredentials(r)
 
 	if r.Method == http.MethodConnect {
 		p.handleConnect(w, r)
@@ -639,6 +662,9 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.URL.Scheme = "https"
 		req.URL.Host = r.Host
 		req.RequestURI = ""
+
+		// Inject MCP credentials if this is an MCP request
+		p.injectMCPCredentials(req)
 
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)

@@ -992,3 +992,149 @@ func TestDefaultConfigSnapshotDefaults(t *testing.T) {
 		t.Errorf("DefaultConfig() Snapshots.Retention.MaxCount = %d, want 10", cfg.Snapshots.Retention.MaxCount)
 	}
 }
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("writeFile: %v", err)
+	}
+}
+
+func TestLoad_MCPServers(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+  - name: public-mcp
+    url: https://public.example.com/mcp
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.MCP) != 2 {
+		t.Fatalf("expected 2 MCP servers, got %d", len(cfg.MCP))
+	}
+
+	// Check first server (with auth)
+	ctx7 := cfg.MCP[0]
+	if ctx7.Name != "context7" {
+		t.Errorf("expected name 'context7', got %q", ctx7.Name)
+	}
+	if ctx7.URL != "https://mcp.context7.com/mcp" {
+		t.Errorf("expected URL 'https://mcp.context7.com/mcp', got %q", ctx7.URL)
+	}
+	if ctx7.Auth == nil {
+		t.Fatal("expected auth to be set")
+	}
+	if ctx7.Auth.Grant != "mcp-context7" {
+		t.Errorf("expected grant 'mcp-context7', got %q", ctx7.Auth.Grant)
+	}
+	if ctx7.Auth.Header != "CONTEXT7_API_KEY" {
+		t.Errorf("expected header 'CONTEXT7_API_KEY', got %q", ctx7.Auth.Header)
+	}
+
+	// Check second server (no auth)
+	public := cfg.MCP[1]
+	if public.Name != "public-mcp" {
+		t.Errorf("expected name 'public-mcp', got %q", public.Name)
+	}
+	if public.Auth != nil {
+		t.Errorf("expected auth to be nil, got %+v", public.Auth)
+	}
+}
+
+func TestLoad_MCP_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "missing name",
+			yaml: `
+mcp:
+  - url: https://example.com
+    auth:
+      grant: mcp-test
+      header: API_KEY
+`,
+			wantErr: "mcp[0]: 'name' is required",
+		},
+		{
+			name: "missing url",
+			yaml: `
+mcp:
+  - name: test
+    auth:
+      grant: mcp-test
+      header: API_KEY
+`,
+			wantErr: "mcp[0]: 'url' is required",
+		},
+		{
+			name: "non-https url",
+			yaml: `
+mcp:
+  - name: test
+    url: http://example.com
+`,
+			wantErr: "mcp[0]: 'url' must use HTTPS",
+		},
+		{
+			name: "auth missing grant",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      header: API_KEY
+`,
+			wantErr: "mcp[0]: 'auth.grant' is required when auth is specified",
+		},
+		{
+			name: "auth missing header",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      grant: mcp-test
+`,
+			wantErr: "mcp[0]: 'auth.header' is required when auth is specified",
+		},
+		{
+			name: "duplicate names",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+  - name: test
+    url: https://other.com
+`,
+			wantErr: "mcp[1]: duplicate name 'test'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "agent.yaml", tt.yaml)
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}

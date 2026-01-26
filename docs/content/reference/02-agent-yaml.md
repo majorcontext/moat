@@ -75,6 +75,14 @@ claude:
       grant: github
       cwd: /workspace
 
+# Remote MCP servers
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+
 # Snapshots
 snapshots:
   disabled: false
@@ -439,7 +447,7 @@ claude:
 
 ### claude.mcp
 
-MCP (Model Context Protocol) server configuration.
+Local MCP (Model Context Protocol) servers that run as child processes inside the container.
 
 ```yaml
 claude:
@@ -467,6 +475,57 @@ claude:
 | `cwd` | `string` | Working directory |
 
 Environment variables support `${secrets.NAME}` interpolation.
+
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/01-running-claude-code.md#remote-mcp-servers) in the Claude Code guide.
+
+---
+
+## mcp
+
+Configures remote HTTP-based MCP (Model Context Protocol) servers accessed over HTTPS with credential injection.
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+```
+
+- Type: `array[object]`
+- Default: `[]`
+
+**Fields:**
+
+- `name` (required): Identifier for the MCP server (must be unique)
+- `url` (required): HTTPS endpoint for the MCP server (HTTP not allowed)
+- `auth` (optional): Authentication configuration
+  - `grant` (required if auth present): Name of grant to use (format: `mcp-<name>`)
+  - `header` (required if auth present): HTTP header name for credential injection
+
+**Credential injection:**
+
+Credentials are stored with `moat grant mcp <name>` and injected by the proxy at runtime. The agent never sees real credentials.
+
+**Example with multiple servers:**
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+
+  - name: public-mcp
+    url: https://public.example.com/mcp
+    # No auth block = no credential injection
+```
+
+**Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
+
+**See also:** [Running Claude Code guide](../guides/01-running-claude-code.md#remote-mcp-servers)
 
 ---
 

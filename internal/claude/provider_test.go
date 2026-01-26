@@ -188,31 +188,94 @@ func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
 }
 
 func TestWriteClaudeConfig(t *testing.T) {
-	stagingDir := t.TempDir()
+	t.Run("without MCP servers", func(t *testing.T) {
+		stagingDir := t.TempDir()
 
-	err := WriteClaudeConfig(stagingDir)
-	if err != nil {
-		t.Fatalf("WriteClaudeConfig() error = %v", err)
-	}
+		err := WriteClaudeConfig(stagingDir, nil)
+		if err != nil {
+			t.Fatalf("WriteClaudeConfig() error = %v", err)
+		}
 
-	// Read and parse the file
-	data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
-	if err != nil {
-		t.Fatalf("failed to read .claude.json: %v", err)
-	}
+		// Read and parse the file
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+		if err != nil {
+			t.Fatalf("failed to read .claude.json: %v", err)
+		}
 
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		t.Fatalf("failed to parse .claude.json: %v", err)
-	}
+		var config map[string]any
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatalf("failed to parse .claude.json: %v", err)
+		}
 
-	// Verify required fields
-	if config["hasCompletedOnboarding"] != true {
-		t.Error("hasCompletedOnboarding should be true")
-	}
-	if config["theme"] != "dark" {
-		t.Error("theme should be dark")
-	}
+		// Verify required fields
+		if config["hasCompletedOnboarding"] != true {
+			t.Error("hasCompletedOnboarding should be true")
+		}
+		if config["theme"] != "dark" {
+			t.Error("theme should be dark")
+		}
+
+		// Should not have mcpServers field
+		if _, ok := config["mcpServers"]; ok {
+			t.Error("mcpServers should not be present when nil")
+		}
+	})
+
+	t.Run("with MCP servers", func(t *testing.T) {
+		stagingDir := t.TempDir()
+
+		mcpServers := map[string]MCPServerForContainer{
+			"context7": {
+				Type: "http",
+				URL:  "https://mcp.context7.com/mcp",
+				Headers: map[string]string{
+					"CONTEXT7_API_KEY": "moat-stub-mcp-context7",
+				},
+			},
+		}
+
+		err := WriteClaudeConfig(stagingDir, mcpServers)
+		if err != nil {
+			t.Fatalf("WriteClaudeConfig() error = %v", err)
+		}
+
+		// Read and parse the file
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+		if err != nil {
+			t.Fatalf("failed to read .claude.json: %v", err)
+		}
+
+		var config map[string]any
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatalf("failed to parse .claude.json: %v", err)
+		}
+
+		// Verify MCP servers are included
+		mcpData, ok := config["mcpServers"].(map[string]any)
+		if !ok {
+			t.Fatal("mcpServers should be present")
+		}
+
+		ctx7, ok := mcpData["context7"].(map[string]any)
+		if !ok {
+			t.Fatal("context7 server should be present")
+		}
+
+		if ctx7["type"] != "http" {
+			t.Errorf("expected type 'http', got %v", ctx7["type"])
+		}
+		if ctx7["url"] != "https://mcp.context7.com/mcp" {
+			t.Errorf("expected correct URL, got %v", ctx7["url"])
+		}
+
+		headers, ok := ctx7["headers"].(map[string]any)
+		if !ok {
+			t.Fatal("headers should be present")
+		}
+		if headers["CONTEXT7_API_KEY"] != "moat-stub-mcp-context7" {
+			t.Errorf("expected stub credential, got %v", headers["CONTEXT7_API_KEY"])
+		}
+	})
 }
 
 // mockProxyConfigurer implements credential.ProxyConfigurer for testing.

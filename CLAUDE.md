@@ -19,12 +19,13 @@ Moat runs AI agents in isolated containers with credential injection and full ob
 cmd/moat/           CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
+  claude/            Claude Code provider setup (OAuth, MCP config)
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)
   image/             Runtime-based image selection (node/python/go → base image)
   log/               Structured logging (slog wrapper)
-  proxy/             TLS-intercepting proxy for credential injection
+  proxy/             TLS-intercepting proxy for credential injection and MCP relay
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
 ```
@@ -41,6 +42,8 @@ internal/
 
 **Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 
+**MCP Integration:** `agent.yaml` defines remote MCP servers → `.claude.json` generated with relay URLs → Claude Code connects to proxy relay → proxy injects credentials → request forwarded to real MCP server with SSE streaming support
+
 ### Proxy Security Model
 
 The credential-injecting proxy has different security configurations per runtime:
@@ -49,6 +52,27 @@ The credential-injecting proxy has different security configurations per runtime
 - **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://moat:token@host:port` URL format.
 
 See `internal/proxy/proxy.go` for the security model documentation.
+
+### MCP (Model Context Protocol) Support
+
+Moat supports two types of MCP servers:
+
+1. **Remote HTTP MCP servers** (top-level `mcp:` in agent.yaml) - External MCP servers accessed via HTTPS with credential injection through a proxy relay pattern
+2. **Local process MCP servers** (under `claude.mcp:` or `codex.mcp:`) - MCP servers running as child processes inside the container
+
+**Remote MCP Architecture:**
+
+The proxy relay pattern works around Claude Code's HTTP client not respecting `HTTP_PROXY`:
+- Container's `.claude.json` points to proxy relay endpoints: `http://proxy:port/mcp/{name}`
+- Proxy relay intercepts requests, injects real credentials from grant store
+- Forwards to actual MCP server with SSE streaming support
+- Circular proxy prevented via `NO_PROXY` env var and `http.Transport{Proxy: nil}`
+
+**Key Implementation Files:**
+- `internal/proxy/mcp.go` - Relay handler and credential injection
+- `internal/claude/provider.go` - `.claude.json` generation
+- `internal/run/manager.go` - MCP setup during container creation
+- `internal/config/config.go` - `MCPServerConfig` (remote) and `MCPServerSpec` (local) types
 
 ## Development Commands
 
