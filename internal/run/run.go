@@ -42,6 +42,8 @@ type Run struct {
 	SSHAgentServer *sshagent.Server  // SSH agent proxy for SSH key access
 	Store          *storage.RunStore // Run data storage
 	storeRef       *atomic.Value     // Atomic reference for concurrent logger access
+	logsCaptured   atomic.Bool       // Track if logs have been captured (for idempotency)
+	exitCh         chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
 	AuditStore     *audit.Store      // Tamper-proof audit log
 	SnapEngine     *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer  bool              // If true, don't auto-remove container after run

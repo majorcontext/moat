@@ -254,6 +254,12 @@ jq:
   type: apt
   package: jq
 
+# curl is used by E2E tests (TestMCPCredentialInjection_E2E) to verify MCP proxy
+curl:
+  description: Command-line HTTP client
+  type: apt
+  package: curl
+
 yq:
   description: YAML processor
   type: github-binary

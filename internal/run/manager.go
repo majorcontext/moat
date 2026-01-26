@@ -172,6 +172,13 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			StartedAt:   meta.StartedAt,
 			StoppedAt:   meta.StoppedAt,
 			Error:       meta.Error,
+			exitCh:      make(chan struct{}),
+		}
+
+		// If container is already stopped, close exitCh immediately
+		// so any Wait() calls don't hang
+		if runState == StateStopped || runState == StateFailed {
+			close(r.exitCh)
 		}
 
 		// Update metadata if state changed
@@ -182,6 +189,12 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		m.mu.Lock()
 		m.runs[runID] = r
 		m.mu.Unlock()
+
+		// For running containers, start background monitor to capture logs when they exit.
+		// This handles the case where moat restarts while containers are running.
+		if runState == StateRunning {
+			go m.monitorContainerExit(context.Background(), r)
+		}
 
 		log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
 	}
@@ -243,6 +256,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		KeepContainer: opts.KeepContainer,
 		Interactive:   opts.Interactive,
 		CreatedAt:     time.Now(),
+		exitCh:        make(chan struct{}),
 	}
 
 	// Default command
@@ -1547,6 +1561,10 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		go m.streamLogs(context.Background(), r)
 	}
 
+	// Start background monitor to capture logs when container exits.
+	// This is critical for detached runs where Wait() is never called.
+	go m.monitorContainerExit(context.Background(), r)
+
 	return nil
 }
 
@@ -1622,12 +1640,18 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 
 	// Wait for the attachment to complete (container exits or context canceled)
-	return <-attachDone
+	attachErr := <-attachDone
+
+	// Capture logs after container exits (critical for audit/observability)
+	m.captureLogs(r)
+
+	return attachErr
 }
 
 // streamLogs streams container logs to stdout for real-time feedback.
-// Note: Final log capture to storage is handled by Wait() using ContainerLogsAll
-// to ensure complete logs are captured even for fast-exiting containers.
+// Note: Final log capture to storage is handled by captureLogs() which is called
+// from all container exit paths (Wait, StartAttached, Stop) to ensure complete
+// logs are captured even for fast-exiting containers.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
@@ -1662,6 +1686,12 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		// Log but don't fail - container might already be stopped
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
+
+	// Capture logs after container stops (defense-in-depth).
+	// monitorContainerExit should also capture these when exitCh is signaled,
+	// but capturing here provides a safety net if moat crashes before that.
+	// captureLogs is idempotent so multiple calls are safe.
+	m.captureLogs(r)
 
 	// Stop the proxy server if one was created
 	if r.ProxyServer != nil {
@@ -1731,32 +1761,23 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	// Wait for container to exit or context cancellation
-	done := make(chan error, 1)
-	go func() {
-		exitCode, err := m.runtime.WaitContainer(ctx, containerID)
-		if err != nil {
-			done <- err
-			return
-		}
-		if exitCode != 0 {
-			done <- fmt.Errorf("container exited with code %d", exitCode)
-			return
-		}
-		done <- nil
-	}()
-
+	// Wait for container to exit (signaled by monitorContainerExit) or context cancellation
+	// NOTE: We don't call WaitContainer here to avoid race condition - monitorContainerExit
+	// is the only goroutine that waits on the container and will close exitCh when done.
 	select {
-	case err := <-done:
-		// Capture all logs after container exits to ensure we don't miss any
-		// (the streaming goroutine may not have captured everything for fast containers)
-		if r.Store != nil {
-			if allLogs, logErr := m.runtime.ContainerLogsAll(context.Background(), containerID); logErr == nil && len(allLogs) > 0 {
-				if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
-					_, _ = lw.Write(allLogs)
-					lw.Close()
-				}
-			}
+	case <-r.exitCh:
+		// Container has exited (monitorContainerExit already captured logs and updated state)
+		// Capture logs again here (idempotent) for defense-in-depth
+		m.captureLogs(r)
+
+		// Get final state to determine error
+		m.mu.RLock()
+		finalErr := r.Error
+		m.mu.RUnlock()
+
+		var err error
+		if finalErr != "" {
+			err = fmt.Errorf("%s", finalErr)
 		}
 
 		// Stop the proxy server if one was created
@@ -1778,18 +1799,15 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 			_ = m.routes.Remove(r.Name)
 		}
 
-		m.mu.Lock()
-		r.State = StateStopped
-		r.StoppedAt = time.Now()
-		if err != nil {
-			r.Error = err.Error()
-		}
+		// NOTE: We don't update r.State, r.StoppedAt, or r.Error here because
+		// monitorContainerExit already set them when the container exited.
+		// Overwriting would lose StateFailed state and error details.
+
+		// Get values needed for cleanup
+		m.mu.RLock()
 		keepContainer := r.KeepContainer
 		providerCleanupPaths := r.ProviderCleanupPaths
-		m.mu.Unlock()
-
-		// Save state to disk
-		_ = r.SaveMetadata()
+		m.mu.RUnlock()
 
 		// Auto-remove container unless --keep was specified
 		if !keepContainer {
@@ -1843,6 +1861,128 @@ func (m *Manager) Get(runID string) (*Run, error) {
 		return nil, fmt.Errorf("run %s not found", runID)
 	}
 	return r, nil
+}
+
+// captureLogs captures container logs to logs.jsonl for audit/observability.
+// This method is idempotent and safe to call multiple times - it will only
+// write logs once. It creates logs.jsonl even if the container produced no
+// output (important for audit trail completeness).
+//
+// This should be called whenever a container exits, regardless of how:
+// - Normal exit (Wait)
+// - Interactive exit (StartAttached)
+// - Explicit stop (Stop)
+// - Detached completion (background monitor)
+func (m *Manager) captureLogs(r *Run) {
+	if r.Store == nil {
+		return
+	}
+
+	// Use CompareAndSwap to ensure only one goroutine captures logs at a time.
+	// We DON'T check Load() first because if a previous attempt failed to create
+	// the file, we want to retry. The flag is only truly "set" after successful
+	// file creation below.
+	if !r.logsCaptured.CompareAndSwap(false, true) {
+		// Another goroutine is currently capturing or has completed.
+		// Check if file exists - if so, we're done.
+		logsPath := filepath.Join(r.Store.Dir(), "logs.jsonl")
+		if _, err := os.Stat(logsPath); err == nil {
+			log.Debug("logs already captured, skipping", "runID", r.ID)
+			return
+		}
+		// File doesn't exist - previous attempt must have failed.
+		// Reset flag and try again (we'll race with other goroutines, that's fine).
+		r.logsCaptured.Store(false)
+		if !r.logsCaptured.CompareAndSwap(false, true) {
+			log.Debug("another goroutine is capturing logs, skipping", "runID", r.ID)
+			return
+		}
+	}
+
+	// Fetch all logs from the container.
+	// Use a background context since the container may already be stopped.
+	allLogs, logErr := m.runtime.ContainerLogsAll(context.Background(), r.ContainerID)
+	if logErr != nil {
+		log.Warn("failed to fetch container logs - creating empty logs.jsonl for audit", "runID", r.ID, "error", logErr)
+		// Still create empty logs.jsonl for audit completeness
+		allLogs = []byte{}
+	}
+
+	// Write logs to storage - this creates the file even if empty
+	lw, lwErr := r.Store.LogWriter()
+	if lwErr != nil {
+		// Failed to create log file - reset flag so another goroutine can try
+		r.logsCaptured.Store(false)
+		log.Warn("failed to open log writer - resetting capture flag", "runID", r.ID, "error", lwErr)
+		return
+	}
+	defer lw.Close()
+	// File is now created (O_CREATE flag in LogWriter). The flag stays true.
+
+	if len(allLogs) > 0 {
+		if _, writeErr := lw.Write(allLogs); writeErr != nil {
+			log.Debug("failed to write logs", "runID", r.ID, "error", writeErr)
+		}
+	}
+
+	log.Debug("logs captured successfully", "runID", r.ID, "bytes", len(allLogs))
+}
+
+// monitorContainerExit watches for container exit and captures logs.
+// This runs in the background for ALL runs to ensure logs are captured
+// even in detached mode where Wait() is never called.
+// It's safe to call multiple times - captureLogs is idempotent.
+func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
+	// Wait for container to exit (no timeout - let it run as long as needed)
+	// This is the ONLY place that calls WaitContainer to avoid race conditions
+	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
+
+	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
+	// Docker may start removing/cleaning the container at any moment after exit.
+	// We must get the logs while the container is still in "exited" state.
+	m.captureLogs(r)
+
+	// Now signal that container has exited (and logs are captured)
+	close(r.exitCh)
+
+	// Update run state
+	m.mu.Lock()
+	if r.State == StateRunning || r.State == StateStarting {
+		if err != nil || exitCode != 0 {
+			r.State = StateFailed
+			if err != nil {
+				r.Error = err.Error()
+			} else {
+				r.Error = fmt.Sprintf("exit code %d", exitCode)
+			}
+		} else {
+			r.State = StateStopped
+		}
+		r.StoppedAt = time.Now()
+	}
+	m.mu.Unlock()
+
+	// Save updated state
+	_ = r.SaveMetadata()
+
+	// Stop the proxy server if one was created
+	if r.ProxyServer != nil {
+		if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
+			log.Debug("stopping proxy after container exit", "error", stopErr)
+		}
+	}
+
+	// Stop the SSH agent server if one was created
+	if r.SSHAgentServer != nil {
+		if stopErr := r.SSHAgentServer.Stop(); stopErr != nil {
+			log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
+		}
+	}
+
+	// Unregister routes
+	if r.Name != "" {
+		_ = m.routes.Remove(r.Name)
+	}
 }
 
 // List returns all runs.
