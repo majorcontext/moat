@@ -1937,11 +1937,13 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// This is the ONLY place that calls WaitContainer to avoid race conditions
 	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
 
-	// Signal that container has exited
-	close(r.exitCh)
-
-	// Capture logs regardless of exit code or error
+	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
+	// Docker may start removing/cleaning the container at any moment after exit.
+	// We must get the logs while the container is still in "exited" state.
 	m.captureLogs(r)
+
+	// Now signal that container has exited (and logs are captured)
+	close(r.exitCh)
 
 	// Update run state
 	m.mu.Lock()
