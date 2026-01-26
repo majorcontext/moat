@@ -199,6 +199,7 @@ func (r *DockerRuntime) ContainerLogs(ctx context.Context, containerID string) (
 }
 
 // ContainerLogsAll returns all logs from a container (does not follow).
+// The logs are demultiplexed from Docker's format (removes 8-byte headers).
 func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string) ([]byte, error) {
 	reader, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true,
@@ -209,7 +210,34 @@ func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string
 		return nil, fmt.Errorf("getting container logs: %w", err)
 	}
 	defer reader.Close()
-	return io.ReadAll(reader)
+
+	// Check if container was created with TTY
+	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		// If we can't inspect, fall back to demuxing (safer default)
+		var stdout, stderr bytes.Buffer
+		if _, err := stdcopy.StdCopy(&stdout, &stderr, reader); err != nil {
+			return nil, fmt.Errorf("demuxing logs: %w", err)
+		}
+		// Combine stdout and stderr
+		combined := append(stdout.Bytes(), stderr.Bytes()...)
+		return combined, nil
+	}
+
+	if inspect.Config.Tty {
+		// TTY mode: logs are not multiplexed, read directly
+		return io.ReadAll(reader)
+	}
+
+	// Non-TTY mode: demux Docker's multiplexed format
+	var stdout, stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, reader); err != nil {
+		return nil, fmt.Errorf("demuxing logs: %w", err)
+	}
+
+	// Combine stdout and stderr (interleaved order is lost, but content is preserved)
+	combined := append(stdout.Bytes(), stderr.Bytes()...)
+	return combined, nil
 }
 
 // GetHostAddress returns the address for containers to reach the host.
