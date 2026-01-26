@@ -172,6 +172,13 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			StartedAt:   meta.StartedAt,
 			StoppedAt:   meta.StoppedAt,
 			Error:       meta.Error,
+			exitCh:      make(chan struct{}),
+		}
+
+		// If container is already stopped, close exitCh immediately
+		// so any Wait() calls don't hang
+		if runState == StateStopped || runState == StateFailed {
+			close(r.exitCh)
 		}
 
 		// Update metadata if state changed
@@ -243,6 +250,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		KeepContainer: opts.KeepContainer,
 		Interactive:   opts.Interactive,
 		CreatedAt:     time.Now(),
+		exitCh:        make(chan struct{}),
 	}
 
 	// Default command
@@ -1549,7 +1557,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 
 	// Start background monitor to capture logs when container exits.
 	// This is critical for detached runs where Wait() is never called.
-	go m.monitorContainerExit(r)
+	go m.monitorContainerExit(context.Background(), r)
 
 	return nil
 }
@@ -1744,25 +1752,24 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	// Wait for container to exit or context cancellation
-	done := make(chan error, 1)
-	go func() {
-		exitCode, err := m.runtime.WaitContainer(ctx, containerID)
-		if err != nil {
-			done <- err
-			return
-		}
-		if exitCode != 0 {
-			done <- fmt.Errorf("container exited with code %d", exitCode)
-			return
-		}
-		done <- nil
-	}()
-
+	// Wait for container to exit (signaled by monitorContainerExit) or context cancellation
+	// NOTE: We don't call WaitContainer here to avoid race condition - monitorContainerExit
+	// is the only goroutine that waits on the container and will close exitCh when done.
 	select {
-	case err := <-done:
-		// Capture all logs after container exits
+	case <-r.exitCh:
+		// Container has exited (monitorContainerExit already captured logs and updated state)
+		// Capture logs again here (idempotent) for defense-in-depth
 		m.captureLogs(r)
+
+		// Get final state to determine error
+		m.mu.RLock()
+		finalErr := r.Error
+		m.mu.RUnlock()
+
+		var err error
+		if finalErr != "" {
+			err = fmt.Errorf("%s", finalErr)
+		}
 
 		// Stop the proxy server if one was created
 		if r.ProxyServer != nil {
@@ -1909,9 +1916,13 @@ func (m *Manager) captureLogs(r *Run) {
 // This runs in the background for ALL runs to ensure logs are captured
 // even in detached mode where Wait() is never called.
 // It's safe to call multiple times - captureLogs is idempotent.
-func (m *Manager) monitorContainerExit(r *Run) {
+func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Wait for container to exit (no timeout - let it run as long as needed)
-	exitCode, err := m.runtime.WaitContainer(context.Background(), r.ContainerID)
+	// This is the ONLY place that calls WaitContainer to avoid race conditions
+	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
+
+	// Signal that container has exited
+	close(r.exitCh)
 
 	// Capture logs regardless of exit code or error
 	m.captureLogs(r)
