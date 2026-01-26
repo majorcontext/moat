@@ -251,7 +251,14 @@ Marketplaces are cloned during image build. Use `--rebuild` to update after chan
 
 ## MCP servers
 
-Configure Model Context Protocol (MCP) servers:
+MCP (Model Context Protocol) servers extend Claude Code with additional tools and context. Moat supports two types:
+
+1. **Local MCP servers** - Child processes running inside the container
+2. **Remote MCP servers** - External HTTPS services with credential injection
+
+### Local MCP servers
+
+Configure local MCP servers that run as child processes:
 
 ```yaml
 claude:
@@ -265,7 +272,133 @@ claude:
       cwd: /workspace
 ```
 
-MCP servers run alongside Claude Code and provide additional context and capabilities.
+See the [agent.yaml reference](../reference/02-agent-yaml.md#claudemcp) for all configuration options.
+
+### Remote MCP servers
+
+Remote MCP servers are external HTTPS services that require credential injection.
+
+#### 1. Grant credentials
+
+Store credentials for the MCP server:
+
+```bash
+$ moat grant mcp context7
+Enter credential for MCP server 'context7': ***************
+MCP credential 'mcp-context7' saved to ~/.moat/credentials/mcp-context7.enc
+```
+
+#### 2. Configure in agent.yaml
+
+Declare the MCP server at the top level (not under `claude:`):
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+```
+
+**Required fields:**
+- `name`: Identifier for the server (must be unique)
+- `url`: HTTPS endpoint (HTTP not allowed for security)
+
+**Optional fields:**
+- `auth.grant`: Name of grant to use (must exist via `moat grant mcp <name>`)
+- `auth.header`: Header name where credential should be injected
+
+For public MCP servers without authentication, omit the `auth` block.
+
+#### 3. Run Claude Code
+
+```bash
+moat claude ./workspace
+```
+
+Behind the scenes:
+- Container starts with `.claude.json` containing MCP configuration
+- Claude Code discovers MCP servers with stub credentials
+- When Claude Code makes MCP requests, the proxy replaces stubs with real credentials
+- All MCP traffic is logged for audit
+
+#### How credential injection works
+
+Moat uses the same credential injection model for MCP as it does for API calls:
+
+1. Credentials never enter the container environment
+2. MCP configuration is written to `.claude.json` with stub credentials (`moat-stub-{grant}`)
+3. When Claude Code makes an MCP request with a stub, the proxy detects it
+4. Proxy replaces stub with real credential based on URL + header matching
+5. MCP server receives the real credential
+
+This ensures:
+- Credentials are not in environment variables or config files
+- Container code cannot access raw credentials
+- Credential usage is fully auditable
+
+#### Multiple MCP servers
+
+Configure multiple MCP servers:
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+
+  - name: notion
+    url: https://notion-mcp.example.com
+    auth:
+      grant: mcp-notion
+      header: Notion-Token
+```
+
+Grant all required credentials:
+
+```bash
+moat grant mcp context7
+moat grant mcp notion
+```
+
+#### Observability
+
+MCP connections appear in network logs:
+
+```bash
+$ moat trace --network
+
+[10:23:44.512] GET https://mcp.context7.com/mcp 200 (89ms)
+```
+
+Credential injection is logged in audit logs:
+
+```bash
+$ moat audit
+
+[10:23:44.500] credential.injected grant=mcp-context7 host=mcp.context7.com header=CONTEXT7_API_KEY
+```
+
+#### Troubleshooting
+
+**MCP server not appearing:**
+- Verify MCP server is declared in `agent.yaml`
+- Check grant exists: `moat grants list` should show `mcp-{name}`
+- Check container logs: `moat logs`
+
+**Authentication failures (401):**
+- Verify grant exists and credential is correct
+- Try revoking and re-granting: `moat revoke mcp-{name}` then `moat grant mcp {name}`
+- Verify URL in `agent.yaml` matches the actual MCP server endpoint
+
+**Stub credential in errors:**
+If you see `moat-stub-{grant}` in errors:
+- Proxy didn't recognize the request as MCP traffic
+- Verify URL in `agent.yaml` exactly matches the host being accessed
+- Verify header name matches what Claude Code is sending
 
 ## Workspace snapshots
 

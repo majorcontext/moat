@@ -12,10 +12,24 @@ import (
 var revokeCmd = &cobra.Command{
 	Use:   "revoke <provider>",
 	Short: "Revoke a stored credential",
-	Long: `Remove a stored credential from the local credential store.
+	Long: `Revoke a previously granted credential.
+
+Supported providers:
+  github            GitHub token
+  anthropic         Anthropic API key or OAuth credentials
+  openai            OpenAI API key or OAuth credentials
+  aws               AWS IAM role configuration
+  mcp-<name>        MCP server credential
+
+The credential file is permanently deleted.
 
 Examples:
-  agent revoke github`,
+  # Revoke GitHub access
+  moat revoke github
+
+  # Revoke MCP server credential
+  moat revoke mcp-context7
+`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRevoke,
 }

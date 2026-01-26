@@ -29,6 +29,7 @@ type Config struct {
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
 	Container    ContainerConfig   `yaml:"container,omitempty"`
+	MCP          []MCPServerConfig `yaml:"mcp,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -53,6 +54,23 @@ type AppleContainerConfig struct {
 	// Note: Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that
 	// provider, potentially leaking information about dependencies being installed.
 	BuilderDNS []string `yaml:"builder_dns,omitempty"`
+}
+
+// MCPServerConfig defines a remote MCP server configuration for top-level
+// MCP servers in agent.yaml. It specifies the server name, URL endpoint,
+// and optional authentication settings for credential injection.
+type MCPServerConfig struct {
+	Name string         `yaml:"name"`
+	URL  string         `yaml:"url"`
+	Auth *MCPAuthConfig `yaml:"auth,omitempty"`
+}
+
+// MCPAuthConfig defines authentication for an MCP server. It specifies which
+// grant credential to use and which HTTP header to inject it into when
+// proxying requests to the MCP server.
+type MCPAuthConfig struct {
+	Grant  string `yaml:"grant"`
+	Header string `yaml:"header"`
 }
 
 // NetworkConfig configures network access policies for the agent.
@@ -277,6 +295,14 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
+	// Validate top-level MCP server specs
+	seenNames := make(map[string]bool)
+	for i, spec := range cfg.MCP {
+		if err := validateTopLevelMCPServerSpec(i, spec, seenNames); err != nil {
+			return nil, err
+		}
+	}
+
 	// Snapshot defaults
 	if cfg.Snapshots.Triggers.IdleThresholdSeconds == 0 {
 		cfg.Snapshots.Triggers.IdleThresholdSeconds = 30
@@ -320,6 +346,39 @@ func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 	if spec.Command == "" {
 		return fmt.Errorf("%s.mcp.%s: 'command' is required", section, name)
 	}
+	return nil
+}
+
+// validateTopLevelMCPServerSpec validates a top-level MCP server specification.
+func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames map[string]bool) error {
+	prefix := fmt.Sprintf("mcp[%d]", index)
+
+	if spec.Name == "" {
+		return fmt.Errorf("%s: 'name' is required", prefix)
+	}
+
+	if seenNames[spec.Name] {
+		return fmt.Errorf("%s: duplicate name '%s'", prefix, spec.Name)
+	}
+	seenNames[spec.Name] = true
+
+	if spec.URL == "" {
+		return fmt.Errorf("%s: 'url' is required", prefix)
+	}
+
+	if !strings.HasPrefix(spec.URL, "https://") {
+		return fmt.Errorf("%s: 'url' must use HTTPS", prefix)
+	}
+
+	if spec.Auth != nil {
+		if spec.Auth.Grant == "" {
+			return fmt.Errorf("%s: 'auth.grant' is required when auth is specified", prefix)
+		}
+		if spec.Auth.Header == "" {
+			return fmt.Errorf("%s: 'auth.header' is required when auth is specified", prefix)
+		}
+	}
+
 	return nil
 }
 

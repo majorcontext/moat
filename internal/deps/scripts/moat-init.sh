@@ -129,6 +129,14 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
   fi
 fi
 
+# MCP Server Setup
+# MCP servers are now configured via the .claude.json file in the staging directory.
+# The moat run manager writes MCP configuration directly to .claude.json with stub
+# credentials (moat-stub-{grant}). The proxy replaces these stub credentials with
+# real credentials at the network layer.
+#
+# This comment is kept as a placeholder in case Codex MCP support is added later.
+
 # Git Safe Directory
 # The workspace is mounted from the host with different ownership than the
 # container user. Git 2.35.2+ rejects operations on directories owned by

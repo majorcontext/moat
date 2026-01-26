@@ -212,6 +212,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Validate MCP grants before allocating any resources
+	if opts.Config != nil && len(opts.Config.MCP) > 0 {
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr != nil {
+			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
+		}
+		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+		if err != nil {
+			return nil, fmt.Errorf("opening credential store: %w", err)
+		}
+		if err := validateMCPGrants(opts.Config, store); err != nil {
+			return nil, err
+		}
+	}
+
 	// Get ports from config
 	var ports map[string]int
 	if opts.Config != nil && len(opts.Config.Ports) > 0 {
@@ -442,6 +457,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			p.SetNetworkPolicy(opts.Config.Network.Policy, opts.Config.Network.Allow, opts.Grants)
 		}
 
+		// Configure MCP servers for credential injection
+		if opts.Config != nil && len(opts.Config.MCP) > 0 {
+			proxyServer.Proxy().SetMCPServers(opts.Config.MCP)
+			proxyServer.Proxy().SetCredentialStore(store)
+		}
+
 		if err := proxyServer.Start(); err != nil {
 			return nil, fmt.Errorf("starting proxy: %w", err)
 		}
@@ -468,11 +489,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			proxyURL = "http://" + proxyHost
 		}
 
+		// Exclude proxy's own address from proxying to prevent circular references
+		// This is critical for MCP relay endpoint which is on the proxy itself
+		noProxy := hostAddr + ",localhost,127.0.0.1"
+
 		proxyEnv = []string{
 			"HTTP_PROXY=" + proxyURL,
 			"HTTPS_PROXY=" + proxyURL,
 			"http_proxy=" + proxyURL,
 			"https_proxy=" + proxyURL,
+			"NO_PROXY=" + noProxy,
+			"no_proxy=" + noProxy,
 			// Terminal settings for TUI applications
 			"TERM=xterm-256color",
 		}
@@ -1074,8 +1101,38 @@ region = %s
 				}
 			}()
 
-			// Write minimal Claude config to skip onboarding
-			if err := claude.WriteClaudeConfig(claudeStagingDir); err != nil {
+			// Build MCP server configuration for .claude.json
+			// Use proxy relay URLs instead of direct MCP server URLs to work around
+			// Claude Code's MCP client not respecting HTTP_PROXY environment variables.
+			mcpServers := make(map[string]claude.MCPServerForContainer)
+			if opts.Config != nil && len(opts.Config.MCP) > 0 {
+				// Get proxy address - use runtime's host address and proxy's port
+				proxyAddr := fmt.Sprintf("%s:%s", m.runtime.GetHostAddress(), proxyServer.Port())
+
+				for _, mcp := range opts.Config.MCP {
+					if mcp.Auth == nil {
+						continue // Skip servers without auth
+					}
+
+					// Point MCP client directly at proxy relay endpoint
+					// Format: http://proxy-host:port/mcp/{server-name}
+					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
+
+					// Provide the original header with a stub value so Claude Code thinks
+					// it has authentication configured. The proxy relay will ignore this
+					// stub and inject the real credential.
+					mcpServers[mcp.Name] = claude.MCPServerForContainer{
+						Type: "http",
+						URL:  relayURL,
+						Headers: map[string]string{
+							mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
+						},
+					}
+				}
+			}
+
+			// Write minimal Claude config to skip onboarding and configure MCP servers
+			if err := claude.WriteClaudeConfig(claudeStagingDir, mcpServers); err != nil {
 				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("writing Claude config: %w", err)
 			}
@@ -1187,6 +1244,9 @@ region = %s
 		// Set env var for moat-init script
 		proxyEnv = append(proxyEnv, "MOAT_CODEX_INIT="+codex.CodexInitMountPath)
 	}
+
+	// MCP servers are now configured via .claude.json in the staging directory
+	// (see claude.WriteClaudeConfig above), not via environment variables.
 
 	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
 	var capAdd []string

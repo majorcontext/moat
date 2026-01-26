@@ -55,7 +55,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding home directory: %w", err)
 	}
 	runDir := filepath.Join(homeDir, ".moat", "runs", runID)
-	dbPath := filepath.Join(runDir, "logs.db")
+	dbPath := filepath.Join(runDir, "audit.db")
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)

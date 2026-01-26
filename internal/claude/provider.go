@@ -104,12 +104,25 @@ func (a *AnthropicSetup) PopulateStagingDir(cred *credential.Credential, staging
 	return nil
 }
 
+// MCPServerForContainer represents an MCP server in Claude's .claude.json format.
+type MCPServerForContainer struct {
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // WriteClaudeConfig writes a minimal ~/.claude.json to the staging directory.
-// This skips the onboarding flow and sets dark theme.
-func WriteClaudeConfig(stagingDir string) error {
+// This skips the onboarding flow, sets dark theme, and optionally configures MCP servers.
+// mcpServers is a map of server names to their configurations.
+func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForContainer) error {
 	config := map[string]any{
 		"hasCompletedOnboarding": true,
 		"theme":                  "dark",
+	}
+
+	// Add MCP servers if provided
+	if len(mcpServers) > 0 {
+		config["mcpServers"] = mcpServers
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")

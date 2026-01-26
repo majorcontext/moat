@@ -1,12 +1,23 @@
 name: moat
 
+interactive: true
+
 dependencies:
   - go@1.25.6
   - go-extras
   - git
   - make
+  - claude-code
+  - node@20
 
 grants:
   - anthropic
   - github
   - ssh:github.com
+
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY

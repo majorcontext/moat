@@ -52,6 +52,10 @@ Supported providers:
   openai      OpenAI API key or ChatGPT subscription credentials
   aws         AWS IAM role assumption (uses host credentials to assume role)
 
+Subcommands:
+  ssh         Grant SSH access for a specific host
+  mcp         Grant credentials for an MCP server
+
 GitHub authentication (in order of precedence):
   1. GITHUB_TOKEN or GH_TOKEN environment variable
   2. gh CLI token (if gh is installed and authenticated)
@@ -98,7 +102,7 @@ Examples:
 If you have Claude Code installed and logged in, 'moat grant anthropic' will
 offer to import your existing OAuth credentials. Similarly, 'moat grant openai'
 will offer to import Codex credentials if available.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MinimumNArgs(1),
 	RunE: runGrant,
 }
 
