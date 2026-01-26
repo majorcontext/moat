@@ -333,3 +333,67 @@ func TestWriter_Apple_BufferSizeLimit(t *testing.T) {
 		t.Errorf("expected buffer <= %d, got %d", maxInitBuffer, bufLen)
 	}
 }
+
+func TestWriter_CursorVisibilityTracking(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Initially cursor is visible
+	w.mu.Lock()
+	if !w.cursorVisible {
+		t.Error("expected cursor visible initially")
+	}
+	w.mu.Unlock()
+	buf.Reset()
+
+	// Write with cursor hide sequence
+	_, _ = w.Write([]byte("hello\x1b[?25l"))
+	w.mu.Lock()
+	if w.cursorVisible {
+		t.Error("expected cursor hidden after hide sequence")
+	}
+	w.mu.Unlock()
+
+	// Output should include cursor hide
+	if !strings.Contains(buf.String(), "\x1b[?25l") {
+		t.Errorf("expected cursor hide in output, got %q", buf.String())
+	}
+	buf.Reset()
+
+	// Write with cursor show sequence
+	_, _ = w.Write([]byte("world\x1b[?25h"))
+	w.mu.Lock()
+	if !w.cursorVisible {
+		t.Error("expected cursor visible after show sequence")
+	}
+	w.mu.Unlock()
+
+	// Output should include cursor show
+	if !strings.Contains(buf.String(), "\x1b[?25h") {
+		t.Errorf("expected cursor show in output, got %q", buf.String())
+	}
+}
+
+func TestWriter_CursorVisibility_LastWins(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Write with both sequences - last one wins
+	_, _ = w.Write([]byte("\x1b[?25l\x1b[?25h\x1b[?25l"))
+	w.mu.Lock()
+	visible := w.cursorVisible
+	w.mu.Unlock()
+
+	if visible {
+		t.Error("expected cursor hidden (last sequence was hide)")
+	}
+}

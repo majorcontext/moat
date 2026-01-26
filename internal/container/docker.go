@@ -682,6 +682,17 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 		return fmt.Errorf("starting container: %w", err)
 	}
 
+	// Resize TTY immediately if initial size was provided.
+	// This ensures the container process sees the correct terminal dimensions
+	// from the very start, before it has a chance to query and cache the size.
+	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		if err := r.ResizeTTY(ctx, containerID, opts.InitialHeight, opts.InitialWidth); err != nil {
+			// Log but don't fail - the container has started successfully
+			// and a later resize from SIGWINCH will fix it
+			_ = err // Intentionally ignored; resize is best-effort
+		}
+	}
+
 	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
 	for {
 		select {
