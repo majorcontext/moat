@@ -228,7 +228,11 @@ func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string
 		return nil, fmt.Errorf("demuxing logs: %w", err)
 	}
 
-	// Combine stdout and stderr (interleaved order is lost, but content is preserved)
+	// Combine stdout and stderr
+	// NOTE: Interleaved ordering between stdout/stderr is lost during demuxing.
+	// Docker's multiplexed format preserves ordering within each stream but not across
+	// streams. This is acceptable for logs.jsonl (audit/observability) where having all
+	// content matters more than perfect ordering. TTY mode preserves ordering naturally.
 	combined := append(stdout.Bytes(), stderr.Bytes()...)
 	return combined, nil
 }

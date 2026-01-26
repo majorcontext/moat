@@ -1676,8 +1676,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.State = StateStopping
 	m.mu.Unlock()
 
-	// Capture logs before stopping the container (critical for audit/observability)
-	m.captureLogs(r)
+	// NOTE: We don't call captureLogs here because monitorContainerExit (running in
+	// background) will capture logs when the container actually exits after StopContainer.
+	// Calling it here would capture incomplete logs (before container fully stops).
 
 	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped

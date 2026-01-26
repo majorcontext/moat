@@ -329,4 +329,3 @@ func TestLogsAlwaysExistForAudit(t *testing.T) {
 	// The important part is that the file was created (verified above)
 	t.Logf("ReadLogs returned %d entries (nil slice is ok for empty file)", len(logs))
 }
-
