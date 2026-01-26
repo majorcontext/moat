@@ -1878,16 +1878,25 @@ func (m *Manager) captureLogs(r *Run) {
 		return
 	}
 
-	// Check if logs have already been captured (idempotency)
-	if r.logsCaptured.Load() {
-		log.Debug("logs already captured, skipping", "runID", r.ID)
-		return
-	}
-
-	// Use CompareAndSwap to ensure only one goroutine captures logs
+	// Use CompareAndSwap to ensure only one goroutine captures logs at a time.
+	// We DON'T check Load() first because if a previous attempt failed to create
+	// the file, we want to retry. The flag is only truly "set" after successful
+	// file creation below.
 	if !r.logsCaptured.CompareAndSwap(false, true) {
-		log.Debug("another goroutine is capturing logs, skipping", "runID", r.ID)
-		return
+		// Another goroutine is currently capturing or has completed.
+		// Check if file exists - if so, we're done.
+		logsPath := filepath.Join(r.Store.Dir(), "logs.jsonl")
+		if _, err := os.Stat(logsPath); err == nil {
+			log.Debug("logs already captured, skipping", "runID", r.ID)
+			return
+		}
+		// File doesn't exist - previous attempt must have failed.
+		// Reset flag and try again (we'll race with other goroutines, that's fine).
+		r.logsCaptured.Store(false)
+		if !r.logsCaptured.CompareAndSwap(false, true) {
+			log.Debug("another goroutine is capturing logs, skipping", "runID", r.ID)
+			return
+		}
 	}
 
 	// Fetch all logs from the container.
@@ -1899,21 +1908,22 @@ func (m *Manager) captureLogs(r *Run) {
 		allLogs = []byte{}
 	}
 
-	// Write logs to storage
+	// Write logs to storage - this creates the file even if empty
 	lw, lwErr := r.Store.LogWriter()
 	if lwErr != nil {
-		log.Debug("failed to open log writer", "runID", r.ID, "error", lwErr)
+		// Failed to create log file - reset flag so another goroutine can try
+		r.logsCaptured.Store(false)
+		log.Warn("failed to open log writer - resetting capture flag", "runID", r.ID, "error", lwErr)
 		return
 	}
 	defer lw.Close()
+	// File is now created (O_CREATE flag in LogWriter). The flag stays true.
 
 	if len(allLogs) > 0 {
 		if _, writeErr := lw.Write(allLogs); writeErr != nil {
 			log.Debug("failed to write logs", "runID", r.ID, "error", writeErr)
 		}
 	}
-	// LogWriter creates the file even if we write nothing, ensuring logs.jsonl
-	// always exists for audit purposes
 
 	log.Debug("logs captured successfully", "runID", r.ID, "bytes", len(allLogs))
 }
