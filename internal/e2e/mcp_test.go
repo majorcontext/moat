@@ -70,7 +70,7 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	defer credStore.Delete(credential.Provider("mcp-test")) // Clean up after test
 
 	// Create run manager
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -245,7 +245,7 @@ mcp:
 	defer credStore.Delete(credential.Provider("mcp-server2"))
 
 	// Create run manager
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestMCPMissingCredential(t *testing.T) {
 	}
 	credStore.Delete(credential.Provider("mcp-test")) // Ensure it doesn't exist
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
