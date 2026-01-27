@@ -15,6 +15,7 @@ import (
 
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -819,4 +820,13 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 	}
 
 	return resp.ID, nil
+}
+
+// InspectContainer returns container inspection data.
+func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
+	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return types.ContainerJSON{}, fmt.Errorf("inspecting container: %w", err)
+	}
+	return inspect, nil
 }
