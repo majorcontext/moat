@@ -856,6 +856,7 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 		},
 		&container.HostConfig{
 			NetworkMode: container.NetworkMode(cfg.NetworkID),
+			Privileged:  cfg.Privileged,
 		},
 		nil, // network config
 		nil, // platform

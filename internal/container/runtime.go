@@ -170,6 +170,9 @@ type SidecarConfig struct {
 
 	// Cmd is the command to run
 	Cmd []string
+
+	// Privileged indicates if the sidecar needs privileged mode
+	Privileged bool
 }
 
 // MountConfig describes a volume mount.

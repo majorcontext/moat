@@ -505,7 +505,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Exclude proxy's own address from proxying to prevent circular references
 		// This is critical for MCP relay endpoint which is on the proxy itself
-		noProxy := hostAddr + ",localhost,127.0.0.1"
+		// Also exclude BuildKit sidecar hostname to allow direct gRPC connections
+		noProxy := hostAddr + ",localhost,127.0.0.1,buildkit"
 
 		proxyEnv = []string{
 			"HTTP_PROXY=" + proxyURL,
@@ -1374,11 +1375,12 @@ region = %s
 		// Start BuildKit sidecar
 		log.Debug("starting buildkit sidecar", "image", buildkitCfg.SidecarImage)
 		sidecarCfg := container.SidecarConfig{
-			Image:     buildkitCfg.SidecarImage,
-			Name:      buildkitCfg.SidecarName,
-			Hostname:  "buildkit",
-			NetworkID: networkID,
-			Cmd:       []string{"--addr", "tcp://0.0.0.0:1234"},
+			Image:      buildkitCfg.SidecarImage,
+			Name:       buildkitCfg.SidecarName,
+			Hostname:   "buildkit",
+			NetworkID:  networkID,
+			Cmd:        []string{"--addr", "tcp://0.0.0.0:1234"},
+			Privileged: true, // BuildKit needs privileged mode for bind mounts
 		}
 
 		buildkitContainerID, err := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg)
