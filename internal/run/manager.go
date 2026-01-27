@@ -1360,17 +1360,18 @@ region = %s
 	}
 
 	// Create network and start BuildKit sidecar if enabled
+	var networkID string
 	if buildkitCfg.Enabled {
 		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
-		networkID, err := m.runtime.(*container.DockerRuntime).CreateNetwork(ctx, buildkitCfg.NetworkName)
-		if err != nil {
+		netID, netErr := m.runtime.(*container.DockerRuntime).CreateNetwork(ctx, buildkitCfg.NetworkName) //nolint:errcheck
+		if netErr != nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
 			cleanupCodex(codexGenerated)
-			return nil, fmt.Errorf("failed to create Docker network for buildkit sidecar: %w", err)
+			return nil, fmt.Errorf("failed to create Docker network for buildkit sidecar: %w", netErr)
 		}
-		buildkitCfg.NetworkID = networkID
+		networkID = netID
 
 		// Start BuildKit sidecar
 		log.Debug("starting buildkit sidecar", "image", buildkitCfg.SidecarImage)
@@ -1400,15 +1401,15 @@ region = %s
 			},
 		}
 
-		buildkitContainerID, err := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg)
-		if err != nil {
+		buildkitContainerID, sidecarErr := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg) //nolint:errcheck
+		if sidecarErr != nil {
 			// Clean up network on failure
-			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID)
+			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID) //nolint:errcheck
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
 			cleanupCodex(codexGenerated)
-			return nil, fmt.Errorf("failed to start buildkit sidecar: %w\n\nEnsure Docker can access Docker Hub to pull %s", err, buildkitCfg.SidecarImage)
+			return nil, fmt.Errorf("failed to start buildkit sidecar: %w\n\nEnsure Docker can access Docker Hub to pull %s", sidecarErr, buildkitCfg.SidecarImage)
 		}
 
 		// Wait for BuildKit to be ready (up to 10 seconds)
@@ -1416,15 +1417,15 @@ region = %s
 		ready := false
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			inspect, err := m.runtime.(*container.DockerRuntime).InspectContainer(ctx, buildkitContainerID)
-			if err == nil && inspect.State != nil && inspect.State.Running {
+			inspect, inspectErr := m.runtime.(*container.DockerRuntime).InspectContainer(ctx, buildkitContainerID) //nolint:errcheck
+			if inspectErr == nil && inspect.State != nil && inspect.State.Running {
 				ready = true
 				break
 			}
 		}
 		if !ready {
-			m.runtime.StopContainer(ctx, buildkitContainerID)
-			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID)
+			_ = m.runtime.StopContainer(ctx, buildkitContainerID)                  //nolint:errcheck
+			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID) //nolint:errcheck
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
@@ -1465,8 +1466,8 @@ region = %s
 	if err != nil {
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			m.runtime.StopContainer(ctx, r.BuildkitContainerID)
-			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, r.NetworkID)
+			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID)                  //nolint:errcheck
+			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
 		}
 		// Clean up proxy servers if container creation fails
 		cleanupProxy(proxyServer)

@@ -18,7 +18,6 @@ import (
 	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -403,8 +402,8 @@ func (r *DockerRuntime) buildImageWithBuildKit(ctx context.Context, dockerfile s
 
 	// Write Dockerfile to temp directory
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
-		return fmt.Errorf("writing Dockerfile: %w", err)
+	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); writeErr != nil {
+		return fmt.Errorf("writing Dockerfile: %w", writeErr)
 	}
 
 	// Determine platform based on host architecture
@@ -848,7 +847,7 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 	}
 
 	// Prepare mounts
-	var mounts []mount.Mount
+	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
 	for _, m := range cfg.Mounts {
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
@@ -881,7 +880,7 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 	// Start container
 	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Clean up on failure
-		r.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		_ = r.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return "", fmt.Errorf("starting sidecar container: %w", err)
 	}
 
@@ -889,10 +888,10 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 }
 
 // InspectContainer returns container inspection data.
-func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
+func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (container.InspectResponse, error) {
 	inspect, err := r.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return types.ContainerJSON{}, fmt.Errorf("inspecting container: %w", err)
+		return container.InspectResponse{}, fmt.Errorf("inspecting container: %w", err)
 	}
 	return inspect, nil
 }
