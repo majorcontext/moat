@@ -429,3 +429,35 @@ func TestRunStoreRemoveEmptyRunID(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestMetadata_BuildKitFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewRunStore(tmpDir, "test-run")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	// Save metadata with buildkit fields
+	original := Metadata{
+		Name:                "test",
+		BuildkitContainerID: "buildkit-123",
+		NetworkID:           "net-456",
+	}
+
+	if err := store.SaveMetadata(original); err != nil {
+		t.Fatalf("SaveMetadata failed: %v", err)
+	}
+
+	// Load and verify
+	loaded, err := store.LoadMetadata()
+	if err != nil {
+		t.Fatalf("LoadMetadata failed: %v", err)
+	}
+
+	if loaded.BuildkitContainerID != original.BuildkitContainerID {
+		t.Errorf("BuildkitContainerID: got %q, want %q", loaded.BuildkitContainerID, original.BuildkitContainerID)
+	}
+	if loaded.NetworkID != original.NetworkID {
+		t.Errorf("NetworkID: got %q, want %q", loaded.NetworkID, original.NetworkID)
+	}
+}

@@ -26,6 +26,10 @@ type Metadata struct {
 	StartedAt   time.Time      `json:"started_at,omitempty"`
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
 	Error       string         `json:"error,omitempty"`
+
+	// BuildKit sidecar fields (docker:dind only)
+	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
+	NetworkID           string `json:"network_id,omitempty"`
 }
 
 // RunStore manages storage for a single agent run.
