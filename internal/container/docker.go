@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/andybons/moat/internal/buildkit"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -376,8 +378,56 @@ func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, erro
 }
 
 // BuildImage builds a Docker image from Dockerfile content.
+// Routes to BuildKit client if BUILDKIT_HOST is set, otherwise uses Docker SDK.
 // Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
 func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Use BuildKit client if BUILDKIT_HOST is set
+	if os.Getenv("BUILDKIT_HOST") != "" {
+		return r.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
+	}
+	// Otherwise use Docker SDK
+	return r.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
+}
+
+// buildImageWithBuildKit builds an image using the BuildKit client.
+func (r *DockerRuntime) buildImageWithBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Create temp directory for build context
+	tmpDir, err := os.MkdirTemp("", "moat-build-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write Dockerfile to temp directory
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
+		return fmt.Errorf("writing Dockerfile: %w", err)
+	}
+
+	// Determine platform based on host architecture
+	platform := "linux/amd64"
+	if goruntime.GOARCH == "arm64" {
+		platform = "linux/arm64"
+	}
+
+	// Create BuildKit client
+	bkClient, err := buildkit.NewClient()
+	if err != nil {
+		return fmt.Errorf("creating buildkit client: %w", err)
+	}
+
+	// Build the image
+	return bkClient.Build(ctx, buildkit.BuildOptions{
+		Tag:        tag,
+		ContextDir: tmpDir,
+		NoCache:    opts.NoCache,
+		Platform:   platform,
+		BuildArgs:  map[string]string{}, // No build args exposed in container.BuildOptions yet
+	})
+}
+
+// buildImageWithDockerSDK builds an image using the Docker SDK.
+func (r *DockerRuntime) buildImageWithDockerSDK(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
 	// Create a tar archive with the Dockerfile
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)

@@ -2,7 +2,10 @@ package container
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -320,5 +323,87 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyName(t *testing.T) {
 	}
 	if err.Error() != "sidecar name cannot be empty" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
+	tests := []struct {
+		name               string
+		buildkitHost       string
+		expectBuildKitPath bool
+	}{
+		{
+			name:               "uses buildkit when BUILDKIT_HOST is set",
+			buildkitHost:       "tcp://buildkit:1234",
+			expectBuildKitPath: true,
+		},
+		{
+			name:               "uses docker sdk when BUILDKIT_HOST is empty",
+			buildkitHost:       "",
+			expectBuildKitPath: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore BUILDKIT_HOST
+			oldBuildKitHost := os.Getenv("BUILDKIT_HOST")
+			defer func() {
+				if oldBuildKitHost != "" {
+					os.Setenv("BUILDKIT_HOST", oldBuildKitHost)
+				} else {
+					os.Unsetenv("BUILDKIT_HOST")
+				}
+			}()
+
+			// Set BUILDKIT_HOST for this test
+			if tt.buildkitHost != "" {
+				os.Setenv("BUILDKIT_HOST", tt.buildkitHost)
+			} else {
+				os.Unsetenv("BUILDKIT_HOST")
+			}
+
+			// Create a minimal runtime
+			rt := &DockerRuntime{}
+
+			ctx := context.Background()
+			dockerfile := "FROM alpine:latest\n"
+			tag := "test:latest"
+			opts := BuildOptions{}
+
+			// Call BuildImage - it will fail (no actual client or buildkit),
+			// but we can verify which path was taken by the error message.
+			// Recover from any panic (Docker SDK may panic with nil client).
+			var err error
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// If we get a panic, it's from Docker SDK path (nil pointer)
+						err = fmt.Errorf("docker sdk panic: %v", r)
+					}
+				}()
+				err = rt.BuildImage(ctx, dockerfile, tag, opts)
+			}()
+
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+
+			// Check which path was taken based on error message
+			errMsg := err.Error()
+			if tt.expectBuildKitPath {
+				// BuildKit path should fail with buildkit-related error
+				// (either "creating buildkit client" or "buildkit build failed")
+				if !strings.Contains(errMsg, "buildkit") {
+					t.Errorf("expected buildkit path error, got: %v", err)
+				}
+			} else {
+				// Docker SDK path should fail with nil client error or panic
+				// (should NOT contain "buildkit")
+				if strings.Contains(errMsg, "buildkit") {
+					t.Errorf("expected docker sdk path, but got buildkit error: %v", err)
+				}
+			}
+		})
 	}
 }
