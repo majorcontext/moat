@@ -749,3 +749,68 @@ func TestDockerModeExclusive(t *testing.T) {
 		t.Error("dind mode should never have GroupAdd")
 	}
 }
+
+func TestManager_CreateWithBuildKit(t *testing.T) {
+	// Test that buildkit sidecar is created for dind mode
+	dockerConfig := &DockerDependencyConfig{
+		Mode:       deps.DockerModeDind,
+		Privileged: true,
+	}
+
+	result := computeBuildKitConfig(dockerConfig, "test-run-id")
+
+	if !result.Enabled {
+		t.Error("BuildKit should be enabled for dind mode")
+	}
+	if result.NetworkName != "moat-test-run-id" {
+		t.Errorf("NetworkName: got %q, want %q", result.NetworkName, "moat-test-run-id")
+	}
+	if result.SidecarName != "moat-buildkit-test-run-id" {
+		t.Errorf("SidecarName: got %q, want %q", result.SidecarName, "moat-buildkit-test-run-id")
+	}
+	if result.SidecarImage != "moby/buildkit:latest" {
+		t.Errorf("SidecarImage: got %q, want %q", result.SidecarImage, "moby/buildkit:latest")
+	}
+}
+
+func TestComputeBuildKitEnv(t *testing.T) {
+	tests := []struct {
+		name       string
+		enabled    bool
+		wantEnvVar bool
+	}{
+		{
+			name:       "buildkit enabled",
+			enabled:    true,
+			wantEnvVar: true,
+		},
+		{
+			name:       "buildkit disabled",
+			enabled:    false,
+			wantEnvVar: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := computeBuildKitEnv(tt.enabled)
+
+			found := false
+			for _, e := range env {
+				if strings.HasPrefix(e, "BUILDKIT_HOST=") {
+					found = true
+					if !tt.wantEnvVar {
+						t.Error("BUILDKIT_HOST should not be set when disabled")
+					}
+					if !strings.Contains(e, "tcp://buildkit:1234") {
+						t.Errorf("BUILDKIT_HOST value incorrect: %s", e)
+					}
+				}
+			}
+
+			if tt.wantEnvVar && !found {
+				t.Error("BUILDKIT_HOST should be set when enabled")
+			}
+		})
+	}
+}

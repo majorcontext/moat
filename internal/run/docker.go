@@ -177,3 +177,38 @@ func ResolveDockerDependency(depList []deps.Dependency, runtimeType container.Ru
 		GroupID: strconv.FormatUint(uint64(gid), 10),
 	}, nil
 }
+
+// BuildKitConfig holds configuration for BuildKit sidecar.
+type BuildKitConfig struct {
+	Enabled      bool
+	NetworkName  string
+	NetworkID    string
+	SidecarName  string
+	SidecarImage string
+}
+
+// computeBuildKitConfig determines if BuildKit sidecar should be used.
+// BuildKit is automatically enabled for docker:dind mode.
+func computeBuildKitConfig(dockerConfig *DockerDependencyConfig, runID string) BuildKitConfig {
+	// Only enable for dind mode
+	if dockerConfig == nil || dockerConfig.Mode != deps.DockerModeDind {
+		return BuildKitConfig{Enabled: false}
+	}
+
+	return BuildKitConfig{
+		Enabled:      true,
+		NetworkName:  "moat-" + runID,
+		SidecarName:  "moat-buildkit-" + runID,
+		SidecarImage: "moby/buildkit:latest",
+	}
+}
+
+// computeBuildKitEnv returns environment variables for BuildKit integration.
+func computeBuildKitEnv(enabled bool) []string {
+	if !enabled {
+		return nil
+	}
+	return []string{
+		"BUILDKIT_HOST=tcp://buildkit:1234",
+	}
+}
