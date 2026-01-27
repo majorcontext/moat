@@ -138,3 +138,68 @@ func TestDockerRuntime_RemoveNetwork(t *testing.T) {
 		t.Fatal("network still exists after removal")
 	}
 }
+
+func TestDockerRuntime_RemoveNetwork_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime()
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	// Try to remove a network that doesn't exist
+	if err := rt.RemoveNetwork(ctx, "nonexistent-network-id"); err != nil {
+		t.Fatalf("RemoveNetwork should not fail for non-existent network: %v", err)
+	}
+}
+
+func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime()
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	// Create a network
+	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
+	networkID, err := rt.CreateNetwork(ctx, networkName)
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+	defer rt.RemoveNetwork(ctx, networkID)
+
+	// Create a container attached to the network
+	containerName := "test-moat-container-" + strconv.FormatInt(time.Now().Unix(), 10)
+	containerID, err := rt.CreateContainer(ctx, Config{
+		Name:        containerName,
+		Image:       "alpine:latest",
+		Cmd:         []string{"sleep", "10"},
+		NetworkMode: networkName, // Attach to the network
+	})
+	if err != nil {
+		t.Fatalf("CreateContainer failed: %v", err)
+	}
+	defer rt.RemoveContainer(ctx, containerID)
+
+	// Start the container to create an active endpoint
+	if err := rt.StartContainer(ctx, containerID); err != nil {
+		t.Fatalf("StartContainer failed: %v", err)
+	}
+
+	// Try to remove the network while the container is running
+	// This should NOT fail (best-effort cleanup)
+	if err := rt.RemoveNetwork(ctx, networkID); err != nil {
+		t.Fatalf("RemoveNetwork should not fail for network with active endpoints: %v", err)
+	}
+
+	// Cleanup: stop and remove the container
+	rt.StopContainer(ctx, containerID)
+	rt.RemoveContainer(ctx, containerID)
+}

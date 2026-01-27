@@ -745,7 +745,7 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 // Returns the network ID.
 func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string, error) {
 	resp, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
-		Driver: "bridge",
+		Driver: "bridge", // Bridge network for inter-container communication
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating network: %w", err)
@@ -756,8 +756,18 @@ func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string,
 // RemoveNetwork removes a Docker network by ID.
 // Best-effort: does not fail if network doesn't exist or has active endpoints.
 func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
-	if err := r.cli.NetworkRemove(ctx, networkID); err != nil {
-		// Log but don't fail - network may already be removed
+	err := r.cli.NetworkRemove(ctx, networkID)
+	if err != nil {
+		// Ignore "not found" and "conflict" errors - network may already be
+		// removed or may have active endpoints during cleanup
+		if errdefs.IsNotFound(err) || errdefs.IsConflict(err) {
+			return nil
+		}
+		// Docker doesn't always return a proper conflict error code for active endpoints.
+		// Check the error message as a fallback.
+		if strings.Contains(err.Error(), "active endpoints") {
+			return nil
+		}
 		return fmt.Errorf("removing network: %w", err)
 	}
 	return nil
