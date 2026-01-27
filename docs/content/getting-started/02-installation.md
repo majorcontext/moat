@@ -75,6 +75,12 @@ Install Docker:
 - **Linux**: [Docker Engine](https://docs.docker.com/engine/install/)
 - **Windows**: [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
 
+**macOS users:** Also install BuildKit for faster image builds:
+
+```bash
+brew install docker-buildx
+```
+
 Verify Docker is running:
 
 ```bash

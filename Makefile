@@ -18,6 +18,9 @@ help: ## Show this help message
 build: ## Build the project
 	go build ./...
 
+build-cli: ## Build the CLI binary ./moat
+	go build -o moat ./cmd/moat
+
 test: test-unit test-e2e ## Run all tests (unit + E2E)
 
 test-unit: ## Run unit tests (use ARGS for filtering, e.g., ARGS='-run TestName')
