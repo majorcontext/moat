@@ -223,6 +223,31 @@ DinD mode runs an isolated Docker daemon inside the container:
 
 Use this mode when running untrusted code or when isolation is required.
 
+##### BuildKit sidecar (automatic with docker:dind)
+
+When using `docker:dind`, moat automatically deploys a BuildKit sidecar container to provide fast image builds:
+
+- **BuildKit sidecar**: Runs `moby/buildkit:latest` in a separate container
+- **Shared network**: Both containers communicate via a Docker network (`moat-<run-id>`)
+- **Environment**: `BUILDKIT_HOST=tcp://buildkit:1234` routes builds to the sidecar
+- **Full Docker**: Local `dockerd` in main container provides `docker ps`, `docker run`, etc.
+- **Performance**: BuildKit layer caching, `RUN --mount=type=cache`, faster multi-stage builds
+
+This configuration is automatic and requires no additional setup.
+
+**Example:**
+
+```yaml
+agent: builder
+dependencies:
+  - docker:dind  # Automatically includes BuildKit sidecar
+
+# Your code can now use:
+# - docker build (uses BuildKit for speed)
+# - docker ps (uses local dockerd)
+# - docker run (uses local dockerd)
+```
+
 ##### Runtime requirements
 
 Both docker modes require Docker runtime:
@@ -240,6 +265,14 @@ moat run --runtime docker ./my-project
 - Building Docker images
 - Running disposable services
 - CI/CD pipelines
+
+##### BuildKit troubleshooting
+
+If builds fail with BuildKit sidecar:
+
+1. **Image pull failure**: Ensure Docker can access Docker Hub to pull `moby/buildkit:latest`
+2. **Network issues**: Check that Docker networks are enabled (not disabled by firewall)
+3. **Performance**: BuildKit sidecar typically starts in 2-5 seconds; check Docker daemon logs if slower
 
 ---
 
