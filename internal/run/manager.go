@@ -1385,9 +1385,16 @@ region = %s
 				{
 					// Mount dind's Docker socket so BuildKit can export images to the daemon.
 					// This is the dind container's socket, NOT the host's socket.
-					// BuildKit uses this to export built images via the "image" exporter type.
+					// BuildKit uses this to export built images via the "docker" exporter type.
 					Source:   "/var/run/docker.sock",
 					Target:   "/var/run/docker.sock",
+					ReadOnly: false,
+				},
+				{
+					// Mount /tmp so BuildKit can access build contexts created by the main container.
+					// Both containers share the same /tmp directory for build context synchronization.
+					Source:   "/tmp",
+					Target:   "/tmp",
 					ReadOnly: false,
 				},
 			},
