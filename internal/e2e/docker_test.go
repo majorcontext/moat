@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -403,4 +404,131 @@ func TestDockerDindIsolation(t *testing.T) {
 	}
 
 	t.Log("docker:dind isolation verified: dind container cannot see host containers")
+}
+
+// TestDockerDindBuildKitImageBuild verifies that image building works with docker:dind
+// using BuildKit. This tests the full BuildKit integration flow:
+// 1. docker:dind starts with BuildKit sidecar
+// 2. BUILDKIT_HOST env var is set correctly
+// 3. Image builds succeed using BuildKit
+// 4. Built images are available in the isolated dind environment
+func TestDockerDindBuildKitImageBuild(t *testing.T) {
+	skipIfNoDocker(t)
+	skipIfNoPrivileged(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManager()
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithDeps(t, []string{"docker:dind"})
+
+	// Create a simple Dockerfile in the workspace
+	dockerfile := `FROM alpine:3.20
+RUN echo "BuildKit E2E test image"
+CMD ["echo", "Hello from BuildKit"]
+`
+	if err := os.WriteFile(workspace+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+		t.Fatalf("WriteFile Dockerfile: %v", err)
+	}
+
+	// Run a command that builds an image and then runs a container from it
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-docker-dind-buildkit",
+		Workspace: workspace,
+		Config: &config.Config{
+			Dependencies: []string{"docker:dind"},
+		},
+		Cmd: []string{"sh", "-c", `
+			echo "=== Verifying BuildKit is available ===" &&
+			echo "BUILDKIT_HOST=$BUILDKIT_HOST" &&
+			if [ -z "$BUILDKIT_HOST" ]; then
+				echo "ERROR: BUILDKIT_HOST not set!"
+				exit 1
+			fi &&
+			echo "=== Building image with BuildKit ===" &&
+			docker buildx build -t buildkit-test:e2e /workspace &&
+			echo "=== Verifying image exists ===" &&
+			docker images buildkit-test:e2e &&
+			echo "=== Running container from built image ===" &&
+			docker run --rm buildkit-test:e2e &&
+			echo "=== BuildKit E2E test complete ==="
+		`},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		// Read logs to help diagnose the failure
+		store, storeErr := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if storeErr == nil {
+			logs, _ := store.ReadLogs(0, 100)
+			var logLines []string
+			for _, entry := range logs {
+				logLines = append(logLines, entry.Line)
+			}
+			t.Fatalf("Wait: %v\nContainer logs:\n%s", err, strings.Join(logLines, "\n"))
+		}
+		t.Fatalf("Wait: %v", err)
+	}
+
+	// Give storage a moment to flush
+	time.Sleep(100 * time.Millisecond)
+
+	// Read logs to verify all steps completed
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	// Verify key markers are present
+	var foundBuildKitHost, foundBuilding, foundComplete, foundHello bool
+	for _, entry := range logs {
+		if strings.Contains(entry.Line, "BUILDKIT_HOST=tcp://") {
+			foundBuildKitHost = true
+		}
+		if strings.Contains(entry.Line, "Building image with BuildKit") {
+			foundBuilding = true
+		}
+		if strings.Contains(entry.Line, "BuildKit E2E test complete") {
+			foundComplete = true
+		}
+		if strings.Contains(entry.Line, "Hello from BuildKit") {
+			foundHello = true
+		}
+	}
+
+	if !foundBuildKitHost {
+		t.Error("BUILDKIT_HOST env var not found in output")
+	}
+	if !foundBuilding {
+		t.Error("Build step marker not found in output")
+	}
+	if !foundComplete {
+		t.Error("Test completion marker not found - command may have failed partway")
+	}
+	if !foundHello {
+		t.Error("Container output not found - built image may not have run correctly")
+	}
+
+	t.Logf("docker:dind BuildKit test output (%d log entries):", len(logs))
+	for _, entry := range logs {
+		t.Logf("  %s", entry.Line)
+	}
+	t.Log("docker:dind BuildKit integration verified: image building works correctly")
 }

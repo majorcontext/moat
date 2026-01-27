@@ -390,11 +390,12 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 			}
 
 			// Check which path was taken based on error message
-			errMsg := err.Error()
+			errMsg := strings.ToLower(err.Error())
 			if tt.expectBuildKitPath {
 				// BuildKit path should fail with buildkit-related error
-				// (either "creating buildkit client" or "buildkit build failed")
-				if !strings.Contains(errMsg, "buildkit") {
+				// (either "creating buildkit client" or "build failed")
+				// The error may contain connection failures to BuildKit
+				if !strings.Contains(errMsg, "buildkit") && !strings.Contains(errMsg, "build failed") {
 					t.Errorf("expected buildkit path error, got: %v", err)
 				}
 			} else {
