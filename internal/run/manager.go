@@ -2185,6 +2185,23 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 
+	// Remove BuildKit sidecar container if present
+	if r.BuildkitContainerID != "" {
+		if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing BuildKit sidecar: %v\n", err)
+		}
+	}
+
+	// Remove BuildKit network if present
+	if r.NetworkID != "" {
+		if dockerRuntime, ok := m.runtime.(*container.DockerRuntime); ok {
+			if err := dockerRuntime.RemoveNetwork(ctx, r.NetworkID); err != nil {
+				// This is best-effort - network may already be removed or in use
+				log.Debug("failed to remove BuildKit network", "network", r.NetworkID, "error", err)
+			}
+		}
+	}
+
 	// Stop the proxy server if one was created and still running
 	if r.ProxyServer != nil {
 		if err := r.ProxyServer.Stop(ctx); err != nil {
