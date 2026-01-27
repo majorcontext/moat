@@ -80,6 +80,10 @@ type Run struct {
 	// (config.toml, auth.json) that are mounted into the container. This should be
 	// cleaned up when the run is stopped or destroyed.
 	CodexConfigTempDir string
+
+	// BuildKit sidecar fields (docker:dind only)
+	BuildkitContainerID string
+	NetworkID           string
 }
 
 // Options configures a new run.
@@ -108,17 +112,19 @@ func (r *Run) SaveMetadata() error {
 		return nil // No store configured
 	}
 	return r.Store.SaveMetadata(storage.Metadata{
-		Name:        r.Name,
-		Workspace:   r.Workspace,
-		Grants:      r.Grants,
-		Ports:       r.Ports,
-		ContainerID: r.ContainerID,
-		State:       string(r.State),
-		Interactive: r.Interactive,
-		CreatedAt:   r.CreatedAt,
-		StartedAt:   r.StartedAt,
-		StoppedAt:   r.StoppedAt,
-		Error:       r.Error,
+		Name:                r.Name,
+		Workspace:           r.Workspace,
+		Grants:              r.Grants,
+		Ports:               r.Ports,
+		ContainerID:         r.ContainerID,
+		State:               string(r.State),
+		Interactive:         r.Interactive,
+		CreatedAt:           r.CreatedAt,
+		StartedAt:           r.StartedAt,
+		StoppedAt:           r.StoppedAt,
+		Error:               r.Error,
+		BuildkitContainerID: r.BuildkitContainerID,
+		NetworkID:           r.NetworkID,
 	})
 }
 

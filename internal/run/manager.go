@@ -865,6 +865,9 @@ region = %s
 		cleanupSSH(sshServer)
 		return nil, dockerErr
 	}
+	// Compute BuildKit configuration (automatic with docker:dind)
+	buildkitCfg := computeBuildKitConfig(dockerConfig, r.ID)
+
 	if dockerConfig != nil {
 		switch dockerConfig.Mode {
 		case deps.DockerModeHost:
@@ -874,10 +877,11 @@ region = %s
 		case deps.DockerModeDind:
 			// Dind mode: signal moat-init to start dockerd
 			proxyEnv = append(proxyEnv, "MOAT_DOCKER_DIND=1")
-			// Disable BuildKit - it has session management issues in nested Docker
-			// that cause "no active sessions" errors during image builds.
-			proxyEnv = append(proxyEnv, "DOCKER_BUILDKIT=0")
-			proxyEnv = append(proxyEnv, "MOAT_DISABLE_BUILDKIT=1")
+			if !buildkitCfg.Enabled {
+				// Disable BuildKit if not using sidecar (fallback case)
+				proxyEnv = append(proxyEnv, "DOCKER_BUILDKIT=0")
+				proxyEnv = append(proxyEnv, "MOAT_DISABLE_BUILDKIT=1")
+			}
 		}
 	}
 
@@ -1354,6 +1358,73 @@ region = %s
 		privileged = true
 	}
 
+	// Create network and start BuildKit sidecar if enabled
+	if buildkitCfg.Enabled {
+		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
+		networkID, err := m.runtime.(*container.DockerRuntime).CreateNetwork(ctx, buildkitCfg.NetworkName)
+		if err != nil {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("failed to create Docker network for buildkit sidecar: %w", err)
+		}
+		buildkitCfg.NetworkID = networkID
+
+		// Start BuildKit sidecar
+		log.Debug("starting buildkit sidecar", "image", buildkitCfg.SidecarImage)
+		sidecarCfg := container.SidecarConfig{
+			Image:     buildkitCfg.SidecarImage,
+			Name:      buildkitCfg.SidecarName,
+			Hostname:  "buildkit",
+			NetworkID: networkID,
+			Cmd:       []string{"--addr", "tcp://0.0.0.0:1234"},
+		}
+
+		buildkitContainerID, err := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg)
+		if err != nil {
+			// Clean up network on failure
+			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID)
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("failed to start buildkit sidecar: %w\n\nEnsure Docker can access Docker Hub to pull %s", err, buildkitCfg.SidecarImage)
+		}
+
+		// Wait for BuildKit to be ready (up to 10 seconds)
+		log.Debug("waiting for buildkit sidecar to be ready")
+		ready := false
+		for i := 0; i < 10; i++ {
+			time.Sleep(1 * time.Second)
+			inspect, err := m.runtime.(*container.DockerRuntime).InspectContainer(ctx, buildkitContainerID)
+			if err == nil && inspect.State.Running {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			m.runtime.StopContainer(ctx, buildkitContainerID)
+			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID)
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("buildkit sidecar failed to become ready within 10 seconds")
+		}
+
+		// Store buildkit IDs in run metadata
+		r.BuildkitContainerID = buildkitContainerID
+		r.NetworkID = networkID
+
+		// Set network mode to use the buildkit network
+		networkMode = networkID
+	}
+
+	// Add BuildKit env vars if enabled
+	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
+	proxyEnv = append(proxyEnv, buildkitEnv...)
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1373,6 +1444,11 @@ region = %s
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 	})
 	if err != nil {
+		// Clean up BuildKit resources on failure
+		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
+			m.runtime.StopContainer(ctx, r.BuildkitContainerID)
+			m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, r.NetworkID)
+		}
 		// Clean up proxy servers if container creation fails
 		cleanupProxy(proxyServer)
 		cleanupSSH(sshServer)
