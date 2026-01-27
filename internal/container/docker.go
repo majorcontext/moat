@@ -772,3 +772,51 @@ func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) err
 	}
 	return nil
 }
+
+// StartSidecar starts a sidecar container (pull, create, start).
+// The container is attached to the specified network and assigned a hostname.
+// Returns the container ID.
+func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
+	// Validate input
+	if cfg.Image == "" {
+		return "", fmt.Errorf("sidecar image cannot be empty")
+	}
+	if cfg.NetworkID == "" {
+		return "", fmt.Errorf("sidecar network ID cannot be empty")
+	}
+	if cfg.Name == "" {
+		return "", fmt.Errorf("sidecar name cannot be empty")
+	}
+
+	// Pull image if not present
+	if err := r.ensureImage(ctx, cfg.Image); err != nil {
+		return "", fmt.Errorf("pulling sidecar image: %w", err)
+	}
+
+	// Create container
+	resp, err := r.cli.ContainerCreate(ctx,
+		&container.Config{
+			Image:    cfg.Image,
+			Cmd:      cfg.Cmd,
+			Hostname: cfg.Hostname,
+		},
+		&container.HostConfig{
+			NetworkMode: container.NetworkMode(cfg.NetworkID),
+		},
+		nil, // network config
+		nil, // platform
+		cfg.Name,
+	)
+	if err != nil {
+		return "", fmt.Errorf("creating sidecar container: %w", err)
+	}
+
+	// Start container
+	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		// Clean up on failure
+		r.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		return "", fmt.Errorf("starting sidecar container: %w", err)
+	}
+
+	return resp.ID, nil
+}

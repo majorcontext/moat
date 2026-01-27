@@ -106,6 +106,19 @@ type Runtime interface {
 
 	// ResizeTTY resizes the container's TTY to the given dimensions.
 	ResizeTTY(ctx context.Context, id string, height, width uint) error
+
+	// CreateNetwork creates a Docker network for inter-container communication.
+	// Returns the network ID.
+	CreateNetwork(ctx context.Context, name string) (string, error)
+
+	// RemoveNetwork removes a Docker network by ID.
+	// Best-effort: does not fail if network doesn't exist or has active endpoints.
+	RemoveNetwork(ctx context.Context, networkID string) error
+
+	// StartSidecar starts a sidecar container (pull, create, start).
+	// The container is attached to the specified network and assigned a hostname.
+	// Returns the container ID.
+	StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error)
 }
 
 // AttachOptions configures container attachment.
@@ -139,6 +152,24 @@ type Config struct {
 	Privileged   bool           // If true, run container in privileged mode (required for Docker-in-Docker)
 	Interactive  bool           // If true, container will be attached interactively (Apple runtime: uses exec workaround; Docker: handled natively)
 	HasMoatUser  bool           // If true, image has moatuser (moat-built images); used for exec --user in Apple containers
+}
+
+// SidecarConfig holds configuration for starting a sidecar container.
+type SidecarConfig struct {
+	// Image is the container image to use (e.g., "moby/buildkit:latest")
+	Image string
+
+	// Name is the container name
+	Name string
+
+	// Hostname is the network hostname for the container
+	Hostname string
+
+	// NetworkID is the Docker network to attach to
+	NetworkID string
+
+	// Cmd is the command to run
+	Cmd []string
 }
 
 // MountConfig describes a volume mount.
