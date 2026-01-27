@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
@@ -738,4 +739,26 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 			return nil
 		}
 	}
+}
+
+// CreateNetwork creates a Docker network for inter-container communication.
+// Returns the network ID.
+func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string, error) {
+	resp, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
+		Driver: "bridge",
+	})
+	if err != nil {
+		return "", fmt.Errorf("creating network: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// RemoveNetwork removes a Docker network by ID.
+// Best-effort: does not fail if network doesn't exist or has active endpoints.
+func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
+	if err := r.cli.NetworkRemove(ctx, networkID); err != nil {
+		// Log but don't fail - network may already be removed
+		return fmt.Errorf("removing network: %w", err)
+	}
+	return nil
 }

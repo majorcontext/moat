@@ -1,7 +1,12 @@
 package container
 
 import (
+	"context"
+	"strconv"
 	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types/network"
 )
 
 func TestConfig_GroupAdd(t *testing.T) {
@@ -71,5 +76,65 @@ func TestDockerRuntime_Type(t *testing.T) {
 	r := &DockerRuntime{}
 	if r.Type() != RuntimeDocker {
 		t.Errorf("Type() = %v, want %v", r.Type(), RuntimeDocker)
+	}
+}
+
+func TestDockerRuntime_CreateNetwork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime()
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
+	networkID, err := rt.CreateNetwork(ctx, networkName)
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+	defer rt.RemoveNetwork(ctx, networkID)
+
+	if networkID == "" {
+		t.Fatal("CreateNetwork returned empty network ID")
+	}
+
+	// Verify network exists
+	inspect, err := rt.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	if err != nil {
+		t.Fatalf("network not created: %v", err)
+	}
+	if inspect.Name != networkName {
+		t.Errorf("network name: got %q, want %q", inspect.Name, networkName)
+	}
+}
+
+func TestDockerRuntime_RemoveNetwork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime()
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
+	networkID, err := rt.CreateNetwork(ctx, networkName)
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+
+	if err := rt.RemoveNetwork(ctx, networkID); err != nil {
+		t.Fatalf("RemoveNetwork failed: %v", err)
+	}
+
+	// Verify network is gone
+	_, err = rt.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	if err == nil {
+		t.Fatal("network still exists after removal")
 	}
 }
