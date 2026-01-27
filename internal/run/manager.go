@@ -1398,7 +1398,7 @@ region = %s
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
 			inspect, err := m.runtime.(*container.DockerRuntime).InspectContainer(ctx, buildkitContainerID)
-			if err == nil && inspect.State.Running {
+			if err == nil && inspect.State != nil && inspect.State.Running {
 				ready = true
 				break
 			}
