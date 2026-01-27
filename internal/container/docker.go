@@ -382,12 +382,12 @@ func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, erro
 // Routes to BuildKit client if BUILDKIT_HOST is set, otherwise uses Docker SDK.
 // Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
 func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Use BuildKit client if BUILDKIT_HOST is set
+	// Use BuildKit client if BUILDKIT_HOST is set (docker:dind mode with BuildKit sidecar)
 	if buildkitHost := os.Getenv("BUILDKIT_HOST"); buildkitHost != "" {
 		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
 		return r.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
 	}
-	// Otherwise use Docker SDK
+	// Otherwise use Docker SDK (will use legacy builder by default for reliability)
 	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
 	return r.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
 }
@@ -459,11 +459,13 @@ func (r *DockerRuntime) buildImageWithDockerSDK(ctx context.Context, dockerfile 
 		platform = "linux/arm64"
 	}
 
-	// Use BuildKit by default, but allow disabling via MOAT_DISABLE_BUILDKIT=1
-	// This is useful in CI environments where BuildKit can have session issues.
-	builderVersion := build.BuilderBuildKit
-	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
-		builderVersion = build.BuilderV1
+	// Use legacy builder by default for Docker SDK.
+	// Docker SDK's BuildKit integration (BuilderBuildKit) is unreliable and causes
+	// "no active sessions" errors. For docker:dind, we use our BuildKit client instead.
+	// Users can opt-in to Docker SDK's BuildKit via DOCKER_BUILDKIT=1 env var if needed.
+	builderVersion := build.BuilderV1
+	if os.Getenv("DOCKER_BUILDKIT") == "1" {
+		builderVersion = build.BuilderBuildKit
 	}
 
 	// Build the image
