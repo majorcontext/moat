@@ -1381,6 +1381,16 @@ region = %s
 			NetworkID:  networkID,
 			Cmd:        []string{"--addr", "tcp://0.0.0.0:1234"},
 			Privileged: true, // BuildKit needs privileged mode for bind mounts
+			Mounts: []container.MountConfig{
+				{
+					// Mount dind's Docker socket so BuildKit can export images to the daemon.
+					// This is the dind container's socket, NOT the host's socket.
+					// BuildKit uses this to export built images via the "image" exporter type.
+					Source:   "/var/run/docker.sock",
+					Target:   "/var/run/docker.sock",
+					ReadOnly: false,
+				},
+			},
 		}
 
 		buildkitContainerID, err := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg)

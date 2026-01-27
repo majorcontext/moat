@@ -847,6 +847,17 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 		return "", fmt.Errorf("pulling sidecar image: %w", err)
 	}
 
+	// Prepare mounts
+	var mounts []mount.Mount
+	for _, m := range cfg.Mounts {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+
 	// Create container
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
@@ -857,6 +868,7 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 		&container.HostConfig{
 			NetworkMode: container.NetworkMode(cfg.NetworkID),
 			Privileged:  cfg.Privileged,
+			Mounts:      mounts,
 		},
 		nil, // network config
 		nil, // platform

@@ -173,6 +173,9 @@ type SidecarConfig struct {
 
 	// Privileged indicates if the sidecar needs privileged mode
 	Privileged bool
+
+	// Mounts are volume mounts for the sidecar
+	Mounts []MountConfig
 }
 
 // MountConfig describes a volume mount.
