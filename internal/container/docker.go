@@ -29,14 +29,16 @@ import (
 // ErrGVisorNotAvailable is returned when gVisor is required but not installed.
 var ErrGVisorNotAvailable = errors.New(`gVisor (runsc) is required but not available
 
-To install on Linux:
-  curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg
-  echo "deb [signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
-    sudo tee /etc/apt/sources.list.d/gvisor.list
-  sudo apt update && sudo apt install runsc
-  sudo runsc install
+To install on Linux (Debian/Ubuntu), copy and run:
 
-To install on Docker Desktop (macOS/Windows):
+  curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
+    sudo tee /etc/apt/sources.list.d/gvisor.list && \
+    sudo apt update && sudo apt install -y runsc && \
+    sudo runsc install && \
+    sudo systemctl reload docker
+
+For Docker Desktop (macOS/Windows):
   See https://gvisor.dev/docs/user_guide/install/
 
 To bypass (reduced isolation):
