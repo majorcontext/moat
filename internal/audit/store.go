@@ -176,6 +176,11 @@ func (s *Store) AppendSSH(data SSHData) (*Entry, error) {
 	return s.Append(EntrySSH, &data)
 }
 
+// AppendContainer adds a container lifecycle entry.
+func (s *Store) AppendContainer(data ContainerData) (*Entry, error) {
+	return s.Append(EntryContainer, &data)
+}
+
 // Get retrieves an entry by sequence number.
 func (s *Store) Get(seq uint64) (*Entry, error) {
 	row := s.db.QueryRow(`

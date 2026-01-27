@@ -119,6 +119,7 @@ type categorizedDeps struct {
 	dynamicUv     []Dependency
 	dynamicCargo  []Dependency
 	dynamicGo     []Dependency
+	dockerMode    DockerMode // empty string means no docker, "host" or "dind" otherwise
 }
 
 // categorizeDeps sorts dependencies into categories for optimal Dockerfile layer caching.
@@ -157,6 +158,8 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 			c.uvToolPkgs = append(c.uvToolPkgs, dep)
 		case TypeCustom:
 			c.customDeps = append(c.customDeps, dep)
+		case TypeDocker:
+			c.dockerMode = dep.DockerMode
 		case TypeMeta:
 			// Meta dependencies are expanded during parsing/validation
 		}
@@ -192,6 +195,9 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 		c.aptPkgs = append(c.aptPkgs, "openssh-client", "socat")
 	}
 
+	// Note: Docker CLI is installed separately from Docker's official repo,
+	// not via apt, to ensure a recent version compatible with modern daemons.
+
 	// Determine base image and write header
 	baseImage, baseRuntime := selectBaseImage(c.runtimes)
 	b.WriteString("FROM " + baseImage + "\n\n")
@@ -201,6 +207,7 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeBasePackages(&b, opts.useBuildKit())
 	writeUserSetup(&b)
 	writeAptPackages(&b, c.aptPkgs, opts.useBuildKit())
+	writeDockerCLI(&b, c.dockerMode)
 	writeRuntimes(&b, c.runtimes, baseRuntime)
 	writeGithubBinaries(&b, c.githubBins)
 	writeNpmPackages(&b, c.npmPkgs)
@@ -222,7 +229,7 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeSSHKnownHosts(&b, opts.SSHHosts)
 
 	// Finalize with entrypoint and user setup
-	writeEntrypoint(&b, opts)
+	writeEntrypoint(&b, opts, c.dockerMode)
 
 	return b.String(), nil
 }
@@ -299,6 +306,35 @@ func writeAptPackages(b *strings.Builder, pkgs []string, useBuildKit bool) {
 	for _, pkg := range pkgs {
 		b.WriteString("       " + pkg + " \\\n")
 	}
+	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+}
+
+// writeDockerCLI installs Docker CLI from Docker's official repository.
+// We use the official repo instead of the docker.io apt package because
+// the apt package is often too old and incompatible with modern Docker daemons.
+//
+// For host mode: Installs docker-ce-cli only (talks to host daemon via socket).
+// For dind mode: Installs docker-ce-cli + docker-ce (daemon) + containerd.io.
+func writeDockerCLI(b *strings.Builder, mode DockerMode) {
+	if mode == "" {
+		return
+	}
+
+	// Determine which packages to install based on mode
+	packages := "docker-ce-cli"
+	comment := "Docker CLI (from official Docker repo for up-to-date version)"
+	if mode == DockerModeDind {
+		packages = "docker-ce docker-ce-cli containerd.io docker-buildx-plugin"
+		comment = "Docker daemon + CLI + buildx (from official Docker repo for dind mode)"
+	}
+
+	b.WriteString("# " + comment + "\n")
+	b.WriteString("RUN install -m 0755 -d /etc/apt/keyrings \\\n")
+	b.WriteString("    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \\\n")
+	b.WriteString("    && chmod a+r /etc/apt/keyrings/docker.asc \\\n")
+	b.WriteString("    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable\" > /etc/apt/sources.list.d/docker.list \\\n")
+	b.WriteString("    && apt-get update \\\n")
+	b.WriteString("    && apt-get install -y --no-install-recommends " + packages + " \\\n")
 	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
 
@@ -431,12 +467,17 @@ func writeSSHKnownHosts(b *strings.Builder, hosts []string) {
 }
 
 // writeEntrypoint writes the entrypoint configuration and working directory.
-func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions) {
-	// Features: SSH agent forwarding, Claude Code file setup, Codex file setup, privilege drop to moatuser
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit
+func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode DockerMode) {
+	// Features that require moat-init entrypoint:
+	// - SSH agent forwarding
+	// - Claude Code file setup
+	// - Codex file setup
+	// - Docker socket group setup (host mode)
+	// - Docker daemon startup (dind mode)
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || dockerMode != ""
 	if needsInit {
 		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
-		b.WriteString("# Moat initialization script (SSH agent forwarding + privilege drop)\n")
+		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
 		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {

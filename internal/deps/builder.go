@@ -38,7 +38,12 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 			spec, _ := GetSpec(d.Name)
 			v = spec.Default
 		}
-		sorted[i] = d.Name + "@" + v
+		key := d.Name + "@" + v
+		// Include DockerMode in hash to differentiate docker:host vs docker:dind
+		if d.DockerMode != "" {
+			key += ":" + string(d.DockerMode)
+		}
+		sorted[i] = key
 	}
 	sort.Strings(sorted)
 
@@ -68,8 +73,11 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 
 	// Hash the combined input
+	// Use 16 chars (64 bits) for sufficiently low collision probability
+	// while keeping tags readable. 12 chars (48 bits) has ~0.1% collision
+	// risk at 10k images; 16 chars reduces this to ~0.00001%.
 	h := sha256.Sum256([]byte(hashInput))
-	hash := hex.EncodeToString(h[:])[:12]
+	hash := hex.EncodeToString(h[:])[:16]
 
 	return "moat/run:" + hash
 }

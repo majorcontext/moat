@@ -20,6 +20,7 @@ const (
 	EntryCredential EntryType = "credential"
 	EntrySecret     EntryType = "secret"
 	EntrySSH        EntryType = "ssh"
+	EntryContainer  EntryType = "container"
 )
 
 // FirstSequence is the sequence number of the first entry in a log.
@@ -61,6 +62,13 @@ type SSHData struct {
 	Host        string `json:"host,omitempty"`        // target host (for sign operations)
 	Fingerprint string `json:"fingerprint,omitempty"` // key fingerprint (for sign operations)
 	Error       string `json:"error,omitempty"`       // error message (for denied operations)
+}
+
+// ContainerData holds container lifecycle entry data.
+type ContainerData struct {
+	Action     string `json:"action"`               // "created", "started", "stopped"
+	Privileged bool   `json:"privileged,omitempty"` // true if container runs in privileged mode
+	Reason     string `json:"reason,omitempty"`     // e.g., "docker:dind" for why privileged
 }
 
 // Entry represents a single hash-chained log entry.

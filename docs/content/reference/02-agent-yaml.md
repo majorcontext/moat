@@ -175,6 +175,72 @@ dependencies:
 | `go@1.22` | `golang:1.22` |
 | (none) | `ubuntu:22.04` |
 
+#### docker
+
+The `docker` dependency provides Docker access inside the container. You must specify a mode explicitly:
+
+| Syntax | Mode | Description |
+|--------|------|-------------|
+| `docker:host` | Host | Mounts the host Docker socket |
+| `docker:dind` | Docker-in-Docker | Runs an isolated Docker daemon |
+
+##### docker:host
+
+```yaml
+dependencies:
+  - docker:host
+```
+
+Host mode mounts `/var/run/docker.sock` from the host:
+- Fast startup (no daemon to initialize)
+- Shared image cache with host
+- Full access to host Docker daemon
+
+**Tradeoffs:**
+- Containers created inside can access host network and resources
+- Agent can see and interact with all host containers
+- Images built inside are cached on host (may be desired or not)
+
+Use this mode for speed and convenience when you trust the agent.
+
+##### docker:dind (Docker-in-Docker)
+
+```yaml
+dependencies:
+  - docker:dind
+```
+
+DinD mode runs an isolated Docker daemon inside the container:
+- Complete isolation from host Docker
+- Agent cannot see or affect host containers
+- Clean slate on each run (no shared image cache)
+
+**Tradeoffs:**
+- Requires privileged mode (Moat sets this automatically)
+- Slower startup (~5-10 seconds to initialize daemon)
+- No image cache between runs
+- Uses vfs storage driver (slower than overlay2)
+
+Use this mode when running untrusted code or when isolation is required.
+
+##### Runtime requirements
+
+Both docker modes require Docker runtime:
+- **docker:host** - Apple containers cannot mount the host Docker socket
+- **docker:dind** - Apple containers do not support privileged mode (required for dockerd)
+
+```bash
+# Force Docker runtime on macOS
+moat run --runtime docker ./my-project
+```
+
+##### Use cases
+
+- Integration tests with testcontainers
+- Building Docker images
+- Running disposable services
+- CI/CD pipelines
+
 ---
 
 ## Credentials

@@ -856,6 +856,31 @@ region = %s
 		}
 	}
 
+	// Resolve docker dependency if present
+	// This validates that Apple containers are not used with docker:host dependency,
+	// and returns the appropriate config for the mode (socket mount for host, privileged for dind).
+	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.runtime.Type())
+	if dockerErr != nil {
+		cleanupProxy(proxyServer)
+		cleanupSSH(sshServer)
+		return nil, dockerErr
+	}
+	if dockerConfig != nil {
+		switch dockerConfig.Mode {
+		case deps.DockerModeHost:
+			// Host mode: mount Docker socket and pass GID for group setup
+			mounts = append(mounts, dockerConfig.SocketMount)
+			proxyEnv = append(proxyEnv, "MOAT_DOCKER_GID="+dockerConfig.GroupID)
+		case deps.DockerModeDind:
+			// Dind mode: signal moat-init to start dockerd
+			proxyEnv = append(proxyEnv, "MOAT_DOCKER_DIND=1")
+			// Disable BuildKit - it has session management issues in nested Docker
+			// that cause "no active sessions" errors during image builds.
+			proxyEnv = append(proxyEnv, "DOCKER_BUILDKIT=0")
+			proxyEnv = append(proxyEnv, "MOAT_DISABLE_BUILDKIT=1")
+		}
+	}
+
 	// Load merged Claude settings which includes:
 	// - ~/.claude/plugins/known_marketplaces.json (marketplace URLs)
 	// - ~/.claude/settings.json (enabled plugins)
@@ -1297,6 +1322,13 @@ region = %s
 		capAdd = []string{"NET_ADMIN"}
 	}
 
+	// Build supplementary groups for container process
+	// Only needed for docker:host mode to access the Docker socket
+	var groupAdd []string
+	if dockerConfig != nil && dockerConfig.Mode == deps.DockerModeHost {
+		groupAdd = append(groupAdd, dockerConfig.GroupID)
+	}
+
 	// Determine container user
 	// On Linux with native Docker, we need to run as the workspace owner's UID to ensure
 	// file permissions work correctly. On macOS/Windows, Docker Desktop handles UID
@@ -1316,6 +1348,12 @@ region = %s
 	}
 	// On macOS/Windows, leave containerUser empty to use the image default (moatuser)
 
+	// Determine if container needs privileged mode (only for docker:dind)
+	var privileged bool
+	if dockerConfig != nil && dockerConfig.Privileged {
+		privileged = true
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1329,6 +1367,8 @@ region = %s
 		Mounts:       mounts,
 		PortBindings: portBindings,
 		CapAdd:       capAdd,
+		GroupAdd:     groupAdd,
+		Privileged:   privileged,
 		Interactive:  opts.Interactive,
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 	})
@@ -1414,6 +1454,14 @@ region = %s
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
+
+	// Log container creation event, including privileged mode for security compliance
+	containerAuditData := audit.ContainerData{Action: "created"}
+	if dockerConfig != nil && dockerConfig.Privileged {
+		containerAuditData.Privileged = true
+		containerAuditData.Reason = "docker:dind"
+	}
+	_, _ = auditStore.AppendContainer(containerAuditData)
 
 	// Initialize snapshot engine if not disabled
 	if opts.Config != nil && !opts.Config.Snapshots.Disabled {

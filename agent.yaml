@@ -9,6 +9,7 @@ dependencies:
   - make
   - claude-code
   - node@20
+  - docker:dind
 
 grants:
   - anthropic

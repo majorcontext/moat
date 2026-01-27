@@ -17,6 +17,7 @@ var dynamicPrefixes = map[string]InstallType{
 }
 
 // Parse parses a dependency string like "node", "node@20", or "npm:eslint".
+// For docker dependencies, supports "docker", "docker:host", or "docker:dind".
 func Parse(s string) (Dependency, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -28,6 +29,11 @@ func Parse(s string) (Dependency, error) {
 		if strings.HasPrefix(s, prefix) {
 			return parseDynamicDep(s, prefix, depType)
 		}
+	}
+
+	// Check for docker with mode specifier (docker:host or docker:dind)
+	if s == "docker" || strings.HasPrefix(s, "docker:") {
+		return parseDockerDep(s)
 	}
 
 	// Standard registry-based dependency
@@ -46,6 +52,29 @@ func Parse(s string) (Dependency, error) {
 	}
 
 	return Dependency{Name: name, Version: version}, nil
+}
+
+// parseDockerDep parses docker dependency with required mode specifier.
+// Supports: "docker:host", "docker:dind"
+func parseDockerDep(s string) (Dependency, error) {
+	dep := Dependency{Name: "docker"}
+
+	if s == "docker" {
+		return Dependency{}, fmt.Errorf("docker dependency requires explicit mode: use 'docker:host' or 'docker:dind'")
+	}
+
+	// Extract mode from docker:mode format
+	mode := strings.TrimPrefix(s, "docker:")
+	switch mode {
+	case "host":
+		dep.DockerMode = DockerModeHost
+	case "dind":
+		dep.DockerMode = DockerModeDind
+	default:
+		return Dependency{}, fmt.Errorf("invalid docker mode %q: must be 'host' or 'dind'", mode)
+	}
+
+	return dep, nil
 }
 
 // parseDynamicDep parses a dynamic dependency like "npm:eslint@8.0.0".

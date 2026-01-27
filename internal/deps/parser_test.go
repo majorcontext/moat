@@ -661,3 +661,164 @@ func TestK8sMetaBundle(t *testing.T) {
 		t.Errorf("Validate error: %v", err)
 	}
 }
+
+func TestDockerDependency(t *testing.T) {
+	// docker requires explicit mode - "docker" alone should error
+	_, err := Parse("docker")
+	if err == nil {
+		t.Fatal("Parse(docker) should error without explicit mode")
+	}
+	if !strings.Contains(err.Error(), "requires explicit mode") {
+		t.Errorf("error should mention 'requires explicit mode', got: %v", err)
+	}
+
+	// docker:host should work
+	dep, err := Parse("docker:host")
+	if err != nil {
+		t.Fatalf("Parse(docker:host) error: %v", err)
+	}
+	if dep.Name != "docker" {
+		t.Errorf("Name = %q, want %q", dep.Name, "docker")
+	}
+	if dep.Version != "" {
+		t.Errorf("Version = %q, want empty", dep.Version)
+	}
+	if dep.IsDynamic() {
+		t.Error("docker should not be a dynamic dependency")
+	}
+	if dep.DockerMode != DockerModeHost {
+		t.Errorf("DockerMode = %q, want %q", dep.DockerMode, DockerModeHost)
+	}
+
+	// ParseAll should work with explicit mode
+	deps, err := ParseAll([]string{"docker:host"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dep, got %d", len(deps))
+	}
+	if deps[0].Name != "docker" {
+		t.Errorf("deps[0].Name = %q, want %q", deps[0].Name, "docker")
+	}
+
+	// Validate should pass (docker has no requirements)
+	if err := Validate(deps); err != nil {
+		t.Errorf("Validate error: %v", err)
+	}
+
+	// Verify it's in the registry with correct type
+	spec, ok := GetSpec("docker")
+	if !ok {
+		t.Fatal("docker should be in registry")
+	}
+	if spec.Type != TypeDocker {
+		t.Errorf("spec.Type = %q, want %q", spec.Type, TypeDocker)
+	}
+}
+
+func TestDockerModes(t *testing.T) {
+	tests := []struct {
+		input      string
+		mode       DockerMode
+		wantErr    bool
+		errContain string
+	}{
+		// Valid modes
+		{"docker:host", DockerModeHost, false, ""}, // Explicit host
+		{"docker:dind", DockerModeDind, false, ""}, // DinD mode
+
+		// Invalid modes
+		{"docker", "", true, "requires explicit mode"}, // No default - must specify mode
+		{"docker:invalid", "", true, "invalid docker mode"},
+		{"docker:HOST", "", true, "invalid docker mode"}, // Case sensitive
+		{"docker:", "", true, "invalid docker mode"},     // Empty mode
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dep, err := Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) should error", tt.input)
+				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContain)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if dep.Name != "docker" {
+				t.Errorf("Name = %q, want %q", dep.Name, "docker")
+			}
+			if dep.DockerMode != tt.mode {
+				t.Errorf("DockerMode = %q, want %q", dep.DockerMode, tt.mode)
+			}
+			if dep.IsDynamic() {
+				t.Error("docker should not be a dynamic dependency")
+			}
+		})
+	}
+}
+
+func TestDockerModeParseAll(t *testing.T) {
+	// Test that ParseAll works with docker modes
+	tests := []struct {
+		deps       []string
+		expectMode DockerMode
+	}{
+		{[]string{"docker:host"}, DockerModeHost},
+		{[]string{"docker:dind"}, DockerModeDind},
+		{[]string{"node", "docker:dind"}, DockerModeDind},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.deps, ","), func(t *testing.T) {
+			deps, err := ParseAll(tt.deps)
+			if err != nil {
+				t.Fatalf("ParseAll error: %v", err)
+			}
+
+			// Find docker dep
+			var dockerDep *Dependency
+			for i := range deps {
+				if deps[i].Name == "docker" {
+					dockerDep = &deps[i]
+					break
+				}
+			}
+			if dockerDep == nil {
+				t.Fatal("docker dependency not found")
+			}
+			if dockerDep.DockerMode != tt.expectMode {
+				t.Errorf("DockerMode = %q, want %q", dockerDep.DockerMode, tt.expectMode)
+			}
+
+			// Validate should pass
+			if err := Validate(deps); err != nil {
+				t.Errorf("Validate error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDockerModeDeduplication(t *testing.T) {
+	// If docker is specified multiple times, last one wins for the mode
+	// but they should be deduplicated
+	deps, err := ParseAll([]string{"docker:host", "docker:dind"})
+	if err != nil {
+		t.Fatalf("ParseAll error: %v", err)
+	}
+
+	// Should have only 1 docker dependency
+	dockerCount := 0
+	for _, d := range deps {
+		if d.Name == "docker" {
+			dockerCount++
+		}
+	}
+	if dockerCount != 1 {
+		t.Errorf("expected 1 docker dep, got %d", dockerCount)
+	}
+}

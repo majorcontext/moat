@@ -663,6 +663,59 @@ func TestCategorizeDeps(t *testing.T) {
 	if len(c.dynamicPip) != 1 {
 		t.Errorf("dynamic pip: got %d, want 1", len(c.dynamicPip))
 	}
+	if c.dockerMode != "" {
+		t.Errorf("dockerMode: got %q, want empty string", c.dockerMode)
+	}
+}
+
+func TestCategorizeDepsWithDockerNoMode(t *testing.T) {
+	// Test that a docker dependency without mode doesn't crash categorizeDeps.
+	// Note: Parser now requires explicit mode, but categorizeDeps should still
+	// handle empty DockerMode gracefully (no dockerfile output for docker CLI).
+	deps := []Dependency{
+		{Name: "docker"}, // No mode set - would error in parser, but test internal behavior
+		{Name: "git"},
+	}
+
+	c := categorizeDeps(deps)
+
+	// Empty mode should not be defaulted - no docker CLI output
+	if c.dockerMode != "" {
+		t.Errorf("dockerMode: got %q, want empty string", c.dockerMode)
+	}
+	// docker should not be added to aptPkgs by categorizeDeps
+	if len(c.aptPkgs) != 1 || c.aptPkgs[0] != "git" {
+		t.Errorf("apt packages: got %v, want [git]", c.aptPkgs)
+	}
+}
+
+func TestCategorizeDepsWithDockerDind(t *testing.T) {
+	deps := []Dependency{
+		{Name: "docker", DockerMode: DockerModeDind},
+		{Name: "git"},
+	}
+
+	c := categorizeDeps(deps)
+
+	if c.dockerMode != DockerModeDind {
+		t.Errorf("dockerMode: got %q, want %q", c.dockerMode, DockerModeDind)
+	}
+	// docker should not be added to aptPkgs by categorizeDeps
+	if len(c.aptPkgs) != 1 || c.aptPkgs[0] != "git" {
+		t.Errorf("apt packages: got %v, want [git]", c.aptPkgs)
+	}
+}
+
+func TestCategorizeDepsWithDockerHost(t *testing.T) {
+	deps := []Dependency{
+		{Name: "docker", DockerMode: DockerModeHost},
+	}
+
+	c := categorizeDeps(deps)
+
+	if c.dockerMode != DockerModeHost {
+		t.Errorf("dockerMode: got %q, want %q", c.dockerMode, DockerModeHost)
+	}
 }
 
 func TestSelectBaseImage(t *testing.T) {
@@ -813,6 +866,141 @@ func TestGenerateDockerfileSSHHostsWithoutSSH(t *testing.T) {
 	// Should have known_hosts even without SSH packages
 	if !strings.Contains(dockerfile, "github.com ssh-ed25519") {
 		t.Error("missing github.com ssh-ed25519 key")
+	}
+}
+
+func TestGenerateDockerfileWithDockerHost(t *testing.T) {
+	// Test that docker:host installs docker-ce-cli from official repo
+	deps := []Dependency{
+		{Name: "docker", DockerMode: DockerModeHost},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should install docker-ce-cli from Docker's official repo
+	if !strings.Contains(dockerfile, "docker-ce-cli") {
+		t.Error("Dockerfile should install docker-ce-cli package")
+	}
+	if !strings.Contains(dockerfile, "download.docker.com") {
+		t.Error("Dockerfile should use Docker's official repo")
+	}
+}
+
+func TestGenerateDockerfileDockerWithOtherDeps(t *testing.T) {
+	// Test docker dependency combined with other dependencies
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "docker", DockerMode: DockerModeHost},
+		{Name: "git"},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should use node as base image
+	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	}
+
+	// Should install docker-ce-cli from Docker's official repo
+	if !strings.Contains(dockerfile, "docker-ce-cli") {
+		t.Error("Dockerfile should install docker-ce-cli package")
+	}
+
+	// Should also install git via apt
+	if !strings.Contains(dockerfile, "git") {
+		t.Error("Dockerfile should install git package")
+	}
+}
+
+func TestGenerateDockerfileDockerDind(t *testing.T) {
+	// Test docker:dind dependency installs full Docker daemon
+	deps := []Dependency{
+		{Name: "docker", DockerMode: DockerModeDind},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have dind mode comment
+	if !strings.Contains(dockerfile, "dind mode") {
+		t.Error("Dockerfile should mention dind mode in comment")
+	}
+
+	// Should install docker-ce (full daemon)
+	if !strings.Contains(dockerfile, "docker-ce ") || !strings.Contains(dockerfile, "docker-ce-cli") {
+		t.Error("Dockerfile should install docker-ce and docker-ce-cli packages")
+	}
+
+	// Should install containerd.io
+	if !strings.Contains(dockerfile, "containerd.io") {
+		t.Error("Dockerfile should install containerd.io package")
+	}
+
+	// Should use Docker's official repo
+	if !strings.Contains(dockerfile, "download.docker.com") {
+		t.Error("Dockerfile should use Docker's official repo")
+	}
+}
+
+func TestGenerateDockerfileDockerHost(t *testing.T) {
+	// Test docker:host dependency installs CLI only
+	deps := []Dependency{
+		{Name: "docker", DockerMode: DockerModeHost},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should NOT have dind mode comment
+	if strings.Contains(dockerfile, "dind mode") {
+		t.Error("Dockerfile should not mention dind mode for host mode")
+	}
+
+	// Should install docker-ce-cli only (not docker-ce daemon)
+	if !strings.Contains(dockerfile, "docker-ce-cli") {
+		t.Error("Dockerfile should install docker-ce-cli package")
+	}
+
+	// Should NOT install containerd.io (not needed for CLI only)
+	if strings.Contains(dockerfile, "containerd.io") {
+		t.Error("Dockerfile should not install containerd.io for host mode")
+	}
+}
+
+func TestGenerateDockerfileDindWithOtherDeps(t *testing.T) {
+	// Test docker:dind combined with other dependencies
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "docker", DockerMode: DockerModeDind},
+		{Name: "git"},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should use node as base image
+	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	}
+
+	// Should install full docker suite for dind
+	if !strings.Contains(dockerfile, "docker-ce ") {
+		t.Error("Dockerfile should install docker-ce package")
+	}
+	if !strings.Contains(dockerfile, "containerd.io") {
+		t.Error("Dockerfile should install containerd.io package")
+	}
+
+	// Should also install git via apt
+	if !strings.Contains(dockerfile, "git") {
+		t.Error("Dockerfile should install git package")
 	}
 }
 

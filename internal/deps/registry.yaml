@@ -430,3 +430,8 @@ k8s:
   description: Kubernetes tools (kubectl, helm)
   type: meta
   requires: [kubectl, helm]
+
+# Container tools
+docker:
+  description: Docker CLI for container operations (requires host Docker socket)
+  type: docker

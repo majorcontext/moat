@@ -48,3 +48,17 @@ func TestImageTagWithSSH(t *testing.T) {
 		t.Error("SSH option should affect tag")
 	}
 }
+
+func TestImageTagDockerModes(t *testing.T) {
+	// docker:host and docker:dind should produce different image tags
+	// because they install different packages (CLI-only vs full daemon)
+	hostDeps := []Dependency{{Name: "docker", DockerMode: DockerModeHost}}
+	dindDeps := []Dependency{{Name: "docker", DockerMode: DockerModeDind}}
+
+	hostTag := ImageTag(hostDeps, nil)
+	dindTag := ImageTag(dindDeps, nil)
+
+	if hostTag == dindTag {
+		t.Errorf("docker:host and docker:dind should have different tags, both got: %s", hostTag)
+	}
+}

@@ -10,6 +10,10 @@
 
 set -e
 
+# Configuration constants
+SSH_SOCKET_WAIT_ITERS=20     # iterations * 0.1s = 2 second timeout for SSH socket
+DIND_TIMEOUT_SECONDS=30      # timeout for Docker daemon startup in dind mode
+
 # SSH Agent Bridge
 # When MOAT_SSH_TCP_ADDR is set, create a Unix socket that bridges to the
 # TCP-based SSH agent proxy running on the host. This is needed for Docker
@@ -27,10 +31,12 @@ if [ -n "$MOAT_SSH_TCP_ADDR" ]; then
     # Socket created with mode 0660 - accessible by owner and group only
     socat UNIX-LISTEN:/run/moat/ssh/agent.sock,fork,mode=0660 TCP:"$MOAT_SSH_TCP_ADDR" &
     SOCAT_PID=$!
-    # Wait for socket to be created (up to 2 seconds)
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    # Wait for socket to be created (SSH_SOCKET_WAIT_ITERS * 0.1s timeout)
+    i=0
+    while [ "$i" -lt "$SSH_SOCKET_WAIT_ITERS" ]; do
       [ -S /run/moat/ssh/agent.sock ] && break
       sleep 0.1
+      i=$((i + 1))
     done
     # Verify socat is still running and socket was created
     if ! kill -0 "$SOCAT_PID" 2>/dev/null; then
@@ -144,6 +150,96 @@ fi
 # system-wide since it's always the moat workspace mount point.
 if command -v git >/dev/null 2>&1; then
   git config --system --add safe.directory /workspace 2>/dev/null || true
+fi
+
+# Docker Access Setup
+# Two mutually exclusive modes:
+# 1. MOAT_DOCKER_GID (host mode): Docker socket mounted from host, just need group access
+# 2. MOAT_DOCKER_DIND (dind mode): Start dockerd inside the container
+
+if [ -n "$MOAT_DOCKER_DIND" ] && [ -n "$MOAT_DOCKER_GID" ]; then
+  echo "Error: MOAT_DOCKER_DIND and MOAT_DOCKER_GID are mutually exclusive" >&2
+  echo "Use MOAT_DOCKER_GID when mounting host's docker socket" >&2
+  echo "Use MOAT_DOCKER_DIND when running Docker-in-Docker" >&2
+  exit 1
+fi
+
+# Docker-in-Docker Mode
+# When MOAT_DOCKER_DIND=1, start dockerd inside the container.
+# This requires the container to be run with --privileged or appropriate capabilities.
+if [ "$MOAT_DOCKER_DIND" = "1" ] && [ "$(id -u)" = "0" ]; then
+  echo "Starting Docker daemon (dind mode)..." >&2
+
+  # Create docker run directory if it doesn't exist
+  mkdir -p /var/run
+
+  # Start dockerd in the background with vfs storage driver (most compatible for nested containers)
+  # Use vfs by default as it works without special kernel requirements
+  # overlay2 may work if the outer container has it available
+  dockerd --storage-driver=vfs --log-level=warn >/var/log/dockerd.log 2>&1 &
+  DOCKERD_PID=$!
+
+  # Wait for dockerd to be ready (up to DIND_TIMEOUT_SECONDS)
+  # Check for socket file AND docker info since socket must exist for non-root users
+  DIND_WAITED=0
+  echo "Waiting for Docker daemon to be ready..." >&2
+  while [ "$DIND_WAITED" -lt "$DIND_TIMEOUT_SECONDS" ]; do
+    # Check both socket exists AND daemon responds
+    if [ -S /var/run/docker.sock ] && docker info >/dev/null 2>&1; then
+      echo "Docker daemon is ready (took ${DIND_WAITED}s)" >&2
+      break
+    fi
+    # Check if dockerd is still running
+    if ! kill -0 "$DOCKERD_PID" 2>/dev/null; then
+      echo "Error: Docker daemon failed to start" >&2
+      echo "Check /var/log/dockerd.log for details:" >&2
+      tail -20 /var/log/dockerd.log 2>/dev/null || true
+      exit 1
+    fi
+    sleep 1
+    DIND_WAITED=$((DIND_WAITED + 1))
+  done
+
+  if [ "$DIND_WAITED" -ge "$DIND_TIMEOUT_SECONDS" ]; then
+    echo "Error: Docker daemon did not become ready within ${DIND_TIMEOUT_SECONDS} seconds" >&2
+    echo "Socket exists: $([ -S /var/run/docker.sock ] && echo yes || echo no)" >&2
+    echo "Check /var/log/dockerd.log for details:" >&2
+    tail -20 /var/log/dockerd.log 2>/dev/null || true
+    exit 1
+  fi
+
+  # Add moatuser to docker group so they can use docker without sudo
+  if id moatuser >/dev/null 2>&1; then
+    # Ensure docker group exists (dockerd creates it, but be safe)
+    if ! getent group docker >/dev/null 2>&1; then
+      groupadd docker 2>/dev/null || true
+    fi
+    usermod -aG docker moatuser 2>/dev/null || true
+  fi
+fi
+
+# Docker Socket Group (host mode)
+# When MOAT_DOCKER_GID is set, the docker socket is mounted and we need to
+# give moatuser access. We detect the socket's GID inside the container
+# (not from the host) because Docker Desktop on macOS translates ownership.
+# Note: Uses GNU stat -c format (Linux-specific, but containers are always Linux).
+if [ -n "$MOAT_DOCKER_GID" ] && [ "$(id -u)" = "0" ] && [ -S /var/run/docker.sock ]; then
+  # Get the actual GID of the socket as seen inside the container
+  SOCKET_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null) || true
+  if [ -z "$SOCKET_GID" ]; then
+    echo "Warning: Failed to detect docker socket GID, docker access may not work" >&2
+  elif [ -n "$SOCKET_GID" ]; then
+    # Check if a group with this GID already exists
+    if ! getent group "$SOCKET_GID" >/dev/null 2>&1; then
+      # Create a group with the docker socket GID
+      groupadd -g "$SOCKET_GID" moat-docker 2>/dev/null || true
+    fi
+    # Add moatuser to the group
+    DOCKER_GROUP=$(getent group "$SOCKET_GID" | cut -d: -f1)
+    if [ -n "$DOCKER_GROUP" ] && id moatuser >/dev/null 2>&1; then
+      usermod -aG "$DOCKER_GROUP" moatuser 2>/dev/null || true
+    fi
+  fi
 fi
 
 # Execute the user's command

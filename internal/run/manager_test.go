@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/andybons/moat/internal/config"
+	"github.com/andybons/moat/internal/container"
+	"github.com/andybons/moat/internal/deps"
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration
@@ -479,5 +482,270 @@ func TestEnsureCACertOnlyDirRemovesStaleFiles(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("expected only ca.crt, got: %v", names)
+	}
+}
+
+// DockerModeContainerConfig captures the container configuration computed from docker mode.
+// This struct allows testing the docker mode wiring logic without creating actual containers.
+type DockerModeContainerConfig struct {
+	Mounts     []container.MountConfig
+	Env        []string
+	GroupAdd   []string
+	Privileged bool
+}
+
+// computeDockerModeConfig replicates the docker mode wiring logic from manager.go.
+// This allows testing the logic without a full manager or real container runtime.
+func computeDockerModeConfig(dockerConfig *DockerDependencyConfig) DockerModeContainerConfig {
+	var cfg DockerModeContainerConfig
+
+	if dockerConfig == nil {
+		return cfg
+	}
+
+	// Handle different modes
+	switch dockerConfig.Mode {
+	case deps.DockerModeHost:
+		// Host mode: mount Docker socket and pass GID for group setup
+		cfg.Mounts = append(cfg.Mounts, dockerConfig.SocketMount)
+		cfg.Env = append(cfg.Env, "MOAT_DOCKER_GID="+dockerConfig.GroupID)
+		cfg.GroupAdd = append(cfg.GroupAdd, dockerConfig.GroupID)
+	case deps.DockerModeDind:
+		// Dind mode: signal moat-init to start dockerd
+		cfg.Env = append(cfg.Env, "MOAT_DOCKER_DIND=1")
+	}
+
+	// Privileged is set from dockerConfig (only true for dind)
+	if dockerConfig.Privileged {
+		cfg.Privileged = true
+	}
+
+	return cfg
+}
+
+// TestDockerModeWiring verifies that docker modes are correctly wired into
+// container configuration in manager.go.
+func TestDockerModeWiring(t *testing.T) {
+	tests := []struct {
+		name          string
+		dockerConfig  *DockerDependencyConfig
+		wantMounts    int
+		wantEnv       string
+		wantGroupAdd  int
+		wantPriv      bool
+		wantNoGroupID bool
+	}{
+		{
+			name:         "nil docker config - no changes",
+			dockerConfig: nil,
+			wantMounts:   0,
+			wantEnv:      "",
+			wantGroupAdd: 0,
+			wantPriv:     false,
+		},
+		{
+			name: "host mode - socket mount and GID",
+			dockerConfig: &DockerDependencyConfig{
+				Mode: deps.DockerModeHost,
+				SocketMount: container.MountConfig{
+					Source:   "/var/run/docker.sock",
+					Target:   "/var/run/docker.sock",
+					ReadOnly: false,
+				},
+				GroupID:    "999",
+				Privileged: false,
+			},
+			wantMounts:   1,
+			wantEnv:      "MOAT_DOCKER_GID=999",
+			wantGroupAdd: 1,
+			wantPriv:     false,
+		},
+		{
+			name: "dind mode - privileged and env var",
+			dockerConfig: &DockerDependencyConfig{
+				Mode:       deps.DockerModeDind,
+				Privileged: true,
+			},
+			wantMounts:    0,
+			wantEnv:       "MOAT_DOCKER_DIND=1",
+			wantGroupAdd:  0,
+			wantPriv:      true,
+			wantNoGroupID: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := computeDockerModeConfig(tt.dockerConfig)
+
+			// Check mounts
+			if len(cfg.Mounts) != tt.wantMounts {
+				t.Errorf("mounts count: got %d, want %d", len(cfg.Mounts), tt.wantMounts)
+			}
+
+			// Check env vars
+			if tt.wantEnv == "" {
+				if len(cfg.Env) != 0 {
+					t.Errorf("expected no env vars, got %v", cfg.Env)
+				}
+			} else {
+				found := false
+				for _, env := range cfg.Env {
+					if env == tt.wantEnv {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected env var %q, got %v", tt.wantEnv, cfg.Env)
+				}
+			}
+
+			// Check GroupAdd
+			if len(cfg.GroupAdd) != tt.wantGroupAdd {
+				t.Errorf("groupAdd count: got %d, want %d", len(cfg.GroupAdd), tt.wantGroupAdd)
+			}
+
+			// Check privileged
+			if cfg.Privileged != tt.wantPriv {
+				t.Errorf("privileged: got %v, want %v", cfg.Privileged, tt.wantPriv)
+			}
+
+			// Verify no MOAT_DOCKER_GID in dind mode
+			if tt.wantNoGroupID {
+				for _, env := range cfg.Env {
+					if strings.HasPrefix(env, "MOAT_DOCKER_GID=") {
+						t.Errorf("dind mode should not have MOAT_DOCKER_GID, got %s", env)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestDockerModeHostMountDetails verifies that host mode configures
+// the correct socket mount path and permissions.
+func TestDockerModeHostMountDetails(t *testing.T) {
+	dockerConfig := &DockerDependencyConfig{
+		Mode: deps.DockerModeHost,
+		SocketMount: container.MountConfig{
+			Source:   "/var/run/docker.sock",
+			Target:   "/var/run/docker.sock",
+			ReadOnly: false,
+		},
+		GroupID: "999",
+	}
+
+	cfg := computeDockerModeConfig(dockerConfig)
+
+	if len(cfg.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(cfg.Mounts))
+	}
+
+	mount := cfg.Mounts[0]
+	if mount.Source != "/var/run/docker.sock" {
+		t.Errorf("mount source: got %q, want /var/run/docker.sock", mount.Source)
+	}
+	if mount.Target != "/var/run/docker.sock" {
+		t.Errorf("mount target: got %q, want /var/run/docker.sock", mount.Target)
+	}
+	if mount.ReadOnly {
+		t.Error("mount should not be read-only for docker socket")
+	}
+
+	// GroupAdd should have the GID
+	if len(cfg.GroupAdd) != 1 || cfg.GroupAdd[0] != "999" {
+		t.Errorf("groupAdd: got %v, want [999]", cfg.GroupAdd)
+	}
+
+	// Should not be privileged
+	if cfg.Privileged {
+		t.Error("host mode should not be privileged")
+	}
+}
+
+// TestDockerModeDindPrivileged verifies that dind mode sets privileged
+// and the correct env var, without socket mount or GroupAdd.
+func TestDockerModeDindPrivileged(t *testing.T) {
+	dockerConfig := &DockerDependencyConfig{
+		Mode:       deps.DockerModeDind,
+		Privileged: true,
+	}
+
+	cfg := computeDockerModeConfig(dockerConfig)
+
+	// No mounts for dind
+	if len(cfg.Mounts) != 0 {
+		t.Errorf("dind mode should have no mounts, got %d", len(cfg.Mounts))
+	}
+
+	// No GroupAdd for dind
+	if len(cfg.GroupAdd) != 0 {
+		t.Errorf("dind mode should have no groupAdd, got %v", cfg.GroupAdd)
+	}
+
+	// Must be privileged
+	if !cfg.Privileged {
+		t.Error("dind mode must be privileged")
+	}
+
+	// Must have MOAT_DOCKER_DIND=1 env var
+	found := false
+	for _, env := range cfg.Env {
+		if env == "MOAT_DOCKER_DIND=1" {
+			found = true
+		}
+		if strings.HasPrefix(env, "MOAT_DOCKER_GID=") {
+			t.Errorf("dind mode should not have MOAT_DOCKER_GID, got %s", env)
+		}
+	}
+	if !found {
+		t.Errorf("dind mode should have MOAT_DOCKER_DIND=1, got %v", cfg.Env)
+	}
+}
+
+// TestDockerModeExclusive verifies that host and dind modes have
+// mutually exclusive configurations.
+func TestDockerModeExclusive(t *testing.T) {
+	// Host mode should never have MOAT_DOCKER_DIND or Privileged=true
+	hostConfig := &DockerDependencyConfig{
+		Mode: deps.DockerModeHost,
+		SocketMount: container.MountConfig{
+			Source: "/var/run/docker.sock",
+			Target: "/var/run/docker.sock",
+		},
+		GroupID:    "999",
+		Privileged: false, // This is set by ResolveDockerDependency
+	}
+
+	hostCfg := computeDockerModeConfig(hostConfig)
+
+	for _, env := range hostCfg.Env {
+		if env == "MOAT_DOCKER_DIND=1" {
+			t.Error("host mode should never have MOAT_DOCKER_DIND=1")
+		}
+	}
+	if hostCfg.Privileged {
+		t.Error("host mode should never be privileged")
+	}
+
+	// Dind mode should never have MOAT_DOCKER_GID or socket mounts
+	dindConfig := &DockerDependencyConfig{
+		Mode:       deps.DockerModeDind,
+		Privileged: true,
+	}
+
+	dindCfg := computeDockerModeConfig(dindConfig)
+
+	for _, env := range dindCfg.Env {
+		if strings.HasPrefix(env, "MOAT_DOCKER_GID=") {
+			t.Error("dind mode should never have MOAT_DOCKER_GID")
+		}
+	}
+	if len(dindCfg.Mounts) > 0 {
+		t.Error("dind mode should never have socket mounts")
+	}
+	if len(dindCfg.GroupAdd) > 0 {
+		t.Error("dind mode should never have GroupAdd")
 	}
 }

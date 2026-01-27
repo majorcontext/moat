@@ -13,6 +13,7 @@ const (
 	TypeCustom       InstallType = "custom"
 	TypeMeta         InstallType = "meta"
 	TypeUvTool       InstallType = "uv-tool" // Tools installed via uv tool install
+	TypeDocker       InstallType = "docker"  // Docker access via socket mounting or DinD
 
 	// Dynamic types (parsed from prefixes like npm:eslint)
 	TypeDynamicNpm   InstallType = "dynamic-npm"   // npm:package
@@ -20,6 +21,16 @@ const (
 	TypeDynamicUv    InstallType = "dynamic-uv"    // uv:package
 	TypeDynamicCargo InstallType = "dynamic-cargo" // cargo:package
 	TypeDynamicGo    InstallType = "dynamic-go"    // go:package
+)
+
+// DockerMode defines how Docker is provided to the container.
+type DockerMode string
+
+const (
+	// DockerModeHost mounts the host Docker socket (fast but full host access).
+	DockerModeHost DockerMode = "host"
+	// DockerModeDind runs an isolated Docker daemon inside the container (privileged but isolated).
+	DockerModeDind DockerMode = "dind"
 )
 
 // IsDynamic returns true if this is a dynamic (prefixed) dependency type.
@@ -76,10 +87,11 @@ type DepSpec struct {
 
 // Dependency represents a parsed dependency from agent.yaml.
 type Dependency struct {
-	Name    string      // e.g., "node", "eslint"
-	Version string      // e.g., "20" or "" for default
-	Type    InstallType // Set for dynamic deps (npm:, pip:, etc.)
-	Package string      // For dynamic deps: the package name/path
+	Name       string      // e.g., "node", "eslint"
+	Version    string      // e.g., "20" or "" for default
+	Type       InstallType // Set for dynamic deps (npm:, pip:, etc.)
+	Package    string      // For dynamic deps: the package name/path
+	DockerMode DockerMode  // For docker deps: "host" or "dind"
 }
 
 // IsDynamic returns true if this dependency was parsed from a prefixed spec.

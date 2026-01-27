@@ -114,6 +114,8 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			ExtraHosts:   cfg.ExtraHosts,
 			PortBindings: portBindings,
 			CapAdd:       cfg.CapAdd,
+			GroupAdd:     cfg.GroupAdd,
+			Privileged:   cfg.Privileged,
 		},
 		nil, // network config
 		nil, // platform
