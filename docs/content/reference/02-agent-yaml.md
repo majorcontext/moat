@@ -225,7 +225,7 @@ Use this mode when running untrusted code or when isolation is required.
 
 ##### BuildKit sidecar (automatic with docker:dind)
 
-When using `docker:dind`, moat automatically deploys a BuildKit sidecar container to provide fast image builds:
+When using `docker:dind`, Moat automatically deploys a BuildKit sidecar container to provide fast image builds:
 
 - **BuildKit sidecar**: Runs `moby/buildkit:latest` in a separate container
 - **Shared network**: Both containers communicate via a Docker network (`moat-<run-id>`)
@@ -234,6 +234,18 @@ When using `docker:dind`, moat automatically deploys a BuildKit sidecar containe
 - **Performance**: BuildKit layer caching, `RUN --mount=type=cache`, faster multi-stage builds
 
 This configuration is automatic and requires no additional setup.
+
+**How it works:**
+
+1. BuildKit sidecar starts with `moby/buildkit:latest`
+2. `BUILDKIT_HOST=tcp://buildkit:1234` environment variable set in main container
+3. Image builds use BuildKit Go client (not Docker SDK)
+4. Full BuildKit features available: cache mounts, multi-platform builds, etc.
+
+**Fallback behavior:**
+
+- If `BUILDKIT_HOST` not set: Uses Docker SDK
+- If BuildKit unreachable: Clear error message with troubleshooting steps
 
 **Example:**
 
@@ -273,6 +285,12 @@ If builds fail with BuildKit sidecar:
 1. **Image pull failure**: Ensure Docker can access Docker Hub to pull `moby/buildkit:latest`
 2. **Network issues**: Check that Docker networks are enabled (not disabled by firewall)
 3. **Performance**: BuildKit sidecar typically starts in 2-5 seconds; check Docker daemon logs if slower
+
+**Common error messages:**
+
+- **"no active sessions"**: Indicates Docker SDK being used instead of BuildKit. Verify `BUILDKIT_HOST` environment variable is set to `tcp://buildkit:1234`
+- **"connection refused"**: BuildKit sidecar not running or network connectivity issue. Check BuildKit container is running and network exists
+- **Slow builds**: Verify BuildKit cache is working. Build output should show "CACHED" for unchanged layers
 
 ---
 
