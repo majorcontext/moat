@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 
 	"github.com/andybons/moat/internal/log"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/session/filesync"
 	"github.com/moby/buildkit/util/progress/progressui"
 	"github.com/tonistiigi/fsutil"
 	"golang.org/x/sync/errgroup"
@@ -43,45 +42,44 @@ type BuildOptions struct {
 }
 
 // Build executes a build using BuildKit.
+//
+// The build process:
+//  1. Connects to BuildKit sidecar via BUILDKIT_HOST (tcp://buildkit:1234)
+//  2. Prepares build context from ContextDir using LocalMounts (BuildKit manages session internally)
+//  3. Executes build with dockerfile.v0 frontend
+//  4. Exports result as Docker image tar, piping directly to `docker load`
+//
+// This approach avoids manual session management and filesync complexity by:
+//   - Using LocalMounts for build context (BuildKit auto-manages the filesync session)
+//   - Using Output function to stream the docker exporter tar to `docker load`
 func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
-	log.Debug("starting buildkit build",
-		"tag", opts.Tag,
-		"context_dir", opts.ContextDir,
-		"platform", opts.Platform,
-		"no_cache", opts.NoCache)
+	log.Debug("starting buildkit build", "tag", opts.Tag, "platform", opts.Platform)
 
-	// Connect to BuildKit
+	// Connect to BuildKit sidecar
 	bkClient, err := client.New(ctx, c.addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to BuildKit at %s - check if docker:dind sidecar is running and BUILDKIT_HOST is configured correctly: %w", c.addr, err)
 	}
 	defer bkClient.Close()
 
-	// Create session for file sync
-	sess, err := session.NewSession(ctx, "moat-build")
-	if err != nil {
-		return fmt.Errorf("creating buildkit session: %w", err)
-	}
-
-	// Attach file sync provider to upload build context
+	// Prepare filesystem for build context
 	fs, err := fsutil.NewFS(opts.ContextDir)
 	if err != nil {
 		return fmt.Errorf("creating filesystem for context: %w", err)
 	}
-	syncProvider := filesync.NewFSSyncProvider(filesync.StaticDirSource{
-		"context":    fs,
-		"dockerfile": fs,
-	})
-	sess.Allow(syncProvider)
 
-	// Prepare solve options
+	// Configure BuildKit solve operation
+	// LocalMounts triggers BuildKit to automatically create and manage a filesync session
 	solveOpt := client.SolveOpt{
 		Frontend: "dockerfile.v0",
 		FrontendAttrs: map[string]string{
 			"filename": "Dockerfile",
 			"platform": opts.Platform,
 		},
-		Session: []session.Attachable{syncProvider},
+		LocalMounts: map[string]fsutil.FS{
+			"context":    fs,
+			"dockerfile": fs,
+		},
 	}
 
 	// Add build args
@@ -94,13 +92,17 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
-	// Set output (export to Docker daemon via docker exporter)
-	// Use "docker" exporter to write directly to Docker daemon via socket
+	// Export as Docker image tar, piped to `docker load`
+	// The Output function receives the tar stream from BuildKit's docker exporter
+	// and pipes it to `docker load` for import into the Docker daemon
 	solveOpt.Exports = []client.ExportEntry{
 		{
-			Type: "docker",
+			Type: client.ExporterDocker,
 			Attrs: map[string]string{
 				"name": opts.Tag,
+			},
+			Output: func(m map[string]string) (io.WriteCloser, error) {
+				return c.createDockerLoadPipe(ctx)
 			},
 		},
 	}
@@ -111,11 +113,11 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 		output = os.Stdout
 	}
 
-	// Create progress channel
+	// Execute build with concurrent progress display
 	ch := make(chan *client.SolveStatus)
 	eg, ctx := errgroup.WithContext(ctx)
 
-	// Display progress
+	// Display build progress
 	eg.Go(func() error {
 		display, err := progressui.NewDisplay(output, progressui.AutoMode)
 		if err != nil {
@@ -129,29 +131,72 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 	eg.Go(func() error {
 		_, err := bkClient.Solve(ctx, nil, solveOpt, ch)
 		if err != nil {
-			// Provide context about common build failures
 			return fmt.Errorf("build failed - check Dockerfile syntax and build context at %s: %w", opts.ContextDir, err)
 		}
 		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
-		log.Error("buildkit build failed", "tag", opts.Tag, "error", err)
 		return err
 	}
 
-	log.Debug("buildkit build completed successfully", "tag", opts.Tag)
+	log.Debug("buildkit build completed", "tag", opts.Tag)
+	return nil
+}
+
+// createDockerLoadPipe creates a pipe to `docker load` for importing the built image.
+//
+// BuildKit writes the image tar stream to the returned WriteCloser, which feeds
+// directly into `docker load` stdin. This approach:
+//   - Avoids intermediate tar files on disk
+//   - Streams the image directly to the Docker daemon
+//   - Ensures the image is imported atomically with the build
+func (c *Client) createDockerLoadPipe(ctx context.Context) (io.WriteCloser, error) {
+	cmd := exec.CommandContext(ctx, "docker", "load")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating stdin pipe for docker load: %w", err)
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting docker load: %w", err)
+	}
+
+	return &dockerLoadWriter{
+		WriteCloser: stdin,
+		cmd:         cmd,
+	}, nil
+}
+
+// dockerLoadWriter wraps the stdin pipe and ensures docker load completes successfully.
+type dockerLoadWriter struct {
+	io.WriteCloser
+	cmd *exec.Cmd
+}
+
+func (w *dockerLoadWriter) Close() error {
+	// Close stdin to signal EOF
+	if err := w.WriteCloser.Close(); err != nil {
+		return err
+	}
+
+	// Wait for docker load to complete
+	if err := w.cmd.Wait(); err != nil {
+		return fmt.Errorf("docker load failed: %w", err)
+	}
+
 	return nil
 }
 
 // Ping checks if BuildKit is reachable.
 func (c *Client) Ping(ctx context.Context) error {
-	log.Debug("pinging buildkit", "address", c.addr)
 	bkClient, err := client.New(ctx, c.addr)
 	if err != nil {
 		return fmt.Errorf("BuildKit not reachable at %s - verify docker:dind sidecar is running and network configuration is correct: %w", c.addr, err)
 	}
 	defer bkClient.Close()
-	log.Debug("buildkit ping successful", "address", c.addr)
 	return nil
 }
