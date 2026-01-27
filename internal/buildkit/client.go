@@ -77,13 +77,13 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
-	// Set output (push to local Docker daemon via image exporter)
+	// Set output (export to Docker daemon via docker exporter)
+	// Use "docker" exporter to write directly to Docker daemon via socket
 	solveOpt.Exports = []client.ExportEntry{
 		{
-			Type: "image",
+			Type: "docker",
 			Attrs: map[string]string{
 				"name": opts.Tag,
-				"push": "false",
 			},
 		},
 	}
