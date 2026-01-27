@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -758,8 +759,9 @@ func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string,
 // Best-effort: does not fail if network doesn't exist or has active endpoints.
 func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
 	if err := r.cli.NetworkRemove(ctx, networkID); err != nil {
-		// Log but don't fail - network may already be removed
-		return fmt.Errorf("removing network: %w", err)
+		// Best-effort: network may already be removed or have active endpoints
+		// This is expected during cleanup, so don't return an error
+		log.Debug("network removal best-effort", "network_id", networkID, "error", err)
 	}
 	return nil
 }
