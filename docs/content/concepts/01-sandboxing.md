@@ -119,6 +119,42 @@ dependencies:
   - python@3.11  # Installed into node:20
 ```
 
+## Docker access modes
+
+Some workloads require Docker access inside the container. Moat supports two modes:
+
+### docker:host
+
+Mounts the host Docker socket (`/var/run/docker.sock`) into the container. This provides:
+- Fast startup (no daemon initialization)
+- Shared image cache with host
+- Full access to host Docker daemon
+
+**Security implications:**
+- Agent can see and interact with all host containers
+- Agent can create containers that access host network and resources
+- Images built inside are cached on host
+
+Use this mode when you trust the agent and need maximum performance.
+
+### docker:dind
+
+Runs an isolated Docker daemon inside the container with automatic BuildKit sidecar:
+- Complete isolation from host Docker
+- Cannot see or affect host containers
+- Automatic BuildKit sidecar for optimized builds
+
+**Security implications:**
+- Requires privileged mode (Moat sets this automatically)
+- Agent has full control over its own Docker daemon
+- No access to host containers or images
+
+Use this mode for untrusted code or when isolation is required.
+
+**Runtime requirement:** Both modes require Docker runtime. Apple containers cannot mount the Docker socket or run in privileged mode.
+
+See [Dependencies](./06-dependencies.md#docker-dependencies) for configuration details.
+
 ## Limitations
 
 Container isolation is not a security boundary against a determined attacker. It provides:

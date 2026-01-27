@@ -96,6 +96,47 @@ dependencies:
 
 Meta dependencies expand to their constituent packages during resolution.
 
+## Docker dependencies
+
+Special dependencies for running Docker inside containers:
+
+```yaml
+dependencies:
+  - docker:host  # Mount host Docker socket
+  - docker:dind  # Isolated Docker daemon with BuildKit
+```
+
+**Modes:**
+
+| Mode | Description | Use when |
+|------|-------------|----------|
+| `docker:host` | Mounts host Docker socket | You need fast startup and trust the agent |
+| `docker:dind` | Runs isolated Docker daemon with BuildKit sidecar | You need isolation or fast image builds |
+
+**Key differences:**
+
+- **docker:host**: Fast startup, shared image cache with host, full access to host Docker
+- **docker:dind**: Complete isolation, automatic BuildKit sidecar for fast builds, privileged mode required
+
+**BuildKit sidecar:**
+
+When using `docker:dind`, Moat automatically deploys a BuildKit sidecar container (`moby/buildkit:latest`) connected via a Docker network. This provides:
+- Fast layer caching
+- `RUN --mount=type=cache` support for optimized builds
+- Optimized multi-stage builds
+- Full Docker daemon access for `docker ps`, `docker run`, etc.
+
+**Runtime requirements:**
+
+Both Docker modes require Docker runtime. Apple containers cannot mount the Docker socket (`docker:host`) or run in privileged mode (`docker:dind`).
+
+```bash
+# Force Docker runtime on macOS
+moat run --runtime docker ./my-project
+```
+
+See [agent.yaml reference](../reference/02-agent-yaml.md#docker) for detailed documentation and examples.
+
 ## Runtimes
 
 ### Node.js
