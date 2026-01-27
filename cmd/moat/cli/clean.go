@@ -36,15 +36,15 @@ func init() {
 func cleanResources(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime
-	rt, err := container.NewRuntime()
+	// Get runtime (no sandbox needed for listing/cleaning)
+	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{Sandbox: false})
 	if err != nil {
 		return fmt.Errorf("initializing runtime: %w", err)
 	}
 	defer rt.Close()
 
-	// Get runs
-	manager, err := run.NewManager()
+	// Get runs (no sandbox needed for listing/cleaning)
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		return fmt.Errorf("creating run manager: %w", err)
 	}
