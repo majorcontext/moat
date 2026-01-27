@@ -261,6 +261,11 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("invalid network policy %q: must be 'permissive' or 'strict'", cfg.Network.Policy)
 	}
 
+	// Validate sandbox setting
+	if cfg.Sandbox != "" && cfg.Sandbox != "none" {
+		return nil, fmt.Errorf("invalid sandbox value %q: must be empty (default) or 'none'", cfg.Sandbox)
+	}
+
 	// Check for overlapping env and secrets keys
 	for key := range cfg.Secrets {
 		if _, exists := cfg.Env[key]; exists {

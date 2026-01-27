@@ -59,32 +59,20 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
 
-	ociRuntime := "runsc"
+	var ociRuntime string // empty string = Docker's default runtime
 	if !sandbox {
 		log.Warn("running without gVisor sandbox - reduced isolation")
-		ociRuntime = "runc"
+		// Leave ociRuntime empty to use Docker's default (usually runc)
 	} else {
-		// Verify gVisor is available
+		// Verify gVisor is available using shared detection function
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		info, err := cli.Info(ctx)
-		if err != nil {
-			cli.Close()
-			return nil, fmt.Errorf("checking Docker info: %w", err)
-		}
-
-		found := false
-		for name := range info.Runtimes {
-			if name == "runsc" {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !GVisorAvailable(ctx) {
 			cli.Close()
 			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
 		}
+		ociRuntime = "runsc"
 	}
 
 	return &DockerRuntime{cli: cli, ociRuntime: ociRuntime}, nil
