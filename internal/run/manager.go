@@ -1804,7 +1804,18 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	}
 
 	r.State = StateStopping
+	buildkitContainerID := r.BuildkitContainerID
+	networkID := r.NetworkID
 	m.mu.Unlock()
+
+	// Stop BuildKit sidecar if present (before main container)
+	if buildkitContainerID != "" {
+		log.Debug("stopping buildkit sidecar", "container_id", buildkitContainerID)
+		if err := m.runtime.StopContainer(ctx, buildkitContainerID); err != nil {
+			log.Warn("failed to stop buildkit sidecar", "error", err)
+			// Continue anyway - try to clean up network
+		}
+	}
 
 	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped
@@ -1868,6 +1879,17 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	if claudeConfigTempDir != "" {
 		if err := os.RemoveAll(claudeConfigTempDir); err != nil {
 			log.Debug("failed to remove Claude config temp dir", "path", claudeConfigTempDir, "error", err)
+		}
+	}
+
+	// Remove network if present (best-effort)
+	if networkID != "" {
+		log.Debug("removing docker network", "network_id", networkID)
+		if dockerRuntime, ok := m.runtime.(*container.DockerRuntime); ok {
+			if err := dockerRuntime.RemoveNetwork(ctx, networkID); err != nil {
+				log.Warn("failed to remove docker network", "error", err)
+				// Non-fatal - network may have active endpoints
+			}
 		}
 	}
 
