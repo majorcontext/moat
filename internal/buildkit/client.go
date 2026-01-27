@@ -8,7 +8,10 @@ import (
 
 	"github.com/andybons/moat/internal/log"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/filesync"
 	"github.com/moby/buildkit/util/progress/progressui"
+	"github.com/tonistiigi/fsutil"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,6 +57,23 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 	}
 	defer bkClient.Close()
 
+	// Create session for file sync
+	sess, err := session.NewSession(ctx, "moat-build")
+	if err != nil {
+		return fmt.Errorf("creating buildkit session: %w", err)
+	}
+
+	// Attach file sync provider to upload build context
+	fs, err := fsutil.NewFS(opts.ContextDir)
+	if err != nil {
+		return fmt.Errorf("creating filesystem for context: %w", err)
+	}
+	syncProvider := filesync.NewFSSyncProvider(filesync.StaticDirSource{
+		"context":    fs,
+		"dockerfile": fs,
+	})
+	sess.Allow(syncProvider)
+
 	// Prepare solve options
 	solveOpt := client.SolveOpt{
 		Frontend: "dockerfile.v0",
@@ -61,10 +81,7 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 			"filename": "Dockerfile",
 			"platform": opts.Platform,
 		},
-		LocalDirs: map[string]string{
-			"context":    opts.ContextDir,
-			"dockerfile": opts.ContextDir,
-		},
+		Session: []session.Attachable{syncProvider},
 	}
 
 	// Add build args
