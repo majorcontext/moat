@@ -1537,6 +1537,9 @@ region = %s
 		containerAuditData.Privileged = true
 		containerAuditData.Reason = "docker:dind"
 	}
+	containerAuditData.BuildKitEnabled = buildkitCfg.Enabled
+	containerAuditData.BuildKitContainerID = r.BuildkitContainerID
+	containerAuditData.BuildKitNetworkID = r.NetworkID
 	_, _ = auditStore.AppendContainer(containerAuditData)
 
 	// Initialize snapshot engine if not disabled

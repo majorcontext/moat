@@ -69,6 +69,11 @@ type ContainerData struct {
 	Action     string `json:"action"`               // "created", "started", "stopped"
 	Privileged bool   `json:"privileged,omitempty"` // true if container runs in privileged mode
 	Reason     string `json:"reason,omitempty"`     // e.g., "docker:dind" for why privileged
+
+	// BuildKit sidecar info (dind mode only)
+	BuildKitEnabled     bool   `json:"buildkit_enabled,omitempty"`
+	BuildKitContainerID string `json:"buildkit_container_id,omitempty"`
+	BuildKitNetworkID   string `json:"buildkit_network_id,omitempty"`
 }
 
 // Entry represents a single hash-chained log entry.
