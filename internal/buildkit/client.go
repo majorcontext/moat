@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/andybons/moat/internal/log"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/util/progress/progressui"
 	"golang.org/x/sync/errgroup"
@@ -21,8 +22,9 @@ type Client struct {
 func NewClient() (*Client, error) {
 	addr := os.Getenv("BUILDKIT_HOST")
 	if addr == "" {
-		return nil, fmt.Errorf("BUILDKIT_HOST not set")
+		return nil, fmt.Errorf("BUILDKIT_HOST not set - this should not happen when BuildKit routing is enabled")
 	}
+	log.Debug("creating buildkit client", "address", addr)
 	return &Client{addr: addr}, nil
 }
 
@@ -39,10 +41,16 @@ type BuildOptions struct {
 
 // Build executes a build using BuildKit.
 func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
+	log.Debug("starting buildkit build",
+		"tag", opts.Tag,
+		"context_dir", opts.ContextDir,
+		"platform", opts.Platform,
+		"no_cache", opts.NoCache)
+
 	// Connect to BuildKit
 	bkClient, err := client.New(ctx, c.addr)
 	if err != nil {
-		return fmt.Errorf("connecting to buildkit at %s: %w", c.addr, err)
+		return fmt.Errorf("failed to connect to BuildKit at %s - check if docker:dind sidecar is running and BUILDKIT_HOST is configured correctly: %w", c.addr, err)
 	}
 	defer bkClient.Close()
 
@@ -94,7 +102,7 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 	eg.Go(func() error {
 		display, err := progressui.NewDisplay(output, progressui.AutoMode)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize progress display: %w", err)
 		}
 		_, err = display.UpdateFrom(ctx, ch)
 		return err
@@ -103,22 +111,30 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 	// Execute build
 	eg.Go(func() error {
 		_, err := bkClient.Solve(ctx, nil, solveOpt, ch)
-		return err
+		if err != nil {
+			// Provide context about common build failures
+			return fmt.Errorf("build failed - check Dockerfile syntax and build context at %s: %w", opts.ContextDir, err)
+		}
+		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("buildkit build failed: %w", err)
+		log.Error("buildkit build failed", "tag", opts.Tag, "error", err)
+		return err
 	}
 
+	log.Debug("buildkit build completed successfully", "tag", opts.Tag)
 	return nil
 }
 
 // Ping checks if BuildKit is reachable.
 func (c *Client) Ping(ctx context.Context) error {
+	log.Debug("pinging buildkit", "address", c.addr)
 	bkClient, err := client.New(ctx, c.addr)
 	if err != nil {
-		return fmt.Errorf("connecting to buildkit: %w", err)
+		return fmt.Errorf("BuildKit not reachable at %s - verify docker:dind sidecar is running and network configuration is correct: %w", c.addr, err)
 	}
 	defer bkClient.Close()
+	log.Debug("buildkit ping successful", "address", c.addr)
 	return nil
 }

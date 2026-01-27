@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/buildkit"
+	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -382,10 +383,12 @@ func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, erro
 // Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
 func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
 	// Use BuildKit client if BUILDKIT_HOST is set
-	if os.Getenv("BUILDKIT_HOST") != "" {
+	if buildkitHost := os.Getenv("BUILDKIT_HOST"); buildkitHost != "" {
+		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
 		return r.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
 	}
 	// Otherwise use Docker SDK
+	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
 	return r.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
 }
 
