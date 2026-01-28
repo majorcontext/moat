@@ -25,6 +25,14 @@ import (
 type AppleRuntime struct {
 	containerBin string
 	hostAddress  string
+
+	buildMgr *appleBuildManager
+}
+
+// appleBuildManager implements BuildManager for Apple containers.
+type appleBuildManager struct {
+	containerBin string
+	hostAddress  string
 }
 
 // NewAppleRuntime creates a new Apple container runtime.
@@ -38,6 +46,10 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 	r := &AppleRuntime{
 		containerBin: binPath,
 		hostAddress:  "192.168.64.1", // Default gateway for Apple containers
+	}
+	r.buildMgr = &appleBuildManager{
+		containerBin: binPath,
+		hostAddress:  "192.168.64.1",
 	}
 
 	return r, nil
@@ -53,9 +65,9 @@ func (r *AppleRuntime) SidecarManager() SidecarManager {
 	return nil
 }
 
-// BuildManager returns nil - will be implemented in Task 3.
+// BuildManager returns the Apple build manager.
 func (r *AppleRuntime) BuildManager() BuildManager {
-	return nil
+	return r.buildMgr
 }
 
 // Type returns RuntimeApple.
@@ -430,7 +442,12 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 
 // ImageExists checks if an image exists locally.
 func (r *AppleRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
-	cmd := exec.CommandContext(ctx, r.containerBin, "image", "inspect", tag)
+	return r.buildMgr.ImageExists(ctx, tag)
+}
+
+// ImageExists checks if an image exists locally.
+func (m *appleBuildManager) ImageExists(ctx context.Context, tag string) (bool, error) {
+	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", tag)
 	if err := cmd.Run(); err != nil {
 		return false, nil
 	}
@@ -441,8 +458,15 @@ func (r *AppleRuntime) ImageExists(ctx context.Context, tag string) (bool, error
 // Before building, it fixes the builder's DNS configuration to work around
 // a known issue (apple/container#656) where the builder cannot resolve external hosts.
 func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	return r.buildMgr.BuildImage(ctx, dockerfile, tag, opts)
+}
+
+// BuildImage builds an image using Apple's container CLI.
+// Before building, it fixes the builder's DNS configuration to work around
+// a known issue (apple/container#656) where the builder cannot resolve external hosts.
+func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
 	// Fix builder DNS before building
-	if err := r.fixBuilderDNS(ctx, opts.DNS); err != nil {
+	if err := m.fixBuilderDNS(ctx, opts.DNS); err != nil {
 		return fmt.Errorf("configuring builder DNS: %w", err)
 	}
 
@@ -467,7 +491,7 @@ func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag st
 	}
 	args = append(args, tmpDir)
 
-	cmd := exec.CommandContext(ctx, r.containerBin, args...)
+	cmd := exec.CommandContext(ctx, m.containerBin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -487,7 +511,7 @@ const builderDNSLockPath = "/tmp/moat-builder-dns.lock"
 //
 // Uses a file lock to prevent race conditions when multiple moat processes
 // attempt to configure the builder DNS simultaneously.
-func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
+func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
 	// Acquire file lock to prevent concurrent DNS configuration
 	lockFile, err := os.OpenFile(builderDNSLockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -525,7 +549,7 @@ func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string
 	}
 
 	// Ensure builder is running before we try to configure it
-	if err := r.ensureBuilderRunning(ctx); err != nil {
+	if err := m.ensureBuilderRunning(ctx); err != nil {
 		return fmt.Errorf("starting builder: %w", err)
 	}
 
@@ -542,7 +566,7 @@ func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string
 	}
 
 	// Write to builder's /etc/resolv.conf using stdin to avoid shell injection
-	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "-i", "buildkit",
+	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "-i", "buildkit",
 		"sh", "-c", "cat > /etc/resolv.conf")
 	cmd.Stdin = strings.NewReader(resolv.String())
 
@@ -553,14 +577,14 @@ func (r *AppleRuntime) fixBuilderDNS(ctx context.Context, configuredDNS []string
 }
 
 // ensureBuilderRunning starts the builder if it's not already running.
-func (r *AppleRuntime) ensureBuilderRunning(ctx context.Context) error {
+func (m *appleBuildManager) ensureBuilderRunning(ctx context.Context) error {
 	// Check if builder is already running by checking output (exit code is always 0)
-	if r.isBuilderRunning(ctx) {
+	if m.isBuilderRunning(ctx) {
 		return nil
 	}
 
 	// Start the builder
-	cmd := exec.CommandContext(ctx, r.containerBin, "builder", "start")
+	cmd := exec.CommandContext(ctx, m.containerBin, "builder", "start")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -578,9 +602,9 @@ func (r *AppleRuntime) ensureBuilderRunning(ctx context.Context) error {
 		default:
 		}
 
-		if r.isBuilderRunning(ctx) {
+		if m.isBuilderRunning(ctx) {
 			// Also verify exec works (builder may take a moment to be accessible)
-			testCmd := exec.CommandContext(ctx, r.containerBin, "exec", "buildkit", "true")
+			testCmd := exec.CommandContext(ctx, m.containerBin, "exec", "buildkit", "true")
 			if testCmd.Run() == nil {
 				return nil
 			}
@@ -596,8 +620,8 @@ func (r *AppleRuntime) ensureBuilderRunning(ctx context.Context) error {
 
 // isBuilderRunning checks if the builder container is in running state.
 // Note: `container builder status` always returns exit code 0, so we must check output.
-func (r *AppleRuntime) isBuilderRunning(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, r.containerBin, "builder", "status")
+func (m *appleBuildManager) isBuilderRunning(ctx context.Context) bool {
+	cmd := exec.CommandContext(ctx, m.containerBin, "builder", "status")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -834,15 +858,22 @@ func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
 // For Apple containers, we inspect the image config similar to Docker.
 // Returns "/root" if detection fails or no home is configured.
 func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
+	return r.buildMgr.GetImageHomeDir(ctx, imageName)
+}
+
+// GetImageHomeDir returns the home directory configured in an image.
+// For Apple containers, we inspect the image config similar to Docker.
+// Returns "/root" if detection fails or no home is configured.
+func (m *appleBuildManager) GetImageHomeDir(ctx context.Context, imageName string) string {
 	const defaultHome = "/root"
 
 	// Ensure image is available first
-	if err := r.ensureImage(ctx, imageName); err != nil {
+	if err := m.ensureImage(ctx, imageName); err != nil {
 		return defaultHome
 	}
 
 	// Try to inspect the image for config
-	cmd := exec.CommandContext(ctx, r.containerBin, "image", "inspect", imageName)
+	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", imageName)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -891,6 +922,25 @@ func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) st
 	}
 
 	return "/home/" + user
+}
+
+// ensureImage pulls an image if it doesn't exist locally.
+func (m *appleBuildManager) ensureImage(ctx context.Context, imageName string) error {
+	// Check if image exists
+	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", imageName)
+	if err := cmd.Run(); err == nil {
+		return nil // Image exists
+	}
+
+	fmt.Printf("Pulling image %s...\n", imageName)
+	cmd = exec.CommandContext(ctx, m.containerBin, "image", "pull", imageName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pulling image %s: %w", imageName, err)
+	}
+	return nil
 }
 
 // BuildCreateArgs is exported for testing.
