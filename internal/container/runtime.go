@@ -247,8 +247,12 @@ type Info struct {
 // BuildOptions configures image building.
 type BuildOptions struct {
 	// DNS servers to use during build (Apple containers only).
-	// If empty, host DNS is auto-detected.
+	// If empty, defaults to Google public DNS (8.8.8.8, 8.8.4.4).
 	DNS []string
+
+	// ContextFiles are additional files to write into the build context directory.
+	// Keys are relative paths, values are file contents.
+	ContextFiles map[string][]byte
 
 	// NoCache disables build cache, forcing a fresh build of all layers.
 	NoCache bool

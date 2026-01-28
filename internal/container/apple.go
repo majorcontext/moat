@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/andybons/moat/internal/container/output"
@@ -456,10 +455,7 @@ func (m *appleBuildManager) ImageExists(ctx context.Context, tag string) (bool, 
 }
 
 // BuildImage builds an image using Apple's container CLI.
-// Before building, it fixes the builder's DNS configuration to work around
-// a known issue (apple/container#656) where the builder cannot resolve external hosts.
 func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Fix builder DNS before building
 	if err := m.fixBuilderDNS(ctx, opts.DNS); err != nil {
 		return fmt.Errorf("configuring builder DNS: %w", err)
 	}
@@ -474,6 +470,20 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
 		return fmt.Errorf("writing Dockerfile: %w", err)
+	}
+
+	// Write additional context files (e.g., scripts for COPY instead of heredoc)
+	for name, content := range opts.ContextFiles {
+		path := filepath.Join(tmpDir, name)
+		// Create parent directories if needed
+		if dir := filepath.Dir(path); dir != tmpDir {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("creating context dir for %s: %w", name, err)
+			}
+		}
+		if err := os.WriteFile(path, content, 0644); err != nil {
+			return fmt.Errorf("writing context file %s: %w", name, err)
+		}
 	}
 
 	output.BuildingImage(tag)
@@ -495,112 +505,68 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 	return nil
 }
 
-// builderDNSLockPath is the file used for advisory locking during builder DNS configuration.
-// This prevents race conditions when multiple moat processes configure DNS simultaneously.
-const builderDNSLockPath = "/tmp/moat-builder-dns.lock"
-
 // fixBuilderDNS ensures the Apple container builder has working DNS.
 // This works around apple/container#656 where the builder's default DNS
-// (the gateway) doesn't forward queries.
+// (the gateway at 192.168.64.1) doesn't forward queries.
 //
-// Uses a file lock to prevent race conditions when multiple moat processes
-// attempt to configure the builder DNS simultaneously.
+// The fix starts the builder if needed, then configures DNS using a simple
+// exec command without stdin to avoid corrupting the gRPC transport.
 func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
-	// Acquire file lock to prevent concurrent DNS configuration
-	lockFile, err := os.OpenFile(builderDNSLockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return fmt.Errorf("opening DNS lock file: %w", err)
-	}
-	defer lockFile.Close()
-
-	// Try to acquire lock with timeout to prevent indefinite blocking
-	lockChan := make(chan error, 1)
-	go func() {
-		lockChan <- syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
-	}()
-
-	select {
-	case err := <-lockChan:
-		if err != nil {
-			return fmt.Errorf("acquiring DNS lock: %w", err)
-		}
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("timeout waiting for DNS lock - another moat process may be configuring the builder")
-	}
-
-	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	}()
-
-	// Use configured DNS if provided
+	// Determine DNS servers to use
 	dnsServers := configuredDNS
-
-	// If not configured, try to detect host DNS
 	if len(dnsServers) == 0 {
-		detected, err := detectHostDNS(ctx)
-		if err != nil {
-			return fmt.Errorf("cannot detect host DNS for Apple container builder\n\n"+
-				"Set DNS explicitly in agent.yaml:\n\n"+
-				"  container:\n"+
-				"    apple:\n"+
-				"      builder_dns: [\"192.168.1.1\"]  # your router/corporate DNS\n\n"+
-				"Or use public DNS if you accept the privacy trade-off:\n\n"+
-				"  container:\n"+
-				"    apple:\n"+
-				"      builder_dns: [\"8.8.8.8\"]\n\n"+
-				"Error: %w", err)
+		// Default to Google's public DNS
+		dnsServers = []string{"8.8.8.8", "8.8.4.4"}
+	}
+
+	// If builder isn't running, start it so we can configure DNS.
+	// The build command would auto-start it anyway, but we need to configure
+	// DNS before the build runs.
+	if !m.isBuilderRunning(ctx) {
+		cmd := exec.CommandContext(ctx, m.containerBin, "builder", "start")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("starting builder: %w: %s", err, stderr.String())
 		}
-		dnsServers = detected
+
+		// Wait for builder to be ready
+		if err := m.waitForBuilder(ctx); err != nil {
+			return fmt.Errorf("waiting for builder: %w", err)
+		}
 	}
 
-	// Ensure builder is running before we try to configure it
-	if err := m.ensureBuilderRunning(ctx); err != nil {
-		return fmt.Errorf("starting builder: %w", err)
-	}
-
-	// Validate and build resolv.conf content
-	var resolv strings.Builder
+	// Validate and build resolv.conf content using printf format (handles newlines correctly)
+	var resolvConf strings.Builder
 	for _, server := range dnsServers {
-		// Validate DNS server is a valid IP address to prevent injection
 		if net.ParseIP(server) == nil {
 			return fmt.Errorf("invalid DNS server %q: not a valid IP address", server)
 		}
-		resolv.WriteString("nameserver ")
-		resolv.WriteString(server)
-		resolv.WriteString("\n")
+		resolvConf.WriteString("nameserver ")
+		resolvConf.WriteString(server)
+		resolvConf.WriteString("\\n") // Escaped for printf
 	}
 
-	// Write to builder's /etc/resolv.conf using stdin to avoid shell injection
-	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "-i", "buildkit",
-		"sh", "-c", "cat > /etc/resolv.conf")
-	cmd.Stdin = strings.NewReader(resolv.String())
+	// Configure DNS using simple exec (no stdin to avoid gRPC transport corruption).
+	// Use printf instead of echo to properly handle embedded newlines.
+	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "buildkit",
+		"sh", "-c", fmt.Sprintf("printf '%s' > /etc/resolv.conf", resolvConf.String()))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("configuring builder DNS: %w", err)
-	}
-	return nil
-}
-
-// ensureBuilderRunning starts the builder if it's not already running.
-func (m *appleBuildManager) ensureBuilderRunning(ctx context.Context) error {
-	// Check if builder is already running by checking output (exit code is always 0)
-	if m.isBuilderRunning(ctx) {
+		// Log but don't fail - the build may still succeed with default DNS
+		log.Debug("DNS configuration failed, build may use default DNS", "error", err, "stderr", stderr.String())
 		return nil
 	}
 
-	// Start the builder
-	cmd := exec.CommandContext(ctx, m.containerBin, "builder", "start")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("starting builder: %w", err)
-	}
+	return nil
+}
 
-	// Wait for builder to be ready and accessible via exec
-	fmt.Println("Waiting for Apple container builder to start...")
+// waitForBuilder waits for the builder to be ready and accessible via exec.
+func (m *appleBuildManager) waitForBuilder(ctx context.Context) error {
 	const maxRetries = 30
 	for i := 0; i < maxRetries; i++ {
-		// Check for context cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -608,14 +574,13 @@ func (m *appleBuildManager) ensureBuilderRunning(ctx context.Context) error {
 		}
 
 		if m.isBuilderRunning(ctx) {
-			// Also verify exec works (builder may take a moment to be accessible)
+			// Verify exec works (builder may take a moment to be accessible)
 			testCmd := exec.CommandContext(ctx, m.containerBin, "exec", "buildkit", "true")
 			if testCmd.Run() == nil {
 				return nil
 			}
 		}
 
-		// Don't sleep on last iteration
 		if i < maxRetries-1 {
 			time.Sleep(time.Second)
 		}
@@ -633,75 +598,11 @@ func (m *appleBuildManager) isBuilderRunning(ctx context.Context) bool {
 	}
 	// When not running: "builder is not running"
 	// When running: table with STATE column showing "running"
-	// Check for "not running" first to avoid false positive from "running" substring
 	output := string(out)
 	if strings.Contains(output, "not running") {
 		return false
 	}
 	return strings.Contains(output, "running")
-}
-
-// detectHostDNS attempts to detect the host's DNS servers from macOS system config.
-// Uses the provided context for timeout/cancellation.
-func detectHostDNS(ctx context.Context) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "scutil", "--dns")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("running scutil --dns: %w", err)
-	}
-
-	var servers []string
-	var skippedIPv6 []string
-	var skippedLocalhost []string
-	seen := make(map[string]bool)
-
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "nameserver[") {
-			// Parse "nameserver[0] : 192.168.1.1"
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				server := strings.TrimSpace(parts[1])
-				// Skip IPv6 for now (container networking may not support it well)
-				if strings.Contains(server, ":") {
-					if !seen[server] {
-						skippedIPv6 = append(skippedIPv6, server)
-						seen[server] = true
-					}
-					continue
-				}
-				// Skip localhost (won't work from container)
-				if server == "127.0.0.1" {
-					if !seen[server] {
-						skippedLocalhost = append(skippedLocalhost, server)
-						seen[server] = true
-					}
-					continue
-				}
-				// Deduplicate
-				if !seen[server] {
-					seen[server] = true
-					servers = append(servers, server)
-				}
-			}
-		}
-	}
-
-	// Log what was found/skipped to help debug DNS detection issues
-	if len(skippedIPv6) > 0 {
-		log.Debug("DNS detection skipped IPv6 servers", "servers", skippedIPv6)
-	}
-	if len(skippedLocalhost) > 0 {
-		log.Debug("DNS detection skipped localhost", "servers", skippedLocalhost)
-	}
-	if len(servers) > 0 {
-		log.Debug("DNS detection found usable servers", "servers", servers)
-	}
-
-	if len(servers) == 0 {
-		return nil, fmt.Errorf("no usable DNS servers found in host configuration")
-	}
-	return servers, nil
 }
 
 // ensureImage pulls an image if it doesn't exist locally.
