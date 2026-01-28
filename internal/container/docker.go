@@ -67,6 +67,9 @@ type dockerNetworkManager struct {
 type dockerSidecarManager struct {
 	cli        *client.Client
 	ociRuntime string // Same OCI runtime as main container ("runsc" or "")
+	                   // Note: BuildKit sidecars inherit the main container's OCI runtime.
+	                   // BuildKit is expected to work with gVisor (runsc), though this
+	                   // combination has not been extensively tested in production.
 
 // dockerBuildManager implements BuildManager for Docker.
 type dockerBuildManager struct {
