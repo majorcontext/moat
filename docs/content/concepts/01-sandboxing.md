@@ -24,42 +24,22 @@ When code runs in a Moat container:
 
 Moat supports two container runtimes:
 
-| Runtime | Platform | How it works |
-|---------|----------|--------------|
-| Docker | macOS (Intel), Linux, Windows | Uses Docker Engine via the Docker API |
-| Apple containers | macOS 15+ with Apple Silicon | Uses macOS native containerization |
+| Runtime | Platform | Notes |
+|---------|----------|-------|
+| Docker | Linux, macOS, Windows | Supports gVisor sandboxing on Linux |
+| Apple containers | macOS 15+ (Apple Silicon) | macOS native containerization |
 
-Moat detects the available runtime automatically at startup. On macOS 15+ with Apple Silicon, it prefers Apple containers. Otherwise, it uses Docker.
+Moat detects the available runtime automatically. On macOS 15+ with Apple Silicon, it prefers Apple containers. Otherwise, it uses Docker.
 
 Check the active runtime:
 
 ```bash
 $ moat status
 
-Runtime: apple  # or "docker"
+Runtime: docker+gvisor  # or "docker" or "apple"
 ```
 
-## Docker runtime
-
-Docker provides container isolation through Linux kernel features: namespaces for isolation and cgroups for resource limits. On macOS and Windows, Docker runs a Linux VM to provide these features.
-
-**Proxy access:** The credential-injecting proxy binds to `127.0.0.1` (localhost) on the host. Containers reach the proxy via `host.docker.internal`, a Docker-provided hostname that resolves to the host machine.
-
-**Security model:** The proxy listens only on localhost, so only processes on the host machine can access it. Containers access it through Docker's host networking bridge.
-
-## Apple containers
-
-Apple containers are native to macOS 15+ on Apple Silicon. They use macOS virtualization frameworks rather than Docker.
-
-**Proxy access:** The proxy binds to `0.0.0.0` (all interfaces) because containers access the host via a gateway IP (e.g., `192.168.64.1`) rather than a special hostname.
-
-**Security model:** Since the proxy binds to all interfaces, Moat uses per-run token authentication. Each run generates a cryptographically random 32-byte token. The token is passed to the container via the `HTTP_PROXY` URL:
-
-```
-HTTP_PROXY=http://moat:<token>@<host>:<port>
-```
-
-The proxy rejects requests without a valid token. This prevents other processes on the network from using the proxy.
+See [Container runtimes](./07-runtimes.md) for runtime selection, gVisor configuration, and security models.
 
 ## Workspace mounting
 
@@ -173,5 +153,6 @@ For high-security scenarios, consider running Moat inside a VM or on a dedicated
 
 ## Related concepts
 
+- [Container runtimes](./07-runtimes.md) — Runtime selection, gVisor sandboxing, and security models
 - [Credential management](./02-credentials.md) — How credentials are injected through the proxy
 - [Network policies](./05-networking.md) — Controlling outbound network access
