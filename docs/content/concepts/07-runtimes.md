@@ -39,14 +39,18 @@ Docker provides container isolation through Linux kernel features. On Linux, Doc
 
 Docker runtime supports two sandbox modes:
 
-| Mode | OCI runtime | Isolation level | When to use |
-|------|-------------|-----------------|-------------|
-| gVisor (default) | `runsc` | High | Untrusted code, additional isolation needed |
-| Standard | `runc` | Standard | Development, gVisor unavailable |
+| Mode | OCI runtime | Isolation level | Default on |
+|------|-------------|-----------------|------------|
+| gVisor | `runsc` | High | Linux |
+| Standard | `runc` | Standard | macOS, Windows |
 
 **gVisor** is an application kernel that adds a security layer between containers and the host kernel. It intercepts system calls and implements them in userspace, reducing the attack surface for container escape exploits.
 
-On Linux, Moat requires gVisor by default. If gVisor is not installed, you'll see:
+**Platform defaults:**
+- **Linux:** gVisor required by default (enhanced isolation)
+- **macOS/Windows:** Standard mode (gVisor unavailable in Docker Desktop)
+
+On Linux, if gVisor is not installed, you'll see:
 
 ```
 Error: gVisor (runsc) is required but not available
@@ -67,9 +71,9 @@ To bypass (reduced isolation):
   moat run --no-sandbox
 ```
 
-### Bypassing gVisor
+### Overriding sandbox mode
 
-Disable the gVisor requirement with `--no-sandbox`:
+On Linux, you can disable gVisor with `--no-sandbox`:
 
 ```bash
 moat run --no-sandbox ./my-project
@@ -81,10 +85,12 @@ This uses the standard `runc` runtime. Moat displays a warning:
 WARN running without gVisor sandbox - reduced isolation
 ```
 
-Use `--no-sandbox` when:
-- Developing on macOS or Windows where gVisor is not available
+Use `--no-sandbox` on Linux when:
 - Running in environments without gVisor installed
 - Debugging issues specific to the standard runtime
+- Working in development where gVisor overhead is undesirable
+
+**Note:** On macOS and Windows, `--no-sandbox` has no effect since gVisor is unavailable by default.
 
 **Security note:** Standard container isolation protects against accidental damage and provides environment separation, but does not defend against container escape exploits. For untrusted code on Linux, install gVisor.
 
@@ -189,20 +195,24 @@ If the requested runtime is unavailable, Moat returns an error:
 Error: Apple container runtime not available: container CLI not found
 ```
 
-### Disable sandbox requirement
+### Override sandbox mode (Linux only)
+
+On Linux, disable gVisor requirement:
 
 ```bash
 moat run --no-sandbox ./my-project
 ```
 
-Or set it in `agent.yaml` (not recommended):
+Or set it in `agent.yaml`:
 
 ```yaml
 # agent.yaml
-sandbox: false  # Use with caution
+sandbox: false
 ```
 
 The CLI flag overrides the `agent.yaml` setting.
+
+**Note:** On macOS and Windows, gVisor is automatically disabled (unavailable in Docker Desktop), so this flag has no effect.
 
 ## Troubleshooting
 
@@ -222,17 +232,19 @@ open -a Docker
 sudo systemctl start docker
 ```
 
-### gVisor not available
+### gVisor not available (Linux only)
 
 ```
 Error: gVisor (runsc) is required but not available
 ```
 
-Install gVisor (Linux only) or use `--no-sandbox`:
+This error only occurs on Linux. Install gVisor or use `--no-sandbox`:
 
 ```bash
 moat run --no-sandbox ./my-project
 ```
+
+**Note:** On macOS and Windows, this error will not occur - Moat automatically uses standard Docker runtime since gVisor is unavailable.
 
 ### Apple container system not running
 

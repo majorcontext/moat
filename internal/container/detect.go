@@ -22,8 +22,13 @@ type RuntimeOptions struct {
 }
 
 // DefaultRuntimeOptions returns the default runtime options.
+// On Linux, defaults to sandbox=true (requires gVisor).
+// On macOS and Windows, defaults to sandbox=false (gVisor unavailable in Docker Desktop).
 func DefaultRuntimeOptions() RuntimeOptions {
-	return RuntimeOptions{Sandbox: true}
+	// gVisor is only available on Linux
+	// Docker Desktop on macOS and Windows does not support gVisor
+	sandbox := runtime.GOOS == "linux"
+	return RuntimeOptions{Sandbox: sandbox}
 }
 
 // NewRuntimeWithOptions creates a new container runtime with the given options.
@@ -88,6 +93,10 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	runtimeName := "Docker"
 	if sandbox {
 		runtimeName = "Docker+gVisor"
+	} else if runtime.GOOS != "linux" {
+		// On macOS/Windows, gVisor is unavailable in Docker Desktop
+		log.Debug("using Docker runtime (gVisor unavailable on " + runtime.GOOS + ")")
+		return rt, nil
 	}
 	log.Debug("using " + runtimeName + " runtime")
 	return rt, nil
