@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andybons/moat/internal/container/output"
 	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/creack/pty"
@@ -470,7 +471,7 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 		return fmt.Errorf("writing Dockerfile: %w", err)
 	}
 
-	fmt.Printf("Building image %s...\n", tag)
+	output.BuildingImage(tag)
 
 	// Run container build
 	args := []string{"build", "-f", dockerfilePath, "-t", tag}
@@ -695,7 +696,7 @@ func (r *AppleRuntime) ensureImage(ctx context.Context, imageName string) error 
 		return nil // Image exists
 	}
 
-	fmt.Printf("Pulling image %s...\n", imageName)
+	output.PullingImage(imageName)
 	cmd = exec.CommandContext(ctx, r.containerBin, "image", "pull", imageName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -913,7 +914,7 @@ func (m *appleBuildManager) ensureImage(ctx context.Context, imageName string) e
 		return nil // Image exists
 	}
 
-	fmt.Printf("Pulling image %s...\n", imageName)
+	output.PullingImage(imageName)
 	cmd = exec.CommandContext(ctx, m.containerBin, "image", "pull", imageName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

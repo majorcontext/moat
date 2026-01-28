@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/buildkit"
+	"github.com/andybons/moat/internal/container/output"
 	"github.com/andybons/moat/internal/log"
 	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
@@ -390,7 +391,7 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 		return nil
 	}
 
-	fmt.Printf("Pulling image %s...\n", imageName)
+	output.PullingImage(imageName)
 	reader, err := r.cli.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pulling image %s: %w", imageName, err)
@@ -764,7 +765,7 @@ func (m *dockerSidecarManager) ensureImage(ctx context.Context, imageName string
 		return nil
 	}
 
-	fmt.Printf("Pulling image %s...\n", imageName)
+	output.PullingImage(imageName)
 	reader, err := m.cli.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pulling image %s: %w", imageName, err)
@@ -875,7 +876,7 @@ func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, docker
 		return fmt.Errorf("closing tar writer: %w", err)
 	}
 
-	fmt.Printf("Building image %s...\n", tag)
+	output.BuildingImage(tag)
 
 	// Determine platform based on host architecture
 	platform := "linux/amd64"
@@ -988,7 +989,7 @@ func (m *dockerBuildManager) ensureImage(ctx context.Context, imageName string) 
 		return nil
 	}
 
-	fmt.Printf("Pulling image %s...\n", imageName)
+	output.PullingImage(imageName)
 	reader, err := m.cli.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pulling image %s: %w", imageName, err)
