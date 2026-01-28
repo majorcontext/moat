@@ -143,6 +143,11 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
+	// Verify gVisor is still available if we're configured to use it
+	if r.ociRuntime == "runsc" && !GVisorAvailable(ctx) {
+		return "", fmt.Errorf("gVisor was available at startup but is no longer configured - did Docker daemon configuration change? %w", ErrGVisorNotAvailable)
+	}
+
 	// Pull image if not present
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
 		return "", err
