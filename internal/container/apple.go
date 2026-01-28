@@ -53,6 +53,11 @@ func (r *AppleRuntime) SidecarManager() SidecarManager {
 	return nil
 }
 
+// BuildManager returns nil - will be implemented in Task 3.
+func (r *AppleRuntime) BuildManager() BuildManager {
+	return nil
+}
+
 // Type returns RuntimeApple.
 func (r *AppleRuntime) Type() RuntimeType {
 	return RuntimeApple

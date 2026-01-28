@@ -33,6 +33,7 @@ type DockerRuntime struct {
 	cli        *client.Client
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
+	buildMgr   *dockerBuildManager
 }
 
 // dockerNetworkManager implements NetworkManager for Docker.
@@ -45,6 +46,11 @@ type dockerSidecarManager struct {
 	cli *client.Client
 }
 
+// dockerBuildManager implements BuildManager for Docker.
+type dockerBuildManager struct {
+	cli *client.Client
+}
+
 // NewDockerRuntime creates a new Docker runtime.
 func NewDockerRuntime() (*DockerRuntime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -54,6 +60,7 @@ func NewDockerRuntime() (*DockerRuntime, error) {
 	r := &DockerRuntime{cli: cli}
 	r.networkMgr = &dockerNetworkManager{cli: cli}
 	r.sidecarMgr = &dockerSidecarManager{cli: cli}
+	r.buildMgr = &dockerBuildManager{cli: cli}
 	return r, nil
 }
 
@@ -65,6 +72,11 @@ func (r *DockerRuntime) NetworkManager() NetworkManager {
 // SidecarManager returns the Docker sidecar manager.
 func (r *DockerRuntime) SidecarManager() SidecarManager {
 	return r.sidecarMgr
+}
+
+// BuildManager returns the Docker build manager.
+func (r *DockerRuntime) BuildManager() BuildManager {
+	return r.buildMgr
 }
 
 // Type returns RuntimeDocker.
@@ -391,141 +403,15 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 }
 
 // ImageExists checks if an image exists locally.
+// Delegates to BuildManager (will be removed in Task 5).
 func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
-	_, err := r.cli.ImageInspect(ctx, tag)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
-	}
-	return true, nil
+	return r.buildMgr.ImageExists(ctx, tag)
 }
 
 // BuildImage builds a Docker image from Dockerfile content.
-// Routes to BuildKit client if BUILDKIT_HOST is set, otherwise uses Docker SDK.
-// Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
+// Delegates to BuildManager (will be removed in Task 5).
 func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Use BuildKit client if BUILDKIT_HOST is set (docker:dind mode with BuildKit sidecar)
-	if buildkitHost := os.Getenv("BUILDKIT_HOST"); buildkitHost != "" {
-		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
-		return r.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
-	}
-	// Otherwise use Docker SDK (will use legacy builder by default for reliability)
-	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
-	return r.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
-}
-
-// buildImageWithBuildKit builds an image using the BuildKit client.
-func (r *DockerRuntime) buildImageWithBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Create temp directory for build context
-	tmpDir, err := os.MkdirTemp("", "moat-build-*")
-	if err != nil {
-		return fmt.Errorf("creating temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write Dockerfile to temp directory
-	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); writeErr != nil {
-		return fmt.Errorf("writing Dockerfile: %w", writeErr)
-	}
-
-	// Determine platform based on host architecture
-	platform := "linux/amd64"
-	if goruntime.GOARCH == "arm64" {
-		platform = "linux/arm64"
-	}
-
-	// Create BuildKit client
-	bkClient, err := buildkit.NewClient()
-	if err != nil {
-		return fmt.Errorf("creating buildkit client: %w", err)
-	}
-
-	// Build the image
-	return bkClient.Build(ctx, buildkit.BuildOptions{
-		Tag:        tag,
-		ContextDir: tmpDir,
-		NoCache:    opts.NoCache,
-		Platform:   platform,
-		BuildArgs:  map[string]string{}, // No build args exposed in container.BuildOptions yet
-	})
-}
-
-// buildImageWithDockerSDK builds an image using the Docker SDK.
-func (r *DockerRuntime) buildImageWithDockerSDK(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Create a tar archive with the Dockerfile
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	// Add Dockerfile to tar
-	header := &tar.Header{
-		Name: "Dockerfile",
-		Mode: 0644,
-		Size: int64(len(dockerfile)),
-	}
-	if err := tw.WriteHeader(header); err != nil {
-		return fmt.Errorf("writing tar header: %w", err)
-	}
-	if _, err := tw.Write([]byte(dockerfile)); err != nil {
-		return fmt.Errorf("writing Dockerfile to tar: %w", err)
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("closing tar writer: %w", err)
-	}
-
-	fmt.Printf("Building image %s...\n", tag)
-
-	// Determine platform based on host architecture
-	platform := "linux/amd64"
-	if goruntime.GOARCH == "arm64" {
-		platform = "linux/arm64"
-	}
-
-	// Use BuildKit by default for faster builds, but allow opting out via MOAT_DISABLE_BUILDKIT=1
-	// for environments where Docker SDK's BuildKit integration has issues (e.g., some Docker Desktop configs).
-	builderVersion := build.BuilderBuildKit
-	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
-		builderVersion = build.BuilderV1
-	}
-
-	// Build the image
-	resp, err := r.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
-		Tags:       []string{tag},
-		Dockerfile: "Dockerfile",
-		Remove:     true,
-		Platform:   platform,
-		Version:    builderVersion,
-		NoCache:    opts.NoCache,
-	})
-	if err != nil {
-		return fmt.Errorf("building image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Stream build output and check for errors
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Error  string `json:"error"`
-		}
-		if err := decoder.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("reading build output: %w", err)
-		}
-		if msg.Error != "" {
-			return fmt.Errorf("build error: %s", msg.Error)
-		}
-		if msg.Stream != "" {
-			fmt.Print(msg.Stream)
-		}
-	}
-
-	return nil
+	return r.buildMgr.BuildImage(ctx, dockerfile, tag, opts)
 }
 
 // ListImages returns all moat-managed images.
@@ -598,53 +484,9 @@ func (r *DockerRuntime) RemoveImage(ctx context.Context, id string) error {
 }
 
 // GetImageHomeDir returns the home directory configured in an image.
-// It inspects the image config for the USER directive and determines the home directory.
-// Returns "/root" if detection fails or the user is root.
+// Delegates to BuildManager (will be removed in Task 5).
 func (r *DockerRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
-	// Default to /root
-	const defaultHome = "/root"
-
-	// Ensure image is available first
-	if err := r.ensureImage(ctx, imageName); err != nil {
-		return defaultHome
-	}
-
-	inspect, err := r.cli.ImageInspect(ctx, imageName)
-	if err != nil {
-		return defaultHome
-	}
-
-	// Check for explicit HOME in environment
-	for _, env := range inspect.Config.Env {
-		if strings.HasPrefix(env, "HOME=") {
-			return strings.TrimPrefix(env, "HOME=")
-		}
-	}
-
-	// Check the USER directive - if non-root, derive home from it
-	user := inspect.Config.User
-	if user == "" || user == "root" || user == "0" {
-		return defaultHome
-	}
-
-	// For non-root users, common convention is /home/<user>
-	// Strip any UID:GID format (e.g., "1000:1000" or "node:node")
-	if colonIdx := strings.Index(user, ":"); colonIdx != -1 {
-		user = user[:colonIdx]
-	}
-
-	// If it's a numeric UID, we can't determine the home directory
-	if _, err := strconv.Atoi(user); err == nil {
-		return defaultHome
-	}
-
-	// Validate username contains only safe characters (POSIX username pattern)
-	// This prevents path traversal attacks from malicious image configs
-	if !isValidUsername(user) {
-		return defaultHome
-	}
-
-	return "/home/" + user
+	return r.buildMgr.GetImageHomeDir(ctx, imageName)
 }
 
 // ContainerState returns the state of a container ("running", "exited", "created", etc).
@@ -962,4 +804,216 @@ func (m *dockerSidecarManager) imageExists(ctx context.Context, tag string) (boo
 		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
 	}
 	return true, nil
+}
+
+// dockerBuildManager methods
+
+// ImageExists checks if an image exists locally.
+func (m *dockerBuildManager) ImageExists(ctx context.Context, tag string) (bool, error) {
+	_, err := m.cli.ImageInspect(ctx, tag)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
+	}
+	return true, nil
+}
+
+// BuildImage builds a Docker image from Dockerfile content.
+// Routes to BuildKit client if BUILDKIT_HOST is set, otherwise uses Docker SDK.
+// Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
+func (m *dockerBuildManager) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Use BuildKit client if BUILDKIT_HOST is set (docker:dind mode with BuildKit sidecar)
+	if buildkitHost := os.Getenv("BUILDKIT_HOST"); buildkitHost != "" {
+		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
+		return m.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
+	}
+	// Otherwise use Docker SDK (will use legacy builder by default for reliability)
+	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
+	return m.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
+}
+
+// buildImageWithBuildKit builds an image using the BuildKit client.
+func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Create temp directory for build context
+	tmpDir, err := os.MkdirTemp("", "moat-build-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write Dockerfile to temp directory
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); writeErr != nil {
+		return fmt.Errorf("writing Dockerfile: %w", writeErr)
+	}
+
+	// Determine platform based on host architecture
+	platform := "linux/amd64"
+	if goruntime.GOARCH == "arm64" {
+		platform = "linux/arm64"
+	}
+
+	// Create BuildKit client
+	bkClient, err := buildkit.NewClient()
+	if err != nil {
+		return fmt.Errorf("creating buildkit client: %w", err)
+	}
+
+	// Build the image
+	return bkClient.Build(ctx, buildkit.BuildOptions{
+		Tag:        tag,
+		ContextDir: tmpDir,
+		NoCache:    opts.NoCache,
+		Platform:   platform,
+		BuildArgs:  map[string]string{}, // No build args exposed in container.BuildOptions yet
+	})
+}
+
+// buildImageWithDockerSDK builds an image using the Docker SDK.
+func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Create a tar archive with the Dockerfile
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	// Add Dockerfile to tar
+	header := &tar.Header{
+		Name: "Dockerfile",
+		Mode: 0644,
+		Size: int64(len(dockerfile)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("writing tar header: %w", err)
+	}
+	if _, err := tw.Write([]byte(dockerfile)); err != nil {
+		return fmt.Errorf("writing Dockerfile to tar: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("closing tar writer: %w", err)
+	}
+
+	fmt.Printf("Building image %s...\n", tag)
+
+	// Determine platform based on host architecture
+	platform := "linux/amd64"
+	if goruntime.GOARCH == "arm64" {
+		platform = "linux/arm64"
+	}
+
+	// Use BuildKit by default for faster builds, but allow opting out via MOAT_DISABLE_BUILDKIT=1
+	// for environments where Docker SDK's BuildKit integration has issues (e.g., some Docker Desktop configs).
+	builderVersion := build.BuilderBuildKit
+	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
+		builderVersion = build.BuilderV1
+	}
+
+	// Build the image
+	resp, err := m.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
+		Tags:       []string{tag},
+		Dockerfile: "Dockerfile",
+		Remove:     true,
+		Platform:   platform,
+		Version:    builderVersion,
+		NoCache:    opts.NoCache,
+	})
+	if err != nil {
+		return fmt.Errorf("building image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Stream build output and check for errors
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var msg struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+		}
+		if err := decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("reading build output: %w", err)
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("build error: %s", msg.Error)
+		}
+		if msg.Stream != "" {
+			fmt.Print(msg.Stream)
+		}
+	}
+
+	return nil
+}
+
+// GetImageHomeDir returns the home directory configured in an image.
+// It inspects the image config for the USER directive and determines the home directory.
+// Returns "/root" if detection fails or the user is root.
+func (m *dockerBuildManager) GetImageHomeDir(ctx context.Context, imageName string) string {
+	// Default to /root
+	const defaultHome = "/root"
+
+	// Ensure image is available first
+	if err := m.ensureImage(ctx, imageName); err != nil {
+		return defaultHome
+	}
+
+	inspect, err := m.cli.ImageInspect(ctx, imageName)
+	if err != nil {
+		return defaultHome
+	}
+
+	// Check for explicit HOME in environment
+	for _, env := range inspect.Config.Env {
+		if strings.HasPrefix(env, "HOME=") {
+			return strings.TrimPrefix(env, "HOME=")
+		}
+	}
+
+	// Check the USER directive - if non-root, derive home from it
+	user := inspect.Config.User
+	if user == "" || user == "root" || user == "0" {
+		return defaultHome
+	}
+
+	// For non-root users, common convention is /home/<user>
+	// Strip any UID:GID format (e.g., "1000:1000" or "node:node")
+	if colonIdx := strings.Index(user, ":"); colonIdx != -1 {
+		user = user[:colonIdx]
+	}
+
+	// If it's a numeric UID, we can't determine the home directory
+	if _, err := strconv.Atoi(user); err == nil {
+		return defaultHome
+	}
+
+	// Validate username contains only safe characters (POSIX username pattern)
+	// This prevents path traversal attacks from malicious image configs
+	if !isValidUsername(user) {
+		return defaultHome
+	}
+
+	return "/home/" + user
+}
+
+// ensureImage pulls an image if it doesn't exist locally.
+func (m *dockerBuildManager) ensureImage(ctx context.Context, imageName string) error {
+	exists, err := m.ImageExists(ctx, imageName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	fmt.Printf("Pulling image %s...\n", imageName)
+	reader, err := m.cli.ImagePull(ctx, imageName, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pulling image %s: %w", imageName, err)
+	}
+	defer reader.Close()
+
+	// Drain the reader to complete the pull
+	_, _ = io.Copy(os.Stdout, reader)
+	return nil
 }
