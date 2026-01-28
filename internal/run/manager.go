@@ -1077,7 +1077,13 @@ region = %s
 				buildOpts.DNS = opts.Config.Container.Apple.BuilderDNS
 			}
 
-			if err := m.runtime.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
+			buildMgr := m.runtime.BuildManager()
+			if buildMgr == nil {
+				cleanupProxy(proxyServer)
+				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtime.Type())
+			}
+
+			if err := buildMgr.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
 				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
 					strings.Join(depNames, ", "), err)
