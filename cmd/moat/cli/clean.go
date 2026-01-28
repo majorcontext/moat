@@ -44,7 +44,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	defer rt.Close()
 
 	// Get runs (no sandbox needed for listing/cleaning)
-	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	noSandbox := true
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
 	if err != nil {
 		return fmt.Errorf("creating run manager: %w", err)
 	}

@@ -77,14 +77,22 @@ type Manager struct {
 // ManagerOptions configures the run manager.
 type ManagerOptions struct {
 	// NoSandbox disables gVisor sandbox for Docker containers.
-	NoSandbox bool
+	// If nil, uses platform-aware defaults (gVisor on Linux, standard on macOS/Windows).
+	NoSandbox *bool
 }
 
 // NewManagerWithOptions creates a new run manager with the given options.
 func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
-	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{
-		Sandbox: !opts.NoSandbox,
-	})
+	var runtimeOpts container.RuntimeOptions
+	if opts.NoSandbox != nil {
+		// User explicitly set --no-sandbox flag
+		runtimeOpts.Sandbox = !*opts.NoSandbox
+	} else {
+		// Use platform-aware defaults
+		runtimeOpts = container.DefaultRuntimeOptions()
+	}
+
+	rt, err := container.NewRuntimeWithOptions(runtimeOpts)
 	if err != nil {
 		return nil, fmt.Errorf("initializing container runtime: %w", err)
 	}

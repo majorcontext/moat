@@ -104,9 +104,12 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	os.Stdout.Sync() // Ensure message appears immediately
 
 	// Create manager
-	manager, err := run.NewManagerWithOptions(run.ManagerOptions{
-		NoSandbox: opts.Flags.NoSandbox,
-	})
+	var managerOpts run.ManagerOptions
+	if opts.Flags.NoSandbox {
+		noSandbox := true
+		managerOpts.NoSandbox = &noSandbox
+	}
+	manager, err := run.NewManagerWithOptions(managerOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating run manager: %w", err)
 	}
