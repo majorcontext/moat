@@ -88,7 +88,7 @@ func TestDockerRuntime_CreateNetwork(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestDockerRuntime_RemoveNetwork(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestDockerRuntime_RemoveNetwork_NotFound(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestDockerRuntime_StartSidecar(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
 	}

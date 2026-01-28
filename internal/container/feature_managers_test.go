@@ -8,7 +8,7 @@ import (
 )
 
 func TestDockerRuntimeFeatureManagers(t *testing.T) {
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false)
 	require.NoError(t, err, "Docker runtime should be available in tests")
 	defer rt.Close()
 

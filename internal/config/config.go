@@ -28,8 +28,14 @@ type Config struct {
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
-	Container    ContainerConfig   `yaml:"container,omitempty"`
-	MCP          []MCPServerConfig `yaml:"mcp,omitempty"`
+
+	// Sandbox configures container sandboxing.
+	// "none" disables gVisor sandbox (Docker only).
+	// Empty string or omitted uses default (gVisor enabled).
+	Sandbox string `yaml:"sandbox,omitempty"`
+
+	Container ContainerConfig   `yaml:"container,omitempty"`
+	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -253,6 +259,11 @@ func Load(dir string) (*Config, error) {
 	// Validate network policy
 	if cfg.Network.Policy != "permissive" && cfg.Network.Policy != "strict" {
 		return nil, fmt.Errorf("invalid network policy %q: must be 'permissive' or 'strict'", cfg.Network.Policy)
+	}
+
+	// Validate sandbox setting
+	if cfg.Sandbox != "" && cfg.Sandbox != "none" {
+		return nil, fmt.Errorf("invalid sandbox value %q: must be empty (default) or 'none'", cfg.Sandbox)
 	}
 
 	// Check for overlapping env and secrets keys

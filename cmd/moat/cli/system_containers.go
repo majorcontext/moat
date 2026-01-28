@@ -31,7 +31,8 @@ func init() {
 func listSystemContainers(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	rt, err := container.NewRuntime()
+	// No sandbox needed for listing containers
+	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{Sandbox: false})
 	if err != nil {
 		return fmt.Errorf("initializing runtime: %w", err)
 	}

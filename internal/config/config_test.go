@@ -317,6 +317,45 @@ network:
 	}
 }
 
+func TestLoadConfigRejectsInvalidSandbox(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	// Test invalid sandbox value
+	content := `
+agent: test
+sandbox: disabled
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error on invalid sandbox value")
+	}
+	if !strings.Contains(err.Error(), "invalid sandbox value") {
+		t.Errorf("error should mention 'invalid sandbox value', got: %v", err)
+	}
+}
+
+func TestLoadConfigAcceptsSandboxNone(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+sandbox: none
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept sandbox: none, got error: %v", err)
+	}
+	if cfg.Sandbox != "none" {
+		t.Errorf("Sandbox = %q, want %q", cfg.Sandbox, "none")
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg == nil {

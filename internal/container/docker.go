@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,9 +30,29 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+// ErrGVisorNotAvailable is returned when gVisor is required but not installed.
+var ErrGVisorNotAvailable = errors.New(`gVisor (runsc) is required but not available
+
+To install on Linux (Debian/Ubuntu), copy and run:
+
+  curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
+    sudo tee /etc/apt/sources.list.d/gvisor.list && \
+    sudo apt update && sudo apt install -y runsc && \
+    sudo runsc install && \
+    sudo systemctl reload docker
+
+For Docker Desktop (macOS/Windows):
+  See https://gvisor.dev/docs/user_guide/install/
+
+To bypass (reduced isolation):
+  moat run --no-sandbox`)
+
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
 	cli        *client.Client
+	ociRuntime string // "runsc" or "runc"
+
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
 	buildMgr   *dockerBuildManager
@@ -44,8 +65,8 @@ type dockerNetworkManager struct {
 
 // dockerSidecarManager implements SidecarManager for Docker.
 type dockerSidecarManager struct {
-	cli *client.Client
-}
+	cli        *client.Client
+	ociRuntime string // Same OCI runtime as main container ("runsc" or "")
 
 // dockerBuildManager implements BuildManager for Docker.
 type dockerBuildManager struct {
@@ -53,14 +74,36 @@ type dockerBuildManager struct {
 }
 
 // NewDockerRuntime creates a new Docker runtime.
-func NewDockerRuntime() (*DockerRuntime, error) {
+// If sandbox is true, requires gVisor (runsc) and fails if unavailable.
+// If sandbox is false, uses standard runc runtime with a warning.
+func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
-	r := &DockerRuntime{cli: cli}
+
+	var ociRuntime string // empty string = Docker's default runtime
+	if !sandbox {
+		log.Warn("running without gVisor sandbox - reduced isolation")
+		// Leave ociRuntime empty to use Docker's default (usually runc)
+	} else {
+		// Verify gVisor is available using shared detection function
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if !GVisorAvailable(ctx) {
+			cli.Close()
+			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
+		}
+		ociRuntime = "runsc"
+	}
+
+	r := &DockerRuntime{
+		cli:        cli,
+		ociRuntime: ociRuntime,
+	}
 	r.networkMgr = &dockerNetworkManager{cli: cli}
-	r.sidecarMgr = &dockerSidecarManager{cli: cli}
+	r.sidecarMgr = &dockerSidecarManager{cli: cli, ociRuntime: ociRuntime}
 	r.buildMgr = &dockerBuildManager{cli: cli}
 	return r, nil
 }
@@ -151,6 +194,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
+			Runtime:      r.ociRuntime, // "runsc" or "runc" or ""
 			Mounts:       mounts,
 			NetworkMode:  networkMode,
 			ExtraHosts:   cfg.ExtraHosts,
@@ -719,6 +763,7 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 			Hostname: cfg.Hostname,
 		},
 		&container.HostConfig{
+			Runtime:     m.ociRuntime, // Use same OCI runtime as main container
 			NetworkMode: container.NetworkMode(cfg.NetworkID),
 			Privileged:  cfg.Privileged,
 			Mounts:      mounts,

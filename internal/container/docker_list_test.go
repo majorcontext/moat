@@ -8,7 +8,7 @@ import (
 )
 
 func TestDockerRuntime_ListImages(t *testing.T) {
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false) // Use runc for tests (no gVisor requirement)
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestDockerRuntime_ListImages(t *testing.T) {
 }
 
 func TestDockerRuntime_ListContainers(t *testing.T) {
-	rt, err := NewDockerRuntime()
+	rt, err := NewDockerRuntime(false) // Use runc for tests (no gVisor requirement)
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}

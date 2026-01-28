@@ -56,6 +56,9 @@ network:
 command: ["npm", "start"]
 interactive: false
 
+# Sandbox (Docker only)
+# sandbox: none  # Uncomment to disable gVisor
+
 # Claude Code
 claude:
   sync_logs: true
@@ -493,6 +496,32 @@ interactive: true
 - CLI override: `-i`
 
 Required for shells, REPLs, and interactive tools.
+
+---
+
+## Sandbox
+
+### sandbox
+
+Configures container sandboxing mode. Only affects Docker containers (Apple containers use macOS virtualization).
+
+```yaml
+sandbox: none
+```
+
+- Type: `string`
+- Values: `""` (empty), `none`
+- Default: `""` (gVisor sandbox enabled)
+- CLI override: `--no-sandbox`
+
+| Value | Description |
+|-------|-------------|
+| (empty/omitted) | gVisor sandbox enabled (default) |
+| `none` | Disable gVisor sandbox |
+
+Setting `sandbox: none` is equivalent to running with `--no-sandbox`. Use this when your agent requires syscalls that gVisor doesn't support.
+
+**Note:** Disabling the sandbox reduces isolation. Only use when necessary for compatibility.
 
 ---
 

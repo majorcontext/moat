@@ -20,7 +20,7 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestLogsCapturedAfterStop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestLogsAlwaysExistForAudit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManager()
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

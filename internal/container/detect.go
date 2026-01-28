@@ -10,22 +10,30 @@ import (
 	"time"
 
 	"github.com/andybons/moat/internal/log"
+	"github.com/docker/docker/client"
 )
 
-// NewRuntime creates a new container runtime, auto-detecting the best available option.
-// On macOS with Apple Silicon, it prefers Apple's container tool if available,
-// falling back to Docker otherwise.
-//
-// The MOAT_RUNTIME environment variable can override auto-detection:
-//   - MOAT_RUNTIME=docker: force Docker runtime
-//   - MOAT_RUNTIME=apple: force Apple container runtime
-func NewRuntime() (Runtime, error) {
+// RuntimeOptions configures runtime creation.
+type RuntimeOptions struct {
+	// Sandbox enables gVisor sandboxing for Docker containers.
+	// When true (default), requires gVisor and fails if unavailable.
+	// When false, uses runc with reduced isolation.
+	Sandbox bool
+}
+
+// DefaultRuntimeOptions returns the default runtime options.
+func DefaultRuntimeOptions() RuntimeOptions {
+	return RuntimeOptions{Sandbox: true}
+}
+
+// NewRuntimeWithOptions creates a new container runtime with the given options.
+func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 	// Check for explicit runtime override
 	if override := os.Getenv("MOAT_RUNTIME"); override != "" {
 		switch strings.ToLower(override) {
 		case "docker":
 			log.Debug("using Docker runtime (MOAT_RUNTIME=docker)")
-			return newDockerRuntimeWithPing()
+			return newDockerRuntimeWithPing(opts.Sandbox)
 		case "apple":
 			log.Debug("using Apple container runtime (MOAT_RUNTIME=apple)")
 			rt, reason := tryAppleRuntime()
@@ -48,12 +56,23 @@ func NewRuntime() (Runtime, error) {
 	}
 
 	// Fall back to Docker
-	return newDockerRuntimeWithPing()
+	return newDockerRuntimeWithPing(opts.Sandbox)
+}
+
+// NewRuntime creates a new container runtime, auto-detecting the best available option.
+// On macOS with Apple Silicon, it prefers Apple's container tool if available,
+// falling back to Docker otherwise. Docker containers use gVisor by default.
+//
+// The MOAT_RUNTIME environment variable can override auto-detection:
+//   - MOAT_RUNTIME=docker: force Docker runtime
+//   - MOAT_RUNTIME=apple: force Apple container runtime
+func NewRuntime() (Runtime, error) {
+	return NewRuntimeWithOptions(DefaultRuntimeOptions())
 }
 
 // newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
-func newDockerRuntimeWithPing() (Runtime, error) {
-	rt, err := NewDockerRuntime()
+func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
+	rt, err := NewDockerRuntime(sandbox)
 	if err != nil {
 		return nil, fmt.Errorf("no container runtime available: Docker error: %w", err)
 	}
@@ -66,7 +85,11 @@ func newDockerRuntimeWithPing() (Runtime, error) {
 		return nil, fmt.Errorf("no container runtime available: %w", err)
 	}
 
-	log.Debug("using Docker runtime")
+	runtimeName := "Docker"
+	if sandbox {
+		runtimeName = "Docker+gVisor"
+	}
+	log.Debug("using " + runtimeName + " runtime")
 	return rt, nil
 }
 
@@ -165,4 +188,26 @@ func appleContainerAvailable() bool {
 // IsAppleSilicon returns true if running on Apple Silicon.
 func IsAppleSilicon() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+
+// GVisorAvailable checks if runsc is configured as a Docker runtime.
+// Returns true if Docker reports "runsc" in its available runtimes.
+func GVisorAvailable(ctx context.Context) bool {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return false
+	}
+	defer cli.Close()
+
+	info, err := cli.Info(ctx)
+	if err != nil {
+		return false
+	}
+
+	for name := range info.Runtimes {
+		if name == "runsc" {
+			return true
+		}
+	}
+	return false
 }

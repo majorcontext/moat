@@ -27,6 +27,7 @@ type ExecFlags struct {
 	KeepContainer bool
 	Detach        bool
 	Interactive   bool
+	NoSandbox     bool
 }
 
 // AddExecFlags adds the common execution flags to a command.
@@ -37,6 +38,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
+	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
 }
 
 // setupStatusBar creates a status bar for interactive container sessions.
@@ -98,8 +100,13 @@ type ExecOptions struct {
 // It handles creating the run, starting it, and managing the lifecycle.
 // Returns the run for further inspection if needed.
 func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
+	fmt.Print("Initializing...")
+	os.Stdout.Sync() // Ensure message appears immediately
+
 	// Create manager
-	manager, err := run.NewManager()
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{
+		NoSandbox: opts.Flags.NoSandbox,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating run manager: %w", err)
 	}
@@ -122,9 +129,11 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	// Create run
 	r, err := manager.Create(ctx, runOpts)
 	if err != nil {
+		fmt.Println() // Clear the "Initializing..." line
 		return nil, fmt.Errorf("creating run: %w", err)
 	}
 
+	fmt.Println() // Clear the "Initializing..." line
 	log.Info("created run", "id", r.ID, "name", r.Name)
 
 	// Call the OnRunCreated callback if provided

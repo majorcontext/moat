@@ -46,6 +46,7 @@ moat run [flags] [path] [-- command]
 | `--rebuild` | Force rebuild of container image |
 | `--mount SRC:DST:MODE` | Additional mount (repeatable) |
 | `--no-snapshots` | Disable snapshots for this run |
+| `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
 
 ### Examples
 
@@ -79,6 +80,21 @@ moat run -e DEBUG=true ./my-project
 
 # Named run for hostname routing
 moat run --name my-feature ./my-project
+
+# Disable gVisor sandbox (when needed for compatibility)
+moat run --no-sandbox ./my-project
+```
+
+### --no-sandbox
+
+Disables gVisor sandboxing for Docker containers. By default, Moat runs Docker containers with gVisor (`runsc`) for additional isolation. This flag disables gVisor and uses the standard Docker runtime (`runc`).
+
+**When to use:** Some workloads use syscalls that gVisor doesn't support. If your agent fails with syscall-related errors, try `--no-sandbox`.
+
+**Note:** This flag only affects Docker containers. Apple containers use macOS virtualization and are unaffected.
+
+```bash
+moat run --no-sandbox ./my-project
 ```
 
 ---

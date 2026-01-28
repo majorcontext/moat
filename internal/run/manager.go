@@ -74,9 +74,17 @@ type Manager struct {
 	mu             sync.RWMutex
 }
 
-// NewManager creates a new run manager.
-func NewManager() (*Manager, error) {
-	rt, err := container.NewRuntime()
+// ManagerOptions configures the run manager.
+type ManagerOptions struct {
+	// NoSandbox disables gVisor sandbox for Docker containers.
+	NoSandbox bool
+}
+
+// NewManagerWithOptions creates a new run manager with the given options.
+func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
+	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{
+		Sandbox: !opts.NoSandbox,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("initializing container runtime: %w", err)
 	}
@@ -105,6 +113,11 @@ func NewManager() (*Manager, error) {
 	}
 
 	return m, nil
+}
+
+// NewManager creates a new run manager with default options.
+func NewManager() (*Manager, error) {
+	return NewManagerWithOptions(ManagerOptions{})
 }
 
 // loadPersistedRuns loads run metadata from disk and reconciles with actual container state.
