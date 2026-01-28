@@ -3,6 +3,7 @@ package run
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"syscall"
 
@@ -111,7 +112,23 @@ func GetDockerSocketGID() (uint32, error) {
 		return 0, fmt.Errorf("failed to get docker socket stats (unsupported platform)")
 	}
 
-	return stat.Gid, nil
+	gid := stat.Gid
+
+	// Validate GID is reasonable on Linux
+	if runtime.GOOS == "linux" && gid == 0 {
+		log.Warn("docker socket owned by root group (gid 0) - this is unusual and may indicate permission issues")
+	}
+
+	// Check if socket is accessible by checking file permissions
+	// For Unix sockets, check read+write permission bits
+	mode := info.Mode()
+	if mode&0060 != 0060 { // Check group read+write
+		log.Warn("docker socket has unexpected group permissions",
+			"mode", mode.String(),
+			"gid", gid)
+	}
+
+	return gid, nil
 }
 
 // ResolveDockerDependency validates the docker dependency against the runtime

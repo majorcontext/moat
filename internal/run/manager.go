@@ -1613,9 +1613,14 @@ region = %s
 
 	// Log container creation event, including privileged mode for security compliance
 	containerAuditData := audit.ContainerData{Action: "created"}
-	if dockerConfig != nil && dockerConfig.Privileged {
+	if privileged {
 		containerAuditData.Privileged = true
-		containerAuditData.Reason = "docker:dind"
+		// Determine reason for privileged mode
+		if dockerConfig != nil && dockerConfig.Privileged {
+			containerAuditData.Reason = "docker:dind"
+		} else {
+			containerAuditData.Reason = "unknown"
+		}
 	}
 	containerAuditData.BuildKitEnabled = buildkitCfg.Enabled
 	containerAuditData.BuildKitContainerID = r.BuildkitContainerID

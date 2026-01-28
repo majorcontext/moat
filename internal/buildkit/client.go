@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/andybons/moat/internal/log"
 	"github.com/moby/buildkit/client"
@@ -54,6 +55,11 @@ type BuildOptions struct {
 //   - Using Output function to stream the docker exporter tar to `docker load`
 func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 	log.Debug("starting buildkit build", "tag", opts.Tag, "platform", opts.Platform)
+
+	// Wait for BuildKit to become ready (daemon init takes ~5-10s)
+	if err := c.WaitForReady(ctx); err != nil {
+		return fmt.Errorf("BuildKit not ready: %w", err)
+	}
 
 	// Connect to BuildKit sidecar
 	bkClient, err := client.New(ctx, c.addr)
@@ -199,4 +205,37 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 	defer bkClient.Close()
 	return nil
+}
+
+// WaitForReady waits for BuildKit to become ready with exponential backoff.
+// BuildKit daemon takes ~5-10s to initialize after sidecar starts.
+func (c *Client) WaitForReady(ctx context.Context) error {
+	backoff := 100 * time.Millisecond
+	maxBackoff := 2 * time.Second
+	timeout := 30 * time.Second
+
+	deadline := time.Now().Add(timeout)
+
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for BuildKit to become ready at %s", c.addr)
+		}
+
+		err := c.Ping(ctx)
+		if err == nil {
+			return nil
+		}
+
+		log.Debug("waiting for BuildKit to become ready", "addr", c.addr, "backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
