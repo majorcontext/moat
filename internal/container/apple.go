@@ -508,10 +508,21 @@ func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []s
 	}
 	defer lockFile.Close()
 
-	// Use blocking flock - will wait if another process holds the lock
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("acquiring DNS lock: %w", err)
+	// Try to acquire lock with timeout to prevent indefinite blocking
+	lockChan := make(chan error, 1)
+	go func() {
+		lockChan <- syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
+	}()
+
+	select {
+	case err := <-lockChan:
+		if err != nil {
+			return fmt.Errorf("acquiring DNS lock: %w", err)
+		}
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("timeout waiting for DNS lock - another moat process may be configuring the builder")
 	}
+
 	defer func() {
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 	}()
