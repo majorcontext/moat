@@ -32,7 +32,7 @@ dependencies:
   - node@20        # Runtime with version
   - python         # Runtime with default version
   - git            # System package
-  - claude-code    # npm package
+  - claude-code    # Custom installer
   - golangci-lint  # GitHub binary
 ```
 
@@ -260,7 +260,7 @@ Or use `moat codex` which includes these automatically.
 | `typescript` | npm | TypeScript compiler |
 | `prettier` | npm | Code formatter |
 | `eslint` | npm | Linter |
-| `claude-code` | npm | Claude Code CLI |
+| `claude-code` | custom | Claude Code CLI (user-space install) |
 | `codex-cli` | npm | OpenAI Codex CLI |
 
 ### CLI tools

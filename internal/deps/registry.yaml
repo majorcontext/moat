@@ -71,9 +71,8 @@ pnpm:
 
 claude-code:
   description: Claude Code CLI
-  type: npm
-  package: "@anthropic-ai/claude-code"
-  requires: [node]
+  type: custom
+  user-install: true
 
 codex-cli:
   description: OpenAI Codex CLI

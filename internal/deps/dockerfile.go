@@ -107,19 +107,20 @@ const containerUID = "5000"
 
 // categorizedDeps holds dependencies sorted by type for Dockerfile generation.
 type categorizedDeps struct {
-	aptPkgs       []string
-	runtimes      []Dependency
-	githubBins    []Dependency
-	npmPkgs       []Dependency
-	goInstallPkgs []Dependency
-	uvToolPkgs    []Dependency
-	customDeps    []Dependency
-	dynamicNpm    []Dependency
-	dynamicPip    []Dependency
-	dynamicUv     []Dependency
-	dynamicCargo  []Dependency
-	dynamicGo     []Dependency
-	dockerMode    DockerMode // empty string means no docker, "host" or "dind" otherwise
+	aptPkgs        []string
+	runtimes       []Dependency
+	githubBins     []Dependency
+	npmPkgs        []Dependency
+	goInstallPkgs  []Dependency
+	uvToolPkgs     []Dependency
+	customDeps     []Dependency
+	userCustomDeps []Dependency
+	dynamicNpm     []Dependency
+	dynamicPip     []Dependency
+	dynamicUv      []Dependency
+	dynamicCargo   []Dependency
+	dynamicGo      []Dependency
+	dockerMode     DockerMode // empty string means no docker, "host" or "dind" otherwise
 }
 
 // categorizeDeps sorts dependencies into categories for optimal Dockerfile layer caching.
@@ -157,7 +158,11 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 		case TypeUvTool:
 			c.uvToolPkgs = append(c.uvToolPkgs, dep)
 		case TypeCustom:
-			c.customDeps = append(c.customDeps, dep)
+			if spec.UserInstall {
+				c.userCustomDeps = append(c.userCustomDeps, dep)
+			} else {
+				c.customDeps = append(c.customDeps, dep)
+			}
 		case TypeDocker:
 			c.dockerMode = dep.DockerMode
 		case TypeMeta:
@@ -215,7 +220,8 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeCustomDeps(&b, c.customDeps)
 	writeUvToolPackages(&b, c.uvToolPkgs)
 
-	// Claude Code plugins (after npm which installs claude-code)
+	// User-space custom deps (install-as: user) run as moatuser
+	writeUserCustomDeps(&b, c.userCustomDeps)
 	b.WriteString(claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser))
 
 	// Dynamic package manager dependencies
@@ -431,6 +437,33 @@ func writeUvToolPackages(b *strings.Builder, deps []Dependency) {
 		b.WriteString(fmt.Sprintf("RUN uv tool install %s\n", pkg))
 	}
 	b.WriteString("\n")
+}
+
+// writeUserCustomDeps writes custom dependencies that require user-space installation.
+// These are deps with user-install: true in the registry, meaning their installers
+// write to $HOME and must run as the container user (moatuser) instead of root.
+func writeUserCustomDeps(b *strings.Builder, deps []Dependency) {
+	if len(deps) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("USER %s\n", containerUser))
+	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
+	for _, dep := range deps {
+		spec, _ := GetSpec(dep.Name)
+		version := dep.Version
+		if version == "" {
+			version = spec.Default
+		}
+		b.WriteString(fmt.Sprintf("# %s (user-space)\n", dep.Name))
+		cmds := getCustomCommands(dep.Name, version)
+		for _, cmd := range cmds.Commands {
+			b.WriteString("RUN " + cmd + "\n")
+		}
+		for k, v := range cmds.EnvVars {
+			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
+		}
+	}
+	b.WriteString("USER root\n\n")
 }
 
 // writeSSHKnownHosts writes known SSH host keys to /etc/ssh/ssh_known_hosts.
