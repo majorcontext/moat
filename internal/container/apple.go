@@ -441,24 +441,12 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 }
 
 // ImageExists checks if an image exists locally.
-func (r *AppleRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
-	return r.buildMgr.ImageExists(ctx, tag)
-}
-
-// ImageExists checks if an image exists locally.
 func (m *appleBuildManager) ImageExists(ctx context.Context, tag string) (bool, error) {
 	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", tag)
 	if err := cmd.Run(); err != nil {
 		return false, nil
 	}
 	return true, nil
-}
-
-// BuildImage builds an image using Apple's container CLI.
-// Before building, it fixes the builder's DNS configuration to work around
-// a known issue (apple/container#656) where the builder cannot resolve external hosts.
-func (r *AppleRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	return r.buildMgr.BuildImage(ctx, dockerfile, tag, opts)
 }
 
 // BuildImage builds an image using Apple's container CLI.
@@ -852,13 +840,6 @@ func (r *AppleRuntime) RemoveImage(ctx context.Context, id string) error {
 		return fmt.Errorf("removing image %s: %w: %s", id, err, stderr.String())
 	}
 	return nil
-}
-
-// GetImageHomeDir returns the home directory configured in an image.
-// For Apple containers, we inspect the image config similar to Docker.
-// Returns "/root" if detection fails or no home is configured.
-func (r *AppleRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
-	return r.buildMgr.GetImageHomeDir(ctx, imageName)
 }
 
 // GetImageHomeDir returns the home directory configured in an image.

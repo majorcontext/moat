@@ -61,13 +61,6 @@ type Runtime interface {
 	// Docker on Linux supports this; Apple container does not.
 	SupportsHostNetwork() bool
 
-	// BuildImage builds an image from a Dockerfile content.
-	// Returns the image ID. The tag is applied to the built image.
-	BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error
-
-	// ImageExists checks if an image with the given tag exists locally.
-	ImageExists(ctx context.Context, tag string) (bool, error)
-
 	// NetworkManager returns the network manager if supported, nil otherwise.
 	// Docker provides this, Apple containers return nil.
 	NetworkManager() NetworkManager
@@ -101,10 +94,6 @@ type Runtime interface {
 
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
-
-	// GetImageHomeDir returns the home directory configured in an image.
-	// Returns "/root" if detection fails or no home is configured.
-	GetImageHomeDir(ctx context.Context, imageName string) string
 
 	// Attach connects stdin/stdout/stderr to a running container.
 	// Returns when the attachment ends (container exits or context canceled).

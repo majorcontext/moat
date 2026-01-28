@@ -382,7 +382,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
-	exists, err := r.ImageExists(ctx, imageName)
+	exists, err := r.buildMgr.ImageExists(ctx, imageName)
 	if err != nil {
 		return err
 	}
@@ -400,18 +400,6 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 	// Drain the reader to complete the pull
 	_, _ = io.Copy(os.Stdout, reader)
 	return nil
-}
-
-// ImageExists checks if an image exists locally.
-// Delegates to BuildManager (will be removed in Task 5).
-func (r *DockerRuntime) ImageExists(ctx context.Context, tag string) (bool, error) {
-	return r.buildMgr.ImageExists(ctx, tag)
-}
-
-// BuildImage builds a Docker image from Dockerfile content.
-// Delegates to BuildManager (will be removed in Task 5).
-func (r *DockerRuntime) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	return r.buildMgr.BuildImage(ctx, dockerfile, tag, opts)
 }
 
 // ListImages returns all moat-managed images.
@@ -481,12 +469,6 @@ func (r *DockerRuntime) RemoveImage(ctx context.Context, id string) error {
 		return fmt.Errorf("removing image %s: %w", id, err)
 	}
 	return nil
-}
-
-// GetImageHomeDir returns the home directory configured in an image.
-// Delegates to BuildManager (will be removed in Task 5).
-func (r *DockerRuntime) GetImageHomeDir(ctx context.Context, imageName string) string {
-	return r.buildMgr.GetImageHomeDir(ctx, imageName)
 }
 
 // ContainerState returns the state of a container ("running", "exited", "created", etc).

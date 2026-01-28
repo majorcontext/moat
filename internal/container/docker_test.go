@@ -374,7 +374,7 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 			tag := "test:latest"
 			opts := BuildOptions{}
 
-			// Call BuildImage - it will fail (no actual client or buildkit),
+			// Call BuildImage via BuildManager - it will fail (no actual client or buildkit),
 			// but we can verify which path was taken by the error message.
 			// Recover from any panic (Docker SDK may panic with nil client).
 			var err error
@@ -385,7 +385,7 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 						err = fmt.Errorf("docker sdk panic: %v", r)
 					}
 				}()
-				err = rt.BuildImage(ctx, dockerfile, tag, opts)
+				err = rt.BuildManager().BuildImage(ctx, dockerfile, tag, opts)
 			}()
 
 			if err == nil {
