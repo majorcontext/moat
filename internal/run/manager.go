@@ -1363,7 +1363,15 @@ region = %s
 	var networkID string
 	if buildkitCfg.Enabled {
 		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
-		netID, netErr := m.runtime.(*container.DockerRuntime).CreateNetwork(ctx, buildkitCfg.NetworkName) //nolint:errcheck
+		netMgr := m.runtime.NetworkManager()
+		if netMgr == nil {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.runtime.Type())
+		}
+		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
 		if netErr != nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
