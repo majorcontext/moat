@@ -72,7 +72,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 	}
 	defer credStore.Delete(credential.ProviderGitHub) // Clean up after test
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestRunWithoutGrantsNoProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestLogsAreCaptured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestConfigEnvironmentVariables(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -682,7 +682,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -744,7 +744,7 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -876,7 +876,7 @@ func TestSSHGrantRequiresAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -915,7 +915,7 @@ func TestSSHGrantWithoutMapping(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -977,7 +977,7 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1103,7 +1103,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1164,7 +1164,7 @@ func TestDependencyPythonRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1224,7 +1224,7 @@ func TestDependencyGoRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1286,7 +1286,7 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1353,7 +1353,7 @@ func TestDependencyNpmPackage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1413,7 +1413,7 @@ func TestDependencyGitHubBinary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1473,7 +1473,7 @@ func TestDependencyMetaBundle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1555,7 +1555,7 @@ func TestInteractiveContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -1616,7 +1616,7 @@ func TestInteractiveContainerShellCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: true})
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
