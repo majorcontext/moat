@@ -169,6 +169,40 @@ func skipIfNoPrivileged(t *testing.T) {
 	}
 }
 
+// skipIfNestedDind skips the test if we're in an environment where nested dind is unreliable.
+// Nested dind (dind inside dind) has reliability issues and is not supported.
+// This commonly occurs in GitHub Actions CI which uses dind for Docker access.
+func skipIfNestedDind(t *testing.T) {
+	t.Helper()
+
+	// Skip in GitHub Actions CI - it uses dind and nested dind doesn't work reliably
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping: nested dind not supported in GitHub Actions CI")
+	}
+
+	// Skip if we're running inside a container with docker access (likely dind)
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+			t.Skip("Skipping: nested dind not supported (already running in dind environment)")
+		}
+	}
+
+	// Skip if running in any CI environment with dind indicators
+	// CI=true is set by most CI systems (GitHub Actions, GitLab CI, CircleCI, etc.)
+	if os.Getenv("CI") == "true" {
+		// Try to detect if Docker is using dind by checking docker info
+		cmd := exec.Command("docker", "info", "--format", "{{.OperatingSystem}}")
+		if output, err := cmd.Output(); err == nil {
+			osInfo := strings.TrimSpace(string(output))
+			// If Docker reports as running in Alpine or similar minimal OS, likely dind
+			if strings.Contains(strings.ToLower(osInfo), "alpine") ||
+				strings.Contains(strings.ToLower(osInfo), "docker") {
+				t.Skip("Skipping: nested dind not supported in CI with dind Docker")
+			}
+		}
+	}
+}
+
 // TestDockerDindDependency verifies that the docker:dind dependency works end-to-end.
 // This tests that a container with docker:dind runs its own isolated Docker daemon
 // and can execute docker commands without access to the host Docker.
@@ -180,6 +214,7 @@ func skipIfNoPrivileged(t *testing.T) {
 func TestDockerDindDependency(t *testing.T) {
 	skipIfNoDocker(t)
 	skipIfNoPrivileged(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -292,6 +327,7 @@ func TestDockerDindDependency(t *testing.T) {
 func TestDockerDindIsolation(t *testing.T) {
 	skipIfNoDocker(t)
 	skipIfNoPrivileged(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -415,6 +451,7 @@ func TestDockerDindIsolation(t *testing.T) {
 func TestDockerDindBuildKitImageBuild(t *testing.T) {
 	skipIfNoDocker(t)
 	skipIfNoPrivileged(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
