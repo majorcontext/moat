@@ -1025,7 +1025,7 @@ region = %s
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
-		exists, _ := m.runtime.ImageExists(ctx, containerImage)
+		exists, _ := m.runtime.BuildManager().ImageExists(ctx, containerImage)
 		if exists {
 			fmt.Printf("Removing cached image %s...\n", containerImage)
 			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
@@ -1057,7 +1057,7 @@ region = %s
 		}
 		generatedDockerfile = dockerfile
 
-		exists, err := m.runtime.ImageExists(ctx, containerImage)
+		exists, err := m.runtime.BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("checking image: %w", err)
@@ -1097,7 +1097,7 @@ region = %s
 	// - anthropic grant is configured (automatic Claude Code integration)
 	var containerHome string
 	if hostHome, err := os.UserHomeDir(); err == nil {
-		containerHome = m.runtime.GetImageHomeDir(ctx, containerImage)
+		containerHome = m.runtime.BuildManager().GetImageHomeDir(ctx, containerImage)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			claudeDir := workspaceToClaudeDir(opts.Workspace)
 			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
