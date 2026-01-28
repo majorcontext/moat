@@ -43,6 +43,16 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 	return r, nil
 }
 
+// NetworkManager returns nil - Apple containers don't support custom networks.
+func (r *AppleRuntime) NetworkManager() NetworkManager {
+	return nil
+}
+
+// SidecarManager returns nil - Apple containers don't support sidecars.
+func (r *AppleRuntime) SidecarManager() SidecarManager {
+	return nil
+}
+
 // Type returns RuntimeApple.
 func (r *AppleRuntime) Type() RuntimeType {
 	return RuntimeApple

@@ -30,6 +30,18 @@ import (
 
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
+	cli        *client.Client
+	networkMgr *dockerNetworkManager
+	sidecarMgr *dockerSidecarManager
+}
+
+// dockerNetworkManager implements NetworkManager for Docker.
+type dockerNetworkManager struct {
+	cli *client.Client
+}
+
+// dockerSidecarManager implements SidecarManager for Docker.
+type dockerSidecarManager struct {
 	cli *client.Client
 }
 
@@ -39,7 +51,20 @@ func NewDockerRuntime() (*DockerRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
-	return &DockerRuntime{cli: cli}, nil
+	r := &DockerRuntime{cli: cli}
+	r.networkMgr = &dockerNetworkManager{cli: cli}
+	r.sidecarMgr = &dockerSidecarManager{cli: cli}
+	return r, nil
+}
+
+// NetworkManager returns the Docker network manager.
+func (r *DockerRuntime) NetworkManager() NetworkManager {
+	return r.networkMgr
+}
+
+// SidecarManager returns the Docker sidecar manager.
+func (r *DockerRuntime) SidecarManager() SidecarManager {
+	return r.sidecarMgr
 }
 
 // Type returns RuntimeDocker.
@@ -797,7 +822,37 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 // CreateNetwork creates a Docker network for inter-container communication.
 // Returns the network ID.
 func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string, error) {
-	resp, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
+	return r.networkMgr.CreateNetwork(ctx, name)
+}
+
+// RemoveNetwork removes a Docker network by ID.
+// Best-effort: does not fail if network doesn't exist or has active endpoints.
+func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
+	return r.networkMgr.RemoveNetwork(ctx, networkID)
+}
+
+// StartSidecar starts a sidecar container (pull, create, start).
+// The container is attached to the specified network and assigned a hostname.
+// Returns the container ID.
+func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
+	return r.sidecarMgr.StartSidecar(ctx, cfg)
+}
+
+// InspectContainer returns container inspection data.
+func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (container.InspectResponse, error) {
+	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return container.InspectResponse{}, fmt.Errorf("inspecting container: %w", err)
+	}
+	return inspect, nil
+}
+
+// dockerNetworkManager methods
+
+// CreateNetwork creates a Docker network for inter-container communication.
+// Returns the network ID.
+func (m *dockerNetworkManager) CreateNetwork(ctx context.Context, name string) (string, error) {
+	resp, err := m.cli.NetworkCreate(ctx, name, network.CreateOptions{
 		Driver: "bridge", // Bridge network for inter-container communication
 	})
 	if err != nil {
@@ -808,8 +863,8 @@ func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string,
 
 // RemoveNetwork removes a Docker network by ID.
 // Best-effort: does not fail if network doesn't exist or has active endpoints.
-func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
-	err := r.cli.NetworkRemove(ctx, networkID)
+func (m *dockerNetworkManager) RemoveNetwork(ctx context.Context, networkID string) error {
+	err := m.cli.NetworkRemove(ctx, networkID)
 	if err != nil {
 		// Ignore "not found" and "conflict" errors - network may already be
 		// removed or may have active endpoints during cleanup
@@ -826,10 +881,12 @@ func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) err
 	return nil
 }
 
+// dockerSidecarManager methods
+
 // StartSidecar starts a sidecar container (pull, create, start).
 // The container is attached to the specified network and assigned a hostname.
 // Returns the container ID.
-func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
+func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
 	// Validate input
 	if cfg.Image == "" {
 		return "", fmt.Errorf("sidecar image cannot be empty")
@@ -842,23 +899,23 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 	}
 
 	// Pull image if not present
-	if err := r.ensureImage(ctx, cfg.Image); err != nil {
+	if err := m.ensureImage(ctx, cfg.Image); err != nil {
 		return "", fmt.Errorf("pulling sidecar image: %w", err)
 	}
 
 	// Prepare mounts
 	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, m := range cfg.Mounts {
+	for _, mt := range cfg.Mounts {
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
+			Source:   mt.Source,
+			Target:   mt.Target,
+			ReadOnly: mt.ReadOnly,
 		})
 	}
 
 	// Create container
-	resp, err := r.cli.ContainerCreate(ctx,
+	resp, err := m.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:    cfg.Image,
 			Cmd:      cfg.Cmd,
@@ -878,9 +935,9 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 	}
 
 	// Start container
-	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if err := m.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Clean up on failure
-		_ = r.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		_ = m.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return "", fmt.Errorf("starting sidecar container: %w", err)
 	}
 
@@ -888,10 +945,49 @@ func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (st
 }
 
 // InspectContainer returns container inspection data.
-func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (container.InspectResponse, error) {
-	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+func (m *dockerSidecarManager) InspectContainer(ctx context.Context, containerID string) (ContainerInspectResponse, error) {
+	inspect, err := m.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return container.InspectResponse{}, fmt.Errorf("inspecting container: %w", err)
+		return ContainerInspectResponse{}, fmt.Errorf("inspecting container: %w", err)
 	}
-	return inspect, nil
+	// Convert Docker's inspect response to our common type
+	return ContainerInspectResponse{
+		State: &ContainerState{
+			Running: inspect.State.Running,
+		},
+	}, nil
+}
+
+// ensureImage pulls an image if it doesn't exist locally.
+func (m *dockerSidecarManager) ensureImage(ctx context.Context, imageName string) error {
+	exists, err := m.imageExists(ctx, imageName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	fmt.Printf("Pulling image %s...\n", imageName)
+	reader, err := m.cli.ImagePull(ctx, imageName, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pulling image %s: %w", imageName, err)
+	}
+	defer reader.Close()
+
+	// Drain the reader to complete the pull
+	_, _ = io.Copy(os.Stdout, reader)
+	return nil
+}
+
+// imageExists checks if an image exists locally.
+func (m *dockerSidecarManager) imageExists(ctx context.Context, tag string) (bool, error) {
+	_, err := m.cli.ImageInspect(ctx, tag)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspecting image %s: %w", tag, err)
+	}
+	return true, nil
 }
