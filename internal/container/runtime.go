@@ -76,6 +76,10 @@ type Runtime interface {
 	// Docker provides this, Apple containers return nil.
 	SidecarManager() SidecarManager
 
+	// BuildManager returns the build manager if supported, nil otherwise.
+	// Both Docker and Apple provide this.
+	BuildManager() BuildManager
+
 	// Close releases runtime resources.
 	Close() error
 
@@ -149,6 +153,21 @@ type ContainerInspectResponse struct {
 // ContainerState holds container execution state.
 type ContainerState struct {
 	Running bool
+}
+
+// BuildManager handles image building operations.
+// Returned by Runtime.BuildManager() - nil if not supported.
+type BuildManager interface {
+	// BuildImage builds an image from a Dockerfile content.
+	// Returns an error if the build fails.
+	BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error
+
+	// ImageExists checks if an image with the given tag exists locally.
+	ImageExists(ctx context.Context, tag string) (bool, error)
+
+	// GetImageHomeDir returns the home directory configured in an image.
+	// Returns "/root" if detection fails or no home is configured.
+	GetImageHomeDir(ctx context.Context, imageName string) string
 }
 
 // AttachOptions configures container attachment.
