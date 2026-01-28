@@ -819,34 +819,6 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 	}
 }
 
-// CreateNetwork creates a Docker network for inter-container communication.
-// Returns the network ID.
-func (r *DockerRuntime) CreateNetwork(ctx context.Context, name string) (string, error) {
-	return r.networkMgr.CreateNetwork(ctx, name)
-}
-
-// RemoveNetwork removes a Docker network by ID.
-// Best-effort: does not fail if network doesn't exist or has active endpoints.
-func (r *DockerRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
-	return r.networkMgr.RemoveNetwork(ctx, networkID)
-}
-
-// StartSidecar starts a sidecar container (pull, create, start).
-// The container is attached to the specified network and assigned a hostname.
-// Returns the container ID.
-func (r *DockerRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
-	return r.sidecarMgr.StartSidecar(ctx, cfg)
-}
-
-// InspectContainer returns container inspection data.
-func (r *DockerRuntime) InspectContainer(ctx context.Context, containerID string) (container.InspectResponse, error) {
-	inspect, err := r.cli.ContainerInspect(ctx, containerID)
-	if err != nil {
-		return container.InspectResponse{}, fmt.Errorf("inspecting container: %w", err)
-	}
-	return inspect, nil
-}
-
 // dockerNetworkManager methods
 
 // CreateNetwork creates a Docker network for inter-container communication.

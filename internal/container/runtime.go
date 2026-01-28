@@ -114,19 +114,6 @@ type Runtime interface {
 
 	// ResizeTTY resizes the container's TTY to the given dimensions.
 	ResizeTTY(ctx context.Context, id string, height, width uint) error
-
-	// CreateNetwork creates a Docker network for inter-container communication.
-	// Returns the network ID.
-	CreateNetwork(ctx context.Context, name string) (string, error)
-
-	// RemoveNetwork removes a Docker network by ID.
-	// Best-effort: does not fail if network doesn't exist or has active endpoints.
-	RemoveNetwork(ctx context.Context, networkID string) error
-
-	// StartSidecar starts a sidecar container (pull, create, start).
-	// The container is attached to the specified network and assigned a hostname.
-	// Returns the container ID.
-	StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error)
 }
 
 // NetworkManager handles Docker network operations.

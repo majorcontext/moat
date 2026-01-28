@@ -94,11 +94,11 @@ func TestDockerRuntime_CreateNetwork(t *testing.T) {
 	}
 
 	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
-	networkID, err := rt.CreateNetwork(ctx, networkName)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
-	defer rt.RemoveNetwork(ctx, networkID)
+	defer rt.NetworkManager().RemoveNetwork(ctx, networkID)
 
 	if networkID == "" {
 		t.Fatal("CreateNetwork returned empty network ID")
@@ -126,12 +126,12 @@ func TestDockerRuntime_RemoveNetwork(t *testing.T) {
 	}
 
 	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
-	networkID, err := rt.CreateNetwork(ctx, networkName)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
 
-	if err := rt.RemoveNetwork(ctx, networkID); err != nil {
+	if err := rt.NetworkManager().RemoveNetwork(ctx, networkID); err != nil {
 		t.Fatalf("RemoveNetwork failed: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestDockerRuntime_RemoveNetwork_NotFound(t *testing.T) {
 	}
 
 	// Try to remove a network that doesn't exist
-	if err := rt.RemoveNetwork(ctx, "nonexistent-network-id"); err != nil {
+	if err := rt.NetworkManager().RemoveNetwork(ctx, "nonexistent-network-id"); err != nil {
 		t.Fatalf("RemoveNetwork should not fail for non-existent network: %v", err)
 	}
 }
@@ -172,11 +172,11 @@ func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
 
 	// Create a network
 	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
-	networkID, err := rt.CreateNetwork(ctx, networkName)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
-	defer rt.RemoveNetwork(ctx, networkID)
+	defer rt.NetworkManager().RemoveNetwork(ctx, networkID)
 
 	// Create a container attached to the network
 	containerName := "test-moat-container-" + strconv.FormatInt(time.Now().Unix(), 10)
@@ -198,7 +198,7 @@ func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
 
 	// Try to remove the network while the container is running
 	// This should NOT fail (best-effort cleanup)
-	if err := rt.RemoveNetwork(ctx, networkID); err != nil {
+	if err := rt.NetworkManager().RemoveNetwork(ctx, networkID); err != nil {
 		t.Fatalf("RemoveNetwork should not fail for network with active endpoints: %v", err)
 	}
 
@@ -220,11 +220,11 @@ func TestDockerRuntime_StartSidecar(t *testing.T) {
 
 	// Create network first
 	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
-	networkID, err := rt.CreateNetwork(ctx, networkName)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
-	defer rt.RemoveNetwork(ctx, networkID)
+	defer rt.NetworkManager().RemoveNetwork(ctx, networkID)
 
 	// Start sidecar
 	cfg := SidecarConfig{
@@ -235,7 +235,7 @@ func TestDockerRuntime_StartSidecar(t *testing.T) {
 		Cmd:       []string{"sleep", "30"},
 	}
 
-	containerID, err := rt.StartSidecar(ctx, cfg)
+	containerID, err := rt.SidecarManager().StartSidecar(ctx, cfg)
 	if err != nil {
 		t.Fatalf("StartSidecar failed: %v", err)
 	}
@@ -266,6 +266,7 @@ func TestDockerRuntime_StartSidecar(t *testing.T) {
 func TestDockerRuntime_StartSidecar_ValidationEmptyImage(t *testing.T) {
 	ctx := context.Background()
 	rt := &DockerRuntime{}
+	rt.sidecarMgr = &dockerSidecarManager{}
 
 	cfg := SidecarConfig{
 		Image:     "", // Empty image
@@ -275,7 +276,7 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyImage(t *testing.T) {
 		Cmd:       []string{"sleep", "30"},
 	}
 
-	_, err := rt.StartSidecar(ctx, cfg)
+	_, err := rt.SidecarManager().StartSidecar(ctx, cfg)
 	if err == nil {
 		t.Fatal("StartSidecar should fail with empty image")
 	}
@@ -287,6 +288,7 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyImage(t *testing.T) {
 func TestDockerRuntime_StartSidecar_ValidationEmptyNetworkID(t *testing.T) {
 	ctx := context.Background()
 	rt := &DockerRuntime{}
+	rt.sidecarMgr = &dockerSidecarManager{}
 
 	cfg := SidecarConfig{
 		Image:     "alpine:latest",
@@ -296,7 +298,7 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyNetworkID(t *testing.T) {
 		Cmd:       []string{"sleep", "30"},
 	}
 
-	_, err := rt.StartSidecar(ctx, cfg)
+	_, err := rt.SidecarManager().StartSidecar(ctx, cfg)
 	if err == nil {
 		t.Fatal("StartSidecar should fail with empty network ID")
 	}
@@ -308,6 +310,7 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyNetworkID(t *testing.T) {
 func TestDockerRuntime_StartSidecar_ValidationEmptyName(t *testing.T) {
 	ctx := context.Background()
 	rt := &DockerRuntime{}
+	rt.sidecarMgr = &dockerSidecarManager{}
 
 	cfg := SidecarConfig{
 		Image:     "alpine:latest",
@@ -317,7 +320,7 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyName(t *testing.T) {
 		Cmd:       []string{"sleep", "30"},
 	}
 
-	_, err := rt.StartSidecar(ctx, cfg)
+	_, err := rt.SidecarManager().StartSidecar(ctx, cfg)
 	if err == nil {
 		t.Fatal("StartSidecar should fail with empty name")
 	}

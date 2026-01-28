@@ -1082,21 +1082,3 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 
 	return result
 }
-
-// CreateNetwork is not supported by Apple containers.
-// Returns an error indicating the feature is not available.
-func (r *AppleRuntime) CreateNetwork(ctx context.Context, name string) (string, error) {
-	return "", fmt.Errorf("network creation not supported by Apple containers")
-}
-
-// RemoveNetwork is not supported by Apple containers.
-// Returns an error indicating the feature is not available.
-func (r *AppleRuntime) RemoveNetwork(ctx context.Context, networkID string) error {
-	return fmt.Errorf("network removal not supported by Apple containers")
-}
-
-// StartSidecar is not supported by Apple containers.
-// Returns an error indicating the feature is not available.
-func (r *AppleRuntime) StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error) {
-	return "", fmt.Errorf("sidecar containers not supported by Apple containers")
-}
