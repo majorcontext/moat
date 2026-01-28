@@ -1409,10 +1409,25 @@ region = %s
 			},
 		}
 
-		buildkitContainerID, sidecarErr := m.runtime.(*container.DockerRuntime).StartSidecar(ctx, sidecarCfg) //nolint:errcheck
+		sidecarMgr := m.runtime.SidecarManager()
+		if sidecarMgr == nil {
+			netMgr := m.runtime.NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
+			}
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.runtime.Type())
+		}
+		buildkitContainerID, sidecarErr := sidecarMgr.StartSidecar(ctx, sidecarCfg)
 		if sidecarErr != nil {
 			// Clean up network on failure
-			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID) //nolint:errcheck
+			netMgr := m.runtime.NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
+			}
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
@@ -1425,15 +1440,18 @@ region = %s
 		ready := false
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			inspect, inspectErr := m.runtime.(*container.DockerRuntime).InspectContainer(ctx, buildkitContainerID) //nolint:errcheck
+			inspect, inspectErr := sidecarMgr.InspectContainer(ctx, buildkitContainerID)
 			if inspectErr == nil && inspect.State != nil && inspect.State.Running {
 				ready = true
 				break
 			}
 		}
 		if !ready {
-			_ = m.runtime.StopContainer(ctx, buildkitContainerID)                  //nolint:errcheck
-			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, networkID) //nolint:errcheck
+			_ = m.runtime.StopContainer(ctx, buildkitContainerID) //nolint:errcheck
+			netMgr := m.runtime.NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
+			}
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
@@ -1474,8 +1492,11 @@ region = %s
 	if err != nil {
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID)                  //nolint:errcheck
-			_ = m.runtime.(*container.DockerRuntime).RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
+			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			netMgr := m.runtime.NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
+			}
 		}
 		// Clean up proxy servers if container creation fails
 		cleanupProxy(proxyServer)
@@ -1916,8 +1937,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Remove network if present (best-effort)
 	if networkID != "" {
 		log.Debug("removing docker network", "network_id", networkID)
-		if dockerRuntime, ok := m.runtime.(*container.DockerRuntime); ok {
-			if err := dockerRuntime.RemoveNetwork(ctx, networkID); err != nil {
+		netMgr := m.runtime.NetworkManager()
+		if netMgr != nil {
+			if err := netMgr.RemoveNetwork(ctx, networkID); err != nil {
 				log.Warn("failed to remove docker network", "error", err)
 				// Non-fatal - network may have active endpoints
 			}
@@ -2203,8 +2225,9 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 	// Remove BuildKit network if present
 	if r.NetworkID != "" {
-		if dockerRuntime, ok := m.runtime.(*container.DockerRuntime); ok {
-			if err := dockerRuntime.RemoveNetwork(ctx, r.NetworkID); err != nil {
+		netMgr := m.runtime.NetworkManager()
+		if netMgr != nil {
+			if err := netMgr.RemoveNetwork(ctx, r.NetworkID); err != nil {
 				// This is best-effort - network may already be removed or in use
 				log.Debug("failed to remove BuildKit network", "network", r.NetworkID, "error", err)
 			}
