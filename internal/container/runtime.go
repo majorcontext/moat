@@ -68,6 +68,14 @@ type Runtime interface {
 	// ImageExists checks if an image with the given tag exists locally.
 	ImageExists(ctx context.Context, tag string) (bool, error)
 
+	// NetworkManager returns the network manager if supported, nil otherwise.
+	// Docker provides this, Apple containers return nil.
+	NetworkManager() NetworkManager
+
+	// SidecarManager returns the sidecar manager if supported, nil otherwise.
+	// Docker provides this, Apple containers return nil.
+	SidecarManager() SidecarManager
+
 	// Close releases runtime resources.
 	Close() error
 
@@ -119,6 +127,41 @@ type Runtime interface {
 	// The container is attached to the specified network and assigned a hostname.
 	// Returns the container ID.
 	StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error)
+}
+
+// NetworkManager handles Docker network operations.
+// Returned by Runtime.NetworkManager() - nil if not supported.
+type NetworkManager interface {
+	// CreateNetwork creates a network for inter-container communication.
+	// Returns the network ID.
+	CreateNetwork(ctx context.Context, name string) (string, error)
+
+	// RemoveNetwork removes a network by ID.
+	// Best-effort: does not fail if network doesn't exist.
+	RemoveNetwork(ctx context.Context, networkID string) error
+}
+
+// SidecarManager handles sidecar container operations.
+// Returned by Runtime.SidecarManager() - nil if not supported.
+type SidecarManager interface {
+	// StartSidecar starts a sidecar container (pull, create, start).
+	// The container is attached to the specified network and assigned a hostname.
+	// Returns the container ID.
+	StartSidecar(ctx context.Context, cfg SidecarConfig) (string, error)
+
+	// InspectContainer returns detailed container information.
+	// Useful for checking sidecar state (running, health, etc).
+	InspectContainer(ctx context.Context, containerID string) (ContainerInspectResponse, error)
+}
+
+// ContainerInspectResponse holds detailed container state.
+type ContainerInspectResponse struct {
+	State *ContainerState
+}
+
+// ContainerState holds container execution state.
+type ContainerState struct {
+	Running bool
 }
 
 // AttachOptions configures container attachment.
