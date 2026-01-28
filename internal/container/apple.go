@@ -399,6 +399,11 @@ func (r *AppleRuntime) Close() error {
 // token in HTTP_PROXY URL) rather than IP filtering. This is more robust than IP-based
 // filtering and prevents unauthorized access even if another service runs on the same port.
 func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+	// Validate port range
+	if proxyPort < 1 || proxyPort > 65535 {
+		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
+	}
+
 	// Apple containers run Linux VMs, so iptables should work
 	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention)
 	// Use conntrack module instead of state for better container compatibility

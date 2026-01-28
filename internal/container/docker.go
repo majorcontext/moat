@@ -362,6 +362,11 @@ func (r *DockerRuntime) Close() error {
 // assigned per-run) rather than IP filtering. Combined with the proxy's authentication
 // for Apple containers, this provides sufficient protection.
 func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+	// Validate port range
+	if proxyPort < 1 || proxyPort > 65535 {
+		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
+	}
+
 	// iptables rules:
 	// 1. Allow loopback
 	// 2. Allow established connections (for responses)
