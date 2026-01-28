@@ -1384,6 +1384,9 @@ region = %s
 	var privileged bool
 	if dockerConfig != nil && dockerConfig.Privileged {
 		privileged = true
+		log.Warn("creating privileged container - full host kernel access granted",
+			"mode", "docker:dind",
+			"security_docs", "https://docs.moat.dev/concepts/sandboxing#docker-modes")
 	}
 
 	// Create network and start BuildKit sidecar if enabled

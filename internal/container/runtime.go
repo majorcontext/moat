@@ -131,16 +131,16 @@ type SidecarManager interface {
 
 	// InspectContainer returns detailed container information.
 	// Useful for checking sidecar state (running, health, etc).
-	InspectContainer(ctx context.Context, containerID string) (ContainerInspectResponse, error)
+	InspectContainer(ctx context.Context, containerID string) (InspectResponse, error)
 }
 
-// ContainerInspectResponse holds detailed container state.
-type ContainerInspectResponse struct {
-	State *ContainerState
+// InspectResponse holds detailed container state.
+type InspectResponse struct {
+	State *State
 }
 
-// ContainerState holds container execution state.
-type ContainerState struct {
+// State holds container execution state.
+type State struct {
 	Running bool
 }
 

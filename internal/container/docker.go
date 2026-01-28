@@ -67,9 +67,9 @@ type dockerNetworkManager struct {
 type dockerSidecarManager struct {
 	cli        *client.Client
 	ociRuntime string // Same OCI runtime as main container ("runsc" or "")
-	                   // Note: BuildKit sidecars inherit the main container's OCI runtime.
-	                   // BuildKit is expected to work with gVisor (runsc), though this
-	                   // combination has not been extensively tested in production.
+	// Note: BuildKit sidecars inherit the main container's OCI runtime.
+	// BuildKit is expected to work with gVisor (runsc), though this
+	// combination has not been extensively tested in production.
 }
 
 // dockerBuildManager implements BuildManager for Docker.
@@ -812,14 +812,14 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 }
 
 // InspectContainer returns container inspection data.
-func (m *dockerSidecarManager) InspectContainer(ctx context.Context, containerID string) (ContainerInspectResponse, error) {
+func (m *dockerSidecarManager) InspectContainer(ctx context.Context, containerID string) (InspectResponse, error) {
 	inspect, err := m.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return ContainerInspectResponse{}, fmt.Errorf("inspecting container: %w", err)
+		return InspectResponse{}, fmt.Errorf("inspecting container: %w", err)
 	}
 	// Convert Docker's inspect response to our common type
-	return ContainerInspectResponse{
-		State: &ContainerState{
+	return InspectResponse{
+		State: &State{
 			Running: inspect.State.Running,
 		},
 	}, nil

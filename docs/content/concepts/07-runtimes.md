@@ -172,6 +172,8 @@ When using `docker:dind` dependencies, Moat creates an isolated Docker daemon wi
 - Uses the same sandbox mode (gVisor or standard)
 - Cleaned up when the run ends
 
+**Note on gVisor compatibility:** BuildKit sidecars inherit the main container's OCI runtime (gVisor or standard). While BuildKit is expected to work with gVisor, this combination has not been extensively tested in production. If you encounter issues with BuildKit builds on Linux, try `--no-sandbox` to use the standard runtime.
+
 **Fallback chain:**
 1. Try BuildKit sidecar (dind mode only)
 2. Fall back to host BuildKit (if `BUILDKIT_HOST` is set)
