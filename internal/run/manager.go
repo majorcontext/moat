@@ -1409,6 +1409,7 @@ region = %s
 			NetworkID:  networkID,
 			Cmd:        []string{"--addr", "tcp://0.0.0.0:1234"},
 			Privileged: true, // BuildKit needs privileged mode for bind mounts
+			RunID:      r.ID, // For orphan cleanup if moat crashes
 			Mounts: []container.MountConfig{
 				{
 					// Mount dind's Docker socket so BuildKit can export images to the daemon.

@@ -214,6 +214,10 @@ type SidecarConfig struct {
 
 	// Mounts are volume mounts for the sidecar
 	Mounts []MountConfig
+
+	// RunID is the moat run ID this sidecar belongs to
+	// Used for orphan cleanup if moat crashes
+	RunID string
 }
 
 // MountConfig describes a volume mount.

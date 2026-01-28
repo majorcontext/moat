@@ -759,12 +759,19 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 		})
 	}
 
-	// Create container
+	// Create container with labels for orphan cleanup
+	labels := make(map[string]string)
+	if cfg.RunID != "" {
+		labels["moat.run-id"] = cfg.RunID
+		labels["moat.role"] = "buildkit-sidecar"
+	}
+
 	resp, err := m.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:    cfg.Image,
 			Cmd:      cfg.Cmd,
 			Hostname: cfg.Hostname,
+			Labels:   labels,
 		},
 		&container.HostConfig{
 			Runtime:     m.ociRuntime, // Use same OCI runtime as main container
