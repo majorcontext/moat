@@ -88,7 +88,11 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 
 	var ociRuntime string // empty string = Docker's default runtime
 	if !sandbox {
-		log.Warn("running without gVisor sandbox - reduced isolation")
+		// Only warn on Linux where gVisor is available but explicitly disabled
+		// On macOS/Windows, gVisor is unavailable by default (not a security downgrade)
+		if goruntime.GOOS == "linux" {
+			log.Warn("running without gVisor sandbox - reduced isolation")
+		}
 		// Leave ociRuntime empty to use Docker's default (usually runc)
 	} else {
 		// Verify gVisor is available using shared detection function
