@@ -326,6 +326,267 @@ func TestWriter_Apple_BufferSizeLimit(t *testing.T) {
 	}
 }
 
+func TestWriter_AltScreenEnter_CompositorMode(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Send alt screen enter sequence
+	_, err := w.Write([]byte("\x1b[?1049h"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Writer should now be in alt screen mode
+	w.mu.Lock()
+	inAlt := w.altScreen
+	hasEmu := w.emulator != nil
+	w.mu.Unlock()
+
+	if !inAlt {
+		t.Error("expected altScreen=true after enter sequence")
+	}
+	if !hasEmu {
+		t.Error("expected emulator to be initialized")
+	}
+
+	// Output should contain alt screen enter (we enter it on real terminal)
+	output := buf.String()
+	if !strings.Contains(output, "\x1b[?1049h") {
+		t.Errorf("expected alt screen enter in output, got %q", output)
+	}
+
+	// Should also have footer
+	if !strings.Contains(output, "run_abc123") {
+		t.Errorf("expected footer in alt screen output")
+	}
+
+	// Clean up
+	w.Cleanup()
+}
+
+func TestWriter_AltScreenExit_RestoresScrollMode(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+	buf.Reset()
+
+	// Exit compositor mode
+	_, err := w.Write([]byte("\x1b[?1049l"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	w.mu.Unlock()
+
+	if inAlt {
+		t.Error("expected altScreen=false after exit sequence")
+	}
+
+	output := buf.String()
+
+	// Should exit alt screen
+	if !strings.Contains(output, "\x1b[?1049l") {
+		t.Errorf("expected alt screen exit in output, got %q", output)
+	}
+
+	// Should re-establish scroll region
+	if !strings.Contains(output, "\x1b[1;23r") {
+		t.Errorf("expected DECSTBM restore in output, got %q", output)
+	}
+
+	// Should redraw footer
+	if !strings.Contains(output, "run_abc123") {
+		t.Errorf("expected footer redraw after exit")
+	}
+}
+
+func TestWriter_AltScreen_CompositorReceivesOutput(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+	buf.Reset()
+
+	// Write content while in compositor mode - should go to emulator, not directly to output
+	_, err := w.Write([]byte("compositor content"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The content should NOT appear directly in buf (it goes to emulator)
+	// It will only appear when the render ticker fires
+	directOutput := buf.String()
+	if strings.Contains(directOutput, "compositor content") {
+		t.Errorf("expected content to go to emulator, not direct output")
+	}
+
+	// Verify emulator received it
+	w.mu.Lock()
+	emuContent := w.emulator.String()
+	w.mu.Unlock()
+
+	if !strings.Contains(emuContent, "compositor content") {
+		t.Errorf("expected emulator to contain content, got %q", emuContent)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_SplitEscapeSequence(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Send alt screen enter split across two writes
+	_, _ = w.Write([]byte("before\x1b[?10"))
+	_, _ = w.Write([]byte("49h"))
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	w.mu.Unlock()
+
+	if !inAlt {
+		t.Error("expected altScreen=true after split sequence")
+	}
+
+	// "before" should have been output directly
+	output := buf.String()
+	if !strings.Contains(output, "before") {
+		t.Errorf("expected 'before' in output, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_Resize_CompositorMode(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+	buf.Reset()
+
+	// Resize while in compositor mode
+	err := w.Resize(80, 30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.mu.Lock()
+	emuW := w.emulator.Width()
+	emuH := w.emulator.Height()
+	isDirty := w.dirty
+	w.mu.Unlock()
+
+	if emuW != 80 {
+		t.Errorf("expected emulator width 80, got %d", emuW)
+	}
+	if emuH != 29 {
+		t.Errorf("expected emulator height 29, got %d", emuH)
+	}
+	if !isDirty {
+		t.Error("expected dirty=true after resize")
+	}
+
+	output := buf.String()
+
+	// Should redraw footer at new position (no DECSTBM in compositor mode)
+	if !strings.Contains(output, "\x1b[30;1H") {
+		t.Errorf("expected footer at row 30, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_AltScreen47_Variant(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Use the ?47h variant
+	_, _ = w.Write([]byte("\x1b[?47h"))
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	w.mu.Unlock()
+
+	if !inAlt {
+		t.Error("expected altScreen=true after ?47h sequence")
+	}
+
+	// Exit with ?47l
+	_, _ = w.Write([]byte("\x1b[?47l"))
+
+	w.mu.Lock()
+	inAlt = w.altScreen
+	w.mu.Unlock()
+
+	if inAlt {
+		t.Error("expected altScreen=false after ?47l sequence")
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_DirtyFlag(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+
+	w.mu.Lock()
+	w.dirty = false
+	w.mu.Unlock()
+
+	// Write should set dirty
+	_, _ = w.Write([]byte("test"))
+
+	w.mu.Lock()
+	isDirty := w.dirty
+	w.mu.Unlock()
+
+	if !isDirty {
+		t.Error("expected dirty=true after write in compositor mode")
+	}
+
+	w.Cleanup()
+}
+
 func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
