@@ -11,6 +11,7 @@ dependencies:
   - make
   - claude-code
   - node@20
+  - bats
   - docker:dind
 
 grants:

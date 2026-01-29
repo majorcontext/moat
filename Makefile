@@ -1,4 +1,4 @@
-.PHONY: all help build test test-unit test-e2e lint clean coverage
+.PHONY: all help build test test-unit test-e2e test-bats lint clean coverage
 
 # Default target - running "make" shows help
 all: help
@@ -21,13 +21,17 @@ build: ## Build the project
 build-cli: ## Build the CLI binary ./moat
 	go build -o moat ./cmd/moat
 
-test: test-unit test-e2e ## Run all tests (unit + E2E)
+test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 
 test-unit: ## Run unit tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test $(ARGS) ./...
 
 test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -tags=e2e -v $(ARGS) ./internal/e2e/
+
+test-bats: ## Run bats tests for Claude Code hooks
+	@which bats > /dev/null || (echo "bats not installed. Install from https://github.com/bats-core/bats-core" && exit 1)
+	bats .claude/hooks/
 
 lint: ## Run linter (requires golangci-lint)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
