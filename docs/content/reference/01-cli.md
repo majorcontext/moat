@@ -317,6 +317,46 @@ moat grant aws \
     --session-duration 30m
 ```
 
+### moat grant list
+
+List all stored credentials.
+
+```
+moat grant list
+```
+
+#### Examples
+
+```bash
+moat grant list
+moat grant list --json
+```
+
+---
+
+## moat sessions
+
+List sessions across all agent types.
+
+```
+moat sessions [flags]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--agent TYPE` | Filter by agent type (claude, codex) |
+| `--active` | Only show running sessions |
+
+### Examples
+
+```bash
+moat sessions
+moat sessions --active
+moat sessions --agent claude
+```
+
 ---
 
 ## moat revoke
@@ -451,18 +491,18 @@ moat audit run_a1b2c3d4e5f6 --list --type=credential
 
 ---
 
-## moat verify-bundle
+### moat audit verify
 
 Verify an exported proof bundle.
 
 ```
-moat verify-bundle <file>
+moat audit verify <file>
 ```
 
 ### Examples
 
 ```bash
-moat verify-bundle proof.json
+moat audit verify proof.json
 ```
 
 ---
@@ -584,79 +624,93 @@ moat clean --dry-run
 
 ---
 
-## moat snapshots
+## moat snapshot
 
-List snapshots for a run.
+Create and manage workspace snapshots.
 
-```
-moat snapshots <run-id>
-```
-
-### Examples
-
-```bash
-moat snapshots run_a1b2c3d4e5f6
-```
-
-### moat snapshots prune
-
-Remove old snapshots.
+When called with a run ID, creates a manual snapshot. Use subcommands to list, prune, or restore snapshots.
 
 ```
-moat snapshots prune <run-id> [flags]
+moat snapshot <run-id> [flags]
 ```
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--keep N` | Keep N most recent (default: 5) |
-| `--dry-run` | Preview what would be deleted |
-
-### Examples
-
-```bash
-moat snapshots prune run_a1b2c3d4e5f6 --keep 3
-moat snapshots prune run_a1b2c3d4e5f6 --dry-run
-```
-
----
-
-## moat snapshot
-
-Create a manual snapshot.
-
-```
-moat snapshot <run-id>
-```
+| `--label TEXT` | Optional label for the snapshot |
 
 ### Examples
 
 ```bash
 moat snapshot run_a1b2c3d4e5f6
+moat snapshot run_a1b2c3d4e5f6 --label "before refactor"
 ```
 
----
+### moat snapshot list
 
-## moat rollback
-
-Restore workspace from a snapshot.
+List snapshots for a run.
 
 ```
-moat rollback <run-id> <snapshot-id>
+moat snapshot list <run-id>
 ```
 
-### Examples
+#### Examples
 
 ```bash
-moat rollback run_a1b2c3d4e5f6 snap_abc123
+moat snapshot list run_a1b2c3d4e5f6
+moat snapshot list run_a1b2c3d4e5f6 --json
+```
+
+### moat snapshot prune
+
+Remove old snapshots, keeping the newest N. The pre-run snapshot is always preserved.
+
+```
+moat snapshot prune <run-id> [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--keep N` | Keep N most recent (default: 5) |
+| `--dry-run` | Preview what would be deleted |
+
+#### Examples
+
+```bash
+moat snapshot prune run_a1b2c3d4e5f6 --keep 3
+moat snapshot prune run_a1b2c3d4e5f6 --dry-run
+```
+
+### moat snapshot restore
+
+Restore workspace from a snapshot. If no snapshot ID is given, restores the most recent. A safety snapshot is created before in-place restores.
+
+```
+moat snapshot restore <run-id> [snapshot-id] [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--to DIR` | Extract to a different directory instead of restoring in-place |
+
+#### Examples
+
+```bash
+moat snapshot restore run_a1b2c3d4e5f6
+moat snapshot restore run_a1b2c3d4e5f6 snap_abc123
+moat snapshot restore run_a1b2c3d4e5f6 --to /tmp/recovery
 ```
 
 ---
 
 ## moat proxy
 
-Manage the hostname routing proxy.
+Manage the hostname routing proxy. When called without a subcommand, shows the current proxy status.
 
 ### moat proxy start
 
@@ -696,20 +750,6 @@ moat proxy status
 ```
 
 ---
-
-## moat promote
-
-Promote run artifacts to persistent storage.
-
-```
-moat promote <run-id>
-```
-
-### Examples
-
-```bash
-moat promote run_a1b2c3d4e5f6
-```
 
 ---
 

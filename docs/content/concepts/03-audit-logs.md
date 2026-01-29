@@ -92,7 +92,7 @@ The proof bundle contains:
 Verify an exported bundle:
 
 ```bash
-$ moat verify-bundle proof.json
+$ moat audit verify proof.json
 
 Verifying bundle: proof.json
 ===============================================================

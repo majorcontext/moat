@@ -1,7 +1,7 @@
 ---
 title: "Workspace snapshots"
 description: "Create point-in-time snapshots of your workspace for recovery."
-keywords: ["moat", "snapshots", "backup", "rollback", "recovery"]
+keywords: ["moat", "snapshots", "backup", "restore", "recovery"]
 ---
 
 # Workspace snapshots
@@ -92,7 +92,7 @@ Captures periodic checkpoints during long-running sessions.
 List snapshots for a run:
 
 ```bash
-$ moat snapshots run_a1b2c3d4e5f6
+$ moat snapshot list run_a1b2c3d4e5f6
 
 SNAPSHOT ID      TIME                   TRIGGER    SIZE
 snap_pre_xyz123  2025-01-21T10:00:00Z  pre_run    45 MB
@@ -111,14 +111,14 @@ moat snapshot run_a1b2c3d4e5f6
 
 Use this before risky operations or when you want to preserve current state.
 
-## Rolling back
+## Restoring a snapshot
 
 Restore workspace to a previous snapshot:
 
 ```bash
-$ moat rollback run_a1b2c3d4e5f6 snap_abc456
+$ moat snapshot restore run_a1b2c3d4e5f6 snap_abc456
 
-Rolling back to snapshot snap_abc456 (2025-01-21T10:05:23Z)
+Restoring to snapshot snap_abc456 (2025-01-21T10:05:23Z)
 
 Warning: This will replace the current workspace contents.
 Files added since the snapshot will be deleted.
@@ -126,7 +126,7 @@ Files modified since the snapshot will be reverted.
 
 Proceed? [y/N]: y
 
-Rollback complete.
+Restore complete.
 ```
 
 After rollback:
@@ -135,12 +135,12 @@ After rollback:
 - Files created after the snapshot are deleted
 - Modified files are reverted to snapshot versions
 
-### Rollback with running agent
+### Restore with running agent
 
-If the agent is still running, rollback pauses execution:
+If the agent is still running, restore pauses execution:
 
 ```bash
-$ moat rollback run_a1b2c3d4e5f6 snap_abc456
+$ moat snapshot restore run_a1b2c3d4e5f6 snap_abc456
 
 Agent is running. Rollback will:
 1. Pause the agent
@@ -153,7 +153,7 @@ Pausing agent...
 Restoring workspace...
 Resuming agent...
 
-Rollback complete.
+Restore complete.
 ```
 
 ## Retention policy
@@ -174,7 +174,7 @@ When `max_count` is exceeded, the oldest snapshots are deleted (except pre-run i
 Manually prune old snapshots:
 
 ```bash
-$ moat snapshots prune run_a1b2c3d4e5f6 --keep 5
+$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 5
 
 Pruning snapshots for run_a1b2c3d4e5f6
 Keeping 5 most recent snapshots
@@ -192,7 +192,7 @@ Deleted 2 snapshots
 Preview what would be deleted:
 
 ```bash
-moat snapshots prune run_a1b2c3d4e5f6 --keep 5 --dry-run
+moat snapshot list prune run_a1b2c3d4e5f6 --keep 5 --dry-run
 ```
 
 ## Excluding files
@@ -292,12 +292,12 @@ moat run --no-snapshots ./my-project
 
 4. If something goes wrong, list snapshots:
    ```bash
-   moat snapshots run_a1b2c3d4e5f6
+   moat snapshot list run_a1b2c3d4e5f6
    ```
 
-5. Rollback to a good state:
+5. Restore to a good state:
    ```bash
-   moat rollback run_a1b2c3d4e5f6 snap_pre_xyz123
+   moat snapshot restore run_a1b2c3d4e5f6 snap_pre_xyz123
    ```
 
 6. Continue working from the restored state.
@@ -331,7 +331,7 @@ snapshots:
 Prune old snapshots:
 
 ```bash
-moat snapshots prune run_a1b2c3d4e5f6 --keep 3
+moat snapshot list prune run_a1b2c3d4e5f6 --keep 3
 ```
 
 Or clean up old runs:
@@ -340,16 +340,16 @@ Or clean up old runs:
 moat clean
 ```
 
-### Rollback failed
+### Restore failed
 
-If rollback fails partway through, the workspace may be in an inconsistent state. The pre-rollback state is preserved in a temporary location:
+If restore fails partway through, the workspace may be in an inconsistent state. A safety snapshot is automatically created before in-place restores, so you can undo the restore:
 
 ```bash
-# Check for backup
-ls ~/.moat/runs/<run-id>/rollback-backup/
+# List snapshots to find the safety snapshot
+moat snapshot list <run-id>
 
-# Restore manually if needed
-cp -r ~/.moat/runs/<run-id>/rollback-backup/* /path/to/workspace/
+# Restore the safety snapshot to undo
+moat snapshot restore <run-id> <safety-snapshot-id>
 ```
 
 ## Related guides

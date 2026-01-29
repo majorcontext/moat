@@ -28,21 +28,21 @@ Example:
 }
 
 var verifyBundleCmd = &cobra.Command{
-	Use:   "verify-bundle <file>",
+	Use:   "verify <file>",
 	Short: "Verify a proof bundle file",
 	Long: `Verifies the integrity of an exported proof bundle without the original database.
 
-This allows offline verification of audit logs that were exported using 'agent audit --export'.
+This allows offline verification of audit logs that were exported using 'moat audit --export'.
 
 Example:
-  moat verify-bundle ./run_a1b2c3d4e5f6.proof.json`,
+  moat audit verify ./run_a1b2c3d4e5f6.proof.json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runVerifyBundle,
 }
 
 func init() {
 	rootCmd.AddCommand(auditCmd)
-	rootCmd.AddCommand(verifyBundleCmd)
+	auditCmd.AddCommand(verifyBundleCmd)
 	auditCmd.Flags().StringVarP(&auditExportFile, "export", "e", "", "Export proof bundle to file (JSON)")
 }
 

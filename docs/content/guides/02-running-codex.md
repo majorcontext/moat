@@ -253,13 +253,13 @@ snapshots:
 List snapshots:
 
 ```bash
-moat snapshots run_a1b2c3d4e5f6
+moat snapshot list run_a1b2c3d4e5f6
 ```
 
-Rollback to a snapshot:
+Restore a snapshot:
 
 ```bash
-moat rollback run_a1b2c3d4e5f6 snap_xyz123
+moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
 ```
 
 See [Snapshots guide](./06-snapshots.md) for details.
