@@ -1523,7 +1523,7 @@ region = %s
 	if err != nil {
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
 			_ = m.runtime.RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
 			netMgr := m.runtime.NetworkManager()
 			if netMgr != nil {
@@ -1887,12 +1887,14 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		return fmt.Errorf("run %s not found", runID)
 	}
 
-	if r.State != StateRunning && r.State != StateStarting {
+	// Check state (thread-safe)
+	currentState := r.GetState()
+	if currentState != StateRunning && currentState != StateStarting {
 		m.mu.Unlock()
 		return nil // Already stopped
 	}
 
-	r.State = StateStopping
+	r.SetState(StateStopping)
 	buildkitContainerID := r.BuildkitContainerID
 	networkID := r.NetworkID
 	m.mu.Unlock()
@@ -1923,10 +1925,8 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	}
 
 	// Stop the SSH agent server if one was created
-	if r.SSHAgentServer != nil {
-		if err := r.SSHAgentServer.Stop(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
-		}
+	if err := r.stopSSHAgentServer(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
 	}
 
 	// Unregister routes for this agent
@@ -2004,15 +2004,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		// Capture logs again here (idempotent) for defense-in-depth
 		m.captureLogs(r)
 
-		// Get final state to determine error
-		m.mu.RLock()
-		finalErr := r.Error
-		m.mu.RUnlock()
-
+		// Get final error (thread-safe read)
 		var err error
-		if finalErr != "" {
-			err = fmt.Errorf("%s", finalErr)
+		r.stateMu.Lock()
+		if r.Error != "" {
+			err = fmt.Errorf("%s", r.Error)
 		}
+		r.stateMu.Unlock()
 
 		// Stop the proxy server if one was created
 		if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
@@ -2175,22 +2173,22 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Now signal that container has exited (and logs are captured)
 	close(r.exitCh)
 
-	// Update run state
-	m.mu.Lock()
-	if r.State == StateRunning || r.State == StateStarting {
+	// Update run state (use state lock to prevent races with concurrent access)
+	currentState := r.GetState()
+	if currentState == StateRunning || currentState == StateStarting {
 		if err != nil || exitCode != 0 {
-			r.State = StateFailed
+			errMsg := ""
 			if err != nil {
-				r.Error = err.Error()
+				errMsg = err.Error()
 			} else {
-				r.Error = fmt.Sprintf("exit code %d", exitCode)
+				errMsg = fmt.Sprintf("exit code %d", exitCode)
 			}
+			r.SetStateWithError(StateFailed, errMsg)
+			r.SetStateWithTime(StateFailed, time.Now())
 		} else {
-			r.State = StateStopped
+			r.SetStateWithTime(StateStopped, time.Now())
 		}
-		r.StoppedAt = time.Now()
 	}
-	m.mu.Unlock()
 
 	// Save updated state
 	_ = r.SaveMetadata()

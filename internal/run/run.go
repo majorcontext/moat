@@ -56,8 +56,13 @@ type Run struct {
 	Error          string
 
 	// Shutdown coordination to prevent race conditions
-	proxyStopOnce     sync.Once // Ensures ProxyServer.Stop() called only once
-	sshAgentStopOnce  sync.Once // Ensures SSHAgentServer.Stop() called only once
+	proxyStopOnce    sync.Once // Ensures ProxyServer.Stop() called only once
+	sshAgentStopOnce sync.Once // Ensures SSHAgentServer.Stop() called only once
+
+	// State protection - guards State, Error, StartedAt, StoppedAt fields
+	// Use this lock when reading or modifying these fields to prevent races
+	// between monitorContainerExit goroutine and user-facing methods
+	stateMu sync.Mutex
 
 	// Firewall settings (set when network.policy is strict)
 	FirewallEnabled bool
@@ -158,6 +163,40 @@ func (r *Run) stopSSHAgentServer() error {
 		}
 	})
 	return stopErr
+}
+
+// GetState safely reads the run state (thread-safe).
+func (r *Run) GetState() State {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	return r.State
+}
+
+// SetState safely updates the run state (thread-safe).
+func (r *Run) SetState(state State) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.State = state
+}
+
+// SetStateWithError safely updates the run state and error (thread-safe).
+func (r *Run) SetStateWithError(state State, err string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.State = state
+	r.Error = err
+}
+
+// SetStateWithTime safely updates the run state and timestamp (thread-safe).
+func (r *Run) SetStateWithTime(state State, timestamp time.Time) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.State = state
+	if state == StateRunning {
+		r.StartedAt = timestamp
+	} else if state == StateStopped || state == StateFailed {
+		r.StoppedAt = timestamp
+	}
 }
 
 // validateMCPGrants checks that all required MCP grants exist.
