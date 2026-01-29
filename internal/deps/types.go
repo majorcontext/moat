@@ -83,6 +83,11 @@ type DepSpec struct {
 
 	// For go-install type
 	GoPackage string `yaml:"go-package,omitempty"`
+
+	// UserInstall indicates the dependency should be installed as the container
+	// user (moatuser) instead of root. This is needed for tools whose installers
+	// write to $HOME (e.g., claude-code's native installer).
+	UserInstall bool `yaml:"user-install,omitempty"`
 }
 
 // Dependency represents a parsed dependency from agent.yaml.

@@ -488,6 +488,115 @@ func TestGenerateDockerfileWithBuildKit(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
+	// claude-code should use the native installer as moatuser, not npm
+	deps := []Dependency{
+		{Name: "claude-code"},
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should NOT use npm
+	if strings.Contains(dockerfile, "npm install") {
+		t.Error("claude-code should not be installed via npm")
+	}
+
+	// Should use native installer
+	if !strings.Contains(dockerfile, "curl -fsSL https://claude.ai/install.sh | bash") {
+		t.Error("Dockerfile should use native Claude installer")
+	}
+
+	// Should run as moatuser
+	lines := strings.Split(dockerfile, "\n")
+	installerIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "claude.ai/install.sh") {
+			installerIdx = i
+			break
+		}
+	}
+	if installerIdx < 0 {
+		t.Fatal("installer line not found")
+	}
+	// Find the nearest USER directive before the installer
+	foundUser := ""
+	for i := installerIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "USER ") {
+			foundUser = strings.TrimSpace(lines[i])
+			break
+		}
+	}
+	if foundUser != "USER moatuser" {
+		t.Errorf("claude-code installer should run as moatuser, got %q", foundUser)
+	}
+
+	// Should add PATH from install commands' EnvVars
+	if !strings.Contains(dockerfile, `ENV PATH="$HOME/.local/bin:$PATH"`) {
+		t.Error("Dockerfile should add installer's PATH to environment")
+	}
+
+	// Should switch back to root after user-space install
+	foundRoot := false
+	for i := installerIdx + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "USER root" {
+			foundRoot = true
+			break
+		}
+	}
+	if !foundRoot {
+		t.Error("Dockerfile should switch back to USER root after user-space install")
+	}
+}
+
+func TestGenerateDockerfileMixedUserAndRootCustomDeps(t *testing.T) {
+	// Verify that user-install and root custom deps coexist correctly.
+	deps := []Dependency{
+		{Name: "rust"},        // root custom dep
+		{Name: "claude-code"}, // user-install custom dep
+	}
+	dockerfile, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Rust should be installed as root (no USER switch around it)
+	if !strings.Contains(dockerfile, "rustup.rs") {
+		t.Error("Dockerfile should install rust")
+	}
+
+	// Claude should be installed as moatuser
+	if !strings.Contains(dockerfile, "claude.ai/install.sh") {
+		t.Error("Dockerfile should install claude-code")
+	}
+
+	// Rust section should come before user-space section
+	rustIdx := strings.Index(dockerfile, "rustup.rs")
+	claudeIdx := strings.Index(dockerfile, "claude.ai/install.sh")
+	if rustIdx > claudeIdx {
+		t.Error("root custom deps should be written before user-space custom deps")
+	}
+
+	// The USER moatuser block should only surround claude, not rust
+	lines := strings.Split(dockerfile, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "rustup.rs") {
+			// Walk backwards to find nearest USER directive
+			for j := i - 1; j >= 0; j-- {
+				trimmed := strings.TrimSpace(lines[j])
+				if strings.HasPrefix(trimmed, "USER ") {
+					if trimmed != "USER root" {
+						t.Errorf("rust should run as root, but nearest USER is %q", trimmed)
+					}
+					break
+				}
+			}
+			break
+		}
+	}
+}
+
 func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 	// Test that Claude plugins are baked into the image
 	deps := []Dependency{

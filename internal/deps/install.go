@@ -352,6 +352,16 @@ func getCustomCommands(name, version string) InstallCommands {
 				"PATH": "/root/.cargo/bin:$PATH",
 			},
 		}
+	case "claude-code":
+		// Native installer - avoids Claude startup warnings from npm-based installs.
+		return InstallCommands{
+			Commands: []string{
+				`curl -fsSL https://claude.ai/install.sh | bash`,
+			},
+			EnvVars: map[string]string{
+				"PATH": "$HOME/.local/bin:$PATH",
+			},
+		}
 	case "kubectl":
 		// Install kubectl - detects architecture
 		return InstallCommands{
