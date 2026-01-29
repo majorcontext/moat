@@ -26,7 +26,10 @@ The routing proxy enables accessing agent services via hostnames like:
   https://web.my-agent.localhost:8080
 
 Run with sudo to bind to privileged ports like 80:
-  sudo agent proxy start --port=80`,
+  sudo agent proxy start --port=80
+
+When called without a subcommand, shows the current proxy status.`,
+	RunE: statusProxy,
 }
 
 var proxyStartCmd = &cobra.Command{
