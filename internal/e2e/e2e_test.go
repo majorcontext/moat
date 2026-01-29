@@ -19,14 +19,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/claude"
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/credential/keyring"
-	"github.com/andybons/moat/internal/deps"
-	"github.com/andybons/moat/internal/run"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/credential/keyring"
+	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 // testTimeout is the default context timeout for e2e tests.

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/andybons/moat/cmd/moat/cli"
+	"github.com/majorcontext/moat/cmd/moat/cli"
 )
 
 func main() {

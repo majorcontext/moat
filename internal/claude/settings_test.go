@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/andybons/moat/internal/config"
+	"github.com/majorcontext/moat/internal/config"
 )
 
 func TestLoadSettings(t *testing.T) {

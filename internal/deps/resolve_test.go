@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/deps/versions"
+	"github.com/majorcontext/moat/internal/deps/versions"
 )
 
 func TestResolveVersions(t *testing.T) {

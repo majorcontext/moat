@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/moat/internal/credential"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

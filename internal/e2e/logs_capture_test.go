@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/run"
 )
 
 // TestLogsCapturedInAttachedMode verifies that logs are captured to logs.jsonl

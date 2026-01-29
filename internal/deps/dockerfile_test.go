@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andybons/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/claude"
 )
 
 func TestGenerateDockerfile(t *testing.T) {

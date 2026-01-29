@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/deps"
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // DockerSocketPath is the standard path for the Docker socket on Linux.

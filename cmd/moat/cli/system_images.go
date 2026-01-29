@@ -7,7 +7,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/moat/internal/container"
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/spf13/cobra"
 )
 

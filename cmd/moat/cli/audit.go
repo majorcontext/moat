@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/audit"
+	"github.com/majorcontext/moat/internal/audit"
 	"github.com/spf13/cobra"
 )
 

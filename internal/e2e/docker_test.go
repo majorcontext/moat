@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/run"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 // skipIfNoDocker skips the test if Docker runtime is not available.

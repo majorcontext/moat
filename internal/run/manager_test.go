@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/deps"
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration

@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestMCPCredentialInjection(t *testing.T) {

@@ -527,7 +527,7 @@ Look at `RunInteractiveAttached` function - this is where we'll wrap stdout.
 // Add import
 import (
 	// ... existing imports
-	"github.com/andybons/moat/internal/tui"
+	"github.com/majorcontext/moat/internal/tui"
 )
 
 // In RunInteractiveAttached, after raw mode setup and before StartAttached:

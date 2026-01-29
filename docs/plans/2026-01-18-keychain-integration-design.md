@@ -1,6 +1,6 @@
 # System Keychain for Credential Encryption Key
 
-**Issue:** https://github.com/andybons/moat/issues/13
+**Issue:** https://github.com/majorcontext/moat/issues/13
 **Date:** 2026-01-18
 **Status:** Proposed
 

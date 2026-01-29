@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/util/progress/progressui"
 	"github.com/tonistiigi/fsutil"

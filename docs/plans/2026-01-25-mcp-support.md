@@ -920,8 +920,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestMCPCredentialInjection(t *testing.T) {
@@ -1067,9 +1067,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // injectMCPCredentials checks if the request is to an MCP server and injects
@@ -1596,8 +1596,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestMCPCredentialInjection_E2E(t *testing.T) {

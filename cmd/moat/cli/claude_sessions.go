@@ -5,9 +5,9 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/andybons/moat/internal/claude"
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 

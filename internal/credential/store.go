@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/credential/keyring"
+	"github.com/majorcontext/moat/internal/credential/keyring"
 )
 
 // FileStore implements Store using encrypted files.

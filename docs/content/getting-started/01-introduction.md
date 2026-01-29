@@ -9,7 +9,7 @@ keywords: ["moat", "ai agents", "containers", "credentials", "observability"]
 Run AI agents in isolated containers with credential injection and observability.
 
 ```bash
-go install github.com/andybons/moat/cmd/moat@latest
+go install github.com/majorcontext/moat/cmd/moat@latest
 ```
 
 ## What Moat does

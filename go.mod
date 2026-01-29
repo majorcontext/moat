@@ -1,4 +1,4 @@
-module github.com/andybons/moat
+module github.com/majorcontext/moat
 
 go 1.25.5
 

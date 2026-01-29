@@ -951,9 +951,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/run"
 )
 
 func TestBuildKitSidecar(t *testing.T) {

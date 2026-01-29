@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/andybons/moat/internal/claude"
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 

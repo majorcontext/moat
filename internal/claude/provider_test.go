@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestAnthropicSetup_Provider(t *testing.T) {

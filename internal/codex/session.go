@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/session"
+	"github.com/majorcontext/moat/internal/session"
 )
 
 // Session type aliases for backward compatibility.

@@ -8,8 +8,8 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/andybons/moat/internal/snapshot"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

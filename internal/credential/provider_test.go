@@ -3,7 +3,7 @@ package credential
 import (
 	"testing"
 
-	"github.com/andybons/moat/internal/container"
+	"github.com/majorcontext/moat/internal/container"
 )
 
 func TestGetProviderSetup(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/run"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

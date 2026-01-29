@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybons/moat/internal/container/output"
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/term"
 	"github.com/creack/pty"
+	"github.com/majorcontext/moat/internal/container/output"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/term"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.

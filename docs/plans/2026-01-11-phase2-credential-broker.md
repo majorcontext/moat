@@ -495,8 +495,8 @@ import (
     "strings"
     "time"
 
-    "github.com/andybons/moat/internal/credential"
-    "github.com/andybons/moat/internal/log"
+    "github.com/majorcontext/moat/internal/credential"
+    "github.com/majorcontext/moat/internal/log"
     "github.com/spf13/cobra"
 )
 
@@ -606,8 +606,8 @@ package cli
 import (
     "fmt"
 
-    "github.com/andybons/moat/internal/credential"
-    "github.com/andybons/moat/internal/log"
+    "github.com/majorcontext/moat/internal/credential"
+    "github.com/majorcontext/moat/internal/log"
     "github.com/spf13/cobra"
 )
 
@@ -1062,8 +1062,8 @@ containerID, err := m.docker.CreateContainer(ctx, docker.ContainerConfig{
 import (
     "strings"
 
-    "github.com/andybons/moat/internal/credential"
-    "github.com/andybons/moat/internal/proxy"
+    "github.com/majorcontext/moat/internal/credential"
+    "github.com/majorcontext/moat/internal/proxy"
 )
 ```
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/andybons/moat/internal/container"
+	"github.com/majorcontext/moat/internal/container"
 )
 
 // ProxyInjectedPlaceholder is a placeholder value for credentials that will be

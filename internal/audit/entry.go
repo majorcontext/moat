@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // EntryType identifies the kind of log entry.

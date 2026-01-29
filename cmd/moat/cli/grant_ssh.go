@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/sshagent"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/spf13/cobra"
 )
 
