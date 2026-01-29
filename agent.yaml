@@ -2,7 +2,8 @@ name: moat
 
 interactive: true
 
-claude: opus
+claude:
+  model: opus
 
 dependencies:
   - go@1.25.6

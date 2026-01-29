@@ -359,7 +359,7 @@ func getCustomCommands(name, version string) InstallCommands {
 				`curl -fsSL https://claude.ai/install.sh | bash`,
 			},
 			EnvVars: map[string]string{
-				"PATH": "$HOME/.local/bin:$PATH",
+				"PATH": "/home/moatuser/.local/bin:$PATH",
 			},
 		}
 	case "kubectl":
