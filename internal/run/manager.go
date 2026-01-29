@@ -1524,6 +1524,7 @@ region = %s
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
 			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			_ = m.runtime.RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
 			netMgr := m.runtime.NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
@@ -1917,10 +1918,8 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	m.captureLogs(r)
 
 	// Stop the proxy server if one was created
-	if r.ProxyServer != nil {
-		if err := r.ProxyServer.Stop(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
-		}
+	if err := r.stopProxyServer(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
 	}
 
 	// Stop the SSH agent server if one was created
@@ -2016,17 +2015,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		}
 
 		// Stop the proxy server if one was created
-		if r.ProxyServer != nil {
-			if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
-			}
+		if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
 		}
 
 		// Stop the SSH agent server if one was created
-		if r.SSHAgentServer != nil {
-			if stopErr := r.SSHAgentServer.Stop(); stopErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", stopErr)
-			}
+		if stopErr := r.stopSSHAgentServer(); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", stopErr)
 		}
 
 		// Unregister routes for this agent
@@ -2201,17 +2196,13 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	_ = r.SaveMetadata()
 
 	// Stop the proxy server if one was created
-	if r.ProxyServer != nil {
-		if stopErr := r.ProxyServer.Stop(context.Background()); stopErr != nil {
-			log.Debug("stopping proxy after container exit", "error", stopErr)
-		}
+	if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
+		log.Debug("stopping proxy after container exit", "error", stopErr)
 	}
 
 	// Stop the SSH agent server if one was created
-	if r.SSHAgentServer != nil {
-		if stopErr := r.SSHAgentServer.Stop(); stopErr != nil {
-			log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
-		}
+	if stopErr := r.stopSSHAgentServer(); stopErr != nil {
+		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
 	}
 
 	// Unregister routes
@@ -2271,17 +2262,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	}
 
 	// Stop the proxy server if one was created and still running
-	if r.ProxyServer != nil {
-		if err := r.ProxyServer.Stop(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
-		}
+	if err := r.stopProxyServer(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
 	}
 
 	// Stop the SSH agent server if one was created and still running
-	if r.SSHAgentServer != nil {
-		if err := r.SSHAgentServer.Stop(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
-		}
+	if err := r.stopSSHAgentServer(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
 	}
 
 	// Unregister routes for this agent
@@ -2455,15 +2442,11 @@ func (m *Manager) Close() error {
 	// Stop all proxy servers
 	m.mu.RLock()
 	for _, r := range m.runs {
-		if r.ProxyServer != nil {
-			if err := r.ProxyServer.Stop(context.Background()); err != nil {
-				log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
-			}
+		if err := r.stopProxyServer(context.Background()); err != nil {
+			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}
-		if r.SSHAgentServer != nil {
-			if err := r.SSHAgentServer.Stop(); err != nil {
-				log.Debug("failed to stop SSH agent during manager close", "run", r.ID, "error", err)
-			}
+		if err := r.stopSSHAgentServer(); err != nil {
+			log.Debug("failed to stop SSH agent during manager close", "run", r.ID, "error", err)
 		}
 	}
 	m.mu.RUnlock()

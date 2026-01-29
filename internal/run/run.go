@@ -1,8 +1,10 @@
 package run
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +54,10 @@ type Run struct {
 	StartedAt      time.Time
 	StoppedAt      time.Time
 	Error          string
+
+	// Shutdown coordination to prevent race conditions
+	proxyStopOnce     sync.Once // Ensures ProxyServer.Stop() called only once
+	sshAgentStopOnce  sync.Once // Ensures SSHAgentServer.Stop() called only once
 
 	// Firewall settings (set when network.policy is strict)
 	FirewallEnabled bool
@@ -126,6 +132,32 @@ func (r *Run) SaveMetadata() error {
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
 	})
+}
+
+// stopProxyServer safely stops the proxy server exactly once.
+// This method is safe to call concurrently from multiple goroutines.
+func (r *Run) stopProxyServer(ctx context.Context) error {
+	var stopErr error
+	r.proxyStopOnce.Do(func() {
+		if r.ProxyServer != nil {
+			stopErr = r.ProxyServer.Stop(ctx)
+			r.ProxyServer = nil
+		}
+	})
+	return stopErr
+}
+
+// stopSSHAgentServer safely stops the SSH agent server exactly once.
+// This method is safe to call concurrently from multiple goroutines.
+func (r *Run) stopSSHAgentServer() error {
+	var stopErr error
+	r.sshAgentStopOnce.Do(func() {
+		if r.SSHAgentServer != nil {
+			stopErr = r.SSHAgentServer.Stop()
+			r.SSHAgentServer = nil
+		}
+	})
+	return stopErr
 }
 
 // validateMCPGrants checks that all required MCP grants exist.
