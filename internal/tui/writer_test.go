@@ -23,14 +23,9 @@ func TestWriter_Write(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain the original content
+	// Should contain the original content (passed through directly)
 	if !strings.Contains(output, "hello world") {
 		t.Errorf("expected original content in output")
-	}
-
-	// With vt-based approach, status bar IS rendered on every write (compositing)
-	if !strings.Contains(output, "run_abc123") {
-		t.Errorf("expected status bar in output")
 	}
 }
 
@@ -72,7 +67,7 @@ func TestWriter_Write_PassesThrough(t *testing.T) {
 	_ = w.Setup()
 	buf.Reset() // Clear setup output
 
-	// Write should render content + status bar (compositing)
+	// Write should pass through content directly (scrolling region handles layout)
 	_, err := w.Write([]byte("hello"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -82,13 +77,11 @@ func TestWriter_Write_PassesThrough(t *testing.T) {
 
 	// Should contain the content
 	if !strings.Contains(output, "hello") {
-		t.Errorf("expected content in output")
+		t.Errorf("expected content in output, got %q", output)
 	}
 
-	// With vt-based approach, status bar is always composited
-	if !strings.Contains(output, "run_abc123") {
-		t.Errorf("expected status bar in composited output")
-	}
+	// Status bar is NOT rewritten on every write (only during Setup/Resize)
+	// This is the key difference from the VT emulator approach
 }
 
 func TestWriter_Cleanup(t *testing.T) {
@@ -255,7 +248,7 @@ func TestWriter_Apple_PassthroughAfterReady(t *testing.T) {
 	_, _ = w.Write([]byte("Escape sequences: Ctrl-/ d\n"))
 	buf.Reset() // Clear initialization output
 
-	// Subsequent writes should composite content + status bar
+	// Subsequent writes should pass through directly
 	_, err := w.Write([]byte("shell prompt $ "))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -268,13 +261,10 @@ func TestWriter_Apple_PassthroughAfterReady(t *testing.T) {
 		t.Errorf("expected shell output to pass through, got %q", output)
 	}
 
-	// Status bar should be composited
-	if !strings.Contains(output, "run_abc123") {
-		t.Errorf("expected status bar in composited output, got %q", output)
-	}
+	// Status bar is NOT rewritten on every write (scrolling region keeps it pinned)
 }
 
-func TestWriter_VirtualTerminal_PreservesContent(t *testing.T) {
+func TestWriter_ScrollingRegion_Resize(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
 	bar.SetDimensions(60, 10)
@@ -287,7 +277,7 @@ func TestWriter_VirtualTerminal_PreservesContent(t *testing.T) {
 	_, _ = w.Write([]byte("line 2\n"))
 	buf.Reset()
 
-	// Resize - content should be preserved from virtual terminal
+	// Resize re-establishes scrolling region and redraws status bar
 	err := w.Resize(60, 15)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -295,12 +285,14 @@ func TestWriter_VirtualTerminal_PreservesContent(t *testing.T) {
 
 	output := buf.String()
 
-	// Virtual terminal preserves content across resize
-	if !strings.Contains(output, "line 1") {
-		t.Errorf("expected line 1 preserved after resize, got %q", output)
+	// Should set DECSTBM scrolling region for new height (1-14)
+	if !strings.Contains(output, "\x1b[1;14r") {
+		t.Errorf("expected DECSTBM for height 15, got %q", output)
 	}
-	if !strings.Contains(output, "line 2") {
-		t.Errorf("expected line 2 preserved after resize, got %q", output)
+
+	// Should redraw status bar
+	if !strings.Contains(output, "run_abc123") {
+		t.Errorf("expected status bar after resize, got %q", output)
 	}
 }
 
@@ -334,66 +326,25 @@ func TestWriter_Apple_BufferSizeLimit(t *testing.T) {
 	}
 }
 
-func TestWriter_CursorVisibilityTracking(t *testing.T) {
+func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
 	bar.SetDimensions(60, 24)
 
 	w := NewWriter(&buf, bar, "docker")
 	_ = w.Setup()
-
-	// Initially cursor is visible
-	w.mu.Lock()
-	if !w.cursorVisible {
-		t.Error("expected cursor visible initially")
-	}
-	w.mu.Unlock()
 	buf.Reset()
 
-	// Write with cursor hide sequence
+	// ANSI sequences should pass through unchanged
 	_, _ = w.Write([]byte("hello\x1b[?25l"))
-	w.mu.Lock()
-	if w.cursorVisible {
-		t.Error("expected cursor hidden after hide sequence")
-	}
-	w.mu.Unlock()
 
-	// Output should include cursor hide
+	// Output should include the cursor hide sequence
 	if !strings.Contains(buf.String(), "\x1b[?25l") {
 		t.Errorf("expected cursor hide in output, got %q", buf.String())
 	}
-	buf.Reset()
 
-	// Write with cursor show sequence
-	_, _ = w.Write([]byte("world\x1b[?25h"))
-	w.mu.Lock()
-	if !w.cursorVisible {
-		t.Error("expected cursor visible after show sequence")
-	}
-	w.mu.Unlock()
-
-	// Output should include cursor show
-	if !strings.Contains(buf.String(), "\x1b[?25h") {
-		t.Errorf("expected cursor show in output, got %q", buf.String())
-	}
-}
-
-func TestWriter_CursorVisibility_LastWins(t *testing.T) {
-	var buf bytes.Buffer
-	bar := NewStatusBar("run_abc123", "my-agent", "docker")
-	bar.SetDimensions(60, 24)
-
-	w := NewWriter(&buf, bar, "docker")
-	_ = w.Setup()
-	buf.Reset()
-
-	// Write with both sequences - last one wins
-	_, _ = w.Write([]byte("\x1b[?25l\x1b[?25h\x1b[?25l"))
-	w.mu.Lock()
-	visible := w.cursorVisible
-	w.mu.Unlock()
-
-	if visible {
-		t.Error("expected cursor hidden (last sequence was hide)")
+	// Output should include the content
+	if !strings.Contains(buf.String(), "hello") {
+		t.Errorf("expected content in output, got %q", buf.String())
 	}
 }
