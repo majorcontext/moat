@@ -149,6 +149,11 @@ make:
   type: apt
   package: make
 
+bats:
+  description: Bash Automated Testing System
+  type: apt
+  package: bats
+
 # Custom installers (complex logic)
 playwright:
   description: Browser testing framework

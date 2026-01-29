@@ -50,8 +50,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up bats
+        uses: bats-core/bats-action@3.0.1
+
       - name: Run tests
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run hook tests
+        run: bats .claude/hooks/
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
