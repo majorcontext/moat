@@ -11,81 +11,32 @@ This guide covers running OpenAI Codex CLI in a Moat container. Codex is OpenAI'
 ## Prerequisites
 
 - Moat installed
-- A ChatGPT Pro/Teams subscription OR an OpenAI API key
+- An OpenAI API key from [platform.openai.com](https://platform.openai.com/api-keys)
 
 ## Granting OpenAI credentials
 
-Run `moat grant openai` to configure authentication. You'll see a menu with available options:
+Run `moat grant openai` to configure authentication:
 
 ```bash
 $ moat grant openai
-
-Choose authentication method:
-
-  1. ChatGPT subscription (recommended)
-     Uses 'codex login' to authenticate via OAuth.
-     Requires a ChatGPT Pro/Teams subscription.
-
-  2. OpenAI API key
-     Use an API key from platform.openai.com
-     Billed per token to your API account.
-
-  3. Import existing Codex credentials
-     Use OAuth tokens from your local Codex installation.
-
-Enter choice [1, 2, or 3]:
-```
-
-### Option 1: ChatGPT subscription (recommended)
-
-If you have a ChatGPT Pro or Teams subscription and the Codex CLI installed, choose option 1. This runs `codex login` to authenticate:
-
-```bash
-Enter choice [1, 2, or 3]: 1
-
-Running 'codex login' to authenticate...
-This may open a browser for authentication.
-
-OpenAI credential saved to ~/.moat/credentials/openai.enc
-
-You can now run 'moat codex' to start Codex.
-```
-
-### Option 2: API key
-
-If you have an OpenAI API key (from platform.openai.com):
-
-```bash
-Enter choice [1, 2, or 3]: 2
 
 Enter your OpenAI API key.
 You can find or create one at: https://platform.openai.com/api-keys
 
 API Key: sk-...
 
-Validate API key with a test request? This makes a small API call. [Y/n]: y
-
 Validating API key...
 API key is valid.
+
 OpenAI API key saved to ~/.moat/credentials/openai.enc
 ```
 
-You can also set `OPENAI_API_KEY` in your environment before running the command.
-
-### Option 3: Import existing credentials
-
-If you already have Codex CLI installed and logged in locally, you can import your existing OAuth credentials:
+You can also set `OPENAI_API_KEY` in your environment before running the command:
 
 ```bash
-Enter choice [1, 2, or 3]: 3
-
-Found Codex credentials.
-  Expires: 2026-02-15T10:30:00Z
-
-Codex credentials imported to ~/.moat/credentials/openai.enc
+export OPENAI_API_KEY="sk-..."
+moat grant openai
 ```
-
-Note: Imported tokens do not auto-refresh. When the token expires, run a Codex session on your host machine to refresh it, then run `moat grant openai` again to import the new token.
 
 ### How credentials are injected
 
@@ -300,16 +251,10 @@ See [Snapshots guide](./06-snapshots.md) for details.
 
 ### "No OpenAI credentials found"
 
-Either:
-
-1. Install Codex CLI and log in, then run `moat grant openai` again
-2. Use an API key: `export OPENAI_API_KEY="sk-..." && moat grant openai`
-
-### "Credential expired"
-
-OAuth credentials have an expiration time. Re-grant:
+Create an API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and grant it:
 
 ```bash
+export OPENAI_API_KEY="sk-..."
 moat grant openai
 ```
 
