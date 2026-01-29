@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"github.com/charmbracelet/x/vt"
 )
 
 // appleContainerReadyMarker is printed by Apple's container CLI when the
@@ -19,28 +17,17 @@ const appleContainerReadyMarker = "Escape sequences:"
 // crashes during startup), this prevents unbounded memory growth.
 const maxInitBuffer = 64 * 1024 // 64KB
 
-// DECTCEM sequences for cursor visibility
-var (
-	cursorHide = []byte("\x1b[?25l")
-	cursorShow = []byte("\x1b[?25h")
-)
-
-// Writer wraps an io.Writer and composites a status bar at the bottom.
-// It uses a virtual terminal emulator to track the screen state, allowing
-// perfect rendering on resize without race conditions.
+// Writer wraps an io.Writer and adds a status bar at the bottom using DECSTBM
+// (scrolling regions). Container output scrolls naturally in the top region
+// while the status bar remains pinned at the bottom.
 //
 // Writer is goroutine-safe for all methods.
 type Writer struct {
-	mu       sync.Mutex
-	out      io.Writer        // Actual terminal output
-	emulator *vt.SafeEmulator // Virtual terminal for content area
-	bar      *StatusBar
-	width    int
-	height   int // Total terminal height (content + status bar)
-
-	// Cursor visibility tracking - the vt emulator doesn't expose this,
-	// so we track DECTCEM sequences ourselves to forward to the real terminal.
-	cursorVisible bool
+	mu     sync.Mutex
+	out    io.Writer // Actual terminal output
+	bar    *StatusBar
+	width  int
+	height int // Total terminal height (content + status bar)
 
 	// Apple container specific
 	runtime     string // "apple" or "docker"
@@ -52,48 +39,58 @@ type Writer struct {
 // The runtime parameter should be "apple" or "docker" to enable runtime-specific
 // behavior (e.g., detecting Apple container CLI's ready marker).
 func NewWriter(w io.Writer, bar *StatusBar, runtime string) *Writer {
-	width := bar.width
-	height := bar.height
-	contentHeight := max(height-1, 1)
-
 	return &Writer{
-		out:           w,
-		emulator:      vt.NewSafeEmulator(width, contentHeight),
-		bar:           bar,
-		width:         width,
-		height:        height,
-		runtime:       runtime,
-		cursorVisible: true, // Terminal cursor starts visible
+		out:     w,
+		bar:     bar,
+		width:   bar.width,
+		height:  bar.height,
+		runtime: runtime,
 	}
 }
 
-// Setup initializes the terminal for status bar display.
-// Call this before any writes to clear the screen and draw initial state.
+// Setup initializes the terminal for status bar display using scrolling regions.
+// Sets DECSTBM to create a scrolling region for content (lines 1 to height-1)
+// and pins the status bar at the bottom line.
 func (w *Writer) Setup() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Clear screen and home cursor
-	_, err := w.out.Write([]byte("\x1b[2J\x1b[H"))
-	if err != nil {
-		return err
-	}
-
-	// Render initial state (empty content area + status bar)
-	return w.renderLocked()
+	return w.setupScrollRegionLocked()
 }
 
-// Write writes data to the virtual terminal and re-renders the display.
+// setupScrollRegionLocked sets up the scrolling region and draws the status bar.
+// Caller must hold the mutex.
+func (w *Writer) setupScrollRegionLocked() error {
+	var buf bytes.Buffer
+
+	// Clear screen
+	buf.WriteString("\x1b[2J\x1b[H")
+
+	// Set scrolling region to lines 1 through height-1
+	// DECSTBM: CSI top;bottom r
+	if w.height > 1 {
+		fmt.Fprintf(&buf, "\x1b[1;%dr", w.height-1)
+	}
+
+	// Draw status bar at bottom line (outside scroll region)
+	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
+	buf.WriteString(w.bar.Render())
+
+	// Move cursor to top of scroll region
+	buf.WriteString("\x1b[H")
+
+	_, err := w.out.Write(buf.Bytes())
+	return err
+}
+
+// Write passes container output directly to the terminal.
+// The scrolling region ensures output scrolls naturally while the status bar
+// remains pinned at the bottom.
 func (w *Writer) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Track cursor visibility from DECTCEM sequences.
-	// The vt emulator parses these but doesn't expose the state, so we track
-	// it ourselves to forward to the real terminal in renderLocked().
-	w.trackCursorVisibility(p)
-
-	// For Apple containers, detect the ready marker and clear content area
+	// For Apple containers, detect the ready marker and clear screen
 	if w.runtime == "apple" && !w.initialized {
 		// Buffer data up to maxInitBuffer to detect the ready marker
 		if len(w.buffer) < maxInitBuffer {
@@ -105,45 +102,22 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 			}
 		}
 
-		// Write to virtual terminal (errors indicate invalid ANSI, safe to ignore)
-		_, _ = w.emulator.Write(p)
-
-		// Render current state
-		_ = w.renderLocked()
+		// Pass through the output
+		_, err = w.out.Write(p)
 
 		// Check if we've seen the ready marker
 		if bytes.Contains(w.buffer, []byte(appleContainerReadyMarker)) {
 			w.initialized = true
-			// Reset the emulator to clear the spinner
-			w.emulator.Resize(w.width, w.height-1)
-			_ = w.renderLocked()
+			// Clear screen and re-setup scroll region to clear the spinner
+			_ = w.setupScrollRegionLocked()
 			// Clear buffer - no longer needed
 			w.buffer = nil
 		}
-		return len(p), nil
+		return len(p), err
 	}
 
-	// Write to virtual terminal (it parses ANSI and updates screen state)
-	_, _ = w.emulator.Write(p)
-
-	// Render: content from emulator + status bar
-	err = w.renderLocked()
-	return len(p), err
-}
-
-// trackCursorVisibility scans for DECTCEM sequences and updates cursorVisible.
-// This is called before passing data to the emulator.
-func (w *Writer) trackCursorVisibility(p []byte) {
-	// Scan for the last occurrence of each sequence to get final state
-	hideIdx := bytes.LastIndex(p, cursorHide)
-	showIdx := bytes.LastIndex(p, cursorShow)
-
-	if hideIdx > showIdx {
-		w.cursorVisible = false
-	} else if showIdx > hideIdx {
-		w.cursorVisible = true
-	}
-	// If neither found (both -1), state unchanged
+	// Pass through container output directly - scrolling region handles layout
+	return w.out.Write(p)
 }
 
 // Cleanup resets the terminal state.
@@ -151,14 +125,20 @@ func (w *Writer) Cleanup() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	var buf bytes.Buffer
+
+	// Reset scrolling region to full screen (DECSTBM with no params)
+	buf.WriteString("\x1b[r")
+
 	// Clear screen and show cursor
-	_, err := w.out.Write([]byte("\x1b[2J\x1b[H\x1b[?25h"))
+	buf.WriteString("\x1b[2J\x1b[H\x1b[?25h")
+
+	_, err := w.out.Write(buf.Bytes())
 	return err
 }
 
-// Resize updates the terminal dimensions and re-renders.
-// This is race-condition free because we re-render from the virtual terminal's
-// buffer rather than relying on the physical terminal's state.
+// Resize updates the terminal dimensions and re-establishes the scrolling region.
+// This must be called on SIGWINCH to maintain the status bar after terminal resize.
 func (w *Writer) Resize(width, height int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -167,47 +147,27 @@ func (w *Writer) Resize(width, height int) error {
 	w.height = height
 	w.bar.SetDimensions(width, height)
 
-	// Resize the virtual terminal's content area (total height minus status bar)
-	contentHeight := max(height-1, 1)
-	w.emulator.Resize(width, contentHeight)
-
-	// Clear physical screen and re-render everything from our buffer
-	_, _ = w.out.Write([]byte("\x1b[2J\x1b[H"))
-
-	return w.renderLocked()
+	// Re-establish scrolling region and redraw status bar
+	return w.setupScrollRegionLocked()
 }
 
-// renderLocked renders the virtual terminal content plus status bar.
-// Caller must hold the mutex.
-func (w *Writer) renderLocked() error {
-	// Get cursor position before rendering (0-indexed)
-	pos := w.emulator.CursorPosition()
+// UpdateStatus updates the status bar content.
+// This is safe to call while the container is running.
+func (w *Writer) UpdateStatus() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	// Get rendered content from virtual terminal (includes ANSI codes)
-	content := w.emulator.Render()
-
-	// Build output: content + status bar at bottom
 	var buf bytes.Buffer
 
-	// Position cursor at top-left and write content
-	buf.WriteString("\x1b[H")
-	buf.WriteString(content)
+	// Save cursor position
+	buf.WriteString("\x1b[s")
 
-	// Position cursor at bottom row and write status bar
-	// Use w.height (the actual terminal height) for status bar position
+	// Move to status bar line and draw it
+	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
 	buf.WriteString(w.bar.Render())
 
-	// Restore cursor to its position in the content area
-	// ANSI positions are 1-indexed, vt positions are 0-indexed
-	fmt.Fprintf(&buf, "\x1b[%d;%dH", pos.Y+1, pos.X+1)
-
-	// Apply cursor visibility state. The vt emulator parses DECTCEM but doesn't
-	// expose the state, so we track it in Write() and apply it here.
-	if w.cursorVisible {
-		buf.Write(cursorShow)
-	} else {
-		buf.Write(cursorHide)
-	}
+	// Restore cursor position
+	buf.WriteString("\x1b[u")
 
 	_, err := w.out.Write(buf.Bytes())
 	return err
