@@ -533,7 +533,7 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	}
 
 	// Should add PATH from install commands' EnvVars
-	if !strings.Contains(dockerfile, `ENV PATH="$HOME/.local/bin:$PATH"`) {
+	if !strings.Contains(dockerfile, `ENV PATH="/home/moatuser/.local/bin:$PATH"`) {
 		t.Error("Dockerfile should add installer's PATH to environment")
 	}
 
