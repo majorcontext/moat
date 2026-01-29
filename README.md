@@ -141,7 +141,10 @@ See the [agent.yaml reference](docs/content/reference/02-agent-yaml.md) for all 
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat attach <run-id>` | Attach to a running agent |
 | `moat grant <provider>` | Store credentials (github, anthropic, openai, aws, ssh) |
+| `moat grant list` | List stored credentials |
 | `moat revoke <provider>` | Remove credentials |
+| `moat sessions` | List all agent sessions |
+| `moat snapshot <run-id>` | Create/manage workspace snapshots |
 | `moat logs [run-id]` | View logs |
 | `moat trace [run-id]` | View network requests |
 | `moat audit [run-id]` | Verify audit log integrity |

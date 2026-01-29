@@ -32,7 +32,7 @@ var verifyBundleCmd = &cobra.Command{
 	Short: "Verify a proof bundle file",
 	Long: `Verifies the integrity of an exported proof bundle without the original database.
 
-This allows offline verification of audit logs that were exported using 'agent audit --export'.
+This allows offline verification of audit logs that were exported using 'moat audit --export'.
 
 Example:
   moat audit verify ./run_a1b2c3d4e5f6.proof.json`,
