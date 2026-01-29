@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/container"
+	"github.com/majorcontext/moat/internal/container"
 )
 
 // GitHubSetup implements ProviderSetup for GitHub credentials.

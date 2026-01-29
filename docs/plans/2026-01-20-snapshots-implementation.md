@@ -1589,8 +1589,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andybons/moat/internal/snapshot"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -1759,8 +1759,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/snapshot"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -1854,8 +1854,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/snapshot"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -1991,7 +1991,7 @@ git commit -m "feat(cli): add moat rollback command with safety snapshots"
 Add to `internal/run/run.go`:
 
 ```go
-import "github.com/andybons/moat/internal/snapshot"
+import "github.com/majorcontext/moat/internal/snapshot"
 
 // Add to Run struct:
 snapEngine *snapshot.Engine

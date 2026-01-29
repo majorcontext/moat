@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/andybons/moat/internal/claude"
-	"github.com/andybons/moat/internal/config"
+	"github.com/majorcontext/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/spf13/cobra"
 )
 

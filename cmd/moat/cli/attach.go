@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/run"
-	"github.com/andybons/moat/internal/term"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/term"
 	"github.com/spf13/cobra"
 )
 

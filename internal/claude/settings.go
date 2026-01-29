@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // validRepoFormat validates marketplace repo strings to prevent malformed input.

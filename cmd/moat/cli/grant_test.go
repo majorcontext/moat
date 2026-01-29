@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestExtractOAuthToken(t *testing.T) {

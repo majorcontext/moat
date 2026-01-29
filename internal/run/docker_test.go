@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/deps"
 )
 
 // TestHasDockerDependency verifies the detection of docker dependency in a list.

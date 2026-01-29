@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
 	"github.com/docker/docker/client"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // RuntimeOptions configures runtime creation.

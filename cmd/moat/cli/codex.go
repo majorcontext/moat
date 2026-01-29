@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/andybons/moat/internal/codex"
+	"github.com/majorcontext/moat/internal/codex"
 	"github.com/spf13/cobra"
 )
 

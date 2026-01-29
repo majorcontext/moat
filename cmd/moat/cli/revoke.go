@@ -4,8 +4,8 @@ package cli
 import (
 	"fmt"
 
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/spf13/cobra"
 )
 

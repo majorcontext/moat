@@ -9,9 +9,9 @@ import (
 	"runtime"
 	"syscall"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/routing"
 	"github.com/spf13/cobra"
 )
 

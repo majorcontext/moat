@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 // GeneratedConfig holds paths to generated configuration files.

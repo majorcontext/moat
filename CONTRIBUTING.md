@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/andybons/moat.git
+git clone https://github.com/majorcontext/moat.git
 cd moat
 go build ./...
 ```

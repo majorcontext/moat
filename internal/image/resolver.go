@@ -1,7 +1,7 @@
 // Package image handles container image selection.
 package image
 
-import "github.com/andybons/moat/internal/deps"
+import "github.com/majorcontext/moat/internal/deps"
 
 // DefaultImage is the default container image.
 const DefaultImage = "ubuntu:22.04"

@@ -8,14 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/andybons/moat/internal/audit"
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/id"
-	"github.com/andybons/moat/internal/proxy"
-	"github.com/andybons/moat/internal/snapshot"
-	"github.com/andybons/moat/internal/sshagent"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/audit"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/id"
+	"github.com/majorcontext/moat/internal/proxy"
+	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/sshagent"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 // State represents the current state of a run.

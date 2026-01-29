@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/spf13/cobra"
 )
 

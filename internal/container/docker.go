@@ -15,10 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/moat/internal/buildkit"
-	"github.com/andybons/moat/internal/container/output"
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/term"
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
@@ -28,6 +24,10 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"github.com/majorcontext/moat/internal/buildkit"
+	"github.com/majorcontext/moat/internal/container/output"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/term"
 )
 
 // ErrGVisorNotAvailable is returned when gVisor is required but not installed.

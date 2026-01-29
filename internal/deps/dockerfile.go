@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/andybons/moat/internal/claude"
+	"github.com/majorcontext/moat/internal/claude"
 )
 
 // DockerfileOptions configures Dockerfile generation.

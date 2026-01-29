@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 // TestMCPRelay_NilCredentialStore tests that handleMCPRelay fails gracefully

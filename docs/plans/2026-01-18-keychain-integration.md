@@ -661,7 +661,7 @@ In `internal/credential/store.go`, replace `DefaultEncryptionKey()`:
 
 ```go
 import (
-	"github.com/andybons/moat/internal/credential/keyring"
+	"github.com/majorcontext/moat/internal/credential/keyring"
 )
 
 // DefaultEncryptionKey retrieves the encryption key from secure storage.

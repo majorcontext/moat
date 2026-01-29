@@ -4,7 +4,7 @@ package deps
 import (
 	"context"
 
-	"github.com/andybons/moat/internal/deps/versions"
+	"github.com/majorcontext/moat/internal/deps/versions"
 )
 
 // versionCache is the global cache for resolved versions.

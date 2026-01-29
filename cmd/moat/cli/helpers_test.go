@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
+	"github.com/majorcontext/moat/internal/config"
 )
 
 func TestResolveWorkspacePath(t *testing.T) {

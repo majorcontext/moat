@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // authTimeout is the deadline for completing token authentication.

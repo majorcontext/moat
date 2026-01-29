@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/run"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 // TestMCPCredentialInjection_E2E verifies that MCP credential injection works end-to-end.

@@ -4,7 +4,7 @@ package snapshot
 import (
 	"time"
 
-	"github.com/andybons/moat/internal/id"
+	"github.com/majorcontext/moat/internal/id"
 )
 
 // Type represents the trigger type for a snapshot.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/andybons/moat/internal/run"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 

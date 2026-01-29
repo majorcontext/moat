@@ -3,7 +3,7 @@ package image
 import (
 	"testing"
 
-	"github.com/andybons/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/deps"
 )
 
 func TestResolveNoDeps(t *testing.T) {

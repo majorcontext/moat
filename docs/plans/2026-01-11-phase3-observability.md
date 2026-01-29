@@ -495,7 +495,7 @@ Wire log capture into the run lifecycle.
 ```go
 // internal/run/run.go - add Store field
 import (
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 type Run struct {
@@ -729,8 +729,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -870,8 +870,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/andybons/moat/internal/log"
-	"github.com/andybons/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 

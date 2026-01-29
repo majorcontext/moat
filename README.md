@@ -15,13 +15,13 @@ For design rationale and principles, see [VISION.md](VISION.md).
 ## Installation
 
 ```bash
-go install github.com/andybons/moat/cmd/moat@latest
+go install github.com/majorcontext/moat/cmd/moat@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/andybons/moat.git
+git clone https://github.com/majorcontext/moat.git
 cd moat
 go build -o moat ./cmd/moat
 ```

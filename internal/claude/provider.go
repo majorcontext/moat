@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 // OAuthBetaHeader is the Anthropic beta header required for OAuth authentication.

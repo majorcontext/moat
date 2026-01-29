@@ -4,7 +4,7 @@
 package cli
 
 import (
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/spf13/cobra"
 )
 

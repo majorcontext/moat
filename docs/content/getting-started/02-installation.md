@@ -16,7 +16,7 @@ keywords: ["moat", "installation", "docker", "apple containers", "setup"]
 ### Using `go install`
 
 ```bash
-go install github.com/andybons/moat/cmd/moat@latest
+go install github.com/majorcontext/moat/cmd/moat@latest
 ```
 
 Ensure `$GOPATH/bin` (typically `~/go/bin`) is in your `PATH`.
@@ -24,7 +24,7 @@ Ensure `$GOPATH/bin` (typically `~/go/bin`) is in your `PATH`.
 ### From source
 
 ```bash
-git clone https://github.com/andybons/moat.git
+git clone https://github.com/majorcontext/moat.git
 cd moat
 go build -o moat ./cmd/moat
 ```

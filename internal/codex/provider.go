@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/andybons/moat/internal/container"
-	"github.com/andybons/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 // CodexInitMountPath is where the staging directory is mounted in containers.

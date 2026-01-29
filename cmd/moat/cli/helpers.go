@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybons/moat/internal/config"
-	"github.com/andybons/moat/internal/credential"
-	"github.com/andybons/moat/internal/log"
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // validEnvKey matches valid environment variable names.
