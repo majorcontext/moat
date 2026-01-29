@@ -1,4 +1,4 @@
-.PHONY: all help build test test-unit test-e2e test-bats lint clean coverage
+.PHONY: all help build test test-unit test-e2e test-bats lint fix clean coverage
 
 # Default target - running "make" shows help
 all: help
@@ -33,9 +33,13 @@ test-bats: ## Run bats tests for Claude Code hooks
 	@which bats > /dev/null || (echo "bats not installed. Install from https://github.com/bats-core/bats-core" && exit 1)
 	bats .claude/hooks/
 
-lint: ## Run linter (requires golangci-lint)
+lint: ## Run linter (requires golangci-lint v2)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
 	golangci-lint run
+
+fix: ## Auto-fix linter and formatter issues (requires golangci-lint v2)
+	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
+	golangci-lint run --fix
 
 coverage: ## Generate test coverage report
 	go test -coverprofile=coverage.out ./...

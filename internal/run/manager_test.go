@@ -477,7 +477,7 @@ func TestEnsureCACertOnlyDirRemovesStaleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].Name() != "ca.crt" {
-		var names []string
+		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
