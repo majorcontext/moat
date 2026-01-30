@@ -1,0 +1,18 @@
+# Example: PostgreSQL service dependency
+#
+# Demonstrates zero-config database access using service dependencies.
+# Moat starts a PostgreSQL sidecar container, generates credentials,
+# and injects connection info as MOAT_POSTGRES_* environment variables.
+#
+# Run with:
+#   moat run examples/service-postgres
+#
+# The demo script creates a table, inserts rows, queries them,
+# and prints the results — all using auto-injected credentials.
+
+name: service-postgres
+
+dependencies:
+  - postgres@17         # PostgreSQL 17 service (sidecar container)
+
+command: ["sh", "/workspace/demo.sh"]
