@@ -942,12 +942,12 @@ func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerf
 	for name, content := range opts.ContextFiles {
 		path := filepath.Join(tmpDir, name)
 		if dir := filepath.Dir(path); dir != tmpDir {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return fmt.Errorf("creating context dir for %s: %w", name, err)
+			if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
+				return fmt.Errorf("creating context dir for %s: %w", name, mkdirErr)
 			}
 		}
-		if err := os.WriteFile(path, content, 0644); err != nil {
-			return fmt.Errorf("writing context file %s: %w", name, err)
+		if writeErr := os.WriteFile(path, content, 0644); writeErr != nil {
+			return fmt.Errorf("writing context file %s: %w", name, writeErr)
 		}
 	}
 
