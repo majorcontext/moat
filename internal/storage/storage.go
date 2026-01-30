@@ -27,6 +27,9 @@ type Metadata struct {
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
+	// Service dependency fields
+	ServiceContainers map[string]string `json:"service_containers,omitempty"` // service name -> container ID
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
 	NetworkID           string `json:"network_id,omitempty"`
