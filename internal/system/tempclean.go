@@ -70,12 +70,32 @@ func FindOrphanedTempDirs(minAge time.Duration) ([]OrphanedTempDir, error) {
 }
 
 // CleanOrphanedTempDirs removes the specified orphaned temporary directories
-func CleanOrphanedTempDirs(dirs []OrphanedTempDir) error {
+// Re-verifies age before deletion to prevent race conditions
+func CleanOrphanedTempDirs(dirs []OrphanedTempDir, minAge time.Duration) error {
 	var errs []string
+	var skipped []string
+	cutoff := time.Now().Add(-minAge)
 
 	for _, dir := range dirs {
+		// Re-check age before deletion to avoid TOCTOU race condition
+		// A new moat run could have started between scan and deletion
+		if info, err := os.Stat(dir.Path); err == nil {
+			if info.ModTime().After(cutoff) {
+				skipped = append(skipped, dir.Path)
+				continue
+			}
+		}
+
 		if err := os.RemoveAll(dir.Path); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", dir.Path, err))
+		}
+	}
+
+	if len(skipped) > 0 {
+		fmt.Fprintf(os.Stderr, "Skipped %d director%s (modified since scan):\n",
+			len(skipped), pluralSuffix(len(skipped), "y", "ies"))
+		for _, path := range skipped {
+			fmt.Fprintf(os.Stderr, "  %s\n", path)
 		}
 	}
 
@@ -84,6 +104,13 @@ func CleanOrphanedTempDirs(dirs []OrphanedTempDir) error {
 	}
 
 	return nil
+}
+
+func pluralSuffix(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 // dirSize calculates the total size of a directory recursively

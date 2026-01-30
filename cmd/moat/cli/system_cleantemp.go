@@ -23,7 +23,6 @@ These are normally cleaned up when a run completes, but may accumulate if moat c
 This command finds and removes temporary directories that:
   - Match moat's temp directory patterns
   - Are older than the specified age (default: 1 hour)
-  - Are not associated with active runs
 
 Patterns scanned:
   - agentops-aws-*           (AWS credential helpers)
@@ -94,8 +93,8 @@ func runCleanTemp(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	// Remove directories
-	if err := system.CleanOrphanedTempDirs(orphaned); err != nil {
+	// Remove directories (with age re-verification to prevent race conditions)
+	if err := system.CleanOrphanedTempDirs(orphaned, cleanTempMinAge); err != nil {
 		return err
 	}
 
