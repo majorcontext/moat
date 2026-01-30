@@ -113,7 +113,7 @@ func (w *Writer) setupScrollRegionLocked() error {
 	}
 
 	// Draw status bar at bottom line (outside scroll region)
-	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
+	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 	buf.WriteString(w.bar.Render())
 
 	// Move cursor to top of scroll region
@@ -323,7 +323,7 @@ func (w *Writer) enterCompositorLocked() error {
 	buf.WriteString("\x1b[2J\x1b[H") // Clear and home
 
 	// Draw footer at bottom line
-	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
+	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 	buf.WriteString(w.bar.Render())
 	buf.WriteString("\x1b[H")
 
@@ -368,7 +368,7 @@ func (w *Writer) exitCompositorLocked() error {
 		fmt.Fprintf(&buf, "\x1b[1;%dr", w.height-1)
 	}
 	// Redraw footer
-	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
+	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 	buf.WriteString(w.bar.Render())
 	buf.WriteString("\x1b[H")
 
@@ -503,7 +503,7 @@ func (w *Writer) Resize(width, height int) error {
 		// Clear and redraw footer (no DECSTBM in compositor mode)
 		var buf bytes.Buffer
 		buf.WriteString("\x1b[2J\x1b[H")
-		fmt.Fprintf(&buf, "\x1b[%d;1H", height)
+		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", height)
 		buf.WriteString(w.bar.Render())
 		buf.WriteString("\x1b[H")
 		w.out.Write(buf.Bytes()) //nolint:errcheck
@@ -526,7 +526,7 @@ func (w *Writer) UpdateStatus() error {
 	buf.WriteString("\x1b[s")
 
 	// Move to status bar line and draw it
-	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height)
+	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 	buf.WriteString(w.bar.Render())
 
 	// Restore cursor position

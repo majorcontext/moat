@@ -37,16 +37,10 @@ func (s *StatusBar) SetDimensions(width, height int) {
 	s.height = height
 }
 
-// Render returns the full status bar with ANSI escapes for positioning.
-// The caller is responsible for cursor positioning after calling Render.
+// Render returns the status bar content with ANSI styling.
+// The caller is responsible for cursor positioning and line clearing.
 func (s *StatusBar) Render() string {
-	if s.height <= 0 {
-		return ""
-	}
-	// Move to bottom row, clear line, draw bar.
-	// Note: No save/restore cursor here - Writer.renderLocked() handles cursor
-	// positioning explicitly to avoid double cursor artifacts.
-	return fmt.Sprintf("\x1b[%d;1H\x1b[2K%s", s.height, s.Content())
+	return s.Content()
 }
 
 // ANSI escape sequences for status bar styling.

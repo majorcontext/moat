@@ -56,13 +56,16 @@ func TestStatusBar_RenderEscaped(t *testing.T) {
 
 	rendered := bar.Render()
 
-	// Should contain cursor positioning
-	if !strings.Contains(rendered, "\x1b[24;1H") { // move to row 24, col 1
-		t.Errorf("expected cursor move escape, got %q", rendered)
+	// Render() should now return just the styled content without positioning
+	// (positioning is handled by the caller in writer.go)
+
+	// Should NOT contain cursor positioning (that's the caller's responsibility)
+	if strings.Contains(rendered, "\x1b[24;1H") {
+		t.Errorf("unexpected cursor move escape (caller handles positioning), got %q", rendered)
 	}
-	// Should contain clear line
-	if !strings.Contains(rendered, "\x1b[2K") {
-		t.Errorf("expected clear line escape, got %q", rendered)
+	// Should NOT contain clear line (that's the caller's responsibility)
+	if strings.Contains(rendered, "\x1b[2K") {
+		t.Errorf("unexpected clear line escape (caller handles clearing), got %q", rendered)
 	}
 	// Should NOT contain save/restore cursor
 	if strings.Contains(rendered, "\x1b[s") {
@@ -71,9 +74,13 @@ func TestStatusBar_RenderEscaped(t *testing.T) {
 	if strings.Contains(rendered, "\x1b[u") {
 		t.Errorf("unexpected restore cursor escape (caller handles cursor), got %q", rendered)
 	}
-	// Should contain the actual status bar content
+	// Should contain the actual status bar content with styling
 	if !strings.Contains(rendered, "moat") {
 		t.Errorf("expected status bar content, got %q", rendered)
+	}
+	// Should contain ANSI styling codes
+	if !strings.Contains(rendered, "\x1b[") {
+		t.Errorf("expected ANSI styling codes, got %q", rendered)
 	}
 }
 
@@ -83,9 +90,13 @@ func TestStatusBar_RenderEscaped_ZeroHeight(t *testing.T) {
 
 	rendered := bar.Render()
 
-	// Should return empty string for height <= 0
-	if rendered != "" {
-		t.Errorf("expected empty string for height=0, got %q", rendered)
+	// Render() now just returns Content(), which doesn't check height
+	// (height checking happens in the caller). So this should return content.
+	if rendered == "" {
+		t.Error("expected non-empty content even with height=0 (caller handles height checks)")
+	}
+	if !strings.Contains(rendered, "moat") {
+		t.Errorf("expected status bar content, got %q", rendered)
 	}
 }
 
