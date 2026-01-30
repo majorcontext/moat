@@ -24,7 +24,7 @@ type Credential struct {
 	Scopes    []string          `json:"scopes,omitempty"`
 	ExpiresAt time.Time         `json:"expires_at,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
-	Metadata  map[string]string `json:"metadata,omitempty"` // Provider-specific extra data (e.g., account_id for OpenAI)
+	Metadata  map[string]string `json:"metadata,omitempty"` // Provider-specific extra data
 }
 
 // Store defines the credential storage interface.

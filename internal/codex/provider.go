@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
@@ -18,7 +17,7 @@ import (
 const CodexInitMountPath = "/moat/codex-init"
 
 // OpenAISetup implements credential.ProviderSetup for OpenAI credentials.
-// It handles both API keys and ChatGPT subscription tokens.
+// It handles API key authentication.
 type OpenAISetup struct{}
 
 // Provider returns the provider identifier.
@@ -28,20 +27,8 @@ func (o *OpenAISetup) Provider() credential.Provider {
 
 // ConfigureProxy sets up proxy headers for OpenAI API.
 func (o *OpenAISetup) ConfigureProxy(p credential.ProxyConfigurer, cred *credential.Credential) {
-	// OpenAI uses Bearer token authentication
-	// api.openai.com is the main API endpoint
-	// chatgpt.com is used for subscription token validation
+	// OpenAI uses Bearer token authentication for API keys
 	p.SetCredential("api.openai.com", "Bearer "+cred.Token)
-	p.SetCredential("chatgpt.com", "Bearer "+cred.Token)
-
-	// For ChatGPT subscription tokens, add the ChatGPT-Account-ID header
-	// This is required by the Codex CLI for subscription-based authentication
-	if cred.Metadata != nil {
-		if accountID, ok := cred.Metadata["account_id"]; ok && accountID != "" {
-			p.AddExtraHeader("api.openai.com", "ChatGPT-Account-ID", accountID)
-			p.AddExtraHeader("chatgpt.com", "ChatGPT-Account-ID", accountID)
-		}
-	}
 }
 
 // ContainerEnv returns environment variables for OpenAI.
@@ -70,55 +57,16 @@ func (o *OpenAISetup) Cleanup(cleanupPath string) {
 // PopulateStagingDir populates the Codex staging directory with auth configuration.
 //
 // Files added:
-// - auth.json (placeholder credentials - real auth is via proxy)
+// - auth.json (placeholder API key - real auth is via proxy)
 //
 // SECURITY: The real token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
 func (o *OpenAISetup) PopulateStagingDir(cred *credential.Credential, stagingDir string) error {
-	var authFile credential.CodexAuthFile
-
-	if credential.IsCodexToken(cred.Token) {
-		// ChatGPT subscription token - use the tokens structure (new format)
-		// If no expiration is set, use a far-future time to prevent local expiration checks
-		expiresAt := cred.ExpiresAt.Unix()
-		if cred.ExpiresAt.IsZero() || expiresAt < 0 {
-			// Set to 1 year from now - Codex CLI checks expiration locally
-			expiresAt = time.Now().Add(365 * 24 * time.Hour).Unix()
-		}
-
-		// Extract account_id from credential metadata if available
-		var accountID string
-		if cred.Metadata != nil {
-			accountID = cred.Metadata["account_id"]
-		}
-
-		// Generate JWT placeholders that contain the account_id in claims.
-		// Codex CLI extracts chatgpt_account_id from both id_token AND access_token locally
-		// before making API calls. Without valid claims, it fails with "Token data is not available".
-		idToken := credential.JWTPlaceholder
-		accessToken := credential.ProxyInjectedPlaceholder
-		if accountID != "" {
-			idToken = credential.GenerateIDTokenPlaceholder(accountID)
-			// access_token also needs to be a JWT with account info for local validation
-			accessToken = credential.GenerateAccessTokenPlaceholder(accountID)
-		}
-
-		// Use Tokens (new format) for compatibility with current Codex CLI
-		// Codex CLI requires id_token, access_token, and refresh_token fields
-		authFile.Tokens = &credential.CodexAuthToken{
-			AccessToken:  accessToken,
-			IDToken:      idToken,
-			RefreshToken: credential.ProxyInjectedPlaceholder,
-			ExpiresAt:    expiresAt,
-			AccountID:    accountID,
-		}
-		// Also set Token (old format) for backwards compatibility
-		authFile.Token = authFile.Tokens
-	} else {
-		// API key - use a placeholder that looks like a valid API key
-		// This bypasses local format validation in Codex CLI.
-		// The proxy will inject the real key in the Authorization header.
-		authFile.APIKey = credential.OpenAIAPIKeyPlaceholder
+	// API key - use a placeholder that looks like a valid API key
+	// This bypasses local format validation in Codex CLI.
+	// The proxy will inject the real key in the Authorization header.
+	authFile := map[string]string{
+		"OPENAI_API_KEY": credential.OpenAIAPIKeyPlaceholder,
 	}
 
 	authJSON, err := json.MarshalIndent(authFile, "", "  ")

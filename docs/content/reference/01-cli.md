@@ -219,7 +219,7 @@ moat grant <provider>[:<scopes>]
 |----------|-------------|
 | `github` | GitHub (gh CLI, env var, or PAT) |
 | `anthropic` | Anthropic (Claude Code OAuth or API key) |
-| `openai` | OpenAI (Codex OAuth or API key) |
+| `openai` | OpenAI (API key) |
 | `aws` | AWS (IAM role assumption) |
 
 GitHub credentials are obtained from multiple sources, in order of preference:
