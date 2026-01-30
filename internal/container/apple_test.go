@@ -109,7 +109,10 @@ func TestBuildCreateArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildCreateArgs(tt.cfg)
+			got, err := BuildCreateArgs(tt.cfg)
+			if err != nil {
+				t.Fatalf("BuildCreateArgs() error = %v", err)
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("BuildCreateArgs() = %v, want %v", got, tt.want)
 			}

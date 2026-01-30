@@ -52,16 +52,24 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 	}
 
 	// On macOS with Apple Silicon, prefer Apple's container tool
+	var appleReason string
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		if rt, reason := tryAppleRuntime(); rt != nil {
+		var rt Runtime
+		rt, appleReason = tryAppleRuntime()
+		if rt != nil {
 			return rt, nil
-		} else if reason != "" {
-			log.Debug(reason)
+		}
+		if appleReason != "" {
+			log.Debug(appleReason)
 		}
 	}
 
 	// Fall back to Docker
-	return newDockerRuntimeWithPing(opts.Sandbox)
+	rt, err := newDockerRuntimeWithPing(opts.Sandbox)
+	if err != nil && appleReason != "" {
+		return nil, fmt.Errorf("no container runtime available:\n  Apple containers: %s\n  Docker: %w", appleReason, err)
+	}
+	return rt, err
 }
 
 // NewRuntime creates a new container runtime, auto-detecting the best available option.
@@ -107,8 +115,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 // or (nil, "") if Apple container is not available.
 func tryAppleRuntime() (Runtime, string) {
 	if !appleContainerAvailable() {
-		log.Debug("Apple container CLI not found, using Docker")
-		return nil, ""
+		return nil, "'container' CLI not found in PATH (requires macOS 15+ with containerization framework)"
 	}
 
 	rt, err := NewAppleRuntime()

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	goruntime "runtime"
+
 	"github.com/creack/pty"
 	"github.com/majorcontext/moat/internal/container/output"
 	"github.com/majorcontext/moat/internal/log"
@@ -75,6 +77,34 @@ func (r *AppleRuntime) Type() RuntimeType {
 	return RuntimeApple
 }
 
+// findFreePort asks the OS for an available TCP port.
+// Note: there is an inherent TOCTOU race between releasing the port here and
+// the container CLI binding to it. This is the best we can do since Apple's
+// container CLI does not support automatic port assignment (host-port is required).
+func findFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close() //nolint:errcheck // best-effort close after reading port
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected address type %T", l.Addr())
+	}
+	return addr.Port, nil
+}
+
+// isKernelNotConfiguredError checks if an error message indicates
+// that the Apple container kernel is not configured.
+func isKernelNotConfiguredError(errMsg string) bool {
+	return strings.Contains(errMsg, "kernel not configured") || strings.Contains(errMsg, "default kernel")
+}
+
+// kernelNotConfiguredError returns a user-friendly error for missing kernel config.
+func kernelNotConfiguredError() error {
+	return fmt.Errorf("no Linux kernel configured for Apple containers.\n\nRun this command to install the recommended kernel:\n\n  container system kernel set --recommended\n\nThen retry your moat command")
+}
+
 // Ping verifies the Apple container system is running.
 func (r *AppleRuntime) Ping(ctx context.Context) error {
 	// Try to list containers to verify the system is working
@@ -95,7 +125,10 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	}
 
 	// Build command arguments
-	args := r.buildCreateArgs(cfg)
+	args, err := r.buildCreateArgs(cfg)
+	if err != nil {
+		return "", fmt.Errorf("building container arguments: %w", err)
+	}
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 	var stdout, stderr bytes.Buffer
@@ -103,7 +136,11 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("container create: %w: %s", err, stderr.String())
+		errMsg := stderr.String()
+		if isKernelNotConfiguredError(errMsg) {
+			return "", kernelNotConfiguredError()
+		}
+		return "", fmt.Errorf("container create: %w: %s", err, errMsg)
 	}
 
 	// The container ID is returned on stdout
@@ -116,7 +153,7 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 }
 
 // buildCreateArgs constructs the arguments for 'container create'.
-func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
+func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	args := []string{"create"}
 
 	// Interactive mode flags
@@ -152,9 +189,18 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
 	args = append(args, "--dns", "8.8.4.4")
 
 	// Port bindings
+	// Apple container CLI requires explicit host ports (no random assignment).
+	// Format: [host-ip:]host-port:container-port
 	for containerPort, hostIP := range cfg.PortBindings {
-		// Format: hostIP::containerPort (empty middle = random host port)
-		args = append(args, "--publish", fmt.Sprintf("%s::%d", hostIP, containerPort))
+		hostPort, err := findFreePort()
+		if err != nil {
+			return nil, fmt.Errorf("finding free port for container port %d: %w", containerPort, err)
+		}
+		if hostIP != "" && hostIP != "0.0.0.0" {
+			args = append(args, "--publish", fmt.Sprintf("%s:%d:%d", hostIP, hostPort, containerPort))
+		} else {
+			args = append(args, "--publish", fmt.Sprintf("%d:%d", hostPort, containerPort))
+		}
 	}
 
 	// Environment variables
@@ -179,7 +225,7 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) []string {
 		args = append(args, cfg.Cmd...)
 	}
 
-	return args
+	return args, nil
 }
 
 // StartContainer starts a created or stopped container.
@@ -344,6 +390,7 @@ func (r *AppleRuntime) GetPortBindings(ctx context.Context, containerID string) 
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
 		// If parsing fails, return empty map - container may not have port bindings
+		log.Debug("failed to parse container inspect output for port bindings: " + err.Error())
 		return make(map[int]int), nil
 	}
 
@@ -403,34 +450,38 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
 	}
 
-	// Apple containers run Linux VMs, so iptables should work
-	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention)
-	// Use conntrack module instead of state for better container compatibility
+	// Apple containers run Linux VMs whose kernel may lack nf_tables modules.
+	// Use iptables-legacy if available, falling back to iptables.
+	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention).
 	_ = proxyHost // See function comment for why this is unused
 	script := fmt.Sprintf(`
-		# Verify iptables is available
-		if ! command -v iptables >/dev/null 2>&1; then
+		# Prefer iptables-legacy since Apple container kernels may lack nf_tables
+		if command -v iptables-legacy >/dev/null 2>&1; then
+			IPT=iptables-legacy
+		elif command -v iptables >/dev/null 2>&1; then
+			IPT=iptables
+		else
 			echo "ERROR: iptables not found - container will not be firewalled" >&2
 			exit 1
 		fi
 
 		# Flush existing rules (may fail if no rules exist, that's OK)
-		iptables -w -F OUTPUT 2>/dev/null || true
+		$IPT -w -F OUTPUT 2>/dev/null || true
 
 		# Allow loopback
-		iptables -w -A OUTPUT -o lo -j ACCEPT
+		$IPT -w -A OUTPUT -o lo -j ACCEPT
 
-		# Allow established/related connections (conntrack more reliable than state in containers)
-		iptables -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+		# Allow established/related connections
+		$IPT -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 		# Allow DNS (UDP 53) - needed for initial hostname resolution
-		iptables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
+		$IPT -w -A OUTPUT -p udp --dport 53 -j ACCEPT
 
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
-		iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
+		$IPT -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
 		# Drop all other outbound traffic
-		iptables -w -A OUTPUT -j DROP
+		$IPT -w -A OUTPUT -j DROP
 	`, proxyPort)
 
 	// Run as root since iptables requires root privileges
@@ -488,21 +539,100 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 
 	output.BuildingImage(tag)
 
-	// Run container build
+	buildErr := m.runBuild(ctx, dockerfilePath, tag, opts.NoCache, tmpDir)
+	if buildErr == nil {
+		return nil
+	}
+
+	// The Apple container builder's gRPC transport can become inactive during
+	// long builds. Restart the builder and retry once.
+	if !isBuilderTransportError(buildErr) {
+		return fmt.Errorf("building image: %w", buildErr)
+	}
+
+	log.Debug("builder transport became inactive, restarting builder and retrying build...")
+	if err := m.restartBuilder(ctx); err != nil {
+		return fmt.Errorf("building image (retry failed): builder restart: %w (original error: %v)", err, buildErr)
+	}
+	if err := m.fixBuilderDNS(ctx, opts.DNS); err != nil {
+		return fmt.Errorf("building image (retry failed): configuring DNS: %w", err)
+	}
+
+	fmt.Println("Retrying build...")
+	if err := m.runBuild(ctx, dockerfilePath, tag, opts.NoCache, tmpDir); err != nil {
+		return fmt.Errorf("building image (retry failed): %w", err)
+	}
+	return nil
+}
+
+// runBuild executes a single container build attempt, capturing stderr for error detection.
+func (m *appleBuildManager) runBuild(ctx context.Context, dockerfilePath, tag string, noCache bool, contextDir string) error {
 	args := []string{"build", "-f", dockerfilePath, "-t", tag}
-	if opts.NoCache {
+	if noCache {
 		args = append(args, "--no-cache")
 	}
-	args = append(args, tmpDir)
+	args = append(args, contextDir)
 
 	cmd := exec.CommandContext(ctx, m.containerBin, args...)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Capture stderr while also printing it so users see build progress
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("building image: %w", err)
+		// Attach stderr content to the error for transport error detection
+		return fmt.Errorf("%w: %s", err, stderrBuf.String())
 	}
 	return nil
+}
+
+// isBuilderTransportError checks if an error is a gRPC transport failure
+// from the Apple container builder.
+func isBuilderTransportError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "Transport became inactive") ||
+		strings.Contains(msg, "unavailable (14)")
+}
+
+// restartBuilder stops and restarts the Apple container builder.
+func (m *appleBuildManager) restartBuilder(ctx context.Context) error {
+	// Stop the builder (best-effort, may already be stopped)
+	stopCmd := exec.CommandContext(ctx, m.containerBin, "builder", "stop")
+	_ = stopCmd.Run()
+
+	// Delete to clear stale state, then start fresh
+	delCmd := exec.CommandContext(ctx, m.containerBin, "builder", "delete")
+	_ = delCmd.Run()
+
+	return m.startBuilder(ctx)
+}
+
+// startBuilder starts the Apple container builder with appropriate resources.
+// Allocates half the host CPUs and 8GB memory (capped at available resources)
+// to avoid OOM/transport failures during large image builds.
+func (m *appleBuildManager) startBuilder(ctx context.Context) error {
+	cpus := goruntime.NumCPU() / 2
+	if cpus < 2 {
+		cpus = 2
+	}
+
+	args := []string{"builder", "start",
+		"--cpus", strconv.Itoa(cpus),
+		"--memory", "8192MB",
+	}
+
+	cmd := exec.CommandContext(ctx, m.containerBin, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errMsg := stderr.String()
+		if isKernelNotConfiguredError(errMsg) {
+			return kernelNotConfiguredError()
+		}
+		return fmt.Errorf("starting builder: %w: %s", err, errMsg)
+	}
+
+	return m.waitForBuilder(ctx)
 }
 
 // fixBuilderDNS ensures the Apple container builder has working DNS.
@@ -523,16 +653,8 @@ func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []s
 	// The build command would auto-start it anyway, but we need to configure
 	// DNS before the build runs.
 	if !m.isBuilderRunning(ctx) {
-		cmd := exec.CommandContext(ctx, m.containerBin, "builder", "start")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("starting builder: %w: %s", err, stderr.String())
-		}
-
-		// Wait for builder to be ready
-		if err := m.waitForBuilder(ctx); err != nil {
-			return fmt.Errorf("waiting for builder: %w", err)
+		if err := m.startBuilder(ctx); err != nil {
+			return err
 		}
 	}
 
@@ -843,7 +965,7 @@ func (m *appleBuildManager) ensureImage(ctx context.Context, imageName string) e
 }
 
 // BuildCreateArgs is exported for testing.
-func BuildCreateArgs(cfg Config) []string {
+func BuildCreateArgs(cfg Config) ([]string, error) {
 	r := &AppleRuntime{}
 	return r.buildCreateArgs(cfg)
 }
