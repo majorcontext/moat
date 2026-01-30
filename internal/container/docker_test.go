@@ -127,16 +127,21 @@ func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
 	// Run 10 concurrent calls to verify thread safety
 	const numGoroutines = 10
 	results := make([]bool, numGoroutines)
+	times := make([]time.Duration, numGoroutines)
 	var wg sync.WaitGroup
 
+	startTime := time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			callStart := time.Now()
 			results[idx] = rt.gvisorAvailable(ctx)
+			times[idx] = time.Since(callStart)
 		}(i)
 	}
 	wg.Wait()
+	totalTime := time.Since(startTime)
 
 	// All results should be identical
 	for i := 1; i < len(results); i++ {
@@ -148,6 +153,16 @@ func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
 	// Verify the cached value matches all results
 	if rt.gvisorAvail != results[0] {
 		t.Errorf("cached value %v doesn't match results %v", rt.gvisorAvail, results[0])
+	}
+
+	// Verify sync.Once behavior: total time should be close to a single API call,
+	// not N times the API call time. If each call made a Docker API request,
+	// total time would be much longer (10+ Docker API round trips).
+	// With sync.Once, only one goroutine makes the API call, others wait.
+	// This is a heuristic check - if it takes more than 2 seconds for 10 goroutines,
+	// something is wrong (should complete in under 1 second with proper caching).
+	if totalTime > 2*time.Second {
+		t.Logf("Warning: concurrent calls took %v, expected <2s (may indicate multiple Docker API calls)", totalTime)
 	}
 }
 

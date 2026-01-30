@@ -54,7 +54,7 @@ type DockerRuntime struct {
 	cli        *client.Client
 	ociRuntime string // "runsc" or "runc"
 
-	// gVisor availability cache (thread-safe via sync.Once)
+	// gVisor availability cache (initialized once via sync.Once, safe for concurrent reads)
 	gvisorOnce  sync.Once
 	gvisorAvail bool
 
@@ -367,12 +367,17 @@ func (r *DockerRuntime) Close() error {
 // gvisorAvailable checks if gVisor (runsc) is available, using cached result if available.
 // The cache prevents repeated Docker client creation and API calls during runtime initialization
 // and container creation. Thread-safe via sync.Once.
+//
+// Note: The result is cached permanently for this runtime instance. If the Docker daemon
+// is temporarily unreachable during the first check, gVisor will be cached as unavailable
+// for the lifetime of this runtime. This is acceptable because runtime instances are
+// typically short-lived (one per moat run).
 func (r *DockerRuntime) gvisorAvailable(ctx context.Context) bool {
 	r.gvisorOnce.Do(func() {
 		// Check gVisor availability using the runtime's existing client
 		info, err := r.cli.Info(ctx)
 		if err != nil {
-			log.Debug("gVisor availability check failed", "error", err)
+			log.Warn("gVisor availability check failed - caching as unavailable", "error", err)
 			r.gvisorAvail = false
 			return
 		}
