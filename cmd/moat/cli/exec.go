@@ -23,6 +23,7 @@ type ExecFlags struct {
 	Grants        []string
 	Env           []string
 	Name          string
+	Runtime       string
 	Rebuild       bool
 	KeepContainer bool
 	Detach        bool
@@ -38,6 +39,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
+	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker)")
 	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
 }
 
@@ -102,6 +104,11 @@ type ExecOptions struct {
 // Returns the run for further inspection if needed.
 func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	fmt.Println("Initializing...")
+
+	// Set runtime override if specified via --runtime flag
+	if opts.Flags.Runtime != "" {
+		os.Setenv("MOAT_RUNTIME", opts.Flags.Runtime)
+	}
 
 	// Create manager
 	var managerOpts run.ManagerOptions
