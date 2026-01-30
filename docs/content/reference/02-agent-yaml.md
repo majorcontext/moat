@@ -318,11 +318,11 @@ If builds fail with BuildKit sidecar:
 2. **Network issues**: Check that Docker networks are enabled (not disabled by firewall)
 3. **Performance**: BuildKit sidecar typically starts in 2-5 seconds; check Docker daemon logs if slower
 
-**Common error messages:**
+**Troubleshooting:**
 
-- **"no active sessions"**: Indicates Docker SDK being used instead of BuildKit. Verify `BUILDKIT_HOST` environment variable is set to `tcp://buildkit:1234`
-- **"connection refused"**: BuildKit sidecar not running or network connectivity issue. Check BuildKit container is running and network exists
+- **"connection refused"** (with dind mode): BuildKit sidecar not running or network connectivity issue. Check BuildKit container is running and network exists
 - **Slow builds**: Verify BuildKit cache is working. Build output should show "CACHED" for unchanged layers
+- **"no active sessions"** or **"--mount option requires BuildKit"** (rare, older Docker versions): Install buildx (https://docs.docker.com/buildx/working-with-buildx/) or disable BuildKit: `export MOAT_DISABLE_BUILDKIT=1`
 
 ---
 
