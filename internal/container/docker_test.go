@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,11 +98,6 @@ func TestDockerRuntime_GVisorCaching(t *testing.T) {
 	// First call - should check and cache
 	result1 := rt.gvisorAvailable(ctx)
 
-	// Verify cache was set
-	if !rt.gvisorChecked {
-		t.Error("expected gvisorChecked to be true after first call")
-	}
-
 	// Second call - should use cached result
 	result2 := rt.gvisorAvailable(ctx)
 
@@ -113,6 +109,45 @@ func TestDockerRuntime_GVisorCaching(t *testing.T) {
 	// Verify the cached value matches the result
 	if rt.gvisorAvail != result1 {
 		t.Errorf("cached value doesn't match result: cached=%v, result=%v", rt.gvisorAvail, result1)
+	}
+}
+
+func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+	defer rt.Close()
+
+	// Run 10 concurrent calls to verify thread safety
+	const numGoroutines = 10
+	results := make([]bool, numGoroutines)
+	var wg sync.WaitGroup
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = rt.gvisorAvailable(ctx)
+		}(i)
+	}
+	wg.Wait()
+
+	// All results should be identical
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			t.Errorf("concurrent call %d returned %v, expected %v", i, results[i], results[0])
+		}
+	}
+
+	// Verify the cached value matches all results
+	if rt.gvisorAvail != results[0] {
+		t.Errorf("cached value %v doesn't match results %v", rt.gvisorAvail, results[0])
 	}
 }
 

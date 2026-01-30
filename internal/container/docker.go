@@ -13,6 +13,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -53,9 +54,9 @@ type DockerRuntime struct {
 	cli        *client.Client
 	ociRuntime string // "runsc" or "runc"
 
-	// gVisor availability cache (accessed from multiple goroutines)
-	gvisorChecked bool // whether we've checked gVisor availability
-	gvisorAvail   bool // cached result of gVisor check
+	// gVisor availability cache (thread-safe via sync.Once)
+	gvisorOnce  sync.Once
+	gvisorAvail bool
 
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
@@ -365,33 +366,27 @@ func (r *DockerRuntime) Close() error {
 
 // gvisorAvailable checks if gVisor (runsc) is available, using cached result if available.
 // The cache prevents repeated Docker client creation and API calls during runtime initialization
-// and container creation.
+// and container creation. Thread-safe via sync.Once.
 func (r *DockerRuntime) gvisorAvailable(ctx context.Context) bool {
-	// Return cached result if already checked
-	if r.gvisorChecked {
-		return r.gvisorAvail
-	}
-
-	// Check gVisor availability using the runtime's existing client
-	info, err := r.cli.Info(ctx)
-	if err != nil {
-		r.gvisorChecked = true
-		r.gvisorAvail = false
-		return false
-	}
-
-	available := false
-	for name := range info.Runtimes {
-		if name == "runsc" {
-			available = true
-			break
+	r.gvisorOnce.Do(func() {
+		// Check gVisor availability using the runtime's existing client
+		info, err := r.cli.Info(ctx)
+		if err != nil {
+			log.Debug("gVisor availability check failed", "error", err)
+			r.gvisorAvail = false
+			return
 		}
-	}
 
-	// Cache the result
-	r.gvisorChecked = true
-	r.gvisorAvail = available
-	return available
+		for name := range info.Runtimes {
+			if name == "runsc" {
+				r.gvisorAvail = true
+				return
+			}
+		}
+		// If we get here, runsc was not found
+		r.gvisorAvail = false
+	})
+	return r.gvisorAvail
 }
 
 // SetupFirewall configures iptables to block all outbound traffic except to the proxy.
