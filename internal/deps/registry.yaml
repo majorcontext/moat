@@ -132,7 +132,7 @@ psql:
   type: apt
   package: postgresql-client
 
-mysql:
+mysql-client:
   description: MySQL client
   type: apt
   package: mysql-client
@@ -408,6 +408,59 @@ helm:
   description: Kubernetes package manager
   type: custom
   default: "3.16.0"
+
+# Service dependencies (databases, caches)
+postgres:
+  description: PostgreSQL database
+  type: service
+  default: "17"
+  versions: ["15", "16", "17"]
+  service:
+    image: "postgres"
+    ports:
+      default: 5432
+    env_prefix: POSTGRES
+    default_user: postgres
+    default_db: postgres
+    password_env: POSTGRES_PASSWORD
+    readiness_cmd: "pg_isready -h localhost -U postgres"
+    url_scheme: "postgresql"
+    url_format: "{scheme}://{user}:{password}@{host}:{port}/{db}"
+
+mysql:
+  description: MySQL database
+  type: service
+  default: "8"
+  versions: ["8", "9"]
+  service:
+    image: "mysql"
+    ports:
+      default: 3306
+    env_prefix: MYSQL
+    default_user: root
+    default_db: moat
+    password_env: MYSQL_ROOT_PASSWORD
+    extra_env:
+      MYSQL_DATABASE: "{db}"
+    readiness_cmd: "mysqladmin ping -h localhost -u root --password={password}"
+    url_scheme: "mysql"
+    url_format: "{scheme}://{user}:{password}@{host}:{port}/{db}"
+
+redis:
+  description: Redis key-value store
+  type: service
+  default: "7"
+  versions: ["6", "7"]
+  service:
+    image: "redis"
+    ports:
+      default: 6379
+    env_prefix: REDIS
+    password_env: ""
+    extra_cmd: ["--requirepass", "{password}"]
+    readiness_cmd: "redis-cli -a {password} PING"
+    url_scheme: "redis"
+    url_format: "{scheme}://:{password}@{host}:{port}"
 
 # Meta dependencies (bundles)
 go-extras:

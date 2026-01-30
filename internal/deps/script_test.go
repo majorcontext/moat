@@ -78,7 +78,7 @@ func TestGenerateInstallScript_RuntimeDefaultVersion(t *testing.T) {
 func TestGenerateInstallScript_MultipleDependencies(t *testing.T) {
 	deps := []Dependency{
 		{Name: "psql"},
-		{Name: "mysql"},
+		{Name: "mysql-client"},
 		{Name: "node", Version: "20"},
 		{Name: "go", Version: "1.22"},
 		{Name: "protoc"},
