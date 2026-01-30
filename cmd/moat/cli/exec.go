@@ -60,6 +60,7 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 
 	runtimeType := manager.RuntimeType()
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
+	bar.SetGrants(r.Grants)
 	bar.SetDimensions(width, height)
 	writer = tui.NewWriter(os.Stdout, bar, runtimeType)
 
@@ -100,8 +101,7 @@ type ExecOptions struct {
 // It handles creating the run, starting it, and managing the lifecycle.
 // Returns the run for further inspection if needed.
 func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
-	fmt.Print("Initializing...")
-	os.Stdout.Sync() // Ensure message appears immediately
+	fmt.Println("Initializing...")
 
 	// Create manager
 	var managerOpts run.ManagerOptions
@@ -132,11 +132,9 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	// Create run
 	r, err := manager.Create(ctx, runOpts)
 	if err != nil {
-		fmt.Println() // Clear the "Initializing..." line
 		return nil, fmt.Errorf("creating run: %w", err)
 	}
 
-	fmt.Println() // Clear the "Initializing..." line
 	log.Info("created run", "id", r.ID, "name", r.Name)
 
 	// Call the OnRunCreated callback if provided

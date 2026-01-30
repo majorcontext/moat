@@ -20,7 +20,7 @@ func TestStatusBar_Render(t *testing.T) {
 
 	rendered := bar.Content()
 
-	// Should contain key components (runtime is not displayed)
+	// Should contain key components
 	if !strings.Contains(rendered, "moat") {
 		t.Errorf("expected 'moat' in bar, got %q", rendered)
 	}
@@ -64,8 +64,7 @@ func TestStatusBar_RenderEscaped(t *testing.T) {
 	if !strings.Contains(rendered, "\x1b[2K") {
 		t.Errorf("expected clear line escape, got %q", rendered)
 	}
-	// Should NOT contain save/restore cursor - the caller (Writer.renderLocked)
-	// handles cursor positioning explicitly to avoid double cursor artifacts
+	// Should NOT contain save/restore cursor
 	if strings.Contains(rendered, "\x1b[s") {
 		t.Errorf("unexpected save cursor escape (caller handles cursor), got %q", rendered)
 	}
@@ -87,5 +86,103 @@ func TestStatusBar_RenderEscaped_ZeroHeight(t *testing.T) {
 	// Should return empty string for height <= 0
 	if rendered != "" {
 		t.Errorf("expected empty string for height=0, got %q", rendered)
+	}
+}
+
+func TestStatusBar_RuntimeDisplay(t *testing.T) {
+	tests := []struct {
+		runtime   string
+		wantColor string
+	}{
+		{"docker", "\x1b[36m"}, // cyan
+		{"apple", "\x1b[35m"},  // magenta
+		{"unknown", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.runtime, func(t *testing.T) {
+			bar := NewStatusBar("run_abc", "agent", tt.runtime)
+			bar.SetDimensions(80, 24)
+			content := bar.Content()
+
+			if !strings.Contains(content, tt.runtime) {
+				t.Errorf("expected runtime %q in bar, got %q", tt.runtime, content)
+			}
+			if tt.wantColor != "" && !strings.Contains(content, tt.wantColor) {
+				t.Errorf("expected color %q for runtime %q, got %q", tt.wantColor, tt.runtime, content)
+			}
+		})
+	}
+}
+
+func TestStatusBar_GrantsDisplay(t *testing.T) {
+	bar := NewStatusBar("run_abc", "agent", "docker")
+	bar.SetGrants([]string{"github", "ssh"})
+	bar.SetDimensions(80, 24)
+
+	content := bar.Content()
+
+	if !strings.Contains(content, "github") {
+		t.Errorf("expected 'github' grant in bar, got %q", content)
+	}
+	if !strings.Contains(content, "ssh") {
+		t.Errorf("expected 'ssh' grant in bar, got %q", content)
+	}
+	// Grants should be dim
+	if !strings.Contains(content, "\x1b[2m") {
+		t.Errorf("expected dim escape for grants, got %q", content)
+	}
+}
+
+func TestStatusBar_DarkGrayBackground(t *testing.T) {
+	bar := NewStatusBar("run_abc", "agent", "docker")
+	bar.SetDimensions(80, 24)
+
+	content := bar.Content()
+
+	// Should use dark gray background instead of reverse video
+	if !strings.Contains(content, "\x1b[48;5;236m") {
+		t.Errorf("expected dark gray background, got %q", content)
+	}
+	if strings.Contains(content, "\x1b[7m") {
+		t.Errorf("unexpected reverse video escape, got %q", content)
+	}
+}
+
+func TestStatusBar_TruncationCascade(t *testing.T) {
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetGrants([]string{"github", "ssh", "aws"})
+
+	// Wide enough for everything
+	bar.SetDimensions(80, 24)
+	content := bar.Content()
+	if !strings.Contains(content, "github") {
+		t.Error("expected grants at width 80")
+	}
+
+	// Narrow: should drop grants first
+	bar.SetDimensions(35, 24)
+	content = bar.Content()
+	stripped := stripANSI(content)
+	if strings.Contains(stripped, "github") {
+		t.Error("expected grants dropped at width 35")
+	}
+	if !strings.Contains(content, "run_abc123") {
+		t.Error("expected run ID preserved at width 35")
+	}
+
+	// Very narrow: should drop name
+	bar.SetDimensions(28, 24)
+	content = bar.Content()
+	stripped = stripANSI(content)
+	if strings.Contains(stripped, "my-agent") {
+		t.Error("expected name dropped at width 28")
+	}
+
+	// Extremely narrow: just spaces
+	bar.SetDimensions(5, 24)
+	content = bar.Content()
+	stripped = stripANSI(content)
+	if len([]rune(stripped)) != 5 {
+		t.Errorf("expected 5 runes at width 5, got %d", len([]rune(stripped)))
 	}
 }

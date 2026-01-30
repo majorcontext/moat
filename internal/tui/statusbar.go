@@ -11,6 +11,7 @@ type StatusBar struct {
 	runID   string
 	name    string
 	runtime string
+	grants  []string
 	width   int
 	height  int
 }
@@ -23,6 +24,11 @@ func NewStatusBar(runID, name, runtime string) *StatusBar {
 		runtime: runtime,
 		width:   80, // default
 	}
+}
+
+// SetGrants sets the granted credentials to display.
+func (s *StatusBar) SetGrants(grants []string) {
+	s.grants = grants
 }
 
 // SetDimensions sets terminal width and height.
@@ -43,52 +49,107 @@ func (s *StatusBar) Render() string {
 	return fmt.Sprintf("\x1b[%d;1H\x1b[2K%s", s.height, s.Content())
 }
 
-// Content returns the status bar content string (with ANSI styling).
-func (s *StatusBar) Content() string {
-	// Build left and right sections with reverse video (inverted colors):
-	//  moat                                      run_id · name
-	left := " moat "
-	right := fmt.Sprintf(" %s · %s ", s.runID, s.name)
+// ANSI escape sequences for status bar styling.
+const (
+	bgDarkGray = "\x1b[48;5;236m"
+	fgCyan     = "\x1b[36m"
+	fgMagenta  = "\x1b[35m"
+	bold       = "\x1b[1m"
+	dim        = "\x1b[2m"
+	reset      = "\x1b[0m"
+)
 
-	leftLen := runeLen(left)
-	rightLen := runeLen(right)
-	totalLen := leftLen + rightLen
-
-	if totalLen >= s.width {
-		// Need to truncate
-		return s.truncatedContent()
+// runtimeColor returns the ANSI color code for the given runtime type.
+func runtimeColor(runtime string) string {
+	switch runtime {
+	case "docker":
+		return fgCyan
+	case "apple":
+		return fgMagenta
+	default:
+		return ""
 	}
-
-	// Fill middle with spaces (will be styled with reverse video)
-	middleLen := s.width - totalLen
-	content := left + strings.Repeat(" ", middleLen) + right
-
-	// Wrap with reverse video escape codes
-	return "\x1b[7m" + content + "\x1b[0m"
 }
 
-// truncatedContent returns a shortened version for narrow terminals.
-func (s *StatusBar) truncatedContent() string {
-	left := " moat "
+// Content returns the status bar content string (with ANSI styling).
+func (s *StatusBar) Content() string {
+	return s.buildContent(true, true)
+}
 
-	// Try with name
-	rightWithName := fmt.Sprintf(" %s · %s ", s.runID, s.name)
-	if runeLen(left)+runeLen(rightWithName) <= s.width {
-		middleLen := s.width - runeLen(left) - runeLen(rightWithName)
-		content := left + strings.Repeat(" ", middleLen) + rightWithName
-		return "\x1b[7m" + content + "\x1b[0m"
+// buildContent constructs the status bar with optional grants and name.
+func (s *StatusBar) buildContent(showGrants, showName bool) string {
+	// Build left segments (plain text for measurement)
+	leftPlain := " moat "
+	runtimePlain := ""
+	if s.runtime != "" {
+		runtimePlain = " " + s.runtime + " "
+	}
+	grantsPlain := ""
+	if showGrants && len(s.grants) > 0 {
+		grantsPlain = " " + strings.Join(s.grants, " · ") + " "
 	}
 
-	// Try without name - just run ID
-	rightMinimal := fmt.Sprintf(" %s ", s.runID)
-	if runeLen(left)+runeLen(rightMinimal) <= s.width {
-		middleLen := s.width - runeLen(left) - runeLen(rightMinimal)
-		content := left + strings.Repeat(" ", middleLen) + rightMinimal
-		return "\x1b[7m" + content + "\x1b[0m"
+	// Build right segment
+	var rightPlain string
+	if showName && s.name != "" {
+		rightPlain = fmt.Sprintf(" %s · %s ", s.runID, s.name)
+	} else {
+		rightPlain = fmt.Sprintf(" %s ", s.runID)
 	}
 
-	// Extremely narrow - just fill with spaces
-	return "\x1b[7m" + strings.Repeat(" ", s.width) + "\x1b[0m"
+	totalPlain := runeLen(leftPlain) + runeLen(runtimePlain) + runeLen(grantsPlain) + runeLen(rightPlain)
+
+	if totalPlain > s.width {
+		// Truncation cascade
+		if showGrants && len(s.grants) > 0 {
+			return s.buildContent(false, showName)
+		}
+		if showName && s.name != "" {
+			return s.buildContent(false, false)
+		}
+		if runeLen(leftPlain)+runeLen(rightPlain) > s.width {
+			// Just spaces
+			return bgDarkGray + strings.Repeat(" ", s.width) + reset
+		}
+	}
+
+	// Build styled content
+	middleLen := s.width - totalPlain
+	if middleLen < 0 {
+		middleLen = 0
+	}
+
+	var buf strings.Builder
+	buf.WriteString(bgDarkGray)
+	buf.WriteString(bold)
+	buf.WriteString(leftPlain)
+	buf.WriteString(reset)
+	buf.WriteString(bgDarkGray)
+
+	if runtimePlain != "" {
+		color := runtimeColor(s.runtime)
+		if color != "" {
+			buf.WriteString(color)
+		}
+		buf.WriteString(runtimePlain)
+		if color != "" {
+			buf.WriteString(reset)
+			buf.WriteString(bgDarkGray)
+		}
+	}
+
+	if grantsPlain != "" {
+		buf.WriteString(dim)
+		buf.WriteString(grantsPlain)
+		buf.WriteString(reset)
+		buf.WriteString(bgDarkGray)
+	}
+
+	buf.WriteString(strings.Repeat(" ", middleLen))
+	buf.WriteString(rightPlain)
+	buf.WriteString(reset)
+
+	return buf.String()
 }
 
 // runeLen returns the display width of a string (counting runes).
