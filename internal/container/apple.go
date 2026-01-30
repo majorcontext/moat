@@ -567,7 +567,16 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 
 // runBuild executes a single container build attempt, capturing stderr for error detection.
 func (m *appleBuildManager) runBuild(ctx context.Context, dockerfilePath, tag string, noCache bool, contextDir string) error {
-	args := []string{"build", "-f", dockerfilePath, "-t", tag}
+	cpus := goruntime.NumCPU() / 2
+	if cpus < 2 {
+		cpus = 2
+	}
+	args := []string{"build",
+		"-f", dockerfilePath,
+		"-t", tag,
+		"--cpus", strconv.Itoa(cpus),
+		"--memory", "8192MB",
+	}
 	if noCache {
 		args = append(args, "--no-cache")
 	}
@@ -649,13 +658,12 @@ func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []s
 		dnsServers = []string{"8.8.8.8", "8.8.4.4"}
 	}
 
-	// If builder isn't running, start it so we can configure DNS.
-	// The build command would auto-start it anyway, but we need to configure
-	// DNS before the build runs.
-	if !m.isBuilderRunning(ctx) {
-		if err := m.startBuilder(ctx); err != nil {
-			return err
-		}
+	// Always restart the builder to ensure it has adequate resources and a
+	// clean gRPC transport. A stale builder (from a previous moat run or
+	// started with default 2 CPU / 2GB) can fail with "Transport became
+	// inactive" during large builds.
+	if err := m.restartBuilder(ctx); err != nil {
+		return err
 	}
 
 	// Validate and build resolv.conf content using printf format (handles newlines correctly)

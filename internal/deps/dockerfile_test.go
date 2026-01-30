@@ -16,49 +16,49 @@ func TestGenerateDockerfile(t *testing.T) {
 		{Name: "psql"},
 	}
 
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// With single runtime (node), should use official node image as base
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should start with FROM node:20-slim, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should start with FROM node:20-slim, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Check apt packages are batched
-	if !strings.Contains(dockerfile, "apt-get install") {
+	if !strings.Contains(result.Dockerfile, "apt-get install") {
 		t.Error("Dockerfile should have apt-get install")
 	}
-	if !strings.Contains(dockerfile, "postgresql-client") {
+	if !strings.Contains(result.Dockerfile, "postgresql-client") {
 		t.Error("Dockerfile should install postgresql-client")
 	}
 
 	// Node should be provided by base image, not installed
-	if strings.Contains(dockerfile, "nodesource") {
+	if strings.Contains(result.Dockerfile, "nodesource") {
 		t.Error("Dockerfile should NOT install Node.js when using node base image")
 	}
-	if !strings.Contains(dockerfile, "provided by base image") {
+	if !strings.Contains(result.Dockerfile, "provided by base image") {
 		t.Error("Dockerfile should note that node is provided by base image")
 	}
 
 	// Check npm globals
-	if !strings.Contains(dockerfile, "npm install -g typescript") {
+	if !strings.Contains(result.Dockerfile, "npm install -g typescript") {
 		t.Error("Dockerfile should install typescript via npm")
 	}
 
 	// Check protoc
-	if !strings.Contains(dockerfile, "protoc") || !strings.Contains(dockerfile, "25.1") {
+	if !strings.Contains(result.Dockerfile, "protoc") || !strings.Contains(result.Dockerfile, "25.1") {
 		t.Error("Dockerfile should install protoc 25.1")
 	}
 }
 
 func TestGenerateDockerfileEmpty(t *testing.T) {
-	dockerfile, err := GenerateDockerfile(nil, nil)
+	result, err := GenerateDockerfile(nil, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.HasPrefix(dockerfile, "FROM debian:bookworm-slim") {
+	if !strings.HasPrefix(result.Dockerfile, "FROM debian:bookworm-slim") {
 		t.Error("Empty deps should still have base image")
 	}
 }
@@ -68,12 +68,12 @@ func TestGenerateDockerfileHasIptables(t *testing.T) {
 	deps := []Dependency{
 		{Name: "python", Version: "3.11"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.Contains(dockerfile, "iptables") {
-		t.Errorf("Dockerfile should install iptables for firewall support.\nGenerated Dockerfile:\n%s", dockerfile)
+	if !strings.Contains(result.Dockerfile, "iptables") {
+		t.Errorf("Dockerfile should install iptables for firewall support.\nGenerated Dockerfile:\n%s", result.Dockerfile)
 	}
 }
 
@@ -82,108 +82,110 @@ func TestGenerateDockerfilePlaywright(t *testing.T) {
 		{Name: "node", Version: "20"},
 		{Name: "playwright"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 	// Should use node as base
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
-	if !strings.Contains(dockerfile, "npm install -g playwright") {
+	if !strings.Contains(result.Dockerfile, "npm install -g playwright") {
 		t.Error("Dockerfile should install playwright")
 	}
-	if !strings.Contains(dockerfile, "npx playwright install") {
+	if !strings.Contains(result.Dockerfile, "npx playwright install") {
 		t.Error("Dockerfile should install playwright browsers")
 	}
 }
 
 func TestGenerateDockerfileGo(t *testing.T) {
 	deps := []Dependency{{Name: "go", Version: "1.22"}}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 	// Should use official golang image as base
-	if !strings.HasPrefix(dockerfile, "FROM golang:1.22") {
-		t.Errorf("Dockerfile should start with FROM golang:1.22, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM golang:1.22") {
+		t.Errorf("Dockerfile should start with FROM golang:1.22, got:\n%s", result.Dockerfile[:100])
 	}
 	// Go should be provided by base image, not installed
-	if strings.Contains(dockerfile, "go.dev/dl") {
+	if strings.Contains(result.Dockerfile, "go.dev/dl") {
 		t.Error("Dockerfile should NOT install Go when using golang base image")
 	}
-	if !strings.Contains(dockerfile, "provided by base image") {
+	if !strings.Contains(result.Dockerfile, "provided by base image") {
 		t.Error("Dockerfile should note that go is provided by base image")
 	}
 }
 
 func TestGenerateDockerfilePython(t *testing.T) {
 	deps := []Dependency{{Name: "python", Version: "3.10"}}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 	// Should use official python image as base
-	if !strings.HasPrefix(dockerfile, "FROM python:3.10-slim") {
-		t.Errorf("Dockerfile should start with FROM python:3.10-slim, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM python:3.10-slim") {
+		t.Errorf("Dockerfile should start with FROM python:3.10-slim, got:\n%s", result.Dockerfile[:100])
 	}
 	// Python should be provided by base image, not installed
-	if strings.Contains(dockerfile, "apt-get install -y python3") {
+	if strings.Contains(result.Dockerfile, "apt-get install -y python3") {
 		t.Error("Dockerfile should NOT install python3 when using python base image")
 	}
-	if !strings.Contains(dockerfile, "provided by base image") {
+	if !strings.Contains(result.Dockerfile, "provided by base image") {
 		t.Error("Dockerfile should note that python is provided by base image")
 	}
 }
 
 func TestGenerateDockerfileWithSSH(t *testing.T) {
 	// Test with NeedsSSH option (triggered by SSH grants)
-	dockerfile, err := GenerateDockerfile(nil, &DockerfileOptions{NeedsSSH: true})
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{NeedsSSH: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Check that openssh-client and socat are installed
-	if !strings.Contains(dockerfile, "openssh-client") {
+	if !strings.Contains(result.Dockerfile, "openssh-client") {
 		t.Error("Dockerfile should install openssh-client")
 	}
-	if !strings.Contains(dockerfile, "socat") {
+	if !strings.Contains(result.Dockerfile, "socat") {
 		t.Error("Dockerfile should install socat")
 	}
 
-	// Check that the entrypoint script is created (via base64)
-	if !strings.Contains(dockerfile, "moat-init") {
-		t.Error("Dockerfile should create moat-init entrypoint")
+	// Check that the entrypoint script is COPYed (not inline base64)
+	if !strings.Contains(result.Dockerfile, "COPY moat-init.sh /usr/local/bin/moat-init") {
+		t.Error("Dockerfile should COPY moat-init script")
 	}
-	if !strings.Contains(dockerfile, "base64 -d") {
-		t.Error("Dockerfile should use base64 decoding for entrypoint script")
-	}
-	if !strings.Contains(dockerfile, "ENTRYPOINT") {
+	if !strings.Contains(result.Dockerfile, "ENTRYPOINT") {
 		t.Error("Dockerfile should set ENTRYPOINT to moat-init")
+	}
+
+	// Check that context files include the init script
+	if _, ok := result.ContextFiles["moat-init.sh"]; !ok {
+		t.Error("ContextFiles should include moat-init.sh")
 	}
 }
 
 func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 	// Test combining regular deps with SSH
 	deps := []Dependency{{Name: "node", Version: "20"}}
-	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsSSH: true})
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsSSH: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Node should be provided by base image
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
-	if !strings.Contains(dockerfile, "provided by base image") {
+	if !strings.Contains(result.Dockerfile, "provided by base image") {
 		t.Error("Dockerfile should note that node is provided by base image")
 	}
 
 	// Check SSH is also installed
-	if !strings.Contains(dockerfile, "openssh-client") {
+	if !strings.Contains(result.Dockerfile, "openssh-client") {
 		t.Error("Dockerfile should install openssh-client")
 	}
-	if !strings.Contains(dockerfile, "ENTRYPOINT") {
+	if !strings.Contains(result.Dockerfile, "ENTRYPOINT") {
 		t.Error("Dockerfile should set ENTRYPOINT")
 	}
 }
@@ -194,21 +196,21 @@ func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 		{Name: "node", Version: "20"},
 		{Name: "python", Version: "3.10"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should use Debian as base when multiple runtimes
-	if !strings.HasPrefix(dockerfile, "FROM debian:bookworm-slim") {
-		t.Errorf("Dockerfile should use debian:bookworm-slim for multiple runtimes, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM debian:bookworm-slim") {
+		t.Errorf("Dockerfile should use debian:bookworm-slim for multiple runtimes, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Both runtimes should be installed
-	if !strings.Contains(dockerfile, "nodesource") {
+	if !strings.Contains(result.Dockerfile, "nodesource") {
 		t.Error("Dockerfile should install Node.js")
 	}
-	if !strings.Contains(dockerfile, "python3") {
+	if !strings.Contains(result.Dockerfile, "python3") {
 		t.Error("Dockerfile should install Python")
 	}
 }
@@ -221,21 +223,21 @@ func TestGenerateDockerfileDynamicNpm(t *testing.T) {
 		{Type: TypeDynamicNpm, Package: "eslint", Name: "eslint"},
 		{Type: TypeDynamicNpm, Package: "@anthropic-ai/claude-code", Name: "@anthropic-ai/claude-code", Version: "1.0.0"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dynamic npm section
-	if !strings.Contains(dockerfile, "npm packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "npm packages (dynamic)") {
 		t.Error("Dockerfile should have npm packages (dynamic) section")
 	}
 
 	// Should install packages
-	if !strings.Contains(dockerfile, "npm install -g eslint") {
+	if !strings.Contains(result.Dockerfile, "npm install -g eslint") {
 		t.Error("Dockerfile should install eslint")
 	}
-	if !strings.Contains(dockerfile, "npm install -g @anthropic-ai/claude-code@1.0.0") {
+	if !strings.Contains(result.Dockerfile, "npm install -g @anthropic-ai/claude-code@1.0.0") {
 		t.Error("Dockerfile should install scoped package with version")
 	}
 }
@@ -246,21 +248,21 @@ func TestGenerateDockerfileDynamicPip(t *testing.T) {
 		{Type: TypeDynamicPip, Package: "pytest", Name: "pytest"},
 		{Type: TypeDynamicPip, Package: "requests", Name: "requests", Version: "2.28.0"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dynamic pip section
-	if !strings.Contains(dockerfile, "pip packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "pip packages (dynamic)") {
 		t.Error("Dockerfile should have pip packages (dynamic) section")
 	}
 
 	// Should install packages with correct syntax
-	if !strings.Contains(dockerfile, "pip install pytest") {
+	if !strings.Contains(result.Dockerfile, "pip install pytest") {
 		t.Error("Dockerfile should install pytest")
 	}
-	if !strings.Contains(dockerfile, "pip install requests==2.28.0") {
+	if !strings.Contains(result.Dockerfile, "pip install requests==2.28.0") {
 		t.Error("Dockerfile should install requests with version specifier")
 	}
 }
@@ -271,18 +273,18 @@ func TestGenerateDockerfileDynamicUv(t *testing.T) {
 		{Name: "uv"},
 		{Type: TypeDynamicUv, Package: "ruff", Name: "ruff"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dynamic uv section
-	if !strings.Contains(dockerfile, "uv packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "uv packages (dynamic)") {
 		t.Error("Dockerfile should have uv packages (dynamic) section")
 	}
 
 	// Should use uv tool install
-	if !strings.Contains(dockerfile, "uv tool install ruff") {
+	if !strings.Contains(result.Dockerfile, "uv tool install ruff") {
 		t.Error("Dockerfile should install ruff via uv tool")
 	}
 }
@@ -292,18 +294,18 @@ func TestGenerateDockerfileDynamicCargo(t *testing.T) {
 		{Name: "rust"},
 		{Type: TypeDynamicCargo, Package: "ripgrep", Name: "ripgrep"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dynamic cargo section
-	if !strings.Contains(dockerfile, "cargo packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "cargo packages (dynamic)") {
 		t.Error("Dockerfile should have cargo packages (dynamic) section")
 	}
 
 	// Should use cargo install
-	if !strings.Contains(dockerfile, "cargo install ripgrep") {
+	if !strings.Contains(result.Dockerfile, "cargo install ripgrep") {
 		t.Error("Dockerfile should install ripgrep via cargo")
 	}
 }
@@ -313,18 +315,18 @@ func TestGenerateDockerfileDynamicGo(t *testing.T) {
 		{Name: "go", Version: "1.22"},
 		{Type: TypeDynamicGo, Package: "golang.org/x/tools/gopls", Name: "gopls"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dynamic go section
-	if !strings.Contains(dockerfile, "go packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "go packages (dynamic)") {
 		t.Error("Dockerfile should have go packages (dynamic) section")
 	}
 
 	// Should use go install with GOBIN
-	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest") {
+	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest") {
 		t.Error("Dockerfile should install gopls via go install with GOBIN")
 	}
 }
@@ -339,33 +341,33 @@ func TestGenerateDockerfileMixedDependencies(t *testing.T) {
 		{Type: TypeDynamicNpm, Package: "eslint", Name: "eslint"},
 		{Type: TypeDynamicNpm, Package: "prettier", Name: "prettier"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Check node base image
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
 		t.Error("Dockerfile should use node:20-slim as base")
 	}
 
 	// Check registry npm packages are batched
-	if !strings.Contains(dockerfile, "npm install -g typescript") {
+	if !strings.Contains(result.Dockerfile, "npm install -g typescript") {
 		t.Error("Dockerfile should install typescript")
 	}
 
 	// Check apt packages
-	if !strings.Contains(dockerfile, "git") {
+	if !strings.Contains(result.Dockerfile, "git") {
 		t.Error("Dockerfile should install git")
 	}
 
 	// Check github binary (gh)
-	if !strings.Contains(dockerfile, "cli/cli/releases") {
+	if !strings.Contains(result.Dockerfile, "cli/cli/releases") {
 		t.Error("Dockerfile should install gh from GitHub")
 	}
 
 	// Check dynamic npm packages are in separate section
-	if !strings.Contains(dockerfile, "npm packages (dynamic)") {
+	if !strings.Contains(result.Dockerfile, "npm packages (dynamic)") {
 		t.Error("Dockerfile should have dynamic npm section")
 	}
 }
@@ -378,21 +380,21 @@ func TestGenerateDockerfileUvToolPackages(t *testing.T) {
 		{Name: "ruff"},
 		{Name: "black"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have uv tool packages section
-	if !strings.Contains(dockerfile, "uv tool packages") {
+	if !strings.Contains(result.Dockerfile, "uv tool packages") {
 		t.Error("Dockerfile should have uv tool packages section")
 	}
 
 	// Should install via uv tool install
-	if !strings.Contains(dockerfile, "uv tool install ruff") {
+	if !strings.Contains(result.Dockerfile, "uv tool install ruff") {
 		t.Error("Dockerfile should install ruff via uv tool")
 	}
-	if !strings.Contains(dockerfile, "uv tool install black") {
+	if !strings.Contains(result.Dockerfile, "uv tool install black") {
 		t.Error("Dockerfile should install black via uv tool")
 	}
 }
@@ -403,21 +405,21 @@ func TestGenerateDockerfileGoInstallPackages(t *testing.T) {
 		{Name: "govulncheck"},
 		{Name: "mockgen"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have go install packages section
-	if !strings.Contains(dockerfile, "go install packages") {
+	if !strings.Contains(result.Dockerfile, "go install packages") {
 		t.Error("Dockerfile should have go install packages section")
 	}
 
 	// Should use GOBIN for installation
-	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
+	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
 		t.Error("Dockerfile should install govulncheck with GOBIN")
 	}
-	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
+	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
 		t.Error("Dockerfile should install mockgen with GOBIN")
 	}
 }
@@ -427,16 +429,16 @@ func TestGenerateDockerfileMultiArchBinary(t *testing.T) {
 	deps := []Dependency{
 		{Name: "bun"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have architecture detection
-	if !strings.Contains(dockerfile, "uname -m") {
+	if !strings.Contains(result.Dockerfile, "uname -m") {
 		t.Error("Dockerfile should detect architecture")
 	}
-	if !strings.Contains(dockerfile, "x86_64") {
+	if !strings.Contains(result.Dockerfile, "x86_64") {
 		t.Error("Dockerfile should have x86_64 condition")
 	}
 }
@@ -448,7 +450,7 @@ func TestGenerateDockerfileWithoutBuildKit(t *testing.T) {
 		{Name: "curl"},
 	}
 	useBuildKit := false
-	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{
 		UseBuildKit: &useBuildKit,
 	})
 	if err != nil {
@@ -456,15 +458,15 @@ func TestGenerateDockerfileWithoutBuildKit(t *testing.T) {
 	}
 
 	// Should NOT have BuildKit-specific cache mounts
-	if strings.Contains(dockerfile, "--mount=type=cache") {
+	if strings.Contains(result.Dockerfile, "--mount=type=cache") {
 		t.Error("Dockerfile should not contain --mount=type=cache when BuildKit is disabled")
 	}
 
 	// Should still have apt-get commands
-	if !strings.Contains(dockerfile, "apt-get update") {
+	if !strings.Contains(result.Dockerfile, "apt-get update") {
 		t.Error("Dockerfile should have apt-get update")
 	}
-	if !strings.Contains(dockerfile, "apt-get install") {
+	if !strings.Contains(result.Dockerfile, "apt-get install") {
 		t.Error("Dockerfile should have apt-get install")
 	}
 }
@@ -475,7 +477,7 @@ func TestGenerateDockerfileWithBuildKit(t *testing.T) {
 		{Name: "git"},
 	}
 	useBuildKit := true
-	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{
 		UseBuildKit: &useBuildKit,
 	})
 	if err != nil {
@@ -483,7 +485,7 @@ func TestGenerateDockerfileWithBuildKit(t *testing.T) {
 	}
 
 	// Should have BuildKit-specific cache mounts
-	if !strings.Contains(dockerfile, "--mount=type=cache") {
+	if !strings.Contains(result.Dockerfile, "--mount=type=cache") {
 		t.Error("Dockerfile should contain --mount=type=cache when BuildKit is enabled")
 	}
 }
@@ -493,23 +495,23 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	deps := []Dependency{
 		{Name: "claude-code"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should NOT use npm
-	if strings.Contains(dockerfile, "npm install") {
+	if strings.Contains(result.Dockerfile, "npm install") {
 		t.Error("claude-code should not be installed via npm")
 	}
 
 	// Should use native installer
-	if !strings.Contains(dockerfile, "curl -fsSL https://claude.ai/install.sh | bash") {
+	if !strings.Contains(result.Dockerfile, "curl -fsSL https://claude.ai/install.sh | bash") {
 		t.Error("Dockerfile should use native Claude installer")
 	}
 
 	// Should run as moatuser
-	lines := strings.Split(dockerfile, "\n")
+	lines := strings.Split(result.Dockerfile, "\n")
 	installerIdx := -1
 	for i, line := range lines {
 		if strings.Contains(line, "claude.ai/install.sh") {
@@ -533,7 +535,7 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	}
 
 	// Should add PATH from install commands' EnvVars
-	if !strings.Contains(dockerfile, `ENV PATH="/home/moatuser/.local/bin:$PATH"`) {
+	if !strings.Contains(result.Dockerfile, `ENV PATH="/home/moatuser/.local/bin:$PATH"`) {
 		t.Error("Dockerfile should add installer's PATH to environment")
 	}
 
@@ -556,30 +558,30 @@ func TestGenerateDockerfileMixedUserAndRootCustomDeps(t *testing.T) {
 		{Name: "rust"},        // root custom dep
 		{Name: "claude-code"}, // user-install custom dep
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Rust should be installed as root (no USER switch around it)
-	if !strings.Contains(dockerfile, "rustup.rs") {
+	if !strings.Contains(result.Dockerfile, "rustup.rs") {
 		t.Error("Dockerfile should install rust")
 	}
 
 	// Claude should be installed as moatuser
-	if !strings.Contains(dockerfile, "claude.ai/install.sh") {
+	if !strings.Contains(result.Dockerfile, "claude.ai/install.sh") {
 		t.Error("Dockerfile should install claude-code")
 	}
 
 	// Rust section should come before user-space section
-	rustIdx := strings.Index(dockerfile, "rustup.rs")
-	claudeIdx := strings.Index(dockerfile, "claude.ai/install.sh")
+	rustIdx := strings.Index(result.Dockerfile, "rustup.rs")
+	claudeIdx := strings.Index(result.Dockerfile, "claude.ai/install.sh")
 	if rustIdx > claudeIdx {
 		t.Error("root custom deps should be written before user-space custom deps")
 	}
 
 	// The USER moatuser block should only surround claude, not rust
-	lines := strings.Split(dockerfile, "\n")
+	lines := strings.Split(result.Dockerfile, "\n")
 	for i, line := range lines {
 		if strings.Contains(line, "rustup.rs") {
 			// Walk backwards to find nearest USER directive
@@ -613,7 +615,7 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 		"aws-agent-skills@aws-agent-skills",
 	}
 
-	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})
@@ -622,33 +624,33 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 	}
 
 	// Should have section header
-	if !strings.Contains(dockerfile, "# Claude Code plugins") {
+	if !strings.Contains(result.Dockerfile, "# Claude Code plugins") {
 		t.Error("Dockerfile should have Claude Code plugins section")
 	}
 
 	// Should switch to moatuser for plugin installation
-	if !strings.Contains(dockerfile, "USER moatuser") {
+	if !strings.Contains(result.Dockerfile, "USER moatuser") {
 		t.Error("Dockerfile should switch to moatuser for plugin installation")
 	}
 
 	// Should add marketplaces with error handling (in sorted order)
-	if !strings.Contains(dockerfile, "claude plugin marketplace add anthropics/claude-plugins-official && echo 'Added marketplace claude-plugins-official' || echo 'WARNING: Could not add marketplace claude-plugins-official") {
+	if !strings.Contains(result.Dockerfile, "claude plugin marketplace add anthropics/claude-plugins-official && echo 'Added marketplace claude-plugins-official' || echo 'WARNING: Could not add marketplace claude-plugins-official") {
 		t.Error("Dockerfile should add claude-plugins-official marketplace with error handling")
 	}
-	if !strings.Contains(dockerfile, "claude plugin marketplace add itsmostafa/aws-agent-skills && echo 'Added marketplace aws-agent-skills' || echo 'WARNING: Could not add marketplace aws-agent-skills") {
+	if !strings.Contains(result.Dockerfile, "claude plugin marketplace add itsmostafa/aws-agent-skills && echo 'Added marketplace aws-agent-skills' || echo 'WARNING: Could not add marketplace aws-agent-skills") {
 		t.Error("Dockerfile should add aws-agent-skills marketplace with error handling")
 	}
 
 	// Should install plugins with error handling (in sorted order)
-	if !strings.Contains(dockerfile, "claude plugin install aws-agent-skills@aws-agent-skills && echo 'Installed plugin aws-agent-skills@aws-agent-skills' || echo 'WARNING: Could not install plugin aws-agent-skills@aws-agent-skills") {
+	if !strings.Contains(result.Dockerfile, "claude plugin install aws-agent-skills@aws-agent-skills && echo 'Installed plugin aws-agent-skills@aws-agent-skills' || echo 'WARNING: Could not install plugin aws-agent-skills@aws-agent-skills") {
 		t.Error("Dockerfile should install aws-agent-skills plugin with error handling")
 	}
-	if !strings.Contains(dockerfile, "claude plugin install claude-md-management@claude-plugins-official && echo 'Installed plugin claude-md-management@claude-plugins-official' || echo 'WARNING: Could not install plugin claude-md-management@claude-plugins-official") {
+	if !strings.Contains(result.Dockerfile, "claude plugin install claude-md-management@claude-plugins-official && echo 'Installed plugin claude-md-management@claude-plugins-official' || echo 'WARNING: Could not install plugin claude-md-management@claude-plugins-official") {
 		t.Error("Dockerfile should install claude-md-management plugin with error handling")
 	}
 
 	// Should switch back to root after plugin installation
-	lines := strings.Split(dockerfile, "\n")
+	lines := strings.Split(result.Dockerfile, "\n")
 	foundUserMoatuser := false
 	foundUserRoot := false
 	for _, line := range lines {
@@ -671,15 +673,15 @@ func TestGenerateDockerfileNoPlugins(t *testing.T) {
 		{Name: "node", Version: "20"},
 	}
 
-	dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{})
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
-	if strings.Contains(dockerfile, "Claude Code plugins") {
+	if strings.Contains(result.Dockerfile, "Claude Code plugins") {
 		t.Error("Dockerfile should NOT have Claude plugins section when none configured")
 	}
-	if strings.Contains(dockerfile, "claude plugin") {
+	if strings.Contains(result.Dockerfile, "claude plugin") {
 		t.Error("Dockerfile should NOT have claude plugin commands when none configured")
 	}
 }
@@ -693,22 +695,22 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 			{Name: "good", Source: "github", Repo: "valid/repo"},
 			{Name: "evil", Source: "github", Repo: "; rm -rf /"},
 		}
-		dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		result, err := GenerateDockerfile(deps, &DockerfileOptions{
 			ClaudeMarketplaces: marketplaces,
 		})
 		if err != nil {
 			t.Fatalf("GenerateDockerfile error: %v", err)
 		}
 		// Valid repo should be included
-		if !strings.Contains(dockerfile, "marketplace add valid/repo") {
+		if !strings.Contains(result.Dockerfile, "marketplace add valid/repo") {
 			t.Error("valid marketplace should be included")
 		}
 		// Invalid repo should trigger error message (note: uses marketplace name, not repo)
-		if !strings.Contains(dockerfile, "Invalid marketplace repo format: evil") {
+		if !strings.Contains(result.Dockerfile, "Invalid marketplace repo format: evil") {
 			t.Error("invalid marketplace should show error message with name")
 		}
-		// The malicious repo value should NOT appear in the dockerfile
-		if strings.Contains(dockerfile, "; rm -rf /") {
+		// The malicious repo value should NOT appear in the result.Dockerfile
+		if strings.Contains(result.Dockerfile, "; rm -rf /") {
 			t.Error("invalid repo value should not appear in output")
 		}
 	})
@@ -718,18 +720,18 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 			"valid-plugin@valid-market",
 			"bad;rm -rf /@market",
 		}
-		dockerfile, err := GenerateDockerfile(deps, &DockerfileOptions{
+		result, err := GenerateDockerfile(deps, &DockerfileOptions{
 			ClaudePlugins: plugins,
 		})
 		if err != nil {
 			t.Fatalf("GenerateDockerfile error: %v", err)
 		}
 		// Valid plugin should be included
-		if !strings.Contains(dockerfile, "plugin install valid-plugin@valid-market") {
+		if !strings.Contains(result.Dockerfile, "plugin install valid-plugin@valid-market") {
 			t.Error("valid plugin should be included")
 		}
 		// Invalid plugin should trigger error message
-		if !strings.Contains(dockerfile, "Invalid plugin format") {
+		if !strings.Contains(result.Dockerfile, "Invalid plugin format") {
 			t.Error("invalid plugin should show error message")
 		}
 	})
@@ -780,7 +782,7 @@ func TestCategorizeDeps(t *testing.T) {
 func TestCategorizeDepsWithDockerNoMode(t *testing.T) {
 	// Test that a docker dependency without mode doesn't crash categorizeDeps.
 	// Note: Parser now requires explicit mode, but categorizeDeps should still
-	// handle empty DockerMode gracefully (no dockerfile output for docker CLI).
+	// handle empty DockerMode gracefully (no result.Dockerfile output for docker CLI).
 	deps := []Dependency{
 		{Name: "docker"}, // No mode set - would error in parser, but test internal behavior
 		{Name: "git"},
@@ -941,21 +943,21 @@ func TestGenerateDockerfileWithSSHHosts(t *testing.T) {
 		SSHHosts: []string{"github.com"},
 	}
 
-	dockerfile, err := GenerateDockerfile(nil, opts)
+	result, err := GenerateDockerfile(nil, opts)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have SSH packages
-	if !strings.Contains(dockerfile, "openssh-client") {
+	if !strings.Contains(result.Dockerfile, "openssh-client") {
 		t.Error("missing openssh-client")
 	}
 
 	// Should have known_hosts for github.com
-	if !strings.Contains(dockerfile, "github.com ssh-ed25519") {
+	if !strings.Contains(result.Dockerfile, "github.com ssh-ed25519") {
 		t.Error("missing github.com ssh-ed25519 key")
 	}
-	if !strings.Contains(dockerfile, "/etc/ssh/ssh_known_hosts") {
+	if !strings.Contains(result.Dockerfile, "/etc/ssh/ssh_known_hosts") {
 		t.Error("missing known_hosts path")
 	}
 }
@@ -967,13 +969,13 @@ func TestGenerateDockerfileSSHHostsWithoutSSH(t *testing.T) {
 		SSHHosts: []string{"github.com"},
 	}
 
-	dockerfile, err := GenerateDockerfile(nil, opts)
+	result, err := GenerateDockerfile(nil, opts)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have known_hosts even without SSH packages
-	if !strings.Contains(dockerfile, "github.com ssh-ed25519") {
+	if !strings.Contains(result.Dockerfile, "github.com ssh-ed25519") {
 		t.Error("missing github.com ssh-ed25519 key")
 	}
 }
@@ -983,16 +985,16 @@ func TestGenerateDockerfileWithDockerHost(t *testing.T) {
 	deps := []Dependency{
 		{Name: "docker", DockerMode: DockerModeHost},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should install docker-ce-cli from Docker's official repo
-	if !strings.Contains(dockerfile, "docker-ce-cli") {
+	if !strings.Contains(result.Dockerfile, "docker-ce-cli") {
 		t.Error("Dockerfile should install docker-ce-cli package")
 	}
-	if !strings.Contains(dockerfile, "download.docker.com") {
+	if !strings.Contains(result.Dockerfile, "download.docker.com") {
 		t.Error("Dockerfile should use Docker's official repo")
 	}
 }
@@ -1004,23 +1006,23 @@ func TestGenerateDockerfileDockerWithOtherDeps(t *testing.T) {
 		{Name: "docker", DockerMode: DockerModeHost},
 		{Name: "git"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should use node as base image
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Should install docker-ce-cli from Docker's official repo
-	if !strings.Contains(dockerfile, "docker-ce-cli") {
+	if !strings.Contains(result.Dockerfile, "docker-ce-cli") {
 		t.Error("Dockerfile should install docker-ce-cli package")
 	}
 
 	// Should also install git via apt
-	if !strings.Contains(dockerfile, "git") {
+	if !strings.Contains(result.Dockerfile, "git") {
 		t.Error("Dockerfile should install git package")
 	}
 }
@@ -1030,28 +1032,28 @@ func TestGenerateDockerfileDockerDind(t *testing.T) {
 	deps := []Dependency{
 		{Name: "docker", DockerMode: DockerModeDind},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should have dind mode comment
-	if !strings.Contains(dockerfile, "dind mode") {
+	if !strings.Contains(result.Dockerfile, "dind mode") {
 		t.Error("Dockerfile should mention dind mode in comment")
 	}
 
 	// Should install docker-ce (full daemon)
-	if !strings.Contains(dockerfile, "docker-ce ") || !strings.Contains(dockerfile, "docker-ce-cli") {
+	if !strings.Contains(result.Dockerfile, "docker-ce ") || !strings.Contains(result.Dockerfile, "docker-ce-cli") {
 		t.Error("Dockerfile should install docker-ce and docker-ce-cli packages")
 	}
 
 	// Should install containerd.io
-	if !strings.Contains(dockerfile, "containerd.io") {
+	if !strings.Contains(result.Dockerfile, "containerd.io") {
 		t.Error("Dockerfile should install containerd.io package")
 	}
 
 	// Should use Docker's official repo
-	if !strings.Contains(dockerfile, "download.docker.com") {
+	if !strings.Contains(result.Dockerfile, "download.docker.com") {
 		t.Error("Dockerfile should use Docker's official repo")
 	}
 }
@@ -1061,23 +1063,23 @@ func TestGenerateDockerfileDockerHost(t *testing.T) {
 	deps := []Dependency{
 		{Name: "docker", DockerMode: DockerModeHost},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should NOT have dind mode comment
-	if strings.Contains(dockerfile, "dind mode") {
+	if strings.Contains(result.Dockerfile, "dind mode") {
 		t.Error("Dockerfile should not mention dind mode for host mode")
 	}
 
 	// Should install docker-ce-cli only (not docker-ce daemon)
-	if !strings.Contains(dockerfile, "docker-ce-cli") {
+	if !strings.Contains(result.Dockerfile, "docker-ce-cli") {
 		t.Error("Dockerfile should install docker-ce-cli package")
 	}
 
 	// Should NOT install containerd.io (not needed for CLI only)
-	if strings.Contains(dockerfile, "containerd.io") {
+	if strings.Contains(result.Dockerfile, "containerd.io") {
 		t.Error("Dockerfile should not install containerd.io for host mode")
 	}
 }
@@ -1089,26 +1091,26 @@ func TestGenerateDockerfileDindWithOtherDeps(t *testing.T) {
 		{Name: "docker", DockerMode: DockerModeDind},
 		{Name: "git"},
 	}
-	dockerfile, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Should use node as base image
-	if !strings.HasPrefix(dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
+		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Should install full docker suite for dind
-	if !strings.Contains(dockerfile, "docker-ce ") {
+	if !strings.Contains(result.Dockerfile, "docker-ce ") {
 		t.Error("Dockerfile should install docker-ce package")
 	}
-	if !strings.Contains(dockerfile, "containerd.io") {
+	if !strings.Contains(result.Dockerfile, "containerd.io") {
 		t.Error("Dockerfile should install containerd.io package")
 	}
 
 	// Should also install git via apt
-	if !strings.Contains(dockerfile, "git") {
+	if !strings.Contains(result.Dockerfile, "git") {
 		t.Error("Dockerfile should install git package")
 	}
 }

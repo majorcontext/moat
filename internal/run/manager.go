@@ -1063,7 +1063,7 @@ region = %s
 		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
 
 		// Always generate the Dockerfile so we can save it to the run directory
-		dockerfile, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
+		result, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
 			NeedsSSH:           hasSSHGrants,
 			SSHHosts:           sshGrants,
 			NeedsClaudeInit:    needsClaudeInit,
@@ -1076,7 +1076,7 @@ region = %s
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("generating Dockerfile: %w", err)
 		}
-		generatedDockerfile = dockerfile
+		generatedDockerfile = result.Dockerfile
 
 		exists, err := m.runtime.BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
@@ -1104,7 +1104,8 @@ region = %s
 				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtime.Type())
 			}
 
-			if err := buildMgr.BuildImage(ctx, dockerfile, containerImage, buildOpts); err != nil {
+			buildOpts.ContextFiles = result.ContextFiles
+			if err := buildMgr.BuildImage(ctx, result.Dockerfile, containerImage, buildOpts); err != nil {
 				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
 					strings.Join(depNames, ", "), err)
