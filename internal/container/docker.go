@@ -505,8 +505,8 @@ func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error
 	}
 	defer reader.Close()
 
-	// Drain the reader to complete the pull
-	_, _ = io.Copy(os.Stdout, reader)
+	// Drain the reader to complete the pull (discard JSON progress output)
+	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }
 
@@ -891,8 +891,8 @@ func (m *dockerSidecarManager) ensureImage(ctx context.Context, imageName string
 	}
 	defer reader.Close()
 
-	// Drain the reader to complete the pull
-	_, _ = io.Copy(os.Stdout, reader)
+	// Drain the reader to complete the pull (discard JSON progress output)
+	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }
 
@@ -1144,7 +1144,7 @@ func (m *dockerBuildManager) ensureImage(ctx context.Context, imageName string) 
 	}
 	defer reader.Close()
 
-	// Drain the reader to complete the pull
-	_, _ = io.Copy(os.Stdout, reader)
+	// Drain the reader to complete the pull (discard JSON progress output)
+	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }

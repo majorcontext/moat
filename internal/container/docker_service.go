@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -48,15 +49,21 @@ func (m *dockerServiceManager) CheckReady(ctx context.Context, info ServiceInfo)
 	cmd := resolveReadinessCmd(info.ReadinessCmd, info.Env, info.PasswordEnv)
 
 	execCreateResp, err := m.cli.ContainerExecCreate(ctx, info.ID, dockercontainer.ExecOptions{
-		Cmd: []string{"sh", "-c", cmd},
+		Cmd:          []string{"sh", "-c", cmd},
+		AttachStdout: true,
+		AttachStderr: true,
 	})
 	if err != nil {
 		return fmt.Errorf("creating exec for readiness check: %w", err)
 	}
 
-	if err := m.cli.ContainerExecStart(ctx, execCreateResp.ID, dockercontainer.ExecStartOptions{}); err != nil {
-		return fmt.Errorf("running readiness check: %w", err)
+	resp, err := m.cli.ContainerExecAttach(ctx, execCreateResp.ID, dockercontainer.ExecAttachOptions{})
+	if err != nil {
+		return fmt.Errorf("attaching to readiness check: %w", err)
 	}
+	// Drain output and wait for command to complete
+	_, _ = io.Copy(io.Discard, resp.Reader)
+	resp.Close()
 
 	execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
 	if err != nil {
