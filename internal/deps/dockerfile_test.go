@@ -165,6 +165,55 @@ func TestGenerateDockerfileWithSSH(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileContextFiles(t *testing.T) {
+	// Verify that all init-triggering options produce context files with non-empty content
+	tests := []struct {
+		name string
+		opts *DockerfileOptions
+		deps []Dependency
+	}{
+		{"SSH", &DockerfileOptions{NeedsSSH: true}, nil},
+		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, nil},
+		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, nil},
+		{"DockerHost", nil, []Dependency{{Name: "docker", DockerMode: DockerModeHost}}},
+		{"DockerDind", nil, []Dependency{{Name: "docker", DockerMode: DockerModeDind}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := GenerateDockerfile(tt.deps, tt.opts)
+			if err != nil {
+				t.Fatalf("GenerateDockerfile error: %v", err)
+			}
+
+			content, ok := result.ContextFiles["moat-init.sh"]
+			if !ok {
+				t.Fatal("ContextFiles should include moat-init.sh")
+			}
+			if len(content) == 0 {
+				t.Error("moat-init.sh content should not be empty")
+			}
+			if !strings.Contains(result.Dockerfile, "COPY moat-init.sh /usr/local/bin/moat-init") {
+				t.Error("Dockerfile should COPY moat-init.sh")
+			}
+		})
+	}
+
+	// No init script when none of the triggers are active
+	t.Run("NoInit", func(t *testing.T) {
+		result, err := GenerateDockerfile(nil, nil)
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		if _, ok := result.ContextFiles["moat-init.sh"]; ok {
+			t.Error("ContextFiles should not include moat-init.sh when no init is needed")
+		}
+		if strings.Contains(result.Dockerfile, "COPY moat-init.sh") {
+			t.Error("Dockerfile should not COPY moat-init.sh when no init is needed")
+		}
+	})
+}
+
 func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 	// Test combining regular deps with SSH
 	deps := []Dependency{{Name: "node", Version: "20"}}
