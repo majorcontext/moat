@@ -1675,13 +1675,14 @@ func TestClaudePluginBaking(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	dockerfile, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+	result, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 
 	// Verify marketplace add command is present
 	if !strings.Contains(dockerfile, "claude plugin marketplace add test/test-marketplace") {
@@ -1713,13 +1714,14 @@ func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	dockerfile, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+	result, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 
 	// Should have agent-marketplace
 	if !strings.Contains(dockerfile, "agent/marketplace") {
