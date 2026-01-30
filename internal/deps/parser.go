@@ -51,7 +51,14 @@ func Parse(s string) (Dependency, error) {
 		}
 	}
 
-	return Dependency{Name: name, Version: version}, nil
+	dep := Dependency{Name: name, Version: version}
+
+	// Set type from registry if available
+	if spec, ok := GetSpec(name); ok {
+		dep.Type = spec.Type
+	}
+
+	return dep, nil
 }
 
 // parseDockerDep parses docker dependency with required mode specifier.

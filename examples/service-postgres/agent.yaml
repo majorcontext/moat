@@ -14,5 +14,6 @@ name: service-postgres
 
 dependencies:
   - postgres@17         # PostgreSQL 17 service (sidecar container)
+  - psql                # PostgreSQL client tools (for demo queries)
 
 command: ["sh", "/workspace/demo.sh"]

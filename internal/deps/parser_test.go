@@ -43,6 +43,28 @@ func TestParseDependency(t *testing.T) {
 	}
 }
 
+func TestParseServiceType(t *testing.T) {
+	dep, err := Parse("postgres@17")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if dep.Type != TypeService {
+		t.Errorf("Type = %q, want %q", dep.Type, TypeService)
+	}
+	if dep.Name != "postgres" {
+		t.Errorf("Name = %q, want %q", dep.Name, "postgres")
+	}
+
+	// Non-service dep should get its type from registry
+	dep2, err := Parse("node@20")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if dep2.Type != TypeRuntime {
+		t.Errorf("Type = %q, want %q", dep2.Type, TypeRuntime)
+	}
+}
+
 func TestParseAll(t *testing.T) {
 	deps, err := ParseAll([]string{"node@20", "protoc", "typescript"})
 	if err != nil {
@@ -557,8 +579,8 @@ func TestParseAllWithDynamicDeps(t *testing.T) {
 	}
 
 	// Check types
-	if deps[0].Type != "" { // registry deps have no type set
-		t.Errorf("node should have empty Type, got %v", deps[0].Type)
+	if deps[0].Type != TypeRuntime { // registry deps get type from registry
+		t.Errorf("node should have TypeRuntime, got %v", deps[0].Type)
 	}
 	if deps[1].Type != TypeDynamicNpm {
 		t.Errorf("eslint should be TypeDynamicNpm, got %v", deps[1].Type)
