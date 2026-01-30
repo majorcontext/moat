@@ -134,3 +134,10 @@ Documentation is part of the feature. A feature without docs is incomplete.
   - Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`
   - Scope is optional but encouraged (e.g., `feat(api): add user endpoint`)
 - Do not include `Co-Authored-By` lines for Claude in commit messages
+
+## Creating Pull Requests
+
+- Use `gh pr create` with default flags only (no `--base`, `--head`, etc.)
+- If `gh pr create` fails, report the error to the operator immediately
+- Do not attempt to work around failures by adding flags or changing configuration
+- Let the operator fix any repository or remote configuration issues
