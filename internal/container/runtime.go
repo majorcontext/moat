@@ -162,15 +162,24 @@ type ServiceConfig struct {
 	Version string
 	Env     map[string]string
 	RunID   string
+
+	// Fields from the service definition (populated by caller from deps registry)
+	Image        string         // Base image name (e.g., "postgres")
+	Ports        map[string]int // Named ports (e.g., "default" -> 5432)
+	PasswordEnv  string         // Env var containing the password (e.g., "POSTGRES_PASSWORD")
+	ExtraCmd     []string       // Extra command args with {placeholder} substitution
+	ReadinessCmd string         // Command to check if service is ready
 }
 
 // ServiceInfo contains connection details for a started service.
 type ServiceInfo struct {
-	ID    string
-	Name  string
-	Host  string
-	Ports map[string]int
-	Env   map[string]string
+	ID           string
+	Name         string
+	Host         string
+	Ports        map[string]int
+	Env          map[string]string
+	ReadinessCmd string // Command to check if service is ready
+	PasswordEnv  string // Env var name containing the password
 }
 
 // BuildManager handles image building operations.
@@ -247,6 +256,12 @@ type SidecarConfig struct {
 	// RunID is the moat run ID this sidecar belongs to
 	// Used for orphan cleanup if moat crashes
 	RunID string
+
+	// Env is environment variables for the container
+	Env []string
+
+	// Labels are container labels (merged with defaults)
+	Labels map[string]string
 }
 
 // MountConfig describes a volume mount.
