@@ -88,7 +88,6 @@ func TestDockerRuntime_GVisorCaching(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	ctx := context.Background()
 	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
@@ -96,10 +95,10 @@ func TestDockerRuntime_GVisorCaching(t *testing.T) {
 	defer rt.Close()
 
 	// First call - should check and cache
-	result1 := rt.gvisorAvailable(ctx)
+	result1 := rt.gvisorAvailable()
 
 	// Second call - should use cached result
-	result2 := rt.gvisorAvailable(ctx)
+	result2 := rt.gvisorAvailable()
 
 	// Results should be consistent
 	if result1 != result2 {
@@ -117,7 +116,6 @@ func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	ctx := context.Background()
 	rt, err := NewDockerRuntime(false)
 	if err != nil {
 		t.Fatalf("failed to create runtime: %v", err)
@@ -133,7 +131,7 @@ func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = rt.gvisorAvailable(ctx)
+			results[idx] = rt.gvisorAvailable()
 		}(i)
 	}
 	wg.Wait()

@@ -105,10 +105,7 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 		// Leave ociRuntime empty to use Docker's default (usually runc)
 	} else {
 		// Verify gVisor is available using cached check
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if !r.gvisorAvailable(ctx) {
+		if !r.gvisorAvailable() {
 			cli.Close()
 			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
 		}
@@ -154,7 +151,7 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Verify gVisor is still available if we're configured to use it
-	if r.ociRuntime == "runsc" && !r.gvisorAvailable(ctx) {
+	if r.ociRuntime == "runsc" && !r.gvisorAvailable() {
 		return "", fmt.Errorf("gVisor was available at startup but is no longer configured - did Docker daemon configuration change? %w", ErrGVisorNotAvailable)
 	}
 
@@ -372,10 +369,10 @@ func (r *DockerRuntime) Close() error {
 // is temporarily unreachable during the first check, gVisor will be cached as unavailable
 // for the lifetime of this runtime. This is acceptable because runtime instances are
 // typically short-lived (one per moat run).
-func (r *DockerRuntime) gvisorAvailable(ctx context.Context) bool {
+func (r *DockerRuntime) gvisorAvailable() bool {
 	r.gvisorOnce.Do(func() {
 		// Use background context for the check since the result is cached permanently.
-		// This avoids issues with cancelled/expired contexts from concurrent callers.
+		// This avoids issues with canceled/expired contexts from concurrent callers.
 		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
