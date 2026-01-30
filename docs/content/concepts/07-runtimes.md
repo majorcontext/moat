@@ -174,7 +174,21 @@ When using `docker:dind` dependencies, Moat creates an isolated Docker daemon wi
 
 **Note on gVisor compatibility:** BuildKit sidecars inherit the main container's OCI runtime (gVisor or standard). While BuildKit is expected to work with gVisor, this combination has not been extensively tested in production. If you encounter issues with BuildKit builds on Linux, try `--no-sandbox` to use the standard runtime.
 
-**Fallback chain:**
+### BuildKit for optimized builds
+
+Moat uses BuildKit for fast builds with layer caching. BuildKit is included by default in:
+- Docker Desktop 20.10+ (macOS, Windows)
+- Docker Engine 23.0+ with buildx plugin
+
+Most users won't need additional setup. If builds fail with BuildKit errors on older Docker installations, install buildx: https://docs.docker.com/buildx/working-with-buildx/
+
+For environments where BuildKit is unavailable (e.g., restricted CI), disable it:
+```bash
+export MOAT_DISABLE_BUILDKIT=1
+```
+Note: This uses the legacy builder which is slower and doesn't cache build layers.
+
+**Build path fallback chain:**
 1. Try BuildKit sidecar (dind mode only)
 2. Fall back to host BuildKit (if `BUILDKIT_HOST` is set)
 3. Fall back to Docker SDK with BuildKit

@@ -931,7 +931,7 @@ func (m *dockerBuildManager) BuildImage(ctx context.Context, dockerfile string, 
 		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
 		return m.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
 	}
-	// Otherwise use Docker SDK (will use legacy builder by default for reliability)
+	// Otherwise use Docker SDK (will use BuildKit by default, unless MOAT_DISABLE_BUILDKIT=1)
 	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
 	return m.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
 }
@@ -988,6 +988,49 @@ func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerf
 
 // buildImageWithDockerSDK builds an image using the Docker SDK.
 func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	// Determine platform based on host architecture
+	platform := "linux/amd64"
+	if goruntime.GOARCH == "arm64" {
+		platform = "linux/arm64"
+	}
+
+	// Use BuildKit by default for faster builds, but allow opting out via MOAT_DISABLE_BUILDKIT=1
+	// for environments where Docker SDK's BuildKit integration has issues (e.g., some Docker Desktop configs).
+	builderVersion := build.BuilderBuildKit
+	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
+		builderVersion = build.BuilderV1
+	}
+
+	// Try building with the selected builder
+	err := m.buildImageWithBuilder(ctx, dockerfile, tag, platform, builderVersion, opts)
+
+	// If BuildKit fails, provide helpful error message with clear resolution steps.
+	// The error will occur quickly (usually within seconds) when BuildKit isn't available.
+	if err != nil && builderVersion == build.BuilderBuildKit {
+		errMsg := err.Error()
+
+		// "no active sessions": BuildKit not installed/available
+		// "mount option requires BuildKit": Dockerfile has BuildKit syntax but builder doesn't support it
+		if strings.Contains(errMsg, "no active sessions") ||
+			strings.Contains(errMsg, "mount option requires BuildKit") {
+			return fmt.Errorf(`BuildKit not available.
+
+Recommended: Install Docker buildx (included in Docker Desktop 20.10+)
+  https://docs.docker.com/buildx/working-with-buildx/
+
+Alternative: Use legacy builder (slower, no layer caching):
+  export MOAT_DISABLE_BUILDKIT=1
+  moat run ...
+
+Original error: %w`, err)
+		}
+	}
+
+	return err
+}
+
+// buildImageWithBuilder performs the actual image build with the specified builder.
+func (m *dockerBuildManager) buildImageWithBuilder(ctx context.Context, dockerfile string, tag string, platform string, builderVersion build.BuilderVersion, opts BuildOptions) error {
 	// Create a tar archive with the Dockerfile
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -1025,19 +1068,6 @@ func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, docker
 	}
 
 	output.BuildingImage(tag)
-
-	// Determine platform based on host architecture
-	platform := "linux/amd64"
-	if goruntime.GOARCH == "arm64" {
-		platform = "linux/arm64"
-	}
-
-	// Use BuildKit by default for faster builds, but allow opting out via MOAT_DISABLE_BUILDKIT=1
-	// for environments where Docker SDK's BuildKit integration has issues (e.g., some Docker Desktop configs).
-	builderVersion := build.BuilderBuildKit
-	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
-		builderVersion = build.BuilderV1
-	}
 
 	// Build the image
 	resp, err := m.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
