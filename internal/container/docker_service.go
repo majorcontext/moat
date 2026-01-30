@@ -18,6 +18,11 @@ type dockerServiceManager struct {
 	networkID string
 }
 
+// SetNetworkID sets the Docker network for service containers.
+func (m *dockerServiceManager) SetNetworkID(id string) {
+	m.networkID = id
+}
+
 // StartService provisions a service container.
 func (m *dockerServiceManager) StartService(ctx context.Context, cfg ServiceConfig) (ServiceInfo, error) {
 	if cfg.Image == "" {
