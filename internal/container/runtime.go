@@ -73,6 +73,10 @@ type Runtime interface {
 	// Both Docker and Apple provide this.
 	BuildManager() BuildManager
 
+	// ServiceManager returns the service manager if supported, nil otherwise.
+	// Docker provides this, Apple containers return nil.
+	ServiceManager() ServiceManager
+
 	// Close releases runtime resources.
 	Close() error
 
@@ -142,6 +146,31 @@ type InspectResponse struct {
 // State holds container execution state.
 type State struct {
 	Running bool
+}
+
+// ServiceManager provisions services (databases, caches, etc).
+// Returned by Runtime.ServiceManager() - nil if not supported.
+type ServiceManager interface {
+	StartService(ctx context.Context, cfg ServiceConfig) (ServiceInfo, error)
+	CheckReady(ctx context.Context, info ServiceInfo) error
+	StopService(ctx context.Context, info ServiceInfo) error
+}
+
+// ServiceConfig defines what service to provision.
+type ServiceConfig struct {
+	Name    string
+	Version string
+	Env     map[string]string
+	RunID   string
+}
+
+// ServiceInfo contains connection details for a started service.
+type ServiceInfo struct {
+	ID    string
+	Name  string
+	Host  string
+	Ports map[string]int
+	Env   map[string]string
 }
 
 // BuildManager handles image building operations.
