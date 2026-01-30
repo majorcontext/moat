@@ -36,6 +36,7 @@ type Config struct {
 
 	Container ContainerConfig   `yaml:"container,omitempty"`
 	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
+	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
 
 	// Deprecated: use Dependencies instead
 	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
@@ -77,6 +78,35 @@ type MCPServerConfig struct {
 type MCPAuthConfig struct {
 	Grant  string `yaml:"grant"`
 	Header string `yaml:"header"`
+}
+
+// ServiceSpec allows customizing service behavior.
+type ServiceSpec struct {
+	Env   map[string]string `yaml:"env,omitempty"`
+	Image string            `yaml:"image,omitempty"`
+	Wait  *bool             `yaml:"wait,omitempty"`
+}
+
+// ServiceWait returns whether to wait for this service to be ready (default: true).
+func (s ServiceSpec) ServiceWait() bool {
+	if s.Wait == nil {
+		return true
+	}
+	return *s.Wait
+}
+
+// ValidateServices checks that services: keys correspond to declared service dependencies.
+func (c *Config) ValidateServices(serviceNames []string) error {
+	nameSet := make(map[string]bool, len(serviceNames))
+	for _, n := range serviceNames {
+		nameSet[n] = true
+	}
+	for name := range c.Services {
+		if !nameSet[name] {
+			return fmt.Errorf("services.%s configured but %s not declared in dependencies\n\nAdd to dependencies:\n  dependencies:\n    - %s", name, name, name)
+		}
+	}
+	return nil
 }
 
 // NetworkConfig configures network access policies for the agent.
