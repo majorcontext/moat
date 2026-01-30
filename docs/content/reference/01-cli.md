@@ -819,3 +819,44 @@ List moat containers.
 ```
 moat system containers
 ```
+
+### moat system clean-temp
+
+Clean up orphaned temporary directories.
+
+```
+moat system clean-temp [flags]
+```
+
+Moat creates temporary directories in `/tmp` for AWS credentials, Claude configuration, and Codex configuration. These are normally cleaned up when a run completes, but may accumulate if moat crashes.
+
+This command scans for and removes temporary directories matching these patterns:
+- `agentops-aws-*` - AWS credential helper directories
+- `moat-claude-staging-*` - Claude configuration staging directories
+- `moat-codex-staging-*` - Codex configuration staging directories
+
+Only directories older than `--min-age` are removed.
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--min-age DURATION` | Minimum age of temp directories to clean (default: 1h) |
+| `--dry-run` | Show what would be cleaned without removing anything |
+| `-f`, `--force` | Skip confirmation prompt |
+
+#### Examples
+
+```bash
+# Show orphaned temp directories (dry run)
+moat system clean-temp --dry-run
+
+# Clean directories older than 24 hours
+moat system clean-temp --min-age=24h
+
+# Clean with automatic confirmation
+moat system clean-temp --force
+
+# Clean directories older than 1 week
+moat system clean-temp --min-age=168h
+```
