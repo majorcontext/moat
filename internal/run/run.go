@@ -95,6 +95,9 @@ type Run struct {
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string
 	NetworkID           string
+
+	// ServiceContainers maps service name to container ID (e.g., "postgres" -> "abc123").
+	ServiceContainers map[string]string
 }
 
 // Options configures a new run.
@@ -136,6 +139,7 @@ func (r *Run) SaveMetadata() error {
 		Error:               r.Error,
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
+		ServiceContainers:   r.ServiceContainers,
 	})
 }
 

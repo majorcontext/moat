@@ -154,6 +154,7 @@ type ServiceManager interface {
 	StartService(ctx context.Context, cfg ServiceConfig) (ServiceInfo, error)
 	CheckReady(ctx context.Context, info ServiceInfo) error
 	StopService(ctx context.Context, info ServiceInfo) error
+	SetNetworkID(id string)
 }
 
 // ServiceConfig defines what service to provision.

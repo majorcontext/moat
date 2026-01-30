@@ -878,6 +878,10 @@ region = %s
 		}
 	}
 
+	// Split dependencies into installable and services
+	serviceDeps := deps.FilterServices(depList)
+	installableDeps := deps.FilterInstallable(depList)
+
 	// Resolve docker dependency if present
 	// This validates that Apple containers are not used with docker:host dependency,
 	// and returns the appropriate config for the mode (socket mount for host, privileged for dind).
@@ -1034,7 +1038,7 @@ region = %s
 
 	// Resolve container image based on dependencies, SSH grants, init needs, and plugins
 	hasSSHGrants := len(sshGrants) > 0
-	containerImage := image.Resolve(depList, &image.ResolveOptions{
+	containerImage := image.Resolve(installableDeps, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
 		NeedsClaudeInit: needsClaudeInit,
 		NeedsCodexInit:  needsCodexInit,
@@ -1042,7 +1046,7 @@ region = %s
 	})
 
 	// Determine if we need a custom image
-	needsCustomImage := len(depList) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1063,7 +1067,7 @@ region = %s
 		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
 
 		// Always generate the Dockerfile so we can save it to the run directory
-		result, err := deps.GenerateDockerfile(depList, &deps.DockerfileOptions{
+		result, err := deps.GenerateDockerfile(installableDeps, &deps.DockerfileOptions{
 			NeedsSSH:           hasSSHGrants,
 			SSHHosts:           sshGrants,
 			NeedsClaudeInit:    needsClaudeInit,
@@ -1085,8 +1089,8 @@ region = %s
 		}
 
 		if !exists {
-			depNames := make([]string, len(depList))
-			for i, d := range depList {
+			depNames := make([]string, len(installableDeps))
+			for i, d := range installableDeps {
 				depNames[i] = d.Name
 			}
 
@@ -1499,6 +1503,148 @@ region = %s
 		networkMode = networkID
 	}
 
+	// Start service dependencies
+	if len(serviceDeps) > 0 {
+		svcMgr := m.runtime.ServiceManager()
+		if svcMgr == nil {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupClaude(claudeGenerated)
+			cleanupCodex(codexGenerated)
+			return nil, fmt.Errorf("service dependencies require Docker runtime\n" +
+				"Apple containers don't support service dependencies\n\n" +
+				"Either:\n  - Use Docker runtime\n  - Install services on your host and set MOAT_*_URL manually")
+		}
+
+		// Validate services config
+		if opts.Config != nil {
+			serviceNames := make([]string, len(serviceDeps))
+			for i, d := range serviceDeps {
+				serviceNames[i] = d.Name
+			}
+			if err := opts.Config.ValidateServices(serviceNames); err != nil {
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, err
+			}
+		}
+
+		// Ensure network exists (share with BuildKit if present)
+		if networkID == "" {
+			netMgr := m.runtime.NetworkManager()
+			if netMgr == nil {
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, fmt.Errorf("service dependencies require network support")
+			}
+			networkName := fmt.Sprintf("moat-%s", r.ID)
+			var netErr error
+			networkID, netErr = netMgr.CreateNetwork(ctx, networkName)
+			if netErr != nil {
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, fmt.Errorf("creating service network: %w", netErr)
+			}
+			r.NetworkID = networkID
+		}
+
+		// Set network on service manager
+		svcMgr.SetNetworkID(networkID)
+
+		// Start services
+		r.ServiceContainers = make(map[string]string)
+		var serviceInfos []container.ServiceInfo
+
+		cleanupServices := func() {
+			for _, info := range serviceInfos {
+				_ = svcMgr.StopService(ctx, info)
+			}
+		}
+
+		for _, dep := range serviceDeps {
+			var userSpec *config.ServiceSpec
+			if opts.Config != nil {
+				if s, ok := opts.Config.Services[dep.Name]; ok {
+					userSpec = &s
+				}
+			}
+
+			svcCfg, err := buildServiceConfig(dep, r.ID, userSpec)
+			if err != nil {
+				cleanupServices()
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
+			}
+
+			info, err := svcMgr.StartService(ctx, svcCfg)
+			if err != nil {
+				cleanupServices()
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, fmt.Errorf("starting %s service: %w", dep.Name, err)
+			}
+
+			serviceInfos = append(serviceInfos, info)
+			r.ServiceContainers[dep.Name] = info.ID
+		}
+
+		// Wait for readiness
+		for i, dep := range serviceDeps {
+			wait := true
+			if opts.Config != nil {
+				if s, ok := opts.Config.Services[dep.Name]; ok {
+					wait = s.ServiceWait()
+				}
+			}
+			if !wait {
+				continue
+			}
+
+			info := serviceInfos[i]
+			log.Debug("waiting for service to be ready", "service", dep.Name)
+			if err := waitForServiceReady(ctx, svcMgr, info); err != nil {
+				cleanupServices()
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupClaude(claudeGenerated)
+				cleanupCodex(codexGenerated)
+				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
+					"Service container logs:\n  moat logs %s --service %s\n\n"+
+					"Or disable wait:\n  services:\n    %s:\n      wait: false",
+					dep.Name, err, r.ID, dep.Name, dep.Name)
+			}
+		}
+
+		// Inject MOAT_* env vars
+		for i, dep := range serviceDeps {
+			spec, _ := deps.GetSpec(dep.Name)
+			var userSpec *config.ServiceSpec
+			if opts.Config != nil {
+				if s, ok := opts.Config.Services[dep.Name]; ok {
+					userSpec = &s
+				}
+			}
+			svcEnv := generateServiceEnv(spec.Service, serviceInfos[i], userSpec)
+			for k, v := range svcEnv {
+				proxyEnv = append(proxyEnv, k+"="+v)
+			}
+		}
+
+		// Use network for main container
+		networkMode = networkID
+	}
+
 	// Add BuildKit env vars if enabled
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
@@ -1898,7 +2044,21 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.SetState(StateStopping)
 	buildkitContainerID := r.BuildkitContainerID
 	networkID := r.NetworkID
+	serviceContainers := r.ServiceContainers
 	m.mu.Unlock()
+
+	// Stop service containers
+	if len(serviceContainers) > 0 {
+		svcMgr := m.runtime.ServiceManager()
+		if svcMgr != nil {
+			for svcName, containerID := range serviceContainers {
+				log.Debug("stopping service", "service", svcName, "container_id", containerID)
+				if err := svcMgr.StopService(ctx, container.ServiceInfo{ID: containerID}); err != nil {
+					log.Warn("failed to stop service", "service", svcName, "error", err)
+				}
+			}
+		}
+	}
 
 	// Stop BuildKit sidecar if present (before main container)
 	if buildkitContainerID != "" {
@@ -2240,6 +2400,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	// Remove container
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	// Remove service containers
+	for svcName, svcContainerID := range r.ServiceContainers {
+		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: removing %s service container: %v\n", svcName, err)
+		}
 	}
 
 	// Remove BuildKit sidecar container if present
