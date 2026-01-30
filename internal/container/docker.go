@@ -136,7 +136,11 @@ func (r *DockerRuntime) BuildManager() BuildManager {
 
 // ServiceManager returns the Docker service manager for database/cache sidecars.
 func (r *DockerRuntime) ServiceManager() ServiceManager {
-	return nil // TODO: implement in next task
+	return &dockerServiceManager{
+		sidecar: r.SidecarManager(),
+		network: r.NetworkManager(),
+		cli:     r.cli,
+	}
 }
 
 // Type returns RuntimeDocker.
@@ -818,7 +822,10 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 	labels := make(map[string]string)
 	if cfg.RunID != "" {
 		labels["moat.run-id"] = cfg.RunID
-		labels["moat.role"] = "buildkit-sidecar"
+		labels["moat.role"] = "buildkit-sidecar" // default, can be overridden
+	}
+	for k, v := range cfg.Labels {
+		labels[k] = v
 	}
 
 	resp, err := m.cli.ContainerCreate(ctx,
@@ -827,6 +834,7 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 			Cmd:      cfg.Cmd,
 			Hostname: cfg.Hostname,
 			Labels:   labels,
+			Env:      cfg.Env,
 		},
 		&container.HostConfig{
 			Runtime:     m.ociRuntime, // Use same OCI runtime as main container
