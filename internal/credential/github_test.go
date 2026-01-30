@@ -30,11 +30,18 @@ func TestGitHubSetup_ContainerEnv(t *testing.T) {
 	cred := &Credential{Token: "test-token"}
 
 	env := setup.ContainerEnv(cred)
-	if len(env) != 1 {
-		t.Fatalf("ContainerEnv() returned %d vars, want 1", len(env))
+	if len(env) != 2 {
+		t.Fatalf("ContainerEnv() returned %d vars, want 2", len(env))
 	}
-	if env[0] != "GH_TOKEN=moat-proxy-injected" {
-		t.Errorf("ContainerEnv()[0] = %q, want %q", env[0], "GH_TOKEN=moat-proxy-injected")
+
+	expectedGHToken := "GH_TOKEN=" + GitHubTokenPlaceholder
+	if env[0] != expectedGHToken {
+		t.Errorf("ContainerEnv()[0] = %q, want %q", env[0], expectedGHToken)
+	}
+
+	expectedGitPrompt := "GIT_TERMINAL_PROMPT=0"
+	if env[1] != expectedGitPrompt {
+		t.Errorf("ContainerEnv()[1] = %q, want %q", env[1], expectedGitPrompt)
 	}
 }
 

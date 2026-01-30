@@ -1,6 +1,9 @@
 package credential
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/container"
@@ -150,6 +153,82 @@ func TestImpliedDependencies(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGenerateIDTokenPlaceholder(t *testing.T) {
+	token := GenerateIDTokenPlaceholder("test-account-123")
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+
+	// Verify header
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decoding header: %v", err)
+	}
+	var header map[string]string
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatalf("unmarshaling header: %v", err)
+	}
+	if header["alg"] != "RS256" || header["typ"] != "JWT" {
+		t.Errorf("header = %v, want alg=RS256, typ=JWT", header)
+	}
+
+	// Verify payload contains account_id
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		t.Fatalf("unmarshaling payload: %v", err)
+	}
+	auth, ok := payload["https://api.openai.com/auth"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing https://api.openai.com/auth claim")
+	}
+	if auth["chatgpt_account_id"] != "test-account-123" {
+		t.Errorf("chatgpt_account_id = %v, want test-account-123", auth["chatgpt_account_id"])
+	}
+}
+
+func TestGenerateAccessTokenPlaceholder(t *testing.T) {
+	token := GenerateAccessTokenPlaceholder("acct-456")
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		t.Fatalf("unmarshaling payload: %v", err)
+	}
+
+	// Verify client_id
+	if payload["client_id"] != codexCLIClientID {
+		t.Errorf("client_id = %v, want %v", payload["client_id"], codexCLIClientID)
+	}
+
+	// Verify account_id in auth claims
+	auth, ok := payload["https://api.openai.com/auth"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing https://api.openai.com/auth claim")
+	}
+	if auth["chatgpt_account_id"] != "acct-456" {
+		t.Errorf("chatgpt_account_id = %v, want acct-456", auth["chatgpt_account_id"])
+	}
+
+	// Verify issuer
+	if payload["iss"] != "https://auth.openai.com" {
+		t.Errorf("iss = %v, want https://auth.openai.com", payload["iss"])
 	}
 }
 
