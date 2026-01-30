@@ -19,6 +19,14 @@ version: 1.0.0
 # Runtime
 dependencies:
   - node@20
+  - postgres@17
+  - redis@7
+
+# Service overrides
+services:
+  postgres:
+    env:
+      POSTGRES_DB: myapp
 
 # Credentials
 grants:
@@ -177,6 +185,27 @@ dependencies:
 | `go@1.21` | `golang:1.21` |
 | `go@1.22` | `golang:1.22` |
 | (none) | `ubuntu:22.04` |
+
+#### Service dependencies
+
+Service dependencies start sidecar containers that run alongside your agent. Moat generates credentials automatically and injects connection details as environment variables.
+
+```yaml
+dependencies:
+  - node@20
+  - postgres@17
+  - redis@7
+```
+
+| Dependency | Service | Default port |
+|------------|---------|-------------|
+| `postgres@16` | PostgreSQL 16 | 5432 |
+| `postgres@17` | PostgreSQL 17 | 5432 |
+| `mysql@8` | MySQL 8 | 3306 |
+| `mysql@9` | MySQL 9 | 3306 |
+| `redis@7` | Redis 7 | 6379 |
+
+Each service injects `MOAT_*` environment variables into the main container. See [Service environment variables](#service-environment-variables) for the full list.
 
 #### docker
 
@@ -522,6 +551,77 @@ sandbox: none
 Setting `sandbox: none` is equivalent to running with `--no-sandbox`. Use this when your agent requires syscalls that gVisor doesn't support.
 
 **Note:** Disabling the sandbox reduces isolation. Only use when necessary for compatibility.
+
+---
+
+## Service dependencies
+
+### services
+
+Customize service behavior for dependencies declared in `dependencies:`.
+
+```yaml
+dependencies:
+  - postgres@17
+  - redis@7
+
+services:
+  postgres:
+    env:
+      POSTGRES_PASSWORD: op://vault/postgres/password
+      POSTGRES_DB: myapp
+    wait: false
+```
+
+- Type: `map[string]object`
+- Default: `{}`
+
+Each key matches a service name from `dependencies:` (e.g., `postgres`, `mysql`, `redis`).
+
+#### Service fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `env` | `map[string]string` | `{}` | Environment variables for the service container. Supports secret references. |
+| `image` | `string` | (auto) | Override default image (Docker runtime only) |
+| `wait` | `boolean` | `true` | Block main container start until service is ready |
+
+Setting `wait: false` starts the main container without waiting for the service health check to pass.
+
+### Service environment variables
+
+Moat injects `MOAT_*` environment variables into the main container for each service dependency. Credentials are auto-generated per run.
+
+#### Postgres
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MOAT_POSTGRES_URL` | Full connection URL | `postgres://postgres:pass@host:5432/postgres` |
+| `MOAT_POSTGRES_HOST` | Hostname | `postgres` |
+| `MOAT_POSTGRES_PORT` | Port | `5432` |
+| `MOAT_POSTGRES_USER` | Username | `postgres` |
+| `MOAT_POSTGRES_PASSWORD` | Auto-generated password | |
+| `MOAT_POSTGRES_DB` | Database name | `postgres` |
+
+#### MySQL
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MOAT_MYSQL_URL` | Full connection URL | `mysql://root:pass@host:3306/mysql` |
+| `MOAT_MYSQL_HOST` | Hostname | `mysql` |
+| `MOAT_MYSQL_PORT` | Port | `3306` |
+| `MOAT_MYSQL_USER` | Username | `root` |
+| `MOAT_MYSQL_PASSWORD` | Auto-generated password | |
+| `MOAT_MYSQL_DB` | Database name | `mysql` |
+
+#### Redis
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MOAT_REDIS_URL` | Full connection URL | `redis://:pass@host:6379` |
+| `MOAT_REDIS_HOST` | Hostname | `redis` |
+| `MOAT_REDIS_PORT` | Port | `6379` |
+| `MOAT_REDIS_PASSWORD` | Auto-generated password | |
 
 ---
 
