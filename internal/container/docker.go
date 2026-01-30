@@ -374,10 +374,14 @@ func (r *DockerRuntime) Close() error {
 // typically short-lived (one per moat run).
 func (r *DockerRuntime) gvisorAvailable(ctx context.Context) bool {
 	r.gvisorOnce.Do(func() {
-		// Check gVisor availability using the runtime's existing client
-		info, err := r.cli.Info(ctx)
+		// Use background context for the check since the result is cached permanently.
+		// This avoids issues with cancelled/expired contexts from concurrent callers.
+		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		info, err := r.cli.Info(checkCtx)
 		if err != nil {
-			log.Warn("gVisor availability check failed - caching as unavailable", "error", err)
+			log.Error("gVisor availability check failed - caching as unavailable", "error", err)
 			r.gvisorAvail = false
 			return
 		}
@@ -388,7 +392,6 @@ func (r *DockerRuntime) gvisorAvailable(ctx context.Context) bool {
 				return
 			}
 		}
-		// If we get here, runsc was not found
 		r.gvisorAvail = false
 	})
 	return r.gvisorAvail
