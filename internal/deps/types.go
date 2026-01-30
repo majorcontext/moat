@@ -14,6 +14,7 @@ const (
 	TypeMeta         InstallType = "meta"
 	TypeUvTool       InstallType = "uv-tool" // Tools installed via uv tool install
 	TypeDocker       InstallType = "docker"  // Docker access via socket mounting or DinD
+	TypeService      InstallType = "service" // Service dependencies (databases, caches)
 
 	// Dynamic types (parsed from prefixes like npm:eslint)
 	TypeDynamicNpm   InstallType = "dynamic-npm"   // npm:package
@@ -84,10 +85,29 @@ type DepSpec struct {
 	// For go-install type
 	GoPackage string `yaml:"go-package,omitempty"`
 
+	// For service type
+	Service *ServiceDef `yaml:"service,omitempty"`
+
 	// UserInstall indicates the dependency should be installed as the container
 	// user (moatuser) instead of root. This is needed for tools whose installers
 	// write to $HOME (e.g., claude-code's native installer).
 	UserInstall bool `yaml:"user-install,omitempty"`
+}
+
+// ServiceDef holds metadata for service-type dependencies (databases, caches).
+// Parsed from the `service:` block in registry.yaml entries.
+type ServiceDef struct {
+	Image        string            `yaml:"image"`
+	Ports        map[string]int    `yaml:"ports"`
+	EnvPrefix    string            `yaml:"env_prefix"`
+	DefaultUser  string            `yaml:"default_user,omitempty"`
+	DefaultDB    string            `yaml:"default_db,omitempty"`
+	PasswordEnv  string            `yaml:"password_env,omitempty"`
+	ExtraEnv     map[string]string `yaml:"extra_env,omitempty"`
+	ExtraCmd     []string          `yaml:"extra_cmd,omitempty"`
+	ReadinessCmd string            `yaml:"readiness_cmd"`
+	URLScheme    string            `yaml:"url_scheme"`
+	URLFormat    string            `yaml:"url_format"`
 }
 
 // Dependency represents a parsed dependency from agent.yaml.

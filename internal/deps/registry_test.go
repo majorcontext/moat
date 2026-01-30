@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegistryLoaded(t *testing.T) {
@@ -53,6 +56,17 @@ func TestRegistryHasPlaywright(t *testing.T) {
 	if len(pw.Requires) == 0 || pw.Requires[0] != "node" {
 		t.Errorf("playwright.Requires = %v, want [node]", pw.Requires)
 	}
+}
+
+func TestServiceDepSpec(t *testing.T) {
+	spec, ok := GetSpec("postgres")
+	require.True(t, ok)
+	assert.Equal(t, TypeService, spec.Type)
+	assert.NotNil(t, spec.Service)
+	assert.Equal(t, "postgres", spec.Service.Image)
+	assert.Equal(t, 5432, spec.Service.Ports["default"])
+	assert.Equal(t, "POSTGRES", spec.Service.EnvPrefix)
+	assert.Equal(t, "pg_isready -h localhost -U postgres", spec.Service.ReadinessCmd)
 }
 
 // TestRegistryGithubBinaryPlaceholders validates that all github-binary entries
