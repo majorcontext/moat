@@ -60,6 +60,7 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 
 	runtimeType := manager.RuntimeType()
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
+	bar.SetGrants(r.Grants)
 	bar.SetDimensions(width, height)
 	writer = tui.NewWriter(os.Stdout, bar, runtimeType)
 

@@ -394,14 +394,21 @@ func (w *Writer) renderLoop(ticker *time.Ticker, stop chan struct{}) {
 	}
 }
 
-// stopRenderLoop stops the render ticker and goroutine.
+// stopRenderLoop stops the render ticker and goroutine. Safe to call
+// multiple times — guards against double-close if Cleanup races with
+// exitCompositorLocked (e.g., process kill during alt screen).
 func (w *Writer) stopRenderLoop() {
 	if w.renderTicker != nil {
 		w.renderTicker.Stop()
 		w.renderTicker = nil
 	}
 	if w.stopRender != nil {
-		close(w.stopRender)
+		select {
+		case <-w.stopRender:
+			// Already closed
+		default:
+			close(w.stopRender)
+		}
 		w.stopRender = nil
 	}
 }
@@ -410,6 +417,8 @@ func (w *Writer) stopRenderLoop() {
 // Each row is positioned absolutely to avoid DECSTBM scroll interactions.
 // Caller must hold the mutex.
 func (w *Writer) renderCompositorLocked() {
+	// Defensive: the render loop goroutine may fire between
+	// exitCompositorLocked setting altScreen=false and clearing the emulator.
 	if w.emulator == nil {
 		return
 	}

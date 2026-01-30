@@ -587,6 +587,64 @@ func TestWriter_DirtyFlag(t *testing.T) {
 	w.Cleanup()
 }
 
+func TestWriter_RapidModeSwitch(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Enter/exit alt screen 10 times rapidly
+	for i := 0; i < 10; i++ {
+		_, err := w.Write([]byte("\x1b[?1049h"))
+		if err != nil {
+			t.Fatalf("enter iteration %d: %v", i, err)
+		}
+
+		w.mu.Lock()
+		if !w.altScreen {
+			w.mu.Unlock()
+			t.Fatalf("expected altScreen=true at iteration %d", i)
+		}
+		if w.emulator == nil {
+			w.mu.Unlock()
+			t.Fatalf("expected emulator at iteration %d", i)
+		}
+		w.mu.Unlock()
+
+		_, err = w.Write([]byte("\x1b[?1049l"))
+		if err != nil {
+			t.Fatalf("exit iteration %d: %v", i, err)
+		}
+
+		w.mu.Lock()
+		if w.altScreen {
+			w.mu.Unlock()
+			t.Fatalf("expected altScreen=false at iteration %d", i)
+		}
+		if w.emulator != nil {
+			w.mu.Unlock()
+			t.Fatalf("expected emulator=nil at iteration %d", i)
+		}
+		w.mu.Unlock()
+	}
+
+	// Final state should be scroll mode with no leaked goroutines
+	w.mu.Lock()
+	hasRenderTicker := w.renderTicker != nil
+	hasStopRender := w.stopRender != nil
+	w.mu.Unlock()
+
+	if hasRenderTicker {
+		t.Error("expected renderTicker=nil after all exits")
+	}
+	if hasStopRender {
+		t.Error("expected stopRender=nil after all exits")
+	}
+}
+
 func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
