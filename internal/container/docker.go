@@ -134,6 +134,11 @@ func (r *DockerRuntime) BuildManager() BuildManager {
 	return r.buildMgr
 }
 
+// ServiceManager returns the Docker service manager for database/cache sidecars.
+func (r *DockerRuntime) ServiceManager() ServiceManager {
+	return nil // TODO: implement in next task
+}
+
 // Type returns RuntimeDocker.
 func (r *DockerRuntime) Type() RuntimeType {
 	return RuntimeDocker

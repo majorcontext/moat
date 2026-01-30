@@ -67,6 +67,11 @@ func (r *AppleRuntime) SidecarManager() SidecarManager {
 	return nil
 }
 
+// ServiceManager returns nil - Apple containers don't support service dependencies.
+func (r *AppleRuntime) ServiceManager() ServiceManager {
+	return nil
+}
+
 // BuildManager returns the Apple build manager.
 func (r *AppleRuntime) BuildManager() BuildManager {
 	return r.buildMgr
