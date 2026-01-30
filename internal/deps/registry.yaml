@@ -108,7 +108,7 @@ golangci-lint:
   repo: golangci/golangci-lint
   asset: "golangci-lint-{version}-linux-{arch}.tar.gz"
   bin: "golangci-lint-{version}-linux-{arch}/golangci-lint"
-  default: "1.55.2"
+  default: "2.8.0"
   targets:
     amd64: amd64
     arm64: arm64
@@ -189,7 +189,7 @@ gofumpt:
   repo: mvdan/gofumpt
   asset: "gofumpt_v{version}_linux_{arch}"
   bin: "gofumpt_v{version}_linux_{arch}"
-  default: "0.7.0"
+  default: "0.9.2"
   requires: [go]
   targets:
     amd64: amd64
@@ -207,7 +207,7 @@ goreleaser:
   repo: goreleaser/goreleaser
   asset: "goreleaser_Linux_{arch}.tar.gz"
   bin: goreleaser
-  default: "2.5.0"
+  default: "2.13.3"
   targets:
     amd64: x86_64
     arm64: arm64
