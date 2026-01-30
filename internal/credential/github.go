@@ -24,13 +24,22 @@ func (g *GitHubSetup) ConfigureProxy(p ProxyConfigurer, cred *Credential) {
 }
 
 // ContainerEnv returns environment variables for GitHub.
-// Sets GH_TOKEN so the gh CLI works without needing hosts.yml authentication.
-// The actual token value is a stub - the proxy replaces it at the network layer.
+//
+// GH_TOKEN: Used by gh CLI for API authentication. We set a format-valid placeholder
+// (ghp_...) that passes gh CLI's local validation. The proxy intercepts HTTPS requests
+// and injects the real token via Authorization headers.
+//
+// GIT_TERMINAL_PROMPT: Set to 0 to disable interactive credential prompts from git.
+// Note that git does NOT use GH_TOKEN - it needs separate credential configuration
+// (like gh as a credential helper). This setting prevents git from prompting users
+// for credentials when accessing GitHub HTTPS remotes, which would fail anyway since
+// the container doesn't have stored credentials. Git operations that need credentials
+// will fail silently instead of blocking on a prompt.
 func (g *GitHubSetup) ContainerEnv(cred *Credential) []string {
-	// GH_TOKEN is checked by gh CLI before making API requests.
-	// We set a stub value here - the TLS-intercepting proxy will replace
-	// the Authorization header with the real token for github.com requests.
-	return []string{"GH_TOKEN=moat-proxy-injected"}
+	return []string{
+		"GH_TOKEN=" + GitHubTokenPlaceholder,
+		"GIT_TERMINAL_PROMPT=0",
+	}
 }
 
 // ContainerMounts returns mounts for GitHub.

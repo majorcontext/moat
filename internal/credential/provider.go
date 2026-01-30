@@ -2,6 +2,8 @@
 package credential
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"time"
 
 	"github.com/majorcontext/moat/internal/container"
@@ -19,6 +21,99 @@ const ProxyInjectedPlaceholder = "moat-proxy-injected"
 // Using a valid-looking placeholder bypasses these checks while still allowing
 // the proxy to inject the real key at the network layer.
 const OpenAIAPIKeyPlaceholder = "sk-moat-proxy-injected-placeholder-0000000000000000000000000000000000000000"
+
+// GitHubTokenPlaceholder is a placeholder that looks like a valid GitHub personal access token.
+//
+// The gh CLI validates token format locally before making requests. Real GitHub PATs use
+// the format ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX (ghp_ prefix + 36 base62 characters, 40 total).
+//
+// This format-valid placeholder is necessary because:
+// - gh CLI checks GH_TOKEN format before making API calls
+// - Tools like Claude Code's footer use gh CLI to fetch PR status
+// - Without a valid-looking token, gh CLI rejects it and may prompt for auth
+//
+// The proxy intercepts all GitHub HTTPS traffic and injects the real token via
+// Authorization headers, so this placeholder never reaches GitHub's servers.
+const GitHubTokenPlaceholder = "ghp_moatProxyInjectedPlaceholder000000000000"
+
+// JWTPlaceholder is a basic placeholder JWT for format validation only.
+// Use GenerateIDTokenPlaceholder for Codex CLI which needs account_id in claims.
+const JWTPlaceholder = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtb2F0LXByb3h5LXBsYWNlaG9sZGVyIiwiZXhwIjo5OTk5OTk5OTk5fQ.placeholder-signature-not-valid"
+
+// GenerateIDTokenPlaceholder creates a JWT-formatted placeholder with the account_id
+// embedded in the claims. This is required for Codex CLI which extracts the
+// chatgpt_account_id from the id_token's JWT claims locally before making API calls.
+//
+// The generated JWT has:
+// - Header: {"alg":"RS256","typ":"JWT"}
+// - Payload: {"sub":"moat-placeholder","exp":<future>,"https://api.openai.com/auth":{"chatgpt_account_id":"<account_id>"}}
+// - Signature: placeholder (not cryptographically valid)
+//
+// The signature is not valid, but Codex CLI only decodes the claims - it doesn't
+// verify the signature locally (that's done server-side).
+func GenerateIDTokenPlaceholder(accountID string) string {
+	// JWT header: {"alg":"RS256","typ":"JWT"}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+
+	// JWT payload with account_id in the OpenAI auth claims structure
+	payload := map[string]interface{}{
+		"sub": "moat-proxy-placeholder",
+		"exp": 9999999999, // Far future expiration
+		"https://api.openai.com/auth": map[string]string{
+			"chatgpt_account_id": accountID,
+		},
+	}
+	// json.Marshal cannot fail for static map[string]interface{} with primitive types
+	payloadJSON, _ := json.Marshal(payload)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	// Signature placeholder (not cryptographically valid, but not checked locally)
+	signature := base64.RawURLEncoding.EncodeToString([]byte("moat-placeholder-signature"))
+
+	return header + "." + payloadB64 + "." + signature
+}
+
+// GenerateAccessTokenPlaceholder creates a JWT-formatted access token placeholder.
+// The Codex CLI also validates the access_token as a JWT and extracts claims from it.
+// This placeholder mirrors the structure of a real OpenAI access token.
+func GenerateAccessTokenPlaceholder(accountID string) string {
+	// JWT header: {"alg":"RS256","typ":"JWT"}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+
+	// JWT payload matching OpenAI access token structure
+	// Based on real token structure: includes aud, client_id, exp, and auth claims
+	payload := map[string]interface{}{
+		"aud":       []string{"https://api.openai.com/v1"},
+		"client_id": codexCLIClientID,
+		"exp":       9999999999, // Far future expiration
+		"iat":       time.Now().Unix(),
+		"iss":       "https://auth.openai.com",
+		"sub":       "moat-proxy-placeholder",
+		"https://api.openai.com/auth": map[string]interface{}{
+			"chatgpt_account_id":      accountID,
+			"chatgpt_account_user_id": "user-moat-placeholder__" + accountID,
+			"chatgpt_plan_type":       "plus",
+			"chatgpt_user_id":         "user-moat-placeholder",
+			"user_id":                 "user-moat-placeholder",
+		},
+		"https://api.openai.com/profile": map[string]interface{}{
+			"email":          "moat-placeholder@example.com",
+			"email_verified": true,
+		},
+		"scp": []string{"openid", "profile", "email", "offline_access"},
+	}
+	// json.Marshal cannot fail for static map[string]interface{} with primitive types
+	payloadJSON, _ := json.Marshal(payload)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	// Signature placeholder
+	signature := base64.RawURLEncoding.EncodeToString([]byte("moat-placeholder-signature"))
+
+	return header + "." + payloadB64 + "." + signature
+}
+
+// codexCLIClientID is the OAuth client ID used by the Codex CLI.
+const codexCLIClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 // ProxyConfigurer is the interface for configuring proxy credentials.
 // This avoids importing the proxy package directly.
