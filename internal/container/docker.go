@@ -13,6 +13,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -53,6 +54,10 @@ type DockerRuntime struct {
 	cli        *client.Client
 	ociRuntime string // "runsc" or "runc"
 
+	// gVisor availability cache (initialized once via sync.Once, safe for concurrent reads)
+	gvisorOnce  sync.Once
+	gvisorAvail bool
+
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
 	buildMgr   *dockerBuildManager
@@ -86,6 +91,10 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
 
+	r := &DockerRuntime{
+		cli: cli,
+	}
+
 	var ociRuntime string // empty string = Docker's default runtime
 	if !sandbox {
 		// Only warn on Linux where gVisor is available but explicitly disabled
@@ -95,21 +104,15 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 		}
 		// Leave ociRuntime empty to use Docker's default (usually runc)
 	} else {
-		// Verify gVisor is available using shared detection function
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if !GVisorAvailable(ctx) {
+		// Verify gVisor is available using cached check
+		if !r.gvisorAvailable() {
 			cli.Close()
 			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
 		}
 		ociRuntime = "runsc"
 	}
 
-	r := &DockerRuntime{
-		cli:        cli,
-		ociRuntime: ociRuntime,
-	}
+	r.ociRuntime = ociRuntime
 	r.networkMgr = &dockerNetworkManager{cli: cli}
 	r.sidecarMgr = &dockerSidecarManager{cli: cli, ociRuntime: ociRuntime}
 	r.buildMgr = &dockerBuildManager{cli: cli}
@@ -148,7 +151,7 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Verify gVisor is still available if we're configured to use it
-	if r.ociRuntime == "runsc" && !GVisorAvailable(ctx) {
+	if r.ociRuntime == "runsc" && !r.gvisorAvailable() {
 		return "", fmt.Errorf("gVisor was available at startup but is no longer configured - did Docker daemon configuration change? %w", ErrGVisorNotAvailable)
 	}
 
@@ -356,6 +359,39 @@ func (r *DockerRuntime) SupportsHostNetwork() bool {
 // Close releases Docker client resources.
 func (r *DockerRuntime) Close() error {
 	return r.cli.Close()
+}
+
+// gvisorAvailable checks if gVisor (runsc) is available, using cached result if available.
+// The cache prevents repeated Docker client creation and API calls during runtime initialization
+// and container creation. Thread-safe via sync.Once.
+//
+// Note: The result is cached permanently for this runtime instance. If the Docker daemon
+// is temporarily unreachable during the first check, gVisor will be cached as unavailable
+// for the lifetime of this runtime. This is acceptable because runtime instances are
+// typically short-lived (one per moat run).
+func (r *DockerRuntime) gvisorAvailable() bool {
+	r.gvisorOnce.Do(func() {
+		// Use background context for the check since the result is cached permanently.
+		// This avoids issues with canceled/expired contexts from concurrent callers.
+		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		info, err := r.cli.Info(checkCtx)
+		if err != nil {
+			log.Error("gVisor availability check failed - caching as unavailable", "error", err)
+			r.gvisorAvail = false
+			return
+		}
+
+		for name := range info.Runtimes {
+			if name == "runsc" {
+				r.gvisorAvail = true
+				return
+			}
+		}
+		r.gvisorAvail = false
+	})
+	return r.gvisorAvail
 }
 
 // SetupFirewall configures iptables to block all outbound traffic except to the proxy.

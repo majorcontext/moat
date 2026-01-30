@@ -201,6 +201,11 @@ func IsAppleSilicon() bool {
 
 // GVisorAvailable checks if runsc is configured as a Docker runtime.
 // Returns true if Docker reports "runsc" in its available runtimes.
+//
+// Deprecated: This function creates a new Docker client on each call, which is
+// inefficient. Use DockerRuntime.gvisorAvailable() instead, which caches the
+// result after the first check. This function is kept for backward compatibility
+// with existing tests.
 func GVisorAvailable(ctx context.Context) bool {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {

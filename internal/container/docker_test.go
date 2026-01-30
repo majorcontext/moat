@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +80,72 @@ func TestDockerRuntime_Type(t *testing.T) {
 	r := &DockerRuntime{}
 	if r.Type() != RuntimeDocker {
 		t.Errorf("Type() = %v, want %v", r.Type(), RuntimeDocker)
+	}
+}
+
+func TestDockerRuntime_GVisorCaching(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+	defer rt.Close()
+
+	// First call - should check and cache
+	result1 := rt.gvisorAvailable()
+
+	// Second call - should use cached result
+	result2 := rt.gvisorAvailable()
+
+	// Results should be consistent
+	if result1 != result2 {
+		t.Errorf("gvisorAvailable returned inconsistent results: first=%v, second=%v", result1, result2)
+	}
+
+	// Verify the cached value matches the result
+	if rt.gvisorAvail != result1 {
+		t.Errorf("cached value doesn't match result: cached=%v, result=%v", rt.gvisorAvail, result1)
+	}
+}
+
+func TestDockerRuntime_GVisorCaching_Concurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+	defer rt.Close()
+
+	// Run 10 concurrent calls to verify thread safety and consistent results
+	const numGoroutines = 10
+	results := make([]bool, numGoroutines)
+	var wg sync.WaitGroup
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = rt.gvisorAvailable()
+		}(i)
+	}
+	wg.Wait()
+
+	// All results should be identical (validates sync.Once correctness)
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			t.Errorf("concurrent call %d returned %v, expected %v", i, results[i], results[0])
+		}
+	}
+
+	// Verify the cached value matches all results
+	if rt.gvisorAvail != results[0] {
+		t.Errorf("cached value %v doesn't match results %v", rt.gvisorAvail, results[0])
 	}
 }
 
