@@ -1177,3 +1177,45 @@ mcp:
 		})
 	}
 }
+
+func TestServicesValidation(t *testing.T) {
+	cfg := &Config{
+		Services: map[string]ServiceSpec{
+			"postgres": {},
+		},
+	}
+	err := cfg.ValidateServices([]string{"node"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "postgres not declared in dependencies") {
+		t.Errorf("expected error to contain 'postgres not declared in dependencies', got %q", err.Error())
+	}
+}
+
+func TestServicesValidationPass(t *testing.T) {
+	cfg := &Config{
+		Services: map[string]ServiceSpec{
+			"postgres": {
+				Env: map[string]string{"POSTGRES_DB": "myapp"},
+			},
+		},
+	}
+	err := cfg.ValidateServices([]string{"postgres"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestServiceWaitDefault(t *testing.T) {
+	s := ServiceSpec{}
+	if !s.ServiceWait() {
+		t.Error("expected ServiceWait() to return true by default")
+	}
+
+	f := false
+	s2 := ServiceSpec{Wait: &f}
+	if s2.ServiceWait() {
+		t.Error("expected ServiceWait() to return false when Wait is false")
+	}
+}
