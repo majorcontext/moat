@@ -82,6 +82,40 @@ func TestDockerRuntime_Type(t *testing.T) {
 	}
 }
 
+func TestDockerRuntime_GVisorCaching(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+	defer rt.Close()
+
+	// First call - should check and cache
+	result1 := rt.gvisorAvailable(ctx)
+
+	// Verify cache was set
+	if !rt.gvisorChecked {
+		t.Error("expected gvisorChecked to be true after first call")
+	}
+
+	// Second call - should use cached result
+	result2 := rt.gvisorAvailable(ctx)
+
+	// Results should be consistent
+	if result1 != result2 {
+		t.Errorf("gvisorAvailable returned inconsistent results: first=%v, second=%v", result1, result2)
+	}
+
+	// Verify the cached value matches the result
+	if rt.gvisorAvail != result1 {
+		t.Errorf("cached value doesn't match result: cached=%v, result=%v", rt.gvisorAvail, result1)
+	}
+}
+
 func TestDockerRuntime_CreateNetwork(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
