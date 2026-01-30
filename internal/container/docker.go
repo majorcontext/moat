@@ -938,6 +938,19 @@ func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerf
 		return fmt.Errorf("writing Dockerfile: %w", writeErr)
 	}
 
+	// Write additional context files
+	for name, content := range opts.ContextFiles {
+		path := filepath.Join(tmpDir, name)
+		if dir := filepath.Dir(path); dir != tmpDir {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("creating context dir for %s: %w", name, err)
+			}
+		}
+		if err := os.WriteFile(path, content, 0644); err != nil {
+			return fmt.Errorf("writing context file %s: %w", name, err)
+		}
+	}
+
 	// Determine platform based on host architecture
 	platform := "linux/amd64"
 	if goruntime.GOARCH == "arm64" {
@@ -978,6 +991,22 @@ func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, docker
 	if _, err := tw.Write([]byte(dockerfile)); err != nil {
 		return fmt.Errorf("writing Dockerfile to tar: %w", err)
 	}
+
+	// Add context files to tar
+	for name, content := range opts.ContextFiles {
+		h := &tar.Header{
+			Name: name,
+			Mode: 0644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			return fmt.Errorf("writing tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			return fmt.Errorf("writing %s to tar: %w", name, err)
+		}
+	}
+
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("closing tar writer: %w", err)
 	}

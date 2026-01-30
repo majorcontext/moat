@@ -20,10 +20,11 @@ func TestFullPipeline(t *testing.T) {
 	}
 
 	// Generate Dockerfile - with single runtime (node), uses official image as base
-	dockerfile, err := GenerateDockerfile(depList, nil)
+	result, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 	if !strings.Contains(dockerfile, "FROM node:20-slim") {
 		t.Error("Dockerfile should use node:20-slim as base image")
 	}
@@ -200,10 +201,11 @@ func TestPipelineWithDefaultVersions(t *testing.T) {
 	}
 
 	// Generate Dockerfile - with single runtime (node), uses official image with default version
-	dockerfile, err := GenerateDockerfile(depList, nil)
+	result, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 	// Should use node:<default-version>-slim as base
 	if !strings.Contains(dockerfile, "FROM node:") || !strings.Contains(dockerfile, "-slim") {
 		t.Error("Dockerfile should use official node image as base")
@@ -248,10 +250,11 @@ func TestEmptyDependencies(t *testing.T) {
 	}
 
 	// Generate Dockerfile for empty list
-	dockerfile, err := GenerateDockerfile(depList, nil)
+	result, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 	if !strings.Contains(dockerfile, "FROM debian:bookworm-slim") {
 		t.Error("Dockerfile missing base image")
 	}
@@ -284,10 +287,11 @@ func TestGoInstallDependencies(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	dockerfile, err := GenerateDockerfile(depList, nil)
+	result, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 
 	// Should contain go install commands with GOBIN set for PATH access
 	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
@@ -321,10 +325,11 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	dockerfile, err := GenerateDockerfile(depList, nil)
+	result, err := GenerateDockerfile(depList, nil)
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
+	dockerfile := result.Dockerfile
 
 	script, err := GenerateInstallScript(depList)
 	if err != nil {

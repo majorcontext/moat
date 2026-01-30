@@ -2,7 +2,6 @@
 package deps
 
 import (
-	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -50,6 +49,18 @@ func (o *DockerfileOptions) useBuildKit() bool {
 		return true
 	}
 	return *o.UseBuildKit
+}
+
+// DockerfileResult contains the generated Dockerfile and any additional context files
+// that should be placed alongside the Dockerfile in the build context directory.
+type DockerfileResult struct {
+	// Dockerfile is the generated Dockerfile content.
+	Dockerfile string
+
+	// ContextFiles maps relative file paths to their contents.
+	// These files should be written to the build context directory
+	// alongside the Dockerfile (e.g., "moat-init.sh" → script content).
+	ContextFiles map[string][]byte
 }
 
 const defaultBaseImage = "debian:bookworm-slim"
@@ -187,11 +198,12 @@ func writeDynamicDeps(b *strings.Builder, comment string, deps []Dependency) {
 }
 
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
-func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, error) {
+func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*DockerfileResult, error) {
 	if opts == nil {
 		opts = &DockerfileOptions{}
 	}
 	var b strings.Builder
+	contextFiles := make(map[string][]byte)
 
 	c := categorizeDeps(deps)
 
@@ -235,9 +247,12 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (string, err
 	writeSSHKnownHosts(&b, opts.SSHHosts)
 
 	// Finalize with entrypoint and user setup
-	writeEntrypoint(&b, opts, c.dockerMode)
+	writeEntrypoint(&b, opts, c.dockerMode, contextFiles)
 
-	return b.String(), nil
+	return &DockerfileResult{
+		Dockerfile:   b.String(),
+		ContextFiles: contextFiles,
+	}, nil
 }
 
 // selectBaseImage determines the base image based on runtime dependencies.
@@ -500,7 +515,10 @@ func writeSSHKnownHosts(b *strings.Builder, hosts []string) {
 }
 
 // writeEntrypoint writes the entrypoint configuration and working directory.
-func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode DockerMode) {
+// When the init script is needed, it is added as a context file and COPYed
+// into the image. This avoids embedding a large base64 blob inline in a RUN
+// command, which triggers gRPC transport errors in Apple's container builder.
+func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode DockerMode, contextFiles map[string][]byte) {
 	// Features that require moat-init entrypoint:
 	// - SSH agent forwarding
 	// - Claude Code file setup
@@ -509,9 +527,10 @@ func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode Doc
 	// - Docker daemon startup (dind mode)
 	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || dockerMode != ""
 	if needsInit {
-		encoded := base64.StdEncoding.EncodeToString([]byte(MoatInitScript))
+		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
-		b.WriteString(fmt.Sprintf("RUN echo '%s' | base64 -d > /usr/local/bin/moat-init && chmod +x /usr/local/bin/moat-init\n", encoded))
+		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init\n")
+		b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
