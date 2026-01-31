@@ -105,6 +105,7 @@ type ServiceDef struct {
 	PasswordEnv  string            `yaml:"password_env,omitempty"`
 	ExtraEnv     map[string]string `yaml:"extra_env,omitempty"`
 	ExtraCmd     []string          `yaml:"extra_cmd,omitempty"`
+	DBEnv        string            `yaml:"db_env,omitempty"`
 	ReadinessCmd string            `yaml:"readiness_cmd"`
 	URLScheme    string            `yaml:"url_scheme"`
 	URLFormat    string            `yaml:"url_format"`

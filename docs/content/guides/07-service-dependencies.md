@@ -8,6 +8,12 @@ keywords: ["moat", "postgres", "mysql", "redis", "database", "service", "sidecar
 
 This guide covers running ephemeral databases and caches alongside agent containers. Moat provisions service containers automatically, generates credentials, and injects connection info as environment variables.
 
+You will learn how to declare service dependencies, configure them with custom settings, and use the injected environment variables to connect from your agent code.
+
+## Prerequisites
+
+Docker runtime is required. Apple containers do not support service dependencies.
+
 ## Quick start
 
 Add a service to your dependencies and use the injected environment variables:
@@ -25,7 +31,7 @@ command: ["sh", "-c", "psql $MOAT_POSTGRES_URL -c 'SELECT 1'"]
 ```
 
 ```bash
-moat run .
+$ moat run .
 ```
 
 Moat starts a PostgreSQL 17 container, waits for it to accept connections, and injects `MOAT_POSTGRES_URL` (and other `MOAT_POSTGRES_*` variables) into the agent container.
@@ -168,7 +174,7 @@ Service containers are labeled with `moat.run-id` and `moat.role=service`. If mo
 
 Container naming follows the pattern `moat-<service>-<run-id>`:
 
-```
+```text
 moat-postgres-run_abc123
 moat-redis-run_abc123
 ```
@@ -187,7 +193,7 @@ Readiness checks run inside the service container via `docker exec`. They verify
 
 If a service fails to become ready within 30 seconds:
 
-```
+```text
 Error: postgres service failed to become ready: timed out after 30s
 
 Service container logs:
@@ -201,7 +207,7 @@ Or disable wait:
 
 ## Network architecture
 
-```
+```text
 Docker network: moat-<run-id>
   ├── agent container (hostname: <run-id>)
   ├── postgres container (hostname: postgres)
@@ -225,7 +231,7 @@ The service container is running but not ready. Possible causes:
 
 ### Service not found in dependencies
 
-```
+```text
 Error: services.postgres configured but postgres not declared in dependencies
 
 Add to dependencies:
@@ -239,7 +245,7 @@ The `services:` block only customizes services declared in `dependencies:`. Add 
 
 Service dependencies require Docker runtime. Apple containers do not support sidecar containers.
 
-```
+```text
 Error: service dependencies require Docker runtime
 Apple containers don't support service dependencies
 ```
@@ -268,7 +274,7 @@ command:
     DATABASE_URL=$MOAT_POSTGRES_URL REDIS_URL=$MOAT_REDIS_URL npm test
 ```
 
-## Related
+## Related guides
 
 - [Dependencies concept](../concepts/06-dependencies.md) — Dependency types and registry
 - [agent.yaml reference](../reference/02-agent-yaml.md) — Full configuration options

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1636,8 +1637,16 @@ region = %s
 				}
 			}
 			svcEnv := generateServiceEnv(spec.Service, serviceInfos[i], userSpec)
-			for k, v := range svcEnv {
-				proxyEnv = append(proxyEnv, k+"="+v)
+
+			// Sort env var keys for deterministic ordering
+			envKeys := make([]string, 0, len(svcEnv))
+			for k := range svcEnv {
+				envKeys = append(envKeys, k)
+			}
+			sort.Strings(envKeys)
+
+			for _, k := range envKeys {
+				proxyEnv = append(proxyEnv, k+"="+svcEnv[k])
 			}
 		}
 

@@ -72,7 +72,7 @@ Dynamic dependencies use the format `PREFIX:package@version`. Supported prefixes
 
 Moat validates that the required runtime is present:
 
-```
+```text
 Error: npm:eslint requires node
 
   Add 'node' to your dependencies:
@@ -249,7 +249,7 @@ Service containers share a Docker network with the agent container (`moat-<run-i
 
 Service dependencies require Docker runtime. Apple containers do not support services.
 
-```
+```text
 Error: postgres@17 requires Docker runtime
 Apple containers don't support service dependencies
 
@@ -465,9 +465,9 @@ claude-code       npm             -          Claude Code CLI
 Filter by type:
 
 ```bash
-moat deps list --type runtime
-moat deps list --type npm
-moat deps list --type github-binary
+$ moat deps list --type runtime
+$ moat deps list --type npm
+$ moat deps list --type github-binary
 ```
 
 ### Get dependency details

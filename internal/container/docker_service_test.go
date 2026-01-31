@@ -64,12 +64,20 @@ func TestBuildServiceInfo(t *testing.T) {
 	assert.Equal(t, "POSTGRES_PASSWORD", info.PasswordEnv)
 }
 
-func TestResolveReadinessCmd(t *testing.T) {
-	// Postgres - uses PasswordEnv
-	cmd := resolveReadinessCmd("pg_isready -U {password}", map[string]string{"POSTGRES_PASSWORD": "pw123"}, "POSTGRES_PASSWORD")
+func TestResolvePlaceholders(t *testing.T) {
+	// Postgres - uses PasswordEnv to alias {password}
+	cmd := resolvePlaceholders("pg_isready -U {password}", map[string]string{"POSTGRES_PASSWORD": "pw123"}, "POSTGRES_PASSWORD")
 	assert.Equal(t, "pg_isready -U pw123", cmd)
 
-	// Redis - uses "password" key directly
-	cmd = resolveReadinessCmd("redis-cli -a {password} PING", map[string]string{"password": "redispw"}, "")
+	// Redis - uses "password" key directly (lowercase match)
+	cmd = resolvePlaceholders("redis-cli -a {password} PING", map[string]string{"password": "redispw"}, "")
 	assert.Equal(t, "redis-cli -a redispw PING", cmd)
+
+	// MySQL - uses PasswordEnv for {password} alias
+	cmd = resolvePlaceholders("mysqladmin ping --password={password}", map[string]string{"MYSQL_ROOT_PASSWORD": "mysqlpw"}, "MYSQL_ROOT_PASSWORD")
+	assert.Equal(t, "mysqladmin ping --password=mysqlpw", cmd)
+
+	// Generic env substitution via lowercase keys
+	cmd = resolvePlaceholders("connect -h {my_host} -p {my_port}", map[string]string{"MY_HOST": "localhost", "MY_PORT": "5432"}, "")
+	assert.Equal(t, "connect -h localhost -p 5432", cmd)
 }
