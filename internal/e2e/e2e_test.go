@@ -1736,6 +1736,115 @@ func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
 
 // createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
 // that specifies dependencies.
+// TestClaudeLogSyncMountTarget verifies that the Claude log sync bind mount
+// targets the runtime user's home directory, not the image's default.
+//
+// When a custom image is built with an init script (needsInit=true), the
+// Dockerfile uses ENTRYPOINT [moat-init] without setting USER moatuser.
+// GetImageHomeDir inspects the image, sees root, and returns "/root".
+// The bind mount lands at /root/.claude/projects/-workspace, but the
+// container runs as moatuser with HOME=/home/moatuser, so writes don't sync.
+//
+// This test uses a dependency to build a custom image with moatuser, then
+// checks that the mount is at /home/moatuser/.claude/projects/-workspace.
+func TestClaudeLogSyncMountTarget(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	workspace := createTestWorkspaceWithSyncLogs(t)
+
+	// On Linux, the container user is determined by the workspace owner's UID.
+	// If the UID isn't 5000 (moatuser), the container runs as that UID directly
+	// instead of using gosu to drop to moatuser, which breaks HOME and mount paths.
+	// Chown the workspace to moatuser's UID so the standard path is exercised.
+	if runtime.GOOS == "linux" {
+		if err := exec.Command("chown", "-R", "5000:5000", workspace).Run(); err != nil {
+			t.Skipf("Cannot chown workspace to moatuser UID (need root): %v", err)
+		}
+	}
+
+	// Use claude-code as a dependency to trigger needsClaudeInit=true, which
+	// causes the Dockerfile to use ENTRYPOINT [moat-init] (needsInit=true).
+	// This is the code path where GetImageHomeDir returns "/root" because the
+	// image has no USER directive — the init script drops to moatuser at runtime.
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-test-claude-log-mount",
+		Workspace: workspace,
+		Config: &config.Config{
+			Agent:        "e2e-test",
+			Version:      "1.0.0",
+			Claude:       config.ClaudeConfig{SyncLogs: &[]bool{true}[0]},
+			Dependencies: []string{"claude-code"},
+		},
+		// Use "grep claude || true" so the command succeeds even if no mount matches.
+		// This lets us inspect the output rather than getting an opaque exit code 1.
+		Cmd: []string{"sh", "-c", "echo HOME=$HOME && echo MOUNTS_START && cat /proc/mounts && echo MOUNTS_END"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := mgr.Wait(ctx, r.ID); err != nil {
+		// Don't fatal — read logs to get diagnostic output
+		t.Logf("Wait returned error (may be expected): %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	logs, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	var allOutput string
+	for _, entry := range logs {
+		allOutput += entry.Line + "\n"
+	}
+
+	// The mount must be at /home/moatuser/.claude/projects/-workspace,
+	// not /root/.claude/projects/-workspace.
+	if strings.Contains(allOutput, "/root/.claude/projects/-workspace") {
+		t.Errorf("Claude log mount targets /root/ instead of /home/moatuser/\n"+
+			"GetImageHomeDir returned the image default (/root) instead of the runtime user home.\n"+
+			"Container output:\n%s", allOutput)
+	}
+
+	if !strings.Contains(allOutput, "/home/moatuser/.claude/projects/-workspace") {
+		t.Errorf("Claude log mount not found at /home/moatuser/.claude/projects/-workspace\n"+
+			"Container output:\n%s", allOutput)
+	}
+}
+
+func createTestWorkspaceWithSyncLogs(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	yaml := `agent: e2e-test
+version: 1.0.0
+claude:
+  sync_logs: true
+`
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile agent.yaml: %v", err)
+	}
+	return dir
+}
+
 func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
 	t.Helper()
 
