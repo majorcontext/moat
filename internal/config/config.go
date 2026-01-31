@@ -34,8 +34,8 @@ type Config struct {
 	// Empty string or omitted uses default (gVisor enabled).
 	Sandbox string `yaml:"sandbox,omitempty"`
 
-	Container ContainerConfig   `yaml:"container,omitempty"`
-	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
+	Container ContainerConfig        `yaml:"container,omitempty"`
+	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
 
 	// Deprecated: use Dependencies instead
