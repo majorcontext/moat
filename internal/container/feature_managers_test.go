@@ -16,13 +16,14 @@ func TestDockerRuntimeFeatureManagers(t *testing.T) {
 	assert.NotNil(t, rt.SidecarManager(), "Docker should provide SidecarManager")
 }
 
-func TestAppleRuntimeNoFeatureManagers(t *testing.T) {
+func TestAppleRuntimeFeatureManagers(t *testing.T) {
 	rt, err := NewAppleRuntime()
 	if err != nil {
 		t.Skip("Apple containers not available")
 	}
 	defer rt.Close()
 
-	assert.Nil(t, rt.NetworkManager(), "Apple should not provide NetworkManager")
+	assert.NotNil(t, rt.NetworkManager(), "Apple should provide NetworkManager")
 	assert.Nil(t, rt.SidecarManager(), "Apple should not provide SidecarManager")
+	assert.NotNil(t, rt.ServiceManager(), "Apple should provide ServiceManager")
 }

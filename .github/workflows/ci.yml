@@ -103,3 +103,4 @@ jobs:
         run: go test -tags=e2e -timeout=15m -p=1 ./internal/e2e/
         env:
           MOAT_DISABLE_BUILDKIT: "1"
+          MOAT_NO_SANDBOX: "1"

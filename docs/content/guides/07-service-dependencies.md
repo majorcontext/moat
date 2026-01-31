@@ -12,7 +12,7 @@ You will learn how to declare service dependencies, configure them with custom s
 
 ## Prerequisites
 
-Docker runtime is required. Apple containers do not support service dependencies.
+Docker or Apple container runtime is required. Apple container networking requires macOS 26 or later.
 
 ## Quick start
 
@@ -236,14 +236,9 @@ Add to dependencies:
 
 The `services:` block only customizes services declared in `dependencies:`. Add the service dependency first.
 
-### Apple containers
+### macOS version
 
-Service dependencies require Docker runtime. Apple containers do not support sidecar containers.
-
-```text
-Error: service dependencies require Docker runtime
-Apple containers don't support service dependencies
-```
+Apple container networking requires macOS 26 or later. On macOS 15, use Docker runtime instead.
 
 ## Example: Full-stack test runner
 

@@ -1522,9 +1522,8 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
 			cleanupCodex(codexGenerated)
-			return nil, fmt.Errorf("service dependencies require Docker runtime\n" +
-				"Apple containers don't support service dependencies\n\n" +
-				"Either:\n  - Use Docker runtime\n  - Install services on your host and set MOAT_*_URL manually")
+			return nil, fmt.Errorf("service dependencies require a runtime with service support\n\n" +
+				"Either:\n  - Use Docker or Apple container runtime\n  - Install services on your host and set MOAT_*_URL manually")
 		}
 
 		// Validate services config
@@ -2381,6 +2380,29 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Stop the SSH agent server if one was created
 	if stopErr := r.stopSSHAgentServer(); stopErr != nil {
 		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
+	}
+
+	// Stop service containers
+	if len(r.ServiceContainers) > 0 {
+		svcMgr := m.runtime.ServiceManager()
+		if svcMgr != nil {
+			for svcName, svcContainerID := range r.ServiceContainers {
+				log.Debug("stopping service after container exit", "service", svcName, "container_id", svcContainerID)
+				if stopErr := svcMgr.StopService(context.Background(), container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
+					log.Warn("failed to stop service", "service", svcName, "error", stopErr)
+				}
+			}
+		}
+	}
+
+	// Remove network
+	if r.NetworkID != "" {
+		netMgr := m.runtime.NetworkManager()
+		if netMgr != nil {
+			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
+				log.Warn("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
+			}
+		}
 	}
 
 	// Unregister routes

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -38,7 +37,7 @@ func (m *dockerServiceManager) StartService(ctx context.Context, cfg ServiceConf
 		return ServiceInfo{}, fmt.Errorf("starting %s service: %w", cfg.Name, err)
 	}
 
-	return buildServiceInfo(containerID, cfg), nil
+	return buildServiceInfo(containerID, cfg, cfg.Name), nil
 }
 
 // CheckReady runs the service's readiness command inside the container.
@@ -119,33 +118,4 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 	}
 
 	return sc
-}
-
-// buildServiceInfo creates a ServiceInfo from a started container.
-func buildServiceInfo(containerID string, cfg ServiceConfig) ServiceInfo {
-	return ServiceInfo{
-		ID:           containerID,
-		Name:         cfg.Name,
-		Host:         cfg.Name,
-		Ports:        cfg.Ports,
-		Env:          cfg.Env,
-		ReadinessCmd: cfg.ReadinessCmd,
-		PasswordEnv:  cfg.PasswordEnv,
-	}
-}
-
-// resolvePlaceholders replaces {key} placeholders in template with values from
-// env, matching keys case-insensitively (using lowercased keys). If passwordEnv
-// is set (e.g. "POSTGRES_PASSWORD"), its value is also available as {password}.
-func resolvePlaceholders(template string, env map[string]string, passwordEnv string) string {
-	// If passwordEnv is set, make the value available under the {password} alias.
-	if passwordEnv != "" {
-		if pw, ok := env[passwordEnv]; ok {
-			template = strings.ReplaceAll(template, "{password}", pw)
-		}
-	}
-	for k, v := range env {
-		template = strings.ReplaceAll(template, "{"+strings.ToLower(k)+"}", v)
-	}
-	return template
 }

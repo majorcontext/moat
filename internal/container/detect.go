@@ -28,6 +28,9 @@ func DefaultRuntimeOptions() RuntimeOptions {
 	// gVisor is only available on Linux
 	// Docker Desktop on macOS and Windows does not support gVisor
 	sandbox := runtime.GOOS == "linux"
+	if os.Getenv("MOAT_NO_SANDBOX") == "1" {
+		sandbox = false
+	}
 	return RuntimeOptions{Sandbox: sandbox}
 }
 

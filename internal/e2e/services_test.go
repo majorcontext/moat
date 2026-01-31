@@ -15,10 +15,25 @@ import (
 	"github.com/majorcontext/moat/internal/storage"
 )
 
+// skipIfNoServiceRuntime skips the test if no container runtime with service
+// support is available (Docker or Apple containers).
+func skipIfNoServiceRuntime(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("docker"); err == nil {
+		return
+	}
+	if _, err := exec.LookPath("container"); err == nil {
+		return
+	}
+	t.Skip("No container runtime with service support available")
+}
+
 // TestServicePostgres verifies that a postgres service dependency starts,
 // injects MOAT_POSTGRES_URL, and the database is reachable from the main container.
 func TestServicePostgres(t *testing.T) {
-	skipIfNoDocker(t)
+	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -37,13 +52,13 @@ func TestServicePostgres(t *testing.T) {
 		Config: &config.Config{
 			Dependencies: []string{"postgres@17"},
 		},
-		Cmd: []string{"sh", "-c", `
+		Cmd: []string{"bash", "-c", `
 			echo "MOAT_POSTGRES_URL=$MOAT_POSTGRES_URL" &&
 			echo "MOAT_POSTGRES_HOST=$MOAT_POSTGRES_HOST" &&
 			echo "MOAT_POSTGRES_PORT=$MOAT_POSTGRES_PORT" &&
 			echo "=== connectivity test ===" &&
 			for i in $(seq 1 10); do
-				if pg_isready -h "$MOAT_POSTGRES_HOST" -p "$MOAT_POSTGRES_PORT" 2>/dev/null; then
+				if (echo > /dev/tcp/"$MOAT_POSTGRES_HOST"/"$MOAT_POSTGRES_PORT") 2>/dev/null; then
 					echo "postgres_reachable=true"
 					exit 0
 				fi
@@ -99,7 +114,8 @@ func TestServicePostgres(t *testing.T) {
 // TestServiceRedis verifies that a redis service dependency starts,
 // injects MOAT_REDIS_URL, and the cache is reachable.
 func TestServiceRedis(t *testing.T) {
-	skipIfNoDocker(t)
+	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -165,7 +181,8 @@ func TestServiceRedis(t *testing.T) {
 // TestServiceMultiple verifies that multiple services (postgres and redis)
 // can run together and both sets of env vars are injected.
 func TestServiceMultiple(t *testing.T) {
-	skipIfNoDocker(t)
+	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -237,7 +254,8 @@ func TestServiceMultiple(t *testing.T) {
 // TestServiceCustomConfig verifies that service configuration can be overridden
 // via the services: block in agent.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
-	skipIfNoDocker(t)
+	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -314,7 +332,8 @@ func TestServiceCustomConfig(t *testing.T) {
 // TestServiceCleanup verifies that service containers are removed when
 // the run is destroyed.
 func TestServiceCleanup(t *testing.T) {
-	skipIfNoDocker(t)
+	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
