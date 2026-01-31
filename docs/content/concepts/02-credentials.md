@@ -6,7 +6,7 @@ keywords: ["moat", "credentials", "oauth", "tokens", "injection", "proxy", "secu
 
 # Credential management
 
-Moat injects credentials at the network layer. Tokens are stored encrypted on your host machine and injected into HTTP requests by a TLS-intercepting proxy. In most cases, the container process never has direct access to the raw tokens—exceptions are explicitly documented per provider.
+Moat injects credentials at the network layer. Tokens are stored encrypted on your host machine and injected into HTTP requests by a TLS-intercepting proxy. The container process does not have direct access to the raw tokens. For services that cannot use HTTP header injection (like AWS CLI with credential_process), credentials are fetched on-demand via the proxy and never stored in the container environment.
 
 ## How credential injection works
 
@@ -84,7 +84,7 @@ GitHub credential saved
 
 The token is injected for requests to `api.github.com` and `github.com`.
 
-`GH_TOKEN` is set in the container environment so the gh CLI works inside the container. This environment variable contains a placeholder value (`moat-proxy-injected`)—the actual token is injected at the network layer by the proxy and never appears in the container environment.
+`GH_TOKEN` is set in the container environment so the gh CLI works inside the container. This environment variable contains a format-valid placeholder value—the actual token is injected at the network layer by the proxy and never appears in the container environment.
 
 ### Anthropic
 
@@ -154,7 +154,7 @@ Claude Code credentials imported to ~/.moat/credentials/anthropic.enc
 
 Note: Imported tokens do not auto-refresh. When the token expires, run a Claude Code session on your host machine to refresh it, then run `moat grant anthropic` again to import the new token.
 
-OAuth tokens (identified by the `sk-ant-oat` prefix) use the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. API keys use `ANTHROPIC_API_KEY`. In both cases, the environment variable contains a placeholder value (`moat-proxy-injected`)—the actual credential is never in the container environment. The proxy intercepts requests to `api.anthropic.com` and injects the real token at the network layer.
+OAuth tokens (identified by the `sk-ant-oat` prefix) use the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. API keys use `ANTHROPIC_API_KEY`. In both cases, the environment variable contains a placeholder value—the actual credential is never in the container environment. The proxy intercepts requests to `api.anthropic.com` and injects the real token at the network layer.
 
 The credential is injected for requests to `api.anthropic.com`.
 
@@ -166,7 +166,7 @@ AWS credentials use IAM role assumption to provide temporary credentials that au
 $ moat grant aws --role arn:aws:iam::123456789012:role/AgentRole
 
 Assuming role: arn:aws:iam::123456789012:role/AgentRole
-Session duration: 1h0m0s
+Session duration: 15m0s
 Role assumed successfully
 AWS credential saved
 ```
@@ -177,7 +177,7 @@ AWS credential saved
 |------|-------------|---------|
 | `--role` | IAM role ARN to assume (required) | — |
 | `--region` | AWS region | From AWS config |
-| `--session-duration` | Session duration (e.g., `1h`, `30m`) | 1 hour |
+| `--session-duration` | Session duration (e.g., `1h`, `30m`) | 15 minutes |
 | `--external-id` | External ID for role assumption | — |
 
 **With explicit region and duration:**

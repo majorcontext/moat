@@ -76,17 +76,17 @@ Codex executes the prompt with `--full-auto` mode enabled and exits when complet
 
 By default, `moat codex -p` runs with `--full-auto` enabled. This auto-approves tool use (file edits, command execution, etc.) without per-operation confirmation prompts.
 
-**Why this is acceptable:**
+**Security properties:**
 
-The container provides isolation from your host system:
+The container provides these isolation boundaries:
 
 - Runs as a non-root user (`moatuser`, UID 5000) inside the container
 - Filesystem access is limited to the mounted workspace, plus read-only mounts for credential helper configs (e.g., `~/.config/gh/config.yml`, AWS credential process scripts)
 - SSH private keys remain on the host—the container can request signatures via an SSH agent proxy but cannot extract key material
-- Most credentials are injected at the network layer via proxy and never appear in the container environment (see [Credential management](../concepts/02-credentials.md) for exceptions like AWS `credential_process`)
+- Credentials are injected at the network layer via proxy and do not appear in the container environment (see [Credential management](../concepts/02-credentials.md) for details on AWS `credential_process`)
 - Standard container isolation separates the run from other containers and host processes
 
-Per-operation prompts add friction without meaningful additional protection when code is already running in an isolated container.
+Per-operation prompts require user confirmation for each action. The container already limits access to the mounted workspace and routes credentials through the proxy.
 
 **Restoring manual approval:**
 

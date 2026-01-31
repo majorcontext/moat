@@ -226,7 +226,7 @@ dependencies:
 Host mode mounts `/var/run/docker.sock` from the host:
 - Fast startup (no daemon to initialize)
 - Shared image cache with host
-- Full access to host Docker daemon
+- Access to the Docker daemon's full API (ps, run, build, exec, etc.)
 
 **Tradeoffs:**
 - Containers created inside can access host network and resources
@@ -253,7 +253,7 @@ DinD mode runs an isolated Docker daemon inside the container:
 - No image cache between runs
 - Uses vfs storage driver (slower than overlay2)
 
-Use this mode when running untrusted code or when isolation is required.
+Use this mode when you need isolation from the host Docker daemon or don't want agents to access host containers.
 
 ##### BuildKit sidecar (automatic with docker:dind)
 
@@ -263,7 +263,7 @@ When using `docker:dind`, Moat automatically deploys a BuildKit sidecar containe
 - **Shared network**: Both containers communicate via a Docker network (`moat-<run-id>`)
 - **Environment**: `BUILDKIT_HOST=tcp://buildkit:1234` routes builds to the sidecar
 - **Full Docker**: Local `dockerd` in main container provides `docker ps`, `docker run`, etc.
-- **Performance**: BuildKit layer caching, `RUN --mount=type=cache`, faster multi-stage builds
+- **Performance**: BuildKit layer caching, `RUN --mount=type=cache`, multi-stage build support
 
 This configuration is automatic and requires no additional setup.
 

@@ -6,7 +6,7 @@ keywords: ["moat", "dependencies", "runtime", "node", "python", "go", "registry"
 
 # Dependencies
 
-Moat builds container images based on the dependencies you declare. Instead of writing Dockerfiles, you list what you need and Moat handles installation, version resolution, and layer caching.
+Moat builds container images based on the dependencies you declare. Instead of writing Dockerfiles, you list what you need and Moat generates a Dockerfile, installs packages, resolves versions, and uses BuildKit for layer caching.
 
 ## Declaring dependencies
 
@@ -111,19 +111,19 @@ dependencies:
 | Mode | Description | Use when |
 |------|-------------|----------|
 | `docker:host` | Mounts host Docker socket | You need fast startup and trust the agent |
-| `docker:dind` | Runs isolated Docker daemon with BuildKit sidecar | You need isolation or fast image builds |
+| `docker:dind` | Runs isolated Docker daemon with BuildKit sidecar | You need isolation from the host Docker daemon |
 
 **Key differences:**
 
 - **docker:host**: Fast startup, shared image cache with host, full access to host Docker
-- **docker:dind**: Complete isolation, automatic BuildKit sidecar for fast builds, privileged mode required
+- **docker:dind**: Complete isolation, automatic BuildKit sidecar, privileged mode required
 
 **BuildKit sidecar:**
 
 When using `docker:dind`, Moat automatically deploys a BuildKit sidecar container (`moby/buildkit:latest`) connected via a Docker network. This provides:
-- Fast layer caching
-- `RUN --mount=type=cache` support for optimized builds
-- Optimized multi-stage builds
+- BuildKit layer caching
+- `RUN --mount=type=cache` support
+- Multi-stage build support
 - Full Docker daemon access for `docker ps`, `docker run`, etc.
 
 **Runtime requirements:**
@@ -156,7 +156,7 @@ dependencies:
 4. Injects `MOAT_*` environment variables into the agent container
 5. Cleans up all service containers when the run ends
 
-The agent never configures connection details — it reads them from environment variables.
+Connection details are provided via environment variables. The agent reads these to connect to services.
 
 ### Available services
 
@@ -260,7 +260,7 @@ Either:
 
 ### Security model
 
-Service dependencies are designed for development and testing. Data is ephemeral — it does not persist between runs. Do not use service dependencies for production data or long-lived state.
+Service dependencies are ephemeral—data does not persist between runs.
 
 Credential handling:
 

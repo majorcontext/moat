@@ -138,14 +138,46 @@ The proxy rejects requests without a valid token. This prevents other processes 
 
 ## Runtime comparison
 
-| Feature | Docker + gVisor | Docker (standard) | Apple containers |
-|---------|-----------------|-------------------|------------------|
-| Platform | Linux | Linux, macOS, Windows | macOS 15+ (Apple Silicon) |
-| Isolation level | High | Standard | Standard |
-| Docker socket access | Yes | Yes | No |
-| Privileged mode | Yes | Yes | No |
-| Startup time | ~2-3s | ~1-2s | ~1s |
-| Resource overhead | ~10-30% CPU | Minimal | Minimal |
+| Feature | Docker + gVisor | Docker (standard) | Apple containers | microVMs (planned) |
+|---------|-----------------|-------------------|------------------|--------------------|
+| Platform | Linux | Linux, macOS, Windows | macOS 15+ (Apple Silicon) | Linux |
+| Isolation level | High | Standard | Standard | Hardware-level |
+| Docker socket access | Yes | Yes | No | Yes (planned) |
+| Privileged mode | Yes | Yes | No | No |
+| Startup time | ~2-3s | ~1-2s | ~1s | ~100-200ms |
+| Resource overhead | Additional CPU usage | Minimal | Minimal | Low |
+
+## Future: VM and microVM support
+
+Moat currently uses container-based isolation (Docker, Apple containers). Future versions will support true VM and microVM runtimes for stronger isolation guarantees.
+
+**Planned runtime options:**
+
+- **Firecracker** — Lightweight microVMs from AWS, designed for multi-tenant workloads
+- **Kata Containers** — OCI-compatible container runtime using lightweight VMs
+- **Cloud Hypervisor** — Open-source VMM optimized for modern cloud workloads
+
+**Why VMs:**
+
+VMs provide a hardware-level isolation boundary that containers cannot match. A compromised container can potentially escape to the host kernel. A compromised VM guest cannot directly access the host without exploiting the hypervisor, which has a much smaller attack surface than a full kernel.
+
+**Use cases for VM-based isolation:**
+
+- Running agents on code from untrusted sources
+- Multi-tenant environments where agents from different users share infrastructure
+- Compliance requirements that mandate hardware-level isolation
+- Defense-in-depth for high-value credentials
+
+**Current workaround:**
+
+For VM-level isolation today, run Moat itself inside a VM:
+
+```bash
+# On host VM
+moat run ./untrusted-project
+```
+
+This provides hardware isolation at the cost of heavier resource overhead compared to future native microVM support.
 
 ## Choosing a runtime
 
@@ -164,7 +196,7 @@ The proxy rejects requests without a valid token. This prevents other processes 
 
 ## BuildKit and Docker-in-Docker
 
-When using `docker:dind` dependencies, Moat creates an isolated Docker daemon with an automatic BuildKit sidecar for optimized builds.
+When using `docker:dind` dependencies, Moat creates an isolated Docker daemon with an automatic BuildKit sidecar.
 
 **Sidecar behavior:**
 - Created automatically when the main container starts
