@@ -197,7 +197,7 @@ If a service fails to become ready within 30 seconds:
 Error: postgres service failed to become ready: timed out after 30s
 
 Service container logs:
-  moat logs <run-id> --service postgres
+  docker logs moat-postgres-<run-id>
 
 Or disable wait:
   services:
