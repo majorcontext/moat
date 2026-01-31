@@ -1005,7 +1005,9 @@ region = %s
 	}
 
 	// Determine if we need Claude init (for OAuth credentials and host files)
-	// This is triggered by an anthropic grant with an OAuth token
+	// This is triggered by:
+	// - an anthropic grant with an OAuth token, OR
+	// - claude-code in the dependencies list (user may run Claude without credential injection)
 	var needsClaudeInit bool
 	var claudeStagingDir string
 	for _, grant := range opts.Grants {
@@ -1023,6 +1025,14 @@ region = %s
 				}
 			}
 			break
+		}
+	}
+	if !needsClaudeInit {
+		for _, d := range depList {
+			if d.Name == "claude-code" {
+				needsClaudeInit = true
+				break
+			}
 		}
 	}
 
@@ -1134,7 +1144,8 @@ region = %s
 	// - anthropic grant is configured (automatic Claude Code integration)
 	var containerHome string
 	if hostHome, err := os.UserHomeDir(); err == nil {
-		containerHome = m.runtime.BuildManager().GetImageHomeDir(ctx, containerImage)
+		imageHome := m.runtime.BuildManager().GetImageHomeDir(ctx, containerImage)
+		containerHome = resolveContainerHome(needsCustomImage, imageHome)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			claudeDir := workspaceToClaudeDir(opts.Workspace)
 			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
@@ -2659,6 +2670,23 @@ func (m *Manager) Close() error {
 	m.mu.RUnlock()
 
 	return m.runtime.Close()
+}
+
+// resolveContainerHome returns the home directory to use for container mounts.
+// Most moat runs build a custom image (needsCustomImage=true) which always creates
+// moatuser and runs as that user, so the home is /home/moatuser. We use this
+// directly rather than inspecting the image because init-based images don't set
+// USER moatuser in the Dockerfile — the init script drops privileges at runtime,
+// so GetImageHomeDir incorrectly returns "/root".
+//
+// The only case where needsCustomImage is false is a minimal agent.yaml with no
+// dependencies, grants, or plugins — the base image is used as-is with no
+// Dockerfile generated, so we fall back to the image's detected home.
+func resolveContainerHome(needsCustomImage bool, imageHome string) string {
+	if needsCustomImage {
+		return "/home/moatuser"
+	}
+	return imageHome
 }
 
 // workspaceToClaudeDir converts an absolute workspace path to Claude's project directory format.

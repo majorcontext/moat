@@ -107,6 +107,57 @@ func TestWorkspaceToClaudeDir(t *testing.T) {
 	}
 }
 
+// TestClaudeLogMountTargetUsesRuntimeHome verifies that the Claude log sync mount
+// targets the actual runtime user's home directory, not the image's default.
+// When a moat-built image uses an init script (ENTRYPOINT moat-init), the image
+// USER is root, but the container runs as moatuser with HOME=/home/moatuser.
+// The mount must target /home/moatuser/.claude/projects/-workspace, not /root/.
+func TestClaudeLogMountTargetUsesRuntimeHome(t *testing.T) {
+	tests := []struct {
+		name             string
+		needsCustomImage bool
+		imageHomeDir     string // what GetImageHomeDir would return
+		wantHome         string
+	}{
+		{
+			name:             "custom image uses moatuser home regardless of image metadata",
+			needsCustomImage: true,
+			imageHomeDir:     "/root", // init-based images report root
+			wantHome:         "/home/moatuser",
+		},
+		{
+			name:             "custom image with correct image metadata still uses moatuser",
+			needsCustomImage: true,
+			imageHomeDir:     "/home/moatuser",
+			wantHome:         "/home/moatuser",
+		},
+		{
+			name:             "base image uses detected home",
+			needsCustomImage: false,
+			imageHomeDir:     "/root",
+			wantHome:         "/root",
+		},
+		{
+			name:             "base image with non-root user",
+			needsCustomImage: false,
+			imageHomeDir:     "/home/node",
+			wantHome:         "/home/node",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containerHome := resolveContainerHome(tt.needsCustomImage, tt.imageHomeDir)
+			got := filepath.Join(containerHome, ".claude", "projects", "-workspace")
+			want := filepath.Join(tt.wantHome, ".claude", "projects", "-workspace")
+
+			if got != want {
+				t.Errorf("mount target = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestValidateMCPGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()
