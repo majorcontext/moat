@@ -842,7 +842,13 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 			Privileged:  cfg.Privileged,
 			Mounts:      mounts,
 		},
-		nil, // network config
+		&network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				cfg.NetworkID: {
+					Aliases: []string{cfg.Hostname},
+				},
+			},
+		},
 		nil, // platform
 		cfg.Name,
 	)
