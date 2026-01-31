@@ -36,7 +36,7 @@ func (m *dockerServiceManager) StartService(ctx context.Context, cfg ServiceConf
 		return ServiceInfo{}, fmt.Errorf("starting %s service: %w", cfg.Name, err)
 	}
 
-	return buildServiceInfo(containerID, cfg), nil
+	return buildServiceInfo(containerID, cfg, cfg.Name), nil
 }
 
 // CheckReady runs the service's readiness command inside the container.

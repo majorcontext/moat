@@ -222,7 +222,7 @@ type Config struct {
 	User         string // User to run as (e.g., "1000:1000" or "moatuser")
 	Mounts       []MountConfig
 	ExtraHosts   []string       // host:ip mappings (Docker-specific)
-	NetworkMode  string         // "bridge", "host", "none" (Docker-specific)
+	NetworkMode  string         // "bridge", "host", "none", or a network name/ID
 	PortBindings map[int]string // container port -> host bind address (e.g., 3000 -> "127.0.0.1")
 	CapAdd       []string       // Linux capabilities to add (e.g., "NET_ADMIN")
 	GroupAdd     []string       // Supplementary group IDs for the container process (e.g., "999" for docker group)

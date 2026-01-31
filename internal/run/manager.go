@@ -2382,6 +2382,29 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
 	}
 
+	// Stop service containers
+	if len(r.ServiceContainers) > 0 {
+		svcMgr := m.runtime.ServiceManager()
+		if svcMgr != nil {
+			for svcName, svcContainerID := range r.ServiceContainers {
+				log.Debug("stopping service after container exit", "service", svcName, "container_id", svcContainerID)
+				if stopErr := svcMgr.StopService(context.Background(), container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
+					log.Warn("failed to stop service", "service", svcName, "error", stopErr)
+				}
+			}
+		}
+	}
+
+	// Remove network
+	if r.NetworkID != "" {
+		netMgr := m.runtime.NetworkManager()
+		if netMgr != nil {
+			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
+				log.Debug("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
+			}
+		}
+	}
+
 	// Unregister routes
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)

@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -44,7 +45,18 @@ func (m *appleServiceManager) StartService(ctx context.Context, cfg ServiceConfi
 	containerID := strings.TrimSpace(string(output))
 	log.Debug("started apple service container", "service", cfg.Name, "container", containerID)
 
-	return buildServiceInfo(containerID, cfg), nil
+	// Apple containers don't support --hostname and DNS resolution by container
+	// name requires system-level setup. Instead, inspect the container to get its
+	// IP address and use that as the host for service connections.
+	host, err := m.getContainerIP(ctx, containerID)
+	if err != nil {
+		// Clean up the container we just started
+		_ = m.StopService(ctx, ServiceInfo{ID: containerID, Name: cfg.Name})
+		return ServiceInfo{}, fmt.Errorf("getting IP for %s service: %w", cfg.Name, err)
+	}
+	log.Debug("resolved service container IP", "service", cfg.Name, "ip", host)
+
+	return buildServiceInfo(containerID, cfg, host), nil
 }
 
 // CheckReady runs the readiness command inside the service container.
@@ -78,15 +90,49 @@ func (m *appleServiceManager) StopService(ctx context.Context, info ServiceInfo)
 	return nil
 }
 
+// getContainerIP inspects a container and returns its IPv4 address on the network.
+func (m *appleServiceManager) getContainerIP(ctx context.Context, containerID string) (string, error) {
+	cmd := exec.CommandContext(ctx, m.containerBin, "inspect", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("inspecting container: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+
+	var info []struct {
+		Networks []struct {
+			IPv4Address string `json:"ipv4Address"`
+		} `json:"networks"`
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		return "", fmt.Errorf("parsing inspect output: %w", err)
+	}
+
+	if len(info) == 0 || len(info[0].Networks) == 0 || info[0].Networks[0].IPv4Address == "" {
+		return "", fmt.Errorf("no network address found for container %s", containerID)
+	}
+
+	// Address is in CIDR format (e.g., "192.168.68.2/24"), strip the prefix length
+	addr := info[0].Networks[0].IPv4Address
+	if idx := strings.IndexByte(addr, '/'); idx != -1 {
+		addr = addr[:idx]
+	}
+
+	return addr, nil
+}
+
+// buildAppleContainerName returns the unique container name for a service.
+func buildAppleContainerName(cfg ServiceConfig) string {
+	return fmt.Sprintf("moat-%s-%s", cfg.Name, cfg.RunID)
+}
+
 // buildAppleRunArgs constructs CLI args for `container run`.
 func buildAppleRunArgs(cfg ServiceConfig, networkID string) []string {
 	image := cfg.Image + ":" + cfg.Version
-	containerName := fmt.Sprintf("moat-%s-%s", cfg.Name, cfg.RunID)
+	containerName := buildAppleContainerName(cfg)
 
 	args := []string{
 		"run", "--detach",
 		"--name", containerName,
-		"--hostname", cfg.Name,
 	}
 
 	if networkID != "" {

@@ -18,10 +18,11 @@ func TestBuildServiceInfo(t *testing.T) {
 		PasswordEnv:  "POSTGRES_PASSWORD",
 	}
 
-	info := buildServiceInfo("container-abc", cfg)
+	info := buildServiceInfo("container-abc", cfg, "postgres")
 	assert.Equal(t, "container-abc", info.ID)
 	assert.Equal(t, "postgres", info.Name)
 	assert.Equal(t, "postgres", info.Host)
+
 	assert.Equal(t, 5432, info.Ports["default"])
 	assert.Equal(t, "testpass", info.Env["POSTGRES_PASSWORD"])
 	assert.Equal(t, "pg_isready", info.ReadinessCmd)

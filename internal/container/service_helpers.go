@@ -3,11 +3,14 @@ package container
 import "strings"
 
 // buildServiceInfo creates a ServiceInfo from a started container.
-func buildServiceInfo(containerID string, cfg ServiceConfig) ServiceInfo {
+// The host parameter sets the hostname used by other containers to reach this service.
+// On Docker this is the service name (via --hostname), on Apple containers it's the
+// container name (which is also the DNS name on shared networks).
+func buildServiceInfo(containerID string, cfg ServiceConfig, host string) ServiceInfo {
 	return ServiceInfo{
 		ID:           containerID,
 		Name:         cfg.Name,
-		Host:         cfg.Name,
+		Host:         host,
 		Ports:        cfg.Ports,
 		Env:          cfg.Env,
 		ReadinessCmd: cfg.ReadinessCmd,
