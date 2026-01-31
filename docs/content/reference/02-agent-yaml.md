@@ -48,7 +48,7 @@ secrets:
 mounts:
   - ./data:/data:ro
 
-# Services
+# Endpoints
 ports:
   web: 3000
   api: 8080
@@ -431,11 +431,11 @@ The workspace is always mounted at `/workspace`.
 
 ---
 
-## Services
+## Endpoints
 
 ### ports
 
-Service ports to expose via hostname routing.
+Endpoint ports to expose via hostname routing.
 
 ```yaml
 ports:
@@ -446,7 +446,7 @@ ports:
 - Type: `map[string]int`
 - Default: `{}`
 
-Services are accessible at `https://<service>.<name>.localhost:<proxy-port>` when the routing proxy is running.
+Endpoints are accessible at `https://<endpoint>.<name>.localhost:<proxy-port>` when the routing proxy is running.
 
 ---
 

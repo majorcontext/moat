@@ -36,8 +36,8 @@ type Run struct {
 	Name           string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Workspace      string
 	Grants         []string
-	Ports          map[string]int // service name -> container port
-	HostPorts      map[string]int // service name -> host port (after binding)
+	Ports          map[string]int // endpoint name -> container port
+	HostPorts      map[string]int // endpoint name -> host port (after binding)
 	State          State
 	ContainerID    string
 	ProxyServer    *proxy.Server     // Auth proxy for credential injection

@@ -840,11 +840,11 @@ region = %s
 		proxyEnv = append(proxyEnv, "MOAT_HOST="+baseHost)
 		proxyEnv = append(proxyEnv, "MOAT_URL=http://"+baseHost)
 
-		for serviceName := range ports {
-			upperName := strings.ToUpper(serviceName)
-			serviceHost := fmt.Sprintf("%s.%s.localhost:%d", serviceName, agentName, proxyPort)
-			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_HOST_%s=%s", upperName, serviceHost))
-			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_URL_%s=http://%s", upperName, serviceHost))
+		for endpointName := range ports {
+			upperName := strings.ToUpper(endpointName)
+			endpointHost := fmt.Sprintf("%s.%s.localhost:%d", endpointName, agentName, proxyPort)
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_HOST_%s=%s", upperName, endpointHost))
+			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_URL_%s=http://%s", upperName, endpointHost))
 		}
 	}
 

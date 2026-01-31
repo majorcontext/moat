@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Simple web server that responds with a greeting on port 3000."""
+"""Simple API server that responds with a greeting on port 8080."""
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
 
-PORT = 3000
+PORT = 8080
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -12,14 +12,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(f"Hello from port {PORT}! (web service)\n".encode())
+        self.wfile.write(f"Hello from port {PORT}! (api endpoint)\n".encode())
 
     def log_message(self, format, *args):
-        print(f"[web] {args[0]}")
+        print(f"[api] {args[0]}")
 
 
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"Web server running on port {PORT}")
-    print(f"MOAT_URL_WEB={os.environ.get('MOAT_URL_WEB', 'not set')}")
+    print(f"API server running on port {PORT}")
+    print(f"MOAT_URL_API={os.environ.get('MOAT_URL_API', 'not set')}")
     server.serve_forever()

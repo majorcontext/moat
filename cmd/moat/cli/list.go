@@ -41,21 +41,21 @@ func listRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tSERVICES")
+	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tENDPOINTS")
 	for _, r := range runs {
-		services := ""
+		endpoints := ""
 		if len(r.Ports) > 0 {
 			names := make([]string, 0, len(r.Ports))
 			for name := range r.Ports {
 				names = append(names, name)
 			}
-			services = strings.Join(names, ", ")
+			endpoints = strings.Join(names, ", ")
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			r.Name,
 			r.ID,
 			r.State,
-			services,
+			endpoints,
 		)
 	}
 	return w.Flush()

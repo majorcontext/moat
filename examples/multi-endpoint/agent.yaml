@@ -1,4 +1,4 @@
-# Example: Multi-service agent with hostname routing
+# Example: Multi-endpoint agent with hostname routing
 #
 # This example runs two simple Python HTTP servers and exposes them
 # via hostname-based routing:

@@ -105,7 +105,7 @@ Local addresses are excluded from proxying.
 
 ### MOAT_URL_*
 
-Service URLs for hostname routing. One variable per service defined in `ports`.
+Endpoint URLs for hostname routing. One variable per endpoint defined in `ports`.
 
 ```yaml
 # agent.yaml
@@ -123,7 +123,7 @@ echo $MOAT_URL_API
 # http://api.my-agent.localhost:8080
 ```
 
-Use these for service-to-service communication or OAuth callback URLs.
+Use these for inter-endpoint communication or OAuth callback URLs.
 
 ### MOAT_RUN_ID
 
