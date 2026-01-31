@@ -15,7 +15,7 @@ dependencies:
   - claude-code
   - node@20
   - bats
-  - docker:dind
+#  - docker:dind
 
 grants:
   - anthropic

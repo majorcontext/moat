@@ -44,6 +44,8 @@ moat run [flags] [path] [-- command]
 | `-d`, `--detach` | Run in background |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--keep` | Keep container after run completes |
 | `--mount SRC:DST:MODE` | Additional mount (repeatable) |
 | `--no-snapshots` | Disable snapshots for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
@@ -119,8 +121,14 @@ moat claude [flags] [path]
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `--grant PROVIDER` | Add credentials (repeatable) |
+| `-e KEY=VALUE` | Set environment variable (repeatable) |
 | `--name NAME` | Session name |
 | `-d`, `--detach` | Run in background |
+| `--rebuild` | Force rebuild of container image |
+| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--keep` | Keep container after run completes |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--noyolo` | Restore Claude Code's confirmation prompts (by default, prompts are skipped) |
 
 ### Examples
@@ -153,6 +161,93 @@ List configured plugins for a workspace.
 
 ```bash
 moat claude plugins list [path]
+```
+
+---
+
+## moat codex
+
+Run OpenAI Codex CLI in a container.
+
+```
+moat codex [workspace] [flags]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `--grant PROVIDER` | Add credentials (repeatable) |
+| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `--name NAME` | Session name |
+| `-d`, `--detach` | Run in background |
+| `--rebuild` | Force rebuild of container image |
+| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
+| `--full-auto` | Enable full-auto mode (auto-approve tool use) (default: true) |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--keep` | Keep container after run completes |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+
+### Examples
+
+```bash
+# Interactive Codex CLI
+moat codex
+
+# In specific directory
+moat codex ./my-project
+
+# Non-interactive with prompt
+moat codex -p "explain this codebase"
+moat codex -p "fix the bug in main.py"
+
+# With GitHub access
+moat codex --grant github
+
+# Named session
+moat codex --name my-feature
+
+# Run in background
+moat codex -d
+
+# Force rebuild
+moat codex --rebuild
+
+# Disable full-auto mode (require manual approval)
+moat codex --full-auto=false
+```
+
+### Subcommands
+
+#### moat codex sessions
+
+List Codex sessions.
+
+```bash
+moat codex sessions [flags]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--active` | Show only running sessions |
+
+**Examples:**
+
+```bash
+# List all sessions
+moat codex sessions
+
+# Show only active sessions
+moat codex sessions --active
 ```
 
 ---
@@ -470,8 +565,6 @@ moat audit [flags] <run-id>
 | Flag | Description |
 |------|-------------|
 | `-e`, `--export FILE` | Export proof bundle |
-| `--list` | List audit entries |
-| `--type TYPE` | Filter by entry type (with `--list`) |
 
 ### Examples
 
@@ -481,12 +574,6 @@ moat audit run_a1b2c3d4e5f6
 
 # Export proof bundle
 moat audit run_a1b2c3d4e5f6 --export proof.json
-
-# List entries
-moat audit run_a1b2c3d4e5f6 --list
-
-# Filter by type
-moat audit run_a1b2c3d4e5f6 --list --type=credential
 ```
 
 ---

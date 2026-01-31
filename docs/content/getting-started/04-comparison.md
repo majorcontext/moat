@@ -28,7 +28,7 @@ All of these are good tools solving related problems. The right choice depends o
 
 ### Use Moat when
 
-You want credentials protected at the network layer—the agent never sees your actual tokens. Moat's TLS-intercepting proxy injects authentication headers into requests, so even if an agent logs all environment variables or gets compromised, your credentials remain safe.
+You want credentials injected at the network layer—the proxy adds authentication headers to requests, so tokens never appear in the container environment. Even if an agent logs all environment variables or gets compromised, your credentials remain safe.
 
 You also want observability. Every HTTP request the agent makes is logged with method, URL, status, and timing. Audit logs are hash-chained and can be cryptographically verified.
 
@@ -101,7 +101,7 @@ How each tool handles sensitive credentials:
 | **Leash** | TLS proxy injects headers (Linux only) | Agent sees placeholder (Linux); full access (macOS) |
 | **Dev Containers** | Environment variables or mounted files | Agent has full access |
 
-If credential security is your primary concern, Moat and Leash (on Linux) provide the strongest protection by keeping real tokens outside the container entirely.
+If you need to prevent tokens from appearing in the container environment, Moat and Leash (on Linux) inject credentials at the network layer, keeping real tokens outside the container entirely.
 
 ### Observability
 
@@ -168,7 +168,7 @@ If you need file-level and process-level policies:
 
 ## Summary
 
-- **Moat**: Credential security via network-layer injection, plus observability. Good balance of security and simplicity.
+- **Moat**: Credential security via network-layer injection, plus observability with tamper-proof audit logs.
 - **packnplay**: Simplest setup for container isolation. No credential protection or observability.
 - **Leash**: Most comprehensive policy enforcement and observability. Requires more setup.
 - **Dev Containers**: Familiar tooling for VS Code users. No agent-specific security features.

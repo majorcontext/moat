@@ -18,7 +18,7 @@ When code runs in a Moat container:
 
 - **Network isolation** — Container traffic routes through Moat's proxy. The proxy enforces network policies and injects credentials. Direct access to the host network is blocked.
 
-- **Resource limits** — Containers have default CPU and memory limits. A container cannot consume all system resources.
+- **Resource limits** — Container resource consumption is managed by the container runtime. Docker and Apple containers can be configured with CPU and memory limits if needed.
 
 ## Supported runtimes
 
@@ -129,7 +129,7 @@ Runs an isolated Docker daemon inside the container with automatic BuildKit side
 - Agent has full control over its own Docker daemon
 - No access to host containers or images
 
-Use this mode for untrusted code or when isolation is required.
+Use this mode when you need isolation from the host Docker daemon or don't want agents to access host containers.
 
 **Runtime requirement:** Both modes require Docker runtime. Apple containers cannot mount the Docker socket or run in privileged mode.
 
@@ -149,7 +149,7 @@ It does not provide:
 - Isolation equivalent to a separate physical machine
 - Defense against malicious code specifically designed to escape containers
 
-For high-security scenarios, consider running Moat inside a VM or on a dedicated machine.
+For defense against container escape exploits or running code from unknown sources, run Moat inside a VM or on a dedicated machine. Future versions of Moat will support native microVM runtimes (Firecracker, Kata Containers) for hardware-level isolation. See [Container runtimes](./07-runtimes.md#future-vm-and-microvm-support) for details.
 
 ## Related concepts
 
