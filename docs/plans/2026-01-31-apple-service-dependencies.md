@@ -45,11 +45,11 @@ package container
 import "strings"
 
 // buildServiceInfo creates a ServiceInfo from a started container.
-func buildServiceInfo(containerID string, cfg ServiceConfig) ServiceInfo {
+func buildServiceInfo(containerID string, cfg ServiceConfig, host string) ServiceInfo {
 	return ServiceInfo{
 		ID:           containerID,
 		Name:         cfg.Name,
-		Host:         cfg.Name,
+		Host:         host,
 		Ports:        cfg.Ports,
 		Env:          cfg.Env,
 		ReadinessCmd: cfg.ReadinessCmd,

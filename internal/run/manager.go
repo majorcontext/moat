@@ -2400,7 +2400,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
-				log.Debug("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
+				log.Warn("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
 			}
 		}
 	}

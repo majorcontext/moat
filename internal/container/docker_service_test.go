@@ -41,4 +41,3 @@ func TestBuildSidecarConfigRedis(t *testing.T) {
 	assert.Equal(t, "redis:7", sidecarCfg.Image)
 	assert.Equal(t, []string{"--requirepass", "redispass"}, sidecarCfg.Cmd)
 }
-

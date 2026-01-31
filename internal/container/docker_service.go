@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -118,4 +119,3 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 
 	return sc
 }
-
