@@ -19,6 +19,7 @@ import (
 // support is available (Docker or Apple containers).
 func skipIfNoServiceRuntime(t *testing.T) {
 	t.Helper()
+
 	if _, err := exec.LookPath("docker"); err == nil {
 		return
 	}
@@ -32,6 +33,7 @@ func skipIfNoServiceRuntime(t *testing.T) {
 // injects MOAT_POSTGRES_URL, and the database is reachable from the main container.
 func TestServicePostgres(t *testing.T) {
 	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -113,6 +115,7 @@ func TestServicePostgres(t *testing.T) {
 // injects MOAT_REDIS_URL, and the cache is reachable.
 func TestServiceRedis(t *testing.T) {
 	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -179,6 +182,7 @@ func TestServiceRedis(t *testing.T) {
 // can run together and both sets of env vars are injected.
 func TestServiceMultiple(t *testing.T) {
 	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -251,6 +255,7 @@ func TestServiceMultiple(t *testing.T) {
 // via the services: block in agent.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
 	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -328,6 +333,7 @@ func TestServiceCustomConfig(t *testing.T) {
 // the run is destroyed.
 func TestServiceCleanup(t *testing.T) {
 	skipIfNoServiceRuntime(t)
+	skipIfNestedDind(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
