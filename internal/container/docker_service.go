@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -46,7 +47,7 @@ func (m *dockerServiceManager) CheckReady(ctx context.Context, info ServiceInfo)
 		return nil
 	}
 
-	cmd := resolveReadinessCmd(info.ReadinessCmd, info.Env, info.PasswordEnv)
+	cmd := resolvePlaceholders(info.ReadinessCmd, info.Env, info.PasswordEnv)
 
 	execCreateResp, err := m.cli.ContainerExecCreate(ctx, info.ID, dockercontainer.ExecOptions{
 		Cmd:          []string{"sh", "-c", cmd},
@@ -85,9 +86,16 @@ func (m *dockerServiceManager) StopService(ctx context.Context, info ServiceInfo
 func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 	image := cfg.Image + ":" + cfg.Version
 
+	// Sort env var keys for deterministic ordering
+	envKeys := make([]string, 0, len(cfg.Env))
+	for k := range cfg.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+
 	var envList []string
-	for k, v := range cfg.Env {
-		envList = append(envList, k+"="+v)
+	for _, k := range envKeys {
+		envList = append(envList, k+"="+cfg.Env[k])
 	}
 
 	sc := SidecarConfig{
@@ -105,10 +113,7 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 	if len(cfg.ExtraCmd) > 0 {
 		cmds := make([]string, len(cfg.ExtraCmd))
 		for i, c := range cfg.ExtraCmd {
-			cmds[i] = c
-			for k, v := range cfg.Env {
-				cmds[i] = strings.ReplaceAll(cmds[i], "{"+strings.ToLower(k)+"}", v)
-			}
+			cmds[i] = resolvePlaceholders(c, cfg.Env, cfg.PasswordEnv)
 		}
 		sc.Cmd = cmds
 	}
@@ -129,15 +134,18 @@ func buildServiceInfo(containerID string, cfg ServiceConfig) ServiceInfo {
 	}
 }
 
-// resolveReadinessCmd substitutes password placeholders in readiness commands.
-func resolveReadinessCmd(cmd string, env map[string]string, passwordEnv string) string {
+// resolvePlaceholders replaces {key} placeholders in template with values from
+// env, matching keys case-insensitively (using lowercased keys). If passwordEnv
+// is set (e.g. "POSTGRES_PASSWORD"), its value is also available as {password}.
+func resolvePlaceholders(template string, env map[string]string, passwordEnv string) string {
+	// If passwordEnv is set, make the value available under the {password} alias.
 	if passwordEnv != "" {
 		if pw, ok := env[passwordEnv]; ok {
-			cmd = strings.ReplaceAll(cmd, "{password}", pw)
+			template = strings.ReplaceAll(template, "{password}", pw)
 		}
 	}
-	if pw, ok := env["password"]; ok {
-		cmd = strings.ReplaceAll(cmd, "{password}", pw)
+	for k, v := range env {
+		template = strings.ReplaceAll(template, "{"+strings.ToLower(k)+"}", v)
 	}
-	return cmd
+	return template
 }

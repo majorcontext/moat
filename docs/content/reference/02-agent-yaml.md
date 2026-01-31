@@ -417,7 +417,7 @@ mounts:
 
 #### Mount format
 
-```
+```text
 <host-path>:<container-path>:<mode>
 ```
 
@@ -596,7 +596,7 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `MOAT_POSTGRES_URL` | Full connection URL | `postgres://postgres:pass@host:5432/postgres` |
+| `MOAT_POSTGRES_URL` | Full connection URL | `postgresql://postgres:pass@host:5432/postgres` |
 | `MOAT_POSTGRES_HOST` | Hostname | `postgres` |
 | `MOAT_POSTGRES_PORT` | Port | `5432` |
 | `MOAT_POSTGRES_USER` | Username | `postgres` |
@@ -607,12 +607,12 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `MOAT_MYSQL_URL` | Full connection URL | `mysql://root:pass@host:3306/mysql` |
+| `MOAT_MYSQL_URL` | Full connection URL | `mysql://root:pass@host:3306/moat` |
 | `MOAT_MYSQL_HOST` | Hostname | `mysql` |
 | `MOAT_MYSQL_PORT` | Port | `3306` |
 | `MOAT_MYSQL_USER` | Username | `root` |
 | `MOAT_MYSQL_PASSWORD` | Auto-generated password | |
-| `MOAT_MYSQL_DB` | Database name | `mysql` |
+| `MOAT_MYSQL_DB` | Database name | `moat` |
 
 #### Redis
 

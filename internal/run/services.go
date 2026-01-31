@@ -58,12 +58,8 @@ func generateServiceEnv(def *deps.ServiceDef, info container.ServiceInfo, userSp
 
 	// DB
 	db := def.DefaultDB
-	if userSpec != nil {
-		// Check for DB override via common env vars
-		if v, ok := userSpec.Env["POSTGRES_DB"]; ok {
-			db = v
-		}
-		if v, ok := userSpec.Env["MYSQL_DATABASE"]; ok {
+	if userSpec != nil && def.DBEnv != "" {
+		if v, ok := userSpec.Env[def.DBEnv]; ok {
 			db = v
 		}
 	}
@@ -153,17 +149,24 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 
 // waitForServiceReady polls CheckReady until success or timeout.
 func waitForServiceReady(ctx context.Context, mgr container.ServiceManager, info container.ServiceInfo) error {
-	deadline := time.Now().Add(readinessTimeout)
+	ctx, cancel := context.WithTimeout(ctx, readinessTimeout)
+	defer cancel()
+
 	var lastErr error
 
-	for time.Now().Before(deadline) {
+	for {
 		if err := mgr.CheckReady(ctx, info); err != nil {
 			lastErr = err
-			time.Sleep(readinessInterval)
+			select {
+			case <-time.After(readinessInterval):
+			case <-ctx.Done():
+				if lastErr != nil {
+					return fmt.Errorf("%w: last check: %w", ctx.Err(), lastErr)
+				}
+				return ctx.Err()
+			}
 			continue
 		}
 		return nil
 	}
-
-	return fmt.Errorf("timed out after %s: %w", readinessTimeout, lastErr)
 }

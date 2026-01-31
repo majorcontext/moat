@@ -423,6 +423,7 @@ postgres:
     default_user: postgres
     default_db: postgres
     password_env: POSTGRES_PASSWORD
+    db_env: POSTGRES_DB
     readiness_cmd: "pg_isready -h localhost -U postgres"
     url_scheme: "postgresql"
     url_format: "{scheme}://{user}:{password}@{host}:{port}/{db}"
@@ -440,6 +441,7 @@ mysql:
     default_user: root
     default_db: moat
     password_env: MYSQL_ROOT_PASSWORD
+    db_env: MYSQL_DATABASE
     extra_env:
       MYSQL_DATABASE: "{db}"
     readiness_cmd: "mysqladmin ping -h localhost -u root --password={password}"
