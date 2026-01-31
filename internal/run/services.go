@@ -105,6 +105,9 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 	if !ok || spec.Service == nil {
 		return container.ServiceConfig{}, fmt.Errorf("unknown service: %s", dep.Name)
 	}
+	if spec.Type != deps.TypeService {
+		return container.ServiceConfig{}, fmt.Errorf("%s has type %q but expected %q", dep.Name, spec.Type, deps.TypeService)
+	}
 
 	password, err := generatePassword()
 	if err != nil {
@@ -152,13 +155,16 @@ func waitForServiceReady(ctx context.Context, mgr container.ServiceManager, info
 	ctx, cancel := context.WithTimeout(ctx, readinessTimeout)
 	defer cancel()
 
+	ticker := time.NewTicker(readinessInterval)
+	defer ticker.Stop()
+
 	var lastErr error
 
 	for {
 		if err := mgr.CheckReady(ctx, info); err != nil {
 			lastErr = err
 			select {
-			case <-time.After(readinessInterval):
+			case <-ticker.C:
 			case <-ctx.Done():
 				if lastErr != nil {
 					return fmt.Errorf("%w: last check: %w", ctx.Err(), lastErr)

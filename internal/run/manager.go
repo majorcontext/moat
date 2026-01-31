@@ -180,21 +180,31 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		}
 
 		// Create run object from metadata
+		// Filter service containers to only those that still exist
+		serviceContainers := make(map[string]string, len(meta.ServiceContainers))
+		for name, id := range meta.ServiceContainers {
+			if _, scErr := m.runtime.ContainerState(ctx, id); scErr == nil {
+				serviceContainers[name] = id
+			}
+		}
+
 		r := &Run{
-			ID:          runID,
-			Name:        meta.Name,
-			Workspace:   meta.Workspace,
-			Grants:      meta.Grants,
-			Ports:       meta.Ports,
-			State:       runState,
-			ContainerID: meta.ContainerID,
-			Store:       store,
-			Interactive: meta.Interactive,
-			CreatedAt:   meta.CreatedAt,
-			StartedAt:   meta.StartedAt,
-			StoppedAt:   meta.StoppedAt,
-			Error:       meta.Error,
-			exitCh:      make(chan struct{}),
+			ID:                runID,
+			Name:              meta.Name,
+			Workspace:         meta.Workspace,
+			Grants:            meta.Grants,
+			Ports:             meta.Ports,
+			State:             runState,
+			ContainerID:       meta.ContainerID,
+			Store:             store,
+			Interactive:       meta.Interactive,
+			CreatedAt:         meta.CreatedAt,
+			StartedAt:         meta.StartedAt,
+			StoppedAt:         meta.StoppedAt,
+			Error:             meta.Error,
+			exitCh:            make(chan struct{}),
+			ServiceContainers: serviceContainers,
+			NetworkID:         meta.NetworkID,
 		}
 
 		// If container is already stopped, close exitCh immediately
