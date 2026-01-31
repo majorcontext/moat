@@ -191,17 +191,6 @@ Each service has a built-in readiness command:
 
 Readiness checks run inside the service container via `docker exec`. They verify that the service accepts connections with the generated credentials.
 
-If a service fails to become ready within 30 seconds:
-
-```text
-Error: postgres service failed to become ready: timed out after 30s
-
-Disable wait:
-  services:
-    postgres:
-      wait: false
-```
-
 ## Network architecture
 
 ```text
