@@ -1,7 +1,7 @@
 ---
 title: "Running multiple agents"
 description: "Run multiple agents simultaneously with hostname routing."
-keywords: ["moat", "multi-agent", "hostname routing", "parallel", "services"]
+keywords: ["moat", "multi-agent", "hostname routing", "parallel", "endpoints"]
 ---
 
 # Running multiple agents
@@ -91,7 +91,7 @@ https://api.checkout.localhost:8080    → checkout container:8080
 ```bash
 $ moat list
 
-NAME        RUN ID              STATE    SERVICES
+NAME        RUN ID              STATE    ENDPOINTS
 dark-mode   run_a1b2c3d4e5f6   running  web, api
 checkout    run_d4e5f6a1b2c3   running  web, api
 ```
@@ -122,7 +122,7 @@ moat stop --all
 
 ## Environment variables
 
-Inside each container, environment variables point to its own services:
+Inside each container, environment variables point to its own endpoints:
 
 ```bash
 # In dark-mode container:
@@ -136,7 +136,7 @@ MOAT_URL_API=http://api.checkout.localhost:8080
 
 Use these for:
 
-- Service-to-service communication within the agent
+- Inter-endpoint communication within the agent
 - OAuth callback URLs
 - Webhook endpoints
 
@@ -187,7 +187,7 @@ moat claude --name checkout ./my-app
 Each Claude Code session:
 - Has its own container
 - Has its own credential injection proxy
-- Can access its services at unique hostnames
+- Can access its endpoints at unique hostnames
 - Has independent snapshots
 
 ### Access the web servers
@@ -203,10 +203,10 @@ Test both features side by side.
 The hostname format is:
 
 ```
-<service>.<agent-name>.localhost:<proxy-port>
+<endpoint>.<agent-name>.localhost:<proxy-port>
 ```
 
-- `service` — From the `ports` map in agent.yaml
+- `endpoint` — From the `ports` map in agent.yaml
 - `agent-name` — From `--name` flag or `name` in agent.yaml
 - `proxy-port` — Default 8080, or as specified with `moat proxy start --port`
 
@@ -261,7 +261,7 @@ moat run --name agent-1 ./my-app &
 moat run --name agent-2 ./my-app &
 ```
 
-Services won't be externally accessible via hostnames, but agents can still:
+Endpoints won't be externally accessible via hostnames, but agents can still:
 - Run their code
 - Make outbound requests
 - Use credential injection

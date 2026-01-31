@@ -170,10 +170,10 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 		globalCfg, _ := config.LoadGlobal()
 		proxyPort := globalCfg.Proxy.Port
 
-		fmt.Println("Services:")
-		for serviceName, containerPort := range r.Ports {
-			url := fmt.Sprintf("https://%s.%s.localhost:%d", serviceName, r.Name, proxyPort)
-			fmt.Printf("  %s: %s (container :%d)\n", serviceName, url, containerPort)
+		fmt.Println("Endpoints:")
+		for endpointName, containerPort := range r.Ports {
+			url := fmt.Sprintf("https://%s.%s.localhost:%d", endpointName, r.Name, proxyPort)
+			fmt.Printf("  %s: %s (container :%d)\n", endpointName, url, containerPort)
 		}
 	}
 

@@ -8,10 +8,10 @@ import (
 	"sync"
 )
 
-// RouteTable manages agent -> service -> host:port mappings.
+// RouteTable manages agent -> endpoint -> host:port mappings.
 type RouteTable struct {
 	dir    string
-	routes map[string]map[string]string // agent -> service -> host:port
+	routes map[string]map[string]string // agent -> endpoint -> host:port
 	mu     sync.RWMutex
 }
 
@@ -36,11 +36,11 @@ func NewRouteTable(dir string) (*RouteTable, error) {
 }
 
 // Add registers routes for an agent.
-func (rt *RouteTable) Add(agent string, services map[string]string) error {
+func (rt *RouteTable) Add(agent string, endpoints map[string]string) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
-	rt.routes[agent] = services
+	rt.routes[agent] = endpoints
 	return rt.save()
 }
 
@@ -75,23 +75,23 @@ func (rt *RouteTable) reload() {
 	}
 }
 
-// Lookup returns the host:port for an agent's service.
+// Lookup returns the host:port for an agent's endpoint.
 // It reloads routes from disk to pick up changes from other processes.
-func (rt *RouteTable) Lookup(agent, service string) (string, bool) {
+func (rt *RouteTable) Lookup(agent, endpoint string) (string, bool) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
 	rt.reload()
 
-	services, ok := rt.routes[agent]
+	endpoints, ok := rt.routes[agent]
 	if !ok {
 		return "", false
 	}
-	addr, ok := services[service]
+	addr, ok := endpoints[endpoint]
 	return addr, ok
 }
 
-// LookupDefault returns the first service's address for an agent.
+// LookupDefault returns the first endpoint's address for an agent.
 // It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) LookupDefault(agent string) (string, bool) {
 	rt.mu.Lock()
@@ -99,12 +99,12 @@ func (rt *RouteTable) LookupDefault(agent string) (string, bool) {
 
 	rt.reload()
 
-	services, ok := rt.routes[agent]
-	if !ok || len(services) == 0 {
+	endpoints, ok := rt.routes[agent]
+	if !ok || len(endpoints) == 0 {
 		return "", false
 	}
-	// Return first service (map iteration order is random but consistent for small maps)
-	for _, addr := range services {
+	// Return first endpoint (map iteration order is random but consistent for small maps)
+	for _, addr := range endpoints {
 		return addr, true
 	}
 	return "", false

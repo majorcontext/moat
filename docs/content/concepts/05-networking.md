@@ -80,11 +80,11 @@ The `allow` list supports wildcard patterns:
 
 ## Hostname routing
 
-Run multiple agents with services on the same ports. Each agent gets its own hostname namespace.
+Run multiple agents with endpoints on the same ports. Each agent gets its own hostname namespace.
 
 ### Configuring ports
 
-Declare service ports in `agent.yaml`:
+Declare endpoint ports in `agent.yaml`:
 
 ```yaml
 name: my-agent
@@ -111,12 +111,12 @@ The proxy listens on port 8080 by default. Change with `--port`:
 moat proxy start --port 9000
 ```
 
-### Accessing services
+### Accessing endpoints
 
-With the routing proxy running, services are accessible via hostnames:
+With the routing proxy running, endpoints are accessible via hostnames:
 
 ```
-https://<service>.<agent-name>.localhost:<proxy-port>
+https://<endpoint>.<agent-name>.localhost:<proxy-port>
 ```
 
 Example with two agents:
@@ -126,12 +126,12 @@ $ moat run --name dark-mode ./my-app &
 $ moat run --name checkout ./my-app &
 
 $ moat list
-NAME        RUN ID              STATE    SERVICES
+NAME        RUN ID              STATE    ENDPOINTS
 dark-mode   run_a1b2c3d4e5f6   running  web, api
 checkout    run_d4e5f6a1b2c3   running  web, api
 ```
 
-Access each agent's services:
+Access each agent's endpoints:
 
 ```
 https://web.dark-mode.localhost:8080  → dark-mode container:3000
@@ -144,7 +144,7 @@ Both agents expose the same internal ports, but the routing proxy directs traffi
 
 ### Environment variables
 
-Inside each container, environment variables point to its own services:
+Inside each container, environment variables point to its own endpoints:
 
 ```bash
 # In dark-mode container:
@@ -156,7 +156,7 @@ MOAT_URL_WEB=http://web.checkout.localhost:8080
 MOAT_URL_API=http://api.checkout.localhost:8080
 ```
 
-Use these variables for service-to-service communication or OAuth callbacks.
+Use these variables for inter-endpoint communication or OAuth callbacks.
 
 ### Trusting the CA certificate
 
