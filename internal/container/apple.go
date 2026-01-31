@@ -28,7 +28,9 @@ type AppleRuntime struct {
 	containerBin string
 	hostAddress  string
 
-	buildMgr *appleBuildManager
+	buildMgr   *appleBuildManager
+	networkMgr *appleNetworkManager
+	serviceMgr *appleServiceManager
 }
 
 // appleBuildManager implements BuildManager for Apple containers.
@@ -53,13 +55,15 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 		containerBin: binPath,
 		hostAddress:  "192.168.64.1",
 	}
+	r.networkMgr = &appleNetworkManager{containerBin: binPath}
+	r.serviceMgr = &appleServiceManager{containerBin: binPath}
 
 	return r, nil
 }
 
-// NetworkManager returns nil - Apple containers don't support custom networks.
+// NetworkManager returns the Apple network manager.
 func (r *AppleRuntime) NetworkManager() NetworkManager {
-	return nil
+	return r.networkMgr
 }
 
 // SidecarManager returns nil - Apple containers don't support sidecars.
@@ -67,9 +71,9 @@ func (r *AppleRuntime) SidecarManager() SidecarManager {
 	return nil
 }
 
-// ServiceManager returns nil - Apple containers don't support service dependencies.
+// ServiceManager returns the Apple service manager.
 func (r *AppleRuntime) ServiceManager() ServiceManager {
-	return nil
+	return r.serviceMgr
 }
 
 // BuildManager returns the Apple build manager.
