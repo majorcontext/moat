@@ -36,8 +36,7 @@ func (m *appleNetworkManager) RemoveNetwork(ctx context.Context, name string) er
 		if strings.Contains(outStr, "not found") || strings.Contains(outStr, "No such") {
 			return nil
 		}
-		log.Warn("failed to remove apple network", "name", name, "error", outStr)
-		return nil
+		return fmt.Errorf("removing network %s: %s: %w", name, outStr, err)
 	}
 	log.Debug("removed apple container network", "name", name)
 	return nil
