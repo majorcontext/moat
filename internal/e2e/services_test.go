@@ -52,13 +52,13 @@ func TestServicePostgres(t *testing.T) {
 		Config: &config.Config{
 			Dependencies: []string{"postgres@17"},
 		},
-		Cmd: []string{"sh", "-c", `
+		Cmd: []string{"bash", "-c", `
 			echo "MOAT_POSTGRES_URL=$MOAT_POSTGRES_URL" &&
 			echo "MOAT_POSTGRES_HOST=$MOAT_POSTGRES_HOST" &&
 			echo "MOAT_POSTGRES_PORT=$MOAT_POSTGRES_PORT" &&
 			echo "=== connectivity test ===" &&
 			for i in $(seq 1 10); do
-				if pg_isready -h "$MOAT_POSTGRES_HOST" -p "$MOAT_POSTGRES_PORT" 2>/dev/null; then
+				if (echo > /dev/tcp/"$MOAT_POSTGRES_HOST"/"$MOAT_POSTGRES_PORT") 2>/dev/null; then
 					echo "postgres_reachable=true"
 					exit 0
 				fi
