@@ -40,6 +40,10 @@ type DockerfileOptions struct {
 	// ClaudePlugins are plugins to install during image build.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
+
+	// NeedsIptables indicates the image needs iptables for network enforcement.
+	// Needed when: (1) grants are present (proxy redirect), (2) network.policy is "strict" (firewall).
+	NeedsIptables bool
 }
 
 // useBuildKit returns whether to use BuildKit features.
@@ -221,9 +225,8 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
 
 	// Write all sections
-	writeBasePackages(&b, opts.useBuildKit())
+	writePackages(&b, c.aptPkgs, opts.useBuildKit(), opts.NeedsIptables)
 	writeUserSetup(&b)
-	writeAptPackages(&b, c.aptPkgs, opts.useBuildKit())
 	writeDockerCLI(&b, c.dockerMode)
 	writeRuntimes(&b, c.runtimes, baseRuntime)
 	writeGithubBinaries(&b, c.githubBins)
@@ -234,7 +237,11 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 
 	// User-space custom deps (install-as: user) run as moatuser
 	writeUserCustomDeps(&b, c.userCustomDeps)
-	b.WriteString(claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser))
+
+	// Claude plugins run as moatuser - only switch back to root if needed
+	needsRootAfterClaude := len(c.dynamicNpm) > 0 || len(c.dynamicPip) > 0 || len(c.dynamicUv) > 0 ||
+		len(c.dynamicCargo) > 0 || len(c.dynamicGo) > 0 || len(opts.SSHHosts) > 0
+	b.WriteString(claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser, needsRootAfterClaude))
 
 	// Dynamic package manager dependencies
 	writeDynamicDeps(&b, "npm packages (dynamic)", c.dynamicNpm)
@@ -274,10 +281,29 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 	return defaultBaseImage, nil
 }
 
-// writeBasePackages writes the base package installation.
+// writePackages writes base and user-specified package installation in a single layer.
 // Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
-func writeBasePackages(b *strings.Builder, useBuildKit bool) {
-	b.WriteString("# Base packages\n")
+// iptables is only included if needsIptables is true (for proxy redirect or firewall).
+func writePackages(b *strings.Builder, userPkgs []string, useBuildKit bool, needsIptables bool) {
+	// Base packages always installed
+	basePkgs := []string{
+		"ca-certificates",
+		"curl",
+		"gnupg",
+		"gosu",
+		"unzip",
+	}
+
+	// Add iptables only if needed for proxy transparent redirect
+	if needsIptables {
+		basePkgs = append(basePkgs, "iptables")
+	}
+
+	// Combine base and user packages
+	allPkgs := append(basePkgs, userPkgs...)
+	sort.Strings(allPkgs)
+
+	b.WriteString("# Packages\n")
 	if useBuildKit {
 		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
 		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
@@ -286,13 +312,19 @@ func writeBasePackages(b *strings.Builder, useBuildKit bool) {
 		b.WriteString("RUN apt-get update \\\n")
 	}
 	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
-	b.WriteString("       ca-certificates \\\n")
-	b.WriteString("       curl \\\n")
-	b.WriteString("       gnupg \\\n")
-	b.WriteString("       gosu \\\n")
-	b.WriteString("       iptables \\\n")
-	b.WriteString("       unzip \\\n")
-	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+	for i, pkg := range allPkgs {
+		if i < len(allPkgs)-1 {
+			b.WriteString("       " + pkg + " \\\n")
+		} else {
+			b.WriteString("       " + pkg)
+		}
+	}
+	if !useBuildKit {
+		// Only clean up apt lists for non-BuildKit builds
+		// BuildKit uses cache mounts, so cleanup is a no-op
+		b.WriteString(" \\\n    && rm -rf /var/lib/apt/lists/*")
+	}
+	b.WriteString("\n\n")
 }
 
 // writeUserSetup writes the non-root user creation commands.
@@ -308,27 +340,6 @@ func writeUserSetup(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))
 }
 
-// writeAptPackages writes user-specified apt package installation.
-// Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
-func writeAptPackages(b *strings.Builder, pkgs []string, useBuildKit bool) {
-	if len(pkgs) == 0 {
-		return
-	}
-	sort.Strings(pkgs)
-	b.WriteString("# Apt packages\n")
-	if useBuildKit {
-		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
-		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
-		b.WriteString("    apt-get update \\\n")
-	} else {
-		b.WriteString("RUN apt-get update \\\n")
-	}
-	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
-	for _, pkg := range pkgs {
-		b.WriteString("       " + pkg + " \\\n")
-	}
-	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
-}
 
 // writeDockerCLI installs Docker CLI from Docker's official repository.
 // We use the official repo instead of the docker.io apt package because

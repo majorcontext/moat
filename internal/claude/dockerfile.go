@@ -38,7 +38,10 @@ var validPluginKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$`)
 // Dockerfile USER and WORKDIR commands. Callers must ensure this is a safe, validated
 // value (e.g., hardcoded "moatuser") since it's inserted directly into the Dockerfile.
 // The function does not validate this parameter to allow flexibility in user naming.
-func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []string, containerUser string) string {
+//
+// The needsRootAfter parameter determines whether to end with `USER root`. Set to true
+// if root operations follow (dynamic deps, SSH hosts, etc.), false if entrypoint is next.
+func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []string, containerUser string, needsRootAfter bool) string {
 	if len(marketplaces) == 0 && len(plugins) == 0 {
 		return ""
 	}
@@ -56,18 +59,29 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		return sortedMarketplaces[i].Name < sortedMarketplaces[j].Name
 	})
 
-	// Add marketplaces - failures are non-fatal (private repos may not be accessible during build)
+	// Add marketplaces in a single RUN layer for faster builds
+	// Failures are non-fatal (private repos may not be accessible during build)
+	validMarketplaces := make([]MarketplaceConfig, 0, len(sortedMarketplaces))
 	for _, m := range sortedMarketplaces {
 		if m.Repo == "" {
 			continue
 		}
-		// Validate repo format to prevent command injection
 		if !validMarketplaceRepo.MatchString(m.Repo) {
 			b.WriteString(fmt.Sprintf("RUN echo 'WARNING: Invalid marketplace repo format: %s, skipping'\n", m.Name))
 			continue
 		}
-		// Try to add marketplace, but don't fail build if it fails (e.g., private repo)
-		b.WriteString(fmt.Sprintf("RUN claude plugin marketplace add %s && echo 'Added marketplace %s' || echo 'WARNING: Could not add marketplace %s (may be private or inaccessible during build)'\n", m.Repo, m.Name, m.Name))
+		validMarketplaces = append(validMarketplaces, m)
+	}
+
+	if len(validMarketplaces) > 0 {
+		b.WriteString("RUN ")
+		for i, m := range validMarketplaces {
+			if i > 0 {
+				b.WriteString(" && \\\n    ")
+			}
+			b.WriteString(fmt.Sprintf("(claude plugin marketplace add %s && echo 'Added marketplace %s' || echo 'WARNING: Could not add marketplace %s (may be private or inaccessible during build)')", m.Repo, m.Name, m.Name))
+		}
+		b.WriteString("\n")
 	}
 
 	// Sort plugins for deterministic output
@@ -75,18 +89,33 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	copy(sortedPlugins, plugins)
 	sort.Strings(sortedPlugins)
 
-	// Install plugins - failures are non-fatal (plugins from inaccessible marketplaces will fail)
+	// Install plugins in a single RUN layer for faster builds
+	// Failures are non-fatal (plugins from inaccessible marketplaces will fail)
+	validPlugins := make([]string, 0, len(sortedPlugins))
 	for _, plugin := range sortedPlugins {
-		// Validate plugin format to prevent command injection
 		if !validPluginKey.MatchString(plugin) {
 			b.WriteString(fmt.Sprintf("RUN echo 'WARNING: Invalid plugin format: %s (expected plugin-name@marketplace-name), skipping'\n", plugin))
 			continue
 		}
-		// Try to install plugin, but don't fail build if it fails
-		b.WriteString(fmt.Sprintf("RUN claude plugin install %s && echo 'Installed plugin %s' || echo 'WARNING: Could not install plugin %s (marketplace may be inaccessible)'\n", plugin, plugin, plugin))
+		validPlugins = append(validPlugins, plugin)
 	}
 
-	b.WriteString("USER root\n\n")
+	if len(validPlugins) > 0 {
+		b.WriteString("RUN ")
+		for i, plugin := range validPlugins {
+			if i > 0 {
+				b.WriteString(" && \\\n    ")
+			}
+			b.WriteString(fmt.Sprintf("(claude plugin install %s && echo 'Installed plugin %s' || echo 'WARNING: Could not install plugin %s (marketplace may be inaccessible)')", plugin, plugin, plugin))
+		}
+		b.WriteString("\n")
+	}
+
+	// Only switch back to root if root operations follow
+	if needsRootAfter {
+		b.WriteString("USER root\n")
+	}
+	b.WriteString("\n")
 
 	return b.String()
 }

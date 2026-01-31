@@ -1078,6 +1078,8 @@ region = %s
 		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
 
 		// Always generate the Dockerfile so we can save it to the run directory
+		// iptables is needed for: (1) proxy when grants are present, (2) firewall when network policy is strict
+		needsIptables := len(opts.Grants) > 0 || (opts.Config != nil && opts.Config.Network.Policy == "strict")
 		result, err := deps.GenerateDockerfile(installableDeps, &deps.DockerfileOptions{
 			NeedsSSH:           hasSSHGrants,
 			SSHHosts:           sshGrants,
@@ -1086,6 +1088,7 @@ region = %s
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
+			NeedsIptables:      needsIptables,
 		})
 		if err != nil {
 			cleanupProxy(proxyServer)

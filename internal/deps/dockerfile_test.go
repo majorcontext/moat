@@ -64,16 +64,25 @@ func TestGenerateDockerfileEmpty(t *testing.T) {
 }
 
 func TestGenerateDockerfileHasIptables(t *testing.T) {
-	// Verify iptables is installed in base packages for firewall support
+	// Verify iptables is installed when NeedsIptables is true (for transparent proxy redirect)
 	deps := []Dependency{
 		{Name: "python", Version: "3.11"},
 	}
-	result, err := GenerateDockerfile(deps, nil)
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsIptables: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 	if !strings.Contains(result.Dockerfile, "iptables") {
-		t.Errorf("Dockerfile should install iptables for firewall support.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+		t.Errorf("Dockerfile should install iptables when NeedsIptables is true.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+
+	// Verify iptables is NOT installed when NeedsIptables is false
+	result, err = GenerateDockerfile(deps, &DockerfileOptions{NeedsIptables: false})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if strings.Contains(result.Dockerfile, "iptables") {
+		t.Errorf("Dockerfile should NOT install iptables when NeedsIptables is false.\nGenerated Dockerfile:\n%s", result.Dockerfile)
 	}
 }
 

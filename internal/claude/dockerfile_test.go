@@ -15,7 +15,8 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		"aws-agent-skills@aws-agent-skills",
 	}
 
-	result := GenerateDockerfileSnippet(marketplaces, plugins, "moatuser")
+	// Test with needsRootAfter = true
+	result := GenerateDockerfileSnippet(marketplaces, plugins, "moatuser", true)
 
 	// Should have section header
 	if !strings.Contains(result, "# Claude Code plugins") {
@@ -43,19 +44,26 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("should install claude-md-management plugin")
 	}
 
-	// Should switch back to root
+	// Should switch back to root when needsRootAfter = true
 	if !strings.Contains(result, "USER root") {
-		t.Error("should switch back to USER root")
+		t.Error("should switch back to USER root when needsRootAfter = true")
+	}
+
+	// Test with needsRootAfter = false
+	result = GenerateDockerfileSnippet(marketplaces, plugins, "moatuser", false)
+	// Should NOT switch back to root when needsRootAfter = false
+	if strings.Contains(result, "USER root") {
+		t.Error("should NOT switch to USER root when needsRootAfter = false")
 	}
 }
 
 func TestGenerateDockerfileSnippetEmpty(t *testing.T) {
-	result := GenerateDockerfileSnippet(nil, nil, "moatuser")
+	result := GenerateDockerfileSnippet(nil, nil, "moatuser", false)
 	if result != "" {
 		t.Error("empty input should return empty string")
 	}
 
-	result = GenerateDockerfileSnippet([]MarketplaceConfig{}, []string{}, "moatuser")
+	result = GenerateDockerfileSnippet([]MarketplaceConfig{}, []string{}, "moatuser", true)
 	if result != "" {
 		t.Error("empty slices should return empty string")
 	}
@@ -68,7 +76,7 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 			{Name: "evil", Source: "github", Repo: "; rm -rf /"},
 		}
 
-		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
+		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser", false)
 
 		// Valid repo should be included
 		if !strings.Contains(result, "marketplace add valid/repo") {
@@ -90,7 +98,7 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 			"bad;rm -rf /@market",
 		}
 
-		result := GenerateDockerfileSnippet(nil, plugins, "moatuser")
+		result := GenerateDockerfileSnippet(nil, plugins, "moatuser", false)
 
 		// Valid plugin should be included
 		if !strings.Contains(result, "plugin install valid-plugin@valid-market") {
