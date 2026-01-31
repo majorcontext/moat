@@ -8,6 +8,7 @@ claude:
 dependencies:
   - go@1.25.6
   - go-extras
+  - cli-essentials
   - git
   - gh
   - make

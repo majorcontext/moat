@@ -93,7 +93,7 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 	}
 	sort.Strings(envKeys)
 
-	var envList []string
+	envList := make([]string, 0, len(envKeys))
 	for _, k := range envKeys {
 		envList = append(envList, k+"="+cfg.Env[k])
 	}

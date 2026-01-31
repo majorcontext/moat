@@ -166,10 +166,7 @@ func waitForServiceReady(ctx context.Context, mgr container.ServiceManager, info
 			select {
 			case <-ticker.C:
 			case <-ctx.Done():
-				if lastErr != nil {
-					return fmt.Errorf("%w: last check: %w", ctx.Err(), lastErr)
-				}
-				return ctx.Err()
+				return fmt.Errorf("%w: last check: %w", ctx.Err(), lastErr)
 			}
 			continue
 		}
