@@ -1522,9 +1522,8 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupClaude(claudeGenerated)
 			cleanupCodex(codexGenerated)
-			return nil, fmt.Errorf("service dependencies require Docker runtime\n" +
-				"Apple containers don't support service dependencies\n\n" +
-				"Either:\n  - Use Docker runtime\n  - Install services on your host and set MOAT_*_URL manually")
+			return nil, fmt.Errorf("service dependencies require a runtime with service support\n\n" +
+				"Either:\n  - Use Docker or Apple container runtime\n  - Install services on your host and set MOAT_*_URL manually")
 		}
 
 		// Validate services config

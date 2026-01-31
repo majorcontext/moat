@@ -247,14 +247,13 @@ Service containers share a Docker network with the agent container (`moat-<run-i
 
 ### Runtime requirements
 
-Service dependencies require Docker runtime. Apple containers do not support services.
+Service dependencies require Docker or Apple container runtime. Apple container networking requires macOS 26 or later.
 
 ```text
-Error: postgres@17 requires Docker runtime
-Apple containers don't support service dependencies
+Error: service dependencies require a runtime with service support
 
 Either:
-  - Use Docker runtime
+  - Use Docker or Apple container runtime
   - Install services on your host and set MOAT_*_URL manually
 ```
 
