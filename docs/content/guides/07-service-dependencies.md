@@ -205,6 +205,15 @@ Services are reachable from the agent container by hostname. All containers on t
 
 If `docker:dind` is also declared, the BuildKit sidecar shares the same network.
 
+## Security model
+
+Service dependencies are designed for development and testing. They are not intended for production data or long-lived state.
+
+- **Ephemeral** — All data is destroyed when the run ends. Nothing persists between runs.
+- **Isolated** — Service containers are on a private Docker network. No ports are exposed to the host.
+- **Authenticated** — Every service requires a password, even on the isolated network. Passwords are 32-character alphanumeric strings generated from `crypto/rand` and unique per run.
+- **Scoped** — Credentials exist only in run metadata and are cleared on cleanup.
+
 ## Troubleshooting
 
 ### Connection refused
