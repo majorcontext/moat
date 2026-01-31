@@ -258,12 +258,17 @@ Either:
   - Install services on your host and set MOAT_*_URL manually
 ```
 
-### Security
+### Security model
+
+Service dependencies are designed for development and testing. Data is ephemeral — it does not persist between runs. Do not use service dependencies for production data or long-lived state.
+
+Credential handling:
 
 - Passwords are 32-character alphanumeric strings from `crypto/rand`
 - Every run gets unique passwords — never reused
 - All services require authentication, even on isolated networks
 - Credentials are stored only in run metadata and cleared on cleanup
+- No ports are exposed to the host — services are reachable only from the agent container
 - The `services:` block supports the same secret providers as `secrets:` (1Password, AWS SSM)
 
 See the [service dependencies guide](../guides/07-service-dependencies.md) for detailed examples and patterns.
