@@ -1009,10 +1009,26 @@ func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, docker
 	if err != nil && builderVersion == build.BuilderBuildKit {
 		errMsg := err.Error()
 
-		// "no active sessions": BuildKit not installed/available
+		// "no active sessions": BuildKit has stale sessions (intermittent issue)
+		if strings.Contains(errMsg, "no active sessions") {
+			return fmt.Errorf(`BuildKit has stale build sessions.
+
+This is usually caused by interrupted builds or Docker daemon state issues.
+
+Quick fix: Clean BuildKit cache
+  docker builder prune -f
+
+Or: Restart Docker Desktop
+
+Alternative: Use legacy builder (slower, no layer caching):
+  export MOAT_DISABLE_BUILDKIT=1
+  moat run ...
+
+Original error: %w`, err)
+		}
+
 		// "mount option requires BuildKit": Dockerfile has BuildKit syntax but builder doesn't support it
-		if strings.Contains(errMsg, "no active sessions") ||
-			strings.Contains(errMsg, "mount option requires BuildKit") {
+		if strings.Contains(errMsg, "mount option requires BuildKit") {
 			return fmt.Errorf(`BuildKit not available.
 
 Recommended: Install Docker buildx (included in Docker Desktop 20.10+)
