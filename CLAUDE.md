@@ -11,7 +11,7 @@ Moat runs AI agents in isolated containers with credential injection and full ob
 - **Smart Image Selection** - Automatically selects container images based on `agent.yaml` runtime config
 - **Full Observability** - Captures logs, network requests, and traces for every run
 - **Declarative Config** - Configure agents via `agent.yaml` manifests
-- **Multi-Runtime Support** - Automatically uses Apple containers (macOS 15+) or Docker
+- **Multi-Runtime Support** - Automatically uses Apple containers (macOS 26+) or Docker
 
 ## Architecture
 
@@ -34,11 +34,11 @@ internal/
 
 **Credential Injection:** `moat grant github` → token from gh CLI, env var, or PAT prompt → token stored encrypted → `moat run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
 
-**Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X / python:X / golang:X / ubuntu:22.04
+**Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X-slim / python:X-slim / golang:X / debian:bookworm-slim
 
 **Observability:** Container stdout → `storage.LogWriter` → `~/.moat/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
-**Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 15+ with Apple Silicon, otherwise Docker
+**Container Runtime Selection:** `container.NewRuntime()` auto-detects: Apple containers on macOS 26+ with Apple Silicon, otherwise Docker
 
 **Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 

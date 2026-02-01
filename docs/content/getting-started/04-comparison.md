@@ -138,7 +138,7 @@ Leash offers the most granular control. Moat provides network-level policies. pa
 | **Leash** | Docker | Docker or native (experimental) | Docker + eBPF |
 | **Dev Containers** | Docker | Docker | Docker |
 
-Moat's Apple container support on macOS 15+ provides native virtualization without Docker Desktop. Leash's macOS native mode is experimental and lacks some features (no credential injection).
+Moat's Apple container support on macOS 26+ provides native virtualization without Docker Desktop. Leash's macOS native mode is experimental and lacks some features (no credential injection).
 
 ## Migration paths
 
