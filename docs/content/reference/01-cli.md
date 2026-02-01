@@ -615,7 +615,7 @@ moat list
 
 ## moat status
 
-Show system status.
+Show high-level system status summary.
 
 ```
 moat status
@@ -624,9 +624,12 @@ moat status
 ### Output sections
 
 - **Runtime**: Docker or Apple containers
-- **Runs**: Active and stopped run counts
-- **Images**: Cached container images with sizes
-- **Disk Usage**: Storage breakdown
+- **Active Runs**: Currently running containers with age, disk usage, and endpoints
+- **Summary**: Counts and disk usage for stopped runs and cached images
+- **Health**: Warnings about stopped runs and orphaned containers
+
+For detailed information about all runs, use `moat list`.
+For image details, use `moat system images`
 
 ---
 

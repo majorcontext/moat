@@ -37,11 +37,11 @@ func init() {
 }
 
 type statusOutput struct {
-	Runtime   string       `json:"runtime"`
-	Runs      []runInfo    `json:"runs"`
-	Images    []imageInfo  `json:"images"`
-	Health    []healthItem `json:"health"`
-	TotalDisk int64        `json:"total_disk_bytes"`
+	Runtime    string       `json:"runtime"`
+	ActiveRuns []runInfo    `json:"active_runs"`
+	Images     []imageInfo  `json:"images"`
+	Health     []healthItem `json:"health"`
+	TotalDisk  int64        `json:"total_disk_bytes"`
 }
 
 type runInfo struct {
@@ -103,18 +103,18 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	var stoppedDisk int64
 
 	for _, r := range runs {
-		if r.State == run.StateRunning {
-			activeRuns = append(activeRuns, r)
-			runDir := filepath.Join(baseDir, r.ID)
-			size := getDirSizeWithTimeout(runDir, 2*time.Second)
-			runDiskUsage[r.ID] = size
-		} else {
+		runDir := filepath.Join(baseDir, r.ID)
+		size := getDirSizeWithTimeout(runDir, 2*time.Second)
+
+		if r.State == run.StateStopped || r.State == run.StateFailed {
 			stoppedCount++
-			runDir := filepath.Join(baseDir, r.ID)
-			size := getDirSizeWithTimeout(runDir, 2*time.Second)
 			if size >= 0 {
 				stoppedDisk += size
 			}
+		} else {
+			// Include all non-stopped states: created, starting, running, stopping
+			activeRuns = append(activeRuns, r)
+			runDiskUsage[r.ID] = size
 		}
 	}
 
@@ -141,7 +141,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			}
 			endpoints = strings.Join(names, ", ")
 		}
-		output.Runs = append(output.Runs, runInfo{
+		output.ActiveRuns = append(output.ActiveRuns, runInfo{
 			Name:      r.Name,
 			ID:        r.ID,
 			State:     string(r.State),
@@ -169,12 +169,6 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			Status:  "warning",
 			Message: fmt.Sprintf("%d stopped runs (%d MB)", stoppedCount, stoppedDiskMB),
 		})
-	}
-
-	// Build a tag-to-ID mapping so we can track images by both identifiers
-	tagToID := make(map[string]string)
-	for _, img := range images {
-		tagToID[img.Tag] = img.ID
 	}
 
 	// Check for orphaned containers
@@ -226,7 +220,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Active Runs: %d\n", len(activeRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  NAME\tRUN ID\tAGE\tDISK\tENDPOINTS")
-		for _, r := range output.Runs {
+		for _, r := range output.ActiveRuns {
 			diskStr := fmt.Sprintf("%d MB", r.DiskMB)
 			if r.DiskMB < 0 {
 				diskStr = "?"
