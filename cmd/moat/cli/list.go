@@ -55,6 +55,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			for name := range r.Ports {
 				names = append(names, name)
 			}
+			sort.Strings(names)
 			endpoints = strings.Join(names, ", ")
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
