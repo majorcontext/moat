@@ -178,15 +178,15 @@ func TestVersionValidation(t *testing.T) {
 }
 
 func TestMetaDependencyExpansion(t *testing.T) {
-	// go-extras is a meta dependency that expands to gofumpt, govulncheck, goreleaser
+	// go-extras is a meta dependency that expands to gofumpt, govulncheck, goreleaser, golangci-lint
 	deps, err := ParseAll([]string{"go", "go-extras"})
 	if err != nil {
 		t.Fatalf("ParseAll error: %v", err)
 	}
 
-	// Should have go + 3 expanded deps = 4 total
-	if len(deps) != 4 {
-		t.Errorf("expected 4 deps after expansion, got %d: %v", len(deps), deps)
+	// Should have go + 4 expanded deps = 5 total
+	if len(deps) != 5 {
+		t.Errorf("expected 5 deps after expansion, got %d: %v", len(deps), deps)
 	}
 
 	// Verify the expanded deps
@@ -194,7 +194,7 @@ func TestMetaDependencyExpansion(t *testing.T) {
 	for _, d := range deps {
 		names[d.Name] = true
 	}
-	expected := []string{"go", "gofumpt", "govulncheck", "goreleaser"}
+	expected := []string{"go", "gofumpt", "govulncheck", "goreleaser", "golangci-lint"}
 	for _, exp := range expected {
 		if !names[exp] {
 			t.Errorf("expected %q in expanded deps, got %v", exp, deps)
@@ -214,9 +214,9 @@ func TestMetaDependencyDeduplication(t *testing.T) {
 		t.Fatalf("ParseAll error: %v", err)
 	}
 
-	// Should have go + gofumpt + govulncheck + goreleaser = 4 total (no duplicate gofumpt)
-	if len(deps) != 4 {
-		t.Errorf("expected 4 deps (no duplicates), got %d: %v", len(deps), deps)
+	// Should have go + gofumpt + govulncheck + goreleaser + golangci-lint = 5 total (no duplicate gofumpt)
+	if len(deps) != 5 {
+		t.Errorf("expected 5 deps (no duplicates), got %d: %v", len(deps), deps)
 	}
 }
 

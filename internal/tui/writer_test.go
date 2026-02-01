@@ -43,8 +43,8 @@ func TestWriter_Setup(t *testing.T) {
 	output := buf.String()
 
 	// Should clear screen first
-	if !strings.Contains(output, "\x1b[2J") {
-		t.Errorf("expected clear screen in setup, got %q", output)
+	if !strings.Contains(output, "\x1b[J") {
+		t.Errorf("expected clear from cursor (ESC[J) in setup, got %q", output)
 	}
 
 	// Should home cursor
@@ -56,6 +56,8 @@ func TestWriter_Setup(t *testing.T) {
 	if !strings.Contains(output, "run_abc123") {
 		t.Errorf("expected status bar in setup")
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Write_PassesThrough(t *testing.T) {
@@ -82,6 +84,8 @@ func TestWriter_Write_PassesThrough(t *testing.T) {
 
 	// Status bar is NOT rewritten on every write (only during Setup/Resize)
 	// This is the key difference from the VT emulator approach
+
+	w.Cleanup()
 }
 
 func TestWriter_Cleanup(t *testing.T) {
@@ -97,9 +101,9 @@ func TestWriter_Cleanup(t *testing.T) {
 
 	output := buf.String()
 
-	// Should clear screen
+	// Cleanup should do full screen clear (ESC[2J), not partial clear (ESC[J)
 	if !strings.Contains(output, "\x1b[2J") {
-		t.Errorf("expected clear screen in cleanup, got %q", output)
+		t.Errorf("expected full screen clear (ESC[2J) in cleanup, got %q", output)
 	}
 
 	// Should show cursor
@@ -126,14 +130,16 @@ func TestWriter_Resize(t *testing.T) {
 	output := buf.String()
 
 	// Should clear screen and re-render
-	if !strings.Contains(output, "\x1b[2J") {
-		t.Errorf("expected clear screen in resize, got %q", output)
+	if !strings.Contains(output, "\x1b[J") {
+		t.Errorf("expected clear from cursor (ESC[J) in resize, got %q", output)
 	}
 
 	// Should render status bar at new position
 	if !strings.Contains(output, "run_abc123") {
 		t.Errorf("expected status bar in resize output")
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Resize_Grow(t *testing.T) {
@@ -154,14 +160,16 @@ func TestWriter_Resize_Grow(t *testing.T) {
 	output := buf.String()
 
 	// Should clear and re-render - this avoids ghost status bars
-	if !strings.Contains(output, "\x1b[2J") {
-		t.Errorf("expected clear screen on grow, got %q", output)
+	if !strings.Contains(output, "\x1b[J") {
+		t.Errorf("expected clear from cursor (ESC[J) on grow, got %q", output)
 	}
 
 	// Should draw status bar at new row 30
 	if !strings.Contains(output, "\x1b[30;1H") {
 		t.Errorf("expected status bar at row 30, got %q", output)
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Resize_Shrink(t *testing.T) {
@@ -182,14 +190,16 @@ func TestWriter_Resize_Shrink(t *testing.T) {
 	output := buf.String()
 
 	// Should clear and re-render
-	if !strings.Contains(output, "\x1b[2J") {
-		t.Errorf("expected clear screen on shrink, got %q", output)
+	if !strings.Contains(output, "\x1b[J") {
+		t.Errorf("expected clear from cursor (ESC[J) on shrink, got %q", output)
 	}
 
 	// Should draw status bar at row 24
 	if !strings.Contains(output, "\x1b[24;1H") {
 		t.Errorf("expected status bar at row 24, got %q", output)
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Apple_ShowsSpinnerThenClears(t *testing.T) {
@@ -200,10 +210,10 @@ func TestWriter_Apple_ShowsSpinnerThenClears(t *testing.T) {
 	w := NewWriter(&buf, bar, "apple")
 	_ = w.Setup()
 
-	// Setup should clear screen
+	// Setup should clear the scroll region (ESC[J after positioning at top)
 	setupOutput := buf.String()
-	if !strings.Contains(setupOutput, "\x1b[2J") {
-		t.Errorf("expected clear screen in setup, got %q", setupOutput)
+	if !strings.Contains(setupOutput, "\x1b[J") {
+		t.Errorf("expected clear from cursor (ESC[J) in setup, got %q", setupOutput)
 	}
 
 	buf.Reset()
@@ -234,6 +244,8 @@ func TestWriter_Apple_ShowsSpinnerThenClears(t *testing.T) {
 	if !strings.Contains(output, "run_abc123") {
 		t.Errorf("expected status bar after ready marker, got %q", output)
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Apple_PassthroughAfterReady(t *testing.T) {
@@ -262,6 +274,8 @@ func TestWriter_Apple_PassthroughAfterReady(t *testing.T) {
 	}
 
 	// Status bar is NOT rewritten on every write (scrolling region keeps it pinned)
+
+	w.Cleanup()
 }
 
 func TestWriter_ScrollingRegion_Resize(t *testing.T) {
@@ -294,6 +308,8 @@ func TestWriter_ScrollingRegion_Resize(t *testing.T) {
 	if !strings.Contains(output, "run_abc123") {
 		t.Errorf("expected status bar after resize, got %q", output)
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_Apple_BufferSizeLimit(t *testing.T) {
@@ -324,6 +340,8 @@ func TestWriter_Apple_BufferSizeLimit(t *testing.T) {
 	if bufLen > maxInitBuffer {
 		t.Errorf("expected buffer <= %d, got %d", maxInitBuffer, bufLen)
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_AltScreenEnter_CompositorMode(t *testing.T) {
@@ -411,6 +429,8 @@ func TestWriter_AltScreenExit_RestoresScrollMode(t *testing.T) {
 	if !strings.Contains(output, "run_abc123") {
 		t.Errorf("expected footer redraw after exit")
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_AltScreen_CompositorReceivesOutput(t *testing.T) {
@@ -643,6 +663,8 @@ func TestWriter_RapidModeSwitch(t *testing.T) {
 	if hasStopRender {
 		t.Error("expected stopRender=nil after all exits")
 	}
+
+	w.Cleanup()
 }
 
 func TestWriter_PassthroughANSI(t *testing.T) {
@@ -666,4 +688,6 @@ func TestWriter_PassthroughANSI(t *testing.T) {
 	if !strings.Contains(buf.String(), "hello") {
 		t.Errorf("expected content in output, got %q", buf.String())
 	}
+
+	w.Cleanup()
 }

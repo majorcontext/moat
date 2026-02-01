@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/trace"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +27,10 @@ const (
 	ttyStartupDelay = 200 * time.Millisecond
 )
 
-var attachInteractive bool
+var (
+	attachInteractive bool
+	attachTTYTrace    string
+)
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <run-id>",
@@ -63,6 +68,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(attachCmd)
 	attachCmd.Flags().BoolVarP(&attachInteractive, "interactive", "i", false, "interactive mode (use -i=false to force output-only)")
+	attachCmd.Flags().StringVar(&attachTTYTrace, "tty-trace", "", "capture terminal I/O to file for debugging (e.g., session.json)")
 }
 
 func attachToRun(cmd *cobra.Command, args []string) error {
@@ -104,7 +110,7 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	if interactive {
-		return attachInteractiveMode(ctx, manager, r)
+		return attachInteractiveMode(ctx, manager, r, attachTTYTrace)
 	}
 
 	return attachOutputMode(ctx, manager, r)
@@ -192,7 +198,13 @@ func attachOutputMode(ctx context.Context, manager *run.Manager, r *run.Run) err
 }
 
 // attachInteractiveMode attaches with stdin connected.
-func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run) error {
+func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run, tracePath string) error {
+	// Set up TTY tracing if requested
+	// Note: We don't have the original command for attach, use a placeholder
+	command := []string{"(attach to " + r.Name + ")"}
+	tracer := setupTTYTracer(tracePath, r, command)
+	defer tracer.save()
+
 	// Show recent logs before attaching so user has context
 	if logs, err := manager.RecentLogs(r.ID, 50); err == nil && len(logs) > 0 {
 		fmt.Print(logs)
@@ -221,13 +233,24 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
 	defer statusCleanup()
 
+	// Wrap stdout with tracer if tracing is enabled
+	if tracer != nil {
+		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
+	}
+
+	// Wrap stdin with escape proxy to detect detach/stop sequences
+	escapeProxy := term.NewEscapeProxy(os.Stdin)
+
+	// Wrap stdin with tracer if tracing is enabled
+	stdin := io.Reader(escapeProxy)
+	if tracer != nil {
+		stdin = trace.NewRecordingReader(escapeProxy, tracer.recorder, trace.EventStdin)
+	}
+
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
-
-	// Wrap stdin with escape proxy to detect detach/stop sequences
-	escapeProxy := term.NewEscapeProxy(os.Stdin)
 
 	// Channel to receive escape actions from the attach goroutine
 	escapeCh := make(chan term.EscapeAction, 1)
@@ -237,7 +260,7 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 
 	attachDone := make(chan error, 1)
 	go func() {
-		err := manager.Attach(attachCtx, r.ID, escapeProxy, stdout, os.Stderr)
+		err := manager.Attach(attachCtx, r.ID, stdin, stdout, os.Stderr)
 		// Check if the error is an escape sequence
 		if term.IsEscapeError(err) {
 			escapeCh <- term.GetEscapeAction(err)
@@ -260,6 +283,10 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 				if statusWriter != nil && term.IsTerminal(os.Stdout) {
 					width, height := term.GetSize(os.Stdout)
 					if width > 0 && height > 0 {
+						// Record resize event for tracing
+						if tracer != nil {
+							tracer.recorder.AddResize(width, height)
+						}
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY
 						// #nosec G115 -- width/height are validated positive above
