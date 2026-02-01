@@ -116,6 +116,16 @@ See [docs/STYLE-GUIDE.md](docs/STYLE-GUIDE.md) for tone, voice, and formatting g
 - **Be practical** — Show working examples first, explain after
 - **Documentation must match actual behavior.** When writing or updating docs, verify claims against the code. Check output formats, confirm flows work as described, and test sample commands. Inaccurate docs erode trust.
 
+### Documentation URL structure
+
+The documentation site is published at `majorcontext.com/moat`. Files in `docs/content` map to URLs with folder and file number prefixes removed:
+
+- `docs/content/concepts/01-sandboxing.md` → `majorcontext.com/moat/concepts/sandboxing`
+- `docs/content/guides/03-ssh-access.md` → `majorcontext.com/moat/guides/ssh-access`
+- `docs/content/reference/02-agent-yaml.md` → `majorcontext.com/moat/reference/agent-yaml`
+
+When referencing documentation in error messages or code, use these URLs.
+
 ### Keeping docs up to date
 
 When you add or change functionality, update the relevant documentation:
