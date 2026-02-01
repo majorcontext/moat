@@ -1414,7 +1414,7 @@ region = %s
 		privileged = true
 		log.Warn("creating privileged container - full host kernel access granted",
 			"mode", "docker:dind",
-			"security_docs", "https://docs.moat.dev/concepts/sandboxing#docker-modes")
+			"security_docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
 	}
 
 	// Create network and start BuildKit sidecar if enabled
