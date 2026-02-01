@@ -45,7 +45,7 @@ type RunStore struct {
 // It creates the run directory under baseDir if it doesn't exist.
 func NewRunStore(baseDir, runID string) (*RunStore, error) {
 	runDir := filepath.Join(baseDir, runID)
-	if err := os.MkdirAll(runDir, 0755); err != nil {
+	if err := os.MkdirAll(runDir, 0700); err != nil {
 		return nil, err
 	}
 	return &RunStore{
@@ -80,7 +80,7 @@ func (s *RunStore) SaveMetadata(m Metadata) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.dir, "metadata.json"), data, 0644)
+	return os.WriteFile(filepath.Join(s.dir, "metadata.json"), data, 0600)
 }
 
 // LoadMetadata reads the metadata from metadata.json in the run directory.
