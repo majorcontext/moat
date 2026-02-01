@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -31,6 +32,11 @@ func listRuns(cmd *cobra.Command, args []string) error {
 
 	runs := manager.List()
 
+	// Sort runs by age (newest first)
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
+
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(runs)
 	}
@@ -41,7 +47,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tENDPOINTS")
+	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tENDPOINTS")
 	for _, r := range runs {
 		endpoints := ""
 		if len(r.Ports) > 0 {
@@ -51,10 +57,11 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			}
 			endpoints = strings.Join(names, ", ")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			r.Name,
 			r.ID,
 			r.State,
+			formatAge(r.CreatedAt),
 			endpoints,
 		)
 	}

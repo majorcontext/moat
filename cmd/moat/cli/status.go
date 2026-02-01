@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -17,12 +19,16 @@ import (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show runs, images, disk usage, and health",
-	Long: `Display the current state of moat resources including:
-- Active and stopped runs
-- Cached container images
-- Disk usage
-- Health indicators and cleanup suggestions`,
+	Short: "Show system status summary",
+	Long: `Display a high-level summary of moat resources including:
+- Active runs
+- Totals for stopped runs and images
+- Health indicators
+
+For detailed information, use:
+  moat list              List all runs
+  moat system images     List all images
+  moat system containers List all containers`,
 	RunE: showStatus,
 }
 
@@ -39,11 +45,12 @@ type statusOutput struct {
 }
 
 type runInfo struct {
-	Name   string `json:"name"`
-	ID     string `json:"id"`
-	State  string `json:"state"`
-	Age    string `json:"age"`
-	DiskMB int64  `json:"disk_mb"`
+	Name      string `json:"name"`
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	Age       string `json:"age"`
+	DiskMB    int64  `json:"disk_mb"`
+	Endpoints string `json:"endpoints,omitempty"`
 }
 
 type imageInfo struct {
@@ -77,19 +84,38 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	runs := manager.List()
 
+	// Sort runs by age (newest first)
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
+
 	// Get images
 	images, err := rt.ListImages(ctx)
 	if err != nil {
 		return fmt.Errorf("listing images: %w", err)
 	}
 
-	// Calculate disk usage per run (with timeout to prevent blocking on slow disks)
+	// Calculate disk usage only for active runs (with timeout to prevent blocking on slow disks)
 	runDiskUsage := make(map[string]int64)
 	baseDir := storage.DefaultBaseDir()
+	var activeRuns []*run.Run
+	var stoppedCount int
+	var stoppedDisk int64
+
 	for _, r := range runs {
-		runDir := filepath.Join(baseDir, r.ID)
-		size := getDirSizeWithTimeout(runDir, 2*time.Second)
-		runDiskUsage[r.ID] = size
+		if r.State == run.StateRunning {
+			activeRuns = append(activeRuns, r)
+			runDir := filepath.Join(baseDir, r.ID)
+			size := getDirSizeWithTimeout(runDir, 2*time.Second)
+			runDiskUsage[r.ID] = size
+		} else {
+			stoppedCount++
+			runDir := filepath.Join(baseDir, r.ID)
+			size := getDirSizeWithTimeout(runDir, 2*time.Second)
+			if size >= 0 {
+				stoppedDisk += size
+			}
+		}
 	}
 
 	// Build output
@@ -97,10 +123,8 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		Runtime: string(rt.Type()),
 	}
 
-	// Runs section
-	var runningCount, stoppedCount int
-	var stoppedDisk int64
-	for _, r := range runs {
+	// Active runs section
+	for _, r := range activeRuns {
 		age := formatAge(r.CreatedAt)
 		size := runDiskUsage[r.ID]
 		var diskMB int64
@@ -109,41 +133,41 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		} else {
 			diskMB = -1 // Indicates timeout/unknown
 		}
-		output.Runs = append(output.Runs, runInfo{
-			Name:   r.Name,
-			ID:     r.ID,
-			State:  string(r.State),
-			Age:    age,
-			DiskMB: diskMB,
-		})
-		if r.State == run.StateRunning {
-			runningCount++
-		} else {
-			stoppedCount++
-			if size >= 0 {
-				stoppedDisk += size
+		endpoints := ""
+		if len(r.Ports) > 0 {
+			names := make([]string, 0, len(r.Ports))
+			for name := range r.Ports {
+				names = append(names, name)
 			}
+			endpoints = strings.Join(names, ", ")
 		}
+		output.Runs = append(output.Runs, runInfo{
+			Name:      r.Name,
+			ID:        r.ID,
+			State:     string(r.State),
+			Age:       age,
+			DiskMB:    diskMB,
+			Endpoints: endpoints,
+		})
 	}
-	stoppedDiskMB := stoppedDisk / (1024 * 1024)
 
-	// Images section
+	// Images section - only need count for summary
 	var totalImageSize int64
 	for _, img := range images {
-		sizeMB := img.Size / (1024 * 1024)
 		totalImageSize += img.Size
 		output.Images = append(output.Images, imageInfo{
 			Tag:     img.Tag,
 			Created: formatAge(img.Created),
-			SizeMB:  sizeMB,
+			SizeMB:  img.Size / (1024 * 1024),
 		})
 	}
 
 	// Health section
 	if stoppedCount > 0 {
+		stoppedDiskMB := stoppedDisk / (1024 * 1024)
 		output.Health = append(output.Health, healthItem{
 			Status:  "warning",
-			Message: fmt.Sprintf("%d stopped runs can be cleaned (%d MB)", stoppedCount, stoppedDiskMB),
+			Message: fmt.Sprintf("%d stopped runs (%d MB)", stoppedCount, stoppedDiskMB),
 		})
 	}
 
@@ -153,7 +177,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		tagToID[img.Tag] = img.ID
 	}
 
-	// Check for orphaned containers and unused images
+	// Check for orphaned containers
 	containers, err := rt.ListContainers(ctx)
 	if err != nil {
 		// Add health warning so users know container checks are incomplete
@@ -163,7 +187,6 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	} else {
 		knownRunIDs := make(map[string]bool)
-		runningImages := make(map[string]bool)
 		for _, r := range runs {
 			knownRunIDs[r.ID] = true
 		}
@@ -172,48 +195,16 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			if !knownRunIDs[c.Name] {
 				orphanedCount++
 			}
-			if c.Status == "running" {
-				runningImages[c.Image] = true
-				// Also mark the image ID as in-use if we can resolve it
-				if id, ok := tagToID[c.Image]; ok {
-					runningImages[id] = true
-				}
-			}
 		}
 		if orphanedCount > 0 {
 			output.Health = append(output.Health, healthItem{
 				Status:  "warning",
 				Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
 			})
-		} else {
-			output.Health = append(output.Health, healthItem{
-				Status:  "ok",
-				Message: "No orphaned containers",
-			})
-		}
-
-		// Check for unused images (not used by any running container)
-		// Check both tag and ID since an image might be referenced either way
-		unusedImageCount := 0
-		for _, img := range images {
-			if !runningImages[img.Tag] && !runningImages[img.ID] {
-				unusedImageCount++
-			}
-		}
-		if unusedImageCount > 0 {
-			output.Health = append(output.Health, healthItem{
-				Status:  "warning",
-				Message: fmt.Sprintf("%d unused images can be cleaned", unusedImageCount),
-			})
-		} else if len(images) > 0 {
-			output.Health = append(output.Health, healthItem{
-				Status:  "ok",
-				Message: "No unused images",
-			})
 		}
 	}
 
-	output.TotalDisk = totalImageSize
+	output.TotalDisk = totalImageSize + stoppedDisk
 	for _, size := range runDiskUsage {
 		if size >= 0 {
 			output.TotalDisk += size
@@ -228,49 +219,53 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	// Human-readable output
 	fmt.Printf("Runtime: %s\n\n", output.Runtime)
 
-	// Runs table
-	if len(output.Runs) == 0 {
-		fmt.Println("Runs (0)")
+	// Active runs table
+	if len(activeRuns) == 0 {
+		fmt.Println("Active Runs: 0")
 	} else {
-		fmt.Printf("Runs (%d total, %d running)\n", len(output.Runs), runningCount)
+		fmt.Printf("Active Runs: %d\n", len(activeRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  NAME\tRUN ID\tSTATE\tAGE\tDISK")
+		fmt.Fprintln(w, "  NAME\tRUN ID\tAGE\tDISK\tENDPOINTS")
 		for _, r := range output.Runs {
 			diskStr := fmt.Sprintf("%d MB", r.DiskMB)
 			if r.DiskMB < 0 {
 				diskStr = "?"
 			}
 			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
-				r.Name, r.ID, r.State, r.Age, diskStr)
+				r.Name, r.ID, r.Age, diskStr, r.Endpoints)
 		}
 		w.Flush()
 	}
 	fmt.Println()
 
-	// Images table
-	if len(output.Images) == 0 {
-		fmt.Println("Images (0)")
-	} else {
-		fmt.Printf("Images (%d total, %d MB)\n", len(output.Images), totalImageSize/(1024*1024))
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  TAG\tCREATED\tSIZE")
-		for _, img := range output.Images {
-			fmt.Fprintf(w, "  %s\t%s\t%d MB\n",
-				img.Tag, img.Created, img.SizeMB)
-		}
-		w.Flush()
-	}
+	// Summary statistics
+	fmt.Println("Summary")
+	stoppedDiskMB := stoppedDisk / (1024 * 1024)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "  Stopped runs:\t%d\t%d MB\n", stoppedCount, stoppedDiskMB)
+	fmt.Fprintf(w, "  Images:\t%d\t%d MB\n", len(images), totalImageSize/(1024*1024))
+	fmt.Fprintf(w, "  Total disk:\t\t%d MB\n", output.TotalDisk/(1024*1024))
+	w.Flush()
 	fmt.Println()
 
 	// Health section
-	fmt.Println("Health")
-	for _, h := range output.Health {
-		icon := "✓"
-		if h.Status == "warning" {
-			icon = "⚠"
+	if len(output.Health) > 0 {
+		fmt.Println("Health")
+		for _, h := range output.Health {
+			icon := "⚠"
+			if h.Status == "ok" {
+				icon = "✓"
+			}
+			fmt.Printf("  %s %s\n", icon, h.Message)
 		}
-		fmt.Printf("  %s %s\n", icon, h.Message)
+		fmt.Println()
 	}
+
+	// Hints for detailed views
+	fmt.Println("For details:")
+	fmt.Println("  moat list                List all runs")
+	fmt.Println("  moat system images       List all images")
+	fmt.Println("  moat system containers   List all containers")
 
 	return nil
 }
