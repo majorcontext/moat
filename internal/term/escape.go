@@ -74,11 +74,39 @@ type EscapeProxy struct {
 
 	sawPrefix     bool         // true if we've seen Ctrl-/ and are waiting for next byte
 	pendingEscape *EscapeError // escape detected but output pending first
+
+	// onPrefixChange is called when the escape prefix state changes.
+	// The callback receives true when Ctrl-/ is pressed (waiting for next key),
+	// and false when the sequence completes or is canceled.
+	onPrefixChange func(active bool)
 }
 
 // NewEscapeProxy creates an EscapeProxy that wraps the given reader.
 func NewEscapeProxy(r io.Reader) *EscapeProxy {
 	return &EscapeProxy{r: r}
+}
+
+// OnPrefixChange sets a callback that fires when the escape prefix state changes.
+// The callback receives true when Ctrl-/ is pressed (waiting for d/k), and false
+// when the sequence completes or is canceled. This can be used to update UI state,
+// such as showing escape key hints in a status bar.
+//
+// The callback is invoked synchronously during Read() calls. Callers must ensure
+// the callback doesn't block or cause deadlocks. If Read() can be called concurrently,
+// the callback must be thread-safe.
+func (e *EscapeProxy) OnPrefixChange(fn func(active bool)) {
+	e.onPrefixChange = fn
+}
+
+// setPrefixState updates the sawPrefix flag and notifies the callback if it changed.
+func (e *EscapeProxy) setPrefixState(active bool) {
+	if e.sawPrefix == active {
+		return // no change
+	}
+	e.sawPrefix = active
+	if e.onPrefixChange != nil {
+		e.onPrefixChange(active)
+	}
 }
 
 // Read implements io.Reader. It returns data from the underlying reader,
@@ -104,7 +132,7 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 	if n == 0 {
 		// If we had a pending prefix and hit EOF, return the prefix as literal
 		if e.sawPrefix && err != nil {
-			e.sawPrefix = false
+			e.setPrefixState(false)
 			p[0] = EscapePrefix
 			return 1, err
 		}
@@ -119,7 +147,7 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 		b := buf[i]
 
 		if e.sawPrefix {
-			e.sawPrefix = false
+			e.setPrefixState(false)
 
 			// Check for escape commands
 			switch b {
@@ -158,7 +186,7 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 		if b == EscapePrefix {
 			// Start of potential escape sequence
-			e.sawPrefix = true
+			e.setPrefixState(true)
 			continue
 		}
 
@@ -200,14 +228,14 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 		n2, err2 := e.r.Read(oneByte)
 		if n2 == 0 {
 			// EOF or error after prefix - treat prefix as literal
-			e.sawPrefix = false
+			e.setPrefixState(false)
 			p[0] = EscapePrefix
 			return 1, err2
 		}
 
 		// Process this byte as if it followed the prefix
 		b := oneByte[0]
-		e.sawPrefix = false
+		e.setPrefixState(false)
 		switch b {
 		case escapeKeyDetach:
 			return 0, EscapeError{Action: EscapeDetach}
@@ -232,7 +260,7 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 	// If sawPrefix is true but we have EOF, treat the prefix as literal
 	if e.sawPrefix && err != nil {
-		e.sawPrefix = false
+		e.setPrefixState(false)
 		out = append(out, EscapePrefix)
 	}
 

@@ -241,6 +241,11 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 	// Wrap stdin with escape proxy to detect detach/stop sequences
 	escapeProxy := term.NewEscapeProxy(os.Stdin)
 
+	// Set up callback to update footer when escape sequence is in progress
+	if statusWriter != nil {
+		statusWriter.SetupEscapeHints(escapeProxy)
+	}
+
 	// Wrap stdin with tracer if tracing is enabled
 	stdin := io.Reader(escapeProxy)
 	if tracer != nil {
