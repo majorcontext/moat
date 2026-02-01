@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/vt"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/term"
 )
 
 // appleContainerReadyMarker is printed by Apple's container CLI when the
@@ -557,6 +559,36 @@ func (w *Writer) UpdateStatus() error {
 
 	_, err := w.out.Write(buf.Bytes())
 	return err
+}
+
+// SetMessage sets a temporary message overlay on the status bar.
+// This replaces the normal status content until ClearMessage is called.
+func (w *Writer) SetMessage(msg string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bar.SetMessage(msg)
+}
+
+// ClearMessage removes any message overlay and restores normal status display.
+func (w *Writer) ClearMessage() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bar.ClearMessage()
+}
+
+// SetupEscapeHints configures the escape proxy to show escape sequence hints
+// in the status bar when Ctrl-/ is pressed.
+func (w *Writer) SetupEscapeHints(proxy *term.EscapeProxy) {
+	proxy.OnPrefixChange(func(active bool) {
+		if active {
+			w.SetMessage("Escape: d (detach) · k (stop) · Ctrl-/ (cancel)")
+		} else {
+			w.ClearMessage()
+		}
+		if err := w.UpdateStatus(); err != nil {
+			log.Debug("failed to update status bar during escape hint toggle", "error", err)
+		}
+	})
 }
 
 // scheduleFooterRedrawLocked schedules a footer redraw after a debounce delay.
