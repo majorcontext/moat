@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/claude"
 	"github.com/majorcontext/moat/internal/codex"
@@ -2051,7 +2052,18 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 
 	// Stream to stdout only for real-time feedback
 	// Storage is handled by Wait() after container exits
-	_, _ = io.Copy(os.Stdout, logs)
+	//
+	// Note: streamLogs is only called for non-interactive runs (see exec.go).
+	// Interactive runs use StartAttached which handles I/O directly.
+	// Non-interactive Docker containers use multiplexed streams (no TTY),
+	// so we must demultiplex to avoid 8-byte headers leaking into output.
+	if m.runtime.Type() == container.RuntimeDocker {
+		// Docker non-interactive container: demultiplex the stream
+		_, _ = stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
+	} else {
+		// Apple container: output is already raw
+		_, _ = io.Copy(os.Stdout, logs)
+	}
 }
 
 // Stop terminates a running run.
