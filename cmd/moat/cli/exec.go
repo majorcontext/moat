@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/trace"
 	"github.com/majorcontext/moat/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,7 @@ type ExecFlags struct {
 	Detach        bool
 	Interactive   bool
 	NoSandbox     bool
+	TTYTrace      string // Path to save terminal I/O trace for debugging
 }
 
 // AddExecFlags adds the common execution flags to a command.
@@ -41,6 +43,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
 	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker)")
 	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
+	cmd.Flags().StringVar(&flags.TTYTrace, "tty-trace", "", "capture terminal I/O to file for debugging (e.g., session.json)")
 }
 
 // setupStatusBar creates a status bar for interactive container sessions.
@@ -99,6 +102,60 @@ type ExecOptions struct {
 	OnRunCreated func(r *run.Run) // Called after run is created, before start
 }
 
+// ttyTracer holds the state for TTY tracing during an interactive session.
+type ttyTracer struct {
+	recorder *trace.Recorder
+	path     string
+}
+
+// setupTTYTracer creates a TTY tracer if trace path is specified.
+// Returns nil if tracing is disabled or setup fails.
+func setupTTYTracer(tracePath string, r *run.Run, command []string) *ttyTracer {
+	if tracePath == "" {
+		return nil
+	}
+
+	// Get initial terminal size
+	width, height := 80, 24 // defaults
+	if term.IsTerminal(os.Stdout) {
+		w, h := term.GetSize(os.Stdout)
+		if w > 0 && h > 0 {
+			width, height = w, h
+		}
+	}
+
+	// Create recorder
+	recorder := trace.NewRecorder(
+		r.ID,
+		command,
+		trace.GetTraceEnv(),
+		trace.Size{Width: width, Height: height},
+	)
+
+	log.Info("TTY tracing enabled", "path", tracePath, "run_id", r.ID)
+	fmt.Printf("Recording terminal I/O to %s\n", tracePath)
+
+	return &ttyTracer{
+		recorder: recorder,
+		path:     tracePath,
+	}
+}
+
+// save saves the trace to disk.
+func (t *ttyTracer) save() {
+	if t == nil || t.recorder == nil {
+		return
+	}
+
+	if err := t.recorder.Save(t.path); err != nil {
+		log.Error("failed to save TTY trace", "path", t.path, "error", err)
+		fmt.Printf("Warning: Failed to save trace to %s: %v\n", t.path, err)
+	} else {
+		log.Info("TTY trace saved", "path", t.path)
+		fmt.Printf("Terminal trace saved to %s\n", t.path)
+	}
+}
+
 // ExecuteRun runs a containerized command with the given options.
 // It handles creating the run, starting it, and managing the lifecycle.
 // Returns the run for further inspection if needed.
@@ -153,7 +210,7 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	// This is required for TUI applications like Codex CLI that need to detect terminal
 	// capabilities immediately on startup.
 	if opts.Interactive && !opts.Flags.Detach {
-		return r, RunInteractiveAttached(ctx, manager, r)
+		return r, RunInteractiveAttached(ctx, manager, r, opts.Command, opts.Flags.TTYTrace)
 	}
 
 	// Start run (non-interactive or detached)
@@ -395,8 +452,12 @@ func RunInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error
 // the TTY is connected before the container process starts. This is required for
 // TUI applications (like Codex CLI) that need to detect terminal capabilities
 // immediately on startup (e.g., reading cursor position).
-func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
+func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Run, command []string, tracePath string) error {
 	fmt.Printf("%s\n\n", term.EscapeHelpText())
+
+	// Set up TTY tracing if requested
+	tracer := setupTTYTracer(tracePath, r, command)
+	defer tracer.save()
 
 	// Put terminal in raw mode to capture escape sequences without echo
 	var rawState *term.RawModeState
@@ -422,13 +483,24 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
 	defer statusCleanup()
 
+	// Wrap stdout with tracer if tracing is enabled
+	if tracer != nil {
+		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
+	}
+
+	// Wrap stdin with escape proxy to detect detach/stop sequences
+	escapeProxy := term.NewEscapeProxy(os.Stdin)
+
+	// Wrap stdin with tracer if tracing is enabled
+	stdin := io.Reader(escapeProxy)
+	if tracer != nil {
+		stdin = trace.NewRecordingReader(escapeProxy, tracer.recorder, trace.EventStdin)
+	}
+
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
-
-	// Wrap stdin with escape proxy to detect detach/stop sequences
-	escapeProxy := term.NewEscapeProxy(os.Stdin)
 
 	// Channel to receive escape actions from the attach goroutine
 	escapeCh := make(chan term.EscapeAction, 1)
@@ -440,7 +512,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	// Start with attachment - this ensures TTY is connected before process starts
 	attachDone := make(chan error, 1)
 	go func() {
-		err := manager.StartAttached(attachCtx, r.ID, escapeProxy, stdout, os.Stderr)
+		err := manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr)
 		// Check if the error is an escape sequence
 		if term.IsEscapeError(err) {
 			escapeCh <- term.GetEscapeAction(err)
@@ -476,6 +548,10 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 				if statusWriter != nil && term.IsTerminal(os.Stdout) {
 					width, height := term.GetSize(os.Stdout)
 					if width > 0 && height > 0 {
+						// Record resize event for tracing
+						if tracer != nil {
+							tracer.recorder.AddResize(width, height)
+						}
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY
 						// #nosec G115 -- width/height are validated positive above

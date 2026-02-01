@@ -69,6 +69,15 @@ type Writer struct {
 	renderTicker *time.Ticker
 	stopRender   chan struct{}
 
+	// Footer redraw debouncing for scroll mode
+	// Redraws the footer only after a quiet period to avoid interrupting
+	// multi-step rendering sequences from the child process.
+	// Alternative approaches to consider:
+	//   (2) Bracketed paste mode detection: only redraw when ESC[?2026l seen
+	//   (3) Whitelist: only redraw on resize, screen clear, or periodic timer
+	footerDebounceDelay time.Duration
+	footerTimer         *time.Timer
+
 	// Apple container specific
 	runtime     string // "apple" or "docker"
 	initialized bool   // true once we've cleared and set up the status bar
@@ -80,11 +89,12 @@ type Writer struct {
 // behavior (e.g., detecting Apple container CLI's ready marker).
 func NewWriter(w io.Writer, bar *StatusBar, runtime string) *Writer {
 	return &Writer{
-		out:     w,
-		bar:     bar,
-		width:   bar.width,
-		height:  bar.height,
-		runtime: runtime,
+		out:                 w,
+		bar:                 bar,
+		width:               bar.width,
+		height:              bar.height,
+		runtime:             runtime,
+		footerDebounceDelay: 50 * time.Millisecond, // Wait 50ms of quiet before redrawing footer
 	}
 }
 
@@ -103,9 +113,6 @@ func (w *Writer) Setup() error {
 func (w *Writer) setupScrollRegionLocked() error {
 	var buf bytes.Buffer
 
-	// Clear screen
-	buf.WriteString("\x1b[2J\x1b[H")
-
 	// Set scrolling region to lines 1 through height-1
 	// DECSTBM: CSI top;bottom r
 	if w.height > 1 {
@@ -116,8 +123,9 @@ func (w *Writer) setupScrollRegionLocked() error {
 	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 	buf.WriteString(w.bar.Render())
 
-	// Move cursor to top of scroll region
-	buf.WriteString("\x1b[H")
+	// Move cursor to top of scroll region and clear from cursor to end of scroll region
+	// This clears lines 1 through height-1 without affecting the status bar
+	buf.WriteString("\x1b[H\x1b[J")
 
 	_, err := w.out.Write(buf.Bytes())
 	return err
@@ -170,12 +178,14 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	// Process data, scanning for alt screen transitions
 	err = w.processDataLocked(data)
 
-	// In scroll mode, redraw the footer after every write. The child process
-	// can clobber it by resetting the scroll region, clearing the screen, or
-	// addressing the cursor to the footer line directly. Redrawing after each
-	// write ensures the footer is always visible (same approach as tmux).
+	// In scroll mode, schedule a debounced footer redraw. The child process
+	// can clobber the footer by resetting the scroll region, clearing the screen,
+	// or addressing the cursor to the footer line directly. We use debouncing to
+	// avoid interrupting multi-step rendering sequences (e.g., Claude Code's banner
+	// draws wrapped in ESC[?2026h/l brackets). We redraw only after output has
+	// been quiet for footerDebounceDelay milliseconds.
 	if !w.altScreen && err == nil {
-		w.redrawFooterLocked()
+		w.scheduleFooterRedrawLocked()
 	}
 
 	return len(p), err
@@ -305,6 +315,13 @@ func (w *Writer) enterCompositorLocked() error {
 		return nil
 	}
 	w.altScreen = true
+
+	// Stop footer debounce timer since we're switching to compositor mode
+	// where footer is redrawn at fixed intervals instead
+	if w.footerTimer != nil {
+		w.footerTimer.Stop()
+		w.footerTimer = nil
+	}
 
 	// Initialize emulator with content area dimensions (height - 1 for footer)
 	contentHeight := w.height - 1
@@ -459,6 +476,12 @@ func (w *Writer) Cleanup() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Stop footer timer if running
+	if w.footerTimer != nil {
+		w.footerTimer.Stop()
+		w.footerTimer = nil
+	}
+
 	// Stop compositor if running
 	w.stopRenderLoop()
 	w.emulator = nil
@@ -534,6 +557,24 @@ func (w *Writer) UpdateStatus() error {
 
 	_, err := w.out.Write(buf.Bytes())
 	return err
+}
+
+// scheduleFooterRedrawLocked schedules a footer redraw after a debounce delay.
+// If a timer is already running, it's reset. This ensures we only redraw after
+// the child process has been quiet for footerDebounceDelay milliseconds.
+// Caller must hold the mutex.
+func (w *Writer) scheduleFooterRedrawLocked() {
+	// Cancel existing timer if any
+	if w.footerTimer != nil {
+		w.footerTimer.Stop()
+	}
+
+	// Schedule new timer
+	w.footerTimer = time.AfterFunc(w.footerDebounceDelay, func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		w.redrawFooterLocked()
+	})
 }
 
 // redrawFooterLocked redraws the footer at the bottom line without disturbing

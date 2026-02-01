@@ -468,7 +468,7 @@ redis:
 go-extras:
   description: Common Go development tools (gofumpt, govulncheck, goreleaser)
   type: meta
-  requires: [gofumpt, govulncheck, goreleaser]
+  requires: [gofumpt, govulncheck, goreleaser, golangci-lint]
 
 cli-essentials:
   description: Essential CLI tools (jq, yq, fzf, ripgrep, fd, bat)
