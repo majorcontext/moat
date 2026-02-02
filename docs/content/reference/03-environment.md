@@ -12,16 +12,6 @@ This page documents environment variables used to configure Moat and variables i
 
 These variables configure Moat itself. Set them in your shell profile or before running Moat commands.
 
-### MOAT_GITHUB_CLIENT_ID
-
-GitHub OAuth App client ID. Required for `moat grant github`.
-
-```bash
-export MOAT_GITHUB_CLIENT_ID="your-client-id"
-```
-
-Create a GitHub OAuth App at https://github.com/settings/developers with device flow enabled.
-
 ### ANTHROPIC_API_KEY
 
 Anthropic API key. Used by `moat grant anthropic` as an alternative to Claude Code OAuth.
@@ -57,6 +47,49 @@ export MOAT_PROXY_PORT="9000"
 ```
 
 - Default: `8080`
+- Ports below 1024 require elevated privileges on macOS/Linux (e.g., `sudo moat run` for port 80)
+
+### MOAT_RUNTIME
+
+Force a specific container runtime instead of auto-detection.
+
+```bash
+export MOAT_RUNTIME=docker  # Force Docker runtime
+export MOAT_RUNTIME=apple   # Force Apple containers runtime
+```
+
+- Default: Auto-detect (Apple containers on macOS 15+ with Apple Silicon, Docker otherwise)
+- If the requested runtime is unavailable, moat returns an error
+
+See [Runtimes](../concepts/07-runtimes.md) for details on runtime selection.
+
+### MOAT_DISABLE_BUILDKIT
+
+Disable BuildKit for image builds, falling back to the legacy Docker builder.
+
+```bash
+export MOAT_DISABLE_BUILDKIT=1
+```
+
+- Default: BuildKit enabled (faster builds, better caching)
+- Use this if BuildKit is unavailable or causes issues in your environment
+- **Warning:** Legacy builder is significantly slower and doesn't cache build layers
+
+See [Runtimes](../concepts/07-runtimes.md#buildkit) for BuildKit configuration.
+
+### MOAT_NO_SANDBOX
+
+Disable gVisor sandbox for Docker containers on Linux.
+
+```bash
+export MOAT_NO_SANDBOX=1
+```
+
+- Default: gVisor sandbox enabled on Linux, disabled on macOS/Windows (not supported)
+- gVisor provides additional isolation by intercepting syscalls
+- Disable if gVisor is unavailable or incompatible with your workload
+
+See [Sandboxing](../concepts/01-sandboxing.md) for security implications.
 
 ### AWS credentials
 
