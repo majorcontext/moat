@@ -147,7 +147,7 @@ Use backticks for:
 - Commands: `moat run`
 - Flags: `--grant`
 - File names: `agent.yaml`
-- Environment variables: `MOAT_GITHUB_CLIENT_ID`
+- Environment variables: `MOAT_PROXY_PORT`
 - Values: `true`, `strict`, `node@20`
 
 Don't use backticks for:
@@ -169,9 +169,9 @@ Supported backends:
 - AWS SSM (`ssm:///path`)
 
 <!-- Ordered: steps that must be followed in sequence -->
-1. Create a GitHub OAuth App
-2. Enable Device Flow
-3. Set `MOAT_GITHUB_CLIENT_ID`
+1. Install Moat
+2. Verify Docker is running
+3. Grant GitHub credentials with `moat grant github`
 ```
 
 ### Tables
@@ -237,11 +237,12 @@ When documenting errors, show the full error message and explain how to resolve 
 ```markdown
 If you see:
 
-    Error: MOAT_GITHUB_CLIENT_ID not set
+    Error: proxy port mismatch: running on 8080, requested 9000
 
-Set the environment variable with your OAuth App's client ID:
+The proxy is already running on a different port. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy:
 
-    export MOAT_GITHUB_CLIENT_ID="your-client-id"
+    unset MOAT_PROXY_PORT
+    moat run ...
 ```
 
 ## Page Structure
