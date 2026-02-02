@@ -233,7 +233,8 @@ AWS credential saved
 3. When a run starts, Moat configures `AWS_CONFIG_FILE` in the container with a [`credential_process`](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html)—an AWS SDK feature that executes an external command to fetch credentials on demand. The command calls back to Moat's proxy, which assumes the role and returns fresh temporary credentials.
 4. The AWS SDK automatically calls the credential process whenever credentials expire, providing seamless refresh during long-running tasks
 
-> **Important:** Unlike other grants (GitHub, Anthropic, OpenAI), AWS credentials use `credential_process`, which means the credential mechanism is accessible inside the container. The container can call this process to fetch temporary AWS credentials.
+> [!IMPORTANT]
+> Unlike other grants (GitHub, Anthropic, OpenAI), AWS credentials use `credential_process`, which means the credential mechanism is accessible inside the container. The container can call this process to fetch temporary AWS credentials.
 >
 > Impact is limited because:
 > - **Temporary credentials (STS)** — Expire automatically, no long-term secrets stored
