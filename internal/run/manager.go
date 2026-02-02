@@ -1412,9 +1412,19 @@ region = %s
 	var privileged bool
 	if dockerConfig != nil && dockerConfig.Privileged {
 		privileged = true
-		log.Warn("creating privileged container - full host kernel access granted",
-			"mode", "docker:dind",
-			"security_docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
+		if goruntime.GOOS == "darwin" {
+			log.Warn("creating privileged container for docker:dind",
+				"platform", "macOS",
+				"isolation", "Docker Desktop VM boundary provides host protection",
+				"risk", "Can compromise Docker engine in VM, cannot access macOS host",
+				"docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
+		} else {
+			log.Warn("creating privileged container for docker:dind",
+				"platform", "Linux",
+				"risk", "CRITICAL - privileged mode grants direct host kernel access",
+				"impact", "Container can escape to host system",
+				"docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
+		}
 	}
 
 	// Create network and start BuildKit sidecar if enabled
