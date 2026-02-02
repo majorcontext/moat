@@ -121,27 +121,25 @@ Runtime: docker
 ...
 ```
 
-## GitHub OAuth setup
+## GitHub authentication setup (optional)
 
-To use `moat grant github`, you need a GitHub OAuth App with device flow enabled.
+`moat grant github` automatically uses credentials from these sources (in order):
 
-1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
-2. Click **New OAuth App**
-3. Fill in the application details:
-   - **Application name**: Moat (or any name)
-   - **Homepage URL**: `http://localhost`
-   - **Authorization callback URL**: `http://localhost`
-4. Click **Register application**
-5. On the app settings page, check **Enable Device Flow**
-6. Copy the **Client ID**
+1. **Environment variable**: `GITHUB_TOKEN` or `GH_TOKEN`
+2. **GitHub CLI**: `gh auth token` (if `gh` is installed and authenticated)
+3. **Interactive prompt**: Enter a Personal Access Token
 
-Set the environment variable in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+Most users don't need additional setup. If you already use `gh` CLI or have `GITHUB_TOKEN` set, you're ready to go.
 
-```bash
-export MOAT_GITHUB_CLIENT_ID="your-client-id"
-```
+If you need to create a Personal Access Token:
 
-Reload your shell or run `source ~/.zshrc`.
+1. Visit [GitHub Personal Access Tokens](https://github.com/settings/tokens)
+2. Click **Generate new token** → **Fine-grained token** (recommended)
+3. Set expiration and select repositories
+4. Under **Repository permissions**, grant **Contents** read/write access
+5. Copy the token and either:
+   - Set `GITHUB_TOKEN` in your shell profile
+   - Use `moat grant github` which will prompt for it
 
 ## Optional dependencies
 

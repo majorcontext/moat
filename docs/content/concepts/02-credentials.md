@@ -49,9 +49,7 @@ The encryption key is stored in your system's keychain:
 
 If no system keychain is available (headless servers, CI environments), Moat falls back to file-based key storage at `~/.moat/encryption.key` with restricted permissions (`0600`).
 
-## Supported credential types
-
-### GitHub
+## GitHub
 
 GitHub credentials are obtained from multiple sources, in order of preference:
 
@@ -86,7 +84,7 @@ The token is injected for requests to `api.github.com` and `github.com`.
 
 `GH_TOKEN` is set in the container environment so the gh CLI works inside the container. This environment variable contains a format-valid placeholder value—the actual token is injected at the network layer by the proxy and never appears in the container environment.
 
-### Anthropic
+## Anthropic
 
 The `moat grant anthropic` command offers three authentication options:
 
@@ -158,7 +156,40 @@ OAuth tokens (identified by the `sk-ant-oat` prefix) use the `CLAUDE_CODE_OAUTH_
 
 The credential is injected for requests to `api.anthropic.com`.
 
-### AWS
+## OpenAI
+
+OpenAI credentials are obtained from the `OPENAI_API_KEY` environment variable or via interactive prompt.
+
+```bash
+$ moat grant openai
+Enter your OpenAI API key.
+You can find or create one at: https://platform.openai.com/api-keys
+
+API Key: ••••••••
+Validating API key...
+API key is valid.
+
+OpenAI API key saved to ~/.moat/credentials/openai.enc
+```
+
+Or from environment variable:
+
+```bash
+$ export OPENAI_API_KEY="sk-..."
+$ moat grant openai
+Using API key from OPENAI_API_KEY environment variable
+Validating API key...
+API key is valid.
+OpenAI API key saved to ~/.moat/credentials/openai.enc
+```
+
+The token is injected for requests to `api.openai.com`, `chatgpt.com`, and `*.openai.com`.
+
+`OPENAI_API_KEY` is set in the container environment so OpenAI SDKs work inside the container. This environment variable contains a format-valid placeholder value—the actual API key is injected at the network layer by the proxy and never appears in the container environment.
+
+This credential is used by `moat codex` to run the Codex CLI with OpenAI API access.
+
+## AWS
 
 AWS credentials use IAM role assumption to provide temporary credentials that automatically refresh.
 
@@ -202,7 +233,19 @@ AWS credential saved
 3. When a run starts, Moat configures `AWS_CONFIG_FILE` in the container with a [`credential_process`](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html)—an AWS SDK feature that executes an external command to fetch credentials on demand. The command calls back to Moat's proxy, which assumes the role and returns fresh temporary credentials.
 4. The AWS SDK automatically calls the credential process whenever credentials expire, providing seamless refresh during long-running tasks
 
-This approach means credentials are never stored long-term and automatically refresh during long-running tasks.
+> **Important:** Unlike other grants (GitHub, Anthropic, OpenAI), AWS credentials use `credential_process`, which means the credential mechanism is accessible inside the container. The container can call this process to fetch temporary AWS credentials.
+>
+> Impact is limited because:
+> - **Temporary credentials (STS)** — Expire automatically, no long-term secrets stored
+> - **Short session duration** — Default 15 minutes limits replay window
+> - **Role scoping** — Permissions are whatever AgentRole allows, nothing more
+> - **No long-term secrets** — No permanent credentials stored in container or on disk
+>
+> **Recommendations for sensitive workloads:**
+> - Keep sessions ≤15–30m unless absolutely needed (default: 15m)
+> - Use one role per run/capability, not a shared "agent role"
+> - Add explicit denies in IAM for dangerous APIs (IAM, STS, KMS, org-wide actions)
+> - Log all AWS calls centrally (CloudTrail + Moat audit logs)
 
 **Requirements:**
 
@@ -228,7 +271,7 @@ This approach means credentials are never stored long-term and automatically ref
 
 The credential is injected for all AWS API requests via the standard SDK credential chain.
 
-### SSH
+## SSH
 
 SSH credentials work differently—Moat proxies SSH agent requests rather than injecting tokens into HTTP headers.
 
@@ -253,7 +296,7 @@ Cloning into 'repo'...
 
 **Requirement:** Your SSH agent must be running (`SSH_AUTH_SOCK` must be set).
 
-### MCP servers
+## MCP servers
 
 MCP (Model Context Protocol) servers can require authentication credentials. Store them with:
 
@@ -285,6 +328,7 @@ See the [MCP servers section](../guides/01-running-claude-code.md#remote-mcp-ser
 ```bash
 moat run --grant github ./my-project
 moat run --grant github --grant anthropic ./my-project
+moat run --grant openai ./my-project
 moat run --grant ssh:github.com ./my-project
 ```
 
@@ -294,6 +338,7 @@ moat run --grant ssh:github.com ./my-project
 grants:
   - github
   - anthropic
+  - openai
   - ssh:github.com
 ```
 
@@ -307,6 +352,7 @@ Credentials are scoped by host. The proxy only injects credentials for requests 
 |------------|-------|
 | `github` | `api.github.com`, `github.com` |
 | `anthropic` | `api.anthropic.com` |
+| `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` |
 | `aws` | `*.amazonaws.com` (all AWS service endpoints) |
 | `ssh:<host>` | The specified host only |
 | `mcp-<name>` | Host specified in MCP server's `url` field |
@@ -319,11 +365,13 @@ Some services require credentials as environment variables rather than HTTP head
 
 ```yaml
 secrets:
-  OPENAI_API_KEY: op://Dev/OpenAI/api-key      # 1Password
-  DATABASE_URL: ssm:///production/database/url  # AWS SSM
+  JWT_SIGNING_KEY: op://Dev/Auth/jwt-signing-key      # 1Password
+  DATABASE_URL: ssm:///production/database/url        # AWS SSM
 ```
 
 Unlike grants, secrets are visible to all processes in the container via environment variables. Use grants when possible; use secrets for services that don't support header-based authentication.
+
+For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), always use the grant instead of pulling credentials via secrets.
 
 See [Secrets Management](../guides/03-secrets-management.md) for detailed setup instructions.
 
@@ -334,6 +382,7 @@ Remove a stored credential:
 ```bash
 moat revoke github
 moat revoke anthropic
+moat revoke openai
 moat revoke ssh:github.com
 moat revoke mcp-context7
 ```

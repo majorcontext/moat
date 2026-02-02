@@ -11,7 +11,7 @@ This tutorial walks through running an agent with credential injection. By the e
 **Prerequisites:**
 - Moat installed ([Installation](./02-installation.md))
 - Docker running, or [Apple containers](./02-installation.md#apple-containers-macos-26-with-apple-silicon) installed (macOS 26+)
-- GitHub OAuth App configured with `MOAT_GITHUB_CLIENT_ID` set
+- GitHub authentication (one of: `gh` CLI, `GITHUB_TOKEN` env var, or Personal Access Token)
 
 ## Step 1: Grant GitHub credentials
 
@@ -19,15 +19,14 @@ Store a GitHub credential that Moat can inject into runs:
 
 ```bash
 $ moat grant github
-
-To authorize, visit: https://github.com/login/device
-Enter code: ABCD-1234
-
-Waiting for authorization...
-GitHub credential saved successfully
+Found gh CLI authentication
+Use token from gh CLI? [Y/n]: y
+Validating token...
+Authenticated as: your-username
+GitHub credential saved to ~/.moat/credentials/github.enc
 ```
 
-Open the URL in your browser, enter the code, and authorize the application. The credential is encrypted and stored in `~/.moat/credentials/`.
+If you don't have `gh` CLI configured, you'll be prompted to enter a Personal Access Token. The credential is encrypted and stored in `~/.moat/credentials/`.
 
 This is a one-time setup. The credential persists across runs until you revoke it with `moat revoke github`.
 
