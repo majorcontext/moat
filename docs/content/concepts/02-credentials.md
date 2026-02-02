@@ -156,6 +156,39 @@ OAuth tokens (identified by the `sk-ant-oat` prefix) use the `CLAUDE_CODE_OAUTH_
 
 The credential is injected for requests to `api.anthropic.com`.
 
+## OpenAI
+
+OpenAI credentials are obtained from the `OPENAI_API_KEY` environment variable or via interactive prompt.
+
+```bash
+$ moat grant openai
+Enter your OpenAI API key.
+You can find or create one at: https://platform.openai.com/api-keys
+
+API Key: ••••••••
+Validating API key...
+API key is valid.
+
+OpenAI API key saved to ~/.moat/credentials/openai.enc
+```
+
+Or from environment variable:
+
+```bash
+$ export OPENAI_API_KEY="sk-..."
+$ moat grant openai
+Using API key from OPENAI_API_KEY environment variable
+Validating API key...
+API key is valid.
+OpenAI API key saved to ~/.moat/credentials/openai.enc
+```
+
+The token is injected for requests to `api.openai.com`, `chatgpt.com`, and `*.openai.com`.
+
+`OPENAI_API_KEY` is set in the container environment so OpenAI SDKs work inside the container. This environment variable contains a format-valid placeholder value—the actual API key is injected at the network layer by the proxy and never appears in the container environment.
+
+This credential is used by `moat codex` to run the Codex CLI with OpenAI API access.
+
 ## AWS
 
 AWS credentials use IAM role assumption to provide temporary credentials that automatically refresh.
@@ -283,6 +316,7 @@ See the [MCP servers section](../guides/01-running-claude-code.md#remote-mcp-ser
 ```bash
 moat run --grant github ./my-project
 moat run --grant github --grant anthropic ./my-project
+moat run --grant openai ./my-project
 moat run --grant ssh:github.com ./my-project
 ```
 
@@ -292,6 +326,7 @@ moat run --grant ssh:github.com ./my-project
 grants:
   - github
   - anthropic
+  - openai
   - ssh:github.com
 ```
 
@@ -305,6 +340,7 @@ Credentials are scoped by host. The proxy only injects credentials for requests 
 |------------|-------|
 | `github` | `api.github.com`, `github.com` |
 | `anthropic` | `api.anthropic.com` |
+| `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` |
 | `aws` | `*.amazonaws.com` (all AWS service endpoints) |
 | `ssh:<host>` | The specified host only |
 | `mcp-<name>` | Host specified in MCP server's `url` field |
@@ -332,6 +368,7 @@ Remove a stored credential:
 ```bash
 moat revoke github
 moat revoke anthropic
+moat revoke openai
 moat revoke ssh:github.com
 moat revoke mcp-context7
 ```
