@@ -15,13 +15,11 @@ Moat distinguishes between **secrets** and **credentials**:
 | | Secrets | Credentials |
 |---|---------|-------------|
 | **Delivery** | Environment variables | Network-layer injection* |
-| **Visibility** | Visible to all processes in container | Not visible in environment** |
+| **Visibility** | Visible to all processes in container | Not visible in environment |
 | **Use case** | Signing keys, database URLs, services without grant support | GitHub, Anthropic, OpenAI, AWS, SSH |
 | **Configuration** | `secrets:` in agent.yaml | `grants:` in agent.yaml |
 
 *AWS uses `credential_process` instead of network-layer injection, making temporary credentials accessible in the container. See [AWS credentials](../concepts/02-credentials.md#aws) for details.
-
-**GitHub, Anthropic, and OpenAI use placeholder values in environment variables with real credentials injected at the network layer. AWS and SSH work differently—see individual credential documentation.
 
 Use credentials (grants) when available. Use secrets for services that don't have dedicated grant support.
 
