@@ -365,11 +365,13 @@ Some services require credentials as environment variables rather than HTTP head
 
 ```yaml
 secrets:
-  OPENAI_API_KEY: op://Dev/OpenAI/api-key      # 1Password
-  DATABASE_URL: ssm:///production/database/url  # AWS SSM
+  JWT_SIGNING_KEY: op://Dev/Auth/jwt-signing-key      # 1Password
+  DATABASE_URL: ssm:///production/database/url        # AWS SSM
 ```
 
 Unlike grants, secrets are visible to all processes in the container via environment variables. Use grants when possible; use secrets for services that don't support header-based authentication.
+
+For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), always use the grant instead of pulling credentials via secrets.
 
 See [Secrets Management](../guides/03-secrets-management.md) for detailed setup instructions.
 

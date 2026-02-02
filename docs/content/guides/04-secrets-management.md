@@ -14,10 +14,14 @@ Moat distinguishes between **secrets** and **credentials**:
 
 | | Secrets | Credentials |
 |---|---------|-------------|
-| **Delivery** | Environment variables | Network-layer injection |
-| **Visibility** | Visible to all processes in container | Not visible in environment |
-| **Use case** | API keys for services without dedicated grant support | GitHub, Anthropic, AWS, SSH |
+| **Delivery** | Environment variables | Network-layer injection* |
+| **Visibility** | Visible to all processes in container | Not visible in environment** |
+| **Use case** | Signing keys, database URLs, services without grant support | GitHub, Anthropic, OpenAI, AWS, SSH |
 | **Configuration** | `secrets:` in agent.yaml | `grants:` in agent.yaml |
+
+*AWS uses `credential_process` instead of network-layer injection, making temporary credentials accessible in the container. See [AWS credentials](../concepts/02-credentials.md#aws) for details.
+
+**GitHub, Anthropic, and OpenAI use placeholder values in environment variables with real credentials injected at the network layer. AWS and SSH work differently—see individual credential documentation.
 
 Use credentials (grants) when available. Use secrets for services that don't have dedicated grant support.
 
@@ -41,9 +45,9 @@ Reference 1Password items using the `op://` URL format:
 
 ```yaml
 secrets:
-  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  JWT_SIGNING_KEY: op://Dev/Auth/jwt-signing-key
   DATABASE_URL: op://Production/Database/connection-string
-  STRIPE_SECRET: op://Dev/Stripe/secret-key
+  STRIPE_WEBHOOK_SECRET: op://Dev/Stripe/webhook-secret
 ```
 
 Format: `op://<vault>/<item>/<field>`
@@ -84,24 +88,25 @@ dependencies:
   - python@3.11
 
 secrets:
-  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  JWT_SIGNING_KEY: op://Dev/Auth/jwt-signing-key
 
-command: ["python", "main.py"]
+command: ["python", "server.py"]
 ```
 
 ```python
-# main.py
+# server.py
 import os
-import openai
+import jwt
 
-openai.api_key = os.environ["OPENAI_API_KEY"]
-# Use the OpenAI API...
+signing_key = os.environ["JWT_SIGNING_KEY"]
+# Use the signing key to create/verify JWTs...
+token = jwt.encode({"user_id": 123}, signing_key, algorithm="HS256")
 ```
 
 ```bash
 $ moat run
 
-# OPENAI_API_KEY is available in the container
+# JWT_SIGNING_KEY is available in the container
 ```
 
 ## AWS SSM Parameter Store
@@ -212,7 +217,7 @@ Use secrets from different backends in the same configuration:
 ```yaml
 secrets:
   # From 1Password
-  OPENAI_API_KEY: op://Dev/OpenAI/api-key
+  JWT_SIGNING_KEY: op://Dev/Auth/jwt-signing-key
 
   # From AWS SSM
   DATABASE_URL: ssm:///production/database/url
@@ -220,6 +225,8 @@ secrets:
   # Plain value (not recommended for sensitive data)
   LOG_LEVEL: debug
 ```
+
+**Note:** For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), use `grants:` instead of `secrets:`. Grants provide better security by injecting credentials at the network layer.
 
 ## Security considerations
 
