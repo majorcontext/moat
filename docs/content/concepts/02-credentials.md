@@ -49,9 +49,7 @@ The encryption key is stored in your system's keychain:
 
 If no system keychain is available (headless servers, CI environments), Moat falls back to file-based key storage at `~/.moat/encryption.key` with restricted permissions (`0600`).
 
-## Supported credential types
-
-### GitHub
+## GitHub
 
 GitHub credentials are obtained from multiple sources, in order of preference:
 
@@ -86,7 +84,7 @@ The token is injected for requests to `api.github.com` and `github.com`.
 
 `GH_TOKEN` is set in the container environment so the gh CLI works inside the container. This environment variable contains a format-valid placeholder value—the actual token is injected at the network layer by the proxy and never appears in the container environment.
 
-### Anthropic
+## Anthropic
 
 The `moat grant anthropic` command offers three authentication options:
 
@@ -158,7 +156,7 @@ OAuth tokens (identified by the `sk-ant-oat` prefix) use the `CLAUDE_CODE_OAUTH_
 
 The credential is injected for requests to `api.anthropic.com`.
 
-### AWS
+## AWS
 
 AWS credentials use IAM role assumption to provide temporary credentials that automatically refresh.
 
@@ -228,7 +226,7 @@ This approach means credentials are never stored long-term and automatically ref
 
 The credential is injected for all AWS API requests via the standard SDK credential chain.
 
-### SSH
+## SSH
 
 SSH credentials work differently—Moat proxies SSH agent requests rather than injecting tokens into HTTP headers.
 
@@ -253,7 +251,7 @@ Cloning into 'repo'...
 
 **Requirement:** Your SSH agent must be running (`SSH_AUTH_SOCK` must be set).
 
-### MCP servers
+## MCP servers
 
 MCP (Model Context Protocol) servers can require authentication credentials. Store them with:
 
