@@ -233,7 +233,19 @@ AWS credential saved
 3. When a run starts, Moat configures `AWS_CONFIG_FILE` in the container with a [`credential_process`](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html)—an AWS SDK feature that executes an external command to fetch credentials on demand. The command calls back to Moat's proxy, which assumes the role and returns fresh temporary credentials.
 4. The AWS SDK automatically calls the credential process whenever credentials expire, providing seamless refresh during long-running tasks
 
-This approach means credentials are never stored long-term and automatically refresh during long-running tasks.
+> **Important:** Unlike other grants (GitHub, Anthropic, OpenAI), AWS credentials use `credential_process`, which means the credential mechanism is accessible inside the container. The container can call this process to fetch temporary AWS credentials.
+>
+> Impact is limited because:
+> - **Temporary credentials (STS)** — Expire automatically, no long-term secrets stored
+> - **Short session duration** — Default 15 minutes limits replay window
+> - **Role scoping** — Permissions are whatever AgentRole allows, nothing more
+> - **No long-term secrets** — No permanent credentials stored in container or on disk
+>
+> **Recommendations for sensitive workloads:**
+> - Keep sessions ≤15–30m unless absolutely needed (default: 15m)
+> - Use one role per run/capability, not a shared "agent role"
+> - Add explicit denies in IAM for dangerous APIs (IAM, STS, KMS, org-wide actions)
+> - Log all AWS calls centrally (CloudTrail + Moat audit logs)
 
 **Requirements:**
 
