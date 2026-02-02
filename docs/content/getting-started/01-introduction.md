@@ -137,7 +137,7 @@ Moat provides container isolation, credential injection, and observability, but 
 
 - The agent is semi-trusted code that should not have direct credential access
 - Credentials are scoped appropriately at the service level (IAM roles, repository permissions)
-- The container boundary prevents accidental credential leakage, not intentional misuse by a compromised agent
+- The container boundary prevents accidental credential leakage, not intentional misuse by malicious code
 
 For high-security scenarios, combine Moat with service-level controls (branch protection, IAM policies, read-only mounts) and agent-level policy frameworks like agentsh.
 
