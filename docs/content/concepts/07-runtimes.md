@@ -12,7 +12,7 @@ Moat runs agents in isolated containers using either Docker or Apple containers.
 
 Moat detects the available runtime automatically:
 
-1. On macOS 15+ with Apple Silicon, it checks for Apple containers
+1. On macOS 26+ with Apple Silicon, it checks for Apple containers
 2. If Apple containers are unavailable, it uses Docker
 3. On Linux and Windows, it uses Docker
 
@@ -108,18 +108,18 @@ Since the proxy listens only on localhost, only processes on the host machine ca
 | macOS | No | Docker Desktop does not support gVisor |
 | Windows | No | Docker Desktop does not support gVisor |
 
-On macOS and Windows, use `--no-sandbox` or switch to Apple containers (macOS 15+ with Apple Silicon).
+On macOS and Windows, use `--no-sandbox` or switch to Apple containers (macOS 26+ with Apple Silicon).
 
 ## Apple containers
 
-Apple containers are native to macOS 15+ on Apple Silicon. They use macOS virtualization frameworks rather than Docker.
+Apple containers require macOS 26+ (Tahoe) on Apple Silicon. Install the `container` CLI from the [Apple container releases](https://github.com/apple/container/releases) page. They use macOS virtualization frameworks rather than Docker.
 
 **Sandbox mode:** Apple containers use macOS's built-in isolation. gVisor is not applicable to this runtime.
 
 **Performance:** Apple containers start faster than Docker on macOS because they don't require a Linux VM.
 
 **Limitations:**
-- macOS 15+ required
+- macOS 26+ required
 - Apple Silicon (M1, M2, M3) required
 - Cannot mount Docker socket (no `docker:host` or `docker:dind`)
 - Cannot run in privileged mode
@@ -140,7 +140,7 @@ The proxy rejects requests without a valid token. This prevents other processes 
 
 | Feature | Docker + gVisor | Docker (standard) | Apple containers | microVMs (planned) |
 |---------|-----------------|-------------------|------------------|--------------------|
-| Platform | Linux | Linux, macOS, Windows | macOS 15+ (Apple Silicon) | Linux |
+| Platform | Linux | Linux, macOS, Windows | macOS 26+ (Apple Silicon) | Linux |
 | Isolation level | High | Standard | Standard | Hardware-level |
 | Docker socket access | Yes | Yes | No | Yes (planned) |
 | Privileged mode | Yes | Yes | No | No |
@@ -149,23 +149,22 @@ The proxy rejects requests without a valid token. This prevents other processes 
 
 ## Future: VM and microVM support
 
-Moat currently uses container-based isolation (Docker, Apple containers). Future versions will support true VM and microVM runtimes for stronger isolation guarantees.
+Moat currently uses container-based isolation (Docker, Apple containers).
+VM-backed isolation via Lima is under consideration for a future release,
+providing stronger isolation guarantees on macOS.
 
-**Planned runtime options:**
+**Planned runtime:**
 
-- **Firecracker** — Lightweight microVMs from AWS, designed for multi-tenant workloads
-- **Kata Containers** — OCI-compatible container runtime using lightweight VMs
-- **Cloud Hypervisor** — Open-source VMM optimized for modern cloud workloads
+- **Lima** — VM-backed runtime on macOS, offering a strong isolation boundary
+  for untrusted workloads
 
-**Why VMs:**
+**Why Lima:**
 
-VMs provide a hardware-level isolation boundary that containers cannot match. A compromised container can potentially escape to the host kernel. A compromised VM guest cannot directly access the host without exploiting the hypervisor, which has a much smaller attack surface than a full kernel.
+Moat prioritizes strong isolation with minimal user-facing complexity. Lima provides a VM-backed security boundary on macOS using native virtualization, without requiring users to manage VMs, images, or guest operating systems. This makes it a better fit than microVM runtimes designed for cloud multi-tenancy or server environments.
 
 **Use cases for VM-based isolation:**
 
 - Running agents on code from untrusted sources
-- Multi-tenant environments where agents from different users share infrastructure
-- Compliance requirements that mandate hardware-level isolation
 - Defense-in-depth for high-value credentials
 
 **Current workaround:**
@@ -182,7 +181,7 @@ This provides hardware isolation at the cost of heavier resource overhead compar
 ## Choosing a runtime
 
 **For development (macOS):**
-- Use Apple containers if available (macOS 15+ with Apple Silicon)
+- Use Apple containers if available (macOS 26+ with Apple Silicon)
 - Use Docker with `--no-sandbox` if gVisor is unavailable
 
 **For production (Linux):**

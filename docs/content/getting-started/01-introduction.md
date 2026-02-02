@@ -98,7 +98,7 @@ Moat supports two container runtimes:
 
 | Platform | Runtime | Detection |
 |----------|---------|-----------|
-| macOS 15+ with Apple Silicon | Apple containers | Automatic |
+| macOS 26+ with Apple Silicon | Apple containers | Automatic |
 | macOS (Intel), Linux, Windows | Docker | Automatic |
 
 Moat detects the available runtime automatically. No configuration required.

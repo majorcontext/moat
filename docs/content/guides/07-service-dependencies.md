@@ -238,7 +238,7 @@ The `services:` block only customizes services declared in `dependencies:`. Add 
 
 ### macOS version
 
-Apple container networking requires macOS 26 or later. On macOS 15, use Docker runtime instead.
+Apple container networking requires macOS 26 or later.
 
 ## Example: Full-stack test runner
 

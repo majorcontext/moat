@@ -170,21 +170,21 @@ dependencies:
 ```
 
 - Type: `array[string]`
-- Default: `[]` (uses `ubuntu:22.04`)
+- Default: `[]` (uses `debian:bookworm-slim`)
 
 #### Supported dependencies
 
 | Dependency | Base image |
 |------------|------------|
-| `node@18` | `node:18` |
-| `node@20` | `node:20` |
-| `node@22` | `node:22` |
-| `python@3.10` | `python:3.10` |
-| `python@3.11` | `python:3.11` |
-| `python@3.12` | `python:3.12` |
+| `node@18` | `node:18-slim` |
+| `node@20` | `node:20-slim` |
+| `node@22` | `node:22-slim` |
+| `python@3.10` | `python:3.10-slim` |
+| `python@3.11` | `python:3.11-slim` |
+| `python@3.12` | `python:3.12-slim` |
 | `go@1.21` | `golang:1.21` |
 | `go@1.22` | `golang:1.22` |
-| (none) | `ubuntu:22.04` |
+| (none) | `debian:bookworm-slim` |
 
 #### Service dependencies
 

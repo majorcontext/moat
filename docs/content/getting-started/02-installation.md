@@ -9,7 +9,7 @@ keywords: ["moat", "installation", "docker", "apple containers", "setup"]
 ## Requirements
 
 - **Go 1.21 or later** — For building from source
-- **Container runtime** — Docker or Apple containers (macOS 15+ with Apple Silicon)
+- **Container runtime** — Docker or Apple containers (macOS 26+ with Apple Silicon)
 
 ## Install Moat
 
@@ -54,25 +54,57 @@ Available Commands:
 
 Moat requires a container runtime. It detects the available runtime automatically.
 
-### macOS 15+ with Apple Silicon
+### Apple containers (macOS 26+ with Apple Silicon)
 
-Apple containers are built into macOS 15 (Sequoia) on Apple Silicon Macs. No additional installation required.
+Apple containers require macOS 26 (Tahoe) on Apple Silicon Macs. Install the `container` CLI from the [Apple container releases](https://github.com/apple/container/releases) page.
+
+Download the latest `.pkg` installer and run it:
+
+```bash
+sudo installer -pkg container-*.pkg -target /
+```
+
+Start the container system:
+
+```bash
+sudo container system start
+```
 
 Verify Apple containers are available:
 
 ```bash
+$ container --version
+container 1.x.x
+
 $ moat status
 
 Runtime: apple
 ...
 ```
 
-### macOS (Intel), Linux, Windows
+### Docker (macOS, Linux, Windows)
 
-Install Docker:
+**macOS (Homebrew):**
 
-- **macOS**: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
-- **Linux**: [Docker Engine](https://docs.docker.com/engine/install/)
+```bash
+brew install --cask docker
+open -a Docker
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt-get update
+sudo apt-get install docker.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+
+Log out and back in for the group change to take effect.
+
+**Other platforms:**
+
+- **Linux (other distros)**: [Docker Engine](https://docs.docker.com/engine/install/)
 - **Windows**: [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
 
 > **Note:** When using `docker:dind` mode in agent.yaml, Moat automatically deploys a BuildKit sidecar for image builds. See the [docker dependency documentation](../reference/02-agent-yaml.md#docker) for details.

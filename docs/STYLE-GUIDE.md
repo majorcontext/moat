@@ -180,7 +180,7 @@ Use tables for structured comparisons. Keep cells concise.
 ```markdown
 | Platform | Runtime | Notes |
 |----------|---------|-------|
-| macOS 15+ (Apple Silicon) | Apple containers | Preferred |
+| macOS 26+ (Apple Silicon) | Apple containers | Preferred |
 | macOS (Intel) | Docker | Requires Docker Desktop |
 | Linux | Docker | Native Docker support |
 ```
