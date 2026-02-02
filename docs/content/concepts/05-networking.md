@@ -94,22 +94,7 @@ ports:
   api: 8080
 ```
 
-### Starting the routing proxy
-
-The hostname routing proxy is separate from the credential injection proxy:
-
-```bash
-$ moat proxy start
-
-Routing proxy started on :8080
-CA certificate: ~/.moat/proxy/ca/ca.crt
-```
-
-The proxy listens on port 8080 by default. Change with `--port`:
-
-```bash
-moat proxy start --port 9000
-```
+When you run an agent with ports configured, the routing proxy starts automatically on port 8080 (or the port specified by `MOAT_PROXY_PORT`).
 
 ### Accessing endpoints
 
@@ -158,6 +143,33 @@ MOAT_URL_API=http://api.checkout.localhost:8080
 
 Use these variables for inter-endpoint communication or OAuth callbacks.
 
+### Running on privileged ports (80/443)
+
+By default, the routing proxy listens on port 8080. To use privileged ports (below 1024), manually start the proxy with `sudo`:
+
+```bash
+$ sudo moat proxy start --port 80
+
+Proxy listening on port 80 (HTTP and HTTPS)
+Access services at:
+  http://<service>.<agent>.localhost:80
+  https://<service>.<agent>.localhost:80
+```
+
+The proxy runs in the foreground. Keep it running in a separate terminal or use a process manager.
+
+When the proxy is already running, `moat run` will detect and use it. All agents will be accessible on port 80:
+
+```bash
+# In another terminal:
+$ moat run --name my-agent ./workspace
+
+# Access at:
+https://web.my-agent.localhost  # Port 80, no port number needed in URL
+```
+
+You can also set `MOAT_PROXY_PORT=80` in your environment, but you must still use `sudo moat proxy start` to bind to the privileged port—`moat run` cannot bind to privileged ports automatically.
+
 ### Trusting the CA certificate
 
 The routing proxy uses HTTPS with a self-signed CA certificate. To avoid browser warnings, trust the CA:
@@ -175,27 +187,27 @@ sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt
 sudo update-ca-certificates
 ```
 
-### Stopping the proxy
+### Proxy status and management
+
+Check if the proxy is running:
+
+```bash
+$ moat proxy status
+
+Proxy running on port 8080 (pid 12345)
+Supports HTTP and HTTPS on the same port
+
+Registered agents:
+  - https://my-agent.localhost:8080
+```
+
+Stop a manually started proxy:
 
 ```bash
 moat proxy stop
 ```
 
-### Proxy status
-
-```bash
-$ moat proxy status
-
-Routing Proxy
-=============
-Status: running
-Port: 8080
-CA: ~/.moat/proxy/ca/ca.crt
-
-Registered Agents:
-  dark-mode   web:3000, api:8080
-  checkout    web:3000, api:8080
-```
+The proxy stops automatically when all agents with ports exit. If you manually started it with `moat proxy start`, use `moat proxy stop` or press Ctrl+C in the proxy terminal.
 
 ## Non-HTTP traffic
 
