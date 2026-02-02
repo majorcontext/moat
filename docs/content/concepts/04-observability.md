@@ -63,7 +63,8 @@ Or start a run in attached mode (the default):
 moat run ./my-project
 ```
 
-> **Note:** The `--follow` flag for `moat logs` is not yet implemented. Use `moat attach` for live output.
+> [!NOTE]
+> The `--follow` flag for `moat logs` is not yet implemented. Use `moat attach` for live output.
 
 ## Network traces
 

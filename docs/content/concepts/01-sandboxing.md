@@ -57,7 +57,8 @@ package.json
 
 Changes made by the container are written to your host filesystem. If the agent modifies files, those changes persist after the run.
 
-> **Note:** `/workspace` is a direct host mount. Any files the agent can read or write there should be considered trusted input/output.
+> [!NOTE]
+> `/workspace` is a direct host mount. Any files the agent can read or write there should be considered trusted input/output.
 
 ### Additional mounts
 
