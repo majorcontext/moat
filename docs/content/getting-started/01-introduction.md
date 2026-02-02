@@ -119,6 +119,28 @@ moat grant anthropic  # Import credentials from Claude Code
 moat claude ./my-project
 ```
 
+## What Moat is not
+
+Moat provides container isolation, credential injection, and observability, but **does not enforce fine-grained permissions** on the actions agents can take with those credentials.
+
+**Examples:**
+
+- **GitHub grant** — An agent with GitHub access could delete `.git/` or force push to main. Moat injects whatever credentials you provide; the agent has the same permissions as those credentials. Protection requires GitHub-level controls (branch protection rules, repository permissions).
+
+- **AWS grant** — An agent with a broad IAM role could delete resources. Moat assumes the role you specify and injects those temporary credentials; the agent can do anything that role allows. Protection requires IAM-level controls (scoped roles, explicit denies, resource policies).
+
+- **File system** — Moat mounts your workspace with read-write access by default. An agent could delete or modify any file in the mounted directory.
+
+**Fine-grained agent policies require tools like [agentsh.org](https://www.agentsh.org/)**, which provides declarative security policies for agent actions. agentsh is complementary to Moat—Moat handles container isolation and credential delivery, while agentsh enforces action-level policies. We have plans to make packaging agentsh in a Moat container straightforward.
+
+**Moat's security model assumes:**
+
+- The agent is semi-trusted code that should not have direct credential access
+- Credentials are scoped appropriately at the service level (IAM roles, repository permissions)
+- The container boundary prevents accidental credential leakage, not intentional misuse by a compromised agent
+
+For high-security scenarios, combine Moat with service-level controls (branch protection, IAM policies, read-only mounts) and agent-level policy frameworks like agentsh.
+
 ## Project status
 
 Moat is in active development. APIs and configuration formats may change. The project is open source and welcomes contributions.
