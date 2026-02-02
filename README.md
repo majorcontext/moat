@@ -10,7 +10,7 @@ moat claude ./workspace
 
 This starts Claude Code in an isolated container with your workspace mounted. Credentials are injected at runtime—Claude authenticates normally but never sees your tokens. Every API call, log line, and network request is captured.
 
-For design rationale and principles, see [VISION.md](VISION.md).
+For design rationale and principles, see [VISION.md](VISION.md), for pretty version of the `docs/content/` files see [majorcontext.com/moat](https://majorcontext.com/moat).
 
 ## Installation
 
