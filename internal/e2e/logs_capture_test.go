@@ -147,6 +147,10 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 // TestLogsCapturedInInteractiveMode verifies that logs are captured to logs.jsonl
 // when a run is started in interactive mode and exits normally.
 // This is the bug reported by the user: interactive runs don't capture logs.
+//
+// This test mirrors real usage: Interactive=true with TTY=true (as moat run -i would do).
+// TTY output is captured via tee (see StartAttached) since container runtime doesn't
+// preserve TTY logs.
 func TestLogsCapturedInInteractiveMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -159,13 +163,14 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 
 	workspace := createTestWorkspace(t)
 
-	// Create an interactive run (TTY enabled)
+	// Create an interactive run (mirrors real usage: moat run -i)
+	// Note: We only set Interactive=true. TTY allocation is determined by
+	// StartAttached based on whether stdin is a real terminal.
 	r, err := mgr.Create(ctx, run.Options{
 		Name:        "test-logs-interactive",
 		Workspace:   workspace,
 		Cmd:         []string{"sh", "-c", "echo 'interactive log 1'; echo 'interactive log 2'"},
 		Interactive: true,
-		TTY:         true,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

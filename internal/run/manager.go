@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -524,6 +525,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
 			r.ProxyPort = proxyPortInt
 		}
+
+		// Store proxy auth token (for tests and debugging)
+		r.ProxyAuthToken = proxyAuthToken
 
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
@@ -1988,10 +1992,31 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
 	// real terminal, so we use the same check here.
 	useTTY := term.IsTerminal(os.Stdin)
+
+	// For interactive mode, tee output to a buffer so we can capture logs.
+	// This is necessary because:
+	// 1. TTY mode: output goes through PTY, not container logs
+	// 2. Non-TTY interactive: we may still want to capture for tests/programmatic use
+	var logBuffer bytes.Buffer
+	var teeStdout, teeStderr io.Writer
+	teeStdout = stdout
+	teeStderr = stderr
+
+	if r.Interactive && r.Store != nil {
+		// Tee stdout and stderr to capture for logs.jsonl
+		teeStdout = io.MultiWriter(stdout, &logBuffer)
+		if stderr != stdout {
+			teeStderr = io.MultiWriter(stderr, &logBuffer)
+		} else {
+			// stdout and stderr are the same writer - don't duplicate
+			teeStderr = teeStdout
+		}
+	}
+
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
+		Stdout: teeStdout,
+		Stderr: teeStderr,
 		TTY:    useTTY,
 	}
 
@@ -2042,7 +2067,25 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
+	// For interactive mode, write captured output directly to logs.jsonl
+	// (Interactive/TTY output may not go through container runtime logs)
+	// We must win the race with monitorContainerExit's captureLogs call.
+	if r.Interactive && logBuffer.Len() > 0 && r.Store != nil {
+		// Use CompareAndSwap to win race with monitorContainerExit
+		if r.logsCaptured.CompareAndSwap(false, true) {
+			if lw, err := r.Store.LogWriter(); err == nil {
+				_, _ = lw.Write(logBuffer.Bytes())
+				lw.Close()
+			} else {
+				// Failed to create file - reset flag so captureLogs can try
+				r.logsCaptured.Store(false)
+			}
+		}
+	}
+
 	// Capture logs after container exits (critical for audit/observability)
+	// For non-interactive mode, this fetches from container runtime logs
+	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
 	m.captureLogs(r)
 
 	return attachErr
@@ -2315,6 +2358,25 @@ func (m *Manager) Get(runID string) (*Run, error) {
 // - Detached completion (background monitor)
 func (m *Manager) captureLogs(r *Run) {
 	if r.Store == nil {
+		return
+	}
+
+	// For interactive mode, logs are captured via tee in StartAttached.
+	// Don't try to fetch from container runtime (TTY output isn't available there).
+	// Just ensure logs.jsonl exists for audit completeness.
+	if r.Interactive {
+		// Check if StartAttached already captured logs
+		if r.logsCaptured.Load() {
+			return
+		}
+		// StartAttached hasn't written logs yet - create empty file for audit
+		if r.logsCaptured.CompareAndSwap(false, true) {
+			if lw, err := r.Store.LogWriter(); err == nil {
+				lw.Close() // Empty file
+			} else {
+				r.logsCaptured.Store(false)
+			}
+		}
 		return
 	}
 

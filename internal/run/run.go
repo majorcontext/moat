@@ -68,6 +68,7 @@ type Run struct {
 	FirewallEnabled bool
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
+	ProxyAuthToken  string // Auth token for proxy (Apple containers only, empty for Docker)
 
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.

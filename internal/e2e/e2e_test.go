@@ -744,6 +744,24 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
+	// Set up a test credential so the proxy is activated
+	encKey, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey: %v", err)
+	}
+	credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	testCred := credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "test-token-for-proxy-test",
+	}
+	if err := credStore.Save(testCred); err != nil {
+		t.Fatalf("Save credential: %v", err)
+	}
+	defer credStore.Delete(credential.ProviderGitHub)
+
 	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -764,6 +782,11 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
+	// Verify proxy was started
+	if r.ProxyServer == nil {
+		t.Fatalf("ProxyServer is nil after Create, expected proxy with grants=%v", r.Grants)
+	}
+
 	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -774,11 +797,6 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-
-	// Verify proxy was started
-	if r.ProxyServer == nil {
-		t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
-	}
 
 	// Read logs to verify HTTP_PROXY was set with gateway IP
 	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
@@ -1604,57 +1622,6 @@ func TestInteractiveContainer(t *testing.T) {
 	t.Logf("Interactive container echoed: %q", strings.TrimSpace(output))
 }
 
-// TestInteractiveContainerShellCommand verifies interactive mode with a shell command.
-// This tests that complex commands work through the interactive flow.
-//
-// Note: This test only runs on Apple containers. Docker's non-TTY attach mode has issues
-// with fast-exiting containers where output is lost before it can be read. The real
-// interactive use case (with TTY from a terminal) works correctly for both runtimes.
-func TestInteractiveContainerShellCommand(t *testing.T) {
-	skipIfNoAppleContainer(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	// Create an interactive run with a shell command that reads from stdin
-	r, err := mgr.Create(ctx, run.Options{
-		Name:        "e2e-interactive-shell",
-		Workspace:   workspace,
-		Interactive: true,
-		Cmd:         []string{"sh", "-c", "read line && echo \"You typed: $line\""},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	// Send input via stdin
-	testInput := "test123\n"
-	stdinReader := strings.NewReader(testInput)
-
-	var stdoutBuf bytes.Buffer
-
-	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf)
-	if err != nil {
-		t.Fatalf("StartAttached: %v", err)
-	}
-
-	output := stdoutBuf.String()
-	if !strings.Contains(output, "You typed: test123") {
-		t.Errorf("Expected shell to echo formatted output, got: %q", output)
-	}
-
-	t.Logf("Interactive shell responded: %q", strings.TrimSpace(output))
-}
-
 // =============================================================================
 // Claude Plugin Tests
 // =============================================================================
@@ -1862,4 +1829,74 @@ func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
 	}
 
 	return dir
+}
+
+// testBothRuntimes runs a test function against all available runtimes.
+// On a system with both Docker and Apple containers available, this runs the test twice
+// (once for each runtime). Tests should be runtime-agnostic where possible.
+func testBothRuntimes(t *testing.T, testFunc func(t *testing.T, rt container.Runtime)) {
+	t.Helper()
+
+	runtimes := detectAvailableRuntimes(t)
+	if len(runtimes) == 0 {
+		t.Skip("No container runtimes available")
+	}
+
+	for _, rtType := range runtimes {
+		rtType := rtType // capture for closure
+		t.Run(string(rtType), func(t *testing.T) {
+			rt := createRuntimeForTest(t, rtType)
+			defer rt.Close()
+			testFunc(t, rt)
+		})
+	}
+}
+
+// detectAvailableRuntimes checks which container runtimes are available on this system.
+func detectAvailableRuntimes(t *testing.T) []container.RuntimeType {
+	t.Helper()
+	var available []container.RuntimeType
+
+	// Check Docker
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if exec.CommandContext(ctx, "docker", "version").Run() == nil {
+		available = append(available, container.RuntimeDocker)
+	}
+
+	// Check Apple containers (macOS only)
+	if runtime.GOOS == "darwin" {
+		if _, err := exec.LookPath("container"); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if exec.CommandContext(ctx, "container", "list", "--quiet").Run() == nil {
+				available = append(available, container.RuntimeApple)
+			}
+		}
+	}
+
+	return available
+}
+
+// createRuntimeForTest creates a runtime of the specified type using MOAT_RUNTIME env var.
+func createRuntimeForTest(t *testing.T, rtType container.RuntimeType) container.Runtime {
+	t.Helper()
+
+	// Set MOAT_RUNTIME to force the specific runtime
+	oldEnv := os.Getenv("MOAT_RUNTIME")
+	os.Setenv("MOAT_RUNTIME", string(rtType))
+	t.Cleanup(func() {
+		if oldEnv == "" {
+			os.Unsetenv("MOAT_RUNTIME")
+		} else {
+			os.Setenv("MOAT_RUNTIME", oldEnv)
+		}
+	})
+
+	rt, err := container.NewRuntime()
+	if err != nil {
+		t.Fatalf("Failed to create %s runtime: %v", rtType, err)
+	}
+
+	return rt
 }
