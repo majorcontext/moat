@@ -391,6 +391,24 @@ func getCustomCommands(name, version string) InstallCommands {
 				"rm -rf /tmp/linux-*",
 			},
 		}
+	case "yarn":
+		// Enable yarn via Corepack (Node.js 16.10+)
+		// Don't use npm install -g yarn - it conflicts with Corepack
+		return InstallCommands{
+			Commands: []string{
+				"corepack enable",
+				"corepack prepare yarn@stable --activate",
+			},
+		}
+	case "pnpm":
+		// Enable pnpm via Corepack (Node.js 16.10+)
+		// Don't use npm install -g pnpm - it conflicts with Corepack
+		return InstallCommands{
+			Commands: []string{
+				"corepack enable",
+				"corepack prepare pnpm@latest --activate",
+			},
+		}
 	default:
 		return InstallCommands{}
 	}
