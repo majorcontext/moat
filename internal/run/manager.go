@@ -2076,10 +2076,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
-	// For interactive mode, write captured output directly to logs.jsonl
-	// (Interactive/TTY output may not go through container runtime logs)
+	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
+	// (Apple TTY output doesn't go through container runtime logs)
+	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
 	// Always create the file for audit completeness, even if empty.
-	if r.Interactive && r.Store != nil {
+	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
@@ -2372,10 +2373,11 @@ func (m *Manager) captureLogs(r *Run) {
 		return
 	}
 
-	// For interactive mode, logs are captured via tee in StartAttached.
-	// Don't try to fetch from container runtime (TTY output isn't available there).
-	// StartAttached is responsible for creating logs.jsonl with the captured output.
-	if r.Interactive {
+	// For interactive mode, logs are captured differently by runtime:
+	// - Docker: Container runtime logs work even in TTY mode, so use ContainerLogsAll
+	// - Apple: TTY output doesn't go to container logs, so StartAttached uses tee
+	// Only skip container logs for Apple containers in interactive mode.
+	if r.Interactive && m.runtime.Type() == container.RuntimeApple {
 		return
 	}
 
