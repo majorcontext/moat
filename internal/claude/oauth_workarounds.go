@@ -97,6 +97,7 @@ func CreateOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, 
 			"reason", "OAuth endpoints require user:profile scope not available in long-lived tokens")
 
 		// Return empty success response for this endpoint
+		//nolint:bodyclose // Response body will be closed by the HTTP handler
 		return createEmptyOAuthResponse(matchedEndpoint), true
 	}
 }

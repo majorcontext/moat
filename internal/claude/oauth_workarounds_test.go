@@ -244,6 +244,7 @@ func TestCreateEmptyOAuthResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			resp := createEmptyOAuthResponse(tt.path)
+			defer resp.Body.Close()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
