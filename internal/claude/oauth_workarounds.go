@@ -31,7 +31,7 @@ import (
 //
 // This transformation only applies to:
 // 1. These explicitly listed endpoints
-// 2. 403 responses with "permission_error" in the body
+// 2. 403 status codes (all 403s on these endpoints, not just permission errors)
 // 3. Requests using OAuth tokens (not API keys)
 //
 // Other errors (401, 500, etc.) pass through unchanged to preserve observability.

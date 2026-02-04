@@ -121,6 +121,10 @@ const codexCLIClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 // It receives the request and response as interface{} to avoid circular dependencies.
 // Cast to *http.Request and *http.Response in the transformer implementation.
 // Returns the modified response and true if transformed, or original response and false otherwise.
+//
+// Note on body handling: Transformers are called BEFORE body capture for logging.
+// If you need to inspect the response body, read it within the transformer and return
+// a new response with a fresh body reader. The original body is not rewound after reading.
 type ResponseTransformer func(req, resp interface{}) (interface{}, bool)
 
 type ProxyConfigurer interface {

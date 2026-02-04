@@ -720,7 +720,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			statusCode = resp.StatusCode
 
 			// Apply response transformers BEFORE capturing body
-			// so transformer can read the original response body
+			// so transformer can read the original response body.
+			// Only the first transformer that returns true is applied (transformers are not chained).
 			if transformers := p.getResponseTransformers(host); len(transformers) > 0 {
 				for _, transformer := range transformers {
 					if newRespInterface, transformed := transformer(req, resp); transformed {
@@ -729,7 +730,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 							statusCode = resp.StatusCode
 							respHeaders = resp.Header.Clone()
 						}
-						break
+						break // Only apply first matching transformer
 					}
 				}
 			}
