@@ -8,10 +8,8 @@ import (
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 )
-
-// OAuthBetaHeader is the Anthropic beta header required for OAuth authentication.
-const OAuthBetaHeader = "oauth-2025-04-20"
 
 // AnthropicSetup implements credential.ProviderSetup for Anthropic credentials.
 // It handles both OAuth tokens (from Claude Code) and API keys.
@@ -27,11 +25,15 @@ func (a *AnthropicSetup) ConfigureProxy(p credential.ProxyConfigurer, cred *cred
 	if credential.IsOAuthToken(cred.Token) {
 		// OAuth token - use Bearer auth with the real token
 		// The proxy injects this at the network layer
-		// Also requires anthropic-beta header for OAuth support
 		p.SetCredential("api.anthropic.com", "Bearer "+cred.Token)
-		p.AddExtraHeader("api.anthropic.com", "anthropic-beta", OAuthBetaHeader)
+
+		// Register response transformer to handle 403s on OAuth endpoints
+		// that require scopes not available in long-lived tokens
+		log.Debug("registering OAuth endpoint transformer for api.anthropic.com")
+		p.AddResponseTransformer("api.anthropic.com", CreateOAuthEndpointTransformer())
 	} else {
 		// Standard API key - use x-api-key header
+		log.Debug("using API key authentication for api.anthropic.com (no transformer)")
 		p.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
 	}
 }

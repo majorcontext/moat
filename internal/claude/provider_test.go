@@ -32,9 +32,9 @@ func TestAnthropicSetup_ConfigureProxy_OAuth(t *testing.T) {
 		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], "Bearer sk-ant-oat01-abc123")
 	}
 
-	// Should also set anthropic-beta header
-	if mockProxy.extraHeaders["api.anthropic.com"]["anthropic-beta"] != OAuthBetaHeader {
-		t.Errorf("anthropic-beta header = %q, want %q", mockProxy.extraHeaders["api.anthropic.com"]["anthropic-beta"], OAuthBetaHeader)
+	// Should NOT inject extra headers - client controls API version headers
+	if len(mockProxy.extraHeaders["api.anthropic.com"]) != 0 {
+		t.Errorf("extra headers should be empty, got %v", mockProxy.extraHeaders["api.anthropic.com"])
 	}
 }
 
@@ -282,6 +282,7 @@ func TestWriteClaudeConfig(t *testing.T) {
 type mockProxyConfigurer struct {
 	credentials  map[string]string
 	extraHeaders map[string]map[string]string
+	transformers map[string][]credential.ResponseTransformer
 }
 
 func (m *mockProxyConfigurer) SetCredential(host, value string) {
@@ -297,4 +298,11 @@ func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue strin
 		m.extraHeaders[host] = make(map[string]string)
 	}
 	m.extraHeaders[host][headerName] = headerValue
+}
+
+func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer credential.ResponseTransformer) {
+	if m.transformers == nil {
+		m.transformers = make(map[string][]credential.ResponseTransformer)
+	}
+	m.transformers[host] = append(m.transformers[host], transformer)
 }
