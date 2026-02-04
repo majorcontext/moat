@@ -62,34 +62,27 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	// Build grants list using a set for deduplication
 	// If user has an API key stored via `moat grant openai`, use proxy injection
 	// Otherwise, Codex will prompt for login on first run
+	// Note: Grants can include mount specifications like "ssh:github.com"
+	// which are validated later during mount parsing, not here
 	grantSet := make(map[string]bool)
 	var grants []string
-	addGrant := func(g string) error {
-		if grantSet[g] {
-			return nil // Already added
+	addGrant := func(g string) {
+		if !grantSet[g] {
+			grantSet[g] = true
+			grants = append(grants, g)
 		}
-		if validateErr := credential.ValidateGrant(g); validateErr != nil {
-			return fmt.Errorf("invalid grant %q: %w", g, validateErr)
-		}
-		grantSet[g] = true
-		grants = append(grants, g)
-		return nil
 	}
 
 	if hasCredential(credential.ProviderOpenAI) {
-		_ = addGrant("openai") // Known valid grant
+		addGrant("openai")
 	}
 	if cfg != nil {
 		for _, g := range cfg.Grants {
-			if grantErr := addGrant(g); grantErr != nil {
-				return grantErr
-			}
+			addGrant(g)
 		}
 	}
 	for _, g := range codexFlags.Grants {
-		if grantErr := addGrant(g); grantErr != nil {
-			return grantErr
-		}
+		addGrant(g)
 	}
 	codexFlags.Grants = grants
 
