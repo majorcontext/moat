@@ -67,11 +67,14 @@ interactive: false
 # Sandbox (Docker only)
 # sandbox: none  # Uncomment to disable gVisor
 
-# Container (runtime-specific)
+# Runtime (optional - auto-detects if not specified)
+# runtime: docker  # Force Docker runtime (useful for docker:dind on macOS)
+
+# Container resources (applies to both Docker and Apple)
 container:
-  apple:
-    memory: 8192  # 8 GB (default: 4096)
-    cpus: 8       # default: 4
+  memory: 8192                    # 8 GB (default: 4096 for Apple, no limit for Docker)
+  cpus: 8                         # CPU count (default: 4 for Apple, no limit for Docker)
+  dns: ["8.8.8.8", "8.8.4.4"]    # DNS servers (default: Google DNS)
 
 # Claude Code
 claude:
@@ -163,7 +166,33 @@ version: 1.0.0
 
 ---
 
-## Runtime
+## Container runtime
+
+### runtime
+
+Force a specific container runtime (Docker or Apple containers).
+
+```yaml
+runtime: docker  # Force Docker runtime
+```
+
+- Type: `string`
+- Values: `docker` | `apple`
+- Default: Auto-detected (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise)
+- CLI override: `--runtime`
+
+**When to use:** On macOS systems with both Docker and Apple containers available, you may need to force Docker runtime for certain dependencies. For example, `docker:dind` (Docker-in-Docker) requires privileged mode which Apple containers don't support.
+
+```yaml
+dependencies:
+  - docker:dind
+
+runtime: docker  # Required: Apple containers can't run dind
+```
+
+---
+
+## Runtime dependencies
 
 ### dependencies
 
@@ -562,69 +591,47 @@ Setting `sandbox: none` is equivalent to running with `--no-sandbox`. Use this w
 
 ## Container
 
-Runtime-specific container options.
+Container resource limits and settings that apply to both Docker and Apple container runtimes.
 
-### container.apple
+### container.memory
 
-Apple container-specific configuration. Only applies when using Apple containers (macOS 26+).
-
-```yaml
-container:
-  apple:
-    memory: 8192
-    cpus: 8
-    builder_dns: ["192.168.1.1"]
-```
-
-- Type: `object`
-- Default: `{}`
-
-#### container.apple.memory
-
-Memory limit for the container in megabytes.
+Memory limit in megabytes.
 
 ```yaml
 container:
-  apple:
-    memory: 8192  # 8 GB
+  memory: 8192  # 8 GB
 ```
 
 - Type: `integer`
-- Default: `4096` (4 GB)
+- Default: `4096` MB for Apple containers, no limit for Docker
 
 Apple containers have a system default of 1024 MB which is often insufficient for AI coding environments like Claude Code. Moat defaults to 4096 MB.
 
-#### container.apple.cpus
+### container.cpus
 
 Number of CPUs available to the container.
 
 ```yaml
 container:
-  apple:
-    cpus: 8
+  cpus: 8
 ```
 
 - Type: `integer`
-- Default: System default (typically 4)
+- Default: System default (Apple: typically 4, Docker: no limit)
 
-Only set this if you need more than the default CPU allocation.
+### container.dns
 
-#### container.apple.builder_dns
-
-DNS servers for the Apple container builder.
+DNS servers for both runtime containers and builders.
 
 ```yaml
 container:
-  apple:
-    builder_dns: ["192.168.1.1"]
+  dns: ["192.168.1.1", "1.1.1.1"]
 ```
 
 - Type: `array[string]`
-- Default: Auto-detected from host
+- Default: `["8.8.8.8", "8.8.4.4"]` (Google DNS)
 
-Moat attempts to detect DNS servers automatically. If detection fails, you must set this explicitly.
-
-**Privacy note:** Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that provider, potentially leaking information about dependencies being installed.
+Applies to both Docker and Apple containers. Used for both build-time dependency installation and runtime name resolution.
 
 ---
 

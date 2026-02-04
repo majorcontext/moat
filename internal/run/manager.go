@@ -1125,7 +1125,7 @@ region = %s
 				NoCache: opts.Rebuild,
 			}
 			if opts.Config != nil {
-				buildOpts.DNS = opts.Config.Container.Apple.BuilderDNS
+				buildOpts.DNS = opts.Config.Container.DNS
 			}
 
 			buildMgr := m.runtime.BuildManager()
@@ -1693,11 +1693,13 @@ region = %s
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
-	// Extract Apple container resource limits from config
+	// Extract container resource limits from config (applies to both Docker and Apple)
 	var memoryMB, cpus int
+	var dns []string
 	if opts.Config != nil {
-		memoryMB = opts.Config.Container.Apple.Memory
-		cpus = opts.Config.Container.Apple.CPUs
+		memoryMB = opts.Config.Container.Memory
+		cpus = opts.Config.Container.CPUs
+		dns = opts.Config.Container.DNS
 	}
 
 	// Create container
@@ -1719,6 +1721,7 @@ region = %s
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 		MemoryMB:     memoryMB,
 		CPUs:         cpus,
+		DNS:          dns,
 	})
 	if err != nil {
 		// Clean up BuildKit resources on failure

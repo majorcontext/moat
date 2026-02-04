@@ -34,53 +34,52 @@ type Config struct {
 	// Empty string or omitted uses default (gVisor enabled).
 	Sandbox string `yaml:"sandbox,omitempty"`
 
+	// Runtime forces a specific container runtime ("docker" or "apple").
+	// If not set, moat auto-detects the best available runtime.
+	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
+	Runtime string `yaml:"runtime,omitempty"`
+
 	Container ContainerConfig        `yaml:"container,omitempty"`
 	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
 
-	// Deprecated: use Dependencies instead
-	Runtime *deprecatedRuntime `yaml:"runtime,omitempty"`
+	// Deprecated: old runtime field for language versions
+	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
 }
 
-// ContainerConfig configures runtime-specific container options.
+// ContainerConfig configures container resource limits and settings.
+// These settings apply to both Docker and Apple container runtimes.
 type ContainerConfig struct {
-	Apple AppleContainerConfig `yaml:"apple,omitempty"`
-}
-
-// AppleContainerConfig configures Apple container-specific options.
-type AppleContainerConfig struct {
-	// BuilderDNS specifies DNS servers for the Apple container builder.
-	// If not set, moat will attempt to detect the host's DNS servers.
-	// If detection fails, an error is returned with instructions to set this explicitly.
+	// Memory specifies the memory limit in megabytes.
+	// Applies to both Docker and Apple containers.
+	// If not set, Apple containers default to 4096 MB (4 GB).
+	// Docker containers have no default limit.
 	//
 	// Example:
 	//   container:
-	//     apple:
-	//       builder_dns: ["192.168.1.1"]
-	//
-	// Note: Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that
-	// provider, potentially leaking information about dependencies being installed.
-	BuilderDNS []string `yaml:"builder_dns,omitempty"`
-
-	// Memory specifies the memory limit for the container in megabytes.
-	// If not set, defaults to 4096 MB (4 GB).
-	// Apple containers have a default limit of 1024 MB which is often insufficient
-	// for AI coding environments like Claude Code.
-	//
-	// Example:
-	//   container:
-	//     apple:
-	//       memory: 8192  # 8 GB
+	//     memory: 8192  # 8 GB
 	Memory int `yaml:"memory,omitempty"`
 
-	// CPUs specifies the number of CPUs available to the container.
-	// If not set, uses the Apple container default (typically 4).
+	// CPUs specifies the number of CPUs.
+	// Applies to both Docker and Apple containers.
+	// If not set, uses runtime defaults.
 	//
 	// Example:
 	//   container:
-	//     apple:
-	//       cpus: 8
+	//     cpus: 8
 	CPUs int `yaml:"cpus,omitempty"`
+
+	// DNS specifies DNS servers for both runtime containers and builders.
+	// Applies to both Docker and Apple containers.
+	// If not set, defaults to ["8.8.8.8", "8.8.4.4"] (Google DNS).
+	//
+	// Example:
+	//   container:
+	//     dns: ["192.168.1.1", "1.1.1.1"]
+	//
+	// Note: Using public DNS will send queries to that provider,
+	// potentially leaking information about your dependencies and internal services.
+	DNS []string `yaml:"dns,omitempty"`
 }
 
 // MCPServerConfig defines a remote MCP server configuration for top-level
@@ -295,10 +294,20 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("parsing agent.yaml: %w", err)
 	}
 
-	// Reject deprecated runtime field
-	if cfg.Runtime != nil && (cfg.Runtime.Node != "" || cfg.Runtime.Python != "" || cfg.Runtime.Go != "") {
-		return nil, fmt.Errorf("'runtime' field is no longer supported\n\n  Replace this:\n    runtime:\n      node: %q\n\n  With this:\n    dependencies:\n      - node@%s",
-			cfg.Runtime.Node, cfg.Runtime.Node)
+	// Validate runtime field (only "docker" or "apple" allowed)
+	if cfg.Runtime != "" && cfg.Runtime != "docker" && cfg.Runtime != "apple" {
+		return nil, fmt.Errorf("invalid runtime %q: must be 'docker' or 'apple'", cfg.Runtime)
+	}
+
+	// Validate container resource limits
+	if cfg.Container.Memory < 0 {
+		return nil, fmt.Errorf("container.memory must be non-negative, got %d", cfg.Container.Memory)
+	}
+	if cfg.Container.Memory > 0 && cfg.Container.Memory < 128 {
+		return nil, fmt.Errorf("container.memory must be at least 128 MB, got %d MB", cfg.Container.Memory)
+	}
+	if cfg.Container.CPUs < 0 {
+		return nil, fmt.Errorf("container.cpus must be non-negative, got %d", cfg.Container.CPUs)
 	}
 
 	// Set default network policy if not specified

@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// DefaultDNS returns the default DNS servers if the provided list is empty.
+// Uses Google DNS (8.8.8.8, 8.8.4.4) as a reliable fallback since container
+// runtime defaults often don't work (e.g., Apple container gateway DNS).
+func DefaultDNS(dns []string) []string {
+	if len(dns) == 0 {
+		return []string{"8.8.8.8", "8.8.4.4"}
+	}
+	return dns
+}
+
 // RuntimeType identifies the container runtime being used.
 type RuntimeType string
 
@@ -229,8 +239,9 @@ type Config struct {
 	Privileged   bool           // If true, run container in privileged mode (required for Docker-in-Docker)
 	Interactive  bool           // If true, container will be attached interactively (Apple runtime: uses exec workaround; Docker: handled natively)
 	HasMoatUser  bool           // If true, image has moatuser (moat-built images); used for exec --user in Apple containers
-	MemoryMB     int            // Memory limit in megabytes (Apple containers only)
-	CPUs         int            // Number of CPUs (Apple containers only)
+	MemoryMB     int            // Memory limit in megabytes (both Docker and Apple)
+	CPUs         int            // Number of CPUs (both Docker and Apple)
+	DNS          []string       // DNS servers (both Docker and Apple)
 }
 
 // SidecarConfig holds configuration for starting a sidecar container.

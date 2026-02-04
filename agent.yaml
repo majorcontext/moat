@@ -1,14 +1,13 @@
-name: moat
-
+name: moat-dev
+runtime: docker
 interactive: true
 
-claude:
-  model: opus
+env:
+  ANTHROPIC_MODEL: opus
 
 container:
-  apple:
-    memory: 8192
-    cpus: 8
+  memory: 8192
+  cpus: 8
 
 dependencies:
   - go@1.25.6
@@ -20,7 +19,7 @@ dependencies:
   - claude-code
   - node@20
   - bats
-#  - docker:dind
+  - docker:dind
 
 grants:
   - anthropic
