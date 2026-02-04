@@ -39,56 +39,56 @@ func TestCreateOAuthEndpointTransformer_Transform403PermissionError(t *testing.T
 	transformer := CreateOAuthEndpointTransformer()
 
 	tests := []struct {
-		name         string
-		path         string
-		statusCode   int
-		body         string
+		name            string
+		path            string
+		statusCode      int
+		body            string
 		shouldTransform bool
-		expectedBody string
+		expectedBody    string
 	}{
 		{
-			name:         "transforms 403 permission_error on /api/oauth/profile",
-			path:         "/api/oauth/profile",
-			statusCode:   403,
-			body:         `{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement user:profile"}}`,
+			name:            "transforms 403 permission_error on /api/oauth/profile",
+			path:            "/api/oauth/profile",
+			statusCode:      403,
+			body:            `{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement user:profile"}}`,
 			shouldTransform: true,
-			expectedBody: `{"id":"","email":"","name":""}`,
+			expectedBody:    `{"id":"","email":"","name":""}`,
 		},
 		{
-			name:         "transforms 403 permission_error on /api/oauth/usage",
-			path:         "/api/oauth/usage",
-			statusCode:   403,
-			body:         `{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement user:profile"}}`,
+			name:            "transforms 403 permission_error on /api/oauth/usage",
+			path:            "/api/oauth/usage",
+			statusCode:      403,
+			body:            `{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement user:profile"}}`,
 			shouldTransform: true,
-			expectedBody: `{"usage":{}}`,
+			expectedBody:    `{"usage":{}}`,
 		},
 		{
-			name:         "transforms all 403s on oauth endpoints (simplified - no body check)",
-			path:         "/api/oauth/profile",
-			statusCode:   403,
-			body:         `{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}`,
+			name:            "transforms all 403s on oauth endpoints (simplified - no body check)",
+			path:            "/api/oauth/profile",
+			statusCode:      403,
+			body:            `{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}`,
 			shouldTransform: true,
-			expectedBody: `{"id":"","email":"","name":""}`,
+			expectedBody:    `{"id":"","email":"","name":""}`,
 		},
 		{
-			name:         "does not transform 404 on oauth endpoint",
-			path:         "/api/oauth/profile",
-			statusCode:   404,
-			body:         `{"error":"not found"}`,
+			name:            "does not transform 404 on oauth endpoint",
+			path:            "/api/oauth/profile",
+			statusCode:      404,
+			body:            `{"error":"not found"}`,
 			shouldTransform: false,
 		},
 		{
-			name:         "does not transform 403 on non-workaround endpoint",
-			path:         "/api/oauth/other",
-			statusCode:   403,
-			body:         `{"type":"error","error":{"type":"permission_error"}}`,
+			name:            "does not transform 403 on non-workaround endpoint",
+			path:            "/api/oauth/other",
+			statusCode:      403,
+			body:            `{"type":"error","error":{"type":"permission_error"}}`,
 			shouldTransform: false,
 		},
 		{
-			name:         "does not transform 200 success",
-			path:         "/api/oauth/profile",
-			statusCode:   200,
-			body:         `{"id":"123","email":"user@example.com"}`,
+			name:            "does not transform 200 success",
+			path:            "/api/oauth/profile",
+			statusCode:      200,
+			body:            `{"id":"123","email":"user@example.com"}`,
 			shouldTransform: false,
 		},
 	}

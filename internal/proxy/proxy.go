@@ -203,8 +203,8 @@ type extraHeader struct {
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials          map[string]credentialHeader                   // host -> credential header
-	extraHeaders         map[string][]extraHeader                      // host -> additional headers to inject
+	credentials          map[string]credentialHeader                 // host -> credential header
+	extraHeaders         map[string][]extraHeader                    // host -> additional headers to inject
 	responseTransformers map[string][]credential.ResponseTransformer // host -> response transformers
 	mu                   sync.RWMutex
 	ca                   *CA           // Optional CA for TLS interception
