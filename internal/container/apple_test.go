@@ -151,4 +151,3 @@ func TestAppleRuntime_SupportsHostNetwork(t *testing.T) {
 		t.Error("SupportsHostNetwork() = true, want false")
 	}
 }
-

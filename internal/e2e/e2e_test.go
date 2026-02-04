@@ -1,8 +1,30 @@
 //go:build e2e
 // +build e2e
 
-// Package e2e provides end-to-end tests that exercise the full Docker + proxy flow.
-// These tests require Docker to be installed and running.
+// Package e2e provides end-to-end tests for Moat's container runtimes.
+//
+// # Test Execution Strategy
+//
+// Tests are categorized by runtime requirements:
+//
+//  1. Docker-Only: Tests requiring Docker-specific features
+//     - Use requireDocker(t) helper
+//     - Run once on Docker only
+//
+//  2. Apple-Only: Tests requiring Apple container-specific features
+//     - Use requireApple(t) helper
+//     - Run once on Apple containers only
+//
+//  3. Docker-in-Docker: Tests requiring privileged containers
+//     - Use requireDinD(t) helper
+//     - Run on Docker with DinD support only
+//
+//  4. Runtime-Agnostic: Tests that should work on any runtime
+//     - Use testOnAllRuntimes(t, testFunc) helper
+//     - Run once per available runtime (Docker, Apple)
+//
+// On a system with both Docker and Apple containers, runtime-agnostic tests
+// run twice (once per runtime) to ensure compatibility across runtimes.
 //
 // Run with: go test -tags=e2e ./internal/e2e/
 package e2e
@@ -68,500 +90,511 @@ func skipIfNoAppleContainer(t *testing.T) {
 // - Apple: binds to 0.0.0.0 (all interfaces, required because container accesses host via gateway)
 // For Apple containers, security is maintained by the fact that the proxy only runs locally
 // and TestProxyNotAccessibleFromNetwork verifies external hosts cannot connect.
+// TestProxyBindsToLocalhostOnly is runtime-agnostic: verifies correct proxy binding per runtime.
 func TestProxyBindsToLocalhostOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	// Create a run with grants to activate the proxy
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-proxy-binding",
-		Workspace: workspace,
-		Grants:    []string{"github"}, // This activates the proxy
-		Cmd:       []string{"sleep", "10"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	// Start the run
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer mgr.Stop(context.Background(), r.ID)
-
-	// Give the proxy a moment to start
-	time.Sleep(500 * time.Millisecond)
-
-	// The proxy server should be running - verify it's bound appropriately
-	if r.ProxyServer == nil {
-		t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
-	}
-
-	addr := r.ProxyServer.Addr()
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		t.Fatalf("SplitHostPort(%q): %v", addr, err)
-	}
-
-	// Check runtime to determine expected binding
-	rt, _ := container.NewRuntime()
-	if rt != nil {
-		defer rt.Close()
-	}
-
-	if rt != nil && rt.Type() == container.RuntimeApple {
-		// Apple containers require binding to all interfaces because the container
-		// accesses the host via the gateway IP (e.g., 192.168.64.1), not localhost.
-		// Security is still maintained because:
-		// 1. The proxy only runs on the local machine
-		// 2. TestProxyNotAccessibleFromNetwork verifies external hosts can't connect
-		if host != "::" && host != "0.0.0.0" {
-			t.Errorf("Apple runtime: Proxy bound to %q, expected \"::\" or \"0.0.0.0\" (all interfaces)\n"+
-				"Apple containers require binding to all interfaces to be reachable via gateway IP.",
-				host)
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-		t.Logf("Apple runtime: Proxy correctly bound to %q (all interfaces for gateway access)", host)
-	} else {
-		// Docker: MUST bind to localhost only
-		if host != "127.0.0.1" {
-			t.Errorf("SECURITY VIOLATION: Proxy bound to %q, want %q\n"+
-				"The proxy must bind to localhost only to prevent credential theft from network peers.",
-				host, "127.0.0.1")
+		defer mgr.Close()
+
+		workspace := createTestWorkspace(t)
+
+		// Create a run with grants to activate the proxy
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-proxy-binding",
+			Workspace: workspace,
+			Grants:    []string{"github"}, // This activates the proxy
+			Cmd:       []string{"sleep", "10"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
 		}
-	}
-}
+		defer mgr.Destroy(context.Background(), r.ID)
 
-// TestProxyNotAccessibleFromNetwork verifies that the proxy cannot be reached
-// from a non-localhost address. This is a defense-in-depth check.
-func TestProxyNotAccessibleFromNetwork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-proxy-network",
-		Workspace: workspace,
-		Grants:    []string{"github"},
-		Cmd:       []string{"sleep", "10"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer mgr.Stop(context.Background(), r.ID)
-
-	time.Sleep(500 * time.Millisecond)
-
-	if r.ProxyServer == nil {
-		t.Fatal("ProxyServer is nil")
-	}
-
-	// Get the port the proxy is listening on
-	port := r.ProxyServer.Port()
-
-	// Try to connect from localhost (should succeed)
-	localConn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 2*time.Second)
-	if err != nil {
-		t.Errorf("Failed to connect to proxy from localhost: %v", err)
-	} else {
-		localConn.Close()
-	}
-
-	// Try to connect from 0.0.0.0 (should fail if bound to 127.0.0.1)
-	// Note: This tests that we can't connect via the "any" address
-	// The actual network isolation is enforced by binding to 127.0.0.1
-}
-
-// TestNetworkRequestsAreCaptured verifies that HTTP requests made through the proxy
-// are captured in the network trace.
-func TestNetworkRequestsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	// Set up a test credential for GitHub so the proxy does TLS interception.
-	// Without credentials, the proxy does transparent tunneling and doesn't log requests.
-	encKey, err := credential.DefaultEncryptionKey()
-	if err != nil {
-		t.Fatalf("DefaultEncryptionKey: %v", err)
-	}
-	credStore, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		encKey,
-	)
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	testCred := credential.Credential{
-		Provider: credential.ProviderGitHub,
-		Token:    "test-token-for-e2e-logging", // Token value doesn't matter for logging
-	}
-	if err := credStore.Save(testCred); err != nil {
-		t.Fatalf("Save credential: %v", err)
-	}
-	defer credStore.Delete(credential.ProviderGitHub) // Clean up after test
-
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithRuntime(t, "python", "3.10")
-
-	// Use Python to make HTTPS request through the proxy. Python is simpler to
-	// set up than gh/curl and handles SSL certificates more gracefully.
-	//
-	// TODO: Mount CA certificate into container to properly test TLS interception.
-	// Currently using PYTHONHTTPSVERIFY=0 because the Moat CA isn't mounted.
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-network-capture",
-		Workspace: workspace,
-		Grants:    []string{"github"},
-		Config: &config.Config{
-			Dependencies: []string{"python@3.10"},
-		},
-		Cmd: []string{
-			"python", "-c",
-			"import urllib.request; print(urllib.request.urlopen('https://api.github.com/zen').read().decode())",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Wait for the run to complete
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		// curl might fail if no network, but we still want to check the trace
-		t.Logf("Wait returned error (may be expected): %v", err)
-	}
-
-	// Give storage a moment to flush
-	time.Sleep(100 * time.Millisecond)
-
-	// Read network requests from storage
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	requests, err := store.ReadNetworkRequests()
-	if err != nil {
-		t.Fatalf("ReadNetworkRequests: %v", err)
-	}
-
-	// Verify we captured the request
-	found := false
-	for _, req := range requests {
-		if strings.Contains(req.URL, "api.github.com") {
-			found = true
-			t.Logf("Captured request: %s %s -> %d", req.Method, req.URL, req.StatusCode)
-			break
+		// Start the run
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
 		}
-	}
+		defer mgr.Stop(context.Background(), r.ID)
 
-	if !found {
-		// Read logs to help diagnose the issue
-		logs, logErr := store.ReadLogs(0, 100)
-		var logLines []string
-		if logErr == nil {
-			for _, entry := range logs {
-				logLines = append(logLines, entry.Line)
+		// Give the proxy a moment to start
+		time.Sleep(500 * time.Millisecond)
+
+		// The proxy server should be running - verify it's bound appropriately
+		if r.ProxyServer == nil {
+			t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
+		}
+
+		addr := r.ProxyServer.Addr()
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			t.Fatalf("SplitHostPort(%q): %v", addr, err)
+		}
+
+		if rt.Type() == container.RuntimeApple {
+			// Apple containers require binding to all interfaces because the container
+			// accesses the host via the gateway IP (e.g., 192.168.64.1), not localhost.
+			// Security is still maintained because:
+			// 1. The proxy only runs on the local machine
+			// 2. TestProxyNotAccessibleFromNetwork verifies external hosts can't connect
+			if host != "::" && host != "0.0.0.0" {
+				t.Errorf("Apple runtime: Proxy bound to %q, expected \"::\" or \"0.0.0.0\" (all interfaces)\n"+
+					"Apple containers require binding to all interfaces to be reachable via gateway IP.",
+					host)
+			}
+			t.Logf("Apple runtime: Proxy correctly bound to %q (all interfaces for gateway access)", host)
+		} else {
+			// Docker: MUST bind to localhost only
+			if host != "127.0.0.1" {
+				t.Errorf("SECURITY VIOLATION: Proxy bound to %q, want %q\n"+
+					"The proxy must bind to localhost only to prevent credential theft from network peers.",
+					host, "127.0.0.1")
 			}
 		}
-		t.Errorf("Network trace did not capture request to api.github.com\n"+
-			"Captured requests: %v\n"+
-			"Container logs: %v", requests, logLines)
-	}
+	})
 }
 
-// TestContainerCanReachProxyViaHostDockerInternal verifies that containers can
-// reach the proxy via host.docker.internal, which is required for the proxy to work.
+// TestProxyNotAccessibleFromNetwork is runtime-agnostic: verifies proxy network isolation.
+func TestProxyNotAccessibleFromNetwork(t *testing.T) {
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
+
+		workspace := createTestWorkspace(t)
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-proxy-network",
+			Workspace: workspace,
+			Grants:    []string{"github"},
+			Cmd:       []string{"sleep", "10"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		defer mgr.Stop(context.Background(), r.ID)
+
+		time.Sleep(500 * time.Millisecond)
+
+		if r.ProxyServer == nil {
+			t.Fatal("ProxyServer is nil")
+		}
+
+		// Get the port the proxy is listening on
+		port := r.ProxyServer.Port()
+
+		// Try to connect from localhost (should succeed)
+		localConn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 2*time.Second)
+		if err != nil {
+			t.Errorf("Failed to connect to proxy from localhost: %v", err)
+		} else {
+			localConn.Close()
+		}
+
+		// Try to connect from 0.0.0.0 (should fail if bound to 127.0.0.1)
+		// Note: This tests that we can't connect via the "any" address
+		// The actual network isolation is enforced by binding to 127.0.0.1
+	})
+}
+
+// TestNetworkRequestsAreCaptured is runtime-agnostic: tests network request capture through proxy.
+func TestNetworkRequestsAreCaptured(t *testing.T) {
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		// Set up a test credential for GitHub so the proxy does TLS interception.
+		// Without credentials, the proxy does transparent tunneling and doesn't log requests.
+		encKey, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			t.Fatalf("DefaultEncryptionKey: %v", err)
+		}
+		credStore, err := credential.NewFileStore(
+			credential.DefaultStoreDir(),
+			encKey,
+		)
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		testCred := credential.Credential{
+			Provider: credential.ProviderGitHub,
+			Token:    "test-token-for-e2e-logging", // Token value doesn't matter for logging
+		}
+		if err := credStore.Save(testCred); err != nil {
+			t.Fatalf("Save credential: %v", err)
+		}
+		defer credStore.Delete(credential.ProviderGitHub) // Clean up after test
+
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
+
+		workspace := createTestWorkspaceWithRuntime(t, "python", "3.10")
+
+		// Use Python to make HTTPS request through the proxy. Python is simpler to
+		// set up than gh/curl and handles SSL certificates more gracefully.
+		//
+		// TODO: Mount CA certificate into container to properly test TLS interception.
+		// Currently using PYTHONHTTPSVERIFY=0 because the Moat CA isn't mounted.
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-network-capture",
+			Workspace: workspace,
+			Grants:    []string{"github"},
+			Config: &config.Config{
+				Dependencies: []string{"python@3.10"},
+			},
+			Cmd: []string{
+				"python", "-c",
+				"import urllib.request; print(urllib.request.urlopen('https://api.github.com/zen').read().decode())",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		// Wait for the run to complete
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			// curl might fail if no network, but we still want to check the trace
+			t.Logf("Wait returned error (may be expected): %v", err)
+		}
+
+		// Give storage a moment to flush
+		time.Sleep(100 * time.Millisecond)
+
+		// Read network requests from storage
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		requests, err := store.ReadNetworkRequests()
+		if err != nil {
+			t.Fatalf("ReadNetworkRequests: %v", err)
+		}
+
+		// Verify we captured the request
+		found := false
+		for _, req := range requests {
+			if strings.Contains(req.URL, "api.github.com") {
+				found = true
+				t.Logf("Captured request: %s %s -> %d", req.Method, req.URL, req.StatusCode)
+				break
+			}
+		}
+
+		if !found {
+			// Read logs to help diagnose the issue
+			logs, logErr := store.ReadLogs(0, 100)
+			var logLines []string
+			if logErr == nil {
+				for _, entry := range logs {
+					logLines = append(logLines, entry.Line)
+				}
+			}
+			t.Errorf("Network trace did not capture request to api.github.com\n"+
+				"Captured requests: %v\n"+
+				"Container logs: %v", requests, logLines)
+		}
+	})
+}
+
+// TestContainerCanReachProxyViaHostDockerInternal is runtime-agnostic: tests proxy connectivity.
 func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
 
-	workspace := createTestWorkspace(t)
+		workspace := createTestWorkspace(t)
 
-	// Run a command that tests connectivity to the proxy
-	// The proxy sets HTTP_PROXY env var, so we can check if it's reachable
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-host-docker-internal",
-		Workspace: workspace,
-		Grants:    []string{"github"},
-		Cmd:       []string{"sh", "-c", "curl -s --connect-timeout 5 http://$HTTP_PROXY/ || echo 'proxy_reachable'"},
+		// Run a command that tests connectivity to the proxy
+		// The proxy sets HTTP_PROXY env var, so we can check if it's reachable
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-host-docker-internal",
+			Workspace: workspace,
+			Grants:    []string{"github"},
+			Cmd:       []string{"sh", "-c", "curl -s --connect-timeout 5 http://$HTTP_PROXY/ || echo 'proxy_reachable'"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		// The command should complete without hanging
+		waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer waitCancel()
+
+		err = mgr.Wait(waitCtx, r.ID)
+		if waitCtx.Err() == context.DeadlineExceeded {
+			t.Error("Container timed out trying to reach proxy via host.docker.internal")
+		}
+		// Error is acceptable here since we're just testing connectivity
+		_ = err
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// The command should complete without hanging
-	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer waitCancel()
-
-	err = mgr.Wait(waitCtx, r.ID)
-	if waitCtx.Err() == context.DeadlineExceeded {
-		t.Error("Container timed out trying to reach proxy via host.docker.internal")
-	}
-	// Error is acceptable here since we're just testing connectivity
-	_ = err
 }
 
-// TestRunWithoutGrantsNoProxy verifies that runs without grants don't start a proxy.
+// TestRunWithoutGrantsNoProxy is runtime-agnostic: tests that runs without grants don't start a proxy.
 func TestRunWithoutGrantsNoProxy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
 
-	workspace := createTestWorkspace(t)
+		workspace := createTestWorkspace(t)
 
-	// Create a run WITHOUT grants
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-no-proxy",
-		Workspace: workspace,
-		Grants:    nil, // No grants = no proxy
-		Cmd:       []string{"echo", "hello"},
+		// Create a run WITHOUT grants
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-no-proxy",
+			Workspace: workspace,
+			Grants:    nil, // No grants = no proxy
+			Cmd:       []string{"echo", "hello"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		// The proxy server should be nil when no grants are specified
+		if r.ProxyServer != nil {
+			t.Error("ProxyServer should be nil when no grants are specified")
+		}
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	// The proxy server should be nil when no grants are specified
-	if r.ProxyServer != nil {
-		t.Error("ProxyServer should be nil when no grants are specified")
-	}
 }
 
 // TestLogsAreCaptured verifies that container logs are captured in storage.
+// TestLogsAreCaptured verifies that container output is captured to logs.jsonl.
+// This is a runtime-agnostic test that runs on all available runtimes.
 func TestLogsAreCaptured(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	testOutput := "e2e-test-unique-output-12345"
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-logs",
-		Workspace: workspace,
-		Cmd:       []string{"echo", testOutput},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	// Give storage a moment to flush
-	time.Sleep(100 * time.Millisecond)
-
-	// Read logs from storage
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	// Verify we captured the output
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, testOutput) {
-			found = true
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Logs did not contain expected output %q\nLogs: %v", testOutput, logs)
-	}
+		workspace := createTestWorkspace(t)
+
+		testOutput := "e2e-test-unique-output-12345"
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-logs",
+			Workspace: workspace,
+			Cmd:       []string{"echo", testOutput},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		// Give storage a moment to flush
+		time.Sleep(100 * time.Millisecond)
+
+		// Read logs from storage
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		// Verify we captured the output
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, testOutput) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Logs did not contain expected output %q\nLogs: %v", testOutput, logs)
+		}
+	})
 }
 
 // TestWorkspaceIsMounted verifies that the workspace directory is mounted in the container.
+// TestWorkspaceIsMounted is runtime-agnostic: tests basic workspace mounting.
 func TestWorkspaceIsMounted(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	// Create a test file in the workspace
-	testFile := "e2e-test-file.txt"
-	testContent := "e2e-test-content-xyz"
-	if err := os.WriteFile(filepath.Join(workspace, testFile), []byte(testContent), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	// Run a command that reads the file
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-workspace",
-		Workspace: workspace,
-		Cmd:       []string{"cat", "/workspace/" + testFile},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	// Read logs to verify the file content was read
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, testContent) {
-			found = true
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Container did not read workspace file correctly\nExpected: %q\nLogs: %v", testContent, logs)
-	}
+		workspace := createTestWorkspace(t)
+
+		// Create a test file in the workspace
+		testFile := "e2e-test-file.txt"
+		testContent := "e2e-test-content-xyz"
+		if err := os.WriteFile(filepath.Join(workspace, testFile), []byte(testContent), 0644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		// Run a command that reads the file
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-workspace",
+			Workspace: workspace,
+			Cmd:       []string{"cat", "/workspace/" + testFile},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		// Read logs to verify the file content was read
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, testContent) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Container did not read workspace file correctly\nExpected: %q\nLogs: %v", testContent, logs)
+		}
+	})
 }
 
-// TestConfigEnvironmentVariables verifies that environment variables from config are set.
+// TestConfigEnvironmentVariables is runtime-agnostic: tests environment variable configuration.
 func TestConfigEnvironmentVariables(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	cfg := &config.Config{
-		Agent:   "e2e-test-env",
-		Version: "1.0.0",
-		Env: map[string]string{
-			"E2E_TEST_VAR": "e2e-test-value-abc123",
-		},
-	}
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-env",
-		Workspace: workspace,
-		Config:    cfg,
-		Cmd:       []string{"sh", "-c", "echo $E2E_TEST_VAR"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "e2e-test-value-abc123") {
-			found = true
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Environment variable was not set correctly\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspace(t)
+
+		cfg := &config.Config{
+			Agent:   "e2e-test-env",
+			Version: "1.0.0",
+			Env: map[string]string{
+				"E2E_TEST_VAR": "e2e-test-value-abc123",
+			},
+		}
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-env",
+			Workspace: workspace,
+			Config:    cfg,
+			Cmd:       []string{"sh", "-c", "echo $E2E_TEST_VAR"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "e2e-test-value-abc123") {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Environment variable was not set correctly\nLogs: %v", logs)
+		}
+	})
 }
 
 // createTestWorkspace creates a temporary directory with an agent.yaml file.
@@ -601,11 +634,9 @@ func createTestWorkspaceWithRuntime(t *testing.T, rt, version string) string {
 // Apple Container Tests (macOS only, skipped in CI)
 // =============================================================================
 
-// TestAppleContainerRuntime verifies that the Apple container backend works correctly.
-// This test only runs on macOS with Apple Silicon and the Apple container CLI installed.
-// It will be skipped in CI since CI uses Linux runners.
+// TestAppleContainerRuntime is Apple-only: tests Apple container backend functionality.
 func TestAppleContainerRuntime(t *testing.T) {
-	skipIfNoAppleContainer(t)
+	requireApple(t)
 
 	// Verify that NewRuntime() selects Apple container on this system
 	rt, err := container.NewRuntime()
@@ -630,11 +661,9 @@ func TestAppleContainerRuntime(t *testing.T) {
 	}
 }
 
-// TestAppleContainerSystemStart verifies that 'container system start' is idempotent
-// and the auto-start behavior works correctly. This tests the same code path as
-// startAppleContainerSystem() in detect.go.
+// TestAppleContainerSystemStart is Apple-only: tests Apple container system start idempotence.
 func TestAppleContainerSystemStart(t *testing.T) {
-	skipIfNoAppleContainer(t)
+	requireApple(t)
 
 	// 'container system start' should be idempotent - it succeeds even if already running
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -674,10 +703,9 @@ func TestAppleContainerSystemStart(t *testing.T) {
 	}
 }
 
-// TestAppleContainerBasicRun verifies that a simple container run works with Apple container.
-// This test only runs on macOS with Apple Silicon and the Apple container CLI installed.
+// TestAppleContainerBasicRun is Apple-only: tests basic container run with Apple container.
 func TestAppleContainerBasicRun(t *testing.T) {
-	skipIfNoAppleContainer(t)
+	requireApple(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -736,10 +764,9 @@ func TestAppleContainerBasicRun(t *testing.T) {
 	}
 }
 
-// TestAppleContainerWithProxy verifies that the proxy works correctly with Apple container.
-// This tests the gateway IP networking path that's different from Docker.
+// TestAppleContainerWithProxy is Apple-only: tests proxy with Apple container gateway IP networking.
 func TestAppleContainerWithProxy(t *testing.T) {
-	skipIfNoAppleContainer(t)
+	requireApple(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -889,169 +916,174 @@ func TestKeychainKeyPersistence(t *testing.T) {
 // SSH Agent Proxy Tests
 // =============================================================================
 
-// TestSSHGrantRequiresAgent verifies that SSH grants fail gracefully when no SSH agent is available.
+// TestSSHGrantRequiresAgent is runtime-agnostic: tests SSH grant validation without SSH agent.
 func TestSSHGrantRequiresAgent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	// Save the original SSH_AUTH_SOCK and clear it for this test
-	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
-	os.Unsetenv("SSH_AUTH_SOCK")
-	defer func() {
-		if origAuthSock != "" {
-			os.Setenv("SSH_AUTH_SOCK", origAuthSock)
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}()
+		defer mgr.Close()
 
-	// Try to create a run with SSH grants but no SSH agent
-	_, err = mgr.Create(ctx, run.Options{
-		Name:      "e2e-ssh-no-agent",
-		Workspace: workspace,
-		Grants:    []string{"ssh:github.com"},
-		Cmd:       []string{"echo", "hello"},
+		workspace := createTestWorkspace(t)
+
+		// Save the original SSH_AUTH_SOCK and clear it for this test
+		origAuthSock := os.Getenv("SSH_AUTH_SOCK")
+		os.Unsetenv("SSH_AUTH_SOCK")
+		defer func() {
+			if origAuthSock != "" {
+				os.Setenv("SSH_AUTH_SOCK", origAuthSock)
+			}
+		}()
+
+		// Try to create a run with SSH grants but no SSH agent
+		_, err = mgr.Create(ctx, run.Options{
+			Name:      "e2e-ssh-no-agent",
+			Workspace: workspace,
+			Grants:    []string{"ssh:github.com"},
+			Cmd:       []string{"echo", "hello"},
+		})
+
+		// Should fail because SSH_AUTH_SOCK is not set
+		if err == nil {
+			t.Error("Expected error when SSH grants are used without SSH_AUTH_SOCK")
+		}
+		if !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
+			t.Errorf("Error should mention SSH_AUTH_SOCK, got: %v", err)
+		}
 	})
-
-	// Should fail because SSH_AUTH_SOCK is not set
-	if err == nil {
-		t.Error("Expected error when SSH grants are used without SSH_AUTH_SOCK")
-	}
-	if !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
-		t.Errorf("Error should mention SSH_AUTH_SOCK, got: %v", err)
-	}
 }
 
-// TestSSHGrantWithoutMapping verifies that SSH grants fail gracefully when no mapping exists.
+// TestSSHGrantWithoutMapping is runtime-agnostic: tests SSH grant validation without mapping.
 func TestSSHGrantWithoutMapping(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
 
-	workspace := createTestWorkspace(t)
+		workspace := createTestWorkspace(t)
 
-	// Check if SSH agent is available
-	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
-	if origAuthSock == "" {
-		t.Skip("SSH_AUTH_SOCK not set, skipping test")
-	}
+		// Check if SSH agent is available
+		origAuthSock := os.Getenv("SSH_AUTH_SOCK")
+		if origAuthSock == "" {
+			t.Skip("SSH_AUTH_SOCK not set, skipping test")
+		}
 
-	// Try to create a run with SSH grant for a host that has no mapping
-	_, err = mgr.Create(ctx, run.Options{
-		Name:      "e2e-ssh-no-mapping",
-		Workspace: workspace,
-		Grants:    []string{"ssh:nonexistent-host.example.com"},
-		Cmd:       []string{"echo", "hello"},
+		// Try to create a run with SSH grant for a host that has no mapping
+		_, err = mgr.Create(ctx, run.Options{
+			Name:      "e2e-ssh-no-mapping",
+			Workspace: workspace,
+			Grants:    []string{"ssh:nonexistent-host.example.com"},
+			Cmd:       []string{"echo", "hello"},
+		})
+
+		// Should fail because no SSH mapping exists for this host
+		if err == nil {
+			t.Error("Expected error when SSH grants are used without mapping")
+		}
+		if !strings.Contains(err.Error(), "no SSH keys configured") {
+			t.Errorf("Error should mention missing SSH keys, got: %v", err)
+		}
 	})
-
-	// Should fail because no SSH mapping exists for this host
-	if err == nil {
-		t.Error("Expected error when SSH grants are used without mapping")
-	}
-	if !strings.Contains(err.Error(), "no SSH keys configured") {
-		t.Errorf("Error should mention missing SSH keys, got: %v", err)
-	}
 }
 
-// TestSSHAuthSockEnvSetInContainer verifies that SSH_AUTH_SOCK is set in container
-// when SSH grants are configured (requires actual SSH agent and mapping).
+// TestSSHAuthSockEnvSetInContainer is runtime-agnostic: tests SSH_AUTH_SOCK environment variable.
 func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
-	// This test requires:
-	// 1. SSH_AUTH_SOCK to be set
-	// 2. An SSH mapping for github.com to exist
-	// Skip if not available
-	if os.Getenv("SSH_AUTH_SOCK") == "" {
-		t.Skip("SSH_AUTH_SOCK not set, skipping test")
-	}
-
-	// Check if we have an SSH mapping for github.com
-	encKey, err := credential.DefaultEncryptionKey()
-	if err != nil {
-		t.Fatalf("DefaultEncryptionKey: %v", err)
-	}
-	credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	mappings, err := credStore.GetSSHMappingsForHosts([]string{"github.com"})
-	if err != nil {
-		t.Fatalf("GetSSHMappingsForHosts: %v", err)
-	}
-	if len(mappings) == 0 {
-		t.Skip("No SSH mapping for github.com, skipping test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
-
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspace(t)
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-ssh-env-test",
-		Workspace: workspace,
-		Grants:    []string{"ssh:github.com"},
-		Cmd:       []string{"sh", "-c", "echo SSH_AUTH_SOCK=$SSH_AUTH_SOCK"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	// Verify SSH server was started
-	if r.SSHAgentServer == nil {
-		t.Error("SSHAgentServer should be set when SSH grants are configured")
-	}
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Logf("Wait returned error (may be expected): %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	// Read logs to verify SSH_AUTH_SOCK was set
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	foundSSHSock := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "SSH_AUTH_SOCK=/run/moat/ssh/agent.sock") {
-			foundSSHSock = true
-			t.Logf("SSH_AUTH_SOCK: %s", entry.Line)
-			break
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		// This test requires:
+		// 1. SSH_AUTH_SOCK to be set
+		// 2. An SSH mapping for github.com to exist
+		// Skip if not available
+		if os.Getenv("SSH_AUTH_SOCK") == "" {
+			t.Skip("SSH_AUTH_SOCK not set, skipping test")
 		}
-	}
 
-	if !foundSSHSock {
-		t.Errorf("SSH_AUTH_SOCK not set correctly in container\nLogs: %v", logs)
-	}
+		// Check if we have an SSH mapping for github.com
+		encKey, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			t.Fatalf("DefaultEncryptionKey: %v", err)
+		}
+		credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		mappings, err := credStore.GetSSHMappingsForHosts([]string{"github.com"})
+		if err != nil {
+			t.Fatalf("GetSSHMappingsForHosts: %v", err)
+		}
+		if len(mappings) == 0 {
+			t.Skip("No SSH mapping for github.com, skipping test")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
+
+		workspace := createTestWorkspace(t)
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-ssh-env-test",
+			Workspace: workspace,
+			Grants:    []string{"ssh:github.com"},
+			Cmd:       []string{"sh", "-c", "echo SSH_AUTH_SOCK=$SSH_AUTH_SOCK"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		// Verify SSH server was started
+		if r.SSHAgentServer == nil {
+			t.Error("SSHAgentServer should be set when SSH grants are configured")
+		}
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Logf("Wait returned error (may be expected): %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		// Read logs to verify SSH_AUTH_SOCK was set
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		foundSSHSock := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "SSH_AUTH_SOCK=/run/moat/ssh/agent.sock") {
+				foundSSHSock = true
+				t.Logf("SSH_AUTH_SOCK: %s", entry.Line)
+				break
+			}
+		}
+
+		if !foundSSHSock {
+			t.Errorf("SSH_AUTH_SOCK not set correctly in container\nLogs: %v", logs)
+		}
+	})
 }
 
 // TestCredentialRoundTripWithKeychain verifies that credentials can be saved
@@ -1116,459 +1148,469 @@ func TestCredentialRoundTripWithKeychain(t *testing.T) {
 // Dependency System Tests
 // =============================================================================
 
-// TestDependencyNodeRuntime verifies that Node.js dependencies work correctly.
+// TestDependencyNodeRuntime is runtime-agnostic: tests Node.js dependency installation.
 func TestDependencyNodeRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithDeps(t, []string{"node@20"})
-
-	// Verify node is installed
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-node",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"node@20"},
-		},
-		Cmd: []string{"node", "--version"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "v20") {
-			found = true
-			t.Logf("Node version: %s", entry.Line)
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@20"})
+
+		// Verify node is installed
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-node",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"node@20"},
+			},
+			Cmd: []string{"node", "--version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "v20") {
+				found = true
+				t.Logf("Node version: %s", entry.Line)
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+		}
+	})
 }
 
-// TestDependencyPythonRuntime verifies that Python dependencies work correctly.
+// TestDependencyPythonRuntime is runtime-agnostic: tests Python dependency installation.
 func TestDependencyPythonRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithDeps(t, []string{"python@3.11"})
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-python",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"python@3.11"},
-		},
-		Cmd: []string{"python", "--version"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "3.11") {
-			found = true
-			t.Logf("Python version: %s", entry.Line)
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspaceWithDeps(t, []string{"python@3.11"})
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-python",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"python@3.11"},
+			},
+			Cmd: []string{"python", "--version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "3.11") {
+				found = true
+				t.Logf("Python version: %s", entry.Line)
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+		}
+	})
 }
 
-// TestDependencyGoRuntime verifies that Go dependencies work correctly.
+// TestDependencyGoRuntime is runtime-agnostic: tests Go dependency installation.
 func TestDependencyGoRuntime(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithDeps(t, []string{"go@1.22"})
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-go",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"go@1.22"},
-		},
-		Cmd: []string{"go", "version"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "go1.22") {
-			found = true
-			t.Logf("Go version: %s", entry.Line)
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("Go 1.22 not found in output\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspaceWithDeps(t, []string{"go@1.22"})
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-go",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"go@1.22"},
+			},
+			Cmd: []string{"go", "version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "go1.22") {
+				found = true
+				t.Logf("Go version: %s", entry.Line)
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Go 1.22 not found in output\nLogs: %v", logs)
+		}
+	})
 }
 
-// TestDependencyMultipleRuntimes verifies that multiple runtimes can be installed together.
+// TestDependencyMultipleRuntimes is runtime-agnostic: tests installing multiple runtime dependencies together.
 // This tests the fallback to Debian base image when multiple runtimes are specified,
 // and ensures Node.js major version extraction works correctly for NodeSource URLs.
 func TestDependencyMultipleRuntimes(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
 
-	workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "python@3.11"})
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "python@3.11"})
 
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-multi-runtime",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"node@20", "python@3.11"},
-		},
-		Cmd: []string{"sh", "-c", "node --version && python --version"},
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-multi-runtime",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"node@20", "python@3.11"},
+			},
+			Cmd: []string{"sh", "-c", "node --version && python --version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		foundNode := false
+		foundPython := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "v20") {
+				foundNode = true
+				t.Logf("Node version: %s", entry.Line)
+			}
+			if strings.Contains(entry.Line, "Python 3.11") {
+				foundPython = true
+				t.Logf("Python version: %s", entry.Line)
+			}
+		}
+
+		if !foundNode {
+			t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+		}
+		if !foundPython {
+			t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+		}
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	foundNode := false
-	foundPython := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "v20") {
-			foundNode = true
-			t.Logf("Node version: %s", entry.Line)
-		}
-		if strings.Contains(entry.Line, "Python 3.11") {
-			foundPython = true
-			t.Logf("Python version: %s", entry.Line)
-		}
-	}
-
-	if !foundNode {
-		t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
-	}
-	if !foundPython {
-		t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
-	}
 }
 
-// TestDependencyNpmPackage verifies that npm packages are installed correctly.
+// TestDependencyNpmPackage is runtime-agnostic: tests npm package installation.
 func TestDependencyNpmPackage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "typescript"})
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-npm",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"node@20", "typescript"},
-		},
-		Cmd: []string{"tsc", "--version"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "Version") {
-			found = true
-			t.Logf("TypeScript version: %s", entry.Line)
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("TypeScript not found in output\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "typescript"})
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-npm",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"node@20", "typescript"},
+			},
+			Cmd: []string{"tsc", "--version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "Version") {
+				found = true
+				t.Logf("TypeScript version: %s", entry.Line)
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("TypeScript not found in output\nLogs: %v", logs)
+		}
+	})
 }
 
-// TestDependencyGitHubBinary verifies that GitHub binary downloads work correctly.
+// TestDependencyGitHubBinary is runtime-agnostic: tests GitHub binary dependency download.
 func TestDependencyGitHubBinary(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithDeps(t, []string{"jq"})
-
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-github-binary",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"jq"},
-		},
-		Cmd: []string{"jq", "--version"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	found := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "jq") {
-			found = true
-			t.Logf("jq version: %s", entry.Line)
-			break
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	if !found {
-		t.Errorf("jq not found in output\nLogs: %v", logs)
-	}
+		workspace := createTestWorkspaceWithDeps(t, []string{"jq"})
+
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-github-binary",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"jq"},
+			},
+			Cmd: []string{"jq", "--version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		found := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "jq") {
+				found = true
+				t.Logf("jq version: %s", entry.Line)
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("jq not found in output\nLogs: %v", logs)
+		}
+	})
 }
 
-// TestDependencyMetaBundle verifies that meta bundles expand correctly.
+// TestDependencyMetaBundle is runtime-agnostic: tests meta bundle expansion.
 func TestDependencyMetaBundle(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+		defer mgr.Close()
 
-	// cli-essentials includes jq, fzf, ripgrep, fd, bat
-	workspace := createTestWorkspaceWithDeps(t, []string{"cli-essentials"})
+		// cli-essentials includes jq, fzf, ripgrep, fd, bat
+		workspace := createTestWorkspaceWithDeps(t, []string{"cli-essentials"})
 
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-dep-meta-bundle",
-		Workspace: workspace,
-		Config: &config.Config{
-			Dependencies: []string{"cli-essentials"},
-		},
-		// Echo labels before each version since fzf --version doesn't include "fzf" in output
-		Cmd: []string{"sh", "-c", "echo 'jq:' && jq --version && echo 'fzf:' && fzf --version && echo 'rg:' && rg --version"},
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-dep-meta-bundle",
+			Workspace: workspace,
+			Config: &config.Config{
+				Dependencies: []string{"cli-essentials"},
+			},
+			// Echo labels before each version since fzf --version doesn't include "fzf" in output
+			Cmd: []string{"sh", "-c", "echo 'jq:' && jq --version && echo 'fzf:' && fzf --version && echo 'rg:' && rg --version"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		// Check that all tested tools from the bundle are installed
+		// We look for the labels we echo before each version command
+		foundJq := false
+		foundFzf := false
+		foundRg := false
+		for _, entry := range logs {
+			if strings.Contains(entry.Line, "jq:") {
+				foundJq = true
+			}
+			if strings.Contains(entry.Line, "fzf:") {
+				foundFzf = true
+			}
+			if strings.Contains(entry.Line, "rg:") {
+				foundRg = true
+			}
+		}
+
+		if !foundJq || !foundFzf || !foundRg {
+			t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs: %v",
+				foundJq, foundFzf, foundRg, logs)
+		}
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	// Check that all tested tools from the bundle are installed
-	// We look for the labels we echo before each version command
-	foundJq := false
-	foundFzf := false
-	foundRg := false
-	for _, entry := range logs {
-		if strings.Contains(entry.Line, "jq:") {
-			foundJq = true
-		}
-		if strings.Contains(entry.Line, "fzf:") {
-			foundFzf = true
-		}
-		if strings.Contains(entry.Line, "rg:") {
-			foundRg = true
-		}
-	}
-
-	if !foundJq || !foundFzf || !foundRg {
-		t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs: %v",
-			foundJq, foundFzf, foundRg, logs)
-	}
 }
 
 // =============================================================================
 // Interactive Container Tests
 // =============================================================================
 
-// TestInteractiveContainer verifies that the interactive container flow works end-to-end.
+// TestInteractiveContainer is Apple-only: Docker's non-TTY attach mode has issues with fast-exiting containers.
 // This tests the Interactive=true option and StartAttached functionality.
-//
-// Note: This test only runs on Apple containers. Docker's non-TTY attach mode has issues
-// with fast-exiting containers where output is lost before it can be read. The real
-// interactive use case (with TTY from a terminal) works correctly for both runtimes.
 func TestInteractiveContainer(t *testing.T) {
-	skipIfNoAppleContainer(t)
+	requireApple(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -1703,99 +1745,91 @@ func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
 
 // createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
 // that specifies dependencies.
-// TestClaudeLogSyncMountTarget verifies that the Claude log sync bind mount
-// targets the runtime user's home directory, not the image's default.
-//
-// When a custom image is built with an init script (needsInit=true), the
-// Dockerfile uses ENTRYPOINT [moat-init] without setting USER moatuser.
-// GetImageHomeDir inspects the image, sees root, and returns "/root".
-// The bind mount lands at /root/.claude/projects/-workspace, but the
-// container runs as moatuser with HOME=/home/moatuser, so writes don't sync.
-//
-// This test uses a dependency to build a custom image with moatuser, then
-// checks that the mount is at /home/moatuser/.claude/projects/-workspace.
+// TestClaudeLogSyncMountTarget is runtime-agnostic: tests Claude log sync mount paths.
 func TestClaudeLogSyncMountTarget(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-	defer mgr.Close()
-
-	workspace := createTestWorkspaceWithSyncLogs(t)
-
-	// On Linux, the container user is determined by the workspace owner's UID.
-	// If the UID isn't 5000 (moatuser), the container runs as that UID directly
-	// instead of using gosu to drop to moatuser, which breaks HOME and mount paths.
-	// Chown the workspace to moatuser's UID so the standard path is exercised.
-	if runtime.GOOS == "linux" {
-		if err := exec.Command("chown", "-R", "5000:5000", workspace).Run(); err != nil {
-			t.Skipf("Cannot chown workspace to moatuser UID (need root): %v", err)
+		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
 		}
-	}
+		defer mgr.Close()
 
-	// Use claude-code as a dependency to trigger needsClaudeInit=true, which
-	// causes the Dockerfile to use ENTRYPOINT [moat-init] (needsInit=true).
-	// This is the code path where GetImageHomeDir returns "/root" because the
-	// image has no USER directive — the init script drops to moatuser at runtime.
-	r, err := mgr.Create(ctx, run.Options{
-		Name:      "e2e-test-claude-log-mount",
-		Workspace: workspace,
-		Config: &config.Config{
-			Agent:        "e2e-test",
-			Version:      "1.0.0",
-			Claude:       config.ClaudeConfig{SyncLogs: &[]bool{true}[0]},
-			Dependencies: []string{"claude-code"},
-		},
-		// Use "grep claude || true" so the command succeeds even if no mount matches.
-		// This lets us inspect the output rather than getting an opaque exit code 1.
-		Cmd: []string{"sh", "-c", "echo HOME=$HOME && echo MOUNTS_START && cat /proc/mounts && echo MOUNTS_END"},
+		workspace := createTestWorkspaceWithSyncLogs(t)
+
+		// On Linux, the container user is determined by the workspace owner's UID.
+		// If the UID isn't 5000 (moatuser), the container runs as that UID directly
+		// instead of using gosu to drop to moatuser, which breaks HOME and mount paths.
+		// Chown the workspace to moatuser's UID so the standard path is exercised.
+		if runtime.GOOS == "linux" {
+			if err := exec.Command("chown", "-R", "5000:5000", workspace).Run(); err != nil {
+				t.Skipf("Cannot chown workspace to moatuser UID (need root): %v", err)
+			}
+		}
+
+		// Use claude-code as a dependency to trigger needsClaudeInit=true, which
+		// causes the Dockerfile to use ENTRYPOINT [moat-init] (needsInit=true).
+		// This is the code path where GetImageHomeDir returns "/root" because the
+		// image has no USER directive — the init script drops to moatuser at runtime.
+		r, err := mgr.Create(ctx, run.Options{
+			Name:      "e2e-test-claude-log-mount",
+			Workspace: workspace,
+			Config: &config.Config{
+				Agent:        "e2e-test",
+				Version:      "1.0.0",
+				Claude:       config.ClaudeConfig{SyncLogs: &[]bool{true}[0]},
+				Dependencies: []string{"claude-code"},
+			},
+			// Use "grep claude || true" so the command succeeds even if no mount matches.
+			// This lets us inspect the output rather than getting an opaque exit code 1.
+			Cmd: []string{"sh", "-c", "echo HOME=$HOME && echo MOUNTS_START && cat /proc/mounts && echo MOUNTS_END"},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer mgr.Destroy(context.Background(), r.ID)
+
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		if err := mgr.Wait(ctx, r.ID); err != nil {
+			// Don't fatal — read logs to get diagnostic output
+			t.Logf("Wait returned error (may be expected): %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+
+		logs, err := store.ReadLogs(0, 100)
+		if err != nil {
+			t.Fatalf("ReadLogs: %v", err)
+		}
+
+		var allOutput string
+		for _, entry := range logs {
+			allOutput += entry.Line + "\n"
+		}
+
+		// The mount must be at /home/moatuser/.claude/projects/-workspace,
+		// not /root/.claude/projects/-workspace.
+		if strings.Contains(allOutput, "/root/.claude/projects/-workspace") {
+			t.Errorf("Claude log mount targets /root/ instead of /home/moatuser/\n"+
+				"GetImageHomeDir returned the image default (/root) instead of the runtime user home.\n"+
+				"Container output:\n%s", allOutput)
+		}
+
+		if !strings.Contains(allOutput, "/home/moatuser/.claude/projects/-workspace") {
+			t.Errorf("Claude log mount not found at /home/moatuser/.claude/projects/-workspace\n"+
+				"Container output:\n%s", allOutput)
+		}
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer mgr.Destroy(context.Background(), r.ID)
-
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	if err := mgr.Wait(ctx, r.ID); err != nil {
-		// Don't fatal — read logs to get diagnostic output
-		t.Logf("Wait returned error (may be expected): %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
-	if err != nil {
-		t.Fatalf("NewRunStore: %v", err)
-	}
-
-	logs, err := store.ReadLogs(0, 100)
-	if err != nil {
-		t.Fatalf("ReadLogs: %v", err)
-	}
-
-	var allOutput string
-	for _, entry := range logs {
-		allOutput += entry.Line + "\n"
-	}
-
-	// The mount must be at /home/moatuser/.claude/projects/-workspace,
-	// not /root/.claude/projects/-workspace.
-	if strings.Contains(allOutput, "/root/.claude/projects/-workspace") {
-		t.Errorf("Claude log mount targets /root/ instead of /home/moatuser/\n"+
-			"GetImageHomeDir returned the image default (/root) instead of the runtime user home.\n"+
-			"Container output:\n%s", allOutput)
-	}
-
-	if !strings.Contains(allOutput, "/home/moatuser/.claude/projects/-workspace") {
-		t.Errorf("Claude log mount not found at /home/moatuser/.claude/projects/-workspace\n"+
-			"Container output:\n%s", allOutput)
-	}
 }
 
 func createTestWorkspaceWithSyncLogs(t *testing.T) string {
@@ -1831,10 +1865,77 @@ func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
 	return dir
 }
 
-// testBothRuntimes runs a test function against all available runtimes.
-// On a system with both Docker and Apple containers available, this runs the test twice
-// (once for each runtime). Tests should be runtime-agnostic where possible.
-func testBothRuntimes(t *testing.T, testFunc func(t *testing.T, rt container.Runtime)) {
+// =============================================================================
+// Runtime Capability Detection and Test Helpers
+// =============================================================================
+
+// hasDocker checks if Docker is available on this system.
+func hasDocker() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "docker", "version").Run() == nil
+}
+
+// hasApple checks if Apple containers are available (macOS 15+ on Apple Silicon).
+func hasApple() bool {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		return false
+	}
+	if _, err := exec.LookPath("container"); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "container", "list", "--quiet").Run() == nil
+}
+
+// hasDinD checks if Docker-in-Docker (privileged containers) is supported.
+// This attempts to detect if we're in an environment that supports privileged containers.
+func hasDinD() bool {
+	if !hasDocker() {
+		return false
+	}
+	// TODO: Implement actual DinD detection by trying to run a privileged container
+	// For now, assume Docker has DinD unless we're in a known restricted environment
+	return true
+}
+
+// requireDocker skips the test if Docker is not available.
+// Use this for tests that specifically require Docker runtime.
+func requireDocker(t *testing.T) {
+	t.Helper()
+	if !hasDocker() {
+		t.Skip("Skipping: Docker not available")
+	}
+}
+
+// requireApple skips the test if Apple containers are not available.
+// Use this for tests that specifically require Apple container runtime.
+func requireApple(t *testing.T) {
+	t.Helper()
+	if !hasApple() {
+		t.Skip("Skipping: Apple containers not available (requires macOS 15+ on Apple Silicon)")
+	}
+}
+
+// requireDinD skips the test if Docker-in-Docker is not available.
+// Use this for tests that need privileged containers or Docker-in-Docker.
+func requireDinD(t *testing.T) {
+	t.Helper()
+	requireDocker(t)
+	if !hasDinD() {
+		t.Skip("Skipping: Docker-in-Docker not available")
+	}
+}
+
+// testOnAllRuntimes runs a test function against all available container runtimes.
+// On a system with both Docker and Apple containers, this runs the test twice
+// (once for each runtime). Use this for runtime-agnostic tests that should work
+// on any container runtime.
+//
+// The test function receives the runtime instance as a parameter, allowing
+// runtime-specific behavior when needed.
+func testOnAllRuntimes(t *testing.T, testFunc func(t *testing.T, rt container.Runtime)) {
 	t.Helper()
 
 	runtimes := detectAvailableRuntimes(t)
@@ -1852,27 +1953,24 @@ func testBothRuntimes(t *testing.T, testFunc func(t *testing.T, rt container.Run
 	}
 }
 
+// testBothRuntimes is an alias for testOnAllRuntimes for backwards compatibility.
+// Deprecated: Use testOnAllRuntimes instead.
+func testBothRuntimes(t *testing.T, testFunc func(t *testing.T, rt container.Runtime)) {
+	testOnAllRuntimes(t, testFunc)
+}
+
 // detectAvailableRuntimes checks which container runtimes are available on this system.
+// Returns a list of available runtime types in order of preference.
 func detectAvailableRuntimes(t *testing.T) []container.RuntimeType {
 	t.Helper()
 	var available []container.RuntimeType
 
-	// Check Docker
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if exec.CommandContext(ctx, "docker", "version").Run() == nil {
+	if hasDocker() {
 		available = append(available, container.RuntimeDocker)
 	}
 
-	// Check Apple containers (macOS only)
-	if runtime.GOOS == "darwin" {
-		if _, err := exec.LookPath("container"); err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			if exec.CommandContext(ctx, "container", "list", "--quiet").Run() == nil {
-				available = append(available, container.RuntimeApple)
-			}
-		}
+	if hasApple() {
+		available = append(available, container.RuntimeApple)
 	}
 
 	return available
