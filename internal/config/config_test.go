@@ -172,24 +172,149 @@ dependencies:
 	}
 }
 
-func TestLoadConfigRejectsRuntime(t *testing.T) {
+func TestLoadConfigAcceptsRuntime(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "agent.yaml")
 
 	content := `
 name: myapp
 agent: test
-runtime:
-  node: "20"
+runtime: docker
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept runtime field, got error: %v", err)
+	}
+	if cfg.Runtime != "docker" {
+		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "docker")
+	}
+}
+
+func TestLoadConfigRejectsInvalidRuntime(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+name: myapp
+agent: test
+runtime: invalid
 `
 	os.WriteFile(configPath, []byte(content), 0644)
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load should error when runtime field is present")
+		t.Fatal("Load should error when runtime is invalid")
 	}
-	if !strings.Contains(err.Error(), "no longer supported") {
-		t.Errorf("error should mention 'no longer supported', got: %v", err)
+	if !strings.Contains(err.Error(), "invalid runtime") {
+		t.Errorf("error should mention 'invalid runtime', got: %v", err)
+	}
+}
+
+func TestLoadConfigWithUnifiedContainer(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+runtime: docker
+container:
+  memory: 8192
+  cpus: 4
+  dns: ["1.1.1.1", "8.8.8.8"]
+dependencies:
+  - node@20
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Runtime != "docker" {
+		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "docker")
+	}
+
+	if cfg.Container.Memory != 8192 {
+		t.Errorf("Container.Memory = %d, want %d", cfg.Container.Memory, 8192)
+	}
+
+	if cfg.Container.CPUs != 4 {
+		t.Errorf("Container.CPUs = %d, want %d", cfg.Container.CPUs, 4)
+	}
+
+	if len(cfg.Container.DNS) != 2 {
+		t.Fatalf("Container.DNS length = %d, want 2", len(cfg.Container.DNS))
+	}
+
+	if cfg.Container.DNS[0] != "1.1.1.1" {
+		t.Errorf("Container.DNS[0] = %q, want %q", cfg.Container.DNS[0], "1.1.1.1")
+	}
+
+	if cfg.Container.DNS[1] != "8.8.8.8" {
+		t.Errorf("Container.DNS[1] = %q, want %q", cfg.Container.DNS[1], "8.8.8.8")
+	}
+}
+
+func TestLoadConfigRejectsNegativeMemory(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+container:
+  memory: -1
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when memory is negative")
+	}
+	if !strings.Contains(err.Error(), "must be non-negative") {
+		t.Errorf("error should mention 'must be non-negative', got: %v", err)
+	}
+}
+
+func TestLoadConfigRejectsTooSmallMemory(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+container:
+  memory: 64
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when memory is too small")
+	}
+	if !strings.Contains(err.Error(), "at least 128 MB") {
+		t.Errorf("error should mention 'at least 128 MB', got: %v", err)
+	}
+}
+
+func TestLoadConfigRejectsNegativeCPUs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+container:
+  cpus: -5
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when cpus is negative")
+	}
+	if !strings.Contains(err.Error(), "must be non-negative") {
+		t.Errorf("error should mention 'must be non-negative', got: %v", err)
 	}
 }
 

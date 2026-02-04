@@ -211,10 +211,11 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--network", cfg.NetworkMode)
 	} else {
 		// DNS configuration - Apple container's default DNS (gateway) often doesn't work.
-		// Use Google's public DNS as a reliable fallback. Only set when not on a custom
-		// network, since custom networks provide their own DNS for container name resolution.
-		args = append(args, "--dns", "8.8.8.8")
-		args = append(args, "--dns", "8.8.4.4")
+		// Use configured DNS or default to Google's public DNS as a reliable fallback.
+		// Only set when not on a custom network, since custom networks provide their own DNS.
+		for _, dns := range DefaultDNS(cfg.DNS) {
+			args = append(args, "--dns", dns)
+		}
 	}
 
 	// Port bindings
@@ -707,13 +708,11 @@ func (m *appleBuildManager) startBuilder(ctx context.Context) error {
 //
 // The fix starts the builder if needed, then configures DNS using a simple
 // exec command without stdin to avoid corrupting the gRPC transport.
-func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, configuredDNS []string) error {
-	// Determine DNS servers to use
-	dnsServers := configuredDNS
-	if len(dnsServers) == 0 {
-		// Default to Google's public DNS
-		dnsServers = []string{"8.8.8.8", "8.8.4.4"}
-	}
+//
+// Uses the same DNS servers as runtime containers for consistency.
+func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, dns []string) error {
+	// Use configured DNS or default to Google's public DNS
+	dnsServers := DefaultDNS(dns)
 
 	// Always restart the builder to ensure it has adequate resources and a
 	// clean gRPC transport. A stale builder (from a previous moat run or

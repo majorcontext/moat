@@ -207,6 +207,25 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 	// TTY mode with non-TTY stdin (e.g., piped input, tests).
 	useTTY := cfg.Interactive && term.IsTerminal(os.Stdin)
 
+	// Configure DNS servers (defaults to Google DNS if not specified)
+	dns := DefaultDNS(cfg.DNS)
+
+	// Configure resource limits
+	var memoryBytes int64
+	if cfg.MemoryMB > 0 {
+		memoryBytes = int64(cfg.MemoryMB) * 1024 * 1024
+	}
+
+	// CPU quota: CPUs * 100000 microseconds per 100ms period
+	// Docker uses a period of 100000 microseconds (100ms)
+	// If you want 2 CPUs, set quota to 200000 (2 * 100000)
+	var cpuQuota int64
+	var cpuPeriod int64
+	if cfg.CPUs > 0 {
+		cpuPeriod = 100000 // 100ms period
+		cpuQuota = int64(cfg.CPUs) * cpuPeriod
+	}
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        cfg.Image,
@@ -227,6 +246,12 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 			CapAdd:       cfg.CapAdd,
 			GroupAdd:     cfg.GroupAdd,
 			Privileged:   cfg.Privileged,
+			DNS:          dns,
+			Resources: container.Resources{
+				Memory:    memoryBytes,
+				CPUQuota:  cpuQuota,
+				CPUPeriod: cpuPeriod,
+			},
 		},
 		nil, // network config
 		nil, // platform

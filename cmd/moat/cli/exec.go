@@ -162,10 +162,16 @@ func (t *ttyTracer) save() {
 func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 	fmt.Println("Initializing...")
 
-	// Set runtime override if specified via --runtime flag
+	// Set runtime based on CLI flag or agent.yaml, in priority order:
+	// 1. --runtime CLI flag (if provided)
+	// 2. agent.yaml runtime field (if set)
+	// Both override the MOAT_RUNTIME env var and auto-detection (handled in detect.go)
 	if opts.Flags.Runtime != "" {
 		os.Setenv("MOAT_RUNTIME", opts.Flags.Runtime)
+	} else if opts.Config != nil && opts.Config.Runtime != "" {
+		os.Setenv("MOAT_RUNTIME", opts.Config.Runtime)
 	}
+	// If neither is set, detect.go checks MOAT_RUNTIME env var, then auto-detects
 
 	// Create manager
 	var managerOpts run.ManagerOptions
