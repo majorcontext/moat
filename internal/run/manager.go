@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -524,6 +525,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
 			r.ProxyPort = proxyPortInt
 		}
+
+		// Store proxy auth token (for tests and debugging)
+		r.ProxyAuthToken = proxyAuthToken
 
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
@@ -1689,6 +1693,13 @@ region = %s
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
+	// Extract Apple container resource limits from config
+	var memoryMB, cpus int
+	if opts.Config != nil {
+		memoryMB = opts.Config.Container.Apple.Memory
+		cpus = opts.Config.Container.Apple.CPUs
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1706,6 +1717,8 @@ region = %s
 		Privileged:   privileged,
 		Interactive:  opts.Interactive,
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
+		MemoryMB:     memoryMB,
+		CPUs:         cpus,
 	})
 	if err != nil {
 		// Clean up BuildKit resources on failure
@@ -1988,10 +2001,31 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
 	// real terminal, so we use the same check here.
 	useTTY := term.IsTerminal(os.Stdin)
+
+	// For interactive mode, tee output to a buffer so we can capture logs.
+	// This is necessary because:
+	// 1. TTY mode: output goes through PTY, not container logs
+	// 2. Non-TTY interactive: we may still want to capture for tests/programmatic use
+	var logBuffer bytes.Buffer
+	var teeStdout, teeStderr io.Writer
+	teeStdout = stdout
+	teeStderr = stderr
+
+	if r.Interactive && r.Store != nil {
+		// Tee stdout and stderr to capture for logs.jsonl
+		teeStdout = io.MultiWriter(stdout, &logBuffer)
+		if stderr != stdout {
+			teeStderr = io.MultiWriter(stderr, &logBuffer)
+		} else {
+			// stdout and stderr are the same writer - don't duplicate
+			teeStderr = teeStdout
+		}
+	}
+
 	attachOpts := container.AttachOptions{
 		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
+		Stdout: teeStdout,
+		Stderr: teeStderr,
 		TTY:    useTTY,
 	}
 
@@ -2042,7 +2076,28 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
+	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
+	// (Apple TTY output doesn't go through container runtime logs)
+	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
+	// Always create the file for audit completeness, even if empty.
+	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
+		// Use CompareAndSwap to ensure single write
+		if r.logsCaptured.CompareAndSwap(false, true) {
+			if lw, err := r.Store.LogWriter(); err == nil {
+				if logBuffer.Len() > 0 {
+					_, _ = lw.Write(logBuffer.Bytes())
+				}
+				lw.Close()
+			} else {
+				// Failed to create file - reset flag so captureLogs can try
+				r.logsCaptured.Store(false)
+			}
+		}
+	}
+
 	// Capture logs after container exits (critical for audit/observability)
+	// For non-interactive mode, this fetches from container runtime logs
+	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
 	m.captureLogs(r)
 
 	return attachErr
@@ -2315,6 +2370,14 @@ func (m *Manager) Get(runID string) (*Run, error) {
 // - Detached completion (background monitor)
 func (m *Manager) captureLogs(r *Run) {
 	if r.Store == nil {
+		return
+	}
+
+	// For interactive mode, logs are captured differently by runtime:
+	// - Docker: Container runtime logs work even in TTY mode, so use ContainerLogsAll
+	// - Apple: TTY output doesn't go to container logs, so StartAttached uses tee
+	// Only skip container logs for Apple containers in interactive mode.
+	if r.Interactive && m.runtime.Type() == container.RuntimeApple {
 		return
 	}
 

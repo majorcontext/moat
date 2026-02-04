@@ -5,6 +5,11 @@ interactive: true
 claude:
   model: opus
 
+container:
+  apple:
+    memory: 8192
+    cpus: 8
+
 dependencies:
   - go@1.25.6
   - go-extras

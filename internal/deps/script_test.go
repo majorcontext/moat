@@ -137,9 +137,20 @@ func TestGenerateInstallScript_NpmPackages(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// All npm packages should be in a single install command
-	if !strings.Contains(script, "npm install -g typescript yarn pnpm") {
-		t.Error("npm packages should be grouped into single install command")
+	// typescript should be installed via npm
+	if !strings.Contains(script, "npm install -g typescript") {
+		t.Error("typescript should be installed via npm")
+	}
+
+	// yarn and pnpm should be enabled via corepack (custom installers)
+	if !strings.Contains(script, "corepack enable") {
+		t.Error("corepack should be enabled for yarn/pnpm")
+	}
+	if !strings.Contains(script, "corepack prepare yarn@stable") {
+		t.Error("yarn should be installed via corepack")
+	}
+	if !strings.Contains(script, "corepack prepare pnpm@latest") {
+		t.Error("pnpm should be installed via corepack")
 	}
 }
 

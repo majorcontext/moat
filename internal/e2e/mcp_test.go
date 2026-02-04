@@ -122,6 +122,11 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	}
 	req.Header.Set("X-Test-Key", "moat-stub-mcp-test")
 
+	// Add proxy authentication if required (Apple containers)
+	if r.ProxyAuthToken != "" {
+		req.Header.Set("Proxy-Authorization", "Bearer "+r.ProxyAuthToken)
+	}
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -294,22 +299,42 @@ mcp:
 	req1, _ := http.NewRequest("GET", relay1URL, nil)
 	req1.Header.Set("X-Server1-Key", "moat-stub-mcp-server1")
 
+	// Add proxy authentication if required (Apple containers)
+	if r.ProxyAuthToken != "" {
+		req1.Header.Set("Proxy-Authorization", "Bearer "+r.ProxyAuthToken)
+	}
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp1, err := client.Do(req1)
 	if err != nil {
 		t.Fatalf("Request to server1 relay: %v", err)
 	}
-	resp1.Body.Close()
+	defer resp1.Body.Close()
+
+	if resp1.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp1.Body)
+		t.Fatalf("Server1 relay returned %d: %s", resp1.StatusCode, string(body))
+	}
 
 	// Test server 2 via relay
 	req2, _ := http.NewRequest("GET", relay2URL, nil)
 	req2.Header.Set("X-Server2-Key", "moat-stub-mcp-server2")
 
+	// Add proxy authentication if required (Apple containers)
+	if r.ProxyAuthToken != "" {
+		req2.Header.Set("Proxy-Authorization", "Bearer "+r.ProxyAuthToken)
+	}
+
 	resp2, err := client.Do(req2)
 	if err != nil {
 		t.Fatalf("Request to server2 relay: %v", err)
 	}
-	resp2.Body.Close()
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("Server2 relay returned %d: %s", resp2.StatusCode, string(body))
+	}
 
 	// Verify both credentials were injected
 	if server1Header != "server1-credential" {

@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 )
 
-// skipIfNoDocker skips the test if Docker runtime is not available.
+// skipIfNoDocker skips the test if Docker runtime is not available, and forces
+// the test to use Docker runtime (via MOAT_RUNTIME env var).
 // Docker-in-Docker tests require the Docker runtime (not Apple containers)
 // because they need access to the host Docker socket.
 func skipIfNoDocker(t *testing.T) {
@@ -26,16 +26,16 @@ func skipIfNoDocker(t *testing.T) {
 		t.Skip("Skipping: Docker not available")
 	}
 
-	// Also check that we're actually using Docker runtime (not Apple)
-	rt, err := container.NewRuntime()
-	if err != nil {
-		t.Skipf("Skipping: Could not create runtime: %v", err)
-	}
-	defer rt.Close()
-
-	if rt.Type() != container.RuntimeDocker {
-		t.Skip("Skipping: Test requires Docker runtime (currently using Apple containers)")
-	}
+	// Force this test to use Docker runtime
+	oldEnv := os.Getenv("MOAT_RUNTIME")
+	os.Setenv("MOAT_RUNTIME", "docker")
+	t.Cleanup(func() {
+		if oldEnv == "" {
+			os.Unsetenv("MOAT_RUNTIME")
+		} else {
+			os.Setenv("MOAT_RUNTIME", oldEnv)
+		}
+	})
 }
 
 // TestDockerDependency verifies that the docker dependency works end-to-end.

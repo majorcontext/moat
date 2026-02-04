@@ -61,6 +61,26 @@ type AppleContainerConfig struct {
 	// Note: Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that
 	// provider, potentially leaking information about dependencies being installed.
 	BuilderDNS []string `yaml:"builder_dns,omitempty"`
+
+	// Memory specifies the memory limit for the container in megabytes.
+	// If not set, defaults to 4096 MB (4 GB).
+	// Apple containers have a default limit of 1024 MB which is often insufficient
+	// for AI coding environments like Claude Code.
+	//
+	// Example:
+	//   container:
+	//     apple:
+	//       memory: 8192  # 8 GB
+	Memory int `yaml:"memory,omitempty"`
+
+	// CPUs specifies the number of CPUs available to the container.
+	// If not set, uses the Apple container default (typically 4).
+	//
+	// Example:
+	//   container:
+	//     apple:
+	//       cpus: 8
+	CPUs int `yaml:"cpus,omitempty"`
 }
 
 // MCPServerConfig defines a remote MCP server configuration for top-level

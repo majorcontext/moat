@@ -1197,3 +1197,44 @@ func TestKnownSSHHostKeysComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "typescript"},
+		{Name: "prettier"},
+		{Name: "eslint"},
+		{Name: "yarn"},
+		{Name: "pnpm"},
+	}
+
+	result, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Verify npm packages (typescript, prettier, eslint) are grouped
+	if !strings.Contains(result.Dockerfile, "npm install -g typescript prettier eslint") {
+		t.Error("npm packages should be grouped into single install command")
+		t.Logf("Dockerfile:\n%s", result.Dockerfile)
+	}
+
+	// Verify yarn is installed via corepack, NOT npm
+	if strings.Contains(result.Dockerfile, "npm install -g yarn") {
+		t.Error("yarn should NOT be installed via npm (conflicts with corepack)")
+	}
+	if !strings.Contains(result.Dockerfile, "corepack enable") {
+		t.Error("corepack should be enabled for yarn")
+	}
+	if !strings.Contains(result.Dockerfile, "corepack prepare yarn@stable") {
+		t.Error("yarn should be installed via corepack")
+	}
+
+	// Verify pnpm is installed via corepack, NOT npm
+	if strings.Contains(result.Dockerfile, "npm install -g pnpm") {
+		t.Error("pnpm should NOT be installed via npm (conflicts with corepack)")
+	}
+	if !strings.Contains(result.Dockerfile, "corepack prepare pnpm@latest") {
+		t.Error("pnpm should be installed via corepack")
+	}
+}

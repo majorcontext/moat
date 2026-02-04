@@ -67,6 +67,12 @@ interactive: false
 # Sandbox (Docker only)
 # sandbox: none  # Uncomment to disable gVisor
 
+# Container (runtime-specific)
+container:
+  apple:
+    memory: 8192  # 8 GB (default: 4096)
+    cpus: 8       # default: 4
+
 # Claude Code
 claude:
   sync_logs: true
@@ -551,6 +557,74 @@ sandbox: none
 Setting `sandbox: none` is equivalent to running with `--no-sandbox`. Use this when your agent requires syscalls that gVisor doesn't support.
 
 **Note:** Disabling the sandbox reduces isolation. Only use when necessary for compatibility.
+
+---
+
+## Container
+
+Runtime-specific container options.
+
+### container.apple
+
+Apple container-specific configuration. Only applies when using Apple containers (macOS 26+).
+
+```yaml
+container:
+  apple:
+    memory: 8192
+    cpus: 8
+    builder_dns: ["192.168.1.1"]
+```
+
+- Type: `object`
+- Default: `{}`
+
+#### container.apple.memory
+
+Memory limit for the container in megabytes.
+
+```yaml
+container:
+  apple:
+    memory: 8192  # 8 GB
+```
+
+- Type: `integer`
+- Default: `4096` (4 GB)
+
+Apple containers have a system default of 1024 MB which is often insufficient for AI coding environments like Claude Code. Moat defaults to 4096 MB.
+
+#### container.apple.cpus
+
+Number of CPUs available to the container.
+
+```yaml
+container:
+  apple:
+    cpus: 8
+```
+
+- Type: `integer`
+- Default: System default (typically 4)
+
+Only set this if you need more than the default CPU allocation.
+
+#### container.apple.builder_dns
+
+DNS servers for the Apple container builder.
+
+```yaml
+container:
+  apple:
+    builder_dns: ["192.168.1.1"]
+```
+
+- Type: `array[string]`
+- Default: Auto-detected from host
+
+Moat attempts to detect DNS servers automatically. If detection fails, you must set this explicitly.
+
+**Privacy note:** Using public DNS (8.8.8.8, 1.1.1.1) will send build queries to that provider, potentially leaking information about dependencies being installed.
 
 ---
 

@@ -182,6 +182,20 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--name", cfg.Name)
 	}
 
+	// Resource limits (Apple containers only)
+	// Default to 4096 MB (4 GB) memory if not specified, since the Apple container
+	// default of 1024 MB is often insufficient for AI coding environments.
+	memoryMB := cfg.MemoryMB
+	if memoryMB == 0 {
+		memoryMB = 4096
+	}
+	args = append(args, "--memory", fmt.Sprintf("%dMB", memoryMB))
+
+	// CPUs - only add if explicitly set, otherwise use Apple container default (typically 4)
+	if cfg.CPUs > 0 {
+		args = append(args, "--cpus", strconv.Itoa(cfg.CPUs))
+	}
+
 	// Working directory
 	if cfg.WorkingDir != "" {
 		args = append(args, "--workdir", cfg.WorkingDir)
@@ -262,7 +276,21 @@ func (r *AppleRuntime) StopContainer(ctx context.Context, containerID string) er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("stopping container: %w: %s", err, stderr.String())
+		stderrStr := stderr.String()
+
+		// Ignore "not found" errors - container may have already been removed
+		if strings.Contains(stderrStr, "notFound") || strings.Contains(stderrStr, "not found") {
+			return nil
+		}
+
+		// XPC timeout errors are transient failures from Apple's container runtime.
+		// The container might still be running, but the caller will attempt RemoveContainer
+		// with --force flag next, which should kill and remove it in one step.
+		if strings.Contains(stderrStr, "XPC timeout") {
+			return fmt.Errorf("stopping container (XPC timeout - will try force removal): %w: %s", err, stderrStr)
+		}
+
+		return fmt.Errorf("stopping container: %w: %s", err, stderrStr)
 	}
 	return nil
 }
@@ -341,7 +369,21 @@ func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("removing container: %w: %s", err, stderr.String())
+		// Ignore "not found" errors - container may have already been removed
+		// The Apple container CLI returns errors like: Error: notFound: "failed to delete one or more containers: ["run_xxx"]"
+		stderrStr := stderr.String()
+		if strings.Contains(stderrStr, "notFound") || strings.Contains(stderrStr, "not found") {
+			return nil
+		}
+
+		// XPC timeout errors can occur when Apple's container runtime is under load or having issues.
+		// These are transient failures - the container might get cleaned up eventually by the system,
+		// or the user can manually clean up with: container rm --force <id>
+		if strings.Contains(stderrStr, "XPC timeout") {
+			return fmt.Errorf("removing container (XPC timeout - container may require manual cleanup): %w: %s", err, stderrStr)
+		}
+
+		return fmt.Errorf("removing container: %w: %s", err, stderrStr)
 	}
 	return nil
 }
@@ -1080,6 +1122,16 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
 
+	// For TTY mode, use a PTY. For non-TTY mode, use regular pipes.
+	// This matches how the container was created (with -t flag for TTY, without for non-TTY).
+	if opts.TTY {
+		return r.startAttachedWithPTY(ctx, cmd, opts)
+	}
+	return r.startAttachedWithPipes(ctx, cmd, opts)
+}
+
+// startAttachedWithPTY handles TTY mode using a PTY
+func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
 	// Create a PTY for the command. This gives the Apple container CLI
 	// real PTY file descriptors while allowing us to intercept output.
 	ptmx, err := pty.Start(cmd)
@@ -1161,7 +1213,7 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 		}
 	case err := <-cmdDone:
 		// Command finished normally
-		cancelCopy()
+		// Don't close PTY yet - wait for output to finish copying
 		if err != nil && ctx.Err() == nil {
 			result = fmt.Errorf("starting container attached: %w", err)
 		}
@@ -1176,8 +1228,52 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 		result = ctx.Err()
 	}
 
-	// Brief wait for output copy to finish
-	<-outputDone
+	// Wait for output copy to finish before closing PTY
+	// This ensures all output is captured even if the container exits quickly.
+	// Use a timeout to prevent hanging if the copy goroutine gets stuck.
+	select {
+	case <-outputDone:
+		// Output copy finished normally
+	case <-time.After(2 * time.Second):
+		// Timeout - forcibly close PTY to unblock the copy goroutine
+		_ = ptmx.Close()
+		<-outputDone
+	}
+	cancelCopy()
 
 	return result
+}
+
+// startAttachedWithPipes handles non-TTY mode using regular pipes
+func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
+	// For non-TTY mode, use regular pipes to capture stdout/stderr
+	stdout := opts.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if opts.Stdin != nil {
+		cmd.Stdin = opts.Stdin
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting container: %w", err)
+	}
+
+	// Wait for command to complete
+	err := cmd.Wait()
+	if err != nil && ctx.Err() == nil {
+		return fmt.Errorf("container attach: %w", err)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return nil
 }
