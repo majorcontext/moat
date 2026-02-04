@@ -2,8 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -151,15 +149,4 @@ func TestPrintClaims(t *testing.T) {
 	}
 
 	t.Logf("\n=== JWT Claims Output ===\n%s", output)
-}
-
-func createMockJWT(claims map[string]interface{}) string {
-	header := map[string]string{"alg": "RS256", "typ": "JWT"}
-	headerJSON, _ := json.Marshal(header)
-	claimsJSON, _ := json.Marshal(claims)
-
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
-	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
-
-	return fmt.Sprintf("%s.%s.fakesignature", headerB64, claimsB64)
 }

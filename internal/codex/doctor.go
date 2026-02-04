@@ -28,7 +28,7 @@ func (d *DoctorSection) Print(w io.Writer) error {
 	configPath := filepath.Join(codexConfigDir, "config.toml")
 
 	// Check if .codex directory exists
-	if _, err := os.Stat(codexConfigDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(codexConfigDir); os.IsNotExist(statErr) {
 		fmt.Fprintln(w, "⚠️  No Codex configuration found")
 		fmt.Fprintf(w, "   Expected at: %s\n", codexConfigDir)
 		return nil
@@ -39,15 +39,15 @@ func (d *DoctorSection) Print(w io.Writer) error {
 	fmt.Fprintf(tw, "Config directory:\t%s\n", codexConfigDir)
 
 	// Check for config.toml
-	if data, err := os.ReadFile(configPath); err == nil {
+	if data, readErr := os.ReadFile(configPath); readErr == nil {
 		fmt.Fprintf(tw, "Config file:\t%s (%d bytes)\n", configPath, len(data))
-	} else if os.IsNotExist(err) {
+	} else if os.IsNotExist(readErr) {
 		fmt.Fprintln(tw, "Config file:\tnot found")
 	}
 
 	// Check for auth.json (should not exist on host - only in containers)
 	authPath := filepath.Join(codexConfigDir, "auth.json")
-	if data, err := os.ReadFile(authPath); err == nil {
+	if data, readErr := os.ReadFile(authPath); readErr == nil {
 		var auth map[string]string
 		if json.Unmarshal(data, &auth) == nil {
 			fmt.Fprintln(tw, "Auth file:\tpresent (should only exist in containers)")

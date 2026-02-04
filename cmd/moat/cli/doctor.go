@@ -139,7 +139,7 @@ func (s *containerSection) Print(w io.Writer) error {
 	// Check for Docker-specific features
 	if dockerRT != nil {
 		// Check gVisor
-		if hasGVisor(dockerRT) {
+		if hasGVisor() {
 			fmt.Fprintln(tw, "gVisor:\tavailable")
 		} else {
 			fmt.Fprintln(tw, "gVisor:\tnot available")
@@ -260,8 +260,6 @@ func (s *credentialSection) Print(w io.Writer) error {
 	}
 
 	return tw.Flush()
-
-	return nil
 }
 
 // getTokenPrefix returns a safe-to-display prefix of the token
@@ -317,7 +315,6 @@ func printClaims(w io.Writer, claims map[string]interface{}, indent string) {
 		}
 	}
 }
-
 
 // sshSection shows SSH grants
 type sshSection struct{}
@@ -484,9 +481,14 @@ func hasBuildx() bool {
 }
 
 // hasGVisor checks if gVisor (runsc) is available for Docker
-func hasGVisor(dockerRT *container.DockerRuntime) bool {
+func hasGVisor() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	// Using deprecated GVisorAvailable is acceptable here:
+	// - This is a diagnostic tool that runs infrequently
+	// - DockerRuntime.gvisorAvailable() is private (can't be called externally)
+	// - The performance impact of creating a Docker client is negligible for doctor command
+	//nolint:staticcheck // SA1019: GVisorAvailable is deprecated but needed for diagnostics
 	return container.GVisorAvailable(ctx)
 }
 
