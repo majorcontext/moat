@@ -16,7 +16,7 @@ func TestBuildCreateArgs(t *testing.T) {
 			cfg: Config{
 				Image: "ubuntu:22.04",
 			},
-			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
 		{
 			name: "with name",
@@ -24,7 +24,7 @@ func TestBuildCreateArgs(t *testing.T) {
 				Name:  "my-container",
 				Image: "python:3.11",
 			},
-			want: []string{"create", "--name", "my-container", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11"},
+			want: []string{"create", "--name", "my-container", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11"},
 		},
 		{
 			name: "with working directory",
@@ -32,7 +32,7 @@ func TestBuildCreateArgs(t *testing.T) {
 				Image:      "node:20",
 				WorkingDir: "/workspace",
 			},
-			want: []string{"create", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
+			want: []string{"create", "--memory", "4096MB", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
 		},
 		{
 			name: "with environment variables",
@@ -40,7 +40,7 @@ func TestBuildCreateArgs(t *testing.T) {
 				Image: "python:3.11",
 				Env:   []string{"DEBUG=true", "API_KEY=secret"},
 			},
-			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--env", "DEBUG=true", "--env", "API_KEY=secret", "python:3.11"},
 		},
 		{
 			name: "with volume mount",
@@ -50,7 +50,7 @@ func TestBuildCreateArgs(t *testing.T) {
 					{Source: "/home/user/project", Target: "/workspace"},
 				},
 			},
-			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "ubuntu:22.04"},
 		},
 		{
 			name: "with read-only volume mount",
@@ -60,7 +60,7 @@ func TestBuildCreateArgs(t *testing.T) {
 					{Source: "/home/user/data", Target: "/data", ReadOnly: true},
 				},
 			},
-			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/data:/data:ro", "ubuntu:22.04"},
 		},
 		{
 			name: "with command",
@@ -68,7 +68,7 @@ func TestBuildCreateArgs(t *testing.T) {
 				Image: "python:3.11",
 				Cmd:   []string{"python", "-c", "print('hello')"},
 			},
-			want: []string{"create", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11", "python", "-c", "print('hello')"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "python:3.11", "python", "-c", "print('hello')"},
 		},
 		{
 			name: "full config",
@@ -86,6 +86,7 @@ func TestBuildCreateArgs(t *testing.T) {
 			want: []string{
 				"create",
 				"--name", "test-agent",
+				"--memory", "4096MB",
 				"--workdir", "/workspace",
 				"--dns", "8.8.8.8", "--dns", "8.8.4.4",
 				"--env", "DEBUG=true",
@@ -103,7 +104,32 @@ func TestBuildCreateArgs(t *testing.T) {
 			},
 			// Note: -t flag is only added when os.Stdin is a real terminal,
 			// which it's not during tests, so we only expect -i here.
-			want: []string{"create", "-i", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+			want: []string{"create", "-i", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
+		{
+			name: "custom memory",
+			cfg: Config{
+				Image:    "ubuntu:22.04",
+				MemoryMB: 8192,
+			},
+			want: []string{"create", "--memory", "8192MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
+		{
+			name: "custom cpus",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				CPUs:  8,
+			},
+			want: []string{"create", "--memory", "4096MB", "--cpus", "8", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
+		{
+			name: "custom memory and cpus",
+			cfg: Config{
+				Image:    "ubuntu:22.04",
+				MemoryMB: 16384,
+				CPUs:     12,
+			},
+			want: []string{"create", "--memory", "16384MB", "--cpus", "12", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
 	}
 

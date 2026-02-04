@@ -182,6 +182,20 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--name", cfg.Name)
 	}
 
+	// Resource limits (Apple containers only)
+	// Default to 4096 MB (4 GB) memory if not specified, since the Apple container
+	// default of 1024 MB is often insufficient for AI coding environments.
+	memoryMB := cfg.MemoryMB
+	if memoryMB == 0 {
+		memoryMB = 4096
+	}
+	args = append(args, "--memory", fmt.Sprintf("%dMB", memoryMB))
+
+	// CPUs - only add if explicitly set, otherwise use Apple container default (typically 4)
+	if cfg.CPUs > 0 {
+		args = append(args, "--cpus", strconv.Itoa(cfg.CPUs))
+	}
+
 	// Working directory
 	if cfg.WorkingDir != "" {
 		args = append(args, "--workdir", cfg.WorkingDir)
@@ -1111,13 +1125,13 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	// For TTY mode, use a PTY. For non-TTY mode, use regular pipes.
 	// This matches how the container was created (with -t flag for TTY, without for non-TTY).
 	if opts.TTY {
-		return r.startAttachedWithPTY(ctx, cmd, containerID, opts)
+		return r.startAttachedWithPTY(ctx, cmd, opts)
 	}
-	return r.startAttachedWithPipes(ctx, cmd, containerID, opts)
+	return r.startAttachedWithPipes(ctx, cmd, opts)
 }
 
 // startAttachedWithPTY handles TTY mode using a PTY
-func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
+func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
 	// Create a PTY for the command. This gives the Apple container CLI
 	// real PTY file descriptors while allowing us to intercept output.
 	ptmx, err := pty.Start(cmd)
@@ -1231,7 +1245,7 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 }
 
 // startAttachedWithPipes handles non-TTY mode using regular pipes
-func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
+func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
 	// For non-TTY mode, use regular pipes to capture stdout/stderr
 	stdout := opts.Stdout
 	if stdout == nil {

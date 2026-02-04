@@ -229,6 +229,8 @@ type Config struct {
 	Privileged   bool           // If true, run container in privileged mode (required for Docker-in-Docker)
 	Interactive  bool           // If true, container will be attached interactively (Apple runtime: uses exec workaround; Docker: handled natively)
 	HasMoatUser  bool           // If true, image has moatuser (moat-built images); used for exec --user in Apple containers
+	MemoryMB     int            // Memory limit in megabytes (Apple containers only)
+	CPUs         int            // Number of CPUs (Apple containers only)
 }
 
 // SidecarConfig holds configuration for starting a sidecar container.

@@ -1693,6 +1693,13 @@ region = %s
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
+	// Extract Apple container resource limits from config
+	var memoryMB, cpus int
+	if opts.Config != nil {
+		memoryMB = opts.Config.Container.Apple.Memory
+		cpus = opts.Config.Container.Apple.CPUs
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1710,6 +1717,8 @@ region = %s
 		Privileged:   privileged,
 		Interactive:  opts.Interactive,
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
+		MemoryMB:     memoryMB,
+		CPUs:         cpus,
 	})
 	if err != nil {
 		// Clean up BuildKit resources on failure
@@ -2069,12 +2078,14 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	// For interactive mode, write captured output directly to logs.jsonl
 	// (Interactive/TTY output may not go through container runtime logs)
-	// We must win the race with monitorContainerExit's captureLogs call.
-	if r.Interactive && logBuffer.Len() > 0 && r.Store != nil {
-		// Use CompareAndSwap to win race with monitorContainerExit
+	// Always create the file for audit completeness, even if empty.
+	if r.Interactive && r.Store != nil {
+		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
-				_, _ = lw.Write(logBuffer.Bytes())
+				if logBuffer.Len() > 0 {
+					_, _ = lw.Write(logBuffer.Bytes())
+				}
 				lw.Close()
 			} else {
 				// Failed to create file - reset flag so captureLogs can try
@@ -2363,20 +2374,8 @@ func (m *Manager) captureLogs(r *Run) {
 
 	// For interactive mode, logs are captured via tee in StartAttached.
 	// Don't try to fetch from container runtime (TTY output isn't available there).
-	// Just ensure logs.jsonl exists for audit completeness.
+	// StartAttached is responsible for creating logs.jsonl with the captured output.
 	if r.Interactive {
-		// Check if StartAttached already captured logs
-		if r.logsCaptured.Load() {
-			return
-		}
-		// StartAttached hasn't written logs yet - create empty file for audit
-		if r.logsCaptured.CompareAndSwap(false, true) {
-			if lw, err := r.Store.LogWriter(); err == nil {
-				lw.Close() // Empty file
-			} else {
-				r.logsCaptured.Store(false)
-			}
-		}
 		return
 	}
 
