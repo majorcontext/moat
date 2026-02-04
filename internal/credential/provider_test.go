@@ -236,6 +236,7 @@ func TestGenerateAccessTokenPlaceholder(t *testing.T) {
 type mockProxyConfigurer struct {
 	credentials  map[string]string
 	extraHeaders map[string]map[string]string
+	transformers map[string][]ResponseTransformer
 }
 
 func (m *mockProxyConfigurer) SetCredential(host, value string) {
@@ -254,6 +255,13 @@ func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue strin
 		m.extraHeaders[host] = make(map[string]string)
 	}
 	m.extraHeaders[host][headerName] = headerValue
+}
+
+func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer ResponseTransformer) {
+	if m.transformers == nil {
+		m.transformers = make(map[string][]ResponseTransformer)
+	}
+	m.transformers[host] = append(m.transformers[host], transformer)
 }
 
 // mockProviderSetup implements ProviderSetup for testing.

@@ -203,25 +203,27 @@ type extraHeader struct {
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials  map[string]credentialHeader // host -> credential header
-	extraHeaders map[string][]extraHeader    // host -> additional headers to inject
-	mu           sync.RWMutex
-	ca           *CA           // Optional CA for TLS interception
-	logger       RequestLogger // Optional request logger
-	authToken    string        // Optional auth token required for proxy access
-	policy       string        // "permissive" or "strict"
-	allowedHosts []hostPattern // parsed allow patterns for strict policy
-	awsHandler   http.Handler  // Optional handler for AWS credential endpoint
-	credStore    credential.Store
-	mcpServers   []config.MCPServerConfig
+	credentials          map[string]credentialHeader                 // host -> credential header
+	extraHeaders         map[string][]extraHeader                    // host -> additional headers to inject
+	responseTransformers map[string][]credential.ResponseTransformer // host -> response transformers
+	mu                   sync.RWMutex
+	ca                   *CA           // Optional CA for TLS interception
+	logger               RequestLogger // Optional request logger
+	authToken            string        // Optional auth token required for proxy access
+	policy               string        // "permissive" or "strict"
+	allowedHosts         []hostPattern // parsed allow patterns for strict policy
+	awsHandler           http.Handler  // Optional handler for AWS credential endpoint
+	credStore            credential.Store
+	mcpServers           []config.MCPServerConfig
 }
 
 // NewProxy creates a new auth proxy.
 func NewProxy() *Proxy {
 	return &Proxy{
-		credentials:  make(map[string]credentialHeader),
-		extraHeaders: make(map[string][]extraHeader),
-		policy:       "permissive", // default to permissive
+		credentials:          make(map[string]credentialHeader),
+		extraHeaders:         make(map[string][]extraHeader),
+		responseTransformers: make(map[string][]credential.ResponseTransformer),
+		policy:               "permissive", // default to permissive
 	}
 }
 
@@ -285,6 +287,20 @@ func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.extraHeaders[host] = append(p.extraHeaders[host], extraHeader{Name: headerName, Value: headerValue})
+}
+
+// AddResponseTransformer registers a response transformer for a host.
+// Transformers are called in registration order after receiving the upstream response.
+// Each transformer can inspect and optionally modify the response.
+// The host must be a valid hostname (not empty, no path components).
+func (p *Proxy) AddResponseTransformer(host string, transformer credential.ResponseTransformer) {
+	if !isValidHost(host) {
+		log.Debug("ignoring invalid host for response transformer", "host", host)
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.responseTransformers[host] = append(p.responseTransformers[host], transformer)
 }
 
 // isValidHost checks if a host string is valid for credential injection.
@@ -354,6 +370,21 @@ func (p *Proxy) getExtraHeaders(host string) []extraHeader {
 	h, _, _ := net.SplitHostPort(host)
 	if h != "" {
 		return p.extraHeaders[h]
+	}
+	return nil
+}
+
+// getResponseTransformers returns response transformers for a host.
+func (p *Proxy) getResponseTransformers(host string) []credential.ResponseTransformer {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if transformers, ok := p.responseTransformers[host]; ok {
+		return transformers
+	}
+	h, _, _ := net.SplitHostPort(host)
+	if h != "" {
+		return p.responseTransformers[h]
 	}
 	return nil
 }
@@ -669,7 +700,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)
 		}
-		// Inject extra headers (e.g., anthropic-beta for OAuth)
+		// Inject any additional headers configured for this host
 		for _, h := range p.getExtraHeaders(r.Host) {
 			req.Header.Set(h.Name, h.Value)
 		}
@@ -686,8 +717,26 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		var statusCode int
 		if resp != nil {
 			respHeaders = resp.Header.Clone()
-			respBody, resp.Body = captureBody(resp.Body, resp.Header.Get("Content-Type"))
 			statusCode = resp.StatusCode
+
+			// Apply response transformers BEFORE capturing body
+			// so transformer can read the original response body.
+			// Only the first transformer that returns true is applied (transformers are not chained).
+			if transformers := p.getResponseTransformers(host); len(transformers) > 0 {
+				for _, transformer := range transformers {
+					if newRespInterface, transformed := transformer(req, resp); transformed {
+						if newResp, ok := newRespInterface.(*http.Response); ok {
+							resp = newResp
+							statusCode = resp.StatusCode
+							respHeaders = resp.Header.Clone()
+						}
+						break // Only apply first matching transformer
+					}
+				}
+			}
+
+			// Capture body AFTER transformation
+			respBody, resp.Body = captureBody(resp.Body, resp.Header.Get("Content-Type"))
 		}
 
 		logCredHeaderName := ""
