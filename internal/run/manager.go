@@ -31,6 +31,7 @@ import (
 	"github.com/majorcontext/moat/internal/image"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
+	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -391,6 +392,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			credential.DefaultStoreDir(),
 			key,
 		)
+
+		// Collect refreshable targets during grant loop
+		var refreshTargets []refreshTarget
+
 		if err == nil {
 			for _, grant := range opts.Grants {
 				provider := credential.Provider(strings.Split(grant, ":")[0])
@@ -399,6 +404,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					if setup := credential.GetProviderSetup(provider); setup != nil {
 						setup.ConfigureProxy(p, cred)
 						providerEnv = append(providerEnv, setup.ContainerEnv(cred)...)
+
+						// Check if this provider supports token refresh
+						if refresher, ok := setup.(credential.TokenRefresher); ok && refresher.CanRefresh(cred) {
+							refreshTargets = append(refreshTargets, refreshTarget{
+								provider:  provider,
+								refresher: refresher,
+								cred:      cred,
+								store:     store,
+							})
+						}
 					} else if provider == credential.ProviderAWS {
 						// AWS credentials are handled via credential endpoint, not header injection
 						// Parse stored config: Token=roleARN, Scopes=[region, sessionDuration, externalID]
@@ -528,6 +543,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Store proxy auth token (for tests and debugging)
 		r.ProxyAuthToken = proxyAuthToken
+
+		// Start background token refresh loop for refreshable grants
+		if len(refreshTargets) > 0 {
+			refreshCtx, refreshCancel := context.WithCancel(context.Background())
+			r.tokenRefreshCancel = refreshCancel
+			go m.runTokenRefreshLoop(refreshCtx, r, p, refreshTargets)
+		}
 
 		// Determine proxy URL based on runtime's host address
 		// Include authentication credentials in URL when token is set (Apple containers)
@@ -2857,4 +2879,82 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	}
 
 	return nil
+}
+
+// refreshTarget holds the state for a single refreshable credential.
+type refreshTarget struct {
+	provider  credential.Provider
+	refresher credential.TokenRefresher
+	cred      *credential.Credential
+	store     credential.Store
+}
+
+// runTokenRefreshLoop periodically re-acquires tokens from their original source.
+// It performs an immediate refresh at startup, then refreshes on the shortest
+// provider interval. Exits when ctx is canceled or the run's exitCh closes.
+func (m *Manager) runTokenRefreshLoop(ctx context.Context, r *Run, p credential.ProxyConfigurer, targets []refreshTarget) {
+	// Immediate refresh at startup — get a fresh token before the session begins
+	for i := range targets {
+		m.refreshToken(ctx, r, p, &targets[i])
+	}
+
+	interval := minRefreshInterval(targets)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.exitCh:
+			return
+		case <-ticker.C:
+			for i := range targets {
+				m.refreshToken(ctx, r, p, &targets[i])
+			}
+		}
+	}
+}
+
+// refreshToken attempts to refresh a single credential target.
+// On failure, it logs a warning and keeps the existing token.
+func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyConfigurer, target *refreshTarget) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	updated, err := target.refresher.RefreshCredential(ctx, p, target.cred)
+	if err != nil {
+		log.Warn("token refresh failed, keeping existing token",
+			"provider", target.provider, "error", err)
+		return
+	}
+
+	// Token unchanged — no-op
+	if updated.Token == target.cred.Token {
+		return
+	}
+
+	// Update in-memory credential for next cycle
+	target.cred = updated
+
+	// Persist to store so crash recovery uses the latest token
+	if target.store != nil {
+		if err := target.store.Save(*updated); err != nil {
+			log.Warn("failed to persist refreshed token",
+				"provider", target.provider, "error", err)
+		}
+	}
+
+	log.Debug("token refreshed", "provider", target.provider, "run_id", r.ID)
+}
+
+// minRefreshInterval returns the shortest refresh interval across all targets.
+func minRefreshInterval(targets []refreshTarget) time.Duration {
+	min := targets[0].refresher.RefreshInterval()
+	for _, t := range targets[1:] {
+		if d := t.refresher.RefreshInterval(); d < min {
+			min = d
+		}
+	}
+	return min
 }

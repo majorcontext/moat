@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/github"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -167,7 +168,7 @@ func grantGitHub() error {
 	// Priority 1: Environment variable
 	if token := getGitHubTokenFromEnv(); token != "" {
 		fmt.Println("Using token from environment variable")
-		return saveGitHubToken(token)
+		return saveGitHubToken(token, github.SourceEnv)
 	}
 
 	// Priority 2: gh CLI
@@ -179,7 +180,7 @@ func grantGitHub() error {
 		response = strings.TrimSpace(strings.ToLower(response))
 
 		if response == "" || response == "y" || response == "yes" {
-			return saveGitHubToken(token)
+			return saveGitHubToken(token, github.SourceCLI)
 		}
 		fmt.Println() // spacing before prompt
 	} else if ghErr != nil && isGHCLIInstalled() {
@@ -210,7 +211,7 @@ To create one:
 		return fmt.Errorf("no token provided")
 	}
 
-	return saveGitHubToken(inputToken)
+	return saveGitHubToken(inputToken, github.SourcePAT)
 }
 
 // getGHCLIToken retrieves the GitHub token from gh CLI if available.
@@ -230,7 +231,8 @@ func isGHCLIInstalled() bool {
 }
 
 // saveGitHubToken validates and saves a GitHub token.
-func saveGitHubToken(token string) error {
+// source indicates how the token was obtained (github.SourceCLI, github.SourceEnv, or github.SourcePAT).
+func saveGitHubToken(token string, source string) error {
 	// Validate token with a simple API call
 	fmt.Println("Validating token...")
 
@@ -275,6 +277,7 @@ func saveGitHubToken(token string) error {
 		Provider:  credential.ProviderGitHub,
 		Token:     token,
 		CreatedAt: time.Now(),
+		Metadata:  map[string]string{credential.MetaKeyTokenSource: source},
 	}
 	credPath, err := saveCredential(cred)
 	if err != nil {

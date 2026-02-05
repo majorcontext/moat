@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+// init registers AWS implied deps here (in the credential package) rather than
+// in a separate provider package because AWS doesn't have a ProviderSetup — it
+// uses the credential endpoint pattern instead of header injection.
+func init() {
+	RegisterImpliedDeps(ProviderAWS, AWSImpliedDeps)
+}
+
 // ParseRoleARN validates an IAM role ARN and returns an AWSConfig.
 // ARN format: arn:PARTITION:iam::ACCOUNT_ID:role/ROLE_NAME
 // Supported partitions: aws, aws-cn, aws-us-gov

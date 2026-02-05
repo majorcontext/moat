@@ -676,6 +676,11 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		MaxIdleConns:    100,
+		IdleConnTimeout: 90 * time.Second,
+		// Note: Do NOT set ForceAttemptHTTP2 here. This transport forwards
+		// HTTP/1.1 requests read from the intercepted TLS connection. Enabling
+		// HTTP/2 on the upstream side causes framing mismatches and hangs.
 	}
 
 	clientReader := bufio.NewReader(tlsClientConn)
