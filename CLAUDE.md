@@ -100,6 +100,7 @@ golangci-lint run
 
 - Follow standard Go conventions and `go fmt` formatting
 - Use `go vet` to catch common issues
+- **After completing a batch of changes, always run `make lint` and fix any issues before committing.** This catches formatting, vet, and lint errors early. If `golangci-lint` is not installed, fall back to `go vet ./...`.
 
 ## Error Messages
 
