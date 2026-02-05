@@ -1263,8 +1263,17 @@ region = %s
 				}
 			}
 
+			// Read host's ~/.claude.json for org context, feature flags, etc.
+			var hostConfig map[string]any
+			if hostHome, err := os.UserHomeDir(); err == nil {
+				hostConfig, err = claude.ReadHostConfig(filepath.Join(hostHome, ".claude.json"))
+				if err != nil {
+					log.Debug("could not read host .claude.json", "error", err)
+				}
+			}
+
 			// Write minimal Claude config to skip onboarding and configure MCP servers
-			if err := claude.WriteClaudeConfig(claudeStagingDir, mcpServers); err != nil {
+			if err := claude.WriteClaudeConfig(claudeStagingDir, mcpServers, hostConfig); err != nil {
 				cleanupProxy(proxyServer)
 				return nil, fmt.Errorf("writing Claude config: %w", err)
 			}

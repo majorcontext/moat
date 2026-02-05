@@ -191,7 +191,7 @@ func TestWriteClaudeConfig(t *testing.T) {
 	t.Run("without MCP servers", func(t *testing.T) {
 		stagingDir := t.TempDir()
 
-		err := WriteClaudeConfig(stagingDir, nil)
+		err := WriteClaudeConfig(stagingDir, nil, nil)
 		if err != nil {
 			t.Fatalf("WriteClaudeConfig() error = %v", err)
 		}
@@ -234,7 +234,7 @@ func TestWriteClaudeConfig(t *testing.T) {
 			},
 		}
 
-		err := WriteClaudeConfig(stagingDir, mcpServers)
+		err := WriteClaudeConfig(stagingDir, mcpServers, nil)
 		if err != nil {
 			t.Fatalf("WriteClaudeConfig() error = %v", err)
 		}
@@ -274,6 +274,201 @@ func TestWriteClaudeConfig(t *testing.T) {
 		}
 		if headers["CONTEXT7_API_KEY"] != "moat-stub-mcp-context7" {
 			t.Errorf("expected stub credential, got %v", headers["CONTEXT7_API_KEY"])
+		}
+	})
+
+	t.Run("with host config", func(t *testing.T) {
+		stagingDir := t.TempDir()
+
+		hostConfig := map[string]any{
+			"userID":         "user-123",
+			"firstStartTime": float64(1700000000),
+			"oauthAccount": map[string]any{
+				"accountUuid":      "acc-uuid",
+				"organizationUuid": "org-uuid",
+				"emailAddress":     "test@example.com",
+			},
+			"sonnet45MigrationComplete": true,
+		}
+
+		err := WriteClaudeConfig(stagingDir, nil, hostConfig)
+		if err != nil {
+			t.Fatalf("WriteClaudeConfig() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+		if err != nil {
+			t.Fatalf("failed to read .claude.json: %v", err)
+		}
+
+		var config map[string]any
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatalf("failed to parse .claude.json: %v", err)
+		}
+
+		// Host config fields should be present
+		if config["userID"] != "user-123" {
+			t.Errorf("userID = %v, want user-123", config["userID"])
+		}
+		if config["firstStartTime"] != float64(1700000000) {
+			t.Errorf("firstStartTime = %v, want 1700000000", config["firstStartTime"])
+		}
+		if config["sonnet45MigrationComplete"] != true {
+			t.Errorf("sonnet45MigrationComplete = %v, want true", config["sonnet45MigrationComplete"])
+		}
+
+		oauthAccount, ok := config["oauthAccount"].(map[string]any)
+		if !ok {
+			t.Fatal("oauthAccount should be present")
+		}
+		if oauthAccount["accountUuid"] != "acc-uuid" {
+			t.Errorf("oauthAccount.accountUuid = %v, want acc-uuid", oauthAccount["accountUuid"])
+		}
+
+		// Our explicit fields should still take precedence
+		if config["hasCompletedOnboarding"] != true {
+			t.Error("hasCompletedOnboarding should be true")
+		}
+		if config["theme"] != "dark" {
+			t.Error("theme should be dark")
+		}
+	})
+
+	t.Run("host config does not override explicit fields", func(t *testing.T) {
+		stagingDir := t.TempDir()
+
+		hostConfig := map[string]any{
+			"hasCompletedOnboarding": false,
+			"theme":                  "light",
+			"userID":                 "user-456",
+		}
+
+		err := WriteClaudeConfig(stagingDir, nil, hostConfig)
+		if err != nil {
+			t.Fatalf("WriteClaudeConfig() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+		if err != nil {
+			t.Fatalf("failed to read .claude.json: %v", err)
+		}
+
+		var config map[string]any
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatalf("failed to parse .claude.json: %v", err)
+		}
+
+		// Explicit fields must take precedence
+		if config["hasCompletedOnboarding"] != true {
+			t.Errorf("hasCompletedOnboarding = %v, want true (should override host config)", config["hasCompletedOnboarding"])
+		}
+		if config["theme"] != "dark" {
+			t.Errorf("theme = %v, want dark (should override host config)", config["theme"])
+		}
+
+		// Non-conflicting host config should still be present
+		if config["userID"] != "user-456" {
+			t.Errorf("userID = %v, want user-456", config["userID"])
+		}
+	})
+}
+
+func TestReadHostConfig(t *testing.T) {
+	t.Run("missing file returns nil", func(t *testing.T) {
+		result, err := ReadHostConfig(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("ReadHostConfig() error = %v, want nil", err)
+		}
+		if result != nil {
+			t.Errorf("ReadHostConfig() = %v, want nil", result)
+		}
+	})
+
+	t.Run("filters to allowlist", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".claude.json")
+
+		full := map[string]any{
+			"userID":                    "user-789",
+			"firstStartTime":            float64(1700000000),
+			"sonnet45MigrationComplete": true,
+			"theme":                     "light",
+			"hasCompletedOnboarding":    false,
+			"secretField":               "should-not-appear",
+			"oauthAccount": map[string]any{
+				"accountUuid": "acc-uuid",
+			},
+		}
+
+		data, _ := json.Marshal(full)
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		result, err := ReadHostConfig(path)
+		if err != nil {
+			t.Fatalf("ReadHostConfig() error = %v", err)
+		}
+
+		// Allowlisted fields should be present
+		if result["userID"] != "user-789" {
+			t.Errorf("userID = %v, want user-789", result["userID"])
+		}
+		if result["firstStartTime"] != float64(1700000000) {
+			t.Errorf("firstStartTime = %v, want 1700000000", result["firstStartTime"])
+		}
+		if result["sonnet45MigrationComplete"] != true {
+			t.Errorf("sonnet45MigrationComplete = %v, want true", result["sonnet45MigrationComplete"])
+		}
+
+		oauthAccount, ok := result["oauthAccount"].(map[string]any)
+		if !ok {
+			t.Fatal("oauthAccount should be present")
+		}
+		if oauthAccount["accountUuid"] != "acc-uuid" {
+			t.Errorf("oauthAccount.accountUuid = %v, want acc-uuid", oauthAccount["accountUuid"])
+		}
+
+		// Non-allowlisted fields should be filtered out
+		if _, ok := result["theme"]; ok {
+			t.Error("theme should not be in result (not allowlisted)")
+		}
+		if _, ok := result["hasCompletedOnboarding"]; ok {
+			t.Error("hasCompletedOnboarding should not be in result (not allowlisted)")
+		}
+		if _, ok := result["secretField"]; ok {
+			t.Error("secretField should not be in result (not allowlisted)")
+		}
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".claude.json")
+
+		if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		_, err := ReadHostConfig(path)
+		if err == nil {
+			t.Error("ReadHostConfig() should return error for invalid JSON")
+		}
+	})
+
+	t.Run("empty object returns empty map", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".claude.json")
+
+		if err := os.WriteFile(path, []byte("{}"), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		result, err := ReadHostConfig(path)
+		if err != nil {
+			t.Fatalf("ReadHostConfig() error = %v", err)
+		}
+		if len(result) != 0 {
+			t.Errorf("ReadHostConfig() = %v, want empty map", result)
 		}
 	})
 }
