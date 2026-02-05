@@ -113,14 +113,60 @@ type MCPServerForContainer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+// hostConfigAllowlist lists fields from the host's ~/.claude.json that are
+// safe and useful to copy into containers. These avoid startup API calls
+// and ensure consistent behavior.
+var hostConfigAllowlist = []string{
+	"oauthAccount",
+	"userID",
+	"cachedGrowthBookFeatures",
+	"firstStartTime",
+	"sonnet45MigrationComplete",
+	"opus45MigrationComplete",
+	"opusProMigrationComplete",
+	"thinkingMigrationComplete",
+}
+
+// ReadHostConfig reads the host's ~/.claude.json and returns allowlisted fields.
+// Returns nil, nil if the file doesn't exist (same pattern as LoadSettings).
+func ReadHostConfig(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var full map[string]any
+	if err := json.Unmarshal(data, &full); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]any)
+	for _, key := range hostConfigAllowlist {
+		if v, ok := full[key]; ok {
+			result[key] = v
+		}
+	}
+	return result, nil
+}
+
 // WriteClaudeConfig writes a minimal ~/.claude.json to the staging directory.
 // This skips the onboarding flow, sets dark theme, and optionally configures MCP servers.
 // mcpServers is a map of server names to their configurations.
-func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForContainer) error {
-	config := map[string]any{
-		"hasCompletedOnboarding": true,
-		"theme":                  "dark",
+// hostConfig contains allowlisted fields from the host's ~/.claude.json to merge in.
+func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForContainer, hostConfig map[string]any) error {
+	config := make(map[string]any)
+
+	// Start with host config fields (if any)
+	for k, v := range hostConfig {
+		config[k] = v
 	}
+
+	// Our explicit fields take precedence over anything from hostConfig
+	config["hasCompletedOnboarding"] = true
+	config["theme"] = "dark"
 
 	// Add MCP servers if provided
 	if len(mcpServers) > 0 {
