@@ -18,6 +18,7 @@ dependencies:
   - make
   - claude-code
   - node@20
+  - python
   - bats
   - docker:dind
 
