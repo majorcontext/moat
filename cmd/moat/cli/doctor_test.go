@@ -130,8 +130,10 @@ func TestPrintClaims(t *testing.T) {
 
 	output := buf.String()
 
-	// Check that timestamps are formatted
-	if !strings.Contains(output, "2025-") || !strings.Contains(output, "2024-") {
+	// Check that timestamps are formatted as dates (use local time, matching printClaims)
+	iatYear := time.Unix(1704067200, 0).Format("2006")
+	expYear := time.Unix(1735689600, 0).Format("2006")
+	if !strings.Contains(output, expYear+"-") || !strings.Contains(output, iatYear+"-") {
 		t.Error("Timestamps not formatted as dates")
 	}
 
