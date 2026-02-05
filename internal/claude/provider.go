@@ -113,18 +113,41 @@ type MCPServerForContainer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// hostConfigAllowlist lists fields from the host's ~/.claude.json that are
+// HostConfigAllowlist lists fields from the host's ~/.claude.json that are
 // safe and useful to copy into containers. These avoid startup API calls
 // and ensure consistent behavior.
-var hostConfigAllowlist = []string{
-	"oauthAccount",
-	"userID",
-	"cachedGrowthBookFeatures",
-	"firstStartTime",
+//
+// Fields are categorized by purpose:
+//   - OAuth authentication: oauthAccount, userID, anonymousId (required for x-organization-uuid header)
+//   - Installation tracking: installMethod, lastOnboardingVersion, numStartups (affects auth behavior)
+//   - Feature flags: migration flags, clientDataCache (contains system_prompt_variant)
+//   - Performance: cachedGrowthBookFeatures (optional, reduces startup API calls)
+var HostConfigAllowlist = []string{
+	// OAuth authentication fields (CRITICAL - missing these causes auth failures)
+	"oauthAccount",  // Contains organizationUuid, accountUuid required for OAuth
+	"userID",        // User identifier for session tracking
+	"anonymousId",   // Session ID - required for x-organization-uuid header to be sent
+	"installMethod", // Installation method - affects OAuth header behavior
+
+	// Version and usage tracking (affects API client behavior)
+	"lastOnboardingVersion", // Last completed onboarding version
+	"lastReleaseNotesSeen",  // Last seen release notes
+	"numStartups",           // Startup count for metrics
+
+	// Feature flags and migrations
 	"sonnet45MigrationComplete",
 	"opus45MigrationComplete",
 	"opusProMigrationComplete",
 	"thinkingMigrationComplete",
+
+	// Client configuration cache (server-provided settings)
+	"clientDataCache", // Contains system_prompt_variant and other runtime config
+
+	// Performance optimizations (optional)
+	"cachedGrowthBookFeatures", // Feature flag cache - reduces startup API calls
+
+	// First launch tracking
+	"firstStartTime", // Initial startup timestamp
 }
 
 // ReadHostConfig reads the host's ~/.claude.json and returns allowlisted fields.
@@ -144,7 +167,7 @@ func ReadHostConfig(path string) (map[string]any, error) {
 	}
 
 	result := make(map[string]any)
-	for _, key := range hostConfigAllowlist {
+	for _, key := range HostConfigAllowlist {
 		if v, ok := full[key]; ok {
 			result[key] = v
 		}

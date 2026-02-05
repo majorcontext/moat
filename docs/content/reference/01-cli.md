@@ -950,3 +950,75 @@ moat system clean-temp --force
 # Clean directories older than 1 week
 moat system clean-temp --min-age=168h
 ```
+
+---
+
+## moat doctor
+
+Diagnostic information about the Moat environment.
+
+```
+moat doctor [flags]
+```
+
+Shows version, container runtime status, credential status, Claude Code configuration, and recent runs. All sensitive information is automatically redacted.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-v`, `--verbose` | Show verbose output including JWT claims |
+
+### Examples
+
+```bash
+moat doctor
+moat doctor --verbose
+```
+
+### Subcommands
+
+#### moat doctor claude
+
+Diagnose Claude Code authentication and configuration issues in moat containers.
+
+```
+moat doctor claude [flags]
+```
+
+Compares your host Claude Code configuration against what's available in moat containers to identify authentication problems. Checks host `~/.claude.json` fields, credential status (OAuth vs API key, expiration), and field mapping via the host config allowlist.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Show full configuration diff and all checked fields |
+| `--json` | Output results as JSON for scripting |
+| `--test-container` | Launch a real container to test authentication end-to-end (~$0.0001 cost) |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | All checks passed |
+| 1 | Configuration issues detected |
+| 2 | Container authentication test failed (`--test-container` only) |
+
+**Examples:**
+
+```bash
+# Basic diagnostics
+moat doctor claude
+
+# Full field-level diff
+moat doctor claude --verbose
+
+# JSON output for scripting
+moat doctor claude --json
+
+# End-to-end container auth test
+moat doctor claude --test-container
+
+# Combine flags
+moat doctor claude --test-container --verbose
+```
