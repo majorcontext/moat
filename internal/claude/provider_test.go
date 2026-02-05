@@ -281,7 +281,7 @@ func TestWriteClaudeConfig(t *testing.T) {
 		stagingDir := t.TempDir()
 
 		hostConfig := map[string]any{
-			"userID":        "user-123",
+			"userID":         "user-123",
 			"firstStartTime": float64(1700000000),
 			"oauthAccount": map[string]any{
 				"accountUuid":      "acc-uuid",
@@ -390,7 +390,7 @@ func TestReadHostConfig(t *testing.T) {
 
 		full := map[string]any{
 			"userID":                    "user-789",
-			"firstStartTime":           float64(1700000000),
+			"firstStartTime":            float64(1700000000),
 			"sonnet45MigrationComplete": true,
 			"theme":                     "light",
 			"hasCompletedOnboarding":    false,
