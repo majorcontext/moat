@@ -10,13 +10,18 @@ import (
 )
 
 func TestGetProviderSetup(t *testing.T) {
-	// Test built-in GitHub provider
-	githubSetup := GetProviderSetup(ProviderGitHub)
-	if githubSetup == nil {
-		t.Error("GetProviderSetup(ProviderGitHub) returned nil")
+	// Register a test provider
+	testProvider := Provider("test-provider-setup")
+	RegisterProviderSetup(testProvider, &mockProviderSetup{provider: testProvider})
+	defer delete(providerSetups, testProvider)
+
+	// Test registered provider
+	setup := GetProviderSetup(testProvider)
+	if setup == nil {
+		t.Error("GetProviderSetup(test-provider-setup) returned nil")
 	}
-	if githubSetup.Provider() != ProviderGitHub {
-		t.Errorf("Provider() = %v, want %v", githubSetup.Provider(), ProviderGitHub)
+	if setup.Provider() != testProvider {
+		t.Errorf("Provider() = %v, want %v", setup.Provider(), testProvider)
 	}
 
 	// Test unknown provider returns nil
@@ -93,6 +98,10 @@ func TestParseGrantProvider(t *testing.T) {
 }
 
 func TestImpliedDependencies(t *testing.T) {
+	// Register GitHub implied deps for this test (normally done by internal/github init())
+	RegisterImpliedDeps(ProviderGitHub, func() []string { return []string{"gh", "git"} })
+	defer delete(impliedDepsRegistry, ProviderGitHub)
+
 	tests := []struct {
 		name   string
 		grants []string
@@ -230,38 +239,6 @@ func TestGenerateAccessTokenPlaceholder(t *testing.T) {
 	if payload["iss"] != "https://auth.openai.com" {
 		t.Errorf("iss = %v, want https://auth.openai.com", payload["iss"])
 	}
-}
-
-// mockProxyConfigurer implements ProxyConfigurer for testing.
-type mockProxyConfigurer struct {
-	credentials  map[string]string
-	extraHeaders map[string]map[string]string
-	transformers map[string][]ResponseTransformer
-}
-
-func (m *mockProxyConfigurer) SetCredential(host, value string) {
-	m.credentials[host] = value
-}
-
-func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue string) {
-	m.credentials[host] = headerName + ": " + headerValue
-}
-
-func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue string) {
-	if m.extraHeaders == nil {
-		m.extraHeaders = make(map[string]map[string]string)
-	}
-	if m.extraHeaders[host] == nil {
-		m.extraHeaders[host] = make(map[string]string)
-	}
-	m.extraHeaders[host][headerName] = headerValue
-}
-
-func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer ResponseTransformer) {
-	if m.transformers == nil {
-		m.transformers = make(map[string][]ResponseTransformer)
-	}
-	m.transformers[host] = append(m.transformers[host], transformer)
 }
 
 // mockProviderSetup implements ProviderSetup for testing.

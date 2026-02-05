@@ -2,6 +2,7 @@
 package credential
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"time"
@@ -162,6 +163,24 @@ type ProviderSetup interface {
 	Cleanup(cleanupPath string)
 }
 
+// TokenRefresher is an optional interface for providers that support
+// background credential refresh. Provider packages implement this on
+// their ProviderSetup struct when the credential source supports
+// re-acquisition (e.g., gh CLI auto-refreshes OAuth tokens).
+type TokenRefresher interface {
+	// RefreshCredential re-acquires a fresh token from the original source
+	// and updates the proxy. Returns the updated credential or an error.
+	// On error, the caller keeps using the previous credential.
+	RefreshCredential(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
+
+	// CanRefresh reports whether this credential can be refreshed.
+	// Returns false for static credentials (PATs, API keys).
+	CanRefresh(cred *Credential) bool
+
+	// RefreshInterval returns how often to attempt refresh.
+	RefreshInterval() time.Duration
+}
+
 // ProviderResult holds the result of configuring a provider.
 type ProviderResult struct {
 	// Env contains environment variables to add to the container.
@@ -183,17 +202,12 @@ func RegisterProviderSetup(provider Provider, setup ProviderSetup) {
 
 // GetProviderSetup returns the ProviderSetup for a given provider.
 // Returns nil if the provider doesn't have a registered setup.
+// Provider packages register their setups via init() using RegisterProviderSetup.
 func GetProviderSetup(provider Provider) ProviderSetup {
 	if setup, ok := providerSetups[provider]; ok {
 		return setup
 	}
-	// Fall back to built-in providers
-	switch provider {
-	case ProviderGitHub:
-		return &GitHubSetup{}
-	default:
-		return nil
-	}
+	return nil
 }
 
 // IsOAuthToken returns true if the token appears to be a Claude Code OAuth token.

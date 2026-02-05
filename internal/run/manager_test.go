@@ -1,15 +1,19 @@
 package run
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 )
 
@@ -812,5 +816,466 @@ func TestComputeBuildKitEnv(t *testing.T) {
 				t.Error("BUILDKIT_HOST should be set when enabled")
 			}
 		})
+	}
+}
+
+// --- Token refresh loop tests ---
+
+// mockTokenRefresher implements credential.TokenRefresher for testing.
+type mockTokenRefresher struct {
+	mu       sync.Mutex
+	calls    int
+	token    string // token to return on refresh
+	err      error  // error to return on refresh
+	interval time.Duration
+	canDo    bool
+}
+
+func (m *mockTokenRefresher) RefreshCredential(_ context.Context, p credential.ProxyConfigurer, cred *credential.Credential) (*credential.Credential, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	p.SetCredential("api.example.com", "Bearer "+m.token)
+	updated := *cred
+	updated.Token = m.token
+	return &updated, nil
+}
+
+func (m *mockTokenRefresher) CanRefresh(*credential.Credential) bool { return m.canDo }
+func (m *mockTokenRefresher) RefreshInterval() time.Duration         { return m.interval }
+
+func (m *mockTokenRefresher) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+// mockProxyConfigurer implements credential.ProxyConfigurer for testing.
+type mockProxyConfigurer struct {
+	mu          sync.Mutex
+	credentials map[string]string
+}
+
+func newMockProxy() *mockProxyConfigurer {
+	return &mockProxyConfigurer{credentials: make(map[string]string)}
+}
+
+func (m *mockProxyConfigurer) SetCredential(host, value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.credentials[host] = value
+}
+
+func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.credentials[host] = headerName + ": " + headerValue
+}
+
+func (m *mockProxyConfigurer) AddExtraHeader(string, string, string) {}
+
+func (m *mockProxyConfigurer) AddResponseTransformer(string, credential.ResponseTransformer) {}
+
+func (m *mockProxyConfigurer) get(host string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.credentials[host]
+}
+
+// mockCredStore implements credential.Store for testing.
+type mockCredStore struct {
+	mu      sync.Mutex
+	saved   []credential.Credential
+	saveErr error
+}
+
+func (s *mockCredStore) Save(cred credential.Credential) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.saved = append(s.saved, cred)
+	return nil
+}
+
+func (s *mockCredStore) Get(credential.Provider) (*credential.Credential, error) { return nil, nil }
+func (s *mockCredStore) Delete(credential.Provider) error                        { return nil }
+func (s *mockCredStore) List() ([]credential.Credential, error)                  { return nil, nil }
+
+func (s *mockCredStore) savedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.saved)
+}
+
+func (s *mockCredStore) lastSaved() credential.Credential {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saved[len(s.saved)-1]
+}
+
+func TestRefreshToken_Success(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	store := &mockCredStore{}
+	r := &Run{ID: "test-run"}
+
+	cred := &credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "old-token",
+	}
+
+	refresher := &mockTokenRefresher{
+		token:    "new-token",
+		interval: 30 * time.Minute,
+		canDo:    true,
+	}
+
+	target := &refreshTarget{
+		provider:  credential.ProviderGitHub,
+		refresher: refresher,
+		cred:      cred,
+		store:     store,
+	}
+
+	m.refreshToken(context.Background(), r, p, target)
+
+	// Verify proxy was updated
+	if got := p.get("api.example.com"); got != "Bearer new-token" {
+		t.Errorf("proxy credential = %q, want %q", got, "Bearer new-token")
+	}
+
+	// Verify in-memory credential was updated
+	if target.cred.Token != "new-token" {
+		t.Errorf("in-memory token = %q, want %q", target.cred.Token, "new-token")
+	}
+
+	// Verify credential was persisted to store
+	if store.savedCount() != 1 {
+		t.Fatalf("store.Save called %d times, want 1", store.savedCount())
+	}
+	if store.lastSaved().Token != "new-token" {
+		t.Errorf("persisted token = %q, want %q", store.lastSaved().Token, "new-token")
+	}
+}
+
+func TestRefreshToken_Unchanged(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	store := &mockCredStore{}
+	r := &Run{ID: "test-run"}
+
+	cred := &credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "same-token",
+	}
+
+	refresher := &mockTokenRefresher{
+		token:    "same-token", // same as current
+		interval: 30 * time.Minute,
+		canDo:    true,
+	}
+
+	target := &refreshTarget{
+		provider:  credential.ProviderGitHub,
+		refresher: refresher,
+		cred:      cred,
+		store:     store,
+	}
+
+	m.refreshToken(context.Background(), r, p, target)
+
+	// Should not persist when token is unchanged
+	if store.savedCount() != 0 {
+		t.Errorf("store.Save should not be called for unchanged token, called %d times", store.savedCount())
+	}
+}
+
+func TestRefreshToken_Error(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	store := &mockCredStore{}
+	r := &Run{ID: "test-run"}
+
+	cred := &credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "old-token",
+	}
+
+	refresher := &mockTokenRefresher{
+		err:      fmt.Errorf("gh auth token: command not found"),
+		interval: 30 * time.Minute,
+		canDo:    true,
+	}
+
+	target := &refreshTarget{
+		provider:  credential.ProviderGitHub,
+		refresher: refresher,
+		cred:      cred,
+		store:     store,
+	}
+
+	m.refreshToken(context.Background(), r, p, target)
+
+	// Should keep existing token on error
+	if target.cred.Token != "old-token" {
+		t.Errorf("token should be unchanged on error, got %q", target.cred.Token)
+	}
+
+	// Should not persist on error
+	if store.savedCount() != 0 {
+		t.Errorf("store.Save should not be called on error, called %d times", store.savedCount())
+	}
+}
+
+func TestRefreshToken_StoreSaveError(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	store := &mockCredStore{saveErr: fmt.Errorf("disk full")}
+	r := &Run{ID: "test-run"}
+
+	cred := &credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "old-token",
+	}
+
+	refresher := &mockTokenRefresher{
+		token:    "new-token",
+		interval: 30 * time.Minute,
+		canDo:    true,
+	}
+
+	target := &refreshTarget{
+		provider:  credential.ProviderGitHub,
+		refresher: refresher,
+		cred:      cred,
+		store:     store,
+	}
+
+	// Should not panic or fail — store error is logged but not fatal
+	m.refreshToken(context.Background(), r, p, target)
+
+	// In-memory credential should still be updated even if persist fails
+	if target.cred.Token != "new-token" {
+		t.Errorf("in-memory token = %q, want %q (should update even if store fails)", target.cred.Token, "new-token")
+	}
+}
+
+func TestRefreshToken_NilStore(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	r := &Run{ID: "test-run"}
+
+	cred := &credential.Credential{
+		Provider: credential.ProviderGitHub,
+		Token:    "old-token",
+	}
+
+	refresher := &mockTokenRefresher{
+		token:    "new-token",
+		interval: 30 * time.Minute,
+		canDo:    true,
+	}
+
+	target := &refreshTarget{
+		provider:  credential.ProviderGitHub,
+		refresher: refresher,
+		cred:      cred,
+		store:     nil, // no store
+	}
+
+	// Should not panic with nil store
+	m.refreshToken(context.Background(), r, p, target)
+
+	if target.cred.Token != "new-token" {
+		t.Errorf("in-memory token = %q, want %q", target.cred.Token, "new-token")
+	}
+}
+
+func TestRunTokenRefreshLoop_ImmediateRefresh(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	r := &Run{ID: "test-run", exitCh: make(chan struct{})}
+
+	refresher := &mockTokenRefresher{
+		token:    "fresh-token",
+		interval: time.Hour, // long interval so only immediate refresh fires
+		canDo:    true,
+	}
+
+	cred := &credential.Credential{Token: "stale-token"}
+	targets := []refreshTarget{
+		{
+			provider:  credential.ProviderGitHub,
+			refresher: refresher,
+			cred:      cred,
+			store:     &mockCredStore{},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		m.runTokenRefreshLoop(ctx, r, p, targets)
+		close(done)
+	}()
+
+	// Give the goroutine time to perform the immediate refresh
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify the immediate refresh happened
+	if refresher.callCount() < 1 {
+		t.Errorf("expected at least 1 refresh call (immediate), got %d", refresher.callCount())
+	}
+
+	cancel()
+	<-done
+}
+
+func TestRunTokenRefreshLoop_ExitsOnCancel(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	r := &Run{ID: "test-run", exitCh: make(chan struct{})}
+
+	refresher := &mockTokenRefresher{
+		token:    "token",
+		interval: time.Millisecond, // fast ticks
+		canDo:    true,
+	}
+
+	targets := []refreshTarget{
+		{
+			provider:  credential.ProviderGitHub,
+			refresher: refresher,
+			cred:      &credential.Credential{Token: "old"},
+			store:     &mockCredStore{},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		m.runTokenRefreshLoop(ctx, r, p, targets)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// goroutine exited cleanly
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh loop did not exit after context cancellation")
+	}
+}
+
+func TestRunTokenRefreshLoop_ExitsOnExitCh(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	r := &Run{ID: "test-run", exitCh: make(chan struct{})}
+
+	refresher := &mockTokenRefresher{
+		token:    "token",
+		interval: time.Hour,
+		canDo:    true,
+	}
+
+	targets := []refreshTarget{
+		{
+			provider:  credential.ProviderGitHub,
+			refresher: refresher,
+			cred:      &credential.Credential{Token: "old"},
+			store:     &mockCredStore{},
+		},
+	}
+
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		m.runTokenRefreshLoop(ctx, r, p, targets)
+		close(done)
+	}()
+
+	// Give it time to start
+	time.Sleep(50 * time.Millisecond)
+
+	close(r.exitCh)
+
+	select {
+	case <-done:
+		// goroutine exited cleanly
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh loop did not exit after exitCh closed")
+	}
+}
+
+func TestRunTokenRefreshLoop_TickerRefresh(t *testing.T) {
+	m := &Manager{}
+	p := newMockProxy()
+	r := &Run{ID: "test-run", exitCh: make(chan struct{})}
+
+	refresher := &mockTokenRefresher{
+		token:    "refreshed",
+		interval: 20 * time.Millisecond, // fast ticks for testing
+		canDo:    true,
+	}
+
+	targets := []refreshTarget{
+		{
+			provider:  credential.ProviderGitHub,
+			refresher: refresher,
+			cred:      &credential.Credential{Token: "initial"},
+			store:     &mockCredStore{},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.runTokenRefreshLoop(ctx, r, p, targets)
+		close(done)
+	}()
+
+	// Wait for immediate refresh + at least one ticker refresh
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	// Should have at least 2 calls: 1 immediate + 1 or more from ticker
+	if refresher.callCount() < 2 {
+		t.Errorf("expected at least 2 refresh calls (immediate + ticker), got %d", refresher.callCount())
+	}
+}
+
+func TestMinRefreshInterval(t *testing.T) {
+	targets := []refreshTarget{
+		{refresher: &mockTokenRefresher{interval: 30 * time.Minute}},
+		{refresher: &mockTokenRefresher{interval: 5 * time.Minute}},
+		{refresher: &mockTokenRefresher{interval: 1 * time.Hour}},
+	}
+
+	got := minRefreshInterval(targets)
+	if got != 5*time.Minute {
+		t.Errorf("minRefreshInterval() = %v, want %v", got, 5*time.Minute)
+	}
+}
+
+func TestMinRefreshInterval_SingleTarget(t *testing.T) {
+	targets := []refreshTarget{
+		{refresher: &mockTokenRefresher{interval: 45 * time.Minute}},
+	}
+
+	got := minRefreshInterval(targets)
+	if got != 45*time.Minute {
+		t.Errorf("minRefreshInterval() = %v, want %v", got, 45*time.Minute)
 	}
 }

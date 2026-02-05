@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// MetaKeyTokenSource is the metadata key for recording how a token was obtained.
+// Provider packages define the values (e.g., "cli", "env", "pat").
+const MetaKeyTokenSource = "token_source"
+
 // Provider identifies a credential provider (github, aws, etc.)
 type Provider string
 
@@ -112,6 +116,16 @@ func ParseGrantProvider(grant string) Provider {
 	return Provider(grant)
 }
 
+// impliedDepsRegistry maps providers to functions returning their implied dependencies.
+// Provider packages register via init() using RegisterImpliedDeps.
+var impliedDepsRegistry = map[Provider]func() []string{}
+
+// RegisterImpliedDeps registers an implied dependencies function for a provider.
+// This is typically called from init() functions in provider packages.
+func RegisterImpliedDeps(provider Provider, fn func() []string) {
+	impliedDepsRegistry[provider] = fn
+}
+
 // ImpliedDependencies returns the dependencies implied by a list of grants.
 // For example, a "github" grant implies "gh" and "git" dependencies.
 func ImpliedDependencies(grants []string) []string {
@@ -121,19 +135,12 @@ func ImpliedDependencies(grants []string) []string {
 	for _, grant := range grants {
 		provider := ParseGrantProvider(grant)
 
-		// Get implied dependencies for this provider
-		var implied []string
-		switch provider {
-		case ProviderGitHub:
-			implied = GitHubImpliedDeps()
-		case ProviderAWS:
-			implied = AWSImpliedDeps()
-		}
-
-		for _, dep := range implied {
-			if !seen[dep] {
-				seen[dep] = true
-				deps = append(deps, dep)
+		if fn, ok := impliedDepsRegistry[provider]; ok {
+			for _, dep := range fn() {
+				if !seen[dep] {
+					seen[dep] = true
+					deps = append(deps, dep)
+				}
 			}
 		}
 	}
