@@ -476,6 +476,13 @@ func outputHuman(diag *claudeDiagnostic) error {
 			}
 		}
 
+		if doctorClaudeVerbose && len(diag.ContainerTest.NetworkRequests) > 0 {
+			fmt.Printf("  Network requests:\n")
+			for _, req := range diag.ContainerTest.NetworkRequests {
+				fmt.Printf("    %s %s -> %d (%dms)\n", req.Method, req.URL, req.StatusCode, req.Duration)
+			}
+		}
+
 		if diag.ContainerTest.ExitCode != 0 {
 			fmt.Printf("  Container exit code: %d\n", diag.ContainerTest.ExitCode)
 		}
@@ -550,6 +557,7 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 	// Create config programmatically with claude-code dependency
 	cfg := &config.Config{
 		Dependencies: []string{"claude-code"},
+		Grants:       []string{"anthropic"},
 	}
 
 	// Create manager
@@ -578,7 +586,9 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 		return fmt.Errorf("creating test run: %w", err)
 	}
 	defer func() {
-		_ = mgr.Destroy(context.Background(), r.ID)
+		// Stop the container and proxy but preserve run storage (logs, network)
+		// so `moat logs <run-id>` works after the doctor finishes.
+		_ = mgr.Stop(context.Background(), r.ID)
 	}()
 
 	result := &containerTestResult{RunID: r.ID}
@@ -597,6 +607,10 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 	if waitErr != nil {
 		// Non-zero exit or timeout - may indicate failure
 		result.ExitCode = extractExitCode(waitErr)
+		if waitCtx.Err() != nil {
+			// Timeout — stop container to trigger log capture before we read logs
+			_ = mgr.Stop(ctx, r.ID)
+		}
 		diag.Issues = append(diag.Issues, issue{
 			Severity:    "error",
 			Component:   "container-test",
@@ -620,26 +634,33 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 
 	result.NetworkRequests = requests
 
-	// Analyze requests for auth success/failure
-	// We consider the test successful if ANY request to api.anthropic.com succeeded
-	// 403s on secondary endpoints (like client_data) are expected with limited OAuth scopes
+	analyzeNetworkAuth(requests, result, diag)
+
+	return nil
+}
+
+// analyzeNetworkAuth checks captured network requests for auth success/failure.
+// A 401 on any Anthropic endpoint means auth is broken, even if other endpoints
+// returned 2xx (e.g. health checks or non-authenticated routes). 403s on secondary
+// endpoints (like client_data) are expected with limited OAuth scopes and are NOT
+// treated as authentication failures.
+func analyzeNetworkAuth(requests []storage.NetworkRequest, result *containerTestResult, diag *claudeDiagnostic) {
+	hasSuccess := false
+	has401 := false
 	for _, req := range requests {
 		if strings.Contains(req.URL, "api.anthropic.com") {
 			if req.StatusCode >= 200 && req.StatusCode < 300 {
-				result.APICallSucceeded = true
+				hasSuccess = true
 			} else if req.StatusCode == 401 {
-				// 401 = authentication error (bad/missing token)
+				has401 = true
 				result.AuthErrors = append(result.AuthErrors,
 					fmt.Sprintf("%s %s -> %d", req.Method, req.URL, req.StatusCode))
 			}
-			// Note: 403 responses are expected for OAuth endpoints requiring scopes
-			// that aren't available in long-lived tokens (e.g., client_data endpoint)
-			// We don't treat these as authentication failures
 		}
 	}
+	result.APICallSucceeded = hasSuccess && !has401
 
-	// Only report auth failure if we got 401s OR if all requests failed
-	if len(result.AuthErrors) > 0 && !result.APICallSucceeded {
+	if has401 {
 		for _, errMsg := range result.AuthErrors {
 			diag.Issues = append(diag.Issues, issue{
 				Severity:    "error",
@@ -654,8 +675,6 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 		diag.Suggestions = append(diag.Suggestions,
 			"Container authentication test PASSED - Claude Code should work in moat containers")
 	}
-
-	return nil
 }
 
 func parseClaudeConfigFromLogs(logs []storage.LogEntry, result *containerTestResult, diag *claudeDiagnostic) {
