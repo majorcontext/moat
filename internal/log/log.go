@@ -156,19 +156,57 @@ func SetOutput(w io.Writer) {
 	slog.SetDefault(logger)
 }
 
-// SetRunID adds a run_id attribute to all subsequent log messages.
+// RunContext contains run-scoped data to include in all log messages.
+type RunContext struct {
+	RunID     string   // Unique run identifier
+	RunName   string   // Human-readable name (e.g., "my-project")
+	Agent     string   // Agent type (e.g., "claude", "codex")
+	Workspace string   // Project directory basename
+	Image     string   // Container image used
+	Grants    []string // Active credential grants
+}
+
+// SetRunContext adds run-scoped attributes to all subsequent log messages.
 // Call this when a run starts to correlate all logs with the run.
-func SetRunID(runID string) {
-	logger = slog.New(logger.Handler().WithAttrs([]slog.Attr{
-		slog.String("run_id", runID),
-	}))
+func SetRunContext(ctx RunContext) {
+	attrs := []slog.Attr{
+		slog.String("run_id", ctx.RunID),
+	}
+	if ctx.RunName != "" {
+		attrs = append(attrs, slog.String("run_name", ctx.RunName))
+	}
+	if ctx.Agent != "" {
+		attrs = append(attrs, slog.String("agent", ctx.Agent))
+	}
+	if ctx.Workspace != "" {
+		attrs = append(attrs, slog.String("workspace", ctx.Workspace))
+	}
+	if ctx.Image != "" {
+		attrs = append(attrs, slog.String("image", ctx.Image))
+	}
+	if len(ctx.Grants) > 0 {
+		attrs = append(attrs, slog.String("grants", joinGrants(ctx.Grants)))
+	}
+	logger = slog.New(logger.Handler().WithAttrs(attrs))
 	slog.SetDefault(logger)
 }
 
-// ClearRunID removes the run_id attribute from subsequent log messages.
+// joinGrants joins grant names with commas.
+func joinGrants(grants []string) string {
+	if len(grants) == 0 {
+		return ""
+	}
+	result := grants[0]
+	for i := 1; i < len(grants); i++ {
+		result += "," + grants[i]
+	}
+	return result
+}
+
+// ClearRunContext removes run-scoped attributes from subsequent log messages.
 // Call this when a run ends.
-func ClearRunID() {
-	// Re-initialize without run_id by getting base handlers
+func ClearRunContext() {
+	// Re-initialize without run context by getting base handlers
 	// For simplicity, we just set run_id to empty which will still appear
 	// but signals no active run. Full removal would require re-init.
 	logger = slog.New(logger.Handler().WithAttrs([]slog.Attr{

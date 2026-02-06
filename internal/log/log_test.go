@@ -145,7 +145,7 @@ func TestInit_InteractiveIgnoresVerbose(t *testing.T) {
 	Close()
 }
 
-func TestSetRunID(t *testing.T) {
+func TestSetRunContext(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Initialize with file logging (JSON format for easy parsing)
@@ -155,13 +155,20 @@ func TestSetRunID(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	// Log without run ID
+	// Log without run context
 	Info("before run")
 
-	// Set run ID
-	SetRunID("test-run-123")
+	// Set run context
+	SetRunContext(RunContext{
+		RunID:     "test-run-123",
+		RunName:   "my-project",
+		Agent:     "claude-code",
+		Workspace: "myapp",
+		Image:     "moat-claude:latest",
+		Grants:    []string{"github", "anthropic"},
+	})
 
-	// Log with run ID
+	// Log with run context
 	Info("during run")
 
 	// Close to flush
@@ -180,13 +187,24 @@ func TestSetRunID(t *testing.T) {
 		t.Fatalf("expected at least 2 log lines, got %d", len(lines))
 	}
 
-	// First line should NOT have run_id
+	// First line should NOT have run context
 	if strings.Contains(lines[0], "test-run-123") {
 		t.Error("first log line should not have run_id")
 	}
 
-	// Second line should have run_id
-	if !strings.Contains(lines[1], "test-run-123") {
-		t.Errorf("second log line should have run_id, got: %s", lines[1])
+	// Second line should have all run context fields
+	secondLine := lines[1]
+	checks := []string{
+		"test-run-123",     // run_id
+		"my-project",       // run_name
+		"claude-code",      // agent
+		"myapp",            // workspace
+		"moat-claude",      // image (partial match)
+		"github,anthropic", // grants
+	}
+	for _, check := range checks {
+		if !strings.Contains(secondLine, check) {
+			t.Errorf("second log line should contain %q, got: %s", check, secondLine)
+		}
 	}
 }
