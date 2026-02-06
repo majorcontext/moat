@@ -34,6 +34,13 @@ func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue 
 	m.headers[host][headerName] = headerValue
 }
 
+func (m *mockProxyConfigurer) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
+	if m.headers[host] == nil {
+		m.headers[host] = make(map[string]string)
+	}
+	m.headers[host][headerName] = headerValue
+}
+
 func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue string) {
 	if m.headers[host] == nil {
 		m.headers[host] = make(map[string]string)
@@ -62,10 +69,10 @@ func TestProvider_ConfigureProxy(t *testing.T) {
 
 	p.ConfigureProxy(proxy, cred)
 
-	// Check that api.openai.com has the Bearer token
-	expected := "Bearer sk-test-api-key-12345"
-	if got := proxy.credentials["api.openai.com"]; got != expected {
-		t.Errorf("api.openai.com credential = %q, want %q", got, expected)
+	// Check that api.openai.com has the Bearer token (stored as "Header: Value")
+	want := "Bearer sk-test-api-key-12345"
+	if got := proxy.headers["api.openai.com"]["Authorization"]; got != want {
+		t.Errorf("api.openai.com Authorization header = %q, want %q", got, want)
 	}
 }
 

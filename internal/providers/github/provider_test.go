@@ -27,6 +27,10 @@ func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue 
 	m.credentials[host] = headerName + ": " + headerValue
 }
 
+func (m *mockProxyConfigurer) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
+	m.credentials[host] = headerName + ": " + headerValue
+}
+
 func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue string) {}
 
 func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer provider.ResponseTransformer) {
@@ -46,11 +50,12 @@ func TestProvider_ConfigureProxy(t *testing.T) {
 
 	p.ConfigureProxy(proxy, cred)
 
-	if proxy.credentials["api.github.com"] != "Bearer test-token" {
-		t.Errorf("api.github.com credential = %q, want %q", proxy.credentials["api.github.com"], "Bearer test-token")
+	want := "Authorization: Bearer test-token"
+	if proxy.credentials["api.github.com"] != want {
+		t.Errorf("api.github.com credential = %q, want %q", proxy.credentials["api.github.com"], want)
 	}
-	if proxy.credentials["github.com"] != "Bearer test-token" {
-		t.Errorf("github.com credential = %q, want %q", proxy.credentials["github.com"], "Bearer test-token")
+	if proxy.credentials["github.com"] != want {
+		t.Errorf("github.com credential = %q, want %q", proxy.credentials["github.com"], want)
 	}
 }
 
@@ -205,11 +210,12 @@ func TestProvider_Refresh_EnvSource(t *testing.T) {
 	}
 
 	// Verify proxy was updated
-	if proxy.credentials["api.github.com"] != "Bearer new-env-token" {
-		t.Errorf("proxy api.github.com = %q, want %q", proxy.credentials["api.github.com"], "Bearer new-env-token")
+	want := "Authorization: Bearer new-env-token"
+	if proxy.credentials["api.github.com"] != want {
+		t.Errorf("proxy api.github.com = %q, want %q", proxy.credentials["api.github.com"], want)
 	}
-	if proxy.credentials["github.com"] != "Bearer new-env-token" {
-		t.Errorf("proxy github.com = %q, want %q", proxy.credentials["github.com"], "Bearer new-env-token")
+	if proxy.credentials["github.com"] != want {
+		t.Errorf("proxy github.com = %q, want %q", proxy.credentials["github.com"], want)
 	}
 
 	// Verify original credential is not mutated

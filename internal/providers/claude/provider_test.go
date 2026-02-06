@@ -27,9 +27,10 @@ func TestProvider_ConfigureProxy_OAuth(t *testing.T) {
 
 	p.ConfigureProxy(mockProxy, cred)
 
-	// OAuth tokens use Bearer auth
-	if mockProxy.credentials["api.anthropic.com"] != "Bearer sk-ant-oat01-abc123" {
-		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], "Bearer sk-ant-oat01-abc123")
+	// OAuth tokens use Bearer auth (stored as "Header: Value" format)
+	want := "Authorization: Bearer sk-ant-oat01-abc123"
+	if mockProxy.credentials["api.anthropic.com"] != want {
+		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], want)
 	}
 
 	// Should have registered a transformer for OAuth tokens
@@ -458,6 +459,10 @@ func (m *mockProxyConfigurer) SetCredential(host, value string) {
 }
 
 func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue string) {
+	m.credentials[host] = headerName + ": " + headerValue
+}
+
+func (m *mockProxyConfigurer) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	m.credentials[host] = headerName + ": " + headerValue
 }
 

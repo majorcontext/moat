@@ -40,8 +40,8 @@ func (p *Provider) Refresh(ctx context.Context, proxy provider.ProxyConfigurer, 
 	}
 
 	// Update proxy
-	proxy.SetCredential("api.github.com", "Bearer "+newToken)
-	proxy.SetCredential("github.com", "Bearer "+newToken)
+	proxy.SetCredentialWithGrant("api.github.com", "Authorization", "Bearer "+newToken, "github")
+	proxy.SetCredentialWithGrant("github.com", "Authorization", "Bearer "+newToken, "github")
 
 	// Return updated credential (copy to avoid mutating original)
 	updated := *cred

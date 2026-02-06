@@ -11,6 +11,12 @@ import (
 // GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
 	Proxy ProxyConfig `yaml:"proxy"`
+	Debug DebugConfig `yaml:"debug"`
+}
+
+// DebugConfig holds debug logging settings.
+type DebugConfig struct {
+	RetentionDays int `yaml:"retention_days"`
 }
 
 // ProxyConfig holds reverse proxy settings.
@@ -23,6 +29,9 @@ func DefaultGlobalConfig() *GlobalConfig {
 	return &GlobalConfig{
 		Proxy: ProxyConfig{
 			Port: 8080,
+		},
+		Debug: DebugConfig{
+			RetentionDays: 14,
 		},
 	}
 }

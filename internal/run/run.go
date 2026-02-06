@@ -36,6 +36,8 @@ type Run struct {
 	Name           string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Workspace      string
 	Grants         []string
+	Agent          string         // Agent type from config (e.g., "claude-code", "codex")
+	Image          string         // Container image used for this run
 	Ports          map[string]int // endpoint name -> container port
 	HostPorts      map[string]int // endpoint name -> host port (after binding)
 	State          State
@@ -133,6 +135,8 @@ func (r *Run) SaveMetadata() error {
 		Name:                r.Name,
 		Workspace:           r.Workspace,
 		Grants:              r.Grants,
+		Agent:               r.Agent,
+		Image:               r.Image,
 		Ports:               r.Ports,
 		ContainerID:         r.ContainerID,
 		State:               string(r.State),

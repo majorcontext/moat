@@ -34,8 +34,8 @@ func (p *Provider) Name() string {
 
 // ConfigureProxy sets up proxy headers for GitHub.
 func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
-	proxy.SetCredential("api.github.com", "Bearer "+cred.Token)
-	proxy.SetCredential("github.com", "Bearer "+cred.Token)
+	proxy.SetCredentialWithGrant("api.github.com", "Authorization", "Bearer "+cred.Token, "github")
+	proxy.SetCredentialWithGrant("github.com", "Authorization", "Bearer "+cred.Token, "github")
 }
 
 // ContainerEnv returns environment variables for GitHub.

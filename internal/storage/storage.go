@@ -18,6 +18,8 @@ type Metadata struct {
 	Name        string         `json:"name"`
 	Workspace   string         `json:"workspace"`
 	Grants      []string       `json:"grants,omitempty"`
+	Agent       string         `json:"agent,omitempty"` // Agent type from config (e.g., "claude-code")
+	Image       string         `json:"image,omitempty"` // Container image used
 	Ports       map[string]int `json:"ports,omitempty"`
 	ContainerID string         `json:"container_id,omitempty"`
 	State       string         `json:"state,omitempty"`

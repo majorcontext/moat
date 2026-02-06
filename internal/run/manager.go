@@ -197,6 +197,8 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			Name:              meta.Name,
 			Workspace:         meta.Workspace,
 			Grants:            meta.Grants,
+			Agent:             meta.Agent,
+			Image:             meta.Image,
 			Ports:             meta.Ports,
 			State:             runState,
 			ContainerID:       meta.ContainerID,
@@ -1095,6 +1097,12 @@ region = %s
 		ClaudePlugins:   claudePlugins,
 	})
 
+	// Set agent and image for logging context
+	if opts.Config != nil && opts.Config.Agent != "" {
+		r.Agent = opts.Config.Agent
+	}
+	r.Image = containerImage
+
 	// Determine if we need a custom image
 	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
 
@@ -1877,6 +1885,16 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	r.State = StateStarting
 	m.mu.Unlock()
 
+	// Set run context in logger for correlation
+	log.SetRunContext(log.RunContext{
+		RunID:     runID,
+		RunName:   r.Name,
+		Agent:     r.Agent,
+		Workspace: filepath.Base(r.Workspace),
+		Image:     r.Image,
+		Grants:    r.Grants,
+	})
+
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
 		m.mu.Lock()
 		r.State = StateFailed
@@ -1973,6 +1991,16 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	r.State = StateStarting
 	containerID := r.ContainerID
 	m.mu.Unlock()
+
+	// Set run context in logger for correlation
+	log.SetRunContext(log.RunContext{
+		RunID:     runID,
+		RunName:   r.Name,
+		Agent:     r.Agent,
+		Workspace: filepath.Base(r.Workspace),
+		Image:     r.Image,
+		Grants:    r.Grants,
+	})
 
 	// Start with attachment - this ensures TTY is connected before process starts.
 	// TTY mode must match how the container was created (see CreateContainer in

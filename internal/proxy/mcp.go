@@ -33,11 +33,6 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		reqHost = req.Host
 	}
 
-	log.Debug("MCP: checking credential injection",
-		"host", reqHost,
-		"path", req.URL.Path,
-		"num_servers", len(p.mcpServers))
-
 	// Find matching MCP server by host
 	var matchedServer *config.MCPServerConfig
 	for i := range p.mcpServers {
@@ -56,11 +51,6 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 			continue
 		}
 
-		log.Debug("Checking MCP server match",
-			"server", server.Name,
-			"serverHost", serverURL.Host,
-			"reqHost", reqHost)
-
 		// Match by host
 		if serverURL.Host == reqHost {
 			matchedServer = server
@@ -72,24 +62,15 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		return // No matching MCP server
 	}
 
-	log.Info("MCP: matched server",
-		"server", matchedServer.Name,
-		"host", reqHost)
-
 	// Check if the specified header exists
 	headerValue := req.Header.Get(matchedServer.Auth.Header)
 
 	if headerValue == "" {
-		log.Info("MCP: header not present in request",
+		log.Debug("MCP: header not present in request",
 			"server", matchedServer.Name,
-			"header", matchedServer.Auth.Header,
-			"allHeaders", req.Header)
+			"header", matchedServer.Auth.Header)
 		return // Header not present
 	}
-
-	log.Info("MCP: found header",
-		"header", matchedServer.Auth.Header,
-		"value", headerValue[:min(20, len(headerValue))]+"...")
 
 	// Check if header value is a stub
 	expectedStub := "moat-stub-" + matchedServer.Auth.Grant
@@ -111,14 +92,12 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		return
 	}
 
-	log.Debug("Found stub credential, will inject real credential",
-		"server", matchedServer.Name,
-		"stub", headerValue[:min(20, len(headerValue))]+"...")
-
 	// Load real credential
 	cred, err := p.credStore.Get(credential.Provider(matchedServer.Auth.Grant))
 	if err != nil {
-		log.Error("Failed to load MCP credential - request will fail at MCP server with stub credential",
+		log.Error("MCP credential load failed",
+			"subsystem", "proxy",
+			"action", "inject-error",
 			"server", matchedServer.Name,
 			"grant", matchedServer.Auth.Grant,
 			"error", err,
@@ -130,11 +109,14 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	// Replace stub with real credential
 	req.Header.Set(matchedServer.Auth.Header, cred.Token)
 
-	log.Info("Injected MCP credential",
-		"server", matchedServer.Name,
+	log.Debug("credential injected",
+		"subsystem", "proxy",
+		"action", "inject",
 		"grant", matchedServer.Auth.Grant,
+		"host", reqHost,
 		"header", matchedServer.Auth.Header,
-		"host", reqHost)
+		"server", matchedServer.Name,
+		"path", req.URL.Path)
 }
 
 // handleMCPRelay proxies MCP requests directly through the proxy with credential injection.
