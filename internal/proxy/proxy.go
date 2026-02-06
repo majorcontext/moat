@@ -411,10 +411,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inject MCP credentials if request matches configured server
 	p.injectMCPCredentials(r)
 
+	// Log the proxied request
 	if r.Method == http.MethodConnect {
+		log.Debug("proxy CONNECT",
+			"host", r.Host)
 		p.handleConnect(w, r)
 		return
 	}
+
+	log.Debug("proxy request",
+		"method", r.Method,
+		"host", r.URL.Host,
+		"path", r.URL.Path)
 	p.handleHTTP(w, r)
 }
 
@@ -520,6 +528,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if authInjected {
 		outReq.Header.Set(cred.Name, cred.Value)
+		log.Debug("credential injected",
+			"host", host,
+			"header", cred.Name)
 	}
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
@@ -704,10 +715,20 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)
+			log.Debug("credential injected",
+				"host", host,
+				"header", cred.Name,
+				"path", req.URL.Path)
 		}
 		// Inject any additional headers configured for this host
-		for _, h := range p.getExtraHeaders(r.Host) {
+		extraHeaders := p.getExtraHeaders(r.Host)
+		for _, h := range extraHeaders {
 			req.Header.Set(h.Name, h.Value)
+		}
+		if len(extraHeaders) > 0 {
+			log.Debug("extra headers injected",
+				"host", host,
+				"count", len(extraHeaders))
 		}
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")

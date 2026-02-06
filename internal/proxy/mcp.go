@@ -33,11 +33,6 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		reqHost = req.Host
 	}
 
-	log.Debug("MCP: checking credential injection",
-		"host", reqHost,
-		"path", req.URL.Path,
-		"num_servers", len(p.mcpServers))
-
 	// Find matching MCP server by host
 	var matchedServer *config.MCPServerConfig
 	for i := range p.mcpServers {
@@ -56,11 +51,6 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 			continue
 		}
 
-		log.Debug("Checking MCP server match",
-			"server", server.Name,
-			"serverHost", serverURL.Host,
-			"reqHost", reqHost)
-
 		// Match by host
 		if serverURL.Host == reqHost {
 			matchedServer = server
@@ -72,24 +62,15 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		return // No matching MCP server
 	}
 
-	log.Info("MCP: matched server",
-		"server", matchedServer.Name,
-		"host", reqHost)
-
 	// Check if the specified header exists
 	headerValue := req.Header.Get(matchedServer.Auth.Header)
 
 	if headerValue == "" {
-		log.Info("MCP: header not present in request",
+		log.Debug("MCP: header not present in request",
 			"server", matchedServer.Name,
-			"header", matchedServer.Auth.Header,
-			"allHeaders", req.Header)
+			"header", matchedServer.Auth.Header)
 		return // Header not present
 	}
-
-	log.Info("MCP: found header",
-		"header", matchedServer.Auth.Header,
-		"value", headerValue[:min(20, len(headerValue))]+"...")
 
 	// Check if header value is a stub
 	expectedStub := "moat-stub-" + matchedServer.Auth.Grant

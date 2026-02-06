@@ -69,9 +69,7 @@ func CreateOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, 
 			return respInterface, false
 		}
 
-		log.Debug("OAuth transformer invoked", "path", req.URL.Path, "status", resp.StatusCode)
-
-		// Only transform 403 responses
+		// Only transform 403 responses on OAuth endpoints
 		if resp.StatusCode != http.StatusForbidden {
 			return resp, false
 		}
@@ -92,9 +90,8 @@ func CreateOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, 
 		resp.Body.Close()
 
 		// Log the transformation for observability
-		log.Debug("transforming OAuth endpoint 403 to empty success",
-			"endpoint", matchedEndpoint,
-			"reason", "OAuth endpoints require user:profile scope not available in long-lived tokens")
+		log.Info("anthropic: transforming OAuth 403 to empty success",
+			"endpoint", matchedEndpoint)
 
 		// Return empty success response for this endpoint
 		//nolint:bodyclose // Response body will be closed by the HTTP handler
