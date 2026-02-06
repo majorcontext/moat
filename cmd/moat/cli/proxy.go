@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -132,7 +133,7 @@ func startProxy(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\nShutting down proxy...")
 	if err := lc.Stop(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		ui.Warnf("Stopping proxy: %v", err)
 	}
 
 	return nil

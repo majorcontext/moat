@@ -29,6 +29,7 @@ import (
 	"github.com/majorcontext/moat/internal/container/output"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // ErrGVisorNotAvailable is returned when gVisor is required but not installed.
@@ -100,7 +101,8 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 		// Only warn on Linux where gVisor is available but explicitly disabled
 		// On macOS/Windows, gVisor is unavailable by default (not a security downgrade)
 		if goruntime.GOOS == "linux" {
-			log.Warn("running without gVisor sandbox - reduced isolation")
+			ui.Warn("Running without gVisor sandbox. Container isolation is reduced.")
+			log.Debug("running without gVisor sandbox - reduced isolation")
 		}
 		// Leave ociRuntime empty to use Docker's default (usually runc)
 	} else {

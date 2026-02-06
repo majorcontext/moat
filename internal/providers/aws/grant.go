@@ -106,7 +106,7 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 			Provider: "aws",
 			Cause:    err,
 			Hint: "Ensure you have permission to assume this role and that your AWS credentials are configured.\n" +
-				"See: https://majorcontext.com/moat/guides/aws-credentials",
+				"See: https://majorcontext.com/moat/concepts/credentials#aws",
 		}
 	}
 

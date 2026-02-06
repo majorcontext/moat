@@ -8,6 +8,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -148,7 +149,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			cmdName == "/bin/bash" || cmdName == "/bin/sh" || cmdName == "/bin/zsh" {
 			// Only warn if no additional args (bare shell invocation)
 			if len(containerCmd) == 1 {
-				fmt.Fprintf(os.Stderr, "Hint: '%s' is interactive. Consider using: moat run -it -- %s\n\n", cmdName, cmdName)
+				ui.Infof("Hint: '%s' is interactive. Consider using: moat run -i -- %s", cmdName, cmdName)
 			}
 		}
 	}

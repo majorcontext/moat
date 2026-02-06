@@ -10,6 +10,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -97,8 +98,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// Log the error so users know why we might not detect in-use images
-		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", containerErr)
-		fmt.Fprintf(os.Stderr, "Proceeding with image cleanup but cannot verify images are unused\n")
+		ui.Warnf("Failed to list containers: %v", containerErr)
+		ui.Info("Proceeding with image cleanup but cannot verify images are unused")
 	}
 
 	var unusedImages []container.ImageInfo

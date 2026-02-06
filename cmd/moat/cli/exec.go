@@ -16,6 +16,7 @@ import (
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/trace"
 	"github.com/majorcontext/moat/internal/tui"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -137,7 +138,7 @@ func (t *ttyTracer) save() {
 
 	if err := t.recorder.Save(t.path); err != nil {
 		log.Error("failed to save TTY trace", "path", t.path, "error", err)
-		fmt.Printf("Warning: Failed to save trace to %s: %v\n", t.path, err)
+		ui.Warnf("Failed to save terminal trace to %s: %v", t.path, err)
 	} else {
 		log.Info("TTY trace saved", "path", t.path)
 		fmt.Printf("Terminal trace saved to %s\n", t.path)
