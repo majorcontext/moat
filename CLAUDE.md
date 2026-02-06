@@ -111,6 +111,17 @@ golangci-lint run
 - Use `go vet` to catch common issues
 - **After completing a batch of changes, always run `make lint` and fix any issues before committing.** This catches formatting, vet, and lint errors early. If `golangci-lint` is not installed, fall back to `go vet ./...`.
 
+## Logging vs User-Visible Output
+
+Two separate systems — don't mix them up:
+
+- **`internal/log`** — Structured debug/diagnostic logging (`log.Debug`, `log.Info`, `log.Warn`, `log.Error`). Writes to `~/.moat/debug/` as JSON. Only appears on stderr with `--verbose`. Use for internal state, timing, request details — anything useful for debugging but not for the user.
+- **`internal/ui`** — User-facing messages (`ui.Warn`, `ui.Error`, `ui.Info`). Always prints to stderr. Colored prefixes when stderr is a TTY. Use for warnings, errors, and status the user needs to see.
+
+For command output (tables, status, results), write directly to stdout with `fmt`. Use `ui.Bold`, `ui.Green`, `ui.OKTag()` etc. for styling — they return plain strings when stdout isn't a TTY or `NO_COLOR` is set.
+
+Don't use `ui` style functions inside `tabwriter` — ANSI codes break column alignment.
+
 ## Error Messages
 
 - Good error messages are documentation - when config is missing or something fails, tell users exactly what to set and how
