@@ -144,3 +144,49 @@ func TestInit_InteractiveIgnoresVerbose(t *testing.T) {
 
 	Close()
 }
+
+func TestSetRunID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize with file logging (JSON format for easy parsing)
+	if err := Init(Options{
+		DebugDir: tmpDir,
+	}); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Log without run ID
+	Info("before run")
+
+	// Set run ID
+	SetRunID("test-run-123")
+
+	// Log with run ID
+	Info("during run")
+
+	// Close to flush
+	Close()
+
+	// Read log file
+	today := time.Now().Format("2006-01-02")
+	logFile := filepath.Join(tmpDir, today+".jsonl")
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 log lines, got %d", len(lines))
+	}
+
+	// First line should NOT have run_id
+	if strings.Contains(lines[0], "test-run-123") {
+		t.Error("first log line should not have run_id")
+	}
+
+	// Second line should have run_id
+	if !strings.Contains(lines[1], "test-run-123") {
+		t.Errorf("second log line should have run_id, got: %s", lines[1])
+	}
+}

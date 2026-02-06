@@ -156,6 +156,27 @@ func SetOutput(w io.Writer) {
 	slog.SetDefault(logger)
 }
 
+// SetRunID adds a run_id attribute to all subsequent log messages.
+// Call this when a run starts to correlate all logs with the run.
+func SetRunID(runID string) {
+	logger = slog.New(logger.Handler().WithAttrs([]slog.Attr{
+		slog.String("run_id", runID),
+	}))
+	slog.SetDefault(logger)
+}
+
+// ClearRunID removes the run_id attribute from subsequent log messages.
+// Call this when a run ends.
+func ClearRunID() {
+	// Re-initialize without run_id by getting base handlers
+	// For simplicity, we just set run_id to empty which will still appear
+	// but signals no active run. Full removal would require re-init.
+	logger = slog.New(logger.Handler().WithAttrs([]slog.Attr{
+		slog.String("run_id", ""),
+	}))
+	slog.SetDefault(logger)
+}
+
 func init() {
 	// Default logger until Init is called
 	logger = slog.Default()

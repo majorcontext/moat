@@ -1877,6 +1877,9 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	r.State = StateStarting
 	m.mu.Unlock()
 
+	// Set run ID in logger for correlation
+	log.SetRunID(runID)
+
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
 		m.mu.Lock()
 		r.State = StateFailed
@@ -1973,6 +1976,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	r.State = StateStarting
 	containerID := r.ContainerID
 	m.mu.Unlock()
+
+	// Set run ID in logger for correlation
+	log.SetRunID(runID)
 
 	// Start with attachment - this ensures TTY is connected before process starts.
 	// TTY mode must match how the container was created (see CreateContainer in
