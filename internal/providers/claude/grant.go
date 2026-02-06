@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -94,7 +95,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 				fmt.Println("No existing Claude Code credentials found. Please choose another option.")
 				continue
 			}
-			return grantViaExistingCreds()
+			return grantViaExistingCreds(ctx)
 
 		default:
 			fmt.Printf("Invalid choice: %s\n", response)
@@ -127,25 +128,42 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Set environment to disable fancy terminal output
-	// This helps get clean token output without ANSI cursor movement codes
-	cmd.Env = append(os.Environ(),
-		"TERM=dumb",
-		"NO_COLOR=1",
-		"CI=1",
-	)
+	// Build a clean environment that forces dumb terminal mode.
+	// We filter out keys we override to avoid duplicates — on Linux (glibc),
+	// the first occurrence of a duplicate env var wins, so appending to
+	// os.Environ() without filtering means our overrides get ignored.
+	overrides := map[string]string{
+		"TERM":     "dumb",
+		"NO_COLOR": "1",
+		"CI":       "1",
+		"COLUMNS":  "10000",
+	}
+	var env []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		if _, override := overrides[key]; !override {
+			env = append(env, e)
+		}
+	}
+	for k, v := range overrides {
+		env = append(env, k+"="+v)
+	}
+	cmd.Env = env
 
 	err := cmd.Run()
 
-	// Debug output when MOAT_DEBUG_ANTHROPIC is set
-	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
-	if debug {
-		fmt.Println("--- DEBUG: claude setup-token stdout ---")
-		fmt.Println(stdout.String())
-		fmt.Println("--- DEBUG: end stdout ---")
-		fmt.Println("--- DEBUG: claude setup-token stderr ---")
-		fmt.Println(stderr.String())
-		fmt.Println("--- DEBUG: end stderr ---")
+	log.Debug("claude setup-token completed",
+		"subsystem", "grant",
+		"exit_error", err,
+		"stdout_len", stdout.Len(),
+		"stderr_len", stderr.Len(),
+	)
+	if log.Verbose() {
+		log.Debug("claude setup-token raw output",
+			"subsystem", "grant",
+			"raw_stdout", stdout.String(),
+			"raw_stderr", stderr.String(),
+		)
 	}
 
 	if err != nil {
@@ -162,6 +180,27 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 	if token == "" {
 		return nil, fmt.Errorf("could not find OAuth token in claude setup-token output")
 	}
+
+	log.Debug("extracted OAuth token",
+		"subsystem", "grant",
+		"token_len", len(token),
+	)
+
+	// Validate the token to catch corruption from ANSI parsing
+	fmt.Println("\nValidating OAuth token...")
+	auth := &anthropicAuth{}
+	validateCtx, validateCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer validateCancel()
+
+	if err := auth.ValidateOAuthToken(validateCtx, token); err != nil {
+		log.Error("OAuth token validation failed after extraction",
+			"subsystem", "grant",
+			"error", err,
+			"token_len", len(token),
+		)
+		return nil, fmt.Errorf("token validation failed: %w", err)
+	}
+	fmt.Println("OAuth token is valid.")
 
 	cred := &provider.Credential{
 		Provider:  "anthropic",
@@ -191,20 +230,28 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 //
 // 3. Clean the extracted block (strip ANSI codes and whitespace)
 func extractOAuthToken(output string) string {
-	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
-
 	// Find the start of the token in raw output
 	const prefix = "sk-ant-oat01-"
 	startIdx := strings.Index(output, prefix)
 	if startIdx == -1 {
-		if debug {
-			fmt.Println("--- DEBUG: No token prefix found in output")
-		}
+		log.Debug("no token prefix found in output",
+			"subsystem", "grant",
+			"action", "extract_token",
+			"output_len", len(output),
+		)
 		return ""
 	}
 
+	log.Debug("found token prefix",
+		"subsystem", "grant",
+		"action", "extract_token",
+		"start_idx", startIdx,
+		"output_len", len(output),
+	)
+
 	// Extract until we hit a "blank line" indicator
 	endIdx := len(output)
+	endReason := "end_of_output"
 	for i := startIdx; i < len(output); i++ {
 		// Check for ANSI cursor down 2+ lines: \x1b[NB where N >= 2
 		// This is used by Claude CLI to create visual blank lines
@@ -226,9 +273,7 @@ func extractOAuthToken(output string) string {
 					for endIdx > startIdx && output[endIdx-1] == '\r' {
 						endIdx--
 					}
-					if debug {
-						fmt.Printf("--- DEBUG: Found ANSI cursor down %d at index %d, endIdx=%d\n", n, i, endIdx)
-					}
+					endReason = fmt.Sprintf("ansi_cursor_down_%d", n)
 					goto done
 				}
 			}
@@ -244,9 +289,7 @@ func extractOAuthToken(output string) string {
 					// Found end of line
 					if isBlank {
 						endIdx = i
-						if debug {
-							fmt.Printf("--- DEBUG: Found blank line at index %d\n", i)
-						}
+						endReason = "blank_line"
 						goto done
 					}
 					break
@@ -260,35 +303,52 @@ func extractOAuthToken(output string) string {
 done:
 
 	tokenBlock := output[startIdx:endIdx]
-	if debug {
-		fmt.Printf("--- DEBUG: Raw token block: %q\n", tokenBlock)
+	log.Debug("token block extracted",
+		"subsystem", "grant",
+		"action", "extract_token",
+		"end_reason", endReason,
+		"block_len", len(tokenBlock),
+	)
+	if log.Verbose() {
+		log.Debug("token block raw content",
+			"subsystem", "grant",
+			"action", "extract_token",
+			"raw_block", fmt.Sprintf("%q", tokenBlock),
+		)
 	}
 
 	// Now clean the token block: strip ANSI and extract only token characters
 	cleaned := stripANSI(tokenBlock)
-	if debug {
-		fmt.Printf("--- DEBUG: After ANSI strip: %q\n", cleaned)
-	}
 
-	// Extract only valid token characters
+	// Extract only valid token characters, tracking what was removed
 	var token strings.Builder
+	var removed strings.Builder
 	for i := 0; i < len(cleaned); i++ {
 		c := cleaned[i]
 		if isTokenChar(c) {
 			token.WriteByte(c)
+		} else {
+			removed.WriteString(fmt.Sprintf("[%d]=%q ", i, string(c)))
 		}
 	}
 
 	result := token.String()
-	if debug {
-		fmt.Printf("--- DEBUG: Extracted token: %q (length: %d)\n", result, len(result))
-	}
+	log.Debug("token extraction complete",
+		"subsystem", "grant",
+		"action", "extract_token",
+		"result_len", len(result),
+		"cleaned_len", len(cleaned),
+		"removed_chars", removed.String(),
+	)
 
 	// Validate the token looks reasonable
 	if len(result) < 60 {
-		if debug {
-			fmt.Printf("--- DEBUG: Token too short: %d chars\n", len(result))
-		}
+		log.Debug("token too short, rejecting",
+			"subsystem", "grant",
+			"action", "extract_token",
+			"result_len", len(result),
+			"min_len", 60,
+		)
 		return ""
 	}
 
@@ -359,11 +419,29 @@ func grantViaAPIKey(ctx context.Context) (*provider.Credential, error) {
 }
 
 // grantViaExistingCreds imports existing Claude Code credentials.
-func grantViaExistingCreds() (*provider.Credential, error) {
+func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
+	log.Debug("importing existing Claude Code credentials",
+		"subsystem", "grant",
+		"os", runtime.GOOS,
+	)
+
 	token, err := getClaudeCodeCredentials()
 	if err != nil {
+		log.Debug("failed to get Claude Code credentials",
+			"subsystem", "grant",
+			"error", err,
+		)
 		return nil, err
 	}
+
+	log.Debug("found Claude Code credentials",
+		"subsystem", "grant",
+		"access_token_len", len(token.AccessToken),
+		"has_refresh_token", token.RefreshToken != "",
+		"expires_at_ms", token.ExpiresAt,
+		"scopes", strings.Join(token.Scopes, ","),
+		"subscription_type", token.SubscriptionType,
+	)
 
 	fmt.Println()
 	fmt.Println("Found Claude Code credentials.")
@@ -380,6 +458,22 @@ func grantViaExistingCreds() (*provider.Credential, error) {
 		}
 		fmt.Printf("  Expires: %s\n", expiresAt.Format(time.RFC3339))
 	}
+
+	// Validate the token against the API
+	fmt.Println("\nValidating OAuth token...")
+	auth := &anthropicAuth{}
+	validateCtx, validateCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer validateCancel()
+
+	if err := auth.ValidateOAuthToken(validateCtx, token.AccessToken); err != nil {
+		log.Error("OAuth token validation failed for imported credentials",
+			"subsystem", "grant",
+			"error", err,
+			"token_len", len(token.AccessToken),
+		)
+		return nil, fmt.Errorf("token validation failed: %w", err)
+	}
+	fmt.Println("OAuth token is valid.")
 
 	cred := &provider.Credential{
 		Provider:  "anthropic",
@@ -416,6 +510,10 @@ func getClaudeCodeCredentials() (*oauthToken, error) {
 	// Try keychain first on macOS
 	if runtime.GOOS == "darwin" {
 		if token, err := getFromKeychain(); err == nil {
+			log.Debug("credentials found in keychain",
+				"subsystem", "grant",
+				"token_len", len(token.AccessToken),
+			)
 			return token, nil
 		}
 		// Fall through to file-based lookup if keychain fails
@@ -466,6 +564,18 @@ func getFromFile() (*oauthToken, error) {
 				"  Have you logged into Claude Code? Run 'claude' to authenticate first", credPath)
 		}
 		return nil, fmt.Errorf("reading credentials file: %w", err)
+	}
+
+	log.Debug("read credentials file",
+		"subsystem", "grant",
+		"path", credPath,
+		"file_size", len(data),
+	)
+	if log.Verbose() {
+		log.Debug("credentials file content",
+			"subsystem", "grant",
+			"raw_json", string(data),
+		)
 	}
 
 	var creds oauthCredentials

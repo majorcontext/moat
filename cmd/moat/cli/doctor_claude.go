@@ -2,8 +2,13 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +18,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
+	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
@@ -52,16 +58,17 @@ What it checks:
     • Validates file permissions
 
   Container Testing (--test-container):
-    • Launches a real moat container with --grant anthropic
-    • Reads actual ~/.claude.json from inside the container
-    • Makes minimal API call to verify authentication works (~$0.0001 cost)
-    • Reports network errors and authentication failures
-    • Compares container config against host config
+    Runs three progressive validation levels, short-circuiting on failure:
+    1. Direct API call — verifies the stored token itself is valid
+    2. Proxy injection — verifies the TLS proxy replaces placeholders with real credentials
+    3. Container test — launches a real container for end-to-end verification
+    If level 1 fails, levels 2 and 3 are skipped. If level 2 fails, level 3 is skipped.
+    Each level costs ~$0.0001 for a minimal Haiku API call.
 
 Exit codes:
   0   All checks passed (including container test if --test-container used)
   1   Configuration issues detected
-  2   Container authentication test failed (--test-container only)`,
+  2   Token validation or container authentication test failed (--test-container only)`,
 	RunE: runDoctorClaude,
 }
 
@@ -79,16 +86,17 @@ func init() {
 }
 
 type claudeDiagnostic struct {
-	HostConfigPath        string               `json:"host_config_path"`
-	HostConfigExists      bool                 `json:"host_config_exists"`
-	HostConfigFields      []string             `json:"host_config_fields"`
-	ContainerConfigExists bool                 `json:"container_config_exists,omitempty"`
-	ContainerConfigFields []string             `json:"container_config_fields,omitempty"`
-	MissingFields         []string             `json:"missing_fields"`
-	CredentialStatus      *credentialStatus    `json:"credential_status"`
-	ContainerTest         *containerTestResult `json:"container_test,omitempty"`
-	Issues                []issue              `json:"issues"`
-	Suggestions           []string             `json:"suggestions"`
+	HostConfigPath        string                 `json:"host_config_path"`
+	HostConfigExists      bool                   `json:"host_config_exists"`
+	HostConfigFields      []string               `json:"host_config_fields"`
+	ContainerConfigExists bool                   `json:"container_config_exists,omitempty"`
+	ContainerConfigFields []string               `json:"container_config_fields,omitempty"`
+	MissingFields         []string               `json:"missing_fields"`
+	CredentialStatus      *credentialStatus      `json:"credential_status"`
+	TokenValidation       *tokenValidationResult `json:"token_validation,omitempty"`
+	ContainerTest         *containerTestResult   `json:"container_test,omitempty"`
+	Issues                []issue                `json:"issues"`
+	Suggestions           []string               `json:"suggestions"`
 }
 
 type containerTestResult struct {
@@ -118,6 +126,54 @@ type issue struct {
 	Fix         string `json:"fix,omitempty"`
 }
 
+type tokenValidationResult struct {
+	DirectTest *validationLevelResult `json:"direct_test"`
+	ProxyTest  *validationLevelResult `json:"proxy_test,omitempty"`
+}
+
+type validationLevelResult struct {
+	Passed     bool   `json:"passed"`
+	StatusCode int    `json:"status_code,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Duration   string `json:"duration,omitempty"`
+	Skipped    bool   `json:"skipped,omitempty"`
+	SkipReason string `json:"skip_reason,omitempty"`
+}
+
+// anthropicValidationURL is the URL used for token validation requests.
+// It is a package-level variable to allow test overrides.
+var anthropicValidationURL = "https://api.anthropic.com/v1/messages"
+
+// validationRequestBody is the minimal request body used for token validation.
+// Uses Haiku for minimal cost (~$0.0001 per validation call).
+const validationRequestBody = `{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`
+
+// newValidationRequest creates an HTTP request configured for Anthropic API
+// token validation. It sets the appropriate auth headers based on token type:
+// OAuth tokens use Bearer auth with required beta flags; API keys use x-api-key.
+func newValidationRequest(ctx context.Context, token string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", anthropicValidationURL, strings.NewReader(validationRequestBody))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	if credential.IsOAuthToken(token) {
+		// OAuth tokens require Bearer auth with specific beta flags.
+		// The oauth-2025-04-20 beta and dangerous-direct-browser-access headers
+		// are required for OAuth tokens to work outside the proxy context.
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+		req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	} else {
+		req.Header.Set("x-api-key", token)
+	}
+
+	return req, nil
+}
+
 func runDoctorClaude(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	diag := &claudeDiagnostic{
@@ -138,10 +194,15 @@ func runDoctorClaude(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("analyzing container configuration: %w", err)
 	}
 
-	// Container test if requested
+	// Progressive validation and container test if requested
 	if doctorClaudeTestContainer {
-		if err := testContainerAuth(ctx, diag); err != nil {
-			return fmt.Errorf("container test failed: %w", err)
+		runProgressiveValidation(ctx, diag)
+
+		// Only run container test if token validation passed
+		if tokenValidationPassed(diag) {
+			if err := testContainerAuth(ctx, diag); err != nil {
+				return fmt.Errorf("container test failed: %w", err)
+			}
 		}
 	}
 
@@ -221,34 +282,46 @@ func checkHostClaudeConfig(diag *claudeDiagnostic) error {
 	return nil
 }
 
-func checkCredentialStatus(diag *claudeDiagnostic) {
+// getAnthropicCredential reads the Anthropic credential from the encrypted store.
+// Returns nil and an error description if the credential cannot be read.
+func getAnthropicCredential() (*credential.Credential, string) {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
-		diag.CredentialStatus = &credentialStatus{Granted: false}
-		diag.Issues = append(diag.Issues, issue{
-			Severity:    "error",
-			Component:   "credential",
-			Description: "Cannot access credential store encryption key",
-			Fix:         "Check MOAT_CREDENTIAL_KEY environment variable",
-		})
-		return
+		return nil, "cannot access credential store encryption key"
 	}
 
 	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	if err != nil {
-		diag.CredentialStatus = &credentialStatus{Granted: false}
-		return
+		return nil, fmt.Sprintf("cannot open credential store: %v", err)
 	}
 
 	cred, err := store.Get(credential.ProviderAnthropic)
 	if err != nil {
+		return nil, "no Anthropic credential granted"
+	}
+
+	return cred, ""
+}
+
+func checkCredentialStatus(diag *claudeDiagnostic) {
+	cred, errMsg := getAnthropicCredential()
+	if errMsg != "" {
 		diag.CredentialStatus = &credentialStatus{Granted: false}
-		diag.Issues = append(diag.Issues, issue{
-			Severity:    "error",
-			Component:   "credential",
-			Description: "No Anthropic credential granted",
-			Fix:         "Run 'moat grant anthropic' to grant credentials",
-		})
+		if errMsg == "no Anthropic credential granted" {
+			diag.Issues = append(diag.Issues, issue{
+				Severity:    "error",
+				Component:   "credential",
+				Description: "No Anthropic credential granted",
+				Fix:         "Run 'moat grant anthropic' to grant credentials",
+			})
+		} else if errMsg == "cannot access credential store encryption key" {
+			diag.Issues = append(diag.Issues, issue{
+				Severity:    "error",
+				Component:   "credential",
+				Description: "Cannot access credential store encryption key",
+				Fix:         "Check MOAT_CREDENTIAL_KEY environment variable",
+			})
+		}
 		return
 	}
 
@@ -426,6 +499,41 @@ func outputHuman(diag *claudeDiagnostic) error {
 	}
 	fmt.Println()
 
+	// Token Validation Results (shown if --test-container was used)
+	if diag.TokenValidation != nil {
+		fmt.Println("Token Validation:")
+
+		// Level 1: Direct test
+		if dt := diag.TokenValidation.DirectTest; dt != nil {
+			if dt.Passed {
+				fmt.Printf("  ✓ Direct API call succeeded (%s)\n", dt.Duration)
+			} else if dt.Skipped {
+				fmt.Printf("  - Direct test skipped (%s)\n", dt.SkipReason)
+			} else {
+				fmt.Printf("  ✗ Direct API call failed: %s\n", dt.Error)
+				fmt.Printf("    Fix: Run 'moat grant anthropic' to get a new token\n")
+			}
+		}
+
+		// Level 2: Proxy test
+		if pt := diag.TokenValidation.ProxyTest; pt != nil {
+			if pt.Passed {
+				fmt.Printf("  ✓ Proxy injection test succeeded (%s)\n", pt.Duration)
+			} else if pt.Skipped {
+				fmt.Printf("  - Proxy test skipped (%s)\n", pt.SkipReason)
+			} else {
+				fmt.Printf("  ✗ Proxy injection test failed: %s\n", pt.Error)
+			}
+		}
+
+		// If validation failed, note that container test was skipped
+		if !tokenValidationPassed(diag) && diag.ContainerTest == nil {
+			fmt.Printf("  - Container test skipped (token validation failed)\n")
+		}
+
+		fmt.Println()
+	}
+
 	// Container Test Results (only shown if --test-container was used)
 	if diag.ContainerTest != nil {
 		fmt.Println("Container Authentication Test:")
@@ -527,8 +635,12 @@ func outputHuman(diag *claudeDiagnostic) error {
 		}
 	}
 
-	// Check container test failure first — exit code 2 signals auth failure
+	// Check token validation failure — exit code 2 signals auth failure
 	// specifically, distinct from general configuration errors (exit code 1).
+	if diag.TokenValidation != nil && !tokenValidationPassed(diag) {
+		fmt.Printf("Result: Token validation FAILED (%d errors, %d warnings)\n", errorCount, warningCount)
+		os.Exit(2)
+	}
 	if diag.ContainerTest != nil && !diag.ContainerTest.APICallSucceeded {
 		fmt.Printf("Result: Container authentication test FAILED (%d errors, %d warnings)\n", errorCount, warningCount)
 		os.Exit(2)
@@ -544,6 +656,228 @@ func outputHuman(diag *claudeDiagnostic) error {
 
 	fmt.Println("Result: All checks passed ✓")
 	return nil
+}
+
+// validateTokenDirect tests that the stored token is valid by making a direct
+// API call to Anthropic (Level 1). This verifies the token itself works before
+// testing proxy injection or containers.
+func validateTokenDirect(ctx context.Context, token string) *validationLevelResult {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := newValidationRequest(ctx, token)
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("creating request: %v", err)}
+	}
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	duration := time.Since(start)
+
+	result := &validationLevelResult{
+		Duration: fmt.Sprintf("%dms", duration.Milliseconds()),
+	}
+
+	if err != nil {
+		result.Error = fmt.Sprintf("network error: %v", err)
+		return result
+	}
+	defer resp.Body.Close()
+
+	// Read response body to check for OAuth-specific errors that indicate
+	// Anthropic changed their OAuth endpoint requirements.
+	body, _ := io.ReadAll(resp.Body)
+
+	result.StatusCode = resp.StatusCode
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Passed = true
+		return result
+	}
+
+	// Check for OAuth-specific error messages that suggest the probe needs updating
+	bodyStr := string(body)
+	if credential.IsOAuthToken(token) && strings.Contains(bodyStr, "OAuth") {
+		result.Error = fmt.Sprintf("API returned status %d: OAuth endpoint requirements may have changed — "+
+			"this diagnostic probe may need updating", resp.StatusCode)
+	} else {
+		result.Error = fmt.Sprintf("API returned status %d", resp.StatusCode)
+	}
+
+	return result
+}
+
+// validateTokenViaProxy tests that the proxy correctly injects credentials
+// (Level 2). It spins up a real TLS-intercepting proxy, sends a request with
+// a placeholder token, and verifies the proxy replaces it with the real token.
+func validateTokenViaProxy(ctx context.Context, token string) *validationLevelResult {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	// Create temp directory for CA
+	tmpDir, err := os.MkdirTemp("", "moat-doctor-proxy-*")
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("creating temp dir: %v", err)}
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create CA for TLS interception
+	ca, err := proxy.NewCA(tmpDir)
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("creating CA: %v", err)}
+	}
+
+	// Extract the target host from the validation URL so credential injection
+	// matches the actual request host. In production this is api.anthropic.com;
+	// in tests it may be a localhost httptest server.
+	targetURL, err := url.Parse(anthropicValidationURL)
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("parsing validation URL: %v", err)}
+	}
+	targetHost := targetURL.Hostname()
+
+	// Create and configure proxy
+	p := proxy.NewProxy()
+	p.SetCA(ca)
+
+	// Configure credential injection matching the Claude provider logic
+	if credential.IsOAuthToken(token) {
+		p.SetCredential(targetHost, "Bearer "+token)
+	} else {
+		p.SetCredentialHeader(targetHost, "x-api-key", token)
+	}
+
+	// Start proxy server
+	server := proxy.NewServer(p)
+	err = server.Start()
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("starting proxy: %v", err)}
+	}
+	defer server.Stop(context.Background()) //nolint:errcheck
+
+	// Build HTTP client that trusts our CA and routes through the proxy
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(ca.CertPEM())
+
+	proxyURL, err := url.Parse("http://" + server.Addr())
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("parsing proxy URL: %v", err)}
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+		},
+	}
+
+	// Build request with placeholder token — the proxy should replace it
+	// with the real credential. We use newValidationRequest with a placeholder
+	// so the request has all the right headers (beta flags, etc.) but the
+	// proxy's credential injection replaces the auth header.
+	placeholder := credential.ProxyInjectedPlaceholder
+	if credential.IsOAuthToken(token) {
+		// Use a placeholder that looks like an OAuth token so newValidationRequest
+		// sets the correct OAuth headers (Bearer auth, beta flags).
+		placeholder = "sk-ant-oat-" + credential.ProxyInjectedPlaceholder
+	}
+	req, err := newValidationRequest(ctx, placeholder)
+	if err != nil {
+		return &validationLevelResult{Error: fmt.Sprintf("creating request: %v", err)}
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	duration := time.Since(start)
+
+	result := &validationLevelResult{
+		Duration: fmt.Sprintf("%dms", duration.Milliseconds()),
+	}
+
+	if err != nil {
+		result.Error = fmt.Sprintf("request through proxy failed: %v", err)
+		return result
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	result.StatusCode = resp.StatusCode
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Passed = true
+	} else {
+		result.Error = fmt.Sprintf("API returned status %d through proxy", resp.StatusCode)
+	}
+
+	return result
+}
+
+// runProgressiveValidation runs Level 1 (direct) and Level 2 (proxy) token
+// validation before the container test. It short-circuits on failure so users
+// see exactly which layer is broken.
+func runProgressiveValidation(ctx context.Context, diag *claudeDiagnostic) {
+	validation := &tokenValidationResult{}
+	diag.TokenValidation = validation
+
+	cred, errMsg := getAnthropicCredential()
+	if errMsg != "" {
+		validation.DirectTest = &validationLevelResult{Error: errMsg}
+		diag.Issues = append(diag.Issues, issue{
+			Severity:    "error",
+			Component:   "token-validation",
+			Description: fmt.Sprintf("Cannot validate token: %s", errMsg),
+			Fix:         "Run 'moat grant anthropic' to grant credentials",
+		})
+		return
+	}
+
+	// Level 1: Direct API call
+	validation.DirectTest = validateTokenDirect(ctx, cred.Token)
+
+	if !validation.DirectTest.Passed {
+		// Short-circuit: skip Level 2
+		validation.ProxyTest = &validationLevelResult{
+			Skipped:    true,
+			SkipReason: "token is invalid",
+		}
+
+		fix := "Run 'moat grant anthropic' to get a new token"
+		if validation.DirectTest.StatusCode == 403 {
+			fix = "Token lacks required permissions. Run 'moat grant anthropic' to get a new token with correct scopes"
+		}
+
+		diag.Issues = append(diag.Issues, issue{
+			Severity:    "error",
+			Component:   "token-validation",
+			Description: fmt.Sprintf("Direct API call failed: %s", validation.DirectTest.Error),
+			Fix:         fix,
+		})
+		return
+	}
+
+	// Level 2: Proxy injection test
+	validation.ProxyTest = validateTokenViaProxy(ctx, cred.Token)
+
+	if !validation.ProxyTest.Passed {
+		diag.Issues = append(diag.Issues, issue{
+			Severity:    "error",
+			Component:   "token-validation",
+			Description: fmt.Sprintf("Proxy injection test failed: %s", validation.ProxyTest.Error),
+			Fix:         "The token is valid but proxy credential injection is not working. Check proxy configuration.",
+		})
+	}
+}
+
+// tokenValidationPassed returns true if both direct and proxy tests passed.
+func tokenValidationPassed(diag *claudeDiagnostic) bool {
+	if diag.TokenValidation == nil {
+		return false
+	}
+	if diag.TokenValidation.DirectTest == nil || !diag.TokenValidation.DirectTest.Passed {
+		return false
+	}
+	if diag.TokenValidation.ProxyTest == nil || !diag.TokenValidation.ProxyTest.Passed {
+		return false
+	}
+	return true
 }
 
 func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
