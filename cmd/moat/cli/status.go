@@ -14,6 +14,7 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -212,13 +213,13 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("Runtime: %s\n\n", output.Runtime)
+	fmt.Printf("%s: %s\n\n", ui.Bold("Runtime"), output.Runtime)
 
 	// Active runs table
 	if len(activeRuns) == 0 {
-		fmt.Println("Active Runs: 0")
+		fmt.Printf("%s: 0\n", ui.Bold("Active Runs"))
 	} else {
-		fmt.Printf("Active Runs: %d\n", len(activeRuns))
+		fmt.Printf("%s: %d\n", ui.Bold("Active Runs"), len(activeRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  NAME\tRUN ID\tAGE\tDISK\tENDPOINTS")
 		for _, r := range output.ActiveRuns {
@@ -234,7 +235,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// Summary statistics
-	fmt.Println("Summary")
+	fmt.Println(ui.Bold("Summary"))
 	stoppedDiskMB := stoppedDisk / (1024 * 1024)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "  Stopped runs:\t%d\t%d MB\n", stoppedCount, stoppedDiskMB)
@@ -245,11 +246,13 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Health section
 	if len(output.Health) > 0 {
-		fmt.Println("Health")
+		fmt.Println(ui.Bold("Health"))
 		for _, h := range output.Health {
-			icon := "⚠"
+			var icon string
 			if h.Status == "ok" {
-				icon = "✓"
+				icon = ui.OKTag()
+			} else {
+				icon = ui.WarnTag()
 			}
 			fmt.Printf("  %s %s\n", icon, h.Message)
 		}

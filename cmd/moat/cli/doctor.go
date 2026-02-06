@@ -18,6 +18,7 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/doctor"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -46,8 +47,7 @@ func init() {
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	fmt.Println("Moat Doctor")
-	fmt.Println("===========")
+	fmt.Println(ui.Bold("Moat Doctor"))
 	fmt.Println()
 
 	// Create registry and register all sections
@@ -63,21 +63,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Run all sections
 	for _, section := range reg.Sections() {
-		printSection(section.Name())
+		ui.Section(section.Name())
 		if err := section.Print(os.Stdout); err != nil {
-			fmt.Printf("❌ Error: %v\n", err)
+			fmt.Printf("%s Error: %v\n", ui.FailTag(), err)
 		}
 		fmt.Println()
 	}
 
 	return nil
-}
-
-func printSection(title string) {
-	fmt.Printf("# %s\n", title)
-	// Print underline matching the title length (including "# ")
-	underline := strings.Repeat("-", len(title)+2)
-	fmt.Println(underline)
 }
 
 // versionSection shows platform and version info
@@ -100,7 +93,7 @@ func (s *containerSection) Name() string { return "Container Runtime" }
 func (s *containerSection) Print(w io.Writer) error {
 	defaultRT, err := container.NewRuntime()
 	if err != nil {
-		fmt.Fprintf(w, "❌ Error detecting runtime: %v\n", err)
+		fmt.Fprintf(w, "%s Error detecting runtime: %v\n", ui.FailTag(), err)
 		return nil
 	}
 
@@ -140,21 +133,21 @@ func (s *containerSection) Print(w io.Writer) error {
 	if dockerRT != nil {
 		// Check gVisor
 		if hasGVisor() {
-			fmt.Fprintln(tw, "gVisor:\tavailable")
+			fmt.Fprintf(tw, "gVisor:\t%s available\n", ui.OKTag())
 		} else {
-			fmt.Fprintln(tw, "gVisor:\tnot available")
+			fmt.Fprintf(tw, "gVisor:\t%s not available\n", ui.Dim("—"))
 		}
 
 		// Check BuildKit
 		buildkit := os.Getenv("DOCKER_BUILDKIT")
 		if buildkit == "1" {
-			fmt.Fprintln(tw, "BuildKit:\tenabled (DOCKER_BUILDKIT=1)")
+			fmt.Fprintf(tw, "BuildKit:\t%s enabled (DOCKER_BUILDKIT=1)\n", ui.OKTag())
 		} else {
 			// Check if buildx is available
 			if hasBuildx() {
-				fmt.Fprintln(tw, "BuildKit:\tavailable (buildx installed)")
+				fmt.Fprintf(tw, "BuildKit:\t%s available (buildx installed)\n", ui.OKTag())
 			} else {
-				fmt.Fprintln(tw, "BuildKit:\tnot available")
+				fmt.Fprintf(tw, "BuildKit:\t%s not available\n", ui.Dim("—"))
 			}
 		}
 	}
@@ -240,7 +233,7 @@ func (s *credentialSection) Print(w io.Writer) error {
 			if exp, ok := jwtClaims["exp"].(float64); ok {
 				expTime := time.Unix(int64(exp), 0)
 				if time.Now().After(expTime) {
-					fmt.Fprintf(tw, "Expires:\t❌ EXPIRED (%s ago)\n", formatAge(expTime))
+					fmt.Fprintf(tw, "Expires:\t%s EXPIRED (%s ago)\n", ui.FailTag(), formatAge(expTime))
 				} else {
 					fmt.Fprintf(tw, "Expires:\t%s\n", expTime.Format("2006-01-02"))
 				}
@@ -252,7 +245,7 @@ func (s *credentialSection) Print(w io.Writer) error {
 			printClaims(w, jwtClaims, "  ")
 		} else if !cred.ExpiresAt.IsZero() {
 			if time.Now().After(cred.ExpiresAt) {
-				fmt.Fprintf(tw, "Expires:\t❌ EXPIRED (%s ago)\n", formatAge(cred.ExpiresAt))
+				fmt.Fprintf(tw, "Expires:\t%s EXPIRED (%s ago)\n", ui.FailTag(), formatAge(cred.ExpiresAt))
 			} else {
 				fmt.Fprintf(tw, "Expires:\t%s\n", cred.ExpiresAt.Format("2006-01-02"))
 			}
@@ -378,7 +371,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 		if json.Unmarshal(data, &config) == nil {
 			fmt.Fprintf(tw, "Main config:\t%s\n", claudeConfigPath)
 			if onboarded, ok := config["hasCompletedOnboarding"].(bool); ok && onboarded {
-				fmt.Fprintln(tw, "Onboarding:\t✅ Complete")
+				fmt.Fprintf(tw, "Onboarding:\t%s Complete\n", ui.OKTag())
 			}
 		}
 	} else {
@@ -391,7 +384,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 	// 1. Claude's known marketplaces
 	knownMarketplacesPath := filepath.Join(home, ".claude", "plugins", "known_marketplaces.json")
 	if _, err := os.Stat(knownMarketplacesPath); err == nil {
-		fmt.Fprintf(tw, "  1. Known marketplaces:\t%s ✅\n", knownMarketplacesPath)
+		fmt.Fprintf(tw, "  1. Known marketplaces:\t%s %s\n", knownMarketplacesPath, ui.OKTag())
 	} else {
 		fmt.Fprintf(tw, "  1. Known marketplaces:\t%s\n", knownMarketplacesPath)
 	}
@@ -409,7 +402,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 					}
 				}
 			}
-			fmt.Fprintf(tw, "  2. User settings:\t%s ✅ (%d plugins)\n", claudeUserSettingsPath, enabledCount)
+			fmt.Fprintf(tw, "  2. User settings:\t%s %s (%d plugins)\n", claudeUserSettingsPath, ui.OKTag(), enabledCount)
 		}
 	} else {
 		fmt.Fprintf(tw, "  2. User settings:\t%s\n", claudeUserSettingsPath)
@@ -418,7 +411,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 	// 3. Moat-specific user defaults
 	moatUserSettingsPath := filepath.Join(home, ".moat", "claude", "settings.json")
 	if _, err := os.Stat(moatUserSettingsPath); err == nil {
-		fmt.Fprintf(tw, "  3. Moat user defaults:\t%s ✅\n", moatUserSettingsPath)
+		fmt.Fprintf(tw, "  3. Moat user defaults:\t%s %s\n", moatUserSettingsPath, ui.OKTag())
 	} else {
 		fmt.Fprintf(tw, "  3. Moat user defaults:\t%s\n", moatUserSettingsPath)
 	}
@@ -427,7 +420,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 	cwd, _ := os.Getwd()
 	projectSettingsPath := filepath.Join(cwd, ".claude", "settings.json")
 	if _, err := os.Stat(projectSettingsPath); err == nil {
-		fmt.Fprintf(tw, "  4. Project settings:\t%s ✅\n", projectSettingsPath)
+		fmt.Fprintf(tw, "  4. Project settings:\t%s %s\n", projectSettingsPath, ui.OKTag())
 	} else {
 		fmt.Fprintf(tw, "  4. Project settings:\t%s\n", projectSettingsPath)
 	}
@@ -438,9 +431,9 @@ func (s *claudeSection) Print(w io.Writer) error {
 		// Check if it has Claude-related configuration
 		hasClaudeConfig := strings.Contains(string(data), "claude:")
 		if hasClaudeConfig {
-			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s ✅ (has claude config)\n", agentYamlPath)
+			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s %s (has claude config)\n", agentYamlPath, ui.OKTag())
 		} else {
-			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s ✅\n", agentYamlPath)
+			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s %s\n", agentYamlPath, ui.OKTag())
 		}
 	} else {
 		fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s\n", agentYamlPath)
@@ -465,10 +458,10 @@ func (s *storageSection) Print(w io.Writer) error {
 	fmt.Fprintf(tw, "Moat directory:\t%s\n", moatDir)
 
 	if info, err := os.Stat(moatDir); err == nil {
-		fmt.Fprintln(tw, "Exists:\t✅")
+		fmt.Fprintf(tw, "Exists:\t%s\n", ui.OKTag())
 		fmt.Fprintf(tw, "Permissions:\t%v\n", info.Mode())
 	} else {
-		fmt.Fprintf(tw, "Exists:\t❌ (%v)\n", err)
+		fmt.Fprintf(tw, "Exists:\t%s (%v)\n", ui.FailTag(), err)
 	}
 
 	return tw.Flush()
