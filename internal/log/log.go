@@ -38,8 +38,9 @@ func Init(opts Options) error {
 
 	var handlers []slog.Handler
 
-	// Stderr handler: Warn+Error by default, all levels if verbose && !interactive
-	stderrLevel := slog.LevelWarn
+	// Stderr handler: suppressed by default, all levels if verbose && !interactive.
+	// User-visible output uses the ui package instead of slog.
+	stderrLevel := slog.LevelError + 1 // nothing passes in normal mode
 	if opts.Verbose && !opts.Interactive {
 		stderrLevel = slog.LevelDebug
 	}

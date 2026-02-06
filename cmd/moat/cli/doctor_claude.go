@@ -21,6 +21,7 @@ import (
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -429,14 +430,13 @@ func outputJSON(diag *claudeDiagnostic) error {
 }
 
 func outputHuman(diag *claudeDiagnostic) error {
-	fmt.Println("Claude Code Diagnostics")
-	fmt.Println("=======================")
+	fmt.Println(ui.Bold("Claude Code Diagnostics"))
 	fmt.Println()
 
 	// Credential Status
-	fmt.Println("Credential Status:")
+	fmt.Println(ui.Bold("Credential Status:"))
 	if diag.CredentialStatus != nil && diag.CredentialStatus.Granted {
-		fmt.Printf("  ✓ Anthropic credential granted\n")
+		fmt.Printf("  %s Anthropic credential granted\n", ui.OKTag())
 		fmt.Printf("    Type: %s\n", diag.CredentialStatus.Type)
 		fmt.Printf("    Prefix: %s\n", diag.CredentialStatus.TokenPrefix)
 		if !diag.CredentialStatus.ExpiresAt.IsZero() {
@@ -448,14 +448,14 @@ func outputHuman(diag *claudeDiagnostic) error {
 			fmt.Printf("    Scopes: %s\n", strings.Join(diag.CredentialStatus.Scopes, ", "))
 		}
 	} else {
-		fmt.Printf("  ✗ No Anthropic credential granted\n")
+		fmt.Printf("  %s No Anthropic credential granted\n", ui.FailTag())
 	}
 	fmt.Println()
 
 	// Host Configuration
-	fmt.Println("Host Configuration:")
+	fmt.Println(ui.Bold("Host Configuration:"))
 	if diag.HostConfigExists {
-		fmt.Printf("  ✓ ~/.claude.json exists\n")
+		fmt.Printf("  %s ~/.claude.json exists\n", ui.OKTag())
 		fmt.Printf("    Fields: %d\n", len(diag.HostConfigFields))
 		if doctorClaudeVerbose {
 			fmt.Printf("    All fields: %s\n", strings.Join(diag.HostConfigFields, ", "))
@@ -470,47 +470,47 @@ func outputHuman(diag *claudeDiagnostic) error {
 			}
 		}
 		if hasOAuth {
-			fmt.Printf("  ✓ OAuth account configured\n")
+			fmt.Printf("  %s OAuth account configured\n", ui.OKTag())
 		}
 	} else {
-		fmt.Printf("  ✗ ~/.claude.json does not exist\n")
+		fmt.Printf("  %s ~/.claude.json does not exist\n", ui.FailTag())
 	}
 	fmt.Println()
 
 	// Container Configuration
-	fmt.Println("Container Configuration (Simulated):")
+	fmt.Println(ui.Bold("Container Configuration (Simulated):"))
 	if diag.ContainerConfigExists {
-		fmt.Printf("  ✓ Would copy %d fields to container\n", len(diag.ContainerConfigFields))
+		fmt.Printf("  %s Would copy %d fields to container\n", ui.OKTag(), len(diag.ContainerConfigFields))
 		if doctorClaudeVerbose {
 			fmt.Printf("    Copied fields: %s\n", strings.Join(diag.ContainerConfigFields, ", "))
 		}
 		fmt.Printf("    From host: %d total fields\n", len(diag.HostConfigFields))
 
 		if len(diag.MissingFields) > 0 {
-			fmt.Printf("  ✗ Missing %d allowlisted fields from host:\n", len(diag.MissingFields))
+			fmt.Printf("  %s Missing %d allowlisted fields from host:\n", ui.FailTag(), len(diag.MissingFields))
 			for _, field := range diag.MissingFields {
 				fmt.Printf("      - %s (would not be copied)\n", field)
 			}
 		} else {
-			fmt.Printf("  ✓ All allowlisted fields present in host config\n")
+			fmt.Printf("  %s All allowlisted fields present in host config\n", ui.OKTag())
 		}
 	} else {
-		fmt.Printf("  ✗ Could not analyze container configuration\n")
+		fmt.Printf("  %s Could not analyze container configuration\n", ui.FailTag())
 	}
 	fmt.Println()
 
 	// Token Validation Results (shown if --test-container was used)
 	if diag.TokenValidation != nil {
-		fmt.Println("Token Validation:")
+		fmt.Println(ui.Bold("Token Validation:"))
 
 		// Level 1: Direct test
 		if dt := diag.TokenValidation.DirectTest; dt != nil {
 			if dt.Passed {
-				fmt.Printf("  ✓ Direct API call succeeded (%s)\n", dt.Duration)
+				fmt.Printf("  %s Direct API call succeeded (%s)\n", ui.OKTag(), dt.Duration)
 			} else if dt.Skipped {
-				fmt.Printf("  - Direct test skipped (%s)\n", dt.SkipReason)
+				fmt.Printf("  %s Direct test skipped (%s)\n", ui.Dim("-"), dt.SkipReason)
 			} else {
-				fmt.Printf("  ✗ Direct API call failed: %s\n", dt.Error)
+				fmt.Printf("  %s Direct API call failed: %s\n", ui.FailTag(), dt.Error)
 				fmt.Printf("    Fix: Run 'moat grant anthropic' to get a new token\n")
 			}
 		}
@@ -518,17 +518,17 @@ func outputHuman(diag *claudeDiagnostic) error {
 		// Level 2: Proxy test
 		if pt := diag.TokenValidation.ProxyTest; pt != nil {
 			if pt.Passed {
-				fmt.Printf("  ✓ Proxy injection test succeeded (%s)\n", pt.Duration)
+				fmt.Printf("  %s Proxy injection test succeeded (%s)\n", ui.OKTag(), pt.Duration)
 			} else if pt.Skipped {
-				fmt.Printf("  - Proxy test skipped (%s)\n", pt.SkipReason)
+				fmt.Printf("  %s Proxy test skipped (%s)\n", ui.Dim("-"), pt.SkipReason)
 			} else {
-				fmt.Printf("  ✗ Proxy injection test failed: %s\n", pt.Error)
+				fmt.Printf("  %s Proxy injection test failed: %s\n", ui.FailTag(), pt.Error)
 			}
 		}
 
 		// If validation failed, note that container test was skipped
 		if !tokenValidationPassed(diag) && diag.ContainerTest == nil {
-			fmt.Printf("  - Container test skipped (token validation failed)\n")
+			fmt.Printf("  %s Container test skipped (token validation failed)\n", ui.Dim("-"))
 		}
 
 		fmt.Println()
@@ -536,12 +536,12 @@ func outputHuman(diag *claudeDiagnostic) error {
 
 	// Container Test Results (only shown if --test-container was used)
 	if diag.ContainerTest != nil {
-		fmt.Println("Container Authentication Test:")
+		fmt.Println(ui.Bold("Container Authentication Test:"))
 		fmt.Printf("  Run ID: %s\n", diag.ContainerTest.RunID)
 
 		// Config file check
 		if diag.ContainerTest.ConfigRead {
-			fmt.Printf("  ✓ Successfully read ~/.claude.json from container\n")
+			fmt.Printf("  %s Successfully read ~/.claude.json from container\n", ui.OKTag())
 
 			if doctorClaudeVerbose && diag.ContainerTest.ContainerConfig != nil {
 				keys := getConfigKeys(diag.ContainerTest.ContainerConfig)
@@ -562,15 +562,15 @@ func outputHuman(diag *claudeDiagnostic) error {
 				}
 			}
 		} else {
-			fmt.Printf("  ✗ Could not read ~/.claude.json from container\n")
+			fmt.Printf("  %s Could not read ~/.claude.json from container\n", ui.FailTag())
 		}
 
 		// API authentication check
 		if diag.ContainerTest.APICallSucceeded {
-			fmt.Printf("  ✓ API authentication succeeded\n")
+			fmt.Printf("  %s API authentication succeeded\n", ui.OKTag())
 			fmt.Printf("    Network requests: %d\n", len(diag.ContainerTest.NetworkRequests))
 		} else {
-			fmt.Printf("  ✗ API authentication failed\n")
+			fmt.Printf("  %s API authentication failed\n", ui.FailTag())
 
 			if len(diag.ContainerTest.AuthErrors) > 0 {
 				fmt.Printf("  Authentication errors:\n")
@@ -600,13 +600,16 @@ func outputHuman(diag *claudeDiagnostic) error {
 
 	// Issues and Suggestions
 	if len(diag.Issues) > 0 {
-		fmt.Println("Issues Found:")
+		fmt.Println(ui.Bold("Issues Found:"))
 		for _, iss := range diag.Issues {
-			icon := "ℹ"
-			if iss.Severity == "error" {
-				icon = "✗"
-			} else if iss.Severity == "warning" {
-				icon = "⚠"
+			var icon string
+			switch iss.Severity {
+			case "error":
+				icon = ui.FailTag()
+			case "warning":
+				icon = ui.WarnTag()
+			default:
+				icon = ui.InfoTag()
 			}
 			fmt.Printf("  %s [%s] %s\n", icon, iss.Component, iss.Description)
 			if iss.Fix != "" {
@@ -617,7 +620,7 @@ func outputHuman(diag *claudeDiagnostic) error {
 	}
 
 	if len(diag.Suggestions) > 0 {
-		fmt.Println("Suggestions:")
+		fmt.Println(ui.Bold("Suggestions:"))
 		for _, suggestion := range diag.Suggestions {
 			fmt.Printf("  → %s\n", suggestion)
 		}
@@ -654,7 +657,7 @@ func outputHuman(diag *claudeDiagnostic) error {
 		os.Exit(0)
 	}
 
-	fmt.Println("Result: All checks passed ✓")
+	fmt.Println(ui.Green("Result: All checks passed ✓"))
 	return nil
 }
 

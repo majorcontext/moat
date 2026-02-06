@@ -44,7 +44,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		// Parse server URL to get host
 		serverURL, err := url.Parse(server.URL)
 		if err != nil {
-			log.Warn("Failed to parse MCP server URL",
+			log.Debug("Failed to parse MCP server URL",
 				"server", server.Name,
 				"url", server.URL,
 				"error", err)
@@ -76,9 +76,9 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	expectedStub := "moat-stub-" + matchedServer.Auth.Grant
 	if headerValue != expectedStub {
 		// Not a stub - could be a real credential or different value
-		// Log warning if it looks like a stub but doesn't match
+		// Log debug if it looks like a stub but doesn't match
 		if strings.HasPrefix(headerValue, "moat-stub-") {
-			log.Warn("MCP request has stub-like header value that doesn't match expected grant",
+			log.Debug("MCP request has stub-like header value that doesn't match expected grant",
 				"server", matchedServer.Name,
 				"header", matchedServer.Auth.Header,
 				"expected", expectedStub,

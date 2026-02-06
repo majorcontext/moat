@@ -10,6 +10,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -97,8 +98,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// Log the error so users know why we might not detect in-use images
-		fmt.Fprintf(os.Stderr, "Warning: failed to list containers: %v\n", containerErr)
-		fmt.Fprintf(os.Stderr, "Proceeding with image cleanup but cannot verify images are unused\n")
+		ui.Warnf("Failed to list containers: %v", containerErr)
+		ui.Info("Proceeding with image cleanup but cannot verify images are unused")
 	}
 
 	var unusedImages []container.ImageInfo
@@ -119,7 +120,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	var totalSize int64
 
 	if len(stoppedRuns) > 0 {
-		fmt.Printf("Stopped runs (%d):\n", len(stoppedRuns))
+		fmt.Printf("%s (%d):\n", ui.Bold("Stopped runs"), len(stoppedRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		for _, r := range stoppedRuns {
 			age := formatAge(r.CreatedAt)
@@ -130,7 +131,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(unusedImages) > 0 {
-		fmt.Printf("Unused images (%d):\n", len(unusedImages))
+		fmt.Printf("%s (%d):\n", ui.Bold("Unused images"), len(unusedImages))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		for _, img := range unusedImages {
 			sizeMB := img.Size / (1024 * 1024)
@@ -169,11 +170,11 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
 		if err := manager.Destroy(ctx, r.ID); err != nil {
-			fmt.Printf("error: %v\n", err)
+			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
 			continue
 		}
-		fmt.Println("done")
+		fmt.Println(ui.Green("done"))
 		removedCount++
 	}
 
@@ -185,16 +186,16 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 		// Re-check if image is now in use
 		if isImageInUse(ctx, rt, img.ID, img.Tag) {
-			fmt.Println("skipped (now in use)")
+			fmt.Println(ui.Yellow("skipped (now in use)"))
 			continue
 		}
 
 		if err := rt.RemoveImage(ctx, img.ID); err != nil {
-			fmt.Printf("error: %v\n", err)
+			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
 			continue
 		}
-		fmt.Println("done")
+		fmt.Println(ui.Green("done"))
 		removedCount++
 		freedSize += img.Size
 	}

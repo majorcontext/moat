@@ -8,6 +8,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/session"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // PrepareContainer sets up staging directories and config files for Claude Code.
@@ -136,7 +137,7 @@ func (p *Provider) ResumeSession(id string) error {
 	// Touch the session to update last accessed time
 	if err := mgr.Touch(sess.ID); err != nil {
 		// Log but don't fail - this is non-critical
-		fmt.Fprintf(os.Stderr, "warning: failed to update session timestamp: %v\n", err)
+		ui.Warnf("Failed to update session timestamp: %v", err)
 	}
 
 	return nil

@@ -40,6 +40,7 @@ import (
 	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Timing constants for run lifecycle operations.
@@ -1019,10 +1020,10 @@ region = %s
 					// Use warning for agent.yaml plugins, debug for auto-discovered host settings
 					if claudeSettings.PluginSources != nil &&
 						claudeSettings.PluginSources[pluginKey] == claude.SourceAgentYAML {
-						log.Warn("skipping plugin from agent.yaml with unknown marketplace",
+						ui.Warnf("Skipping plugin %q: marketplace %q is not configured. Add it to agent.yaml under claude.marketplaces.", pluginKey, marketplace)
+						log.Debug("skipping plugin from agent.yaml with unknown marketplace",
 							"plugin", pluginKey,
-							"marketplace", marketplace,
-							"hint", "add the marketplace to agent.yaml claude.marketplaces")
+							"marketplace", marketplace)
 					} else {
 						log.Debug("skipping plugin with unknown marketplace",
 							"plugin", pluginKey,
@@ -1112,7 +1113,7 @@ region = %s
 		if exists {
 			fmt.Printf("Removing cached image %s...\n", containerImage)
 			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove image: %v\n", err)
+				ui.Warnf("Failed to remove image: %v", err)
 			}
 		}
 	}
@@ -1189,7 +1190,7 @@ region = %s
 
 			// Ensure directory exists on host
 			if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to create Claude logs directory: %v\n", err)
+				ui.Warnf("Failed to create Claude logs directory: %v", err)
 			} else {
 				// Container writes to ~/.claude/projects/-workspace/
 				// Host sees it as ~/.claude/projects/<workspace-path-encoded>/
@@ -1400,17 +1401,15 @@ region = %s
 	if dockerConfig != nil && dockerConfig.Privileged {
 		privileged = true
 		if goruntime.GOOS == "darwin" {
-			log.Warn("creating privileged container for docker:dind",
+			ui.Warn("Creating privileged container for docker:dind. On macOS, the Docker Desktop VM provides host protection.")
+			log.Debug("creating privileged container for docker:dind",
 				"platform", "macOS",
-				"isolation", "Docker Desktop VM boundary provides host protection",
-				"risk", "Can compromise Docker engine in VM, cannot access macOS host",
-				"docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
+				"isolation", "Docker Desktop VM boundary provides host protection")
 		} else {
-			log.Warn("creating privileged container for docker:dind",
+			ui.Warn("Creating privileged container for docker:dind on Linux. This grants direct host kernel access. See https://majorcontext.com/moat/concepts/sandboxing#docker-access-modes")
+			log.Debug("creating privileged container for docker:dind",
 				"platform", "Linux",
-				"risk", "CRITICAL - privileged mode grants direct host kernel access",
-				"impact", "Container can escape to host system",
-				"docs", "https://majorcontext.com/moat/concepts/sandboxing#docker-modes")
+				"risk", "privileged mode grants direct host kernel access")
 		}
 	}
 
@@ -1822,8 +1821,8 @@ region = %s
 			Additional:   opts.Config.Snapshots.Exclude.Additional,
 		})
 		if snapErr != nil {
-			// Log warning but don't fail - snapshots are best-effort
-			log.Warn("failed to initialize snapshot engine", "error", snapErr)
+			// Log debug but don't fail - snapshots are best-effort
+			log.Debug("failed to initialize snapshot engine", "error", snapErr)
 		} else {
 			r.SnapEngine = snapEngine
 		}
@@ -1911,7 +1910,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 			// explicitly requested network isolation. Without iptables, only proxy-level
 			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
 			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
 		}
@@ -1931,7 +1930,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 		if err != nil {
 			// Log but don't fail - container is running
-			fmt.Fprintf(os.Stderr, "Warning: getting port bindings: %v\n", err)
+			ui.Warnf("Getting port bindings: %v", err)
 		} else {
 			r.HostPorts = make(map[string]int)
 			services := make(map[string]string)
@@ -1944,7 +1943,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 			// Register routes
 			if len(services) > 0 {
 				if err := m.routes.Add(r.Name, services); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: registering routes: %v\n", err)
+					ui.Warnf("Registering routes: %v", err)
 				}
 			}
 		}
@@ -1961,7 +1960,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	// Create pre-run snapshot
 	if r.SnapEngine != nil && !r.DisablePreRunSnapshot {
 		if _, err := r.SnapEngine.Create(snapshot.TypePreRun, ""); err != nil {
-			log.Warn("failed to create pre-run snapshot", "error", err)
+			log.Debug("failed to create pre-run snapshot", "error", err)
 		}
 	}
 
@@ -2073,7 +2072,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
 			// Firewall setup failed - this is fatal for strict policy
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to stop container after firewall error: %v\n", stopErr)
+				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
 			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
 		}
@@ -2116,7 +2115,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting logs: %v\n", err)
+		ui.Errorf("Getting logs: %v", err)
 		return
 	}
 	defer logs.Close()
@@ -2166,7 +2165,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 			for svcName, containerID := range serviceContainers {
 				log.Debug("stopping service", "service", svcName, "container_id", containerID)
 				if err := svcMgr.StopService(ctx, container.ServiceInfo{ID: containerID}); err != nil {
-					log.Warn("failed to stop service", "service", svcName, "error", err)
+					log.Debug("failed to stop service", "service", svcName, "error", err)
 				}
 			}
 		}
@@ -2176,14 +2175,15 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	if buildkitContainerID != "" {
 		log.Debug("stopping buildkit sidecar", "container_id", buildkitContainerID)
 		if err := m.runtime.StopContainer(ctx, buildkitContainerID); err != nil {
-			log.Warn("failed to stop buildkit sidecar", "error", err)
+			log.Debug("failed to stop buildkit sidecar", "error", err)
 			// Continue anyway - try to clean up network
 		}
 	}
 
 	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
 		// Log but don't fail - container might already be stopped
-		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		ui.Warnf("%v", err)
+		log.Debug("failed to stop container", "container_id", r.ContainerID, "error", err)
 	}
 
 	// Capture logs after container stops (defense-in-depth).
@@ -2194,12 +2194,12 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 
 	// Stop the proxy server if one was created
 	if err := r.stopProxyServer(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		ui.Warnf("Stopping proxy: %v", err)
 	}
 
 	// Stop the SSH agent server if one was created
 	if err := r.stopSSHAgentServer(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
+		ui.Warnf("Stopping SSH agent proxy: %v", err)
 	}
 
 	// Unregister routes for this agent
@@ -2221,7 +2221,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Auto-remove container unless --keep was specified
 	if !keepContainer {
 		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
-			fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+			ui.Warnf("Removing container: %v", rmErr)
 		}
 	}
 
@@ -2248,7 +2248,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if err := netMgr.RemoveNetwork(ctx, networkID); err != nil {
-				log.Warn("failed to remove docker network", "error", err)
+				log.Debug("failed to remove docker network", "error", err)
 				// Non-fatal - network may have active endpoints
 			}
 		}
@@ -2287,12 +2287,12 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 
 		// Stop the proxy server if one was created
 		if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", stopErr)
+			ui.Warnf("Stopping proxy: %v", stopErr)
 		}
 
 		// Stop the SSH agent server if one was created
 		if stopErr := r.stopSSHAgentServer(); stopErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", stopErr)
+			ui.Warnf("Stopping SSH agent proxy: %v", stopErr)
 		}
 
 		// Unregister routes for this agent
@@ -2313,7 +2313,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		// Auto-remove container unless --keep was specified
 		if !keepContainer {
 			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
-				fmt.Fprintf(os.Stderr, "Removing container: %v\n", rmErr)
+				ui.Warnf("Removing container: %v", rmErr)
 			}
 		}
 
@@ -2327,7 +2327,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		// Clean up AWS temp directory
 		if r.awsTempDir != "" {
 			if rmErr := os.RemoveAll(r.awsTempDir); rmErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", rmErr)
+				ui.Warnf("Removing AWS temp dir: %v", rmErr)
 			}
 		}
 
@@ -2491,7 +2491,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 			for svcName, svcContainerID := range r.ServiceContainers {
 				log.Debug("stopping service after container exit", "service", svcName, "container_id", svcContainerID)
 				if stopErr := svcMgr.StopService(context.Background(), container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
-					log.Warn("failed to stop service", "service", svcName, "error", stopErr)
+					log.Debug("failed to stop service", "service", svcName, "error", stopErr)
 				}
 			}
 		}
@@ -2502,7 +2502,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
-				log.Warn("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
+				log.Debug("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
 			}
 		}
 	}
@@ -2542,20 +2542,20 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 	// Remove container
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		ui.Warnf("%v", err)
 	}
 
 	// Remove service containers
 	for svcName, svcContainerID := range r.ServiceContainers {
 		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: removing %s service container: %v\n", svcName, err)
+			ui.Warnf("Removing %s service container: %v", svcName, err)
 		}
 	}
 
 	// Remove BuildKit sidecar container if present
 	if r.BuildkitContainerID != "" {
 		if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: removing BuildKit sidecar: %v\n", err)
+			ui.Warnf("Removing BuildKit sidecar: %v", err)
 		}
 	}
 
@@ -2572,32 +2572,32 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 	// Stop the proxy server if one was created and still running
 	if err := r.stopProxyServer(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: stopping proxy: %v\n", err)
+		ui.Warnf("Stopping proxy: %v", err)
 	}
 
 	// Stop the SSH agent server if one was created and still running
 	if err := r.stopSSHAgentServer(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: stopping SSH agent proxy: %v\n", err)
+		ui.Warnf("Stopping SSH agent proxy: %v", err)
 	}
 
 	// Unregister routes for this agent
 	if r.Name != "" {
 		if err := m.routes.Remove(r.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: removing routes: %v\n", err)
+			ui.Warnf("Removing routes: %v", err)
 		}
 	}
 
 	// Check if we should stop the routing proxy (no more agents with ports)
 	if m.proxyLifecycle.ShouldStop() {
 		if err := m.proxyLifecycle.Stop(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stopping routing proxy: %v\n", err)
+			ui.Warnf("Stopping routing proxy: %v", err)
 		}
 	}
 
 	// Close audit store
 	if r.AuditStore != nil {
 		if err := r.AuditStore.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: closing audit store: %v\n", err)
+			ui.Warnf("Closing audit store: %v", err)
 		}
 	}
 
@@ -2611,7 +2611,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	// Clean up AWS temp directory
 	if r.awsTempDir != "" {
 		if err := os.RemoveAll(r.awsTempDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: removing AWS temp dir: %v\n", err)
+			ui.Warnf("Removing AWS temp dir: %v", err)
 		}
 	}
 
@@ -2632,7 +2632,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	// Remove run storage directory (logs, traces, metadata)
 	if r.Store != nil {
 		if err := r.Store.Remove(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: removing storage: %v\n", err)
+			ui.Warnf("Removing storage: %v", err)
 		}
 	}
 
@@ -2924,7 +2924,8 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 	}
 
 	if err != nil {
-		log.Warn("token refresh failed, keeping existing token",
+		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.provider)
+		log.Debug("token refresh failed, keeping existing token",
 			"provider", target.provider, "error", err)
 		return
 	}

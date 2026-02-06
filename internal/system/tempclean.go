@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // TempDirPattern represents a temporary directory pattern created by moat
@@ -92,10 +94,10 @@ func CleanOrphanedTempDirs(dirs []OrphanedTempDir, minAge time.Duration) error {
 	}
 
 	if len(skipped) > 0 {
-		fmt.Fprintf(os.Stderr, "Skipped %d director%s (modified since scan):\n",
+		ui.Warnf("Skipped %d director%s (modified since scan):",
 			len(skipped), pluralSuffix(len(skipped), "y", "ies"))
 		for _, path := range skipped {
-			fmt.Fprintf(os.Stderr, "  %s\n", path)
+			ui.Infof("  %s", path)
 		}
 	}
 

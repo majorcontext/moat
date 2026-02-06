@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/audit"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -98,43 +99,43 @@ func runAudit(cmd *cobra.Command, args []string) error {
 
 	// Human-readable output
 	fmt.Printf("Auditing run: %s\n", runID)
-	fmt.Println("===============================================================")
+	fmt.Println(ui.Dim("───────────────────────────────────────────────────────────────"))
 	fmt.Println()
 
-	fmt.Println("Log Integrity")
+	fmt.Println(ui.Bold("Log Integrity"))
 	if result.HashChainValid {
-		fmt.Printf("  [ok] Hash chain: %d entries, no gaps, all hashes valid\n", result.EntryCount)
+		fmt.Printf("  %s Hash chain: %d entries, no gaps, all hashes valid\n", ui.Green("[ok]"), result.EntryCount)
 	} else {
-		fmt.Printf("  [FAIL] Hash chain: INVALID\n")
+		fmt.Printf("  %s Hash chain: INVALID\n", ui.Red("[FAIL]"))
 	}
 
 	fmt.Println()
-	fmt.Println("Local Signatures")
+	fmt.Println(ui.Bold("Local Signatures"))
 	if result.AttestationCount == 0 {
-		fmt.Println("  - No attestations found")
+		fmt.Printf("  %s No attestations found\n", ui.Dim("-"))
 	} else if result.AttestationsValid {
-		fmt.Printf("  [ok] %d attestations, all signatures valid\n", result.AttestationCount)
+		fmt.Printf("  %s %d attestations, all signatures valid\n", ui.Green("[ok]"), result.AttestationCount)
 	} else {
-		fmt.Printf("  [FAIL] Attestations: INVALID\n")
+		fmt.Printf("  %s Attestations: INVALID\n", ui.Red("[FAIL]"))
 	}
 
 	fmt.Println()
-	fmt.Println("External Attestations (Sigstore/Rekor)")
+	fmt.Println(ui.Bold("External Attestations (Sigstore/Rekor)"))
 	if result.RekorProofCount == 0 {
-		fmt.Println("  - No Rekor proofs found")
+		fmt.Printf("  %s No Rekor proofs found\n", ui.Dim("-"))
 	} else {
-		fmt.Printf("  [info] %d entries anchored to Rekor (not verified - offline mode)\n", result.RekorProofCount)
+		fmt.Printf("  %s %d entries anchored to Rekor (not verified - offline mode)\n", ui.Cyan("[info]"), result.RekorProofCount)
 	}
 
 	fmt.Println()
-	fmt.Println("===============================================================")
+	fmt.Println(ui.Dim("───────────────────────────────────────────────────────────────"))
 
 	if result.Valid {
-		fmt.Println("VERDICT: [ok] INTACT - No tampering detected")
+		fmt.Printf("VERDICT: %s\n", ui.Green("[ok] INTACT — No tampering detected"))
 		return nil
 	}
 
-	fmt.Printf("VERDICT: [FAIL] TAMPERED - %s\n", result.Error)
+	fmt.Printf("VERDICT: %s\n", ui.Red(fmt.Sprintf("[FAIL] TAMPERED — %s", result.Error)))
 	// Return error so Cobra exits with code 1
 	return fmt.Errorf("tampering detected")
 }
@@ -170,50 +171,50 @@ func runVerifyBundle(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Println("Proof Bundle Verification")
-	fmt.Println("===============================================================")
+	fmt.Println(ui.Bold("Proof Bundle Verification"))
+	fmt.Println(ui.Dim("───────────────────────────────────────────────────────────────"))
 	fmt.Printf("Bundle Version: %d\n", bundle.Version)
 	fmt.Printf("Created: %s\n", bundle.CreatedAt.Format("2006-01-02 15:04:05 UTC"))
 	fmt.Printf("Entries: %d\n", result.EntryCount)
 	fmt.Println()
 
-	fmt.Println("Log Integrity")
+	fmt.Println(ui.Bold("Log Integrity"))
 	if result.HashChainValid {
-		fmt.Printf("  [ok] Hash chain: %d entries verified\n", result.EntryCount)
+		fmt.Printf("  %s Hash chain: %d entries verified\n", ui.Green("[ok]"), result.EntryCount)
 		if len(bundle.LastHash) >= 16 {
-			fmt.Printf("  [ok] Last hash: %s...\n", bundle.LastHash[:16])
+			fmt.Printf("  %s Last hash: %s...\n", ui.Green("[ok]"), bundle.LastHash[:16])
 		} else if bundle.LastHash != "" {
-			fmt.Printf("  [ok] Last hash: %s\n", bundle.LastHash)
+			fmt.Printf("  %s Last hash: %s\n", ui.Green("[ok]"), bundle.LastHash)
 		}
 	} else {
-		fmt.Println("  [FAIL] Hash chain: INVALID")
+		fmt.Printf("  %s Hash chain: INVALID\n", ui.Red("[FAIL]"))
 	}
 
 	fmt.Println()
-	fmt.Println("Local Signatures")
+	fmt.Println(ui.Bold("Local Signatures"))
 	if result.AttestationCount == 0 {
-		fmt.Println("  - No attestations in bundle")
+		fmt.Printf("  %s No attestations in bundle\n", ui.Dim("-"))
 	} else if result.AttestationsValid {
-		fmt.Printf("  [ok] %d attestation(s) verified\n", result.AttestationCount)
+		fmt.Printf("  %s %d attestation(s) verified\n", ui.Green("[ok]"), result.AttestationCount)
 	} else {
-		fmt.Println("  [FAIL] Attestation signatures: INVALID")
+		fmt.Printf("  %s Attestation signatures: INVALID\n", ui.Red("[FAIL]"))
 	}
 
 	fmt.Println()
-	fmt.Println("External Attestations (Sigstore/Rekor)")
+	fmt.Println(ui.Bold("External Attestations (Sigstore/Rekor)"))
 	if result.RekorProofCount == 0 {
-		fmt.Println("  - No Rekor proofs in bundle")
+		fmt.Printf("  %s No Rekor proofs in bundle\n", ui.Dim("-"))
 	} else {
-		fmt.Printf("  [info] %d Rekor proof(s) included (not verified - offline mode)\n", result.RekorProofCount)
+		fmt.Printf("  %s %d Rekor proof(s) included (not verified - offline mode)\n", ui.Cyan("[info]"), result.RekorProofCount)
 	}
 
 	fmt.Println()
-	fmt.Println("===============================================================")
+	fmt.Println(ui.Dim("───────────────────────────────────────────────────────────────"))
 	if result.Valid {
-		fmt.Println("VERDICT: [ok] VALID")
+		fmt.Printf("VERDICT: %s\n", ui.Green("[ok] VALID"))
 		return nil
 	}
 
-	fmt.Printf("VERDICT: [FAIL] TAMPERED - %s\n", result.Error)
+	fmt.Printf("VERDICT: %s\n", ui.Red(fmt.Sprintf("[FAIL] TAMPERED — %s", result.Error)))
 	return fmt.Errorf("bundle verification failed")
 }

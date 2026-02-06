@@ -72,12 +72,13 @@ func TestInit_StderrLevels(t *testing.T) {
 		t.Error("info should not appear on stderr in non-verbose mode")
 	}
 
-	// Warn and Error SHOULD appear
-	if !strings.Contains(output, "warn message") {
-		t.Error("warn should appear on stderr")
+	// Warn and Error should NOT appear on stderr in default mode either
+	// (user-facing output now uses the ui package, not slog)
+	if strings.Contains(output, "warn message") {
+		t.Error("warn should not appear on stderr in default mode")
 	}
-	if !strings.Contains(output, "error message") {
-		t.Error("error should appear on stderr")
+	if strings.Contains(output, "error message") {
+		t.Error("error should not appear on stderr in default mode")
 	}
 
 	Close()

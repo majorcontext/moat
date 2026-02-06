@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // credentialRefreshBuffer is the time before expiration when credentials should be refreshed.
@@ -48,7 +49,7 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	creds, err := h.getCredentials(r.Context())
 	if err != nil {
 		// Log detailed error server-side but return generic message to prevent leaking sensitive info
-		fmt.Fprintf(os.Stderr, "AWS credential fetch error: %v\n", err)
+		log.Error("AWS credential fetch error", "error", err)
 		http.Error(w, "failed to get credentials", http.StatusInternalServerError)
 		return
 	}
@@ -66,7 +67,7 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		// Response already started, can't send HTTP error. Log and continue.
-		fmt.Fprintf(os.Stderr, "Warning: failed to encode AWS credentials response: %v\n", err)
+		ui.Warnf("Failed to encode AWS credentials response: %v", err)
 	}
 }
 
