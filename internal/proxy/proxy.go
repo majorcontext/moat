@@ -174,6 +174,7 @@ func (p *Proxy) logRequest(method, url string, statusCode int, duration time.Dur
 type credentialHeader struct {
 	Name  string // Header name (e.g., "Authorization", "x-api-key")
 	Value string // Header value (e.g., "Bearer token", "sk-ant-...")
+	Grant string // Grant name for logging (e.g., "github", "anthropic")
 }
 
 // extraHeader holds an additional header to inject for a host.
@@ -266,13 +267,22 @@ func (p *Proxy) SetCredential(host, authHeader string) {
 // Use this for APIs that use non-standard header names like "x-api-key".
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
+	p.SetCredentialWithGrant(host, headerName, headerValue, "")
+}
+
+// SetCredentialWithGrant sets a credential header with grant info for logging.
+// Grant is used for structured logging to identify the credential source.
+func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for credential injection", "host", host, "header", headerName)
+		log.Debug("ignoring invalid host for credential injection",
+			"subsystem", "proxy",
+			"host", host,
+			"header", headerName)
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue}
+	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue, Grant: grant}
 }
 
 // AddExtraHeader adds an additional header to inject for a host.
@@ -413,15 +423,22 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Log the proxied request
 	if r.Method == http.MethodConnect {
-		log.Debug("proxy CONNECT",
-			"host", r.Host)
+		host, port, _ := net.SplitHostPort(r.Host)
+		log.Debug("proxy connect",
+			"subsystem", "proxy",
+			"action", "connect",
+			"host", host,
+			"port", port)
 		p.handleConnect(w, r)
 		return
 	}
 
 	log.Debug("proxy request",
+		"subsystem", "proxy",
+		"action", "forward",
 		"method", r.Method,
-		"host", r.URL.Host,
+		"host", r.URL.Hostname(),
+		"port", r.URL.Port(),
 		"path", r.URL.Path)
 	p.handleHTTP(w, r)
 }
@@ -529,8 +546,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if authInjected {
 		outReq.Header.Set(cred.Name, cred.Value)
 		log.Debug("credential injected",
+			"subsystem", "proxy",
+			"action", "inject",
+			"grant", cred.Grant,
 			"host", host,
-			"header", cred.Name)
+			"header", cred.Name,
+			"method", r.Method,
+			"path", r.URL.Path)
 	}
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
@@ -716,8 +738,12 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)
 			log.Debug("credential injected",
+				"subsystem", "proxy",
+				"action", "inject",
+				"grant", cred.Grant,
 				"host", host,
 				"header", cred.Name,
+				"method", req.Method,
 				"path", req.URL.Path)
 		}
 		// Inject any additional headers configured for this host
@@ -727,6 +753,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		}
 		if len(extraHeaders) > 0 {
 			log.Debug("extra headers injected",
+				"subsystem", "proxy",
+				"action", "inject-extra",
 				"host", host,
 				"count", len(extraHeaders))
 		}

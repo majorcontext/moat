@@ -875,6 +875,12 @@ func (m *mockProxyConfigurer) SetCredentialHeader(host, headerName, headerValue 
 	m.credentials[host] = headerName + ": " + headerValue
 }
 
+func (m *mockProxyConfigurer) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.credentials[host] = headerName + ": " + headerValue
+}
+
 func (m *mockProxyConfigurer) AddExtraHeader(string, string, string) {}
 
 func (m *mockProxyConfigurer) AddResponseTransformer(string, credential.ResponseTransformer) {}

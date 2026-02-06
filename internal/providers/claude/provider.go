@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -34,16 +33,14 @@ func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider
 	if isOAuthToken(cred.Token) {
 		// OAuth token - use Bearer auth with the real token
 		// The proxy injects this at the network layer
-		proxy.SetCredential("api.anthropic.com", "Bearer "+cred.Token)
+		proxy.SetCredentialWithGrant("api.anthropic.com", "Authorization", "Bearer "+cred.Token, "anthropic")
 
 		// Register response transformer to handle 403s on OAuth endpoints
 		// that require scopes not available in long-lived tokens
-		log.Debug("registering OAuth endpoint transformer for api.anthropic.com")
 		proxy.AddResponseTransformer("api.anthropic.com", CreateOAuthEndpointTransformer())
 	} else {
 		// Standard API key - use x-api-key header
-		log.Debug("using API key authentication for api.anthropic.com (no transformer)")
-		proxy.SetCredentialHeader("api.anthropic.com", "x-api-key", cred.Token)
+		proxy.SetCredentialWithGrant("api.anthropic.com", "x-api-key", cred.Token, "anthropic")
 	}
 }
 

@@ -43,7 +43,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 // Authorization header with the real API key.
 func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
 	// OpenAI uses Bearer token authentication for API keys
-	proxy.SetCredential("api.openai.com", "Bearer "+cred.Token)
+	proxy.SetCredentialWithGrant("api.openai.com", "Authorization", "Bearer "+cred.Token, "codex")
 }
 
 // ContainerEnv returns environment variables for OpenAI.

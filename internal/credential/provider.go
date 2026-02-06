@@ -133,6 +133,8 @@ type ProxyConfigurer interface {
 	SetCredential(host, value string)
 	// SetCredentialHeader sets a custom header for a host.
 	SetCredentialHeader(host, headerName, headerValue string)
+	// SetCredentialWithGrant sets a credential header with grant info for logging.
+	SetCredentialWithGrant(host, headerName, headerValue, grant string)
 	// AddExtraHeader adds an additional header to inject for a host.
 	AddExtraHeader(host, headerName, headerValue string)
 	// AddResponseTransformer registers a response transformer for a host.

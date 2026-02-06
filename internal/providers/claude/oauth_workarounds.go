@@ -90,8 +90,13 @@ func CreateOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, 
 		resp.Body.Close()
 
 		// Log the transformation for observability
-		log.Info("anthropic: transforming OAuth 403 to empty success",
-			"endpoint", matchedEndpoint)
+		log.Debug("response transformed",
+			"subsystem", "proxy",
+			"action", "transform",
+			"grant", "anthropic",
+			"reason", "oauth-scope-workaround",
+			"endpoint", matchedEndpoint,
+			"original_status", http.StatusForbidden)
 
 		// Return empty success response for this endpoint
 		//nolint:bodyclose // Response body will be closed by the HTTP handler
