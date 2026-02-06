@@ -4,40 +4,25 @@ package cli
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/majorcontext/moat/internal/credential"
-	"github.com/majorcontext/moat/internal/github"
+	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-// AWS grant flags
+// AWS grant flags - these need to be passed to the AWS provider
 var (
 	awsRole            string
 	awsRegion          string
 	awsSessionDuration string
 	awsExternalID      string
 )
-
-// getGitHubTokenFromEnv returns a GitHub token from environment variables.
-// Checks GITHUB_TOKEN first, then GH_TOKEN (used by gh CLI).
-func getGitHubTokenFromEnv() string {
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
-	}
-	return os.Getenv("GH_TOKEN")
-}
 
 var grantCmd = &cobra.Command{
 	Use:   "grant <provider>",
@@ -134,19 +119,28 @@ func saveCredential(cred credential.Credential) (string, error) {
 }
 
 func runGrant(cmd *cobra.Command, args []string) error {
-	providerStr := args[0]
-	provider := credential.Provider(providerStr)
+	providerName := args[0]
 
-	switch provider {
-	case credential.ProviderGitHub:
-		return grantGitHub()
-	case credential.ProviderAnthropic:
-		return grantAnthropic()
-	case credential.ProviderOpenAI:
-		return grantOpenAI()
-	case credential.ProviderAWS:
-		if awsRole == "" {
-			return fmt.Errorf(`--role is required for AWS grant
+	// Map CLI names to provider names
+	// "anthropic" is the CLI name, but the provider is registered as "claude"
+	// "openai" is the CLI name, but the provider is registered as "codex"
+	switch providerName {
+	case "anthropic":
+		providerName = "claude"
+	case "openai":
+		providerName = "codex"
+	}
+
+	// Look up provider in registry
+	prov := provider.Get(providerName)
+	if prov == nil {
+		return fmt.Errorf("unknown provider: %s\n\nAvailable providers: %s",
+			args[0], strings.Join(provider.Names(), ", "))
+	}
+
+	// For AWS, validate required flags before calling Grant
+	if providerName == "aws" && awsRole == "" {
+		return fmt.Errorf(`--role is required for AWS grant
 
 Usage: moat grant aws --role=arn:aws:iam::ACCOUNT:role/ROLE_NAME
 
@@ -155,139 +149,45 @@ Options:
   --region           AWS region (default: us-east-1)
   --session-duration Session duration (default: 15m, max: 12h)
   --external-id      External ID for role assumption`)
-		}
-		return grantAWS(awsRole, awsRegion, awsSessionDuration, awsExternalID)
-	default:
-		return fmt.Errorf("unsupported provider: %s", providerStr)
-	}
-}
-
-func grantGitHub() error {
-	reader := bufio.NewReader(os.Stdin)
-
-	// Priority 1: Environment variable
-	if token := getGitHubTokenFromEnv(); token != "" {
-		fmt.Println("Using token from environment variable")
-		return saveGitHubToken(token, github.SourceEnv)
 	}
 
-	// Priority 2: gh CLI
-	token, ghErr := getGHCLIToken()
-	if ghErr == nil && token != "" {
-		fmt.Println("Found gh CLI authentication")
-		fmt.Print("Use token from gh CLI? [Y/n]: ")
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-
-		if response == "" || response == "y" || response == "yes" {
-			return saveGitHubToken(token, github.SourceCLI)
-		}
-		fmt.Println() // spacing before prompt
-	} else if ghErr != nil && isGHCLIInstalled() {
-		// gh CLI is installed but failed - warn user
-		fmt.Printf("Note: gh CLI found but 'gh auth token' failed: %v\n", ghErr)
-		fmt.Println("You may need to run 'gh auth login' first.")
-		fmt.Println()
+	// Call the provider's Grant method
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	// Priority 3: Interactive prompt
-	fmt.Println(`Enter a GitHub Personal Access Token.
+	// For AWS, pass the CLI flags via context
+	if providerName == "aws" {
+		ctx = aws.WithGrantOptions(ctx, awsRole, awsRegion, awsSessionDuration, awsExternalID)
+	}
 
-To create one:
-  1. Visit https://github.com/settings/tokens
-  2. Click "Generate new token" → "Fine-grained token" (recommended)
-  3. Set expiration and select repositories
-  4. Under "Repository permissions", grant "Contents" read/write access
-  5. Copy the generated token`)
-	fmt.Print("Token: ")
-	tokenBytes, err := readPassword()
+	provCred, err := prov.Grant(ctx)
 	if err != nil {
-		return fmt.Errorf("reading token: %w", err)
-	}
-	inputToken := strings.TrimSpace(string(tokenBytes))
-	fmt.Println() // newline after hidden input
-
-	if inputToken == "" {
-		return fmt.Errorf("no token provided")
+		return err
 	}
 
-	return saveGitHubToken(inputToken, github.SourcePAT)
-}
-
-// getGHCLIToken retrieves the GitHub token from gh CLI if available.
-func getGHCLIToken() (string, error) {
-	cmd := exec.Command("gh", "auth", "token")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// isGHCLIInstalled checks if the gh CLI is available in PATH.
-func isGHCLIInstalled() bool {
-	_, err := exec.LookPath("gh")
-	return err == nil
-}
-
-// saveGitHubToken validates and saves a GitHub token.
-// source indicates how the token was obtained (github.SourceCLI, github.SourceEnv, or github.SourcePAT).
-func saveGitHubToken(token string, source string) error {
-	// Validate token with a simple API call
-	fmt.Println("Validating token...")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "moat")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("validating token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case 200:
-		// Success - continue
-	case 401:
-		return fmt.Errorf("invalid token (401 Unauthorized)")
-	case 403:
-		return fmt.Errorf("token validation failed (403 Forbidden) - token may lack permissions or you may be rate limited")
-	default:
-		return fmt.Errorf("unexpected status validating token: %d", resp.StatusCode)
-	}
-
-	// Parse response to show username
-	var user struct {
-		Login string `json:"login"`
-	}
-	if decodeErr := json.NewDecoder(resp.Body).Decode(&user); decodeErr == nil && user.Login != "" {
-		fmt.Printf("Authenticated as: %s\n", user.Login)
-	}
-
+	// Convert to credential.Credential for storage
 	cred := credential.Credential{
-		Provider:  credential.ProviderGitHub,
-		Token:     token,
-		CreatedAt: time.Now(),
-		Metadata:  map[string]string{credential.MetaKeyTokenSource: source},
+		Provider:  credential.Provider(provCred.Provider),
+		Token:     provCred.Token,
+		Scopes:    provCred.Scopes,
+		ExpiresAt: provCred.ExpiresAt,
+		CreatedAt: provCred.CreatedAt,
+		Metadata:  provCred.Metadata,
 	}
+
 	credPath, err := saveCredential(cred)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("GitHub credential saved to %s\n", credPath)
+
+	fmt.Printf("Credential saved to %s\n", credPath)
 	return nil
 }
 
 // readPassword reads a password from stdin without echoing.
+// This is used by grant subcommands that need to prompt for secrets.
 func readPassword() ([]byte, error) {
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
@@ -297,511 +197,4 @@ func readPassword() ([]byte, error) {
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
 	return []byte(strings.TrimSuffix(line, "\n")), err
-}
-
-func grantAnthropic() error {
-	reader := bufio.NewReader(os.Stdin)
-
-	// Check if claude is available for setup-token
-	claudeAvailable := isClaudeAvailable()
-
-	// Check for existing Claude Code credentials as option 3
-	claudeCode := &credential.ClaudeCodeCredentials{}
-	hasExistingCreds := claudeCode.HasClaudeCodeCredentials()
-
-	// If only API key is available, skip the menu
-	if !claudeAvailable && !hasExistingCreds {
-		return grantAnthropicViaAPIKey()
-	}
-
-	for {
-		// Offer choices to user
-		fmt.Println("Choose authentication method:")
-		fmt.Println()
-		if claudeAvailable {
-			fmt.Println("  1. Claude subscription (recommended)")
-			fmt.Println("     Uses 'claude setup-token' to get a long-lived OAuth token.")
-			fmt.Println("     Requires a Claude Pro/Max subscription.")
-			fmt.Println()
-		}
-		fmt.Println("  2. Anthropic API key")
-		fmt.Println("     Use an API key from console.anthropic.com")
-		fmt.Println("     Billed per token to your API account.")
-		fmt.Println()
-
-		if hasExistingCreds {
-			fmt.Println("  3. Import existing Claude Code credentials")
-			fmt.Println("     Use OAuth tokens from your local Claude Code installation.")
-			fmt.Println()
-		}
-
-		var validChoices string
-		if claudeAvailable && hasExistingCreds {
-			validChoices = "1, 2, or 3"
-		} else if claudeAvailable {
-			validChoices = "1 or 2"
-		} else {
-			// hasExistingCreds must be true (we handled !claudeAvailable && !hasExistingCreds above)
-			validChoices = "2 or 3"
-		}
-
-		fmt.Printf("Enter choice [%s]: ", validChoices)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(response)
-
-		// Default to option 1 if claude available, otherwise 2
-		if response == "" {
-			if claudeAvailable {
-				response = "1"
-			} else {
-				response = "2"
-			}
-		}
-
-		switch response {
-		case "1":
-			if !claudeAvailable {
-				fmt.Println("Claude Code is not installed. Please choose another option.")
-				continue
-			}
-			return grantAnthropicViaSetupToken()
-
-		case "2":
-			return grantAnthropicViaAPIKey()
-
-		case "3":
-			if !hasExistingCreds {
-				fmt.Println("No existing Claude Code credentials found. Please choose another option.")
-				continue
-			}
-			return grantAnthropicViaExistingCreds(claudeCode)
-
-		default:
-			fmt.Printf("Invalid choice: %s\n", response)
-			continue
-		}
-	}
-}
-
-// isClaudeAvailable checks if the claude CLI is installed.
-func isClaudeAvailable() bool {
-	cmd := exec.Command("claude", "--version")
-	return cmd.Run() == nil
-}
-
-// grantAnthropicViaSetupToken uses `claude setup-token` to get an OAuth token.
-func grantAnthropicViaSetupToken() error {
-	fmt.Println()
-	fmt.Println("Running 'claude setup-token' to obtain authentication token...")
-	fmt.Println("This may open a browser for authentication.")
-	fmt.Println()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "claude", "setup-token")
-	cmd.Stdin = os.Stdin
-
-	// Capture both stdout and stderr since the token might be on either stream
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Set environment to disable fancy terminal output
-	// This helps get clean token output without ANSI cursor movement codes
-	cmd.Env = append(os.Environ(),
-		"TERM=dumb",
-		"NO_COLOR=1",
-		"CI=1",
-	)
-
-	err := cmd.Run()
-
-	// Debug output when MOAT_DEBUG_ANTHROPIC is set
-	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
-	if debug {
-		fmt.Println("--- DEBUG: claude setup-token stdout ---")
-		fmt.Println(stdout.String())
-		fmt.Println("--- DEBUG: end stdout ---")
-		fmt.Println("--- DEBUG: claude setup-token stderr ---")
-		fmt.Println(stderr.String())
-		fmt.Println("--- DEBUG: end stderr ---")
-	}
-
-	if err != nil {
-		// Show stderr to user on failure
-		if stderr.Len() > 0 {
-			fmt.Fprintln(os.Stderr, stderr.String())
-		}
-		return fmt.Errorf("claude setup-token failed: %w", err)
-	}
-
-	// Try to extract token from stdout first, then stderr
-	combined := stdout.String() + "\n" + stderr.String()
-	token := extractOAuthToken(combined)
-	if token == "" {
-		return fmt.Errorf("could not find OAuth token in claude setup-token output")
-	}
-
-	cred := credential.Credential{
-		Provider:  credential.ProviderAnthropic,
-		Token:     token,
-		CreatedAt: time.Now(),
-	}
-	credPath, err := saveCredential(cred)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\nAnthropic credential saved to %s\n", credPath)
-	fmt.Println("\nYou can now run 'moat claude' to start Claude Code.")
-	return nil
-}
-
-// extractOAuthToken extracts the OAuth token from claude setup-token output.
-//
-// The token format is: sk-ant-oat01-<base64-data>
-// The token appears on its own line(s) between descriptive text.
-//
-// The Claude CLI output varies:
-// - Sometimes uses \n for newlines with blank lines as \n\n or \n<spaces>\n
-// - Sometimes uses \r with ANSI cursor codes: \x1b[1B (down 1), \x1b[2B (down 2 = blank line)
-//
-// Strategy:
-// 1. Find "sk-ant-oat01-" in the raw output
-// 2. Extract until we hit a "blank line" indicator:
-//   - \x1b[2B (ANSI cursor down 2+)
-//   - \n followed by whitespace-only line followed by \n
-//
-// 3. Clean the extracted block (strip ANSI codes and whitespace)
-func extractOAuthToken(output string) string {
-	debug := os.Getenv("MOAT_DEBUG_ANTHROPIC") != ""
-
-	// Find the start of the token in raw output
-	const prefix = "sk-ant-oat01-"
-	startIdx := strings.Index(output, prefix)
-	if startIdx == -1 {
-		if debug {
-			fmt.Println("--- DEBUG: No token prefix found in output")
-		}
-		return ""
-	}
-
-	// Extract until we hit a "blank line" indicator
-	endIdx := len(output)
-	for i := startIdx; i < len(output); i++ {
-		// Check for ANSI cursor down 2+ lines: \x1b[NB where N >= 2
-		// This is used by Claude CLI to create visual blank lines
-		if output[i] == '\x1b' && i+3 < len(output) && output[i+1] == '[' {
-			// Parse the number before 'B'
-			j := i + 2
-			for j < len(output) && output[j] >= '0' && output[j] <= '9' {
-				j++
-			}
-			if j < len(output) && output[j] == 'B' && j > i+2 {
-				n := 0
-				for k := i + 2; k < j; k++ {
-					n = n*10 + int(output[k]-'0')
-				}
-				if n >= 2 {
-					// Find the \r or start of this escape sequence
-					endIdx = i
-					// Back up past any preceding \r
-					for endIdx > startIdx && output[endIdx-1] == '\r' {
-						endIdx--
-					}
-					if debug {
-						fmt.Printf("--- DEBUG: Found ANSI cursor down %d at index %d, endIdx=%d\n", n, i, endIdx)
-					}
-					goto done
-				}
-			}
-		}
-
-		// Check for blank line: \n followed by only whitespace until next \n
-		if output[i] == '\n' {
-			lineStart := i + 1
-			isBlank := true
-			for j := lineStart; j < len(output); j++ {
-				c := output[j]
-				if c == '\n' {
-					// Found end of line
-					if isBlank {
-						endIdx = i
-						if debug {
-							fmt.Printf("--- DEBUG: Found blank line at index %d\n", i)
-						}
-						goto done
-					}
-					break
-				}
-				if c != ' ' && c != '\t' && c != '\r' {
-					break // Non-whitespace found, not a blank line
-				}
-			}
-		}
-	}
-done:
-
-	tokenBlock := output[startIdx:endIdx]
-	if debug {
-		fmt.Printf("--- DEBUG: Raw token block: %q\n", tokenBlock)
-	}
-
-	// Now clean the token block: strip ANSI and extract only token characters
-	cleaned := stripANSI(tokenBlock)
-	if debug {
-		fmt.Printf("--- DEBUG: After ANSI strip: %q\n", cleaned)
-	}
-
-	// Extract only valid token characters
-	var token strings.Builder
-	for i := 0; i < len(cleaned); i++ {
-		c := cleaned[i]
-		if isTokenChar(c) {
-			token.WriteByte(c)
-		}
-	}
-
-	result := token.String()
-	if debug {
-		fmt.Printf("--- DEBUG: Extracted token: %q (length: %d)\n", result, len(result))
-	}
-
-	// Validate the token looks reasonable
-	if len(result) < 60 {
-		if debug {
-			fmt.Printf("--- DEBUG: Token too short: %d chars\n", len(result))
-		}
-		return ""
-	}
-
-	return result
-}
-
-// isTokenChar returns true if c is a valid OAuth token character.
-func isTokenChar(c byte) bool {
-	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-		(c >= '0' && c <= '9') || c == '_' || c == '-'
-}
-
-// stripANSI removes ANSI escape sequences from a string.
-func stripANSI(s string) string {
-	var result strings.Builder
-	inEscape := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			// ANSI sequences end with a letter
-			if (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') {
-				inEscape = false
-			}
-			continue
-		}
-		result.WriteByte(s[i])
-	}
-	return result.String()
-}
-
-// grantAnthropicViaAPIKey prompts for an API key.
-func grantAnthropicViaAPIKey() error {
-	auth := &credential.AnthropicAuth{}
-
-	// Get API key from environment variable or interactive prompt
-	var apiKey string
-	if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
-		apiKey = envKey
-		fmt.Println("Using API key from ANTHROPIC_API_KEY environment variable")
-	} else {
-		var err error
-		apiKey, err = auth.PromptForAPIKey()
-		if err != nil {
-			return fmt.Errorf("reading API key: %w", err)
-		}
-	}
-
-	// Validate the key
-	fmt.Println("\nValidating API key...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := auth.ValidateKey(ctx, apiKey); err != nil {
-		return fmt.Errorf("validating API key: %w", err)
-	}
-	fmt.Println("API key is valid.")
-
-	cred := auth.CreateCredential(apiKey)
-	credPath, err := saveCredential(cred)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\nAnthropic API key saved to %s\n", credPath)
-	return nil
-}
-
-// grantAnthropicViaExistingCreds imports existing Claude Code credentials.
-func grantAnthropicViaExistingCreds(claudeCode *credential.ClaudeCodeCredentials) error {
-	token, _ := claudeCode.GetClaudeCodeCredentials()
-
-	fmt.Println()
-	fmt.Println("Found Claude Code credentials.")
-	if token.SubscriptionType != "" {
-		fmt.Printf("  Subscription: %s\n", token.SubscriptionType)
-	}
-	if !token.ExpiresAtTime().IsZero() {
-		if token.IsExpired() {
-			fmt.Printf("  Status: Expired (was valid until %s)\n", token.ExpiresAtTime().Format(time.RFC3339))
-			fmt.Println("\nWarning: Token has expired. You may need to re-authenticate in Claude Code.")
-			fmt.Println("Run 'claude' to refresh your credentials, then try again.")
-			return fmt.Errorf("Claude Code token has expired")
-		}
-		fmt.Printf("  Expires: %s\n", token.ExpiresAtTime().Format(time.RFC3339))
-	}
-
-	cred := claudeCode.CreateCredentialFromOAuth(token)
-	credPath, err := saveCredential(cred)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\nClaude Code credentials imported to %s\n", credPath)
-	fmt.Println("\nYou can now run 'moat claude' to start Claude Code.")
-	if !token.ExpiresAtTime().IsZero() {
-		remaining := time.Until(token.ExpiresAtTime())
-		if remaining > 24*time.Hour {
-			fmt.Printf("Token expires in %d days. Re-run 'moat grant anthropic' if it expires.\n", int(remaining.Hours()/24))
-		} else {
-			fmt.Printf("Token expires in %.0f hours. Re-run 'moat grant anthropic' if it expires.\n", remaining.Hours())
-		}
-	}
-	return nil
-}
-
-func grantOpenAI() error {
-	return grantOpenAIViaAPIKey()
-}
-
-// grantOpenAIViaAPIKey prompts for an API key.
-func grantOpenAIViaAPIKey() error {
-	auth := &credential.OpenAIAuth{}
-
-	// Get API key from environment variable or interactive prompt
-	var apiKey string
-	if envKey := os.Getenv("OPENAI_API_KEY"); envKey != "" {
-		apiKey = envKey
-		fmt.Println("Using API key from OPENAI_API_KEY environment variable")
-	} else {
-		var err error
-		apiKey, err = auth.PromptForAPIKey()
-		if err != nil {
-			return fmt.Errorf("reading API key: %w", err)
-		}
-	}
-
-	// Validate the key
-	fmt.Println("\nValidating API key...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := auth.ValidateKey(ctx, apiKey); err != nil {
-		return fmt.Errorf("validating API key: %w", err)
-	}
-	fmt.Println("API key is valid.")
-
-	cred := auth.CreateCredential(apiKey)
-	credPath, err := saveCredential(cred)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\nOpenAI API key saved to %s\n", credPath)
-	return nil
-}
-
-func grantAWS(roleARN, region, sessionDuration, externalID string) error {
-	// Parse and validate role ARN
-	awsCfg, err := credential.ParseRoleARN(roleARN)
-	if err != nil {
-		return err
-	}
-
-	// Override region if specified
-	if region != "" {
-		awsCfg.Region = region
-	}
-
-	// Validate session duration if specified
-	if sessionDuration != "" {
-		awsCfg.SessionDurationStr = sessionDuration
-		if _, sdErr := awsCfg.SessionDuration(); sdErr != nil {
-			return sdErr
-		}
-	}
-
-	awsCfg.ExternalID = externalID
-
-	// Load host AWS credentials
-	ctx := context.Background()
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(awsCfg.Region))
-	if err != nil {
-		return fmt.Errorf(`no AWS credentials found
-
-Set credentials via:
-  - AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
-  - aws configure
-  - aws sso login
-
-Error: %w`, err)
-	}
-
-	// Test AssumeRole to verify the role is assumable
-	fmt.Println("Testing role assumption...")
-	stsClient := sts.NewFromConfig(cfg)
-
-	input := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(roleARN),
-		RoleSessionName: aws.String(fmt.Sprintf("agentops-grant-test-%d", time.Now().Unix())),
-		DurationSeconds: aws.Int32(900), // 15 min for test
-	}
-	if externalID != "" {
-		input.ExternalId = aws.String(externalID)
-	}
-
-	result, err := stsClient.AssumeRole(ctx, input)
-	if err != nil {
-		return fmt.Errorf(`cannot assume role: %w
-
-Check that:
-  - The role's trust policy allows your IAM principal
-  - You have sts:AssumeRole permission
-  - The role ARN is correct`, err)
-	}
-
-	fmt.Printf("  Successfully assumed role (test session expires: %s)\n", result.Credentials.Expiration.Format("15:04:05"))
-
-	// Store the config (not credentials)
-	// We pack extra fields into Scopes for compatibility with existing storage
-	cred := credential.Credential{
-		Provider:  credential.ProviderAWS,
-		Token:     awsCfg.RoleARN, // Store role ARN in Token field
-		Scopes:    []string{awsCfg.Region, awsCfg.SessionDurationStr, awsCfg.ExternalID},
-		CreatedAt: time.Now(),
-	}
-
-	credPath, err := saveCredential(cred)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("\nAWS grant saved to %s\n", credPath)
-	fmt.Printf("\nRole:             %s\n", roleARN)
-	fmt.Printf("Region:           %s\n", awsCfg.Region)
-	if sessionDuration != "" {
-		fmt.Printf("Session duration: %s\n", sessionDuration)
-	} else {
-		fmt.Printf("Session duration: 15m (default)\n")
-	}
-	fmt.Printf("\nUse with: moat run --grant aws <agent>\n")
-
-	return nil
 }

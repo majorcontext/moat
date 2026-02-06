@@ -4,7 +4,9 @@
 package cli
 
 import (
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +28,8 @@ zero secret copying, full visibility.`,
 	SilenceUsage: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		log.Init(verbose, jsonOut)
+		// Sync dry-run state to internal/cli package for providers
+		intcli.DryRun = dryRun
 	},
 }
 
@@ -34,8 +38,20 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// RegisterProviderCLI registers CLI commands for all agent providers.
+// This must be called after providers have registered themselves (e.g., after
+// providers.RegisterAll() in main.go).
+func RegisterProviderCLI() {
+	for _, agent := range provider.Agents() {
+		agent.RegisterCLI(rootCmd)
+	}
+}
+
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "show what would happen without executing")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "output in JSON format")
+
+	// Store root command for providers that may need it
+	intcli.RootCmd = rootCmd
 }

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
@@ -18,32 +19,35 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ExecFlags holds the common flags for container execution commands.
-// These are shared between `moat run`, `moat claude`, and future tool commands.
-type ExecFlags struct {
-	Grants        []string
-	Env           []string
-	Name          string
-	Runtime       string
-	Rebuild       bool
-	KeepContainer bool
-	Detach        bool
-	Interactive   bool
-	NoSandbox     bool
-	TTYTrace      string // Path to save terminal I/O trace for debugging
-}
+// Re-export types from internal/cli for backward compatibility
+// with code in cmd/moat/cli that uses these types.
+type ExecFlags = intcli.ExecFlags
+type ExecOptions = intcli.ExecOptions
 
 // AddExecFlags adds the common execution flags to a command.
 func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
-	cmd.Flags().StringSliceVarP(&flags.Grants, "grant", "g", nil, "capabilities to grant (e.g., github, aws:s3.read)")
-	cmd.Flags().StringArrayVarP(&flags.Env, "env", "e", nil, "environment variables (KEY=VALUE)")
-	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from agent.yaml or random)")
-	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
-	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
-	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
-	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker)")
-	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
-	cmd.Flags().StringVar(&flags.TTYTrace, "tty-trace", "", "capture terminal I/O to file for debugging (e.g., session.json)")
+	intcli.AddExecFlags(cmd, flags)
+}
+
+func init() {
+	// Register the ExecuteRun function in the internal/cli globals
+	// so that provider packages can use it without import cycles.
+	intcli.ExecuteRun = executeRunWrapper
+}
+
+// executeRunWrapper wraps ExecuteRun to match the function signature in intcli.
+func executeRunWrapper(ctx context.Context, opts intcli.ExecOptions) (*intcli.ExecResult, error) {
+	r, err := ExecuteRun(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, nil
+	}
+	return &intcli.ExecResult{
+		ID:   r.ID,
+		Name: r.Name,
+	}, nil
 }
 
 // setupStatusBar creates a status bar for interactive container sessions.
@@ -84,22 +88,6 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 	}
 
 	return writer, cleanup, writer
-}
-
-// ExecOptions contains all the options needed to execute a containerized command.
-type ExecOptions struct {
-	// From flags
-	Flags ExecFlags
-
-	// Command-specific
-	Workspace   string
-	Command     []string
-	Config      *config.Config
-	Interactive bool // Can be set by flags or command logic
-	TTY         bool
-
-	// Callbacks for command-specific behavior
-	OnRunCreated func(r *run.Run) // Called after run is created, before start
 }
 
 // ttyTracer holds the state for TTY tracing during an interactive session.
@@ -159,7 +147,7 @@ func (t *ttyTracer) save() {
 // ExecuteRun runs a containerized command with the given options.
 // It handles creating the run, starting it, and managing the lifecycle.
 // Returns the run for further inspection if needed.
-func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
+func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) {
 	fmt.Println("Initializing...")
 
 	// Set runtime based on CLI flag or agent.yaml, in priority order:
@@ -209,7 +197,10 @@ func ExecuteRun(ctx context.Context, opts ExecOptions) (*run.Run, error) {
 
 	// Call the OnRunCreated callback if provided
 	if opts.OnRunCreated != nil {
-		opts.OnRunCreated(r)
+		opts.OnRunCreated(intcli.RunInfo{
+			ID:   r.ID,
+			Name: r.Name,
+		})
 	}
 
 	// Interactive mode: use StartAttached to ensure TTY is connected before process starts

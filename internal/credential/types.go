@@ -147,3 +147,32 @@ func ImpliedDependencies(grants []string) []string {
 
 	return deps
 }
+
+// ProviderCredential is a minimal interface for provider.Credential conversion.
+// This allows passing credentials to the new provider package without import cycles.
+type ProviderCredential interface {
+	GetProvider() string
+	GetToken() string
+	GetScopes() []string
+	GetExpiresAt() time.Time
+	GetCreatedAt() time.Time
+	GetMetadata() map[string]string
+}
+
+// GetProvider implements ProviderCredential.
+func (c *Credential) GetProvider() string { return string(c.Provider) }
+
+// GetToken implements ProviderCredential.
+func (c *Credential) GetToken() string { return c.Token }
+
+// GetScopes implements ProviderCredential.
+func (c *Credential) GetScopes() []string { return c.Scopes }
+
+// GetExpiresAt implements ProviderCredential.
+func (c *Credential) GetExpiresAt() time.Time { return c.ExpiresAt }
+
+// GetCreatedAt implements ProviderCredential.
+func (c *Credential) GetCreatedAt() time.Time { return c.CreatedAt }
+
+// GetMetadata implements ProviderCredential.
+func (c *Credential) GetMetadata() map[string]string { return c.Metadata }
