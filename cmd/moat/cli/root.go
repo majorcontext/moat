@@ -4,7 +4,10 @@
 package cli
 
 import (
+	"path/filepath"
+
 	intcli "github.com/majorcontext/moat/internal/cli"
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/spf13/cobra"
@@ -27,7 +30,28 @@ Core promise: moat run my-agent . just works — zero Docker knowledge,
 zero secret copying, full visibility.`,
 	SilenceUsage: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		log.Init(verbose, jsonOut)
+		// Load global config for debug settings
+		globalCfg, _ := config.LoadGlobal()
+		debugDir := filepath.Join(config.GlobalConfigDir(), "debug")
+
+		// Check if this is an interactive command
+		interactive := false
+		if cmd.Flags().Lookup("interactive") != nil {
+			interactive, _ = cmd.Flags().GetBool("interactive")
+		}
+
+		if err := log.Init(log.Options{
+			Verbose:       verbose,
+			JSONFormat:    jsonOut,
+			Interactive:   interactive,
+			DebugDir:      debugDir,
+			RetentionDays: globalCfg.Debug.RetentionDays,
+		}); err != nil {
+			// Log init failure is non-fatal - fallback to default logger
+			// Just print to stderr since logging may not be working
+			cmd.PrintErrf("Warning: failed to initialize debug logging: %v\n", err)
+		}
+
 		// Sync dry-run state to internal/cli package for providers
 		intcli.DryRun = dryRun
 	},
