@@ -988,13 +988,21 @@ moat doctor claude [flags]
 
 Compares your host Claude Code configuration against what's available in moat containers to identify authentication problems. Checks host `~/.claude.json` fields, credential status (OAuth vs API key, expiration), and field mapping via the host config allowlist.
 
+With `--test-container`, runs three progressive validation levels that short-circuit on failure:
+
+1. **Direct API call** — verifies the stored token is valid by calling the Anthropic API from the host
+2. **Proxy injection** — spins up a TLS-intercepting proxy and verifies it replaces placeholder credentials with real ones
+3. **Container test** — launches a real moat container for full end-to-end verification
+
+If level 1 fails (bad token), levels 2 and 3 are skipped. If level 2 fails (proxy issue), level 3 is skipped. This tells you exactly which layer is broken.
+
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
 | `--verbose` | Show full configuration diff and all checked fields |
 | `--json` | Output results as JSON for scripting |
-| `--test-container` | Launch a real container to test authentication end-to-end (~$0.0001 cost) |
+| `--test-container` | Run progressive token validation and container auth test (~$0.0001 per level) |
 
 **Exit codes:**
 
@@ -1002,7 +1010,7 @@ Compares your host Claude Code configuration against what's available in moat co
 |------|---------|
 | 0 | All checks passed |
 | 1 | Configuration issues detected |
-| 2 | Container authentication test failed (`--test-container` only) |
+| 2 | Token validation or container authentication test failed (`--test-container` only) |
 
 **Examples:**
 

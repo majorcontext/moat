@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 
-	// validationModel is the model used for API key validation.
+	// validationModel is the model used for token validation.
 	// Using Haiku for minimal cost during key verification.
-	validationModel = "claude-3-haiku-20240307"
+	validationModel = "claude-haiku-4-5-20251001"
 
 	// anthropicKeyPrefix is the expected prefix for Anthropic API keys.
 	anthropicKeyPrefix = "sk-ant-"
@@ -121,6 +124,87 @@ func (a *anthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 			return fmt.Errorf("API key has insufficient credits")
 		}
 		return fmt.Errorf("invalid request (status %d)", resp.StatusCode)
+	default:
+		return fmt.Errorf("API error (status %d)", resp.StatusCode)
+	}
+}
+
+// ValidateOAuthToken validates an OAuth token by making a minimal API request.
+// OAuth tokens require Bearer auth with specific beta flags, unlike API keys
+// which use the x-api-key header.
+// Returns nil if the token is valid, or an error describing the problem.
+func (a *anthropicAuth) ValidateOAuthToken(ctx context.Context, token string) error {
+	reqBody := fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, validationModel)
+	apiURL := a.apiURL()
+
+	log.Debug("validating OAuth token",
+		"subsystem", "grant",
+		"action", "validate_oauth",
+		"api_url", apiURL,
+		"model", validationModel,
+		"token_len", len(token),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+
+	start := time.Now()
+	resp, err := a.httpClient().Do(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		log.Error("OAuth validation request failed",
+			"subsystem", "grant",
+			"action", "validate_oauth",
+			"error", err,
+			"elapsed", elapsed.String(),
+		)
+		return fmt.Errorf("making request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Debug("OAuth validation response",
+		"subsystem", "grant",
+		"action", "validate_oauth",
+		"status", resp.StatusCode,
+		"elapsed", elapsed.String(),
+	)
+
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	log.Error("OAuth validation failed",
+		"subsystem", "grant",
+		"action", "validate_oauth",
+		"status", resp.StatusCode,
+		"response_body", bodyStr,
+		"elapsed", elapsed.String(),
+	)
+
+	// Check for OAuth-specific errors that indicate the endpoint requirements
+	// have changed — flag this so users know it's a moat issue, not their token.
+	if strings.Contains(bodyStr, "OAuth") {
+		return fmt.Errorf("OAuth validation failed (status %d): the Anthropic OAuth endpoint may have changed — "+
+			"try updating moat, or use 'moat doctor claude --test-container' to diagnose", resp.StatusCode)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("invalid OAuth token (check that the token is correct and not corrupted)")
+	case http.StatusForbidden:
+		return fmt.Errorf("OAuth token lacks required permissions")
 	default:
 		return fmt.Errorf("API error (status %d)", resp.StatusCode)
 	}

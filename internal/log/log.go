@@ -9,6 +9,7 @@ import (
 
 var logger *slog.Logger
 var fileWriter *FileWriter
+var verbose bool
 
 // Options configures the logger.
 type Options struct {
@@ -32,6 +33,8 @@ func Init(opts Options) error {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+
+	verbose = opts.Verbose
 
 	var handlers []slog.Handler
 
@@ -142,6 +145,13 @@ func Warn(msg string, args ...any) {
 // Error logs an error message.
 func Error(msg string, args ...any) {
 	logger.Error(msg, args...)
+}
+
+// Verbose returns true if verbose logging was enabled at init.
+// Use this to gate sensitive debug output (tokens, credentials, raw output)
+// that should only appear when the user explicitly requests verbose mode.
+func Verbose() bool {
+	return verbose
 }
 
 // With returns a logger with additional context.
