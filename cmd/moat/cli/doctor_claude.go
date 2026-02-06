@@ -647,8 +647,10 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 func analyzeNetworkAuth(requests []storage.NetworkRequest, result *containerTestResult, diag *claudeDiagnostic) {
 	hasSuccess := false
 	has401 := false
+	anthropicTotal := 0
 	for _, req := range requests {
 		if strings.Contains(req.URL, "api.anthropic.com") {
+			anthropicTotal++
 			if req.StatusCode >= 200 && req.StatusCode < 300 {
 				hasSuccess = true
 			} else if req.StatusCode == 401 {
@@ -661,14 +663,12 @@ func analyzeNetworkAuth(requests []storage.NetworkRequest, result *containerTest
 	result.APICallSucceeded = hasSuccess && !has401
 
 	if has401 {
-		for _, errMsg := range result.AuthErrors {
-			diag.Issues = append(diag.Issues, issue{
-				Severity:    "error",
-				Component:   "container-auth",
-				Description: fmt.Sprintf("API authentication failed: %s", errMsg),
-				Fix:         "Check that 'moat grant anthropic' has been run and token is valid",
-			})
-		}
+		diag.Issues = append(diag.Issues, issue{
+			Severity:    "error",
+			Component:   "container-auth",
+			Description: fmt.Sprintf("API authentication failed: %d of %d Anthropic requests returned 401", len(result.AuthErrors), anthropicTotal),
+			Fix:         "Run 'moat grant anthropic' to refresh credentials, then retry",
+		})
 	}
 
 	if result.APICallSucceeded {

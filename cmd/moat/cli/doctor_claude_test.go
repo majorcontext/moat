@@ -77,14 +77,27 @@ func TestAnalyzeNetworkAuth(t *testing.T) {
 			wantIssueCount: 0,
 		},
 		{
-			name: "multiple 401s reported individually",
+			name: "multiple 401s produce single summary issue",
 			requests: []storage.NetworkRequest{
 				{URL: "https://api.anthropic.com/v1/messages", Method: "POST", StatusCode: 401},
 				{URL: "https://api.anthropic.com/v1/complete", Method: "POST", StatusCode: 401},
 			},
 			wantSucceeded:  false,
 			wantAuthErrors: 2,
-			wantIssueCount: 2,
+			wantIssueCount: 1, // single summary, not one per 401
+		},
+		{
+			name: "summary issue includes correct counts",
+			requests: []storage.NetworkRequest{
+				{URL: "https://api.anthropic.com/v1/org/access", Method: "GET", StatusCode: 200},
+				{URL: "https://api.anthropic.com/v1/eval/sdk", Method: "POST", StatusCode: 200},
+				{URL: "https://api.anthropic.com/v1/messages?beta=true", Method: "POST", StatusCode: 401},
+				{URL: "https://api.anthropic.com/v1/messages?beta=true", Method: "POST", StatusCode: 401},
+				{URL: "https://api.anthropic.com/v1/event_logging/batch", Method: "POST", StatusCode: 401},
+			},
+			wantSucceeded:  false,
+			wantAuthErrors: 3,
+			wantIssueCount: 1,
 		},
 		{
 			name: "500 errors are not auth failures",
@@ -133,7 +146,7 @@ func TestAnalyzeNetworkAuth(t *testing.T) {
 				}
 			}
 			if authIssues != tt.wantIssueCount {
-				t.Errorf("container-auth issues = %d, want %d", authIssues, tt.wantIssueCount)
+				t.Errorf("container-auth issues = %d, want %d; issues: %v", authIssues, tt.wantIssueCount, diag.Issues)
 			}
 
 			if tt.wantSuggestions > 0 && len(diag.Suggestions) != tt.wantSuggestions {
