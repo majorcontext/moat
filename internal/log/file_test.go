@@ -65,3 +65,39 @@ func TestFileWriter_LatestSymlink(t *testing.T) {
 		t.Errorf("expected symlink to point to %s, got %s", expected, target)
 	}
 }
+
+func TestCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create old log files
+	oldDate := time.Now().AddDate(0, 0, -20).Format("2006-01-02")
+	oldFile := filepath.Join(tmpDir, oldDate+".jsonl")
+	os.WriteFile(oldFile, []byte("old"), 0644)
+
+	// Create recent log file
+	recentDate := time.Now().AddDate(0, 0, -5).Format("2006-01-02")
+	recentFile := filepath.Join(tmpDir, recentDate+".jsonl")
+	os.WriteFile(recentFile, []byte("recent"), 0644)
+
+	// Create non-log file (should be ignored)
+	otherFile := filepath.Join(tmpDir, "other.txt")
+	os.WriteFile(otherFile, []byte("other"), 0644)
+
+	// Run cleanup with 14 day retention
+	Cleanup(tmpDir, 14)
+
+	// Old file should be deleted
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Errorf("expected old file %s to be deleted", oldFile)
+	}
+
+	// Recent file should remain
+	if _, err := os.Stat(recentFile); os.IsNotExist(err) {
+		t.Errorf("expected recent file %s to remain", recentFile)
+	}
+
+	// Non-log file should remain
+	if _, err := os.Stat(otherFile); os.IsNotExist(err) {
+		t.Errorf("expected other file %s to remain", otherFile)
+	}
+}

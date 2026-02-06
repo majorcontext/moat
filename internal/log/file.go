@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -93,4 +94,39 @@ func (fw *FileWriter) updateSymlink(target string) {
 		return // Best effort
 	}
 	_ = os.Rename(tmpPath, symlinkPath) // Best effort
+}
+
+// datePattern matches YYYY-MM-DD.jsonl filenames.
+var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.jsonl$`)
+
+// Cleanup removes log files older than retentionDays.
+func Cleanup(dir string, retentionDays int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // Directory doesn't exist or can't be read
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if !datePattern.MatchString(name) {
+			continue // Not a log file
+		}
+
+		// Parse date from filename
+		dateStr := name[:10] // "YYYY-MM-DD"
+		fileDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue // Malformed, skip
+		}
+
+		if fileDate.Before(cutoff) {
+			os.Remove(filepath.Join(dir, name))
+		}
+	}
 }
