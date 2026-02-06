@@ -19,4 +19,6 @@
 //   - Container preparation (staging directories, config files)
 //   - Session management for Claude Code runs
 //   - CLI commands (moat claude, moat claude sessions)
+//   - Loading and merging Claude settings from multiple sources
+//   - Generating Dockerfile snippets for plugin installation
 package claude

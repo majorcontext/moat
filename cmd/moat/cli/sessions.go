@@ -5,10 +5,11 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/majorcontext/moat/internal/claude"
-	"github.com/majorcontext/moat/internal/codex"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/providers/claude"
+	"github.com/majorcontext/moat/internal/providers/codex"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +76,7 @@ func runAllSessions(cmd *cobra.Command, args []string) error {
 	if sessionsActiveFlag {
 		var active []sessionEntry
 		for _, e := range entries {
-			if e.State == claude.SessionStateRunning || e.State == codex.SessionStateRunning {
+			if e.State == session.StateRunning {
 				active = append(active, e)
 			}
 		}
@@ -120,20 +121,20 @@ func getClaudeSessions() ([]sessionEntry, error) {
 		for _, s := range sessions {
 			r, err := runMgr.Get(s.RunID)
 			if err != nil {
-				if s.State == claude.SessionStateRunning {
-					s.State = claude.SessionStateCompleted
-					_ = sessionMgr.UpdateState(s.ID, claude.SessionStateCompleted)
+				if s.State == session.StateRunning {
+					s.State = session.StateCompleted
+					_ = sessionMgr.UpdateState(s.ID, session.StateCompleted)
 				}
 				continue
 			}
 			var newState string
 			switch r.State {
 			case run.StateRunning:
-				newState = claude.SessionStateRunning
+				newState = session.StateRunning
 			case run.StateStopped:
-				newState = claude.SessionStateStopped
+				newState = session.StateStopped
 			default:
-				newState = claude.SessionStateCompleted
+				newState = session.StateCompleted
 			}
 			if s.State != newState {
 				s.State = newState
