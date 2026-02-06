@@ -36,6 +36,7 @@ internal/
   proxy/             TLS-intercepting proxy for credential injection and MCP relay
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
+  ui/                TTY-aware colored output and formatting helpers
 ```
 
 ### Key Flows
