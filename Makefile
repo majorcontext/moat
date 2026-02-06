@@ -27,7 +27,7 @@ test-unit: ## Run unit tests (use ARGS for filtering, e.g., ARGS='-run TestName'
 	go test $(ARGS) ./...
 
 test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
-	go test -tags=e2e -v $(ARGS) ./internal/e2e/
+	go test -tags=e2e $(ARGS) ./internal/e2e/
 
 test-bats: ## Run bats tests for Claude Code hooks
 	@which bats > /dev/null || (echo "bats not installed. Install from https://github.com/bats-core/bats-core" && exit 1)

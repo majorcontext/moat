@@ -7,23 +7,25 @@ import (
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
 )
 
-// GeneratedConfig holds paths to generated configuration files.
-type GeneratedConfig struct {
-	// StagingDir is the directory containing generated config files.
-	StagingDir string
+// WriteCodexConfig writes a minimal ~/.codex/config.toml to the staging directory.
+// This provides default settings for the Codex CLI.
+func WriteCodexConfig(stagingDir string) error {
+	// Minimal config to set up Codex with sensible defaults
+	// Using TOML format as Codex expects
+	configContent := `# Moat-generated Codex configuration
+# Real authentication is handled by the Moat proxy
 
-	// TempDir is the temporary directory to clean up when done.
-	TempDir string
-}
+[shell_environment_policy]
+inherit = "core"
+`
 
-// Cleanup removes temporary files created during config generation.
-func (g *GeneratedConfig) Cleanup() {
-	if g.TempDir != "" {
-		os.RemoveAll(g.TempDir)
+	if err := os.WriteFile(filepath.Join(stagingDir, "config.toml"), []byte(configContent), 0600); err != nil {
+		return fmt.Errorf("writing config.toml: %w", err)
 	}
+
+	return nil
 }
 
 // MCPConfig represents the MCP configuration structure for Codex.
@@ -83,11 +85,11 @@ func GenerateMCPConfig(cfg *config.Config, grants []string) ([]byte, error) {
 			}
 			switch spec.Grant {
 			case "github":
-				server.Env["GITHUB_TOKEN"] = credential.ProxyInjectedPlaceholder
+				server.Env["GITHUB_TOKEN"] = ProxyInjectedPlaceholder
 			case "openai":
-				server.Env["OPENAI_API_KEY"] = credential.ProxyInjectedPlaceholder
+				server.Env["OPENAI_API_KEY"] = ProxyInjectedPlaceholder
 			case "anthropic":
-				server.Env["ANTHROPIC_API_KEY"] = credential.ProxyInjectedPlaceholder
+				server.Env["ANTHROPIC_API_KEY"] = ProxyInjectedPlaceholder
 			}
 		}
 

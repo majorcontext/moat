@@ -19,12 +19,20 @@ Moat runs AI agents in isolated containers with credential injection and full ob
 cmd/moat/           CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
-  claude/            Claude Code provider setup (OAuth, MCP config)
+  claude/            Claude Code settings and Dockerfile generation
+  cli/               Shared CLI helpers (environment parsing, mount helpers)
+  codex/             Codex CLI settings and session tracking
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)
   image/             Runtime-based image selection (node/python/go → base image)
   log/               Structured logging (slog wrapper)
+  provider/          Provider registry and interfaces (CredentialProvider, AgentProvider)
+  providers/         Provider implementations:
+    aws/               AWS IAM role assumption and credential endpoint
+    claude/            Claude Code CLI, grants, and config generation
+    codex/             Codex CLI, grants, and config generation
+    github/            GitHub token management and refresh
   proxy/             TLS-intercepting proxy for credential injection and MCP relay
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
@@ -70,7 +78,7 @@ The proxy relay pattern works around Claude Code's HTTP client not respecting `H
 
 **Key Implementation Files:**
 - `internal/proxy/mcp.go` - Relay handler and credential injection
-- `internal/claude/provider.go` - `.claude.json` generation
+- `internal/providers/claude/config.go` - `.claude.json` generation
 - `internal/run/manager.go` - MCP setup during container creation
 - `internal/config/config.go` - `MCPServerConfig` (remote) and `MCPServerSpec` (local) types
 

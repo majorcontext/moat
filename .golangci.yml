@@ -123,6 +123,12 @@ linters:
           - revive
         text: "function-length"
 
+      # Allow util package name for internal provider utilities
+      - path: internal/provider/util/
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+
     paths:
       - vendor
 

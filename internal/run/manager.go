@@ -22,8 +22,7 @@ import (
 
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/majorcontext/moat/internal/audit"
-	"github.com/majorcontext/moat/internal/claude"
-	"github.com/majorcontext/moat/internal/codex"
+	"github.com/majorcontext/moat/internal/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
@@ -31,7 +30,9 @@ import (
 	"github.com/majorcontext/moat/internal/image"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
+	"github.com/majorcontext/moat/internal/provider"
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
+	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -356,19 +357,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// cleanupClaude is a helper to clean up Claude generated config and log any errors.
-	cleanupClaude := func(cg *claude.GeneratedConfig) {
-		if cg != nil {
-			if err := cg.Cleanup(); err != nil {
-				log.Debug("failed to cleanup Claude config during cleanup", "error", err)
-			}
-		}
-	}
-
-	// cleanupCodex is a helper to clean up Codex generated config and log any errors.
-	cleanupCodex := func(cg *codex.GeneratedConfig) {
-		if cg != nil {
-			cg.Cleanup()
+	// cleanupAgentConfig is a helper to clean up agent-generated config (via provider.ContainerConfig).
+	cleanupAgentConfig := func(cfg *provider.ContainerConfig) {
+		if cfg != nil && cfg.Cleanup != nil {
+			cfg.Cleanup()
 		}
 	}
 
@@ -398,58 +390,61 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		if err == nil {
 			for _, grant := range opts.Grants {
-				provider := credential.Provider(strings.Split(grant, ":")[0])
-				if cred, err := store.Get(provider); err == nil {
-					// Use provider-specific setup if available
-					if setup := credential.GetProviderSetup(provider); setup != nil {
-						setup.ConfigureProxy(p, cred)
-						providerEnv = append(providerEnv, setup.ContainerEnv(cred)...)
+				grantName := strings.Split(grant, ":")[0]
+				providerName := credential.Provider(grantName)
+				log.Debug("processing grant", "grant", grant, "providerName", providerName)
+				cred, getErr := store.Get(providerName)
+				if getErr != nil {
+					log.Debug("credential not found in store", "provider", providerName, "error", getErr)
+					continue
+				}
+				// Convert credential for new provider interface
+				provCred := provider.FromLegacy(cred)
 
-						// Check if this provider supports token refresh
-						if refresher, ok := setup.(credential.TokenRefresher); ok && refresher.CanRefresh(cred) {
-							refreshTargets = append(refreshTargets, refreshTarget{
-								provider:  provider,
-								refresher: refresher,
-								cred:      cred,
-								store:     store,
-							})
-						}
-					} else if provider == credential.ProviderAWS {
-						// AWS credentials are handled via credential endpoint, not header injection
-						// Parse stored config: Token=roleARN, Scopes=[region, sessionDuration, externalID]
-						awsConfig := credential.AWSConfig{
-							RoleARN: cred.Token,
-							Region:  "us-east-1",
-						}
-						if len(cred.Scopes) > 0 && cred.Scopes[0] != "" {
-							awsConfig.Region = cred.Scopes[0]
-						}
-						if len(cred.Scopes) > 1 {
-							awsConfig.SessionDurationStr = cred.Scopes[1]
-						}
-						if len(cred.Scopes) > 2 {
-							awsConfig.ExternalID = cred.Scopes[2]
-						}
+				// Use new provider registry (supports aliases like "anthropic" -> "claude")
+				prov := provider.Get(grantName)
+				if prov == nil {
+					log.Debug("provider not found in registry", "provider", grantName)
+					continue
+				}
+				prov.ConfigureProxy(p, provCred)
+				envVars := prov.ContainerEnv(provCred)
+				log.Debug("adding provider env vars", "provider", providerName, "vars", envVars)
+				providerEnv = append(providerEnv, envVars...)
 
-						sessionDuration, err := awsConfig.SessionDuration()
-						if err != nil {
-							return nil, fmt.Errorf("invalid AWS session duration: %w", err)
-						}
+				// Check if this provider supports token refresh
+				if prov.CanRefresh(provCred) {
+					refreshTargets = append(refreshTargets, refreshTarget{
+						provider:  providerName,
+						refresher: nil, // Will use new provider.Refresh method
+						cred:      cred,
+						store:     store,
+						newProv:   prov, // Store new provider for refresh
+					})
+				}
 
-						awsProvider, err := proxy.NewAWSCredentialProvider(
-							ctx,
-							awsConfig.RoleARN,
-							awsConfig.Region,
-							sessionDuration,
-							awsConfig.ExternalID,
-							"moat-"+r.ID,
-						)
-						if err != nil {
-							return nil, fmt.Errorf("creating AWS credential provider: %w", err)
-						}
-						// Store provider; handler will be set later after auth token is generated
-						r.AWSCredentialProvider = awsProvider
+				// Handle AWS endpoint provider
+				if ep := provider.GetEndpoint(string(providerName)); ep != nil {
+					// AWS credentials are handled via credential endpoint
+					// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
+					awsCfg, err := awsprov.ConfigFromCredential(provCred)
+					if err != nil {
+						return nil, fmt.Errorf("parsing AWS credential: %w", err)
 					}
+
+					awsProvider, err := proxy.NewAWSCredentialProvider(
+						ctx,
+						awsCfg.RoleARN,
+						awsCfg.Region,
+						awsCfg.SessionDuration,
+						awsCfg.ExternalID,
+						"moat-"+r.ID,
+					)
+					if err != nil {
+						return nil, fmt.Errorf("creating AWS credential provider: %w", err)
+					}
+					// Store provider; handler will be set later after auth token is generated
+					r.AWSCredentialProvider = awsProvider
 				}
 			}
 		}
@@ -893,8 +888,16 @@ region = %s
 	}
 
 	// Add implied dependencies from grants (e.g., github grant implies gh and git)
-	impliedDeps := credential.ImpliedDependencies(opts.Grants)
-	allDeps = append(allDeps, impliedDeps...)
+	// Use new provider interface (supports aliases), fall back to legacy registry
+	for _, grant := range opts.Grants {
+		grantName := strings.Split(grant, ":")[0]
+		if prov := provider.Get(grantName); prov != nil {
+			allDeps = append(allDeps, prov.ImpliedDependencies()...)
+		}
+	}
+	// Also check legacy registry for providers not yet migrated
+	legacyImpliedDeps := credential.ImpliedDependencies(opts.Grants)
+	allDeps = append(allDeps, legacyImpliedDeps...)
 
 	if len(allDeps) > 0 {
 		var err error
@@ -1033,18 +1036,18 @@ region = %s
 
 	// Determine if we need Claude init (for OAuth credentials and host files)
 	// This is triggered by:
-	// - an anthropic grant with an OAuth token, OR
+	// - a claude/anthropic grant with an OAuth token, OR
 	// - claude-code in the dependencies list (user may run Claude without credential injection)
 	var needsClaudeInit bool
-	var claudeStagingDir string
 	for _, grant := range opts.Grants {
-		provider := credential.Provider(strings.Split(grant, ":")[0])
-		if provider == credential.ProviderAnthropic {
+		providerName := credential.Provider(strings.Split(grant, ":")[0])
+		// Check for both "claude" (new) and "anthropic" (legacy) provider names
+		if providerName == "claude" || providerName == credential.ProviderAnthropic {
 			key, keyErr := credential.DefaultEncryptionKey()
 			if keyErr == nil {
 				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 				if storeErr == nil {
-					if cred, err := store.Get(provider); err == nil {
+					if cred, err := store.Get(providerName); err == nil {
 						if credential.IsOAuthToken(cred.Token) {
 							needsClaudeInit = true
 						}
@@ -1066,7 +1069,6 @@ region = %s
 	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
 	// This is triggered by an openai grant
 	var needsCodexInit bool
-	var codexStagingDir string
 	for _, grant := range opts.Grants {
 		provider := credential.Provider(strings.Split(grant, ":")[0])
 		if provider == credential.ProviderOpenAI {
@@ -1200,19 +1202,20 @@ region = %s
 			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 			if storeErr == nil {
 				for _, grant := range opts.Grants {
-					provider := credential.Provider(strings.Split(grant, ":")[0])
-					if cred, err := store.Get(provider); err == nil {
-						if setup := credential.GetProviderSetup(provider); setup != nil {
-							providerMounts, cleanupPath, mountErr := setup.ContainerMounts(cred, containerHome)
+					providerName := credential.Provider(strings.Split(grant, ":")[0])
+					if cred, err := store.Get(providerName); err == nil {
+						if prov := provider.Get(string(providerName)); prov != nil {
+							provCred := provider.FromLegacy(cred)
+							providerMounts, cleanupPath, mountErr := prov.ContainerMounts(provCred, containerHome)
 							if mountErr != nil {
-								log.Debug("failed to set up provider mounts", "provider", provider, "error", mountErr)
+								log.Debug("failed to set up provider mounts", "provider", providerName, "error", mountErr)
 							} else {
 								mounts = append(mounts, providerMounts...)
 								if cleanupPath != "" {
 									if r.ProviderCleanupPaths == nil {
 										r.ProviderCleanupPaths = make(map[string]string)
 									}
-									r.ProviderCleanupPaths[string(provider)] = cleanupPath
+									r.ProviderCleanupPaths[string(providerName)] = cleanupPath
 								}
 							}
 						}
@@ -1222,62 +1225,38 @@ region = %s
 		}
 	}
 
-	// Set up Claude staging directory for init script
-	// This includes OAuth credentials, host files, and optionally plugin settings
-	var claudeGenerated *claude.GeneratedConfig
+	// Set up Claude staging directory for init script using the provider interface.
+	// This includes OAuth credentials, host files, and MCP server configuration.
+	var claudeConfig *provider.ContainerConfig
 	if needsClaudeInit || (opts.Config != nil) {
 		// claudeSettings was loaded earlier for plugin detection
-
-		// Determine if we need to set up plugins/marketplaces
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
-
-		// Check if we're running Claude Code (need to copy onboarding state)
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
 
-		// We need a staging directory if:
+		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
 		// - hasPlugins (plugin settings to configure)
 		// - isClaudeCode (need to copy onboarding state from host)
 		if needsClaudeInit || hasPlugins || isClaudeCode {
-			// Create staging directory
-			var stagingErr error
-			claudeStagingDir, stagingErr = os.MkdirTemp("", "moat-claude-staging-*")
-			if stagingErr != nil {
+			claudeProvider := provider.GetAgent("claude")
+			if claudeProvider == nil {
 				cleanupProxy(proxyServer)
-				return nil, fmt.Errorf("creating Claude staging directory: %w", stagingErr)
+				return nil, fmt.Errorf("claude provider not registered")
 			}
-			// Use a flag to track cleanup responsibility. The defer cleans up on error.
-			// Once claudeGenerated is assigned, it takes over cleanup, so we set the flag false.
-			stagingNeedsCleanup := true
-			defer func() {
-				if stagingNeedsCleanup && claudeStagingDir != "" {
-					os.RemoveAll(claudeStagingDir)
-				}
-			}()
 
 			// Build MCP server configuration for .claude.json
 			// Use proxy relay URLs instead of direct MCP server URLs to work around
 			// Claude Code's MCP client not respecting HTTP_PROXY environment variables.
-			mcpServers := make(map[string]claude.MCPServerForContainer)
+			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
-				// Get proxy address - use runtime's host address and proxy's port
 				proxyAddr := fmt.Sprintf("%s:%s", m.runtime.GetHostAddress(), proxyServer.Port())
-
 				for _, mcp := range opts.Config.MCP {
 					if mcp.Auth == nil {
 						continue // Skip servers without auth
 					}
-
-					// Point MCP client directly at proxy relay endpoint
-					// Format: http://proxy-host:port/mcp/{server-name}
 					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
-
-					// Provide the original header with a stub value so Claude Code thinks
-					// it has authentication configured. The proxy relay will ignore this
-					// stub and inject the real credential.
-					mcpServers[mcp.Name] = claude.MCPServerForContainer{
-						Type: "http",
-						URL:  relayURL,
+					mcpServers[mcp.Name] = provider.MCPServerConfig{
+						URL: relayURL,
 						Headers: map[string]string{
 							mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
 						},
@@ -1285,37 +1264,41 @@ region = %s
 				}
 			}
 
-			// Read host's ~/.claude.json for org context, feature flags, etc.
-			var hostConfig map[string]any
-			if hostHome, err := os.UserHomeDir(); err == nil {
-				hostConfig, err = claude.ReadHostConfig(filepath.Join(hostHome, ".claude.json"))
-				if err != nil {
-					log.Debug("could not read host .claude.json", "error", err)
-				}
-			}
-
-			// Write minimal Claude config to skip onboarding and configure MCP servers
-			if err := claude.WriteClaudeConfig(claudeStagingDir, mcpServers, hostConfig); err != nil {
-				cleanupProxy(proxyServer)
-				return nil, fmt.Errorf("writing Claude config: %w", err)
-			}
-
-			// Populate with OAuth credentials if needed (only for OAuth tokens)
+			// Get Claude credential for PrepareContainer
+			var claudeCred *provider.Credential
 			if needsClaudeInit {
 				key, keyErr := credential.DefaultEncryptionKey()
 				if keyErr == nil {
 					store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 					if storeErr == nil {
-						if cred, err := store.Get(credential.ProviderAnthropic); err == nil {
-							anthropicSetup := &claude.AnthropicSetup{}
-							if err := anthropicSetup.PopulateStagingDir(cred, claudeStagingDir); err != nil {
-								cleanupProxy(proxyServer)
-								return nil, fmt.Errorf("populating Claude staging directory: %w", err)
-							}
+						// Try "claude" first, fall back to "anthropic" (legacy)
+						cred, err := store.Get(credential.Provider("claude"))
+						if err != nil {
+							cred, err = store.Get(credential.ProviderAnthropic)
+						}
+						if err == nil {
+							claudeCred = provider.FromLegacy(cred)
 						}
 					}
 				}
 			}
+
+			// Call provider to prepare container config
+			var prepErr error
+			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
+				Credential:    claudeCred,
+				ContainerHome: containerHome,
+				MCPServers:    mcpServers,
+				// HostConfig is read automatically by the provider if nil
+			})
+			if prepErr != nil {
+				cleanupProxy(proxyServer)
+				return nil, fmt.Errorf("preparing Claude container config: %w", prepErr)
+			}
+
+			// Add mounts and env vars from provider
+			mounts = append(mounts, claudeConfig.Mounts...)
+			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
 			// Note: Plugins are now installed during image build (via Dockerfile RUN commands),
 			// not at runtime. The hasPlugins flag is used only for logging.
@@ -1324,92 +1307,53 @@ region = %s
 					"plugins", len(claudeSettings.EnabledPlugins),
 					"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
 			}
-
-			// Transfer cleanup responsibility to claudeGenerated.
-			// The defer no longer needs to clean up since claudeGenerated.Cleanup() will handle it.
-			stagingNeedsCleanup = false
-			claudeGenerated = &claude.GeneratedConfig{
-				StagingDir: claudeStagingDir,
-				TempDir:    claudeStagingDir,
-			}
-
-			// Mount staging directory
-			mounts = append(mounts, container.MountConfig{
-				Source:   claudeStagingDir,
-				Target:   claude.ClaudeInitMountPath,
-				ReadOnly: true,
-			})
-
-			// Set env var for moat-init script
-			proxyEnv = append(proxyEnv, "MOAT_CLAUDE_INIT="+claude.ClaudeInitMountPath)
 		}
 	}
 
-	// Set up Codex staging directory for init script
-	// This includes auth config for ChatGPT subscription tokens
-	var codexGenerated *codex.GeneratedConfig
+	// Set up Codex staging directory for init script using the provider interface.
+	// This includes auth config for OpenAI tokens.
+	var codexConfig *provider.ContainerConfig
 	if needsCodexInit || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
-		// Create staging directory
-		var stagingErr error
-		codexStagingDir, stagingErr = os.MkdirTemp("", "moat-codex-staging-*")
-		if stagingErr != nil {
+		codexProvider := provider.GetAgent("codex")
+		if codexProvider == nil {
 			cleanupProxy(proxyServer)
-			cleanupClaude(claudeGenerated)
-			return nil, fmt.Errorf("creating Codex staging directory: %w", stagingErr)
-		}
-		// Use a flag to track cleanup responsibility. The defer cleans up on error.
-		codexStagingNeedsCleanup := true
-		defer func() {
-			if codexStagingNeedsCleanup && codexStagingDir != "" {
-				os.RemoveAll(codexStagingDir)
-			}
-		}()
-
-		// Write minimal Codex config
-		if err := codex.WriteCodexConfig(codexStagingDir); err != nil {
-			cleanupProxy(proxyServer)
-			cleanupClaude(claudeGenerated)
-			return nil, fmt.Errorf("writing Codex config: %w", err)
+			cleanupAgentConfig(claudeConfig)
+			return nil, fmt.Errorf("codex provider not registered")
 		}
 
-		// Populate with auth credentials if needed (only for ChatGPT subscription tokens)
+		// Get Codex credential for PrepareContainer
+		var codexCred *provider.Credential
 		if needsCodexInit {
 			key, keyErr := credential.DefaultEncryptionKey()
 			if keyErr == nil {
 				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 				if storeErr == nil {
 					if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
-						openaiSetup := &codex.OpenAISetup{}
-						if err := openaiSetup.PopulateStagingDir(cred, codexStagingDir); err != nil {
-							cleanupProxy(proxyServer)
-							cleanupClaude(claudeGenerated)
-							return nil, fmt.Errorf("populating Codex staging directory: %w", err)
-						}
+						codexCred = provider.FromLegacy(cred)
 					}
 				}
 			}
 		}
 
-		// Transfer cleanup responsibility to codexGenerated
-		codexStagingNeedsCleanup = false
-		codexGenerated = &codex.GeneratedConfig{
-			StagingDir: codexStagingDir,
-			TempDir:    codexStagingDir,
+		// Call provider to prepare container config
+		var prepErr error
+		codexConfig, prepErr = codexProvider.PrepareContainer(ctx, provider.PrepareOpts{
+			Credential:    codexCred,
+			ContainerHome: containerHome,
+		})
+		if prepErr != nil {
+			cleanupProxy(proxyServer)
+			cleanupAgentConfig(claudeConfig)
+			return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)
 		}
 
-		// Mount staging directory
-		mounts = append(mounts, container.MountConfig{
-			Source:   codexStagingDir,
-			Target:   codex.CodexInitMountPath,
-			ReadOnly: true,
-		})
-
-		// Set env var for moat-init script
-		proxyEnv = append(proxyEnv, "MOAT_CODEX_INIT="+codex.CodexInitMountPath)
+		// Add mounts and env vars from provider
+		mounts = append(mounts, codexConfig.Mounts...)
+		proxyEnv = append(proxyEnv, codexConfig.Env...)
 	}
 
 	// MCP servers are now configured via .claude.json in the staging directory
-	// (see claude.WriteClaudeConfig above), not via environment variables.
+	// (handled by the claude provider's PrepareContainer), not via environment variables.
 
 	// Add NET_ADMIN capability if firewall is enabled (needed for iptables)
 	var capAdd []string
@@ -1470,16 +1414,16 @@ region = %s
 		if netMgr == nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.runtime.Type())
 		}
 		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
 		if netErr != nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("failed to create Docker network for buildkit sidecar: %w", netErr)
 		}
 		networkID = netID
@@ -1521,8 +1465,8 @@ region = %s
 			}
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.runtime.Type())
 		}
 		buildkitContainerID, sidecarErr := sidecarMgr.StartSidecar(ctx, sidecarCfg)
@@ -1534,8 +1478,8 @@ region = %s
 			}
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("failed to start buildkit sidecar: %w\n\nEnsure Docker can access Docker Hub to pull %s", sidecarErr, buildkitCfg.SidecarImage)
 		}
 
@@ -1558,8 +1502,8 @@ region = %s
 			}
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("buildkit sidecar failed to become ready within 10 seconds")
 		}
 
@@ -1577,8 +1521,8 @@ region = %s
 		if svcMgr == nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("service dependencies require a runtime with service support\n\n" +
 				"Either:\n  - Use Docker or Apple container runtime\n  - Install services on your host and set MOAT_*_URL manually")
 		}
@@ -1592,8 +1536,8 @@ region = %s
 			if err := opts.Config.ValidateServices(serviceNames); err != nil {
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, err
 			}
 		}
@@ -1604,8 +1548,8 @@ region = %s
 			if netMgr == nil {
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, fmt.Errorf("service dependencies require network support")
 			}
 			networkName := fmt.Sprintf("moat-%s", r.ID)
@@ -1614,8 +1558,8 @@ region = %s
 			if netErr != nil {
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, fmt.Errorf("creating service network: %w", netErr)
 			}
 			r.NetworkID = networkID
@@ -1647,8 +1591,8 @@ region = %s
 				cleanupServices()
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
 			}
 
@@ -1657,8 +1601,8 @@ region = %s
 				cleanupServices()
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, fmt.Errorf("starting %s service: %w", dep.Name, err)
 			}
 
@@ -1684,8 +1628,8 @@ region = %s
 				cleanupServices()
 				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
-				cleanupClaude(claudeGenerated)
-				cleanupCodex(codexGenerated)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
 				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
 					"Service container logs:\n  moat logs %s --service %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
@@ -1767,19 +1711,19 @@ region = %s
 		// Clean up proxy servers if container creation fails
 		cleanupProxy(proxyServer)
 		cleanupSSH(sshServer)
-		cleanupClaude(claudeGenerated)
-		cleanupCodex(codexGenerated)
+		cleanupAgentConfig(claudeConfig)
+		cleanupAgentConfig(codexConfig)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
 	r.SSHAgentServer = sshServer
-	if claudeGenerated != nil {
-		r.ClaudeConfigTempDir = claudeGenerated.TempDir
+	if claudeConfig != nil {
+		r.ClaudeConfigTempDir = claudeConfig.StagingDir
 	}
-	if codexGenerated != nil {
-		r.CodexConfigTempDir = codexGenerated.TempDir
+	if codexConfig != nil {
+		r.CodexConfigTempDir = codexConfig.StagingDir
 	}
 
 	// Ensure proxy is running if we have ports to expose
@@ -1791,8 +1735,8 @@ region = %s
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupProxy(proxyServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
@@ -1801,8 +1745,8 @@ region = %s
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupProxy(proxyServer)
-			cleanupClaude(claudeGenerated)
-			cleanupCodex(codexGenerated)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
 	}
@@ -1815,8 +1759,8 @@ region = %s
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
 		cleanupProxy(proxyServer)
-		cleanupClaude(claudeGenerated)
-		cleanupCodex(codexGenerated)
+		cleanupAgentConfig(claudeConfig)
+		cleanupAgentConfig(codexConfig)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
@@ -1840,8 +1784,8 @@ region = %s
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
 		cleanupProxy(proxyServer)
-		cleanupClaude(claudeGenerated)
-		cleanupCodex(codexGenerated)
+		cleanupAgentConfig(claudeConfig)
+		cleanupAgentConfig(codexConfig)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -2254,9 +2198,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	}
 
 	// Clean up provider resources
-	for provider, cleanupPath := range providerCleanupPaths {
-		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
-			setup.Cleanup(cleanupPath)
+	for providerName, cleanupPath := range providerCleanupPaths {
+		if prov := provider.Get(providerName); prov != nil {
+			prov.Cleanup(cleanupPath)
 		}
 	}
 
@@ -2346,9 +2290,9 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		}
 
 		// Clean up provider resources
-		for provider, cleanupPath := range providerCleanupPaths {
-			if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
-				setup.Cleanup(cleanupPath)
+		for providerName, cleanupPath := range providerCleanupPaths {
+			if prov := provider.Get(providerName); prov != nil {
+				prov.Cleanup(cleanupPath)
 			}
 		}
 
@@ -2630,9 +2574,9 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	}
 
 	// Clean up provider resources
-	for provider, cleanupPath := range r.ProviderCleanupPaths {
-		if setup := credential.GetProviderSetup(credential.Provider(provider)); setup != nil {
-			setup.Cleanup(cleanupPath)
+	for providerName, cleanupPath := range r.ProviderCleanupPaths {
+		if prov := provider.Get(providerName); prov != nil {
+			prov.Cleanup(cleanupPath)
 		}
 	}
 
@@ -2884,9 +2828,10 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 // refreshTarget holds the state for a single refreshable credential.
 type refreshTarget struct {
 	provider  credential.Provider
-	refresher credential.TokenRefresher
+	refresher credential.TokenRefresher // Legacy refresher (deprecated, may be nil)
 	cred      *credential.Credential
 	store     credential.Store
+	newProv   provider.CredentialProvider // New provider interface (preferred)
 }
 
 // runTokenRefreshLoop periodically re-acquires tokens from their original source.
@@ -2922,7 +2867,34 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	updated, err := target.refresher.RefreshCredential(ctx, p, target.cred)
+	var updated *credential.Credential
+	var err error
+
+	// Use new provider interface if available
+	if target.newProv != nil {
+		provCred := provider.FromLegacy(target.cred)
+		newCred, refreshErr := target.newProv.Refresh(ctx, p, provCred)
+		if refreshErr != nil {
+			err = refreshErr
+		} else if newCred != nil {
+			// Convert back to credential.Credential
+			updated = &credential.Credential{
+				Provider:  target.provider,
+				Token:     newCred.Token,
+				Scopes:    newCred.Scopes,
+				ExpiresAt: newCred.ExpiresAt,
+				CreatedAt: newCred.CreatedAt,
+				Metadata:  newCred.Metadata,
+			}
+		}
+	} else if target.refresher != nil {
+		// Fall back to legacy refresher
+		updated, err = target.refresher.RefreshCredential(ctx, p, target.cred)
+	} else {
+		log.Warn("no refresh method available", "provider", target.provider)
+		return
+	}
+
 	if err != nil {
 		log.Warn("token refresh failed, keeping existing token",
 			"provider", target.provider, "error", err)
@@ -2930,7 +2902,7 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 	}
 
 	// Token unchanged — no-op
-	if updated.Token == target.cred.Token {
+	if updated == nil || updated.Token == target.cred.Token {
 		return
 	}
 
@@ -2950,11 +2922,20 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 
 // minRefreshInterval returns the shortest refresh interval across all targets.
 func minRefreshInterval(targets []refreshTarget) time.Duration {
-	min := targets[0].refresher.RefreshInterval()
-	for _, t := range targets[1:] {
-		if d := t.refresher.RefreshInterval(); d < min {
+	var min time.Duration
+	for i, t := range targets {
+		var d time.Duration
+		if t.newProv != nil {
+			d = t.newProv.RefreshInterval()
+		} else if t.refresher != nil {
+			d = t.refresher.RefreshInterval()
+		}
+		if i == 0 || (d > 0 && d < min) {
 			min = d
 		}
+	}
+	if min == 0 {
+		min = 30 * time.Minute // Default fallback
 	}
 	return min
 }

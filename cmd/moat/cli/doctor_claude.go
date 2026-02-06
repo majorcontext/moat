@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/majorcontext/moat/internal/claude"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
@@ -305,7 +305,7 @@ func checkContainerConfig(diag *claudeDiagnostic) error {
 	}
 
 	// Read host config
-	hostConfig, err := claude.ReadHostConfig(filepath.Join(homeDir, ".claude.json"))
+	hostConfig, err := claudeprov.ReadHostConfig(filepath.Join(homeDir, ".claude.json"))
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ func checkContainerConfig(diag *claudeDiagnostic) error {
 
 	// Determine which fields would be copied
 	allowlistSet := make(map[string]bool)
-	for _, field := range claude.HostConfigAllowlist {
+	for _, field := range claudeprov.HostConfigAllowlist {
 		allowlistSet[field] = true
 		if _, exists := hostConfig[field]; exists {
 			diag.ContainerConfigFields = append(diag.ContainerConfigFields, field)
@@ -329,7 +329,7 @@ func checkContainerConfig(diag *claudeDiagnostic) error {
 	sort.Strings(diag.ContainerConfigFields)
 
 	// Check that all allowlisted fields are present in host config
-	for _, field := range claude.HostConfigAllowlist {
+	for _, field := range claudeprov.HostConfigAllowlist {
 		if _, exists := hostConfig[field]; !exists {
 			// Skip fields that are optional or set by moat:
 			// - mcpServers: configured via agent.yaml, not copied from host

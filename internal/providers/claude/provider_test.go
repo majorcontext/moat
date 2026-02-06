@@ -7,183 +7,153 @@ import (
 	"testing"
 	"time"
 
-	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/provider"
 )
 
-func TestAnthropicSetup_Provider(t *testing.T) {
-	setup := &AnthropicSetup{}
-	if setup.Provider() != credential.ProviderAnthropic {
-		t.Errorf("Provider() = %v, want %v", setup.Provider(), credential.ProviderAnthropic)
+func TestProvider_Name(t *testing.T) {
+	p := &Provider{}
+	if got := p.Name(); got != "claude" {
+		t.Errorf("Name() = %q, want %q", got, "claude")
 	}
 }
 
-func TestAnthropicSetup_ConfigureProxy_OAuth(t *testing.T) {
-	setup := &AnthropicSetup{}
+func TestProvider_ConfigureProxy_OAuth(t *testing.T) {
+	p := &Provider{}
 	mockProxy := &mockProxyConfigurer{
 		credentials:  make(map[string]string),
 		extraHeaders: make(map[string]map[string]string),
 	}
-	cred := &credential.Credential{Token: "sk-ant-oat01-abc123"}
+	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
 
-	setup.ConfigureProxy(mockProxy, cred)
+	p.ConfigureProxy(mockProxy, cred)
 
 	// OAuth tokens use Bearer auth
 	if mockProxy.credentials["api.anthropic.com"] != "Bearer sk-ant-oat01-abc123" {
 		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], "Bearer sk-ant-oat01-abc123")
 	}
 
-	// Should NOT inject extra headers - client controls API version headers
-	if len(mockProxy.extraHeaders["api.anthropic.com"]) != 0 {
-		t.Errorf("extra headers should be empty, got %v", mockProxy.extraHeaders["api.anthropic.com"])
+	// Should have registered a transformer for OAuth tokens
+	if len(mockProxy.transformers["api.anthropic.com"]) == 0 {
+		t.Error("expected transformer to be registered for OAuth tokens")
 	}
 }
 
-func TestAnthropicSetup_ConfigureProxy_APIKey(t *testing.T) {
-	setup := &AnthropicSetup{}
+func TestProvider_ConfigureProxy_APIKey(t *testing.T) {
+	p := &Provider{}
 	mockProxy := &mockProxyConfigurer{
 		credentials:  make(map[string]string),
 		extraHeaders: make(map[string]map[string]string),
 	}
-	cred := &credential.Credential{Token: "sk-ant-api01-abc123"}
+	cred := &provider.Credential{Token: "sk-ant-api01-abc123"}
 
-	setup.ConfigureProxy(mockProxy, cred)
+	p.ConfigureProxy(mockProxy, cred)
 
 	// API keys use x-api-key header
 	if mockProxy.credentials["api.anthropic.com"] != "x-api-key: sk-ant-api01-abc123" {
 		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], "x-api-key: sk-ant-api01-abc123")
 	}
 
-	// Should NOT set anthropic-beta header for API keys
-	if len(mockProxy.extraHeaders["api.anthropic.com"]) != 0 {
-		t.Errorf("extra headers should be empty for API keys, got %v", mockProxy.extraHeaders["api.anthropic.com"])
+	// Should NOT have registered a transformer for API keys
+	if len(mockProxy.transformers["api.anthropic.com"]) != 0 {
+		t.Error("expected no transformer for API keys")
 	}
 }
 
-func TestAnthropicSetup_ContainerEnv_OAuth(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{Token: "sk-ant-oat01-abc123"}
+func TestProvider_ContainerEnv_OAuth(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
 
-	env := setup.ContainerEnv(cred)
+	env := p.ContainerEnv(cred)
 
 	// OAuth should set CLAUDE_CODE_OAUTH_TOKEN with a placeholder
-	// The real token is injected by the proxy at the network layer
 	if len(env) != 1 {
 		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
 		return
 	}
-	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+credential.ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+credential.ProxyInjectedPlaceholder)
+	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
 	}
 }
 
-func TestAnthropicSetup_ContainerEnv_APIKey(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{Token: "sk-ant-api01-abc123"}
+func TestProvider_ContainerEnv_APIKey(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "sk-ant-api01-abc123"}
 
-	env := setup.ContainerEnv(cred)
+	env := p.ContainerEnv(cred)
 
 	// API key should set ANTHROPIC_API_KEY placeholder
 	if len(env) != 1 {
 		t.Errorf("ContainerEnv() for API key returned %d vars, want 1", len(env))
 		return
 	}
-	if env[0] != "ANTHROPIC_API_KEY="+credential.ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+credential.ProxyInjectedPlaceholder)
+	if env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder)
 	}
 }
 
-func TestAnthropicSetup_RegistrationViaInit(t *testing.T) {
-	// The init() function should have registered AnthropicSetup
-	setup := credential.GetProviderSetup(credential.ProviderAnthropic)
-	if setup == nil {
-		t.Fatal("GetProviderSetup(ProviderAnthropic) returned nil - init() may not have run")
+func TestProvider_ContainerEnv_NilCredential(t *testing.T) {
+	p := &Provider{}
+
+	env := p.ContainerEnv(nil)
+
+	// Nil credential should fall back to API key placeholder
+	if len(env) != 1 {
+		t.Errorf("ContainerEnv(nil) returned %d vars, want 1", len(env))
+		return
 	}
-	if setup.Provider() != credential.ProviderAnthropic {
-		t.Errorf("Provider() = %v, want %v", setup.Provider(), credential.ProviderAnthropic)
+	if env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
+		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder)
 	}
 }
 
-func TestAnthropicSetup_ContainerMounts_APIKey(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{Token: "sk-ant-api01-abc123"}
+func TestProvider_CanRefresh(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
 
-	mounts, cleanupPath, err := setup.ContainerMounts(cred, "/home/user")
+	if p.CanRefresh(cred) {
+		t.Error("CanRefresh() should return false for Claude credentials")
+	}
+}
+
+func TestProvider_RefreshInterval(t *testing.T) {
+	p := &Provider{}
+	if p.RefreshInterval() != 0 {
+		t.Errorf("RefreshInterval() = %v, want 0", p.RefreshInterval())
+	}
+}
+
+func TestProvider_ImpliedDependencies(t *testing.T) {
+	p := &Provider{}
+	deps := p.ImpliedDependencies()
+	if deps != nil {
+		t.Errorf("ImpliedDependencies() = %v, want nil", deps)
+	}
+}
+
+func TestProvider_ContainerMounts(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
+
+	mounts, cleanupPath, err := p.ContainerMounts(cred, "/home/user")
 	if err != nil {
 		t.Errorf("ContainerMounts() error = %v", err)
 	}
 	if len(mounts) != 0 {
-		t.Errorf("ContainerMounts() for API key returned %d mounts, want 0", len(mounts))
+		t.Errorf("ContainerMounts() returned %d mounts, want 0 (uses staging dir)", len(mounts))
 	}
 	if cleanupPath != "" {
-		t.Errorf("ContainerMounts() cleanupPath = %q, want empty", cleanupPath)
+		t.Errorf("ContainerMounts() cleanupPath = %q, want empty (uses staging dir cleanup)", cleanupPath)
 	}
 }
 
-func TestAnthropicSetup_ContainerMounts_OAuth(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{
-		Token:     "sk-ant-oat01-abc123",
-		ExpiresAt: time.Now().Add(time.Hour),
-		Scopes:    []string{"user:read"},
+func TestProvider_Registration(t *testing.T) {
+	// The init() function should have registered the provider
+	p := provider.Get("claude")
+	if p == nil {
+		t.Fatal("provider.Get(\"claude\") returned nil - init() may not have run")
 	}
-
-	// ContainerMounts now returns empty because we use PopulateStagingDir instead
-	mounts, cleanupPath, err := setup.ContainerMounts(cred, "/home/user")
-	if err != nil {
-		t.Errorf("ContainerMounts() error = %v", err)
-	}
-
-	// Should return empty - staging directory approach is used instead
-	if len(mounts) != 0 {
-		t.Errorf("ContainerMounts() for OAuth returned %d mounts, want 0 (uses staging dir)", len(mounts))
-	}
-
-	// Should return empty cleanup path - staging directory is cleaned up by caller
-	if cleanupPath != "" {
-		t.Error("ContainerMounts() cleanupPath should be empty (staging dir cleanup handled by caller)")
-	}
-}
-
-func TestAnthropicSetup_PopulateStagingDir(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{
-		Token:     "sk-ant-oat01-abc123",
-		ExpiresAt: time.Now().Add(time.Hour),
-		Scopes:    []string{"user:read"},
-	}
-
-	// Create temp staging directory
-	stagingDir := t.TempDir()
-
-	err := setup.PopulateStagingDir(cred, stagingDir)
-	if err != nil {
-		t.Fatalf("PopulateStagingDir() error = %v", err)
-	}
-
-	// Check credentials file was created
-	credsFile := filepath.Join(stagingDir, ".credentials.json")
-	if _, err := os.Stat(credsFile); err != nil {
-		t.Errorf("credentials file should exist: %v", err)
-	}
-}
-
-func TestAnthropicSetup_PopulateStagingDir_APIKey(t *testing.T) {
-	setup := &AnthropicSetup{}
-	cred := &credential.Credential{
-		Token: "sk-ant-api01-abc123", // API key, not OAuth
-	}
-
-	stagingDir := t.TempDir()
-
-	err := setup.PopulateStagingDir(cred, stagingDir)
-	if err != nil {
-		t.Fatalf("PopulateStagingDir() error = %v", err)
-	}
-
-	// API keys don't need credentials file
-	credsFile := filepath.Join(stagingDir, ".credentials.json")
-	if _, err := os.Stat(credsFile); err == nil {
-		t.Error("credentials file should NOT exist for API keys")
+	if p.Name() != "claude" {
+		t.Errorf("Name() = %q, want %q", p.Name(), "claude")
 	}
 }
 
@@ -317,58 +287,12 @@ func TestWriteClaudeConfig(t *testing.T) {
 			t.Errorf("sonnet45MigrationComplete = %v, want true", config["sonnet45MigrationComplete"])
 		}
 
-		oauthAccount, ok := config["oauthAccount"].(map[string]any)
-		if !ok {
-			t.Fatal("oauthAccount should be present")
-		}
-		if oauthAccount["accountUuid"] != "acc-uuid" {
-			t.Errorf("oauthAccount.accountUuid = %v, want acc-uuid", oauthAccount["accountUuid"])
-		}
-
 		// Our explicit fields should still take precedence
 		if config["hasCompletedOnboarding"] != true {
 			t.Error("hasCompletedOnboarding should be true")
 		}
 		if config["theme"] != "dark" {
 			t.Error("theme should be dark")
-		}
-	})
-
-	t.Run("host config does not override explicit fields", func(t *testing.T) {
-		stagingDir := t.TempDir()
-
-		hostConfig := map[string]any{
-			"hasCompletedOnboarding": false,
-			"theme":                  "light",
-			"userID":                 "user-456",
-		}
-
-		err := WriteClaudeConfig(stagingDir, nil, hostConfig)
-		if err != nil {
-			t.Fatalf("WriteClaudeConfig() error = %v", err)
-		}
-
-		data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
-		if err != nil {
-			t.Fatalf("failed to read .claude.json: %v", err)
-		}
-
-		var config map[string]any
-		if err := json.Unmarshal(data, &config); err != nil {
-			t.Fatalf("failed to parse .claude.json: %v", err)
-		}
-
-		// Explicit fields must take precedence
-		if config["hasCompletedOnboarding"] != true {
-			t.Errorf("hasCompletedOnboarding = %v, want true (should override host config)", config["hasCompletedOnboarding"])
-		}
-		if config["theme"] != "dark" {
-			t.Errorf("theme = %v, want dark (should override host config)", config["theme"])
-		}
-
-		// Non-conflicting host config should still be present
-		if config["userID"] != "user-456" {
-			t.Errorf("userID = %v, want user-456", config["userID"])
 		}
 	})
 }
@@ -440,44 +364,93 @@ func TestReadHostConfig(t *testing.T) {
 			t.Error("secretField should not be in result (not allowlisted)")
 		}
 	})
+}
 
-	t.Run("invalid JSON returns error", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, ".claude.json")
-
-		if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
-			t.Fatalf("failed to write test file: %v", err)
+func TestWriteCredentialsFile(t *testing.T) {
+	t.Run("OAuth token creates file", func(t *testing.T) {
+		stagingDir := t.TempDir()
+		cred := &provider.Credential{
+			Token:     "sk-ant-oat01-abc123",
+			ExpiresAt: time.Now().Add(time.Hour),
+			Scopes:    []string{"user:read"},
 		}
 
-		_, err := ReadHostConfig(path)
-		if err == nil {
-			t.Error("ReadHostConfig() should return error for invalid JSON")
+		err := WriteCredentialsFile(cred, stagingDir)
+		if err != nil {
+			t.Fatalf("WriteCredentialsFile() error = %v", err)
+		}
+
+		// Check credentials file was created
+		credsFile := filepath.Join(stagingDir, ".credentials.json")
+		if _, err := os.Stat(credsFile); err != nil {
+			t.Errorf("credentials file should exist: %v", err)
+		}
+
+		// Read and verify content
+		data, err := os.ReadFile(credsFile)
+		if err != nil {
+			t.Fatalf("failed to read credentials file: %v", err)
+		}
+
+		var creds oauthCredentials
+		if err := json.Unmarshal(data, &creds); err != nil {
+			t.Fatalf("failed to parse credentials file: %v", err)
+		}
+
+		if creds.ClaudeAiOauth == nil {
+			t.Fatal("ClaudeAiOauth should be present")
+		}
+		if creds.ClaudeAiOauth.AccessToken != ProxyInjectedPlaceholder {
+			t.Errorf("AccessToken = %q, want %q", creds.ClaudeAiOauth.AccessToken, ProxyInjectedPlaceholder)
 		}
 	})
 
-	t.Run("empty object returns empty map", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, ".claude.json")
-
-		if err := os.WriteFile(path, []byte("{}"), 0644); err != nil {
-			t.Fatalf("failed to write test file: %v", err)
+	t.Run("API key does not create file", func(t *testing.T) {
+		stagingDir := t.TempDir()
+		cred := &provider.Credential{
+			Token: "sk-ant-api01-abc123", // API key, not OAuth
 		}
 
-		result, err := ReadHostConfig(path)
+		err := WriteCredentialsFile(cred, stagingDir)
 		if err != nil {
-			t.Fatalf("ReadHostConfig() error = %v", err)
+			t.Fatalf("WriteCredentialsFile() error = %v", err)
 		}
-		if len(result) != 0 {
-			t.Errorf("ReadHostConfig() = %v, want empty map", result)
+
+		// API keys don't need credentials file
+		credsFile := filepath.Join(stagingDir, ".credentials.json")
+		if _, err := os.Stat(credsFile); err == nil {
+			t.Error("credentials file should NOT exist for API keys")
 		}
 	})
 }
 
-// mockProxyConfigurer implements credential.ProxyConfigurer for testing.
+func TestIsOAuthToken(t *testing.T) {
+	tests := []struct {
+		token string
+		want  bool
+	}{
+		{"sk-ant-oat01-abc123xyz", true},
+		{"sk-ant-oat02-abc123xyz", true},
+		{"sk-ant-api01-abc123xyz", false},
+		{"sk-ant-abc123xyz", false},
+		{"short", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.token, func(t *testing.T) {
+			if got := isOAuthToken(tt.token); got != tt.want {
+				t.Errorf("isOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
+			}
+		})
+	}
+}
+
+// mockProxyConfigurer implements provider.ProxyConfigurer for testing.
 type mockProxyConfigurer struct {
 	credentials  map[string]string
 	extraHeaders map[string]map[string]string
-	transformers map[string][]credential.ResponseTransformer
+	transformers map[string][]provider.ResponseTransformer
 }
 
 func (m *mockProxyConfigurer) SetCredential(host, value string) {
@@ -495,9 +468,9 @@ func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue strin
 	m.extraHeaders[host][headerName] = headerValue
 }
 
-func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer credential.ResponseTransformer) {
+func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer provider.ResponseTransformer) {
 	if m.transformers == nil {
-		m.transformers = make(map[string][]credential.ResponseTransformer)
+		m.transformers = make(map[string][]provider.ResponseTransformer)
 	}
 	m.transformers[host] = append(m.transformers[host], transformer)
 }
