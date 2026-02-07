@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
@@ -118,16 +120,13 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 	fmt.Println("This may open a browser for authentication.")
 	fmt.Println()
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+	// Use a dedicated timeout for the setup-token command only.
+	// This context is NOT reused for validation — see below.
+	cmdCtx, cmdCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cmdCancel()
 
-	cmd := exec.CommandContext(ctx, "claude", "setup-token")
+	cmd := exec.CommandContext(cmdCtx, "claude", "setup-token")
 	cmd.Stdin = os.Stdin
-
-	// Capture both stdout and stderr since the token might be on either stream
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
 	// Build a clean environment that forces dumb terminal mode.
 	// We filter out keys we override to avoid duplicates — on Linux (glibc),
@@ -151,35 +150,58 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 	}
 	cmd.Env = env
 
-	err := cmd.Run()
+	// Spawn with a PTY so Node.js uses synchronous stdout writes.
+	// Without a PTY, stdout is a pipe and Node buffers writes asynchronously —
+	// if the process exits (or calls process.exit()) before the buffer is
+	// flushed, the token is lost. With a PTY, writes are synchronous on POSIX.
+	var output strings.Builder
+	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: 24, Cols: 10000}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("starting claude setup-token: %w", err)
+	}
+
+	// Copy PTY output in a goroutine; it returns when the child exits and
+	// the PTY slave side closes.
+	ioDone := make(chan struct{})
+	go func() {
+		defer close(ioDone)
+		_, _ = io.Copy(&output, ptmx)
+	}()
+
+	cmdErr := cmd.Wait()
+	_ = ptmx.Close()
+	<-ioDone // wait for all output to be read
 
 	log.Debug("claude setup-token completed",
 		"subsystem", "grant",
-		"exit_error", err,
-		"stdout_len", stdout.Len(),
-		"stderr_len", stderr.Len(),
+		"exit_error", cmdErr,
+		"output_len", output.Len(),
 	)
 	if log.Verbose() {
 		log.Debug("claude setup-token raw output",
 			"subsystem", "grant",
-			"raw_stdout", stdout.String(),
-			"raw_stderr", stderr.String(),
+			"raw_output", output.String(),
 		)
 	}
 
-	if err != nil {
-		// Show stderr to user on failure
-		if stderr.Len() > 0 {
-			fmt.Fprintln(os.Stderr, stderr.String())
+	// Try to extract the token even if the command exited non-zero.
+	// The CLI may have printed the token but then failed during cleanup
+	// (e.g., writing to its own credential store).
+	token := extractOAuthToken(output.String())
+
+	if token == "" {
+		if cmdErr != nil {
+			return nil, fmt.Errorf("claude setup-token failed: %w", cmdErr)
 		}
-		return nil, fmt.Errorf("claude setup-token failed: %w", err)
+		return nil, fmt.Errorf("could not find OAuth token in claude setup-token output")
 	}
 
-	// Try to extract token from stdout first, then stderr
-	combined := stdout.String() + "\n" + stderr.String()
-	token := extractOAuthToken(combined)
-	if token == "" {
-		return nil, fmt.Errorf("could not find OAuth token in claude setup-token output")
+	if cmdErr != nil {
+		log.Debug("claude setup-token exited non-zero but token was extracted",
+			"subsystem", "grant",
+			"exit_error", cmdErr,
+			"token_len", len(token),
+		)
 	}
 
 	log.Debug("extracted OAuth token",
@@ -187,10 +209,12 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 		"token_len", len(token),
 	)
 
-	// Validate the token to catch corruption from ANSI parsing
+	// Validate the token to catch corruption from ANSI parsing.
+	// Use a fresh context — the command timeout context may be nearly
+	// exhausted if the user took a while to authenticate in the browser.
 	fmt.Println("\nValidating OAuth token...")
 	auth := &anthropicAuth{}
-	validateCtx, validateCancel := context.WithTimeout(ctx, 30*time.Second)
+	validateCtx, validateCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer validateCancel()
 
 	if err := auth.ValidateOAuthToken(validateCtx, token); err != nil {
