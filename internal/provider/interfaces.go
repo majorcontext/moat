@@ -56,6 +56,15 @@ type CredentialProvider interface {
 	ImpliedDependencies() []string
 }
 
+// RefreshableProvider is an optional interface for providers that support
+// background credential refresh. Providers with static credentials
+// (API keys, role ARNs) do not implement this.
+type RefreshableProvider interface {
+	CanRefresh(cred *Credential) bool
+	RefreshInterval() time.Duration
+	Refresh(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
+}
+
 // AgentProvider extends CredentialProvider for AI agent runtimes.
 // Implemented by claude and codex providers.
 type AgentProvider interface {
