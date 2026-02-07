@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/credential/keyring"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // FileStore implements Store using encrypted files.
@@ -122,6 +123,7 @@ func (s *FileStore) List() ([]Credential, error) {
 		provider := Provider(entry.Name()[:len(entry.Name())-4])
 		cred, err := s.Get(provider)
 		if err != nil {
+			log.Debug("Skipping credential", "provider", provider, "error", err)
 			continue // Skip unreadable credentials
 		}
 		creds = append(creds, *cred)
