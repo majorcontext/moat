@@ -2,6 +2,8 @@ package gemini
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/majorcontext/moat/internal/provider"
@@ -13,8 +15,9 @@ type Provider struct{}
 
 // Ensure Provider implements the required interfaces.
 var (
-	_ provider.CredentialProvider = (*Provider)(nil)
-	_ provider.AgentProvider      = (*Provider)(nil)
+	_ provider.CredentialProvider  = (*Provider)(nil)
+	_ provider.AgentProvider       = (*Provider)(nil)
+	_ provider.RefreshableProvider = (*Provider)(nil)
 )
 
 func init() {
@@ -87,6 +90,10 @@ func (p *Provider) Refresh(ctx context.Context, proxy provider.ProxyConfigurer, 
 	refresher := &TokenRefresher{}
 	result, err := refresher.Refresh(ctx, refreshToken)
 	if err != nil {
+		var oauthErr *OAuthError
+		if errors.As(err, &oauthErr) && oauthErr.IsRevoked() {
+			return nil, fmt.Errorf("%w: %w", provider.ErrTokenRevoked, err)
+		}
 		return nil, err
 	}
 

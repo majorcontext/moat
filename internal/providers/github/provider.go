@@ -21,7 +21,10 @@ const (
 type Provider struct{}
 
 // Verify interface compliance at compile time.
-var _ provider.CredentialProvider = (*Provider)(nil)
+var (
+	_ provider.CredentialProvider  = (*Provider)(nil)
+	_ provider.RefreshableProvider = (*Provider)(nil)
+)
 
 func init() {
 	provider.Register(&Provider{})
