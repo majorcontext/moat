@@ -14,10 +14,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/majorcontext/moat/internal/codex"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/doctor"
+	"github.com/majorcontext/moat/internal/providers/codex"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )

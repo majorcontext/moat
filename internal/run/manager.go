@@ -22,7 +22,6 @@ import (
 
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/majorcontext/moat/internal/audit"
-	"github.com/majorcontext/moat/internal/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
@@ -33,6 +32,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
+	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -617,7 +617,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			// Write the credential helper script
 			// Use 0700 permissions since the script contains the credential endpoint URL
 			helperPath := filepath.Join(awsDir, "credentials")
-			if err := os.WriteFile(helperPath, GetAWSCredentialHelper(), 0700); err != nil {
+			if err := os.WriteFile(helperPath, awsprov.GetCredentialHelper(), 0700); err != nil {
 				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
 			}
 
@@ -891,16 +891,12 @@ region = %s
 	}
 
 	// Add implied dependencies from grants (e.g., github grant implies gh and git)
-	// Use new provider interface (supports aliases), fall back to legacy registry
 	for _, grant := range opts.Grants {
 		grantName := strings.Split(grant, ":")[0]
 		if prov := provider.Get(grantName); prov != nil {
 			allDeps = append(allDeps, prov.ImpliedDependencies()...)
 		}
 	}
-	// Also check legacy registry for providers not yet migrated
-	legacyImpliedDeps := credential.ImpliedDependencies(opts.Grants)
-	allDeps = append(allDeps, legacyImpliedDeps...)
 
 	if len(allDeps) > 0 {
 		var err error

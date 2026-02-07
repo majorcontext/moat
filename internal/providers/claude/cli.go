@@ -226,7 +226,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		TTY:         interactive,
 		OnRunCreated: func(info cli.RunInfo) {
 			// Create session record
-			sessionMgr, sessionErr := newSessionManager()
+			sessionMgr, sessionErr := NewSessionManager()
 			if sessionErr != nil {
 				log.Debug("failed to create session manager", "error", sessionErr)
 				return
@@ -274,7 +274,7 @@ func getClaudeCredentialName() string {
 func runSessions(cmd *cobra.Command, args []string) error {
 	activeOnly, _ := cmd.Flags().GetBool("active")
 
-	mgr, err := newSessionManager()
+	mgr, err := NewSessionManager()
 	if err != nil {
 		return fmt.Errorf("creating session manager: %w", err)
 	}

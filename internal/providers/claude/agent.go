@@ -99,7 +99,7 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 
 // Sessions returns all Claude Code sessions.
 func (p *Provider) Sessions() ([]provider.Session, error) {
-	mgr, err := newSessionManager()
+	mgr, err := NewSessionManager()
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (p *Provider) Sessions() ([]provider.Session, error) {
 
 // ResumeSession resumes an existing session by ID.
 func (p *Provider) ResumeSession(id string) error {
-	mgr, err := newSessionManager()
+	mgr, err := NewSessionManager()
 	if err != nil {
 		return err
 	}
@@ -143,22 +143,22 @@ func (p *Provider) ResumeSession(id string) error {
 	return nil
 }
 
-// sessionManager wraps session.Manager for Claude Code sessions.
-type sessionManager struct {
+// SessionManager wraps session.Manager for Claude Code sessions.
+type SessionManager struct {
 	*session.Manager
 }
 
-// newSessionManager creates a session manager for Claude Code sessions.
-func newSessionManager() (*sessionManager, error) {
-	dir, err := defaultSessionDir()
+// NewSessionManager creates a session manager for Claude Code sessions.
+func NewSessionManager() (*SessionManager, error) {
+	dir, err := DefaultSessionDir()
 	if err != nil {
 		return nil, err
 	}
-	return &sessionManager{Manager: session.NewManager(dir)}, nil
+	return &SessionManager{Manager: session.NewManager(dir)}, nil
 }
 
-// defaultSessionDir returns the default Claude session storage directory.
-func defaultSessionDir() (string, error) {
+// DefaultSessionDir returns the default Claude session storage directory.
+func DefaultSessionDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

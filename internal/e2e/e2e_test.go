@@ -41,12 +41,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/majorcontext/moat/internal/claude"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/credential/keyring"
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 )
