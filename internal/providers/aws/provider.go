@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/majorcontext/moat/internal/provider"
 )
@@ -53,21 +52,6 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 // ContainerMounts returns nil; AWS doesn't require any mounts.
 func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
-}
-
-// CanRefresh returns false; credentials are fetched at runtime via the endpoint.
-func (p *Provider) CanRefresh(cred *provider.Credential) bool {
-	return false
-}
-
-// RefreshInterval returns 0; AWS doesn't use periodic refresh.
-func (p *Provider) RefreshInterval() time.Duration {
-	return 0
-}
-
-// Refresh is not supported for AWS; credentials are fetched on demand.
-func (p *Provider) Refresh(ctx context.Context, pc provider.ProxyConfigurer, cred *provider.Credential) (*provider.Credential, error) {
-	return nil, provider.ErrRefreshNotSupported
 }
 
 // Cleanup is a no-op for AWS.

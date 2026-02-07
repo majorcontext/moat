@@ -119,26 +119,6 @@ func TestProvider_ContainerMounts(t *testing.T) {
 	}
 }
 
-func TestProvider_CanRefresh(t *testing.T) {
-	p := &Provider{}
-	cred := &provider.Credential{
-		Provider: "codex",
-		Token:    "sk-test-api-key-12345",
-	}
-
-	if got := p.CanRefresh(cred); got != false {
-		t.Errorf("CanRefresh() = %v, want false", got)
-	}
-}
-
-func TestProvider_RefreshInterval(t *testing.T) {
-	p := &Provider{}
-
-	if got := p.RefreshInterval(); got != 0 {
-		t.Errorf("RefreshInterval() = %v, want 0", got)
-	}
-}
-
 func TestProvider_ImpliedDependencies(t *testing.T) {
 	p := &Provider{}
 

@@ -30,30 +30,6 @@ func TestProvider_ImpliedDependencies(t *testing.T) {
 	}
 }
 
-func TestProvider_CanRefresh(t *testing.T) {
-	p := New()
-	cred := &provider.Credential{Token: "arn:aws:iam::123456789012:role/Test"}
-	if p.CanRefresh(cred) {
-		t.Error("CanRefresh() = true, want false")
-	}
-}
-
-func TestProvider_RefreshInterval(t *testing.T) {
-	p := New()
-	if p.RefreshInterval() != 0 {
-		t.Errorf("RefreshInterval() = %v, want 0", p.RefreshInterval())
-	}
-}
-
-func TestProvider_Refresh(t *testing.T) {
-	p := New()
-	cred := &provider.Credential{Token: "arn:aws:iam::123456789012:role/Test"}
-	_, err := p.Refresh(context.Background(), nil, cred)
-	if err != provider.ErrRefreshNotSupported {
-		t.Errorf("Refresh() error = %v, want ErrRefreshNotSupported", err)
-	}
-}
-
 func TestProvider_ContainerEnv(t *testing.T) {
 	p := New()
 	cred := &provider.Credential{Token: "arn:aws:iam::123456789012:role/Test"}
