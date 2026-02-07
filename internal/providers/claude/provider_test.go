@@ -479,3 +479,7 @@ func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer pr
 	}
 	m.transformers[host] = append(m.transformers[host], transformer)
 }
+
+func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
+
+func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}

@@ -885,6 +885,10 @@ func (m *mockProxyConfigurer) AddExtraHeader(string, string, string) {}
 
 func (m *mockProxyConfigurer) AddResponseTransformer(string, credential.ResponseTransformer) {}
 
+func (m *mockProxyConfigurer) RemoveRequestHeader(string, string) {}
+
+func (m *mockProxyConfigurer) SetTokenSubstitution(string, string, string) {}
+
 func (m *mockProxyConfigurer) get(host string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

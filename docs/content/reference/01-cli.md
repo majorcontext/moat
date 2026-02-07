@@ -252,6 +252,89 @@ moat codex sessions --active
 
 ---
 
+## moat gemini
+
+Run Google Gemini CLI in a container.
+
+```
+moat gemini [workspace] [flags]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `--grant PROVIDER` | Add credentials (repeatable) |
+| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `--name NAME` | Session name |
+| `-d`, `--detach` | Run in background |
+| `--rebuild` | Force rebuild of container image |
+| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--keep` | Keep container after run completes |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+
+### Examples
+
+```bash
+# Interactive Gemini CLI
+moat gemini
+
+# In specific directory
+moat gemini ./my-project
+
+# Non-interactive with prompt
+moat gemini -p "explain this codebase"
+moat gemini -p "fix the bug in main.py"
+
+# With GitHub access
+moat gemini --grant github
+
+# Named session
+moat gemini --name my-feature
+
+# Run in background
+moat gemini -d
+
+# Force rebuild
+moat gemini --rebuild
+```
+
+### Subcommands
+
+#### moat gemini sessions
+
+List Gemini sessions.
+
+```bash
+moat gemini sessions [flags]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--active` | Show only running sessions |
+
+**Examples:**
+
+```bash
+# List all sessions
+moat gemini sessions
+
+# Show only active sessions
+moat gemini sessions --active
+```
+
+---
+
 ## moat attach
 
 Attach to a running container.
@@ -315,6 +398,7 @@ moat grant <provider>[:<scopes>]
 | `github` | GitHub (gh CLI, env var, or PAT) |
 | `anthropic` | Anthropic (Claude Code OAuth or API key) |
 | `openai` | OpenAI (API key) |
+| `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
 | `aws` | AWS (IAM role assumption) |
 
 GitHub credentials are obtained from multiple sources, in order of preference:
@@ -334,6 +418,9 @@ moat grant anthropic
 
 # OpenAI
 moat grant openai
+
+# Gemini (imports Gemini CLI OAuth or prompts for API key)
+moat grant gemini
 ```
 
 ### moat grant mcp <name>
@@ -441,7 +528,7 @@ moat sessions [flags]
 
 | Flag | Description |
 |------|-------------|
-| `--agent TYPE` | Filter by agent type (claude, codex) |
+| `--agent TYPE` | Filter by agent type (claude, codex, gemini) |
 | `--active` | Only show running sessions |
 
 ### Examples
@@ -924,6 +1011,7 @@ This command scans for and removes temporary directories matching these patterns
 - `agentops-aws-*` - AWS credential helper directories
 - `moat-claude-staging-*` - Claude configuration staging directories
 - `moat-codex-staging-*` - Codex configuration staging directories
+- `moat-gemini-staging-*` - Gemini configuration staging directories
 
 Only directories older than `--min-age` are removed.
 

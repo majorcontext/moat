@@ -36,6 +36,10 @@ func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue strin
 func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer provider.ResponseTransformer) {
 }
 
+func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
+
+func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
+
 func TestProvider_Name(t *testing.T) {
 	p := &Provider{}
 	if got := p.Name(); got != "github" {

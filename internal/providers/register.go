@@ -9,6 +9,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/aws"    // registers AWS provider
 	_ "github.com/majorcontext/moat/internal/providers/claude" // registers Claude/Anthropic provider
 	_ "github.com/majorcontext/moat/internal/providers/codex"  // registers Codex/OpenAI provider
+	_ "github.com/majorcontext/moat/internal/providers/gemini" // registers Gemini/Google provider
 	_ "github.com/majorcontext/moat/internal/providers/github" // registers GitHub provider
 )
 

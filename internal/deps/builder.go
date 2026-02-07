@@ -19,6 +19,9 @@ type ImageTagOptions struct {
 	// NeedsCodexInit indicates the image needs the init script for Codex setup.
 	NeedsCodexInit bool
 
+	// NeedsGeminiInit indicates the image needs the init script for Gemini setup.
+	NeedsGeminiInit bool
+
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
@@ -57,6 +60,9 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 	if opts.NeedsCodexInit {
 		hashInput += ",codex:init"
+	}
+	if opts.NeedsGeminiInit {
+		hashInput += ",gemini:init"
 	}
 
 	// Include plugins in hash (different plugins = different image).

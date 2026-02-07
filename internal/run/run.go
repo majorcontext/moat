@@ -98,6 +98,11 @@ type Run struct {
 	// cleaned up when the run is stopped or destroyed.
 	CodexConfigTempDir string
 
+	// GeminiConfigTempDir is the temporary directory containing Gemini configuration files
+	// (settings.json, oauth_creds.json) that are mounted into the container. This should be
+	// cleaned up when the run is stopped or destroyed.
+	GeminiConfigTempDir string
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string
 	NetworkID           string

@@ -25,6 +25,7 @@ type Config struct {
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 	Codex        CodexConfig       `yaml:"codex,omitempty"`
+	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
@@ -163,6 +164,17 @@ type CodexConfig struct {
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
 }
 
+// GeminiConfig configures Google Gemini CLI integration options.
+type GeminiConfig struct {
+	// SyncLogs enables mounting Gemini's session logs directory so logs from
+	// inside the container appear on the host at the correct project location.
+	// Default: false, unless the "gemini" grant is configured (then true).
+	SyncLogs *bool `yaml:"sync_logs,omitempty"`
+
+	// MCP defines MCP (Model Context Protocol) server configurations.
+	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
 // MarketplaceSpec defines a plugin marketplace source.
 type MarketplaceSpec struct {
 	// Source is the type of marketplace: "github", "git", or "directory"
@@ -270,6 +282,23 @@ func (c *Config) ShouldSyncCodexLogs() bool {
 	return false
 }
 
+// ShouldSyncGeminiLogs returns true if Gemini session logs should be synced.
+// The logic is:
+// - If gemini.sync_logs is explicitly set, use that value
+// - Otherwise, enable sync_logs if "gemini" is in grants (Gemini integration)
+func (c *Config) ShouldSyncGeminiLogs() bool {
+	if c.Gemini.SyncLogs != nil {
+		return *c.Gemini.SyncLogs
+	}
+	// Default: enable if gemini grant is configured
+	for _, grant := range c.Grants {
+		if grant == "gemini" || strings.HasPrefix(grant, "gemini:") {
+			return true
+		}
+	}
+	return false
+}
+
 // deprecatedRuntime is kept only to detect and reject old configs.
 type deprecatedRuntime struct {
 	Node   string `yaml:"node,omitempty"`
@@ -361,6 +390,13 @@ func Load(dir string) (*Config, error) {
 	// Validate Codex MCP server specs
 	for name, spec := range cfg.Codex.MCP {
 		if err := validateMCPServerSpec("codex", name, spec); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate Gemini MCP server specs
+	for name, spec := range cfg.Gemini.MCP {
+		if err := validateMCPServerSpec("gemini", name, spec); err != nil {
 			return nil, err
 		}
 	}

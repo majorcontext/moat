@@ -1085,12 +1085,42 @@ region = %s
 		}
 	}
 
+	// Determine if we need Gemini init (for Gemini credentials - both OAuth and API keys)
+	// This is triggered by:
+	// - a gemini grant, OR
+	// - gemini-cli in the dependencies list
+	var needsGeminiInit bool
+	for _, grant := range opts.Grants {
+		provider := credential.Provider(strings.Split(grant, ":")[0])
+		if provider == credential.ProviderGemini {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if _, err := store.Get(provider); err == nil {
+						needsGeminiInit = true
+					}
+				}
+			}
+			break
+		}
+	}
+	if !needsGeminiInit {
+		for _, d := range depList {
+			if d.Name == "gemini-cli" {
+				needsGeminiInit = true
+				break
+			}
+		}
+	}
+
 	// Resolve container image based on dependencies, SSH grants, init needs, and plugins
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(installableDeps, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
 		NeedsClaudeInit: needsClaudeInit,
 		NeedsCodexInit:  needsCodexInit,
+		NeedsGeminiInit: needsGeminiInit,
 		ClaudePlugins:   claudePlugins,
 	})
 
@@ -1101,7 +1131,7 @@ region = %s
 	r.Image = containerImage
 
 	// Determine if we need a custom image
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || len(claudePlugins) > 0
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1127,6 +1157,7 @@ region = %s
 			SSHHosts:           sshGrants,
 			NeedsClaudeInit:    needsClaudeInit,
 			NeedsCodexInit:     needsCodexInit,
+			NeedsGeminiInit:    needsGeminiInit,
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
@@ -1357,6 +1388,50 @@ region = %s
 		proxyEnv = append(proxyEnv, codexConfig.Env...)
 	}
 
+	// Set up Gemini staging directory for init script using the provider interface.
+	// This includes settings.json and optionally oauth_creds.json.
+	var geminiConfig *provider.ContainerConfig
+	if needsGeminiInit || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
+		geminiProvider := provider.GetAgent("gemini")
+		if geminiProvider == nil {
+			cleanupProxy(proxyServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, fmt.Errorf("gemini provider not registered")
+		}
+
+		// Get Gemini credential for PrepareContainer
+		var geminiCred *provider.Credential
+		if needsGeminiInit {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if cred, err := store.Get(credential.ProviderGemini); err == nil {
+						geminiCred = provider.FromLegacy(cred)
+					}
+				}
+			}
+		}
+
+		// Call provider to prepare container config
+		var prepErr error
+		geminiConfig, prepErr = geminiProvider.PrepareContainer(ctx, provider.PrepareOpts{
+			Credential:    geminiCred,
+			ContainerHome: containerHome,
+		})
+		if prepErr != nil {
+			cleanupProxy(proxyServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, fmt.Errorf("preparing Gemini container config: %w", prepErr)
+		}
+
+		// Add mounts and env vars from provider
+		mounts = append(mounts, geminiConfig.Mounts...)
+		proxyEnv = append(proxyEnv, geminiConfig.Env...)
+	}
+
 	// MCP servers are now configured via .claude.json in the staging directory
 	// (handled by the claude provider's PrepareContainer), not via environment variables.
 
@@ -1541,6 +1616,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, err
 			}
 		}
@@ -1553,6 +1629,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("service dependencies require network support")
 			}
 			networkName := fmt.Sprintf("moat-%s", r.ID)
@@ -1563,6 +1640,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("creating service network: %w", netErr)
 			}
 			r.NetworkID = networkID
@@ -1596,6 +1674,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
 			}
 
@@ -1606,6 +1685,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("starting %s service: %w", dep.Name, err)
 			}
 
@@ -1633,6 +1713,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
 					"Service container logs:\n  moat logs %s --service %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
@@ -1716,6 +1797,7 @@ region = %s
 		cleanupSSH(sshServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -1727,6 +1809,9 @@ region = %s
 	}
 	if codexConfig != nil {
 		r.CodexConfigTempDir = codexConfig.StagingDir
+	}
+	if geminiConfig != nil {
+		r.GeminiConfigTempDir = geminiConfig.StagingDir
 	}
 
 	// Ensure proxy is running if we have ports to expose
@@ -1764,6 +1849,7 @@ region = %s
 		cleanupProxy(proxyServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
@@ -1789,6 +1875,7 @@ region = %s
 		cleanupProxy(proxyServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -2238,6 +2325,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Gemini config temp directory
+	m.mu.RLock()
+	geminiConfigTempDir := r.GeminiConfigTempDir
+	m.mu.RUnlock()
+	if geminiConfigTempDir != "" {
+		if err := os.RemoveAll(geminiConfigTempDir); err != nil {
+			log.Debug("failed to remove Gemini config temp dir", "path", geminiConfigTempDir, "error", err)
+		}
+	}
+
 	// Remove network if present (best-effort)
 	if networkID != "" {
 		log.Debug("removing docker network", "network_id", networkID)
@@ -2338,6 +2435,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if r.CodexConfigTempDir != "" {
 			if rmErr := os.RemoveAll(r.CodexConfigTempDir); rmErr != nil {
 				log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", rmErr)
+			}
+		}
+
+		// Clean up Gemini config temp directory
+		if r.GeminiConfigTempDir != "" {
+			if rmErr := os.RemoveAll(r.GeminiConfigTempDir); rmErr != nil {
+				log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", rmErr)
 			}
 		}
 
@@ -2622,6 +2726,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if r.CodexConfigTempDir != "" {
 		if err := os.RemoveAll(r.CodexConfigTempDir); err != nil {
 			log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", err)
+		}
+	}
+
+	// Clean up Gemini config temp directory
+	if r.GeminiConfigTempDir != "" {
+		if err := os.RemoveAll(r.GeminiConfigTempDir); err != nil {
+			log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", err)
 		}
 	}
 

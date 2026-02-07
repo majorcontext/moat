@@ -140,6 +140,13 @@ type ProxyConfigurer interface {
 	// AddResponseTransformer registers a response transformer for a host.
 	// Transformers are called in registration order after the response is received.
 	AddResponseTransformer(host string, transformer ResponseTransformer)
+	// RemoveRequestHeader removes a client-sent header before forwarding.
+	// Used when injected credentials conflict with client headers.
+	RemoveRequestHeader(host, headerName string)
+	// SetTokenSubstitution replaces placeholder tokens with real tokens in both
+	// Authorization headers and request bodies for a specific host.
+	// Body substitution is limited to 64KB requests to avoid memory issues.
+	SetTokenSubstitution(host, placeholder, realToken string)
 }
 
 // ProviderSetup configures a credential provider for use in a container run.
