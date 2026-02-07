@@ -118,9 +118,9 @@ func TestImpliedDependencies(t *testing.T) {
 			want:   []string{"gh", "git"},
 		},
 		{
-			name:   "aws grant implies aws",
+			name:   "aws grant implies nothing via legacy registry",
 			grants: []string{"aws"},
-			want:   []string{"aws"},
+			want:   nil,
 		},
 		{
 			name:   "anthropic grant implies nothing",
@@ -130,7 +130,7 @@ func TestImpliedDependencies(t *testing.T) {
 		{
 			name:   "multiple grants",
 			grants: []string{"github", "aws"},
-			want:   []string{"gh", "git", "aws"},
+			want:   []string{"gh", "git"},
 		},
 		{
 			name:   "empty grants",

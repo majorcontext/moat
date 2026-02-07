@@ -39,39 +39,6 @@ type Store interface {
 	List() ([]Credential, error)
 }
 
-// AWSConfig holds AWS IAM role configuration for credential injection.
-// Unlike other providers, AWS stores role config (not tokens) since credentials
-// are obtained at runtime via STS AssumeRole.
-type AWSConfig struct {
-	RoleARN            string `json:"role_arn"`
-	Region             string `json:"region,omitempty"`
-	SessionDurationStr string `json:"session_duration,omitempty"`
-	ExternalID         string `json:"external_id,omitempty"`
-}
-
-// SessionDuration parses the session duration string and validates it.
-// Returns default of 15 minutes if not set.
-// AWS allows 15 minutes to 12 hours for assumed role sessions.
-func (c *AWSConfig) SessionDuration() (time.Duration, error) {
-	if c.SessionDurationStr == "" {
-		return 15 * time.Minute, nil
-	}
-	d, err := time.ParseDuration(c.SessionDurationStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid session duration %q: %w", c.SessionDurationStr, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("session duration %v must be positive", d)
-	}
-	if d < 15*time.Minute {
-		return 0, fmt.Errorf("session duration %v is less than minimum 15m", d)
-	}
-	if d > 12*time.Hour {
-		return 0, fmt.Errorf("session duration %v exceeds maximum 12h", d)
-	}
-	return d, nil
-}
-
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
 	return []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI}
