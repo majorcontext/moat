@@ -41,7 +41,12 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 		switch strings.ToLower(override) {
 		case "docker":
 			log.Debug("using Docker runtime (MOAT_RUNTIME=docker)")
-			return newDockerRuntimeWithPing(opts.Sandbox)
+			rt, err := newDockerRuntimeWithPing(opts.Sandbox)
+			if err != nil {
+				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from agent.yaml to use auto-detection."
+				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or agent.yaml) but not available: %w\n\n%s", err, hint)
+			}
+			return rt, nil
 		case "apple":
 			log.Debug("using Apple container runtime (MOAT_RUNTIME=apple)")
 			rt, reason := tryAppleRuntime()
@@ -69,10 +74,13 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 
 	// Fall back to Docker
 	rt, err := newDockerRuntimeWithPing(opts.Sandbox)
-	if err != nil && appleReason != "" {
-		return nil, fmt.Errorf("no container runtime available:\n  Apple containers: %s\n  Docker: %w", appleReason, err)
+	if err != nil {
+		if appleReason != "" {
+			return nil, fmt.Errorf("no container runtime available:\n  Apple containers: %s\n  Docker: %w", appleReason, err)
+		}
+		return nil, fmt.Errorf("no container runtime available: %w", err)
 	}
-	return rt, err
+	return rt, nil
 }
 
 // NewRuntime creates a new container runtime, auto-detecting the best available option.
@@ -90,7 +98,7 @@ func NewRuntime() (Runtime, error) {
 func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	rt, err := NewDockerRuntime(sandbox)
 	if err != nil {
-		return nil, fmt.Errorf("no container runtime available: Docker error: %w", err)
+		return nil, fmt.Errorf("Docker runtime error: %w", err)
 	}
 
 	// Verify Docker is accessible
@@ -98,7 +106,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	defer cancel()
 
 	if err := rt.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("no container runtime available: %w", err)
+		return nil, err
 	}
 
 	runtimeName := "Docker"

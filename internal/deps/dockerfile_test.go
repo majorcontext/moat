@@ -649,7 +649,7 @@ func TestGenerateDockerfileMixedUserAndRootCustomDeps(t *testing.T) {
 }
 
 func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
-	// Test that Claude plugins are baked into the image
+	// Test that Claude plugins are baked into the image via a script context file
 	deps := []Dependency{
 		{Name: "node", Version: "20"},
 		{Name: "claude-code"},
@@ -682,20 +682,35 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 		t.Error("Dockerfile should switch to moatuser for plugin installation")
 	}
 
-	// Should add marketplaces with error handling (in sorted order)
-	if !strings.Contains(result.Dockerfile, "claude plugin marketplace add anthropics/claude-plugins-official && echo 'Added marketplace claude-plugins-official' || echo 'WARNING: Could not add marketplace claude-plugins-official") {
-		t.Error("Dockerfile should add claude-plugins-official marketplace with error handling")
+	// Should COPY and run the plugin install script
+	if !strings.Contains(result.Dockerfile, "COPY --chown=moatuser claude-plugins.sh") {
+		t.Error("Dockerfile should COPY plugin install script with correct ownership")
 	}
-	if !strings.Contains(result.Dockerfile, "claude plugin marketplace add itsmostafa/aws-agent-skills && echo 'Added marketplace aws-agent-skills' || echo 'WARNING: Could not add marketplace aws-agent-skills") {
-		t.Error("Dockerfile should add aws-agent-skills marketplace with error handling")
+	if !strings.Contains(result.Dockerfile, "RUN bash /tmp/claude-plugins.sh") {
+		t.Error("Dockerfile should run plugin install script")
 	}
 
-	// Should install plugins with error handling (in sorted order)
-	if !strings.Contains(result.Dockerfile, "claude plugin install aws-agent-skills@aws-agent-skills && echo 'Installed plugin aws-agent-skills@aws-agent-skills' || echo 'WARNING: Could not install plugin aws-agent-skills@aws-agent-skills") {
-		t.Error("Dockerfile should install aws-agent-skills plugin with error handling")
+	// Plugin script should be in context files
+	scriptContent, ok := result.ContextFiles["claude-plugins.sh"]
+	if !ok {
+		t.Fatal("ContextFiles should include claude-plugins.sh")
 	}
-	if !strings.Contains(result.Dockerfile, "claude plugin install claude-md-management@claude-plugins-official && echo 'Installed plugin claude-md-management@claude-plugins-official' || echo 'WARNING: Could not install plugin claude-md-management@claude-plugins-official") {
-		t.Error("Dockerfile should install claude-md-management plugin with error handling")
+	script := string(scriptContent)
+
+	// Script should add marketplaces with error handling (in sorted order)
+	if !strings.Contains(script, "claude plugin marketplace add anthropics/claude-plugins-official && echo 'Added marketplace claude-plugins-official' || echo 'WARNING: Could not add marketplace claude-plugins-official") {
+		t.Error("script should add claude-plugins-official marketplace with error handling")
+	}
+	if !strings.Contains(script, "claude plugin marketplace add itsmostafa/aws-agent-skills && echo 'Added marketplace aws-agent-skills' || echo 'WARNING: Could not add marketplace aws-agent-skills") {
+		t.Error("script should add aws-agent-skills marketplace with error handling")
+	}
+
+	// Script should install plugins with error handling (in sorted order)
+	if !strings.Contains(script, "claude plugin install aws-agent-skills@aws-agent-skills && echo 'Installed plugin aws-agent-skills@aws-agent-skills' || echo 'WARNING: Could not install plugin aws-agent-skills@aws-agent-skills") {
+		t.Error("script should install aws-agent-skills plugin with error handling")
+	}
+	if !strings.Contains(script, "claude plugin install claude-md-management@claude-plugins-official && echo 'Installed plugin claude-md-management@claude-plugins-official' || echo 'WARNING: Could not install plugin claude-md-management@claude-plugins-official") {
+		t.Error("script should install claude-md-management plugin with error handling")
 	}
 
 	// Should switch back to root after plugin installation
@@ -750,16 +765,17 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateDockerfile error: %v", err)
 		}
-		// Valid repo should be included
-		if !strings.Contains(result.Dockerfile, "marketplace add valid/repo") {
+		script := string(result.ContextFiles["claude-plugins.sh"])
+		// Valid repo should be included in script
+		if !strings.Contains(script, "marketplace add valid/repo") {
 			t.Error("valid marketplace should be included")
 		}
 		// Invalid repo should trigger error message (note: uses marketplace name, not repo)
-		if !strings.Contains(result.Dockerfile, "Invalid marketplace repo format: evil") {
+		if !strings.Contains(script, "Invalid marketplace repo format: evil") {
 			t.Error("invalid marketplace should show error message with name")
 		}
-		// The malicious repo value should NOT appear in the result.Dockerfile
-		if strings.Contains(result.Dockerfile, "; rm -rf /") {
+		// The malicious repo value should NOT appear in the script
+		if strings.Contains(script, "; rm -rf /") {
 			t.Error("invalid repo value should not appear in output")
 		}
 	})
@@ -775,12 +791,13 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateDockerfile error: %v", err)
 		}
-		// Valid plugin should be included
-		if !strings.Contains(result.Dockerfile, "plugin install valid-plugin@valid-market") {
+		script := string(result.ContextFiles["claude-plugins.sh"])
+		// Valid plugin should be included in script
+		if !strings.Contains(script, "plugin install valid-plugin@valid-market") {
 			t.Error("valid plugin should be included")
 		}
 		// Invalid plugin should trigger error message
-		if !strings.Contains(result.Dockerfile, "Invalid plugin format") {
+		if !strings.Contains(script, "Invalid plugin format") {
 			t.Error("invalid plugin should show error message")
 		}
 	})

@@ -1,5 +1,4 @@
 name: moat-dev
-runtime: docker
 interactive: true
 
 env:
@@ -20,16 +19,16 @@ dependencies:
   - node@20
   - python
   - bats
-  - docker:dind
+  # - docker:dind
 
 grants:
   - anthropic
   - github
   - ssh:github.com
 
-mcp:
-  - name: context7
-    url: https://mcp.context7.com/mcp
-    auth:
-      grant: mcp-context7
-      header: CONTEXT7_API_KEY
+# mcp:
+#   - name: context7
+#     url: https://mcp.context7.com/mcp
+#     auth:
+#       grant: mcp-context7
+#       header: CONTEXT7_API_KEY
