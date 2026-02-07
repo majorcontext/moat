@@ -87,7 +87,9 @@ func (r *TokenRefresher) Refresh(ctx context.Context, refreshToken string) (*Ref
 			Error       string `json:"error"`
 			Description string `json:"error_description"`
 		}
-		_ = json.Unmarshal(body, &errResp)
+		if unmarshalErr := json.Unmarshal(body, &errResp); unmarshalErr != nil {
+			return nil, fmt.Errorf("token refresh failed (HTTP %d): %s", resp.StatusCode, string(body))
+		}
 		return nil, &OAuthError{
 			Code:        errResp.Error,
 			Description: errResp.Description,
