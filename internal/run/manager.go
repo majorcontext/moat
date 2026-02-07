@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -416,13 +417,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				providerEnv = append(providerEnv, envVars...)
 
 				// Check if this provider supports token refresh
-				if prov.CanRefresh(provCred) {
+				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
 					refreshTargets = append(refreshTargets, refreshTarget{
-						provider:  providerName,
-						refresher: nil, // Will use new provider.Refresh method
-						cred:      cred,
-						store:     store,
-						newProv:   prov, // Store new provider for refresh
+						providerName: providerName,
+						refresher:    rp,
+						cred:         cred,
+						store:        store,
 					})
 				}
 
@@ -2962,12 +2962,21 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 
 // refreshTarget holds the state for a single refreshable credential.
 type refreshTarget struct {
-	provider  credential.Provider
-	refresher credential.TokenRefresher // Legacy refresher (deprecated, may be nil)
-	cred      *credential.Credential
-	store     credential.Store
-	newProv   provider.CredentialProvider // New provider interface (preferred)
+	providerName credential.Provider
+	refresher    provider.RefreshableProvider
+	cred         *credential.Credential
+	store        credential.Store
+
+	// Retry state for exponential backoff
+	nextRetryAfter time.Time
+	retryDelay     time.Duration
+	revoked        bool
 }
+
+const (
+	refreshRetryMin = 30 * time.Second
+	refreshRetryMax = 5 * time.Minute
+)
 
 // runTokenRefreshLoop periodically re-acquires tokens from their original source.
 // It performs an immediate refresh at startup, then refreshes on the shortest
@@ -2997,44 +3006,62 @@ func (m *Manager) runTokenRefreshLoop(ctx context.Context, r *Run, p credential.
 }
 
 // refreshToken attempts to refresh a single credential target.
-// On failure, it logs a warning and keeps the existing token.
+// On failure, it applies exponential backoff. On revocation, it stops retrying.
 func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyConfigurer, target *refreshTarget) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	var updated *credential.Credential
-	var err error
-
-	// Use new provider interface if available
-	if target.newProv != nil {
-		provCred := provider.FromLegacy(target.cred)
-		newCred, refreshErr := target.newProv.Refresh(ctx, p, provCred)
-		if refreshErr != nil {
-			err = refreshErr
-		} else if newCred != nil {
-			// Convert back to credential.Credential
-			updated = &credential.Credential{
-				Provider:  target.provider,
-				Token:     newCred.Token,
-				Scopes:    newCred.Scopes,
-				ExpiresAt: newCred.ExpiresAt,
-				CreatedAt: newCred.CreatedAt,
-				Metadata:  newCred.Metadata,
-			}
-		}
-	} else if target.refresher != nil {
-		// Fall back to legacy refresher
-		updated, err = target.refresher.RefreshCredential(ctx, p, target.cred)
-	} else {
-		log.Warn("no refresh method available", "provider", target.provider)
+	if target.revoked {
+		return
+	}
+	if !target.nextRetryAfter.IsZero() && time.Now().Before(target.nextRetryAfter) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	provCred := provider.FromLegacy(target.cred)
+	newCred, err := target.refresher.Refresh(ctx, p, provCred)
+
 	if err != nil {
-		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.provider)
+		if errors.Is(err, provider.ErrTokenRevoked) {
+			target.revoked = true
+			ui.Warnf("Token for %s has been revoked. Run 'moat grant %s' to re-authenticate.", target.providerName, target.providerName)
+			log.Warn("refresh token revoked, stopping refresh",
+				"provider", target.providerName, "error", err)
+			return
+		}
+
+		// Exponential backoff
+		if target.retryDelay == 0 {
+			target.retryDelay = refreshRetryMin
+		} else {
+			target.retryDelay *= 2
+			if target.retryDelay > refreshRetryMax {
+				target.retryDelay = refreshRetryMax
+			}
+		}
+		target.nextRetryAfter = time.Now().Add(target.retryDelay)
+
+		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.providerName)
 		log.Debug("token refresh failed, keeping existing token",
-			"provider", target.provider, "error", err)
+			"provider", target.providerName, "error", err, "retry_in", target.retryDelay)
 		return
+	}
+
+	// Reset backoff on success
+	target.retryDelay = 0
+	target.nextRetryAfter = time.Time{}
+
+	// Convert back to credential.Credential
+	var updated *credential.Credential
+	if newCred != nil {
+		updated = &credential.Credential{
+			Provider:  target.providerName,
+			Token:     newCred.Token,
+			Scopes:    newCred.Scopes,
+			ExpiresAt: newCred.ExpiresAt,
+			CreatedAt: newCred.CreatedAt,
+			Metadata:  newCred.Metadata,
+		}
 	}
 
 	// Token unchanged — no-op
@@ -3049,23 +3076,18 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 	if target.store != nil {
 		if err := target.store.Save(*updated); err != nil {
 			log.Warn("failed to persist refreshed token",
-				"provider", target.provider, "error", err)
+				"provider", target.providerName, "error", err)
 		}
 	}
 
-	log.Debug("token refreshed", "provider", target.provider, "run_id", r.ID)
+	log.Debug("token refreshed", "provider", target.providerName, "run_id", r.ID)
 }
 
 // minRefreshInterval returns the shortest refresh interval across all targets.
 func minRefreshInterval(targets []refreshTarget) time.Duration {
 	var min time.Duration
 	for i, t := range targets {
-		var d time.Duration
-		if t.newProv != nil {
-			d = t.newProv.RefreshInterval()
-		} else if t.refresher != nil {
-			d = t.refresher.RefreshInterval()
-		}
+		d := t.refresher.RefreshInterval()
 		if i == 0 || (d > 0 && d < min) {
 			min = d
 		}
