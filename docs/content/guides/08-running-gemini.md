@@ -383,4 +383,4 @@ moat grant gemini
 
 - [SSH access](./03-ssh-access.md) -- Set up SSH for git operations
 - [Snapshots](./06-snapshots.md) -- Protect your workspace with snapshots
-- [Multi-agent](./05-multi-agent.md) -- Run multiple Gemini sessions
+- [Exposing ports](./05-exposing-ports.md) — Access services running inside containers

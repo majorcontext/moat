@@ -355,4 +355,4 @@ moat snapshot restore <run-id> <safety-snapshot-id>
 ## Related guides
 
 - [Running Claude Code](./01-running-claude-code.md) — Use snapshots with Claude Code
-- [Multi-agent](./05-multi-agent.md) — Independent snapshots per agent
+- [Exposing ports](./05-exposing-ports.md) — Independent snapshots per agent

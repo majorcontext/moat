@@ -24,7 +24,7 @@
 - [Running Codex](./content/guides/02-running-codex.md) — Use OpenAI Codex CLI in isolated containers
 - [SSH Access](./content/guides/03-ssh-access.md) — Grant SSH access without exposing private keys
 - [Secrets Management](./content/guides/04-secrets-management.md) — Pull secrets from 1Password and AWS SSM
-- [Running Multiple Agents](./content/guides/05-multi-agent.md) — Parallel agents with hostname routing
+- [Exposing Ports](./content/guides/05-exposing-ports.md) — Access services running inside agent containers
 - [Workspace Snapshots](./content/guides/06-snapshots.md) — Point-in-time recovery for workspaces
 
 ### Reference
