@@ -95,6 +95,18 @@ claude:
       grant: github
       cwd: /workspace
 
+# Gemini CLI
+gemini:
+  sync_logs: true
+  mcp:
+    my_server:
+      command: /path/to/server
+      args: ["--flag"]
+      env:
+        VAR: value
+      grant: github
+      cwd: /workspace
+
 # Remote MCP servers
 mcp:
   - name: context7
@@ -386,6 +398,7 @@ grants:
 | `github` | GitHub API |
 | `anthropic` | Anthropic API |
 | `openai` | OpenAI API |
+| `gemini` | Google Gemini API |
 | `ssh:HOSTNAME` | SSH access to specific host |
 
 Credentials must be stored first with `moat grant`.
@@ -871,6 +884,63 @@ codex:
 - Default: `true` (when `openai` grant is used)
 
 When enabled, Codex session logs are synced to the host at `~/.moat/runs/<run-id>/codex/`.
+
+---
+
+## Gemini
+
+### gemini.sync_logs
+
+Mount Gemini's session logs directory for observability.
+
+```yaml
+gemini:
+  sync_logs: true
+```
+
+- Type: `boolean`
+- Default: `true` (when `gemini` grant is used)
+
+When enabled, Gemini session logs are synced to the host at `~/.moat/runs/<run-id>/gemini/`.
+
+### gemini.mcp
+
+Local MCP (Model Context Protocol) servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
+
+```yaml
+gemini:
+  mcp:
+    my_server:
+      command: /path/to/server
+      args: ["--flag", "value"]
+      env:
+        API_KEY: my-key
+      grant: github
+      cwd: /workspace
+```
+
+- Type: `map[string]object`
+- Default: `{}`
+
+#### MCP server fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | `string` | Server executable path |
+| `args` | `array[string]` | Command arguments |
+| `env` | `map[string]string` | Environment variables |
+| `grant` | `string` | Credential to inject |
+| `cwd` | `string` | Working directory |
+
+When a `grant` is specified, the corresponding environment variable is set automatically:
+
+| Grant | Environment variable |
+|-------|---------------------|
+| `github` | `GITHUB_TOKEN` |
+| `gemini` | `GEMINI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/08-running-gemini.md#mcp-servers) in the Gemini guide.
 
 ---
 

@@ -183,6 +183,12 @@ type extraHeader struct {
 	Value string
 }
 
+// tokenSubstitution maps a placeholder string to the real token for a host.
+type tokenSubstitution struct {
+	placeholder string
+	realToken   string
+}
+
 // Proxy is an HTTP proxy that injects credentials into outgoing requests.
 //
 // # Security Model
@@ -216,6 +222,8 @@ type Proxy struct {
 	awsHandler           http.Handler  // Optional handler for AWS credential endpoint
 	credStore            credential.Store
 	mcpServers           []config.MCPServerConfig
+	removeHeaders        map[string][]string           // host -> []headerName
+	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
 }
 
 // NewProxy creates a new auth proxy.
@@ -224,6 +232,8 @@ func NewProxy() *Proxy {
 		credentials:          make(map[string]credentialHeader),
 		extraHeaders:         make(map[string][]extraHeader),
 		responseTransformers: make(map[string][]credential.ResponseTransformer),
+		removeHeaders:        make(map[string][]string),
+		tokenSubstitutions:   make(map[string]*tokenSubstitution),
 		policy:               "permissive", // default to permissive
 	}
 }
@@ -311,6 +321,81 @@ func (p *Proxy) AddResponseTransformer(host string, transformer credential.Respo
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.responseTransformers[host] = append(p.responseTransformers[host], transformer)
+}
+
+// RemoveRequestHeader removes a client-sent header before forwarding.
+func (p *Proxy) RemoveRequestHeader(host, headerName string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.removeHeaders[host] = append(p.removeHeaders[host], headerName)
+}
+
+// SetTokenSubstitution replaces placeholder tokens with real tokens
+// in both Authorization headers and request bodies for a specific host.
+func (p *Proxy) SetTokenSubstitution(host, placeholder, realToken string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tokenSubstitutions[host] = &tokenSubstitution{
+		placeholder: placeholder,
+		realToken:   realToken,
+	}
+}
+
+// getTokenSubstitution returns the token substitution for a host.
+func (p *Proxy) getTokenSubstitution(host string) *tokenSubstitution {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if sub, ok := p.tokenSubstitutions[host]; ok {
+		return sub
+	}
+	h, _, _ := net.SplitHostPort(host)
+	if h != "" {
+		return p.tokenSubstitutions[h]
+	}
+	return nil
+}
+
+// getRemoveHeaders returns header names to remove for a host.
+func (p *Proxy) getRemoveHeaders(host string) []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if headers, ok := p.removeHeaders[host]; ok {
+		return headers
+	}
+	h, _, _ := net.SplitHostPort(host)
+	if h != "" {
+		return p.removeHeaders[h]
+	}
+	return nil
+}
+
+// maxTokenSubBodySize is the maximum request body size for token substitution.
+// Larger bodies (like file uploads) are not substituted to avoid memory issues.
+const maxTokenSubBodySize = 64 * 1024
+
+// applyTokenSubstitution replaces placeholder tokens with real tokens in
+// the request's Authorization header and body.
+func (p *Proxy) applyTokenSubstitution(req *http.Request, sub *tokenSubstitution) {
+	// Replace in Authorization header
+	if auth := req.Header.Get("Authorization"); auth != "" {
+		if newAuth := strings.ReplaceAll(auth, sub.placeholder, sub.realToken); newAuth != auth {
+			req.Header.Set("Authorization", newAuth)
+		}
+	}
+
+	// Replace in request body (limited to maxTokenSubBodySize)
+	if req.Body != nil && req.ContentLength > 0 && req.ContentLength <= maxTokenSubBodySize {
+		bodyBytes, err := io.ReadAll(req.Body)
+		req.Body.Close()
+		if err == nil {
+			bodyStr := string(bodyBytes)
+			if newBody := strings.ReplaceAll(bodyStr, sub.placeholder, sub.realToken); newBody != bodyStr {
+				bodyBytes = []byte(newBody)
+			}
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			req.ContentLength = int64(len(bodyBytes))
+		}
+	}
 }
 
 // isValidHost checks if a host string is valid for credential injection.
@@ -557,6 +642,15 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 
+	// Remove headers that should be stripped
+	for _, headerName := range p.getRemoveHeaders(host) {
+		outReq.Header.Del(headerName)
+	}
+	// Apply token substitution if configured
+	if sub := p.getTokenSubstitution(host); sub != nil {
+		p.applyTokenSubstitution(outReq, sub)
+	}
+
 	// Forward request
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	duration := time.Since(start)
@@ -760,6 +854,15 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		}
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")
+
+		// Remove headers that should be stripped for this host
+		for _, headerName := range p.getRemoveHeaders(host) {
+			req.Header.Del(headerName)
+		}
+		// Apply token substitution if configured for this host
+		if sub := p.getTokenSubstitution(host); sub != nil {
+			p.applyTokenSubstitution(req, sub)
+		}
 
 		start := time.Now()
 		resp, err := transport.RoundTrip(req)

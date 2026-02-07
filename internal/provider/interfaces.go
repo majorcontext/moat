@@ -37,23 +37,21 @@ type CredentialProvider interface {
 	// when the run ends.
 	ContainerMounts(cred *Credential, containerHome string) ([]MountConfig, string, error)
 
-	// CanRefresh reports whether this credential can be refreshed.
-	CanRefresh(cred *Credential) bool
-
-	// RefreshInterval returns how often to attempt refresh.
-	// Returns 0 if refresh is not supported.
-	RefreshInterval() time.Duration
-
-	// Refresh re-acquires a fresh token and updates the proxy.
-	// Returns ErrRefreshNotSupported if the credential cannot be refreshed.
-	Refresh(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
-
 	// Cleanup is called when the run ends to clean up any resources.
 	Cleanup(cleanupPath string)
 
 	// ImpliedDependencies returns dependencies implied by this provider.
 	// For example, github implies ["gh", "git"].
 	ImpliedDependencies() []string
+}
+
+// RefreshableProvider is an optional interface for providers that support
+// background credential refresh. Providers with static credentials
+// (API keys, role ARNs) do not implement this.
+type RefreshableProvider interface {
+	CanRefresh(cred *Credential) bool
+	RefreshInterval() time.Duration
+	Refresh(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
 }
 
 // AgentProvider extends CredentialProvider for AI agent runtimes.

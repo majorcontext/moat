@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -416,13 +417,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				providerEnv = append(providerEnv, envVars...)
 
 				// Check if this provider supports token refresh
-				if prov.CanRefresh(provCred) {
+				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
 					refreshTargets = append(refreshTargets, refreshTarget{
-						provider:  providerName,
-						refresher: nil, // Will use new provider.Refresh method
-						cred:      cred,
-						store:     store,
-						newProv:   prov, // Store new provider for refresh
+						providerName: providerName,
+						refresher:    rp,
+						cred:         cred,
+						store:        store,
 					})
 				}
 
@@ -1085,12 +1085,42 @@ region = %s
 		}
 	}
 
+	// Determine if we need Gemini init (for Gemini credentials - both OAuth and API keys)
+	// This is triggered by:
+	// - a gemini grant, OR
+	// - gemini-cli in the dependencies list
+	var needsGeminiInit bool
+	for _, grant := range opts.Grants {
+		provider := credential.Provider(strings.Split(grant, ":")[0])
+		if provider == credential.ProviderGemini {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if _, err := store.Get(provider); err == nil {
+						needsGeminiInit = true
+					}
+				}
+			}
+			break
+		}
+	}
+	if !needsGeminiInit {
+		for _, d := range depList {
+			if d.Name == "gemini-cli" {
+				needsGeminiInit = true
+				break
+			}
+		}
+	}
+
 	// Resolve container image based on dependencies, SSH grants, init needs, and plugins
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(installableDeps, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
 		NeedsClaudeInit: needsClaudeInit,
 		NeedsCodexInit:  needsCodexInit,
+		NeedsGeminiInit: needsGeminiInit,
 		ClaudePlugins:   claudePlugins,
 	})
 
@@ -1101,7 +1131,7 @@ region = %s
 	r.Image = containerImage
 
 	// Determine if we need a custom image
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || len(claudePlugins) > 0
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || len(claudePlugins) > 0
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1127,6 +1157,7 @@ region = %s
 			SSHHosts:           sshGrants,
 			NeedsClaudeInit:    needsClaudeInit,
 			NeedsCodexInit:     needsCodexInit,
+			NeedsGeminiInit:    needsGeminiInit,
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
@@ -1357,6 +1388,50 @@ region = %s
 		proxyEnv = append(proxyEnv, codexConfig.Env...)
 	}
 
+	// Set up Gemini staging directory for init script using the provider interface.
+	// This includes settings.json and optionally oauth_creds.json.
+	var geminiConfig *provider.ContainerConfig
+	if needsGeminiInit || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
+		geminiProvider := provider.GetAgent("gemini")
+		if geminiProvider == nil {
+			cleanupProxy(proxyServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, fmt.Errorf("gemini provider not registered")
+		}
+
+		// Get Gemini credential for PrepareContainer
+		var geminiCred *provider.Credential
+		if needsGeminiInit {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if cred, err := store.Get(credential.ProviderGemini); err == nil {
+						geminiCred = provider.FromLegacy(cred)
+					}
+				}
+			}
+		}
+
+		// Call provider to prepare container config
+		var prepErr error
+		geminiConfig, prepErr = geminiProvider.PrepareContainer(ctx, provider.PrepareOpts{
+			Credential:    geminiCred,
+			ContainerHome: containerHome,
+		})
+		if prepErr != nil {
+			cleanupProxy(proxyServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, fmt.Errorf("preparing Gemini container config: %w", prepErr)
+		}
+
+		// Add mounts and env vars from provider
+		mounts = append(mounts, geminiConfig.Mounts...)
+		proxyEnv = append(proxyEnv, geminiConfig.Env...)
+	}
+
 	// MCP servers are now configured via .claude.json in the staging directory
 	// (handled by the claude provider's PrepareContainer), not via environment variables.
 
@@ -1541,6 +1616,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, err
 			}
 		}
@@ -1553,6 +1629,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("service dependencies require network support")
 			}
 			networkName := fmt.Sprintf("moat-%s", r.ID)
@@ -1563,6 +1640,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("creating service network: %w", netErr)
 			}
 			r.NetworkID = networkID
@@ -1596,6 +1674,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
 			}
 
@@ -1606,6 +1685,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("starting %s service: %w", dep.Name, err)
 			}
 
@@ -1633,6 +1713,7 @@ region = %s
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
 					"Service container logs:\n  moat logs %s --service %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
@@ -1716,6 +1797,7 @@ region = %s
 		cleanupSSH(sshServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -1727,6 +1809,9 @@ region = %s
 	}
 	if codexConfig != nil {
 		r.CodexConfigTempDir = codexConfig.StagingDir
+	}
+	if geminiConfig != nil {
+		r.GeminiConfigTempDir = geminiConfig.StagingDir
 	}
 
 	// Ensure proxy is running if we have ports to expose
@@ -1764,6 +1849,7 @@ region = %s
 		cleanupProxy(proxyServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
@@ -1789,6 +1875,7 @@ region = %s
 		cleanupProxy(proxyServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -2238,6 +2325,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Gemini config temp directory
+	m.mu.RLock()
+	geminiConfigTempDir := r.GeminiConfigTempDir
+	m.mu.RUnlock()
+	if geminiConfigTempDir != "" {
+		if err := os.RemoveAll(geminiConfigTempDir); err != nil {
+			log.Debug("failed to remove Gemini config temp dir", "path", geminiConfigTempDir, "error", err)
+		}
+	}
+
 	// Remove network if present (best-effort)
 	if networkID != "" {
 		log.Debug("removing docker network", "network_id", networkID)
@@ -2338,6 +2435,13 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		if r.CodexConfigTempDir != "" {
 			if rmErr := os.RemoveAll(r.CodexConfigTempDir); rmErr != nil {
 				log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", rmErr)
+			}
+		}
+
+		// Clean up Gemini config temp directory
+		if r.GeminiConfigTempDir != "" {
+			if rmErr := os.RemoveAll(r.GeminiConfigTempDir); rmErr != nil {
+				log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", rmErr)
 			}
 		}
 
@@ -2625,6 +2729,13 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
+	// Clean up Gemini config temp directory
+	if r.GeminiConfigTempDir != "" {
+		if err := os.RemoveAll(r.GeminiConfigTempDir); err != nil {
+			log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", err)
+		}
+	}
+
 	// Remove run storage directory (logs, traces, metadata)
 	if r.Store != nil {
 		if err := r.Store.Remove(); err != nil {
@@ -2851,12 +2962,21 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 
 // refreshTarget holds the state for a single refreshable credential.
 type refreshTarget struct {
-	provider  credential.Provider
-	refresher credential.TokenRefresher // Legacy refresher (deprecated, may be nil)
-	cred      *credential.Credential
-	store     credential.Store
-	newProv   provider.CredentialProvider // New provider interface (preferred)
+	providerName credential.Provider
+	refresher    provider.RefreshableProvider
+	cred         *credential.Credential
+	store        credential.Store
+
+	// Retry state for exponential backoff
+	nextRetryAfter time.Time
+	retryDelay     time.Duration
+	revoked        bool
 }
+
+const (
+	refreshRetryMin = 30 * time.Second
+	refreshRetryMax = 5 * time.Minute
+)
 
 // runTokenRefreshLoop periodically re-acquires tokens from their original source.
 // It performs an immediate refresh at startup, then refreshes on the shortest
@@ -2886,44 +3006,62 @@ func (m *Manager) runTokenRefreshLoop(ctx context.Context, r *Run, p credential.
 }
 
 // refreshToken attempts to refresh a single credential target.
-// On failure, it logs a warning and keeps the existing token.
+// On failure, it applies exponential backoff. On revocation, it stops retrying.
 func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyConfigurer, target *refreshTarget) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	var updated *credential.Credential
-	var err error
-
-	// Use new provider interface if available
-	if target.newProv != nil {
-		provCred := provider.FromLegacy(target.cred)
-		newCred, refreshErr := target.newProv.Refresh(ctx, p, provCred)
-		if refreshErr != nil {
-			err = refreshErr
-		} else if newCred != nil {
-			// Convert back to credential.Credential
-			updated = &credential.Credential{
-				Provider:  target.provider,
-				Token:     newCred.Token,
-				Scopes:    newCred.Scopes,
-				ExpiresAt: newCred.ExpiresAt,
-				CreatedAt: newCred.CreatedAt,
-				Metadata:  newCred.Metadata,
-			}
-		}
-	} else if target.refresher != nil {
-		// Fall back to legacy refresher
-		updated, err = target.refresher.RefreshCredential(ctx, p, target.cred)
-	} else {
-		log.Warn("no refresh method available", "provider", target.provider)
+	if target.revoked {
+		return
+	}
+	if !target.nextRetryAfter.IsZero() && time.Now().Before(target.nextRetryAfter) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	provCred := provider.FromLegacy(target.cred)
+	newCred, err := target.refresher.Refresh(ctx, p, provCred)
+
 	if err != nil {
-		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.provider)
+		if errors.Is(err, provider.ErrTokenRevoked) {
+			target.revoked = true
+			ui.Warnf("Token for %s has been revoked. Run 'moat grant %s' to re-authenticate.", target.providerName, target.providerName)
+			log.Warn("refresh token revoked, stopping refresh",
+				"provider", target.providerName, "error", err)
+			return
+		}
+
+		// Exponential backoff
+		if target.retryDelay == 0 {
+			target.retryDelay = refreshRetryMin
+		} else {
+			target.retryDelay *= 2
+			if target.retryDelay > refreshRetryMax {
+				target.retryDelay = refreshRetryMax
+			}
+		}
+		target.nextRetryAfter = time.Now().Add(target.retryDelay)
+
+		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.providerName)
 		log.Debug("token refresh failed, keeping existing token",
-			"provider", target.provider, "error", err)
+			"provider", target.providerName, "error", err, "retry_in", target.retryDelay)
 		return
+	}
+
+	// Reset backoff on success
+	target.retryDelay = 0
+	target.nextRetryAfter = time.Time{}
+
+	// Convert back to credential.Credential
+	var updated *credential.Credential
+	if newCred != nil {
+		updated = &credential.Credential{
+			Provider:  target.providerName,
+			Token:     newCred.Token,
+			Scopes:    newCred.Scopes,
+			ExpiresAt: newCred.ExpiresAt,
+			CreatedAt: newCred.CreatedAt,
+			Metadata:  newCred.Metadata,
+		}
 	}
 
 	// Token unchanged — no-op
@@ -2938,23 +3076,18 @@ func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyCo
 	if target.store != nil {
 		if err := target.store.Save(*updated); err != nil {
 			log.Warn("failed to persist refreshed token",
-				"provider", target.provider, "error", err)
+				"provider", target.providerName, "error", err)
 		}
 	}
 
-	log.Debug("token refreshed", "provider", target.provider, "run_id", r.ID)
+	log.Debug("token refreshed", "provider", target.providerName, "run_id", r.ID)
 }
 
 // minRefreshInterval returns the shortest refresh interval across all targets.
 func minRefreshInterval(targets []refreshTarget) time.Duration {
 	var min time.Duration
 	for i, t := range targets {
-		var d time.Duration
-		if t.newProv != nil {
-			d = t.newProv.RefreshInterval()
-		} else if t.refresher != nil {
-			d = t.refresher.RefreshInterval()
-		}
+		d := t.refresher.RefreshInterval()
 		if i == 0 || (d > 0 && d < min) {
 			min = d
 		}

@@ -29,6 +29,11 @@ type DockerfileOptions struct {
 	// the moat-init entrypoint script.
 	NeedsCodexInit bool
 
+	// NeedsGeminiInit indicates Gemini CLI configuration files need to be
+	// copied from a staging directory at container startup. This requires
+	// the moat-init entrypoint script.
+	NeedsGeminiInit bool
+
 	// UseBuildKit enables BuildKit-specific features like cache mounts.
 	// When false, generates Dockerfiles compatible with the legacy builder.
 	// Defaults to true if not explicitly set (checked via useBuildKit method).
@@ -525,7 +530,7 @@ func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode Doc
 	// - Codex file setup
 	// - Docker socket group setup (host mode)
 	// - Docker daemon startup (dind mode)
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || dockerMode != ""
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != ""
 	if needsInit {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")

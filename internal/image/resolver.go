@@ -17,6 +17,9 @@ type ResolveOptions struct {
 	// NeedsCodexInit indicates the image needs the init script for Codex setup.
 	NeedsCodexInit bool
 
+	// NeedsGeminiInit indicates the image needs the init script for Gemini setup.
+	NeedsGeminiInit bool
+
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
@@ -30,8 +33,8 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		opts = &ResolveOptions{}
 	}
 
-	// Need custom image if we have dependencies, SSH, Claude init, Codex init, or plugins
-	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || len(opts.ClaudePlugins) > 0
+	// Need custom image if we have dependencies, SSH, Claude init, Codex init, Gemini init, or plugins
+	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || len(opts.ClaudePlugins) > 0
 	if !needsCustomImage {
 		return DefaultImage
 	}
@@ -40,6 +43,7 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		NeedsSSH:        opts.NeedsSSH,
 		NeedsClaudeInit: opts.NeedsClaudeInit,
 		NeedsCodexInit:  opts.NeedsCodexInit,
+		NeedsGeminiInit: opts.NeedsGeminiInit,
 		ClaudePlugins:   opts.ClaudePlugins,
 	})
 }

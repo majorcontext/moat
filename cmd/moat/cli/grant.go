@@ -36,6 +36,7 @@ Supported providers:
   github      GitHub token (from gh CLI, environment, or interactive prompt)
   anthropic   Anthropic API key or Claude Code OAuth credentials
   openai      OpenAI API key
+  gemini      Gemini API key or Gemini CLI OAuth credentials
   aws         AWS IAM role assumption (uses host credentials to assume role)
 
 Subcommands:
@@ -85,6 +86,16 @@ Examples:
   # Use OpenAI credential for Codex
   moat run my-agent . --grant openai
 
+  # Grant Gemini access (will auto-detect Gemini CLI credentials)
+  moat grant gemini
+
+  # Grant Gemini API access from environment variable
+  export GEMINI_API_KEY="..."
+  moat grant gemini
+
+  # Use Gemini credential
+  moat gemini ./my-project
+
 If you have Claude Code installed and logged in, 'moat grant anthropic' will
 offer to import your existing OAuth credentials.`,
 	Args: cobra.MinimumNArgs(1),
@@ -124,11 +135,14 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	// Map CLI names to provider names
 	// "anthropic" is the CLI name, but the provider is registered as "claude"
 	// "openai" is the CLI name, but the provider is registered as "codex"
+	// "google" is an alias for "gemini"
 	switch providerName {
 	case "anthropic":
 		providerName = "claude"
 	case "openai":
 		providerName = "codex"
+	case "google":
+		providerName = "gemini"
 	}
 
 	// Look up provider in registry

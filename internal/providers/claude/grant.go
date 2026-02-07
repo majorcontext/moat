@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,9 +15,6 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
-
-// ErrRefreshNotSupported is returned when refresh is not supported for a credential.
-var ErrRefreshNotSupported = errors.New("credential refresh not supported")
 
 // Grant acquires Anthropic credentials interactively or from environment.
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {

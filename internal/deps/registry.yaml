@@ -78,6 +78,12 @@ codex-cli:
   package: "@openai/codex"
   requires: [node]
 
+gemini-cli:
+  description: Google Gemini CLI
+  type: npm
+  package: "@google/gemini-cli"
+  requires: [node]
+
 # Build tools (github-binary)
 protoc:
   description: Protocol Buffers compiler

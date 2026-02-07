@@ -1,9 +1,6 @@
 package claude
 
 import (
-	"context"
-	"time"
-
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -69,24 +66,6 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome string) ([]provider.MountConfig, string, error) {
 	// No direct mounts - we use the staging directory approach instead
 	return nil, "", nil
-}
-
-// CanRefresh reports whether this credential can be refreshed.
-// OAuth tokens from Claude are long-lived and don't support refresh via this interface.
-func (p *Provider) CanRefresh(cred *provider.Credential) bool {
-	return false
-}
-
-// RefreshInterval returns how often to attempt refresh.
-// Returns 0 since Claude credentials don't support refresh.
-func (p *Provider) RefreshInterval() time.Duration {
-	return 0
-}
-
-// Refresh attempts to refresh the credential.
-// Always returns an error since Claude credentials don't support refresh.
-func (p *Provider) Refresh(ctx context.Context, proxy provider.ProxyConfigurer, cred *provider.Credential) (*provider.Credential, error) {
-	return nil, ErrRefreshNotSupported
 }
 
 // Cleanup cleans up Claude resources.

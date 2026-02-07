@@ -19,6 +19,7 @@ const (
 	ProviderAWS       Provider = "aws"
 	ProviderAnthropic Provider = "anthropic"
 	ProviderOpenAI    Provider = "openai"
+	ProviderGemini    Provider = "gemini"
 )
 
 // Credential represents a stored credential.
@@ -41,13 +42,13 @@ type Store interface {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	return []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI}
+	return []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini}
 }
 
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini:
 		return true
 	default:
 		return false

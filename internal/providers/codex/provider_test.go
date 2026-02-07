@@ -52,6 +52,10 @@ func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer pr
 	// Not used in these tests
 }
 
+func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
+
+func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
+
 func TestProvider_Name(t *testing.T) {
 	p := &Provider{}
 	if got := p.Name(); got != "codex" {
@@ -112,26 +116,6 @@ func TestProvider_ContainerMounts(t *testing.T) {
 	}
 	if cleanupPath != "" {
 		t.Errorf("ContainerMounts() cleanupPath = %q, want empty", cleanupPath)
-	}
-}
-
-func TestProvider_CanRefresh(t *testing.T) {
-	p := &Provider{}
-	cred := &provider.Credential{
-		Provider: "codex",
-		Token:    "sk-test-api-key-12345",
-	}
-
-	if got := p.CanRefresh(cred); got != false {
-		t.Errorf("CanRefresh() = %v, want false", got)
-	}
-}
-
-func TestProvider_RefreshInterval(t *testing.T) {
-	p := &Provider{}
-
-	if got := p.RefreshInterval(); got != 0 {
-		t.Errorf("RefreshInterval() = %v, want 0", got)
 	}
 }
 

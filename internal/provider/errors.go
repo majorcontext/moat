@@ -14,6 +14,8 @@ var (
 	ErrCredentialExpired = errors.New("credential expired")
 	// ErrRefreshNotSupported is returned when refresh is attempted on a static credential.
 	ErrRefreshNotSupported = errors.New("credential refresh not supported")
+	// ErrTokenRevoked is returned when a refresh token has been revoked.
+	ErrTokenRevoked = errors.New("refresh token revoked")
 )
 
 // GrantError wraps provider-specific grant failures with actionable guidance.

@@ -135,6 +135,36 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
   fi
 fi
 
+# Gemini CLI Setup
+# When MOAT_GEMINI_INIT is set to the staging directory path, copy files
+# from the staging area to their final locations (~/.gemini).
+if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
+  # Determine target home directory
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    TARGET_HOME="/home/moatuser"
+  else
+    TARGET_HOME="$HOME"
+  fi
+
+  # Create ~/.gemini directory
+  mkdir -p "$TARGET_HOME/.gemini"
+
+  # Copy settings.json if present (preserve permissions)
+  [ -f "$MOAT_GEMINI_INIT/settings.json" ] && \
+    cp -p "$MOAT_GEMINI_INIT/settings.json" "$TARGET_HOME/.gemini/"
+
+  # Copy oauth_creds.json if present (ensure restricted permissions for security)
+  if [ -f "$MOAT_GEMINI_INIT/oauth_creds.json" ]; then
+    cp -p "$MOAT_GEMINI_INIT/oauth_creds.json" "$TARGET_HOME/.gemini/"
+    chmod 600 "$TARGET_HOME/.gemini/oauth_creds.json"
+  fi
+
+  # Ensure moatuser owns all the files if we're running as root
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown -R moatuser:moatuser "$TARGET_HOME/.gemini" 2>/dev/null || true
+  fi
+fi
+
 # MCP Server Setup
 # MCP servers are now configured via the .claude.json file in the staging directory.
 # The moat run manager writes MCP configuration directly to .claude.json with stub

@@ -107,22 +107,6 @@ func TestProvider_ContainerEnv_NilCredential(t *testing.T) {
 	}
 }
 
-func TestProvider_CanRefresh(t *testing.T) {
-	p := &Provider{}
-	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
-
-	if p.CanRefresh(cred) {
-		t.Error("CanRefresh() should return false for Claude credentials")
-	}
-}
-
-func TestProvider_RefreshInterval(t *testing.T) {
-	p := &Provider{}
-	if p.RefreshInterval() != 0 {
-		t.Errorf("RefreshInterval() = %v, want 0", p.RefreshInterval())
-	}
-}
-
 func TestProvider_ImpliedDependencies(t *testing.T) {
 	p := &Provider{}
 	deps := p.ImpliedDependencies()
@@ -479,3 +463,7 @@ func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer pr
 	}
 	m.transformers[host] = append(m.transformers[host], transformer)
 }
+
+func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
+
+func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}

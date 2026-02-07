@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -20,11 +19,6 @@ func (m *mockProvider) ConfigureProxy(ProxyConfigurer, *Credential) {}
 func (m *mockProvider) ContainerEnv(*Credential) []string           { return nil }
 func (m *mockProvider) ContainerMounts(*Credential, string) ([]MountConfig, string, error) {
 	return nil, "", nil
-}
-func (m *mockProvider) CanRefresh(*Credential) bool    { return false }
-func (m *mockProvider) RefreshInterval() time.Duration { return 0 }
-func (m *mockProvider) Refresh(context.Context, ProxyConfigurer, *Credential) (*Credential, error) {
-	return nil, ErrRefreshNotSupported
 }
 func (m *mockProvider) Cleanup(string)                {}
 func (m *mockProvider) ImpliedDependencies() []string { return nil }

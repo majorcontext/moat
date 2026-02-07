@@ -1,0 +1,23 @@
+# Example: Google Gemini agent
+#
+# Run Gemini CLI in an isolated container with credential injection.
+#
+# Run with:
+#   moat gemini examples/agent-gemini
+#   moat gemini examples/agent-gemini -p "fix the bug in main.py"
+
+name: gemini-test
+
+dependencies:
+  - node@20
+  - git
+  - gemini-cli
+
+grants:
+  - gemini
+
+command: ["gemini"]
+interactive: true
+
+# Gemini session logs are automatically synced to the host when "gemini" grant
+# is configured. To disable, set: gemini: { sync_logs: false }

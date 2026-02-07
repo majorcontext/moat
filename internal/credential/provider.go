@@ -2,7 +2,6 @@
 package credential
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"time"
@@ -140,6 +139,13 @@ type ProxyConfigurer interface {
 	// AddResponseTransformer registers a response transformer for a host.
 	// Transformers are called in registration order after the response is received.
 	AddResponseTransformer(host string, transformer ResponseTransformer)
+	// RemoveRequestHeader removes a client-sent header before forwarding.
+	// Used when injected credentials conflict with client headers.
+	RemoveRequestHeader(host, headerName string)
+	// SetTokenSubstitution replaces placeholder tokens with real tokens in both
+	// Authorization headers and request bodies for a specific host.
+	// Body substitution is limited to 64KB requests to avoid memory issues.
+	SetTokenSubstitution(host, placeholder, realToken string)
 }
 
 // ProviderSetup configures a credential provider for use in a container run.
@@ -163,24 +169,6 @@ type ProviderSetup interface {
 	// Cleanup is called when the run ends to clean up any resources.
 	// The cleanupPath is the path returned by ContainerMounts.
 	Cleanup(cleanupPath string)
-}
-
-// TokenRefresher is an optional interface for providers that support
-// background credential refresh. Provider packages implement this on
-// their ProviderSetup struct when the credential source supports
-// re-acquisition (e.g., gh CLI auto-refreshes OAuth tokens).
-type TokenRefresher interface {
-	// RefreshCredential re-acquires a fresh token from the original source
-	// and updates the proxy. Returns the updated credential or an error.
-	// On error, the caller keeps using the previous credential.
-	RefreshCredential(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
-
-	// CanRefresh reports whether this credential can be refreshed.
-	// Returns false for static credentials (PATs, API keys).
-	CanRefresh(cred *Credential) bool
-
-	// RefreshInterval returns how often to attempt refresh.
-	RefreshInterval() time.Duration
 }
 
 // ProviderResult holds the result of configuring a provider.
