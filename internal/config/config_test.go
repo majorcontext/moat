@@ -1303,6 +1303,78 @@ mcp:
 	}
 }
 
+func TestLoadConfigWithHooks(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+hooks:
+  post_build: git config --global core.autocrlf input
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Hooks.PostBuild != "git config --global core.autocrlf input" {
+		t.Errorf("Hooks.PostBuild = %q, want %q", cfg.Hooks.PostBuild, "git config --global core.autocrlf input")
+	}
+}
+
+func TestLoadConfigWithHooksAll(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+hooks:
+  post_build: git config --global core.autocrlf input
+  post_build_root: apt-get install -y figlet
+  pre_run: npm install
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Hooks.PostBuild != "git config --global core.autocrlf input" {
+		t.Errorf("Hooks.PostBuild = %q, want %q", cfg.Hooks.PostBuild, "git config --global core.autocrlf input")
+	}
+	if cfg.Hooks.PostBuildRoot != "apt-get install -y figlet" {
+		t.Errorf("Hooks.PostBuildRoot = %q, want %q", cfg.Hooks.PostBuildRoot, "apt-get install -y figlet")
+	}
+	if cfg.Hooks.PreRun != "npm install" {
+		t.Errorf("Hooks.PreRun = %q, want %q", cfg.Hooks.PreRun, "npm install")
+	}
+}
+
+func TestLoadConfigWithHooksEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Hooks.PostBuild != "" {
+		t.Errorf("Hooks.PostBuild should be empty, got %q", cfg.Hooks.PostBuild)
+	}
+	if cfg.Hooks.PostBuildRoot != "" {
+		t.Errorf("Hooks.PostBuildRoot should be empty, got %q", cfg.Hooks.PostBuildRoot)
+	}
+	if cfg.Hooks.PreRun != "" {
+		t.Errorf("Hooks.PreRun should be empty, got %q", cfg.Hooks.PreRun)
+	}
+}
+
 func TestServicesValidation(t *testing.T) {
 	cfg := &Config{
 		Services: map[string]ServiceSpec{

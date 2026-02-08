@@ -49,6 +49,38 @@ func TestImageTagWithSSH(t *testing.T) {
 	}
 }
 
+func TestImageTagWithHooks(t *testing.T) {
+	noHooks := ImageTag(nil, nil)
+	withHooks := ImageTag(nil, &ImageTagOptions{
+		Hooks: &HooksConfig{
+			PostBuild:     "git config --global core.autocrlf input",
+			PostBuildRoot: "apt-get install -y figlet",
+		},
+	})
+	if noHooks == withHooks {
+		t.Error("hooks should change the image hash")
+	}
+
+	// Different hooks should produce different tags
+	hooks1 := ImageTag(nil, &ImageTagOptions{
+		Hooks: &HooksConfig{PostBuild: "echo a"},
+	})
+	hooks2 := ImageTag(nil, &ImageTagOptions{
+		Hooks: &HooksConfig{PostBuild: "echo b"},
+	})
+	if hooks1 == hooks2 {
+		t.Error("different hooks should produce different image tags")
+	}
+
+	// pre_run should also affect hash
+	withPreRun := ImageTag(nil, &ImageTagOptions{
+		Hooks: &HooksConfig{PreRun: "npm install"},
+	})
+	if noHooks == withPreRun {
+		t.Error("pre_run should change the image hash")
+	}
+}
+
 func TestImageTagDockerModes(t *testing.T) {
 	// docker:host and docker:dind should produce different image tags
 	// because they install different packages (CLI-only vs full daemon)
