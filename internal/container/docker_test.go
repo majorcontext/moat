@@ -404,7 +404,7 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 	}{
 		{
 			name:               "uses buildkit when BUILDKIT_HOST is set",
-			buildkitHost:       "tcp://buildkit:1234",
+			buildkitHost:       "tcp://192.0.2.1:1", // non-routable TEST-NET-1 address (RFC 5737)
 			expectBuildKitPath: true,
 		},
 		{
@@ -436,7 +436,9 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 			// Create a minimal runtime
 			rt := &DockerRuntime{}
 
-			ctx := context.Background()
+			// Use a short deadline so BuildKit connection to non-routable address fails fast.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
 			dockerfile := "FROM alpine:latest\n"
 			tag := "test:latest"
 			opts := BuildOptions{}
@@ -459,20 +461,19 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 
-			// Check which path was taken based on error message
+			// Determine which path was taken:
+			// - Docker SDK path: nil *dockerBuildManager dereferences m.cli → panic
+			//   (caught by recover as "docker sdk panic: ...")
+			// - BuildKit path: returns a normal error (message varies by environment)
 			errMsg := strings.ToLower(err.Error())
+			isPanic := strings.Contains(errMsg, "docker sdk panic")
 			if tt.expectBuildKitPath {
-				// BuildKit path should fail with buildkit-related error
-				// (either "creating buildkit client" or "build failed")
-				// The error may contain connection failures to BuildKit
-				if !strings.Contains(errMsg, "buildkit") && !strings.Contains(errMsg, "build failed") {
-					t.Errorf("expected buildkit path error, got: %v", err)
+				if isPanic {
+					t.Errorf("expected buildkit path, but got docker sdk panic: %v", err)
 				}
 			} else {
-				// Docker SDK path should fail with nil client error or panic
-				// (should NOT contain "buildkit")
-				if strings.Contains(errMsg, "buildkit") {
-					t.Errorf("expected docker sdk path, but got buildkit error: %v", err)
+				if !isPanic {
+					t.Errorf("expected docker sdk path (panic), got: %v", err)
 				}
 			}
 		})
