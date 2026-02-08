@@ -1,5 +1,6 @@
 ---
 title: "Workspace snapshots"
+navTitle: "Snapshots"
 description: "Create point-in-time snapshots of your workspace for recovery."
 keywords: ["moat", "snapshots", "backup", "restore", "recovery"]
 ---
@@ -355,4 +356,4 @@ moat snapshot restore <run-id> <safety-snapshot-id>
 ## Related guides
 
 - [Running Claude Code](./01-running-claude-code.md) — Use snapshots with Claude Code
-- [Exposing ports](./05-exposing-ports.md) — Independent snapshots per agent
+- [Exposing ports](./06-exposing-ports.md) — Independent snapshots per agent

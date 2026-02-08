@@ -1,5 +1,6 @@
 ---
 title: "Exposing ports"
+navTitle: "Ports"
 description: "Access web servers and services running inside agent containers."
 keywords: ["moat", "ports", "endpoints", "hostname routing", "web server", "preview"]
 ---
@@ -263,4 +264,4 @@ moat run --name checkout .worktrees/checkout &
 
 - [Networking](../concepts/05-networking.md) — How the routing proxy works, network policies, and traffic flow
 - [Running Claude Code](./01-running-claude-code.md) — Use port access with Claude Code sessions
-- [Snapshots](./06-snapshots.md) — Independent snapshots per agent
+- [Snapshots](./07-snapshots.md) — Independent snapshots per agent

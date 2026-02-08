@@ -1,5 +1,6 @@
 ---
 title: "agent.yaml reference"
+navTitle: "agent.yaml"
 description: "Complete reference for agent.yaml configuration options."
 keywords: ["moat", "agent.yaml", "configuration", "reference", "yaml"]
 ---
@@ -1039,7 +1040,7 @@ When a `grant` is specified, the corresponding environment variable is set autom
 | `gemini` | `GEMINI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 
-**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/08-running-gemini.md#mcp-servers) in the Gemini guide.
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/03-running-gemini.md#mcp-servers) in the Gemini guide.
 
 ---
 

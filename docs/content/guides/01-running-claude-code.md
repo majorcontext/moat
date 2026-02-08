@@ -1,5 +1,6 @@
 ---
 title: "Running Claude Code"
+navTitle: "Claude Code"
 description: "Run Claude Code in an isolated container with credential injection."
 keywords: ["moat", "claude code", "anthropic", "ai agent", "coding assistant"]
 ---
@@ -454,7 +455,7 @@ Restore a snapshot:
 moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
 ```
 
-See [Snapshots guide](./06-snapshots.md) for details.
+See [Snapshots guide](./07-snapshots.md) for details.
 
 ## Example: Code review workflow
 
@@ -545,6 +546,6 @@ moat run --grant anthropic -- curl -s https://api.anthropic.com/v1/models
 
 ## Related guides
 
-- [SSH access](./03-ssh-access.md) — Set up SSH for git operations
-- [Snapshots](./06-snapshots.md) — Protect your workspace with snapshots
-- [Exposing ports](./05-exposing-ports.md) — Access services running inside containers
+- [SSH access](./04-ssh-access.md) — Set up SSH for git operations
+- [Snapshots](./07-snapshots.md) — Protect your workspace with snapshots
+- [Exposing ports](./06-exposing-ports.md) — Access services running inside containers

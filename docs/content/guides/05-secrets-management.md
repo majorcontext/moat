@@ -1,5 +1,6 @@
 ---
 title: "Secrets management"
+navTitle: "Secrets"
 description: "Pull secrets from 1Password and AWS SSM into container environment variables."
 keywords: ["moat", "secrets", "1password", "aws ssm", "environment variables"]
 ---

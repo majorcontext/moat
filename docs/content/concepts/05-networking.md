@@ -288,4 +288,4 @@ $ moat logs | grep "blocked by network policy"
 
 - [Credential management](./02-credentials.md) — How credentials are injected via the proxy
 - [Sandboxing](./01-sandboxing.md) — Container network isolation
-- [Exposing ports](../guides/05-exposing-ports.md) — Access services running inside containers
+- [Exposing ports](../guides/06-exposing-ports.md) — Access services running inside containers
