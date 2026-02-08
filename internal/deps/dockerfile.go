@@ -239,7 +239,11 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 
 	// User-space custom deps (install-as: user) run as moatuser
 	writeUserCustomDeps(&b, c.userCustomDeps)
-	b.WriteString(claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser))
+	pluginResult := claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser)
+	b.WriteString(pluginResult.DockerfileSnippet)
+	if pluginResult.ScriptName != "" {
+		contextFiles[pluginResult.ScriptName] = pluginResult.ScriptContent
+	}
 
 	// Dynamic package manager dependencies
 	writeDynamicDeps(&b, "npm packages (dynamic)", c.dynamicNpm)
