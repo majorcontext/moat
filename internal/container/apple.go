@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -609,11 +610,12 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 	}
 
 	log.Debug("builder transport became inactive, restarting builder and retrying build...")
+	// Force a full restart since the transport is known-broken, then fix DNS.
 	if err := m.restartBuilder(ctx); err != nil {
 		return fmt.Errorf("building image (retry failed): builder restart: %w (original error: %v)", err, buildErr)
 	}
 	if err := m.fixBuilderDNS(ctx, opts.DNS); err != nil {
-		return fmt.Errorf("building image (retry failed): configuring DNS: %w", err)
+		return fmt.Errorf("building image (retry failed): %w (original error: %v)", err, buildErr)
 	}
 
 	fmt.Println("Retrying build...")
@@ -667,8 +669,10 @@ func (m *appleBuildManager) restartBuilder(ctx context.Context) error {
 	stopCmd := exec.CommandContext(ctx, m.containerBin, "builder", "stop")
 	_ = stopCmd.Run()
 
-	// Delete to clear stale state, then start fresh
-	delCmd := exec.CommandContext(ctx, m.containerBin, "builder", "delete")
+	// Force-delete to clear stale state. Without --force, delete fails when
+	// the builder is "running" but its gRPC transport is dead (e.g., after a
+	// "Transport became inactive" error), leaving us stuck with a broken builder.
+	delCmd := exec.CommandContext(ctx, m.containerBin, "builder", "delete", "--force")
 	_ = delCmd.Run()
 
 	return m.startBuilder(ctx)
@@ -714,12 +718,14 @@ func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, dns []string) err
 	// Use configured DNS or default to Google's public DNS
 	dnsServers := DefaultDNS(dns)
 
-	// Always restart the builder to ensure it has adequate resources and a
-	// clean gRPC transport. A stale builder (from a previous moat run or
-	// started with default 2 CPU / 2GB) can fail with "Transport became
-	// inactive" during large builds.
-	if err := m.restartBuilder(ctx); err != nil {
-		return err
+	// Start the builder if it's not already running. Avoid unconditional
+	// restarts — stopping and restarting the builder immediately before a
+	// build destabilizes the gRPC transport, causing "Transport became
+	// inactive" errors during large builds.
+	if !m.isBuilderRunning(ctx) {
+		if err := m.startBuilder(ctx); err != nil {
+			return err
+		}
 	}
 
 	// Validate and build resolv.conf content using printf format (handles newlines correctly)
@@ -741,8 +747,25 @@ func (m *appleBuildManager) fixBuilderDNS(ctx context.Context, dns []string) err
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Log but don't fail - the build may still succeed with default DNS
-		log.Debug("DNS configuration failed, build may use default DNS", "error", err, "stderr", stderr.String())
+		errMsg := stderr.String()
+		// If the exec failed due to a transport error, the builder is a zombie:
+		// it reports "running" but its gRPC transport is dead. Force-restart it
+		// so the subsequent build has a working builder.
+		if isBuilderTransportError(errors.New(errMsg)) {
+			log.Debug("builder transport is dead (zombie builder), force-restarting...")
+			if restartErr := m.restartBuilder(ctx); restartErr != nil {
+				return fmt.Errorf("restarting zombie builder: %w", restartErr)
+			}
+			// Re-apply DNS fix after restart
+			retryCmd := exec.CommandContext(ctx, m.containerBin, "exec", "buildkit",
+				"sh", "-c", fmt.Sprintf("printf '%s' > /etc/resolv.conf", resolvConf.String()))
+			if retryErr := retryCmd.Run(); retryErr != nil {
+				log.Debug("DNS configuration failed after builder restart", "error", retryErr)
+			}
+			return nil
+		}
+		// Non-transport error: log but don't fail - the build may still succeed with default DNS
+		log.Debug("DNS configuration failed, build may use default DNS", "error", err, "stderr", errMsg)
 		return nil
 	}
 

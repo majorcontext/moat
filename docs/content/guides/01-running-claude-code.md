@@ -547,4 +547,4 @@ moat run --grant anthropic -- curl -s https://api.anthropic.com/v1/models
 
 - [SSH access](./03-ssh-access.md) — Set up SSH for git operations
 - [Snapshots](./06-snapshots.md) — Protect your workspace with snapshots
-- [Multi-agent](./05-multi-agent.md) — Run multiple Claude Code sessions
+- [Exposing ports](./05-exposing-ports.md) — Access services running inside containers
