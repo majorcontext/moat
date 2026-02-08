@@ -25,7 +25,8 @@ builds:
       - -X github.com/majorcontext/moat/cmd/moat/cli.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
@@ -66,6 +67,25 @@ changelog:
       order: 4
     - title: Others
       order: 999
+
+brews:
+  - name: moat
+    repository:
+      owner: majorcontext
+      name: homebrew-moat
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    commit_author:
+      name: moat-bot
+      email: bot@majorcontext.com
+    commit_msg_template: "brew: update {{ .ProjectName }} to {{ .Tag }}"
+    homepage: "https://majorcontext.com/moat"
+    description: "Run AI agents in isolated containers with credential injection and full observability"
+    license: "MIT"
+    test: |
+      system "#{bin}/moat", "version"
+    install: |
+      bin.install "moat"
 
 release:
   github:

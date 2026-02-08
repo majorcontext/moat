@@ -15,15 +15,14 @@ For design rationale and principles, see [VISION.md](VISION.md), for pretty vers
 ## Installation
 
 ```bash
-go install github.com/majorcontext/moat/cmd/moat@latest
+brew tap majorcontext/moat
+brew install moat
 ```
 
-Or build from source:
+Or with Go:
 
 ```bash
-git clone https://github.com/majorcontext/moat.git
-cd moat
-go build -o moat ./cmd/moat
+go install github.com/majorcontext/moat/cmd/moat@latest
 ```
 
 **Requirements:** Docker or Apple containers (macOS 15+ with Apple Silicon—auto-detected).
