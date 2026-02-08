@@ -252,12 +252,12 @@ type TracingConfig struct {
 // HooksConfig configures lifecycle hooks that run at different stages.
 type HooksConfig struct {
 	// PostBuild runs as the container user (moatuser) during image build,
-	// after all dependencies are installed. Baked into Docker layers and cached.
+	// after all dependencies are installed. Baked into image layers and cached.
 	// Use for user-level image setup like configuring git defaults.
 	PostBuild string `yaml:"post_build,omitempty"`
 
 	// PostBuildRoot runs as root during image build, after all dependencies
-	// are installed. Baked into Docker layers and cached.
+	// are installed. Baked into image layers and cached.
 	// Use for system-level setup like installing packages or kernel tuning.
 	PostBuildRoot string `yaml:"post_build_root,omitempty"`
 

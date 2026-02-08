@@ -588,7 +588,7 @@ Lifecycle hooks that run at different stages of the container lifecycle.
 
 ### hooks.post_build_root
 
-Command to run as `root` during image build, after dependencies are installed. Baked into Docker layers and cached.
+Command to run as `root` during image build, after dependencies are installed. Baked into image layers and cached.
 
 ```yaml
 hooks:
@@ -602,7 +602,7 @@ Use for system-level setup: installing system packages, kernel tuning, modifying
 
 ### hooks.post_build
 
-Command to run as the container user (`moatuser`) during image build, after dependencies are installed. Baked into Docker layers and cached.
+Command to run as the container user (`moatuser`) during image build, after dependencies are installed. Baked into image layers and cached.
 
 ```yaml
 hooks:
@@ -614,7 +614,7 @@ hooks:
 
 Use for user-level image setup: configuring tools, setting defaults.
 
-Build hooks run during `docker build`, **before** your workspace is mounted. They can only use commands available in the image — not files from your project directory. For multi-step setup, chain commands with `&&`:
+Build hooks run during image build, **before** your workspace is mounted. They can only use commands available in the image — not files from your project directory. For multi-step setup, chain commands with `&&`:
 
 ```yaml
 hooks:
@@ -639,13 +639,13 @@ Use for workspace-level setup that needs your project files: installing dependen
 
 ### Build time vs runtime
 
-Build hooks (`post_build`, `post_build_root`) run during `docker build` — they cannot access workspace files. Use them for **image-level setup**.
+Build hooks (`post_build`, `post_build_root`) run during image build — they cannot access workspace files. Use them for **image-level setup**.
 
 `pre_run` runs at container start when the workspace is mounted — it can access your project files. Use it for **workspace-level setup**.
 
 ```yaml
 hooks:
-  # Image-level: install system packages (cached in Docker layers)
+  # Image-level: install system packages (cached during image build)
   post_build_root: apt-get update -qq && apt-get install -y -qq figlet
 
   # Workspace-level: install project deps (runs every start, fast when current)
@@ -664,7 +664,7 @@ hooks:
 
 ### Caching
 
-Build hooks (`post_build`, `post_build_root`) are Dockerfile `RUN` commands. Docker caches each layer, so they only re-run when:
+Build hooks (`post_build`, `post_build_root`) are image build `RUN` commands. The build system caches each layer, so they only re-run when:
 - The command string changes in `agent.yaml`
 - You use `--rebuild` to force a fresh build
 - A preceding layer changes (new dependency, etc.)

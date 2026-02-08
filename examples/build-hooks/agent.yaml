@@ -1,7 +1,7 @@
 # Example: Hooks
 #
 # Hooks run at different lifecycle stages:
-#   post_build / post_build_root — during image build (cached in Docker layers)
+#   post_build / post_build_root — during image build (cached in image layers)
 #   pre_run                      — every container start (workspace is mounted)
 #
 # Run with:
