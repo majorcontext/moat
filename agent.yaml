@@ -3,6 +3,7 @@ interactive: true
 
 env:
   ANTHROPIC_MODEL: opus
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: 1
 
 container:
   memory: 8192
@@ -26,9 +27,3 @@ grants:
   - github
   - ssh:github.com
 
-# mcp:
-#   - name: context7
-#     url: https://mcp.context7.com/mcp
-#     auth:
-#       grant: mcp-context7
-#       header: CONTEXT7_API_KEY
