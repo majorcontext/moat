@@ -22,10 +22,12 @@
 
 - [Running Claude Code](./content/guides/01-running-claude-code.md) — Use Claude Code in isolated containers
 - [Running Codex](./content/guides/02-running-codex.md) — Use OpenAI Codex CLI in isolated containers
-- [SSH Access](./content/guides/03-ssh-access.md) — Grant SSH access without exposing private keys
-- [Secrets Management](./content/guides/04-secrets-management.md) — Pull secrets from 1Password and AWS SSM
-- [Exposing Ports](./content/guides/05-exposing-ports.md) — Access services running inside agent containers
-- [Workspace Snapshots](./content/guides/06-snapshots.md) — Point-in-time recovery for workspaces
+- [Running Gemini](./content/guides/03-running-gemini.md) — Use Google Gemini CLI in isolated containers
+- [SSH Access](./content/guides/04-ssh-access.md) — Grant SSH access without exposing private keys
+- [Secrets Management](./content/guides/05-secrets-management.md) — Pull secrets from 1Password and AWS SSM
+- [Exposing Ports](./content/guides/06-exposing-ports.md) — Access services running inside agent containers
+- [Workspace Snapshots](./content/guides/07-snapshots.md) — Point-in-time recovery for workspaces
+- [Service Dependencies](./content/guides/08-service-dependencies.md) — Run databases and caches alongside agents
 
 ### Reference
 
@@ -56,6 +58,7 @@ Each documentation file includes YAML frontmatter:
 ```yaml
 ---
 title: "Page Title"
+navTitle: "Short Title"  # optional, for navigation menus
 description: "Brief description for SEO and previews"
 keywords: ["keyword1", "keyword2"]
 ---

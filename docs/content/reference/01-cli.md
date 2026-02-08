@@ -1,5 +1,6 @@
 ---
 title: "CLI reference"
+navTitle: "CLI"
 description: "Complete reference for all Moat CLI commands and flags."
 keywords: ["moat", "cli", "commands", "reference", "flags"]
 ---

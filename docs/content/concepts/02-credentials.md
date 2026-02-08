@@ -1,5 +1,6 @@
 ---
 title: "Credential management"
+navTitle: "Credentials"
 description: "How Moat stores, encrypts, and injects credentials into agent runs."
 keywords: ["moat", "credentials", "oauth", "tokens", "injection", "proxy", "security"]
 ---

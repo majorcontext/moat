@@ -1,5 +1,6 @@
 ---
 title: "Choosing a tool"
+navTitle: "Comparison"
 description: "Compare Moat with other tools for running AI coding agents in isolated environments."
 keywords: ["moat", "comparison", "packnplay", "leash", "devcontainer", "sandbox"]
 ---

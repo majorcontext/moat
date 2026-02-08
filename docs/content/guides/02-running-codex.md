@@ -1,5 +1,6 @@
 ---
 title: "Running Codex"
+navTitle: "Codex"
 description: "Run OpenAI Codex CLI in an isolated container with credential injection."
 keywords: ["moat", "codex", "openai", "ai agent", "coding assistant"]
 ---
@@ -213,7 +214,7 @@ Restore a snapshot:
 moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
 ```
 
-See [Snapshots guide](./06-snapshots.md) for details.
+See [Snapshots guide](./07-snapshots.md) for details.
 
 ## Example: Code review workflow
 
@@ -276,6 +277,6 @@ moat run --grant openai -- curl -s https://api.openai.com/v1/models -H "Authoriz
 
 ## Related guides
 
-- [SSH access](./03-ssh-access.md) — Set up SSH for git operations
-- [Snapshots](./06-snapshots.md) — Protect your workspace with snapshots
-- [Exposing ports](./05-exposing-ports.md) — Access services running inside containers
+- [SSH access](./04-ssh-access.md) — Set up SSH for git operations
+- [Snapshots](./07-snapshots.md) — Protect your workspace with snapshots
+- [Exposing ports](./06-exposing-ports.md) — Access services running inside containers

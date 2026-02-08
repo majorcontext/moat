@@ -1,5 +1,6 @@
 ---
 title: "Environment variables"
+navTitle: "Environment"
 description: "Environment variables used by Moat and injected into containers."
 keywords: ["moat", "environment variables", "configuration", "reference"]
 ---

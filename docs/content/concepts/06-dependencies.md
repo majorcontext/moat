@@ -270,7 +270,7 @@ Credential handling:
 - No ports are exposed to the host — services are reachable only from the agent container
 - The `services:` block supports the same secret providers as `secrets:` (1Password, AWS SSM)
 
-See the [service dependencies guide](../guides/07-service-dependencies.md) for detailed examples and patterns.
+See the [service dependencies guide](../guides/08-service-dependencies.md) for detailed examples and patterns.
 
 ## Runtimes
 
@@ -630,6 +630,6 @@ grants:
 ## Related concepts
 
 - [agent.yaml reference](../reference/02-agent-yaml.md) — Full configuration options
-- [Service dependencies guide](../guides/07-service-dependencies.md) — Detailed examples and patterns
+- [Service dependencies guide](../guides/08-service-dependencies.md) — Detailed examples and patterns
 - [Running Claude Code](../guides/01-running-claude-code.md) — AI agent setup
 - [Running Codex](../guides/02-running-codex.md) — OpenAI Codex setup
