@@ -8,6 +8,9 @@ import (
 )
 
 func TestGrantMCP(t *testing.T) {
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+
 	// Save stdin/stdout
 	oldStdin := os.Stdin
 	oldStdout := os.Stdout
