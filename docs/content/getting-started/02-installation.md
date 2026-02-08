@@ -1,19 +1,38 @@
 ---
 title: "Installation"
 description: "Install Moat on macOS, Linux, or Windows with Docker or Apple containers."
-keywords: ["moat", "installation", "docker", "apple containers", "setup"]
+keywords: ["moat", "installation", "docker", "apple containers", "setup", "homebrew"]
 ---
 
 # Installation
 
 ## Requirements
 
-- **Go 1.21 or later** — For building from source
 - **Container runtime** — Docker or Apple containers (macOS 26+ with Apple Silicon)
 
 ## Install Moat
 
+### Homebrew (recommended)
+
+```bash
+brew tap majorcontext/moat
+brew install moat
+```
+
+### Download binary
+
+Download a prebuilt binary from the [GitHub releases](https://github.com/majorcontext/moat/releases) page. Archives are available for macOS (arm64, amd64) and Linux (arm64, amd64).
+
+Extract the archive and move the binary to a directory in your `PATH`:
+
+```bash
+tar xzf moat_*.tar.gz
+mv moat /usr/local/bin/
+```
+
 ### Using `go install`
+
+Requires Go 1.21 or later.
 
 ```bash
 go install github.com/majorcontext/moat/cmd/moat@latest
