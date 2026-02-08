@@ -858,35 +858,27 @@ func TestAppleContainerWithProxy(t *testing.T) {
 // Keychain Integration Tests
 // =============================================================================
 
-// cleanupKeychainKey deletes the test encryption key if MOAT_TEST_CLEANUP is set.
-// This prevents test artifacts from accumulating in CI environments.
+// cleanupKeychainKey deletes the test encryption key.
+// With MOAT_KEYRING_SERVICE=moat-test, this is always safe to run as it only
+// affects the isolated test keychain entry.
 func cleanupKeychainKey(t *testing.T) {
 	t.Helper()
-	if os.Getenv("MOAT_TEST_CLEANUP") != "" {
-		if err := keyring.DeleteKey(); err != nil {
-			t.Logf("Note: cleanup failed (may be expected): %v", err)
-		} else {
-			t.Log("Cleaned up test encryption key")
-		}
+	if err := keyring.DeleteKey(); err != nil {
+		t.Logf("Note: cleanup failed (may be expected): %v", err)
+	} else {
+		t.Log("Cleaned up test encryption key")
 	}
 }
 
 // TestKeychainKeyPersistence verifies that the encryption key is stored securely
 // and persists across calls. This tests the keyring package integration.
 //
-// IMPORTANT: This test uses the real system keychain or file storage. It will
-// create a key entry that persists after the test unless MOAT_TEST_CLEANUP=1.
-// In CI environments, set MOAT_TEST_CLEANUP=1 to clean up test artifacts.
-// For local development, the test will reuse any existing key (which is the
-// expected production behavior).
+// Uses MOAT_KEYRING_SERVICE=moat-test for complete isolation from production keys.
 func TestKeychainKeyPersistence(t *testing.T) {
-	// Warn developers about test isolation
-	if os.Getenv("MOAT_TEST_CLEANUP") == "" {
-		t.Log("Note: MOAT_TEST_CLEANUP not set. Test will use/create real keychain entry.")
-		t.Log("Set MOAT_TEST_CLEANUP=1 to clean up test artifacts after test.")
-	}
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
 
-	// Register cleanup for CI environments
+	// Always clean up test keyring entry
 	t.Cleanup(func() { cleanupKeychainKey(t) })
 
 	// Get or create the encryption key
@@ -1089,6 +1081,10 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 // TestCredentialRoundTripWithKeychain verifies that credentials can be saved
 // and retrieved using the keychain-stored encryption key.
 func TestCredentialRoundTripWithKeychain(t *testing.T) {
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
 	// Use a temp directory for this test's credentials
 	tmpDir := t.TempDir()
 
