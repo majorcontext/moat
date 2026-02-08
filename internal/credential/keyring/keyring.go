@@ -36,13 +36,23 @@ import (
 )
 
 const (
-	// ServiceName is the keyring service identifier.
+	// ServiceName is the default keyring service identifier.
+	// Can be overridden with MOAT_KEYRING_SERVICE environment variable for test isolation.
 	ServiceName = "moat"
 	// AccountName is the keyring account identifier.
 	AccountName = "encryption-key"
 	// KeySize is the required encryption key size in bytes.
 	KeySize = 32
 )
+
+// getServiceName returns the keyring service name, checking environment variable first.
+// This allows tests to use isolated keyring entries via MOAT_KEYRING_SERVICE=moat-test.
+func getServiceName() string {
+	if name := os.Getenv("MOAT_KEYRING_SERVICE"); name != "" {
+		return name
+	}
+	return ServiceName
+}
 
 // encodeKey converts a raw key to base64 for keychain storage.
 func encodeKey(key []byte) string {
@@ -73,7 +83,7 @@ type Backend interface {
 type keychainBackend struct{}
 
 func (k *keychainBackend) Get() ([]byte, error) {
-	encoded, err := keyring.Get(ServiceName, AccountName)
+	encoded, err := keyring.Get(getServiceName(), AccountName)
 	if err != nil {
 		return nil, fmt.Errorf("keychain get: %w", err)
 	}
@@ -84,19 +94,20 @@ func (k *keychainBackend) Set(key []byte) error {
 	// Check if key already exists - don't overwrite to prevent race conditions.
 	// If another process created a key between our Get() and Set() calls,
 	// we should use that key instead of overwriting it.
-	if _, err := keyring.Get(ServiceName, AccountName); err == nil {
+	serviceName := getServiceName()
+	if _, err := keyring.Get(serviceName, AccountName); err == nil {
 		return nil // Key already exists, don't overwrite
 	}
 
 	encoded := encodeKey(key)
-	if err := keyring.Set(ServiceName, AccountName, encoded); err != nil {
+	if err := keyring.Set(serviceName, AccountName, encoded); err != nil {
 		return fmt.Errorf("keychain set: %w", err)
 	}
 	return nil
 }
 
 func (k *keychainBackend) Delete() error {
-	if err := keyring.Delete(ServiceName, AccountName); err != nil {
+	if err := keyring.Delete(getServiceName(), AccountName); err != nil {
 		return fmt.Errorf("keychain delete: %w", err)
 	}
 	return nil
@@ -194,20 +205,29 @@ var ErrNoHomeDirectory = errors.New("could not determine home directory for secu
 // DefaultKeyFilePath returns the default path for the fallback key file.
 // The path is always absolute to ensure consistent key storage across
 // different working directories.
+// The service name (from MOAT_KEYRING_SERVICE or default "moat") is included
+// in the filename to support test isolation.
 // Returns an error if the home directory cannot be determined, as using
 // temp directories is insecure (may be world-readable or cleared on reboot).
 func DefaultKeyFilePath() (string, error) {
+	// Use service-name-based filename only when MOAT_KEYRING_SERVICE is set (test isolation).
+	// Otherwise use the standard "encryption.key" filename.
+	filename := "encryption.key"
+	if name := os.Getenv("MOAT_KEYRING_SERVICE"); name != "" {
+		filename = name + ".key"
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// UserHomeDir failed - try $HOME directly (Unix).
 		if envHome := os.Getenv("HOME"); envHome != "" {
-			return filepath.Join(envHome, ".moat", "encryption.key"), nil
+			return filepath.Join(envHome, ".moat", filename), nil
 		}
 		// Cannot determine home directory - fail rather than use insecure temp directory.
 		// Temp directories may be world-readable, shared between users, or cleared on reboot.
 		return "", fmt.Errorf("%w: set $HOME environment variable or ensure user home is configured", ErrNoHomeDirectory)
 	}
-	return filepath.Join(home, ".moat", "encryption.key"), nil
+	return filepath.Join(home, ".moat", filename), nil
 }
 
 // generateKey creates a new random encryption key.

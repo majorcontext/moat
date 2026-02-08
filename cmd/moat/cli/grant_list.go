@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +46,19 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(creds) == 0 {
+		// Check if there are .enc files that couldn't be decrypted
+		if hasUnreadableCredentials(credential.DefaultStoreDir()) {
+			ui.Warn("Found encrypted credential files that cannot be decrypted.")
+			ui.Warn("This usually means the encryption key has changed.")
+			ui.Warn("")
+			ui.Warn("To fix:")
+			ui.Warn("  1. Re-grant your credentials: moat grant <provider>")
+			ui.Warn("  2. Or restore your encryption key from backup")
+			ui.Warn("")
+			ui.Warn("For details, run with --verbose to see which providers failed")
+			return nil
+		}
+
 		fmt.Println("No credentials found.")
 		fmt.Println("\nGrant a credential with: moat grant <provider>")
 		return nil
@@ -100,4 +115,19 @@ func credType(c credential.Credential) string {
 	default:
 		return "token"
 	}
+}
+
+// hasUnreadableCredentials checks if there are .enc files in the credential directory.
+// Used to detect when credentials exist but can't be decrypted (e.g., key changed).
+func hasUnreadableCredentials(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".enc" {
+			return true
+		}
+	}
+	return false
 }

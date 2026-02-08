@@ -30,6 +30,10 @@ import (
 // 4. Run container with curl command using stub header
 // 5. Verify real credential was injected by proxy
 func TestMCPCredentialInjection_E2E(t *testing.T) {
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -180,6 +184,10 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 // TestMCPMultipleServers verifies that multiple MCP servers can be configured
 // and credentials are injected correctly for each.
 func TestMCPMultipleServers(t *testing.T) {
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -351,6 +359,10 @@ mcp:
 
 // TestMCPMissingCredential verifies that runs fail gracefully when MCP credential is missing.
 func TestMCPMissingCredential(t *testing.T) {
+	// Use isolated test keyring to avoid interfering with user's real credentials
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
