@@ -1693,14 +1693,27 @@ func TestClaudePluginBaking(t *testing.T) {
 	}
 	dockerfile := result.Dockerfile
 
-	// Verify marketplace add command is present
-	if !strings.Contains(dockerfile, "claude plugin marketplace add test/test-marketplace") {
-		t.Errorf("Dockerfile should contain marketplace add command.\nDockerfile:\n%s", dockerfile)
+	// Plugin commands are in a separate script (claude-plugins.sh) to stay under
+	// Apple containers builder's gRPC transport size limit. The Dockerfile COPY's
+	// and runs the script.
+	pluginScript := string(result.ContextFiles["claude-plugins.sh"])
+	if pluginScript == "" {
+		t.Fatal("Expected claude-plugins.sh in context files")
 	}
 
-	// Verify plugin install command is present
-	if !strings.Contains(dockerfile, "claude plugin install test-plugin@test-marketplace") {
-		t.Errorf("Dockerfile should contain plugin install command.\nDockerfile:\n%s", dockerfile)
+	// Verify Dockerfile references the plugin script
+	if !strings.Contains(dockerfile, "claude-plugins.sh") {
+		t.Errorf("Dockerfile should COPY the plugin install script.\nDockerfile:\n%s", dockerfile)
+	}
+
+	// Verify marketplace add command is in the plugin script
+	if !strings.Contains(pluginScript, "claude plugin marketplace add test/test-marketplace") {
+		t.Errorf("Plugin script should contain marketplace add command.\nScript:\n%s", pluginScript)
+	}
+
+	// Verify plugin install command is in the plugin script
+	if !strings.Contains(pluginScript, "claude plugin install test-plugin@test-marketplace") {
+		t.Errorf("Plugin script should contain plugin install command.\nScript:\n%s", pluginScript)
 	}
 
 	// Verify commands run as moatuser
@@ -1732,14 +1745,25 @@ func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
 	}
 	dockerfile := result.Dockerfile
 
-	// Should have agent-marketplace
-	if !strings.Contains(dockerfile, "agent/marketplace") {
-		t.Errorf("Dockerfile should contain agent marketplace.\nDockerfile:\n%s", dockerfile)
+	// Plugin commands are in a separate script context file
+	pluginScript := string(result.ContextFiles["claude-plugins.sh"])
+	if pluginScript == "" {
+		t.Fatal("Expected claude-plugins.sh in context files")
 	}
 
-	// Should have agent-plugin
-	if !strings.Contains(dockerfile, "agent-plugin@agent-marketplace") {
-		t.Errorf("Dockerfile should contain agent plugin.\nDockerfile:\n%s", dockerfile)
+	// Should have agent-marketplace in the plugin script
+	if !strings.Contains(pluginScript, "agent/marketplace") {
+		t.Errorf("Plugin script should contain agent marketplace.\nScript:\n%s", pluginScript)
+	}
+
+	// Should have agent-plugin in the plugin script
+	if !strings.Contains(pluginScript, "agent-plugin@agent-marketplace") {
+		t.Errorf("Plugin script should contain agent plugin.\nScript:\n%s", pluginScript)
+	}
+
+	// Verify Dockerfile still references the script and uses correct user
+	if !strings.Contains(dockerfile, "claude-plugins.sh") {
+		t.Errorf("Dockerfile should COPY the plugin install script.\nDockerfile:\n%s", dockerfile)
 	}
 }
 
