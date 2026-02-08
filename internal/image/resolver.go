@@ -23,6 +23,9 @@ type ResolveOptions struct {
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
+
+	// Hooks contains user-defined lifecycle hook commands.
+	Hooks *deps.HooksConfig
 }
 
 // Resolve determines the image to use based on dependencies and options.
@@ -33,8 +36,10 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		opts = &ResolveOptions{}
 	}
 
-	// Need custom image if we have dependencies, SSH, Claude init, Codex init, Gemini init, or plugins
-	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || len(opts.ClaudePlugins) > 0
+	hasHooks := opts.Hooks != nil && (opts.Hooks.PostBuild != "" || opts.Hooks.PostBuildRoot != "" || opts.Hooks.PreRun != "")
+
+	// Need custom image if we have dependencies, SSH, Claude init, Codex init, Gemini init, plugins, or hooks
+	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || len(opts.ClaudePlugins) > 0 || hasHooks
 	if !needsCustomImage {
 		return DefaultImage
 	}
@@ -45,5 +50,6 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		NeedsCodexInit:  opts.NeedsCodexInit,
 		NeedsGeminiInit: opts.NeedsGeminiInit,
 		ClaudePlugins:   opts.ClaudePlugins,
+		Hooks:           opts.Hooks,
 	})
 }

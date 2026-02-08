@@ -25,6 +25,10 @@ type ImageTagOptions struct {
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
+
+	// Hooks contains user-defined lifecycle hook commands.
+	// Different hooks produce different image tags.
+	Hooks *HooksConfig
 }
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
@@ -75,6 +79,19 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 		sort.Strings(sortedPlugins)
 		for _, p := range sortedPlugins {
 			hashInput += ",plugin:" + p
+		}
+	}
+
+	// Include hooks in hash (different hooks = different image)
+	if opts.Hooks != nil {
+		if opts.Hooks.PostBuild != "" {
+			hashInput += ",hook:post_build:" + opts.Hooks.PostBuild
+		}
+		if opts.Hooks.PostBuildRoot != "" {
+			hashInput += ",hook:post_build_root:" + opts.Hooks.PostBuildRoot
+		}
+		if opts.Hooks.PreRun != "" {
+			hashInput += ",hook:pre_run:" + opts.Hooks.PreRun
 		}
 	}
 

@@ -29,6 +29,7 @@ type Config struct {
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
 	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
+	Hooks        HooksConfig       `yaml:"hooks,omitempty"`
 
 	// Sandbox configures container sandboxing.
 	// "none" disables gVisor sandbox (Docker only).
@@ -246,6 +247,24 @@ type SnapshotRetentionConfig struct {
 // TracingConfig configures execution tracing.
 type TracingConfig struct {
 	DisableExec bool `yaml:"disable_exec,omitempty"`
+}
+
+// HooksConfig configures lifecycle hooks that run at different stages.
+type HooksConfig struct {
+	// PostBuild runs as the container user (moatuser) during image build,
+	// after all dependencies are installed. Baked into Docker layers and cached.
+	// Use for user-level image setup like configuring git defaults.
+	PostBuild string `yaml:"post_build,omitempty"`
+
+	// PostBuildRoot runs as root during image build, after all dependencies
+	// are installed. Baked into Docker layers and cached.
+	// Use for system-level setup like installing packages or kernel tuning.
+	PostBuildRoot string `yaml:"post_build_root,omitempty"`
+
+	// PreRun runs as the container user (moatuser) in /workspace on every
+	// container start, before the main command. Use for workspace-level
+	// setup that needs project files (e.g., "npm install").
+	PreRun string `yaml:"pre_run,omitempty"`
 }
 
 // ShouldSyncClaudeLogs returns true if Claude session logs should be synced.

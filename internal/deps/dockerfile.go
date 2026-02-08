@@ -9,6 +9,14 @@ import (
 	"github.com/majorcontext/moat/internal/providers/claude"
 )
 
+// HooksConfig holds hook commands for Dockerfile generation and image tagging.
+// This mirrors config.HooksConfig to avoid circular imports.
+type HooksConfig struct {
+	PostBuild     string
+	PostBuildRoot string
+	PreRun        string
+}
+
 // DockerfileOptions configures Dockerfile generation.
 type DockerfileOptions struct {
 	// NeedsSSH indicates SSH grants are present and the image needs
@@ -45,6 +53,11 @@ type DockerfileOptions struct {
 	// ClaudePlugins are plugins to install during image build.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
+
+	// Hooks contains user-defined lifecycle hook commands.
+	// PostBuild and PostBuildRoot are baked into the image as RUN commands.
+	// PreRun is passed to the init script to execute on every container start.
+	Hooks *HooksConfig
 }
 
 // useBuildKit returns whether to use BuildKit features.
@@ -254,6 +267,9 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 
 	// SSH known hosts for granted hosts
 	writeSSHKnownHosts(&b, opts.SSHHosts)
+
+	// User-defined build hooks
+	writeBuildHooks(&b, opts.Hooks)
 
 	// Finalize with entrypoint and user setup
 	writeEntrypoint(&b, opts, c.dockerMode, contextFiles)
@@ -523,6 +539,32 @@ func writeSSHKnownHosts(b *strings.Builder, hosts []string) {
 	b.WriteString("\n")
 }
 
+// writeBuildHooks writes user-defined build hook RUN commands.
+// post_build_root runs as root, post_build runs as the container user.
+// Both run after all dependency installation is complete.
+func writeBuildHooks(b *strings.Builder, hooks *HooksConfig) {
+	if hooks == nil {
+		return
+	}
+	if hooks.PostBuildRoot == "" && hooks.PostBuild == "" {
+		return
+	}
+
+	if hooks.PostBuildRoot != "" {
+		b.WriteString("# Build hook: post_build_root\n")
+		b.WriteString("WORKDIR /workspace\n")
+		b.WriteString("RUN " + hooks.PostBuildRoot + "\n\n")
+	}
+
+	if hooks.PostBuild != "" {
+		b.WriteString("# Build hook: post_build\n")
+		b.WriteString(fmt.Sprintf("USER %s\n", containerUser))
+		b.WriteString("WORKDIR /workspace\n")
+		b.WriteString("RUN " + hooks.PostBuild + "\n")
+		b.WriteString("USER root\n\n")
+	}
+}
+
 // writeEntrypoint writes the entrypoint configuration and working directory.
 // When the init script is needed, it is added as a context file and COPYed
 // into the image. This avoids embedding a large base64 blob inline in a RUN
@@ -534,7 +576,8 @@ func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode Doc
 	// - Codex file setup
 	// - Docker socket group setup (host mode)
 	// - Docker daemon startup (dind mode)
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != ""
+	hasPreRun := opts.Hooks != nil && opts.Hooks.PreRun != ""
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != "" || hasPreRun
 	if needsInit {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")

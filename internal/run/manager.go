@@ -852,6 +852,11 @@ region = %s
 		}
 	}
 
+	// Pass pre_run hook command to moat-init via env var
+	if opts.Config != nil && opts.Config.Hooks.PreRun != "" {
+		proxyEnv = append(proxyEnv, "MOAT_PRE_RUN="+opts.Config.Hooks.PreRun)
+	}
+
 	// Add explicit env vars (highest priority - can override config)
 	proxyEnv = append(proxyEnv, opts.Env...)
 
@@ -1114,7 +1119,17 @@ region = %s
 		}
 	}
 
-	// Resolve container image based on dependencies, SSH grants, init needs, and plugins
+	// Hooks config for image hashing, Dockerfile generation, and pre_run
+	var hooks *deps.HooksConfig
+	if opts.Config != nil && (opts.Config.Hooks.PostBuild != "" || opts.Config.Hooks.PostBuildRoot != "" || opts.Config.Hooks.PreRun != "") {
+		hooks = &deps.HooksConfig{
+			PostBuild:     opts.Config.Hooks.PostBuild,
+			PostBuildRoot: opts.Config.Hooks.PostBuildRoot,
+			PreRun:        opts.Config.Hooks.PreRun,
+		}
+	}
+
+	// Resolve container image based on dependencies, SSH grants, init needs, plugins, and build hooks
 	hasSSHGrants := len(sshGrants) > 0
 	containerImage := image.Resolve(installableDeps, &image.ResolveOptions{
 		NeedsSSH:        hasSSHGrants,
@@ -1122,6 +1137,7 @@ region = %s
 		NeedsCodexInit:  needsCodexInit,
 		NeedsGeminiInit: needsGeminiInit,
 		ClaudePlugins:   claudePlugins,
+		Hooks:           hooks,
 	})
 
 	// Set agent and image for logging context
@@ -1131,7 +1147,8 @@ region = %s
 	r.Image = containerImage
 
 	// Determine if we need a custom image
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || len(claudePlugins) > 0
+	hasHooks := hooks != nil
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || len(claudePlugins) > 0 || hasHooks
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1161,6 +1178,7 @@ region = %s
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
+			Hooks:              hooks,
 		})
 		if err != nil {
 			cleanupProxy(proxyServer)

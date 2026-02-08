@@ -1215,6 +1215,124 @@ func TestKnownSSHHostKeysComplete(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfile_HooksPostBuild(t *testing.T) {
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+		Hooks: &HooksConfig{
+			PostBuild: "git config --global core.autocrlf input",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "# Build hook: post_build") {
+		t.Error("Dockerfile should contain post_build comment")
+	}
+	if !strings.Contains(result.Dockerfile, "git config --global core.autocrlf input") {
+		t.Error("Dockerfile should contain the post_build command")
+	}
+}
+
+func TestGenerateDockerfile_HooksPostBuildRoot(t *testing.T) {
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+		Hooks: &HooksConfig{
+			PostBuildRoot: "apt-get install -y figlet",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "# Build hook: post_build_root") {
+		t.Error("Dockerfile should contain post_build_root comment")
+	}
+	if !strings.Contains(result.Dockerfile, "apt-get install -y figlet") {
+		t.Error("Dockerfile should contain the post_build_root command")
+	}
+	if !strings.Contains(result.Dockerfile, "WORKDIR /workspace\nRUN apt-get") {
+		t.Error("Dockerfile should set WORKDIR /workspace before post_build_root command")
+	}
+}
+
+func TestGenerateDockerfile_HooksBothBuild(t *testing.T) {
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+		Hooks: &HooksConfig{
+			PostBuild:     "git config --global core.autocrlf input",
+			PostBuildRoot: "apt-get install -y figlet",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	// post_build_root should appear before post_build (root runs first, then user)
+	rootIdx := strings.Index(result.Dockerfile, "post_build_root")
+	userIdx := strings.Index(result.Dockerfile, "# Build hook: post_build\n")
+	if rootIdx == -1 || userIdx == -1 {
+		t.Fatal("Both hooks should be present")
+	}
+	if rootIdx > userIdx {
+		t.Error("post_build_root should appear before post_build in Dockerfile")
+	}
+}
+
+func TestGenerateDockerfile_HooksNil(t *testing.T) {
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if strings.Contains(result.Dockerfile, "Build hook") {
+		t.Error("Dockerfile should not contain build hooks when none configured")
+	}
+}
+
+func TestGenerateDockerfile_HooksWorkdir(t *testing.T) {
+	// Verify that post_build runs in /workspace
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+		Hooks: &HooksConfig{
+			PostBuild: "echo hello",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	// Find the WORKDIR /workspace before the build hook command
+	lines := strings.Split(result.Dockerfile, "\n")
+	hookIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "echo hello") {
+			hookIdx = i
+			break
+		}
+	}
+	if hookIdx < 0 {
+		t.Fatal("hook command not found in Dockerfile")
+	}
+	// Walk backwards to find nearest WORKDIR
+	foundWorkdir := ""
+	for i := hookIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "WORKDIR ") {
+			foundWorkdir = strings.TrimSpace(lines[i])
+			break
+		}
+	}
+	if foundWorkdir != "WORKDIR /workspace" {
+		t.Errorf("post_build hook should run in /workspace, but nearest WORKDIR is %q", foundWorkdir)
+	}
+}
+
+func TestGenerateDockerfile_HooksPreRunTriggersInit(t *testing.T) {
+	// pre_run should trigger moat-init entrypoint even without other init features
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+		Hooks: &HooksConfig{
+			PreRun: "npm install",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "moat-init") {
+		t.Error("Dockerfile should include moat-init entrypoint when pre_run is set")
+	}
+}
+
 func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
 	deps := []Dependency{
 		{Name: "node", Version: "20"},
