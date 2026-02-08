@@ -1,0 +1,39 @@
+# Example: Hooks
+#
+# Hooks run at different lifecycle stages:
+#   post_build / post_build_root — during image build (cached in image layers)
+#   pre_run                      — every container start (workspace is mounted)
+#
+# Run with:
+#   moat run examples/build-hooks
+
+name: hooks-demo
+
+dependencies:
+  - git
+
+hooks:
+  # Runs as root during image build — install system packages.
+  post_build_root: >-
+    apt-get update -qq && apt-get install -y -qq figlet
+    && date -u '+%Y-%m-%d %H:%M:%S UTC' > /tmp/post-build-root.timestamp
+
+  # Runs as moatuser during image build — configure user-level settings.
+  post_build: >-
+    git config --global core.autocrlf input
+    && date -u '+%Y-%m-%d %H:%M:%S UTC' > /tmp/post-build.timestamp
+
+  # Runs as moatuser in /workspace on every container start.
+  pre_run: date -u '+%Y-%m-%d %H:%M:%S UTC' > .pre-run.timestamp
+
+# Show that each hook ran by reading its timestamp.
+# figlet proves post_build_root installed a system package.
+command:
+  - bash
+  - -c
+  - |
+    echo "post_build_root: $(cat /tmp/post-build-root.timestamp)"
+    echo "post_build:      $(cat /tmp/post-build.timestamp)"
+    echo "pre_run:         $(cat .pre-run.timestamp)"
+    echo
+    figlet -f small "Hooks work!"

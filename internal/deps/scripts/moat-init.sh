@@ -272,11 +272,30 @@ if [ -n "$MOAT_DOCKER_GID" ] && [ "$(id -u)" = "0" ] && [ -S /var/run/docker.soc
   fi
 fi
 
+# Pre-run Hook
+# When MOAT_PRE_RUN is set, run the command as moatuser in /workspace before
+# executing the main command. This runs on every container start (not cached).
+# Use for workspace-level setup that needs project files (e.g., "npm install").
+run_pre_run_hook() {
+  if [ -z "$MOAT_PRE_RUN" ]; then
+    return
+  fi
+  if [ "$(id -u)" != "0" ]; then
+    # Already non-root, run directly
+    cd /workspace && sh -c "$MOAT_PRE_RUN"
+  elif id moatuser >/dev/null 2>&1; then
+    # Drop to moatuser for the hook
+    gosu moatuser sh -c "cd /workspace && $MOAT_PRE_RUN"
+  fi
+}
+
 # Execute the user's command
+# First run the pre_run hook (if set), then exec the main command.
 # If we're already running as a non-root user (UID != 0), just exec directly.
 # This happens when Docker is started with --user to match host UID on Linux.
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
+run_pre_run_hook
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)
   exec "$@"

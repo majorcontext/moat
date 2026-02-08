@@ -64,6 +64,12 @@ network:
 command: ["npm", "start"]
 interactive: false
 
+# Hooks
+hooks:
+  post_build_root: apt-get update -qq && apt-get install -y -qq figlet
+  post_build: git config --global core.autocrlf input
+  pre_run: npm install
+
 # Sandbox (Docker only)
 # sandbox: none  # Uncomment to disable gVisor
 
@@ -573,6 +579,99 @@ interactive: true
 - CLI override: `-i`
 
 Required for shells, REPLs, and interactive tools.
+
+---
+
+## Hooks
+
+Lifecycle hooks that run at different stages of the container lifecycle.
+
+### hooks.post_build_root
+
+Command to run as `root` during image build, after dependencies are installed. Baked into image layers and cached.
+
+```yaml
+hooks:
+  post_build_root: apt-get update -qq && apt-get install -y -qq figlet
+```
+
+- Type: `string`
+- Default: None
+
+Use for system-level setup: installing system packages, kernel tuning, modifying `/etc` files.
+
+### hooks.post_build
+
+Command to run as the container user (`moatuser`) during image build, after dependencies are installed. Baked into image layers and cached.
+
+```yaml
+hooks:
+  post_build: git config --global core.autocrlf input
+```
+
+- Type: `string`
+- Default: None
+
+Use for user-level image setup: configuring tools, setting defaults.
+
+Build hooks run during image build, **before** your workspace is mounted. They can only use commands available in the image — not files from your project directory. For multi-step setup, chain commands with `&&`:
+
+```yaml
+hooks:
+  post_build: git config --global core.autocrlf input && git config --global pull.rebase true
+```
+
+### hooks.pre_run
+
+Command to run as the container user (`moatuser`) in `/workspace` on every container start, before the main command.
+
+```yaml
+hooks:
+  pre_run: npm install
+```
+
+- Type: `string`
+- Default: None
+
+Use for workspace-level setup that needs your project files: installing dependencies, running codegen, building assets. This runs on every start, but workspace-aware package managers like `npm install` and `pip install` are fast no-ops when dependencies are current.
+
+`pre_run` runs before any command, including when `moat claude` or `moat codex` overrides `command`.
+
+### Build time vs runtime
+
+Build hooks (`post_build`, `post_build_root`) run during image build — they cannot access workspace files. Use them for **image-level setup**.
+
+`pre_run` runs at container start when the workspace is mounted — it can access your project files. Use it for **workspace-level setup**.
+
+```yaml
+hooks:
+  # Image-level: install system packages (cached during image build)
+  post_build_root: apt-get update -qq && apt-get install -y -qq figlet
+
+  # Workspace-level: install project deps (runs every start, fast when current)
+  pre_run: npm install
+```
+
+### Execution order
+
+1. **Image build** (cached):
+   1. Dependencies installed (from `dependencies:`)
+   2. `post_build_root` runs as root in `/workspace`
+   3. `post_build` runs as moatuser in `/workspace`
+2. **Container start** (every run):
+   1. `pre_run` runs as moatuser in `/workspace`
+   2. `command` (or agent command like `moat claude`) executes
+
+### Caching
+
+Build hooks (`post_build`, `post_build_root`) are image build `RUN` commands. The build system caches each layer, so they only re-run when:
+- The command string changes in `agent.yaml`
+- You use `--rebuild` to force a fresh build
+- A preceding layer changes (new dependency, etc.)
+
+`pre_run` is **not cached** — it runs on every container start.
+
+To force re-running build hooks: `moat run --rebuild ./my-project`
 
 ---
 
