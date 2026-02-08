@@ -1,0 +1,76 @@
+version: 2
+
+project_name: moat
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - main: ./cmd/moat
+    binary: moat
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/majorcontext/moat/cmd/moat/cli.version={{.Version}}
+      - -X github.com/majorcontext/moat/cmd/moat/cli.commit={{.Commit}}
+      - -X github.com/majorcontext/moat/cmd/moat/cli.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Refactoring
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Build
+      regexp: '^.*?build(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: majorcontext
+    name: moat
+  prerelease: auto
+  footer: |
+    **Full Changelog**: https://github.com/majorcontext/moat/compare/{{ .PreviousTag }}...{{ .Tag }}

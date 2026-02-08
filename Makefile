@@ -1,4 +1,4 @@
-.PHONY: all help build test test-unit test-e2e test-bats lint fix clean coverage
+.PHONY: all help build test test-unit test-e2e test-bats lint fix clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -19,7 +19,7 @@ build: ## Build the project
 	go build ./...
 
 build-cli: ## Build the CLI binary ./moat
-	go build -o moat ./cmd/moat
+	go build -ldflags "-s -w -X github.com/majorcontext/moat/cmd/moat/cli.version=dev -X github.com/majorcontext/moat/cmd/moat/cli.commit=$$(git rev-parse --short HEAD) -X github.com/majorcontext/moat/cmd/moat/cli.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o moat ./cmd/moat
 
 test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 
@@ -46,6 +46,11 @@ coverage: ## Generate test coverage report
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+snapshot: ## Build a local release snapshot with GoReleaser
+	@which goreleaser > /dev/null || (echo "goreleaser not installed. Install from https://goreleaser.com/install/" && exit 1)
+	goreleaser release --snapshot --clean
+
 clean: ## Clean build artifacts and coverage files
 	rm -f coverage.out coverage.out coverage.html
+	rm -rf dist/
 	go clean

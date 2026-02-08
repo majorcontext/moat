@@ -81,7 +81,7 @@ func (s *versionSection) Name() string { return "Version" }
 func (s *versionSection) Print(w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "Platform:\t%s/%s\n", runtime.GOOS, runtime.GOARCH)
-	// TODO: Add actual version from build-time variable
+	fmt.Fprintf(tw, "Version:\t%s\n", Version())
 	return tw.Flush()
 }
 

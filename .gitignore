@@ -45,6 +45,9 @@ go.work.sum
 /moat
 /agent
 
+# GoReleaser
+dist/
+
 # Generated credential helpers (built via go generate)
 internal/run/helpers/aws-credential-helper-*
 
