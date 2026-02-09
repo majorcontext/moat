@@ -267,6 +267,6 @@ command:
 
 ## Related guides
 
-- [Dependencies concept](../concepts/06-dependencies.md) — Dependency types and registry
+- [Dependencies concept](../reference/06-dependencies.md) — Dependency types and registry
 - [agent.yaml reference](../reference/02-agent-yaml.md) — Full configuration options
-- [Secrets management](05-secrets-management.md) — Using secret references in service config
+- [Secrets management](05-secrets.md) — Using secret references in service config

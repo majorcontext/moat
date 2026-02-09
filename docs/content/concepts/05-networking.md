@@ -80,134 +80,9 @@ The `allow` list supports wildcard patterns:
 
 ## Hostname routing
 
-Run multiple agents with endpoints on the same ports. Each agent gets its own hostname namespace.
+Moat includes a routing proxy that gives each agent its own hostname namespace. When agents declare `ports` in `agent.yaml`, the proxy maps hostnames like `https://web.my-agent.localhost:8080` to the corresponding container port. This allows multiple agents to expose the same internal ports without conflicts -- the routing proxy directs traffic based on the hostname in each request. The proxy also serves HTTPS using a generated CA certificate and sets `MOAT_URL_*` environment variables inside each container for inter-service communication.
 
-### Configuring ports
-
-Declare endpoint ports in `agent.yaml`:
-
-```yaml
-name: my-agent
-
-ports:
-  web: 3000
-  api: 8080
-```
-
-When you run an agent with ports configured, the routing proxy starts automatically on port 8080 (or the port specified by `MOAT_PROXY_PORT`).
-
-### Accessing endpoints
-
-With the routing proxy running, endpoints are accessible via hostnames:
-
-```
-https://<endpoint>.<agent-name>.localhost:<proxy-port>
-```
-
-Example with two agents:
-
-```bash
-$ moat run --name dark-mode ./my-app &
-$ moat run --name checkout ./my-app &
-
-$ moat list
-NAME        RUN ID              STATE    ENDPOINTS
-dark-mode   run_a1b2c3d4e5f6   running  web, api
-checkout    run_d4e5f6a1b2c3   running  web, api
-```
-
-Access each agent's endpoints:
-
-```
-https://web.dark-mode.localhost:8080  → dark-mode container:3000
-https://api.dark-mode.localhost:8080  → dark-mode container:8080
-https://web.checkout.localhost:8080   → checkout container:3000
-https://api.checkout.localhost:8080   → checkout container:8080
-```
-
-Both agents expose the same internal ports, but the routing proxy directs traffic based on the hostname.
-
-### Environment variables
-
-Inside each container, environment variables point to its own endpoints:
-
-```bash
-# In dark-mode container:
-MOAT_URL_WEB=http://web.dark-mode.localhost:8080
-MOAT_URL_API=http://api.dark-mode.localhost:8080
-
-# In checkout container:
-MOAT_URL_WEB=http://web.checkout.localhost:8080
-MOAT_URL_API=http://api.checkout.localhost:8080
-```
-
-Use these variables for inter-endpoint communication or OAuth callbacks.
-
-### Running on privileged ports (80/443)
-
-By default, the routing proxy listens on port 8080. To use privileged ports (below 1024), manually start the proxy with `sudo`:
-
-```bash
-$ sudo moat proxy start --port 80
-
-Proxy listening on port 80 (HTTP and HTTPS)
-Access services at:
-  http://<service>.<agent>.localhost:80
-  https://<service>.<agent>.localhost:80
-```
-
-The proxy runs in the foreground. Keep it running in a separate terminal or use a process manager.
-
-When the proxy is already running, `moat run` will detect and use it. All agents will be accessible on port 80:
-
-```bash
-# In another terminal:
-$ moat run --name my-agent ./workspace
-
-# Access at:
-https://web.my-agent.localhost  # Port 80, no port number needed in URL
-```
-
-You can also set `MOAT_PROXY_PORT=80` in your environment, but you must still use `sudo moat proxy start` to bind to the privileged port—`moat run` cannot bind to privileged ports automatically.
-
-### Trusting the CA certificate
-
-The routing proxy uses HTTPS with a self-signed CA certificate. To avoid browser warnings, trust the CA:
-
-**macOS:**
-```bash
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain \
-  ~/.moat/proxy/ca/ca.crt
-```
-
-**Linux:**
-```bash
-sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt
-sudo update-ca-certificates
-```
-
-### Proxy status and management
-
-Check if the proxy is running:
-
-```bash
-$ moat proxy status
-
-Proxy running on port 8080 (pid 12345)
-Supports HTTP and HTTPS on the same port
-
-Registered agents:
-  - https://my-agent.localhost:8080
-```
-
-Stop a manually started proxy:
-
-```bash
-moat proxy stop
-```
-
-The proxy stops automatically when all agents with ports exit. If you manually started it with `moat proxy start`, use `moat proxy stop` or press Ctrl+C in the proxy terminal.
+See [Exposing ports](../guides/06-ports.md) for configuration and usage. See [Proxy architecture](../concepts/09-proxy.md) for details on how the routing proxy works.
 
 ## Non-HTTP traffic
 
@@ -219,7 +94,7 @@ Non-HTTP traffic has direct network access:
 
 - **Raw TCP** — Connects directly (bypasses proxy)
 - **UDP** — Connects directly (bypasses proxy)
-- **SSH** — Uses the SSH agent proxy for granted hosts (see [SSH access](../guides/02-ssh-access.md))
+- **SSH** — Uses the SSH agent proxy for granted hosts (see [SSH access](../guides/04-ssh.md))
 
 ### Strict mode
 
@@ -249,43 +124,12 @@ Some traffic bypasses the proxy:
 
 The `NO_PROXY` variable is set automatically to exclude local addresses.
 
-## Debugging network issues
-
-### Check proxy status
-
-```bash
-moat status
-```
-
-Shows whether the proxy is running and any errors.
-
-### View network traces
-
-```bash
-moat trace --network
-moat trace --network -v  # With headers and bodies
-```
-
-### Test connectivity from container
-
-```bash
-moat run -- curl -v https://api.github.com/
-```
-
-The `-v` flag shows the connection details, including proxy negotiation.
-
-### Check policy violations
-
-If requests are blocked by network policy, they appear in logs with the block reason:
-
-```bash
-$ moat logs | grep "blocked by network policy"
-
-[10:23:45] Moat: request blocked by network policy. Host "example.com" is not in the allow list.
-```
-
 ## Related concepts
 
 - [Credential management](./02-credentials.md) — How credentials are injected via the proxy
+- [Proxy architecture](./09-proxy.md) — TLS interception, credential injection, and proxy security model
 - [Sandboxing](./01-sandboxing.md) — Container network isolation
-- [Exposing ports](../guides/06-exposing-ports.md) — Access services running inside containers
+
+## Related guides
+
+- [Exposing ports](../guides/06-ports.md) — Hostname routing configuration, CA trust setup, and proxy management

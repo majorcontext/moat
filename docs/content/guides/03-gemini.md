@@ -7,7 +7,7 @@ keywords: ["moat", "gemini", "google", "ai agent", "coding assistant"]
 
 # Running Gemini
 
-This guide covers running Google Gemini CLI in a Moat container. Gemini CLI is Google's AI coding assistant that can read, write, and execute code.
+This guide covers running Google Gemini CLI in a Moat container.
 
 ## Prerequisites
 
@@ -88,9 +88,7 @@ Both methods are fully supported. The proxy injects credentials at the network l
 
 ### How credentials are injected
 
-For API key mode, Moat sets `GEMINI_API_KEY` in the container environment with a placeholder value. The proxy intercepts requests to `generativelanguage.googleapis.com` and injects the real key via the `x-goog-api-key` header.
-
-For OAuth mode, Moat writes a placeholder `oauth_creds.json` to `~/.gemini/` inside the container. The proxy intercepts requests to `cloudcode-pa.googleapis.com` and `oauth2.googleapis.com`, replacing placeholder tokens with real ones at the network layer.
+The actual credential is never in the container environment. Moat's proxy intercepts requests to Google's API endpoints and injects the real token at the network layer, for both API key and OAuth modes. See [Credential management](../concepts/02-credentials.md) for details.
 
 ## Running Gemini
 
@@ -108,7 +106,7 @@ Start in a specific project:
 moat gemini ./my-project
 ```
 
-Gemini launches in interactive mode. Use it as you would normally -- it has full access to the mounted workspace.
+Gemini launches in interactive mode with full access to the mounted workspace.
 
 ### Non-interactive mode
 
@@ -121,6 +119,14 @@ moat gemini -p "add input validation to the user registration form"
 ```
 
 Gemini executes the prompt and exits when complete.
+
+### Permission handling
+
+Gemini CLI does not have a per-tool confirmation prompt. File edits, command execution, and other operations run without individual approval steps.
+
+**Security properties:**
+
+The container runs as a non-root user with filesystem access limited to the mounted workspace. Credentials are injected at the network layer and never appear in the container environment. See [Security model](../concepts/08-security.md) for the full threat model.
 
 ### Named sessions
 
@@ -280,32 +286,7 @@ MCP configuration is written to `.mcp.json` in the workspace directory. See the 
 
 ## Workspace snapshots
 
-Moat can create point-in-time snapshots of your workspace. This is useful for recovering from unwanted changes.
-
-Enable automatic snapshots:
-
-```yaml
-snapshots:
-  triggers:
-    disable_pre_run: false    # Snapshot before run starts
-    disable_git_commits: false # Snapshot on git commits
-    disable_idle: false        # Snapshot when idle
-    idle_threshold_seconds: 30
-```
-
-List snapshots:
-
-```bash
-moat snapshot list run_a1b2c3d4e5f6
-```
-
-Restore a snapshot:
-
-```bash
-moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
-```
-
-See [Snapshots guide](./07-snapshots.md) for details.
+Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./07-snapshots.md) for configuration and usage.
 
 ## Example: Code review workflow
 
@@ -382,6 +363,6 @@ moat grant gemini
 
 ## Related guides
 
-- [SSH access](./04-ssh-access.md) -- Set up SSH for git operations
+- [SSH access](./04-ssh.md) -- Set up SSH for git operations
 - [Snapshots](./07-snapshots.md) -- Protect your workspace with snapshots
-- [Exposing ports](./06-exposing-ports.md) — Access services running inside containers
+- [Exposing ports](./06-ports.md) -- Access services running inside containers

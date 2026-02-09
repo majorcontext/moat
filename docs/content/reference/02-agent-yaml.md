@@ -200,14 +200,7 @@ runtime: docker  # Force Docker runtime
 - Default: Auto-detected (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise)
 - CLI override: `--runtime`
 
-**When to use:** On macOS systems with both Docker and Apple containers available, you may need to force Docker runtime for certain dependencies. For example, `docker:dind` (Docker-in-Docker) requires privileged mode which Apple containers don't support.
-
-```yaml
-dependencies:
-  - docker:dind
-
-runtime: docker  # Required: Apple containers can't run dind
-```
+Force Docker when dependencies require privileged mode (e.g., `docker:dind`).
 
 ---
 
@@ -277,17 +270,7 @@ dependencies:
   - docker:host
 ```
 
-Host mode mounts `/var/run/docker.sock` from the host:
-- Fast startup (no daemon to initialize)
-- Shared image cache with host
-- Access to the Docker daemon's full API (ps, run, build, exec, etc.)
-
-**Tradeoffs:**
-- Containers created inside can access host network and resources
-- Agent can see and interact with all host containers
-- Images built inside are cached on host (may be desired or not)
-
-Use this mode for speed and convenience when you trust the agent.
+Host mode mounts `/var/run/docker.sock` from the host. Fast startup, shared image cache, full Docker API access. The agent can see and interact with all host containers.
 
 ##### docker:dind (Docker-in-Docker)
 
@@ -296,18 +279,7 @@ dependencies:
   - docker:dind
 ```
 
-DinD mode runs an isolated Docker daemon inside the container:
-- Complete isolation from host Docker
-- Agent cannot see or affect host containers
-- Clean slate on each run (no shared image cache)
-
-**Tradeoffs:**
-- Requires privileged mode (Moat sets this automatically)
-- Slower startup (~5-10 seconds to initialize daemon)
-- No image cache between runs
-- Uses vfs storage driver (slower than overlay2)
-
-Use this mode when you need isolation from the host Docker daemon or don't want agents to access host containers.
+DinD mode runs an isolated Docker daemon inside the container. Complete isolation from host Docker, clean slate on each run. Requires privileged mode (set automatically), ~5-10 second startup, vfs storage driver.
 
 ##### BuildKit sidecar (automatic with docker:dind)
 
@@ -319,19 +291,7 @@ When using `docker:dind`, Moat automatically deploys a BuildKit sidecar containe
 - **Full Docker**: Local `dockerd` in main container provides `docker ps`, `docker run`, etc.
 - **Performance**: BuildKit layer caching, `RUN --mount=type=cache`, multi-stage build support
 
-This configuration is automatic and requires no additional setup.
-
-**How it works:**
-
-1. BuildKit sidecar starts with `moby/buildkit:latest`
-2. `BUILDKIT_HOST=tcp://buildkit:1234` environment variable set in main container
-3. Image builds use BuildKit Go client (not Docker SDK)
-4. Full BuildKit features available: cache mounts, multi-platform builds, etc.
-
-**Fallback behavior:**
-
-- If `BUILDKIT_HOST` not set: Uses Docker SDK
-- If BuildKit unreachable: Clear error message with troubleshooting steps
+This configuration is automatic and requires no additional setup. The main container receives `BUILDKIT_HOST=tcp://buildkit:1234`; when unset or unreachable, builds fall back to the Docker SDK.
 
 **Example:**
 
@@ -356,27 +316,6 @@ Both docker modes require Docker runtime:
 # Force Docker runtime on macOS
 moat run --runtime docker ./my-project
 ```
-
-##### Use cases
-
-- Integration tests with testcontainers
-- Building Docker images
-- Running disposable services
-- CI/CD pipelines
-
-##### BuildKit troubleshooting
-
-If builds fail with BuildKit sidecar:
-
-1. **Image pull failure**: Ensure Docker can access Docker Hub to pull `moby/buildkit:latest`
-2. **Network issues**: Check that Docker networks are enabled (not disabled by firewall)
-3. **Performance**: BuildKit sidecar typically starts in 2-5 seconds; check Docker daemon logs if slower
-
-**Troubleshooting:**
-
-- **"connection refused"** (with dind mode): BuildKit sidecar not running or network connectivity issue. Check BuildKit container is running and network exists
-- **Slow builds**: Verify BuildKit cache is working. Build output should show "CACHED" for unchanged layers
-- **"no active sessions"** or **"--mount option requires BuildKit"** (rare, older Docker versions): Install buildx (https://docs.docker.com/buildx/working-with-buildx/) or disable BuildKit: `export MOAT_DISABLE_BUILDKIT=1`
 
 ---
 
@@ -638,41 +577,11 @@ Use for workspace-level setup that needs your project files: installing dependen
 
 `pre_run` runs before any command, including when `moat claude` or `moat codex` overrides `command`.
 
-### Build time vs runtime
-
-Build hooks (`post_build`, `post_build_root`) run during image build — they cannot access workspace files. Use them for **image-level setup**.
-
-`pre_run` runs at container start when the workspace is mounted — it can access your project files. Use it for **workspace-level setup**.
-
-```yaml
-hooks:
-  # Image-level: install system packages (cached during image build)
-  post_build_root: apt-get update -qq && apt-get install -y -qq figlet
-
-  # Workspace-level: install project deps (runs every start, fast when current)
-  pre_run: npm install
-```
-
 ### Execution order
 
-1. **Image build** (cached):
-   1. Dependencies installed (from `dependencies:`)
-   2. `post_build_root` runs as root in `/workspace`
-   3. `post_build` runs as moatuser in `/workspace`
-2. **Container start** (every run):
-   1. `pre_run` runs as moatuser in `/workspace`
-   2. `command` (or agent command like `moat claude`) executes
+Build hooks (`post_build_root`, `post_build`) run during image build and are cached as Docker layers -- they cannot access workspace files. `pre_run` runs at container start after the workspace is mounted and is not cached.
 
-### Caching
-
-Build hooks (`post_build`, `post_build_root`) are image build `RUN` commands. The build system caches each layer, so they only re-run when:
-- The command string changes in `agent.yaml`
-- You use `--rebuild` to force a fresh build
-- A preceding layer changes (new dependency, etc.)
-
-`pre_run` is **not cached** — it runs on every container start.
-
-To force re-running build hooks: `moat run --rebuild ./my-project`
+Order: `dependencies` installed -> `post_build_root` (root) -> `post_build` (moatuser) -> container start -> `pre_run` (moatuser) -> `command`. Use `--rebuild` to force re-running build hooks.
 
 ---
 
@@ -916,7 +825,7 @@ claude:
 
 Environment variables support `${secrets.NAME}` interpolation.
 
-**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/01-running-claude-code.md#remote-mcp-servers) in the Claude Code guide.
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/09-mcp.md#remote-mcp-servers) guide.
 
 ---
 
@@ -965,7 +874,7 @@ mcp:
 
 **Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
 
-**See also:** [Running Claude Code guide](../guides/01-running-claude-code.md#remote-mcp-servers)
+**See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
 ---
 
@@ -1040,7 +949,7 @@ When a `grant` is specified, the corresponding environment variable is set autom
 | `gemini` | `GEMINI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 
-**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/03-running-gemini.md#mcp-servers) in the Gemini guide.
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/03-gemini.md#mcp-servers) in the Gemini guide.
 
 ---
 

@@ -7,7 +7,7 @@ keywords: ["moat", "codex", "openai", "ai agent", "coding assistant"]
 
 # Running Codex
 
-This guide covers running OpenAI Codex CLI in a Moat container. Codex is OpenAI's AI coding assistant that can read, write, and execute code.
+This guide covers running OpenAI Codex CLI in a Moat container.
 
 ## Prerequisites
 
@@ -41,7 +41,7 @@ moat grant openai
 
 ### How credentials are injected
 
-Moat sets `OPENAI_API_KEY` in the container environment. This variable contains a placeholder value (`moat-proxy-injected`)—the actual credential is never in the container environment. The proxy intercepts requests to OpenAI's API and injects the real token at the network layer.
+The actual credential is never in the container environment. Moat's proxy intercepts requests to OpenAI's API and injects the real token at the network layer. See [Credential management](../concepts/02-credentials.md) for details.
 
 ## Running Codex
 
@@ -59,7 +59,7 @@ Start in a specific project:
 moat codex ./my-project
 ```
 
-Codex launches in interactive TUI mode. Use it as you would normally—it has full access to the mounted workspace.
+Codex launches in interactive TUI mode with full access to the mounted workspace.
 
 ### Non-interactive mode
 
@@ -79,15 +79,7 @@ By default, `moat codex -p` runs with `--full-auto` enabled. This auto-approves 
 
 **Security properties:**
 
-The container provides these isolation boundaries:
-
-- Runs as a non-root user (`moatuser`, UID 5000) inside the container
-- Filesystem access is limited to the mounted workspace, plus read-only mounts for credential helper configs (e.g., `~/.config/gh/config.yml`, AWS credential process scripts)
-- SSH private keys remain on the host—the container can request signatures via an SSH agent proxy but cannot extract key material
-- Credentials are injected at the network layer via proxy and do not appear in the container environment (see [Credential management](../concepts/02-credentials.md) for details on AWS `credential_process`)
-- Standard container isolation separates the run from other containers and host processes
-
-Per-operation prompts require user confirmation for each action. The container already limits access to the mounted workspace and routes credentials through the proxy.
+The container runs as a non-root user with filesystem access limited to the mounted workspace. Credentials are injected at the network layer and never appear in the container environment. See [Security model](../concepts/08-security.md) for the full threat model.
 
 **Restoring manual approval:**
 
@@ -189,32 +181,7 @@ network:
 
 ## Workspace snapshots
 
-Moat can create point-in-time snapshots of your workspace. This is useful for recovering from unwanted changes.
-
-Enable automatic snapshots:
-
-```yaml
-snapshots:
-  triggers:
-    disable_pre_run: false    # Snapshot before run starts
-    disable_git_commits: false # Snapshot on git commits
-    disable_idle: false        # Snapshot when idle
-    idle_threshold_seconds: 30
-```
-
-List snapshots:
-
-```bash
-moat snapshot list run_a1b2c3d4e5f6
-```
-
-Restore a snapshot:
-
-```bash
-moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
-```
-
-See [Snapshots guide](./07-snapshots.md) for details.
+Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./07-snapshots.md) for configuration and usage.
 
 ## Example: Code review workflow
 
@@ -277,6 +244,6 @@ moat run --grant openai -- curl -s https://api.openai.com/v1/models -H "Authoriz
 
 ## Related guides
 
-- [SSH access](./04-ssh-access.md) — Set up SSH for git operations
+- [SSH access](./04-ssh.md) — Set up SSH for git operations
 - [Snapshots](./07-snapshots.md) — Protect your workspace with snapshots
-- [Exposing ports](./06-exposing-ports.md) — Access services running inside containers
+- [Exposing ports](./06-ports.md) — Access services running inside containers

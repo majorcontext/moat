@@ -97,7 +97,7 @@ moat codex             # Interactive mode
 moat codex -p "explain this codebase"   # Non-interactive
 ```
 
-Both agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-running-claude-code.md) and [Running Codex](docs/content/guides/02-running-codex.md) guides for details.
+Both agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-claude-code.md) and [Running Codex](docs/content/guides/02-codex.md) guides for details.
 
 ## Configuration
 

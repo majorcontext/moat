@@ -13,27 +13,34 @@
 
 - [Sandboxing](./content/concepts/01-sandboxing.md) — Container isolation with Docker and Apple containers
 - [Credential Management](./content/concepts/02-credentials.md) — Secure credential storage and network-layer injection
-- [Audit Logs](./content/concepts/03-audit-logs.md) — Tamper-proof logging with cryptographic hash chains
-- [Observability](./content/concepts/04-observability.md) — Logs, network traces, and execution spans
+- [Observability](./content/concepts/03-observability.md) — Audit logging, network traces, and execution spans
 - [Networking](./content/concepts/05-networking.md) — Network policies and hostname routing
-- [Dependencies](./content/concepts/06-dependencies.md) — Runtime environments, tools, and the dependency registry
+- [Runtimes](./content/concepts/07-runtimes.md) — Container runtimes, sandbox modes, and platform differences
+- [Security Model](./content/concepts/08-security.md) — Threat model, trust boundaries, and defense in depth
+- [Proxy Architecture](./content/concepts/09-proxy.md) — TLS interception, credential injection, and MCP relay
 
 ### Guides
 
-- [Running Claude Code](./content/guides/01-running-claude-code.md) — Use Claude Code in isolated containers
-- [Running Codex](./content/guides/02-running-codex.md) — Use OpenAI Codex CLI in isolated containers
-- [Running Gemini](./content/guides/03-running-gemini.md) — Use Google Gemini CLI in isolated containers
-- [SSH Access](./content/guides/04-ssh-access.md) — Grant SSH access without exposing private keys
-- [Secrets Management](./content/guides/05-secrets-management.md) — Pull secrets from 1Password and AWS SSM
-- [Exposing Ports](./content/guides/06-exposing-ports.md) — Access services running inside agent containers
+- [Running Claude Code](./content/guides/01-claude-code.md) — Use Claude Code in isolated containers
+- [Running Codex](./content/guides/02-codex.md) — Use OpenAI Codex CLI in isolated containers
+- [Running Gemini](./content/guides/03-gemini.md) — Use Google Gemini CLI in isolated containers
+- [SSH Access](./content/guides/04-ssh.md) — Grant SSH access without exposing private keys
+- [Secrets Management](./content/guides/05-secrets.md) — Pull secrets from 1Password and AWS SSM
+- [Exposing Ports](./content/guides/06-ports.md) — Access services running inside agent containers
 - [Workspace Snapshots](./content/guides/07-snapshots.md) — Point-in-time recovery for workspaces
-- [Service Dependencies](./content/guides/08-service-dependencies.md) — Run databases and caches alongside agents
+- [Service Dependencies](./content/guides/08-services.md) — Run databases and caches alongside agents
+- [MCP Servers](./content/guides/09-mcp.md) — Configure remote and local MCP servers
+- [Lifecycle Hooks](./content/guides/10-hooks.md) — Run commands during image build and container startup
+- [Observability](./content/guides/11-observability.md) — View logs, traces, and audit data
 
 ### Reference
 
 - [CLI Reference](./content/reference/01-cli.md) — Complete command and flag reference
 - [agent.yaml Reference](./content/reference/02-agent-yaml.md) — Configuration file options
 - [Environment Variables](./content/reference/03-environment.md) — Moat and container environment variables
+- [Grants Reference](./content/reference/04-grants.md) — All grant types, credential sources, and injection details
+- [Mount Syntax](./content/reference/05-mounts.md) — Mount format, path resolution, and access modes
+- [Dependencies Reference](./content/reference/06-dependencies.md) — Dependency types, version resolution, and base images
 
 ---
 

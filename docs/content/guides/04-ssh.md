@@ -24,13 +24,13 @@ Your SSH agent must be running with keys loaded:
 
 ```bash
 # Check if SSH agent is running
-echo $SSH_AUTH_SOCK
+$ echo $SSH_AUTH_SOCK
 
 # If not set, start the agent
-eval "$(ssh-agent -s)"
+$ eval "$(ssh-agent -s)"
 
 # Add your key
-ssh-add ~/.ssh/id_ed25519
+$ ssh-add ~/.ssh/id_ed25519
 ```
 
 List loaded keys:
@@ -55,9 +55,9 @@ Granted SSH access to github.com
 Grant access to multiple hosts:
 
 ```bash
-moat grant ssh --host github.com
-moat grant ssh --host gitlab.com
-moat grant ssh --host bitbucket.org
+$ moat grant ssh --host github.com
+$ moat grant ssh --host gitlab.com
+$ moat grant ssh --host bitbucket.org
 ```
 
 ## Using SSH in runs
@@ -65,7 +65,7 @@ moat grant ssh --host bitbucket.org
 ### Via CLI flag
 
 ```bash
-moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
+$ moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
 ```
 
 ### Via agent.yaml
@@ -79,19 +79,19 @@ grants:
 Then:
 
 ```bash
-moat run -- git clone git@github.com:org/repo.git
+$ moat run -- git clone git@github.com:org/repo.git
 ```
 
 ## Example: Clone and work with a private repository
 
 1. Ensure SSH agent is running with your key:
    ```bash
-   ssh-add -l
+   $ ssh-add -l
    ```
 
 2. Grant SSH access:
    ```bash
-   moat grant ssh --host github.com
+   $ moat grant ssh --host github.com
    ```
 
 3. Clone a private repository:
@@ -106,7 +106,7 @@ moat run -- git clone git@github.com:org/repo.git
 
 4. Work with the repository:
    ```bash
-   moat run --grant ssh:github.com -- sh -c "cd private-repo && git pull"
+   $ moat run --grant ssh:github.com -- sh -c "cd private-repo && git pull"
    ```
 
 ## Combining SSH and HTTPS credentials
@@ -120,7 +120,7 @@ grants:
 ```
 
 ```bash
-moat run -- sh -c "
+$ moat run -- sh -c "
   git clone git@github.com:org/repo.git
   cd repo
   # Use GitHub API via HTTPS (token injected)
@@ -133,8 +133,8 @@ moat run -- sh -c "
 SSH grants are host-specific. Each grant maps your SSH key to one host:
 
 ```bash
-moat grant ssh --host github.com
-moat grant ssh --host gitlab.com
+$ moat grant ssh --host github.com
+$ moat grant ssh --host gitlab.com
 ```
 
 Inside the container, only keys for granted hosts are visible:
@@ -153,7 +153,7 @@ Permission denied (publickey).
 For interactive SSH (not just git), use interactive mode:
 
 ```bash
-moat run -i --grant ssh:myserver.com -- ssh user@myserver.com
+$ moat run -i --grant ssh:myserver.com -- ssh user@myserver.com
 ```
 
 ## Revoking SSH access
@@ -161,7 +161,7 @@ moat run -i --grant ssh:myserver.com -- ssh user@myserver.com
 Remove SSH access for a host:
 
 ```bash
-moat revoke ssh:github.com
+$ moat revoke ssh:github.com
 ```
 
 ## Troubleshooting
@@ -171,8 +171,8 @@ moat revoke ssh:github.com
 Your SSH agent is not running. Start it:
 
 ```bash
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519
+$ eval "$(ssh-agent -s)"
+$ ssh-add ~/.ssh/id_ed25519
 ```
 
 Add to your shell profile to start automatically.
@@ -181,17 +181,17 @@ Add to your shell profile to start automatically.
 
 1. Verify the key is loaded:
    ```bash
-   ssh-add -l
+   $ ssh-add -l
    ```
 
 2. Verify the host is granted:
    ```bash
-   moat run --grant ssh:github.com -- env | grep SSH
+   $ moat run --grant ssh:github.com -- env | grep SSH
    ```
 
 3. Test SSH from outside Moat:
    ```bash
-   ssh -T git@github.com
+   $ ssh -T git@github.com
    ```
 
 ### "Could not read from remote repository"
@@ -199,7 +199,7 @@ Add to your shell profile to start automatically.
 The SSH grant may be missing. Add it:
 
 ```bash
-moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
+$ moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
 ```
 
 Or in `agent.yaml`:
@@ -214,8 +214,8 @@ grants:
 If you have multiple keys, the SSH agent proxy uses the first key that was loaded. Load your preferred key first:
 
 ```bash
-ssh-add ~/.ssh/id_ed25519_github
-ssh-add ~/.ssh/id_ed25519_gitlab
+$ ssh-add ~/.ssh/id_ed25519_github
+$ ssh-add ~/.ssh/id_ed25519_gitlab
 ```
 
 ## Security considerations
@@ -244,5 +244,5 @@ env:
 
 ## Related guides
 
-- [Running Claude Code](./01-running-claude-code.md) — Use SSH with Claude Code
+- [Running Claude Code](./01-claude-code.md) — Use SSH with Claude Code
 - [Credential management](../concepts/02-credentials.md) — How credential injection works
