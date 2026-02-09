@@ -8,7 +8,7 @@ keywords: ["moat", "installation", "docker", "apple containers", "setup", "homeb
 
 ## Requirements
 
-- **Container runtime** — Docker or Apple containers (macOS 26+ with Apple Silicon)
+- **Container runtime** -- Docker or Apple containers (macOS 26+ with Apple Silicon)
 
 ## Install Moat
 
@@ -126,8 +126,7 @@ Log out and back in for the group change to take effect.
 - **Linux (other distros)**: [Docker Engine](https://docs.docker.com/engine/install/)
 - **Windows**: [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
 
-> [!NOTE]
-> When using `docker:dind` mode in agent.yaml, Moat automatically deploys a BuildKit sidecar for image builds. See the [docker dependency documentation](../reference/02-agent-yaml.md#docker) for details.
+> **Note:** When using `docker:dind` mode in agent.yaml, Moat automatically deploys a BuildKit sidecar for image builds. See the [docker dependency documentation](../reference/02-agent-yaml.md#docker) for details.
 
 Verify Docker is running:
 
@@ -184,4 +183,4 @@ Moat stores data in `~/.moat/`:
 
 ## Next steps
 
-- [Quick start](./03-quick-start.md) — Run your first agent
+- [Quick start](./03-quick-start.md) -- Run your first agent

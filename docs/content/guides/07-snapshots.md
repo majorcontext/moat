@@ -107,7 +107,7 @@ snap_ghi012      2025-01-21T10:15:30Z  git_commit 47 MB
 Create a snapshot at any time:
 
 ```bash
-moat snapshot run_a1b2c3d4e5f6
+$ moat snapshot run_a1b2c3d4e5f6
 ```
 
 Use this before risky operations or when you want to preserve current state.
@@ -130,7 +130,7 @@ Proceed? [y/N]: y
 Restore complete.
 ```
 
-After rollback:
+After restore:
 
 - Files match the snapshot state exactly
 - Files created after the snapshot are deleted
@@ -143,7 +143,7 @@ If the agent is still running, restore pauses execution:
 ```bash
 $ moat snapshot restore run_a1b2c3d4e5f6 snap_abc456
 
-Agent is running. Rollback will:
+Agent is running. Restore will:
 1. Pause the agent
 2. Restore the workspace
 3. Resume the agent
@@ -193,7 +193,7 @@ Deleted 2 snapshots
 Preview what would be deleted:
 
 ```bash
-moat snapshot list prune run_a1b2c3d4e5f6 --keep 5 --dry-run
+$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 5 --dry-run
 ```
 
 ## Excluding files
@@ -262,7 +262,7 @@ snapshots:
 Or disable via CLI:
 
 ```bash
-moat run --no-snapshots ./my-project
+$ moat run --no-snapshots ./my-project
 ```
 
 ## Example: Safe experimentation
@@ -286,19 +286,19 @@ moat run --no-snapshots ./my-project
 
 2. Start Claude Code:
    ```bash
-   moat claude --name experiment ./my-project
+   $ moat claude --name experiment ./my-project
    ```
 
 3. Let Claude make changes. Snapshots are created automatically.
 
 4. If something goes wrong, list snapshots:
    ```bash
-   moat snapshot list run_a1b2c3d4e5f6
+   $ moat snapshot list run_a1b2c3d4e5f6
    ```
 
 5. Restore to a good state:
    ```bash
-   moat snapshot restore run_a1b2c3d4e5f6 snap_pre_xyz123
+   $ moat snapshot restore run_a1b2c3d4e5f6 snap_pre_xyz123
    ```
 
 6. Continue working from the restored state.
@@ -332,13 +332,13 @@ snapshots:
 Prune old snapshots:
 
 ```bash
-moat snapshot list prune run_a1b2c3d4e5f6 --keep 3
+$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 3
 ```
 
 Or clean up old runs:
 
 ```bash
-moat clean
+$ moat clean
 ```
 
 ### Restore failed
@@ -347,13 +347,13 @@ If restore fails partway through, the workspace may be in an inconsistent state.
 
 ```bash
 # List snapshots to find the safety snapshot
-moat snapshot list <run-id>
+$ moat snapshot list <run-id>
 
 # Restore the safety snapshot to undo
-moat snapshot restore <run-id> <safety-snapshot-id>
+$ moat snapshot restore <run-id> <safety-snapshot-id>
 ```
 
 ## Related guides
 
-- [Running Claude Code](./01-running-claude-code.md) — Use snapshots with Claude Code
-- [Exposing ports](./06-exposing-ports.md) — Independent snapshots per agent
+- [Running Claude Code](./01-claude-code.md) — Use snapshots with Claude Code
+- [Exposing ports](./06-ports.md) — Independent snapshots per agent

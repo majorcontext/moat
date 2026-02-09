@@ -20,6 +20,26 @@ These flags apply to all commands:
 | `--json` | Output in JSON format |
 | `-h`, `--help` | Show help for command |
 
+## Common agent flags
+
+The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the following flags. These flags work identically across `moat claude`, `moat codex`, and `moat gemini`.
+
+| Flag | Description |
+|------|-------------|
+| `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
+| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `-n`, `--name NAME` | Session name (default: from `agent.yaml` or random) |
+| `-d`, `--detach` | Run in background |
+| `--rebuild` | Force rebuild of container image |
+| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
+| `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
+| `--keep` | Keep container after run completes |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+
+Each agent command also accepts `-p`/`--prompt` for non-interactive mode, plus command-specific flags documented in their own sections.
+
+---
+
 ## moat run
 
 Run an agent in a container.
@@ -47,7 +67,7 @@ moat run [flags] [path] [-- command]
 | `--rebuild` | Force rebuild of container image |
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |
 | `--keep` | Keep container after run completes |
-| `--mount SRC:DST:MODE` | Additional mount (repeatable) |
+| `--mount SRC:DST:MODE` | Additional mount (repeatable). Format: `SRC:DST[:MODE]` where `SRC` is the host path, `DST` is the container path, and `MODE` is `ro` (read-only) or `rw` (read-write, default). See [Mount syntax](./05-mounts.md) for full details. |
 | `--no-snapshots` | Disable snapshots for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
 
@@ -84,6 +104,9 @@ moat run -e DEBUG=true ./my-project
 # Named run for hostname routing
 moat run --name my-feature ./my-project
 
+# Mount a host directory read-only
+moat run --mount /host/data:/data:ro ./my-project
+
 # Disable gVisor sandbox (when needed for compatibility)
 moat run --no-sandbox ./my-project
 ```
@@ -107,30 +130,23 @@ moat run --no-sandbox ./my-project
 Run Claude Code in a container.
 
 ```
-moat claude [flags] [path]
+moat claude [workspace] [flags]
 ```
+
+In addition to the command-specific flags below, `moat claude` accepts all [common agent flags](#common-agent-flags).
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `path` | Workspace directory (default: current directory) |
+| `workspace` | Workspace directory (default: current directory) |
 
-### Flags
+### Command-specific flags
 
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
-| `--grant PROVIDER` | Add credentials (repeatable) |
-| `-e KEY=VALUE` | Set environment variable (repeatable) |
-| `--name NAME` | Session name |
-| `-d`, `--detach` | Run in background |
-| `--rebuild` | Force rebuild of container image |
-| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
-| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
-| `--keep` | Keep container after run completes |
-| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
-| `--noyolo` | Restore Claude Code's confirmation prompts (by default, prompts are skipped) |
+| `--noyolo` | Restore Claude Code's per-operation confirmation prompts. By default, `moat claude` runs with `--dangerously-skip-permissions` because the container provides isolation. Use `--noyolo` to re-enable permission prompts. |
 
 ### Examples
 
@@ -152,6 +168,9 @@ moat claude --name feature-auth ./my-project
 
 # Background session
 moat claude -d ./my-project
+
+# Require manual approval for each tool use
+moat claude --noyolo
 ```
 
 ### Subcommands
@@ -174,27 +193,20 @@ Run OpenAI Codex CLI in a container.
 moat codex [workspace] [flags]
 ```
 
+In addition to the command-specific flags below, `moat codex` accepts all [common agent flags](#common-agent-flags).
+
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
 | `workspace` | Workspace directory (default: current directory) |
 
-### Flags
+### Command-specific flags
 
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
-| `--grant PROVIDER` | Add credentials (repeatable) |
-| `-e KEY=VALUE` | Set environment variable (repeatable) |
-| `--name NAME` | Session name |
-| `-d`, `--detach` | Run in background |
-| `--rebuild` | Force rebuild of container image |
-| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
-| `--full-auto` | Enable full-auto mode (auto-approve tool use) (default: true) |
-| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
-| `--keep` | Keep container after run completes |
-| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--full-auto` | Enable full-auto mode (auto-approve tool use). Default: `true`. Set `--full-auto=false` to require manual approval for each action. This is analogous to `--noyolo` on `moat claude` -- the container provides isolation, so auto-approval is the default. |
 
 ### Examples
 
@@ -261,26 +273,21 @@ Run Google Gemini CLI in a container.
 moat gemini [workspace] [flags]
 ```
 
+In addition to the command-specific flags below, `moat gemini` accepts all [common agent flags](#common-agent-flags).
+
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
 | `workspace` | Workspace directory (default: current directory) |
 
-### Flags
+### Command-specific flags
 
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
-| `--grant PROVIDER` | Add credentials (repeatable) |
-| `-e KEY=VALUE` | Set environment variable (repeatable) |
-| `--name NAME` | Session name |
-| `-d`, `--detach` | Run in background |
-| `--rebuild` | Force rebuild of container image |
-| `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
-| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
-| `--keep` | Keep container after run completes |
-| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+
+Gemini does not have a `--noyolo` or `--full-auto` equivalent. The Gemini CLI does not expose a flag to skip confirmation prompts.
 
 ### Examples
 
@@ -375,18 +382,18 @@ moat attach -i=false run_a1b2c3d4e5f6
 ### Detach sequences
 
 **Non-interactive mode:**
-- `Ctrl+C` — Detach (run continues)
-- `Ctrl+C Ctrl+C` (within 500ms) — Stop the run
+- `Ctrl+C` -- Detach (run continues)
+- `Ctrl+C Ctrl+C` (within 500ms) -- Stop the run
 
 **Interactive mode:**
-- `Ctrl-/ d` — Detach (run continues)
-- `Ctrl-/ k` — Stop the run
+- `Ctrl-/ d` -- Detach (run continues)
+- `Ctrl-/ k` -- Stop the run
 
 ---
 
 ## moat grant
 
-Store credentials for injection into runs.
+Store credentials for injection into runs. See [Grants reference](./04-grants.md) for details on each provider, host matching rules, and credential sources.
 
 ```
 moat grant <provider>[:<scopes>]
@@ -402,29 +409,49 @@ moat grant <provider>[:<scopes>]
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
 | `aws` | AWS (IAM role assumption) |
 
+### moat grant github
+
 GitHub credentials are obtained from multiple sources, in order of preference:
 
-1. **gh CLI** — Uses token from `gh auth token` if available
-2. **Environment variable** — Falls back to `GITHUB_TOKEN` or `GH_TOKEN`
-3. **Personal Access Token** — Interactive prompt for manual entry
-
-### Examples
+1. **gh CLI** -- Uses token from `gh auth token` if available
+2. **Environment variable** -- Falls back to `GITHUB_TOKEN` or `GH_TOKEN`
+3. **Personal Access Token** -- Interactive prompt for manual entry
 
 ```bash
-# GitHub (uses gh CLI token if available)
 moat grant github
+```
 
-# Anthropic
+### moat grant anthropic
+
+Stores an Anthropic credential for Claude Code. Supports OAuth tokens (from `claude setup-token`) or API keys.
+
+```bash
 moat grant anthropic
+```
 
-# OpenAI
+### moat grant openai
+
+Stores an OpenAI API key. Reads from the `OPENAI_API_KEY` environment variable, or prompts interactively.
+
+```bash
 moat grant openai
+```
 
-# Gemini (imports Gemini CLI OAuth or prompts for API key)
+### moat grant gemini
+
+Stores a Google Gemini credential. Supports two authentication methods:
+
+1. **Gemini CLI OAuth (recommended)** -- Imports OAuth tokens from your local Gemini CLI installation (`gemini`). Refresh tokens are stored for automatic access token renewal. If Gemini CLI credentials are detected, you are prompted to choose between OAuth import and API key.
+2. **API key** -- Uses an API key from `aistudio.google.com/apikey`. Reads from `GEMINI_API_KEY` environment variable, or prompts interactively.
+
+If no Gemini CLI credentials are found, falls directly to the API key prompt.
+
+```bash
+# Import from Gemini CLI or enter API key
 moat grant gemini
 ```
 
-### moat grant mcp <name>
+### moat grant mcp \<name\>
 
 Store a credential for an MCP server.
 
@@ -473,10 +500,10 @@ moat grant aws --role=<ARN> [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--role ARN` | IAM role ARN to assume (required) | — |
+| `--role ARN` | IAM role ARN to assume (required) | -- |
 | `--region REGION` | AWS region for API calls | From AWS config |
 | `--session-duration DURATION` | Session duration (e.g., `1h`, `30m`, `15m`) | `15m` |
-| `--external-id ID` | External ID for cross-account role assumption | — |
+| `--external-id ID` | External ID for cross-account role assumption | -- |
 
 ### Examples
 
@@ -933,7 +960,7 @@ moat proxy status
 
 ## moat deps
 
-Manage dependencies. See [Dependencies](../concepts/06-dependencies.md) for details on the dependency system.
+Manage dependencies. See [Dependencies](./06-dependencies.md) for details on the dependency system.
 
 ### moat deps list
 
@@ -1079,9 +1106,9 @@ Compares your host Claude Code configuration against what's available in moat co
 
 With `--test-container`, runs three progressive validation levels that short-circuit on failure:
 
-1. **Direct API call** — verifies the stored token is valid by calling the Anthropic API from the host
-2. **Proxy injection** — spins up a TLS-intercepting proxy and verifies it replaces placeholder credentials with real ones
-3. **Container test** — launches a real moat container for full end-to-end verification
+1. **Direct API call** -- verifies the stored token is valid by calling the Anthropic API from the host
+2. **Proxy injection** -- spins up a TLS-intercepting proxy and verifies it replaces placeholder credentials with real ones
+3. **Container test** -- launches a real moat container for full end-to-end verification
 
 If level 1 fails (bad token), levels 2 and 3 are skipped. If level 2 fails (proxy issue), level 3 is skipped. This tells you exactly which layer is broken.
 

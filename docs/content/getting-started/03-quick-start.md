@@ -219,4 +219,4 @@ Removed 3 runs
 
 - [Sandboxing](../concepts/01-sandboxing.md) — How container isolation works
 - [Credential management](../concepts/02-credentials.md) — Credential storage and injection
-- [Running Claude Code](../guides/01-running-claude-code.md) — Use Moat with Claude Code
+- [Running Claude Code](../guides/01-claude-code.md) — Use Moat with Claude Code

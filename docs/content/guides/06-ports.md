@@ -30,7 +30,7 @@ The `ports` map defines endpoints. Each key is an endpoint name that becomes par
 ### 2. Start the agent
 
 ```bash
-moat run --name my-app ./my-app
+$ moat run --name my-app ./my-app
 ```
 
 Moat starts a routing proxy automatically when `ports` are configured.
@@ -67,8 +67,8 @@ https://docs.my-app.localhost:8080  → container:4000
 When two agents expose the same internal port, hostname routing keeps them separate. Each agent's name creates a distinct URL namespace.
 
 ```bash
-moat run --name dark-mode ./my-app &
-moat run --name checkout ./my-app &
+$ moat run --name dark-mode ./my-app &
+$ moat run --name checkout ./my-app &
 ```
 
 Both agents run web servers on port 3000, but each is accessible at its own hostname:
@@ -93,19 +93,19 @@ checkout    run_d4e5f6a1b2c3   running  web
 By name:
 
 ```bash
-moat stop dark-mode
+$ moat stop dark-mode
 ```
 
 By run ID:
 
 ```bash
-moat stop run_a1b2c3d4e5f6
+$ moat stop run_a1b2c3d4e5f6
 ```
 
 All at once:
 
 ```bash
-moat stop --all
+$ moat stop --all
 ```
 
 ## Trusting the CA certificate
@@ -114,15 +114,15 @@ The routing proxy serves HTTPS using a self-signed CA. Browsers show a certifica
 
 **macOS:**
 ```bash
-sudo security add-trusted-cert -d -r trustRoot \
+$ sudo security add-trusted-cert -d -r trustRoot \
   -k /Library/Keychains/System.keychain \
   ~/.moat/proxy/ca/ca.crt
 ```
 
 **Linux:**
 ```bash
-sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt
-sudo update-ca-certificates
+$ sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt
+$ sudo update-ca-certificates
 ```
 
 ## Environment variables
@@ -170,8 +170,8 @@ Registered Agents:
 ### Use a different port
 
 ```bash
-moat proxy stop
-moat proxy start --port 9000
+$ moat proxy stop
+$ moat proxy start --port 9000
 ```
 
 URLs change accordingly: `https://web.dark-mode.localhost:9000`
@@ -183,7 +183,7 @@ You can also set `MOAT_PROXY_PORT=9000` in your environment.
 Privileged ports require `sudo`:
 
 ```bash
-sudo moat proxy start --port 80
+$ sudo moat proxy start --port 80
 ```
 
 With port 80, URLs don't need a port number: `https://web.my-app.localhost`
@@ -193,7 +193,7 @@ When a proxy is already running, `moat run` detects and uses it automatically.
 ### Stop the proxy
 
 ```bash
-moat proxy stop
+$ moat proxy stop
 ```
 
 The proxy stops automatically when all agents with ports exit. If you started it manually with `moat proxy start`, use `moat proxy stop` or Ctrl+C.
@@ -225,8 +225,8 @@ Trust the CA certificate (see [Trusting the CA certificate](#trusting-the-ca-cer
 
 ```bash
 # macOS
-sudo security delete-certificate -c "Moat CA"
-sudo security add-trusted-cert -d -r trustRoot \
+$ sudo security delete-certificate -c "Moat CA"
+$ sudo security add-trusted-cert -d -r trustRoot \
   -k /Library/Keychains/System.keychain \
   ~/.moat/proxy/ca/ca.crt
 ```
@@ -235,12 +235,12 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 1. Check the proxy is running:
    ```bash
-   moat proxy status
+   $ moat proxy status
    ```
 
 2. Check the agent is running:
    ```bash
-   moat list
+   $ moat list
    ```
 
 3. Verify the endpoint name matches `agent.yaml`:
@@ -256,12 +256,12 @@ Each agent has an isolated container filesystem, but they share the same workspa
 For complete isolation, point each agent at a separate directory. Git worktrees work well for this — each agent gets its own working tree from the same repository:
 
 ```bash
-moat run --name dark-mode .worktrees/dark-mode &
-moat run --name checkout .worktrees/checkout &
+$ moat run --name dark-mode .worktrees/dark-mode &
+$ moat run --name checkout .worktrees/checkout &
 ```
 
 ## Related
 
-- [Networking](../concepts/05-networking.md) — How the routing proxy works, network policies, and traffic flow
-- [Running Claude Code](./01-running-claude-code.md) — Use port access with Claude Code sessions
+- [Networking](../concepts/05-networking.md) — Network policies, traffic flow, and proxy bypass rules
+- [Running Claude Code](./01-claude-code.md) — Use port access with Claude Code sessions
 - [Snapshots](./07-snapshots.md) — Independent snapshots per agent

@@ -245,23 +245,73 @@ The proxy is already running on a different port. Either unset MOAT_PROXY_PORT, 
     moat run ...
 ```
 
+## Section Definitions
+
+The documentation has four sections. Each serves a distinct purpose. Content that doesn't fit a section's purpose belongs elsewhere.
+
+### Getting Started
+
+**Purpose:** Onboard new users from install to first successful run.
+
+**Audience:** Someone who has never used Moat.
+
+**Contains:** Installation instructions, a guided walkthrough, and orientation material. Pages are sequential -- each builds on the previous one.
+
+**Does not contain:** Deep explanations, exhaustive configuration options, or advanced workflows.
+
+### Concepts
+
+**Purpose:** Explain *how things work* and *why they are designed that way*. Build mental models.
+
+**Audience:** Someone who wants to understand the system, not accomplish a specific task.
+
+**Contains:** Architecture, design decisions, trade-offs, threat models, data flow diagrams. Describes mechanisms and explains rationale. May include brief examples to illustrate a point, but examples serve understanding, not task completion.
+
+**Does not contain:** Step-by-step instructions, command output examples, configuration syntax tables, or troubleshooting steps. If a reader needs to *do* something, that content belongs in a guide. If a reader needs to *look up* syntax or options, that belongs in reference.
+
+**Test:** If you removed all code blocks and the page still makes sense, it's a concept page.
+
+### Guides
+
+**Purpose:** Help users accomplish specific tasks. Answer "how do I do X?"
+
+**Audience:** Someone who has a goal and needs steps to reach it.
+
+**Contains:** Prerequisites, step-by-step instructions, working examples with expected output, verification steps, and troubleshooting. May include brief "how it works" context (3-5 sentences) to orient the reader, but the bulk of the page is procedural.
+
+**Does not contain:** Deep architectural explanations, design rationale, or exhaustive option tables. Link to concept pages for "why" and reference pages for "all options."
+
+**Test:** The page should read as a recipe. A reader should be able to follow it start-to-finish and achieve a result.
+
+### Reference
+
+**Purpose:** Provide complete, structured specifications. Answer "what are all the options?"
+
+**Audience:** Someone who knows what they want to do and needs exact syntax, flags, fields, or values.
+
+**Contains:** CLI commands with all flags, configuration file schemas with all fields, environment variable tables, format specifications. Organized for lookup, not reading. Every option documented with type, default, and description.
+
+**Does not contain:** Extended explanations of why things work the way they do, or guided workflows. Brief notes clarifying behavior are fine; multi-paragraph explanations belong in concepts.
+
+**Test:** The page should work as a lookup table. A reader should be able to find any option in under 10 seconds.
+
 ## Page Structure
 
-### Getting Started Pages
+### Getting started pages
 1. Brief intro (1-2 sentences)
 2. What you'll accomplish
 3. Prerequisites (if any)
 4. Step-by-step instructions
 5. Next steps / related pages
 
-### Concept Pages
+### Concept pages
 1. What it is (1-2 paragraphs)
 2. Why it matters
 3. How it works (with diagrams if helpful)
 4. Key details / edge cases
 5. Related concepts
 
-### Guide Pages
+### Guide pages
 1. What you'll accomplish
 2. Prerequisites
 3. Step-by-step walkthrough
@@ -269,7 +319,7 @@ The proxy is already running on a different port. Either unset MOAT_PROXY_PORT, 
 5. Troubleshooting common issues
 6. Related guides
 
-### Reference Pages
+### Reference pages
 1. Brief description
 2. Complete specification
 3. Examples for each option

@@ -7,7 +7,7 @@ keywords: ["moat", "claude code", "anthropic", "ai agent", "coding assistant"]
 
 # Running Claude Code
 
-This guide covers running Claude Code in a Moat container. Claude Code is Anthropic's AI coding assistant that can read, write, and execute code.
+This guide covers running Claude Code in a Moat container.
 
 ## Prerequisites
 
@@ -91,7 +91,7 @@ Note: Imported tokens do not auto-refresh. When the token expires, run a Claude 
 
 ### How credentials are injected
 
-Moat sets `CLAUDE_CODE_OAUTH_TOKEN` (for OAuth) or `ANTHROPIC_API_KEY` (for API keys) in the container environment. These variables contain a placeholder value—the actual credential is never in the container environment. The proxy intercepts requests to Anthropic's API and injects the real token at the network layer.
+The actual credential is never in the container environment. Moat's proxy intercepts requests to Anthropic's API and injects the real token at the network layer. See [Credential management](../concepts/02-credentials.md) for details.
 
 ## Running Claude Code
 
@@ -109,7 +109,7 @@ Start in a specific project:
 moat claude ./my-project
 ```
 
-Claude Code launches in interactive mode. Use it as you would normally—it has full access to the mounted workspace.
+Claude Code launches in interactive mode with full access to the mounted workspace.
 
 ### Non-interactive mode
 
@@ -129,15 +129,7 @@ By default, `moat claude` runs with `--dangerously-skip-permissions` enabled. Th
 
 **Security properties:**
 
-The container provides these isolation boundaries:
-
-- Runs as a non-root user (`moatuser`, UID 5000) inside the container
-- Filesystem access is limited to the mounted workspace, plus read-only mounts for credential helper configs (e.g., `~/.config/gh/config.yml`, AWS credential process scripts)
-- SSH private keys remain on the host—the container can request signatures via an SSH agent proxy but cannot extract key material
-- Credentials are injected at the network layer via proxy and do not appear in the container environment (see [Credential management](../concepts/02-credentials.md) for details on AWS `credential_process`)
-- Standard container isolation separates the run from other containers and host processes
-
-Per-operation prompts require user confirmation for each action. The container already limits access to the mounted workspace and routes credentials through the proxy.
+The container runs as a non-root user with filesystem access limited to the mounted workspace. Credentials are injected at the network layer and never appear in the container environment. See [Security model](../concepts/08-security.md) for the full threat model.
 
 **Restoring manual approval:**
 
@@ -279,183 +271,11 @@ This shows plugins from all sources: host settings, project settings, and `agent
 
 ## MCP servers
 
-MCP (Model Context Protocol) servers extend Claude Code with additional tools and context. Moat supports two types:
-
-1. **Local MCP servers** - Child processes running inside the container
-2. **Remote MCP servers** - External HTTPS services with credential injection
-
-### Local MCP servers
-
-Configure local MCP servers that run as child processes:
-
-```yaml
-claude:
-  mcp:
-    my_server:
-      command: /path/to/server
-      args: ["--flag"]
-      env:
-        API_KEY: ${secrets.MY_API_KEY}
-      grant: github
-      cwd: /workspace
-```
-
-See the [agent.yaml reference](../reference/02-agent-yaml.md#claudemcp) for all configuration options.
-
-### Remote MCP servers
-
-Remote MCP servers are external HTTPS services that require credential injection.
-
-#### 1. Grant credentials
-
-Store credentials for the MCP server:
-
-```bash
-$ moat grant mcp context7
-Enter credential for MCP server 'context7': ***************
-MCP credential 'mcp-context7' saved to ~/.moat/credentials/mcp-context7.enc
-```
-
-#### 2. Configure in agent.yaml
-
-Declare the MCP server at the top level (not under `claude:`):
-
-```yaml
-mcp:
-  - name: context7
-    url: https://mcp.context7.com/mcp
-    auth:
-      grant: mcp-context7
-      header: CONTEXT7_API_KEY
-```
-
-**Required fields:**
-- `name`: Identifier for the server (must be unique)
-- `url`: HTTPS endpoint (HTTP not allowed for security)
-
-**Optional fields:**
-- `auth.grant`: Name of grant to use (must exist via `moat grant mcp <name>`)
-- `auth.header`: Header name where credential should be injected
-
-For public MCP servers without authentication, omit the `auth` block.
-
-#### 3. Run Claude Code
-
-```bash
-moat claude ./workspace
-```
-
-Behind the scenes:
-- Container starts with `.claude.json` containing MCP configuration
-- Claude Code discovers MCP servers with stub credentials
-- When Claude Code makes MCP requests, the proxy replaces stubs with real credentials
-- All MCP traffic is logged for audit
-
-#### How credential injection works
-
-Moat uses the same credential injection model for MCP as it does for API calls:
-
-1. Credentials never enter the container environment
-2. MCP configuration is written to `.claude.json` with stub credentials (`moat-stub-{grant}`)
-3. When Claude Code makes an MCP request with a stub, the proxy detects it
-4. Proxy replaces stub with real credential based on URL + header matching
-5. MCP server receives the real credential
-
-This ensures:
-- Credentials are not in environment variables or config files
-- Container code cannot access raw credentials
-- Credential usage is fully auditable
-
-#### Multiple MCP servers
-
-Configure multiple MCP servers:
-
-```yaml
-mcp:
-  - name: context7
-    url: https://mcp.context7.com/mcp
-    auth:
-      grant: mcp-context7
-      header: CONTEXT7_API_KEY
-
-  - name: notion
-    url: https://notion-mcp.example.com
-    auth:
-      grant: mcp-notion
-      header: Notion-Token
-```
-
-Grant all required credentials:
-
-```bash
-moat grant mcp context7
-moat grant mcp notion
-```
-
-#### Observability
-
-MCP connections appear in network logs:
-
-```bash
-$ moat trace --network
-
-[10:23:44.512] GET https://mcp.context7.com/mcp 200 (89ms)
-```
-
-Credential injection is logged in audit logs:
-
-```bash
-$ moat audit
-
-[10:23:44.500] credential.injected grant=mcp-context7 host=mcp.context7.com header=CONTEXT7_API_KEY
-```
-
-#### Troubleshooting
-
-**MCP server not appearing:**
-- Verify MCP server is declared in `agent.yaml`
-- Check grant exists: `moat grants list` should show `mcp-{name}`
-- Check container logs: `moat logs`
-
-**Authentication failures (401):**
-- Verify grant exists and credential is correct
-- Try revoking and re-granting: `moat revoke mcp-{name}` then `moat grant mcp {name}`
-- Verify URL in `agent.yaml` matches the actual MCP server endpoint
-
-**Stub credential in errors:**
-If you see `moat-stub-{grant}` in errors:
-- Proxy didn't recognize the request as MCP traffic
-- Verify URL in `agent.yaml` exactly matches the host being accessed
-- Verify header name matches what Claude Code is sending
+Moat supports both remote and local MCP servers with credential injection. See [MCP servers](./09-mcp.md) for configuration and usage.
 
 ## Workspace snapshots
 
-Moat can create point-in-time snapshots of your workspace. This is useful for recovering from unwanted changes.
-
-Enable automatic snapshots:
-
-```yaml
-snapshots:
-  triggers:
-    disable_pre_run: false    # Snapshot before run starts
-    disable_git_commits: false # Snapshot on git commits
-    disable_idle: false        # Snapshot when idle
-    idle_threshold_seconds: 30
-```
-
-List snapshots:
-
-```bash
-moat snapshot list run_a1b2c3d4e5f6
-```
-
-Restore a snapshot:
-
-```bash
-moat snapshot restore run_a1b2c3d4e5f6 snap_xyz123
-```
-
-See [Snapshots guide](./07-snapshots.md) for details.
+Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./07-snapshots.md) for configuration and usage.
 
 ## Example: Code review workflow
 
@@ -546,6 +366,8 @@ moat run --grant anthropic -- curl -s https://api.anthropic.com/v1/models
 
 ## Related guides
 
-- [SSH access](./04-ssh-access.md) — Set up SSH for git operations
+- [SSH access](./04-ssh.md) — Set up SSH for git operations
 - [Snapshots](./07-snapshots.md) — Protect your workspace with snapshots
-- [Exposing ports](./06-exposing-ports.md) — Access services running inside containers
+- [MCP servers](./09-mcp.md) — Extend Claude Code with remote and local MCP servers
+- [Exposing ports](./06-ports.md) — Access services running inside containers
+- [Security model](../concepts/08-security.md) — Container isolation and credential injection

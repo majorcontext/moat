@@ -97,14 +97,7 @@ The `dependencies` field determines the base image (`node@20` → `node:20`). Th
 
 ## Container runtimes
 
-Moat supports two container runtimes:
-
-| Platform | Runtime | Detection |
-|----------|---------|-----------|
-| macOS 26+ with Apple Silicon | Apple containers | Automatic |
-| macOS (Intel), Linux, Windows | Docker | Automatic |
-
-Moat detects the available runtime automatically. No configuration required.
+Moat detects your container runtime automatically. It supports Apple containers on macOS 26+ with Apple Silicon, and Docker on all other platforms. See [Runtimes](../concepts/07-runtimes.md) for details.
 
 ## Use cases
 
@@ -122,27 +115,9 @@ moat grant anthropic  # Import credentials from Claude Code
 moat claude ./my-project
 ```
 
-## What Moat is not
+## Security model
 
-Moat provides container isolation, credential injection, and observability, but **does not enforce fine-grained permissions** on the actions agents can take with those credentials.
-
-**Examples:**
-
-- **GitHub grant** — An agent with GitHub access could delete `.git/` or force push to main. Moat injects whatever credentials you provide; the agent has the same permissions as those credentials. Protection requires GitHub-level controls (branch protection rules, repository permissions).
-
-- **AWS grant** — An agent with a broad IAM role could delete resources. Moat assumes the role you specify and injects those temporary credentials; the agent can do anything that role allows. Protection requires IAM-level controls (scoped roles, explicit denies, resource policies).
-
-- **File system** — Moat mounts your workspace with read-write access by default. An agent could delete or modify any file in the mounted directory.
-
-**Fine-grained agent policies require tools like [agentsh.org](https://www.agentsh.org/)**, which provides declarative security policies for agent actions. agentsh is complementary to Moat—Moat handles container isolation and credential delivery, while agentsh enforces action-level policies. We have plans to make packaging agentsh in a Moat container straightforward.
-
-**Moat's security model assumes:**
-
-- The agent is semi-trusted code that should not have direct credential access
-- Credentials are scoped appropriately at the service level (IAM roles, repository permissions)
-- The container boundary prevents accidental credential leakage, not intentional misuse by malicious code
-
-For high-security scenarios, combine Moat with service-level controls (branch protection, IAM policies, read-only mounts) and agent-level policy frameworks like agentsh.
+Moat provides container isolation and network-layer credential injection. It does not enforce fine-grained permissions on the actions agents take with those credentials. See [Security model](../concepts/08-security.md) for the trust model, threat boundaries, and defense-in-depth recommendations.
 
 ## Project status
 
@@ -153,3 +128,4 @@ Moat is in active development. APIs and configuration formats may change. The pr
 - [Installation](./02-installation.md) — Platform-specific installation instructions
 - [Quick start](./03-quick-start.md) — Guided walkthrough of your first run
 - [Choosing a tool](./04-comparison.md) — Compare Moat with packnplay, Leash, and Dev Containers
+- [Security model](../concepts/08-security.md) — Trust model, threat boundaries, and defense-in-depth
