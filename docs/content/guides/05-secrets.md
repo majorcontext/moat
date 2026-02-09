@@ -299,4 +299,4 @@ Your AWS credentials lack permission to read the parameter. Check IAM policies.
 ## Related guides
 
 - [Credential management](../concepts/02-credentials.md) — Network-layer credential injection
-- [Running Claude Code](./01-running-claude-code.md) — Use secrets with Claude Code
+- [Running Claude Code](./01-claude-code.md) — Use secrets with Claude Code

@@ -17,20 +17,7 @@ Moat detects the available runtime automatically:
 2. If Apple containers are unavailable, it uses Docker
 3. On Linux and Windows, it uses Docker
 
-Check the active runtime:
-
-```bash
-$ moat status
-
-Runtime: docker+gvisor  # or "docker" or "apple"
-```
-
-Override automatic detection:
-
-```bash
-export MOAT_RUNTIME=docker  # Force Docker runtime
-export MOAT_RUNTIME=apple   # Force Apple containers
-```
+The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing either `docker` or `apple`. If the requested runtime is unavailable, Moat returns an error.
 
 ## Docker runtime
 
@@ -51,49 +38,15 @@ Docker runtime supports two sandbox modes:
 - **Linux:** gVisor required by default (enhanced isolation)
 - **macOS/Windows:** Standard mode (gVisor unavailable in Docker Desktop)
 
-On Linux, if gVisor is not installed, you'll see:
-
-```
-Error: gVisor (runsc) is required but not available
-
-To install on Linux (Debian/Ubuntu), copy and run:
-
-  curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
-    sudo tee /etc/apt/sources.list.d/gvisor.list && \
-    sudo apt update && sudo apt install -y runsc && \
-    sudo runsc install && \
-    sudo systemctl reload docker
-
-For Docker Desktop (macOS/Windows):
-  See https://gvisor.dev/docs/user_guide/install/
-
-To bypass (reduced isolation):
-  moat run --no-sandbox
-```
+On Linux, if gVisor is not installed, Moat returns an error with installation instructions. gVisor is available for Debian/Ubuntu via the official `gvisor.dev` package repository, and installation details are included in the error message itself.
 
 ### Overriding sandbox mode
 
-On Linux, you can disable gVisor with `--no-sandbox`:
+The `--no-sandbox` flag (or `sandbox: false` in `agent.yaml`) disables the gVisor requirement on Linux, falling back to the standard `runc` runtime. This is useful in environments where gVisor is not installed, during development where gVisor overhead is undesirable, or when debugging runtime-specific issues.
 
-```bash
-moat run --no-sandbox ./my-project
-```
+On macOS and Windows, `--no-sandbox` has no effect since gVisor is unavailable in Docker Desktop and standard mode is already the default.
 
-This uses the standard `runc` runtime. Moat displays a warning:
-
-```
-WARN running without gVisor sandbox - reduced isolation
-```
-
-Use `--no-sandbox` on Linux when:
-- Running in environments without gVisor installed
-- Debugging issues specific to the standard runtime
-- Working in development where gVisor overhead is undesirable
-
-**Note:** On macOS and Windows, `--no-sandbox` has no effect since gVisor is unavailable by default.
-
-**Security note:** Standard container isolation protects against accidental damage and provides environment separation, but does not defend against container escape exploits. For untrusted code on Linux, install gVisor.
+Standard container isolation (`runc`) protects against accidental damage and provides environment separation, but does not defend against container escape exploits. For untrusted code on Linux, gVisor is the recommended default.
 
 ### Proxy security model
 
@@ -109,11 +62,11 @@ Since the proxy listens only on localhost, only processes on the host machine ca
 | macOS | No | Docker Desktop does not support gVisor |
 | Windows | No | Docker Desktop does not support gVisor |
 
-On macOS and Windows, use `--no-sandbox` or switch to Apple containers (macOS 26+ with Apple Silicon).
+On macOS and Windows, Moat automatically uses standard mode. Apple containers (macOS 26+ with Apple Silicon) provide an alternative with native macOS isolation.
 
 ## Apple containers
 
-Apple containers require macOS 26+ (Tahoe) on Apple Silicon. Install the `container` CLI from the [Apple container releases](https://github.com/apple/container/releases) page. They use macOS virtualization frameworks rather than Docker.
+Apple containers require macOS 26+ (Tahoe) on Apple Silicon, with the `container` CLI installed from the [Apple container releases](https://github.com/apple/container/releases) page. They use macOS virtualization frameworks rather than Docker.
 
 **Sandbox mode:** Apple containers use macOS's built-in isolation. gVisor is not applicable to this runtime.
 
@@ -129,13 +82,7 @@ Apple containers require macOS 26+ (Tahoe) on Apple Silicon. Install the `contai
 
 The proxy binds to `0.0.0.0` (all interfaces) because containers access the host via a gateway IP (e.g., `192.168.64.1`) rather than a special hostname.
 
-Since the proxy binds to all interfaces, Moat uses per-run token authentication. Each run generates a cryptographically random 32-byte token. The token is passed to the container via the `HTTP_PROXY` URL:
-
-```
-HTTP_PROXY=http://moat:<token>@<host>:<port>
-```
-
-The proxy rejects requests without a valid token. This prevents other processes on the network from using the proxy.
+Since the proxy binds to all interfaces, Moat uses per-run token authentication. Each run generates a cryptographically random 32-byte token, which is embedded in the `HTTP_PROXY` URL passed to the container. The proxy rejects requests without a valid token, preventing other processes on the network from using the proxy.
 
 ## Runtime comparison
 
@@ -168,16 +115,7 @@ Moat prioritizes strong isolation with minimal user-facing complexity. Lima prov
 - Running agents on code from untrusted sources
 - Defense-in-depth for high-value credentials
 
-**Current workaround:**
-
-For VM-level isolation today, run Moat itself inside a VM:
-
-```bash
-# On host VM
-moat run ./untrusted-project
-```
-
-This provides hardware isolation at the cost of heavier resource overhead compared to future native microVM support.
+**Current workaround:** For VM-level isolation today, run Moat itself inside a VM. This provides hardware isolation at the cost of heavier resource overhead compared to future native Lima support.
 
 ## Choosing a runtime
 
@@ -196,120 +134,12 @@ This provides hardware isolation at the cost of heavier resource overhead compar
 
 ## BuildKit and Docker-in-Docker
 
-When using `docker:dind` dependencies, Moat creates an isolated Docker daemon with an automatic BuildKit sidecar.
+When using `docker:dind` dependencies, Moat creates an isolated Docker daemon with an automatic BuildKit sidecar. The sidecar shares the main container's network and sandbox mode, and is cleaned up when the run ends.
 
-**Sidecar behavior:**
-- Created automatically when the main container starts
-- Shares the same network as the main container
-- Uses the same sandbox mode (gVisor or standard)
-- Cleaned up when the run ends
-
-**Note on gVisor compatibility:** BuildKit sidecars inherit the main container's OCI runtime (gVisor or standard). While BuildKit is expected to work with gVisor, this combination has not been extensively tested in production. If you encounter issues with BuildKit builds on Linux, try `--no-sandbox` to use the standard runtime.
-
-### BuildKit for optimized builds
-
-Moat uses BuildKit for fast builds with layer caching. BuildKit is included by default in:
-- Docker Desktop 20.10+ (macOS, Windows)
-- Docker Engine 23.0+ with buildx plugin
-
-Most users won't need additional setup. If builds fail with BuildKit errors on older Docker installations, install buildx: https://docs.docker.com/buildx/working-with-buildx/
-
-For environments where BuildKit is unavailable (e.g., restricted CI), disable it:
-```bash
-export MOAT_DISABLE_BUILDKIT=1
-```
-Note: This uses the legacy builder which is slower and doesn't cache build layers.
-
-**Build path fallback chain:**
-1. Try BuildKit sidecar (dind mode only)
-2. Fall back to host BuildKit (if `BUILDKIT_HOST` is set)
-3. Fall back to Docker SDK with BuildKit
-4. Fall back to legacy builder (if `MOAT_DISABLE_BUILDKIT=1`)
-
-See [Dependencies](./06-dependencies.md#docker-dependencies) for Docker dependency configuration.
-
-## Runtime configuration
-
-### Force a specific runtime
-
-```bash
-export MOAT_RUNTIME=docker  # Force Docker
-export MOAT_RUNTIME=apple   # Force Apple containers
-```
-
-If the requested runtime is unavailable, Moat returns an error:
-
-```
-Error: Apple container runtime not available: container CLI not found
-```
-
-### Override sandbox mode (Linux only)
-
-On Linux, disable gVisor requirement:
-
-```bash
-moat run --no-sandbox ./my-project
-```
-
-Or set it in `agent.yaml`:
-
-```yaml
-# agent.yaml
-sandbox: false
-```
-
-The CLI flag overrides the `agent.yaml` setting.
-
-**Note:** On macOS and Windows, gVisor is automatically disabled (unavailable in Docker Desktop), so this flag has no effect.
-
-## Troubleshooting
-
-### Docker daemon not running
-
-```
-Error: no container runtime available: Docker error: Cannot connect to the Docker daemon
-```
-
-Start Docker Desktop or the Docker daemon:
-
-```bash
-# macOS
-open -a Docker
-
-# Linux (systemd)
-sudo systemctl start docker
-```
-
-### gVisor not available (Linux only)
-
-```
-Error: gVisor (runsc) is required but not available
-```
-
-This error only occurs on Linux. Install gVisor or use `--no-sandbox`:
-
-```bash
-moat run --no-sandbox ./my-project
-```
-
-**Note:** On macOS and Windows, this error will not occur - Moat automatically uses standard Docker runtime since gVisor is unavailable.
-
-### Apple container system not running
-
-```
-Error: Apple container system not running
-```
-
-Moat attempts to start the system automatically. If this fails, start it manually:
-
-```bash
-sudo container system start
-```
-
-Wait 10-30 seconds for the system to initialize, then retry.
+Moat uses BuildKit for optimized builds with layer caching. BuildKit sidecars inherit the main container's OCI runtime (gVisor or standard). If BuildKit is unavailable, Moat falls back through a chain of alternatives, ending with the legacy Docker builder. See [Dependencies](../reference/06-dependencies.md#docker-dependencies) for Docker dependency configuration.
 
 ## Related concepts
 
 - [Sandboxing](./01-sandboxing.md) — Container isolation and workspace mounting
-- [Dependencies](./06-dependencies.md) — Docker access modes and BuildKit configuration
+- [Dependencies](../reference/06-dependencies.md) — Docker access modes and BuildKit configuration
 - [Networking](./05-networking.md) — Network policies and proxy configuration

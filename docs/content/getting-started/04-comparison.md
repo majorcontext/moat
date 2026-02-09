@@ -9,7 +9,7 @@ keywords: ["moat", "comparison", "packnplay", "leash", "devcontainer", "sandbox"
 
 Several tools help you run AI coding agents in isolated environments. This guide compares Moat with packnplay, Leash, and VS Code Dev Containers to help you choose the right one for your needs.
 
-All of these are good tools solving related problems. The right choice depends on what you're optimizing for.
+These tools solve related problems. The right choice depends on what you're optimizing for.
 
 ## Quick comparison
 
@@ -29,7 +29,7 @@ All of these are good tools solving related problems. The right choice depends o
 
 ### Use Moat when
 
-You want credentials injected at the network layer—the proxy adds authentication headers to requests, so tokens never appear in the container environment. Even if an agent logs all environment variables or gets compromised, your credentials remain safe.
+You want credentials injected at the network layer--the proxy adds authentication headers to requests, so tokens never appear in the container environment. Even if an agent logs all environment variables or gets compromised, your credentials remain safe.
 
 You also want observability. Every HTTP request the agent makes is logged with method, URL, status, and timing. Audit logs are hash-chained and can be cryptographically verified.
 
@@ -56,7 +56,7 @@ packnplay run --all-creds claude
 
 ### Use Leash when
 
-You need fine-grained policy enforcement with Cedar policies. Leash uses eBPF on Linux to enforce policies at the kernel level—controlling which files agents can access, which processes they can run, and which network connections they can make.
+You need fine-grained policy enforcement with Cedar policies. Leash uses eBPF on Linux to enforce policies at the kernel level--controlling which files agents can access, which processes they can run, and which network connections they can make.
 
 ```cedar
 // Example Cedar policy
@@ -85,7 +85,7 @@ You're already using VS Code or GitHub Codespaces and want a consistent developm
 }
 ```
 
-The limitation is that credentials must be passed as environment variables or mounted files—the agent can access them directly.
+Credentials are delivered as environment variables or mounted files--the agent can access them directly.
 
 **Best for:** Developers who want to use the same containerized environment for both manual development and AI agents.
 
@@ -139,7 +139,7 @@ Leash offers the most granular control. Moat provides network-level policies. pa
 | **Leash** | Docker | Docker or native (experimental) | Docker + eBPF |
 | **Dev Containers** | Docker | Docker | Docker |
 
-Moat's Apple container support on macOS 26+ provides native virtualization without Docker Desktop. Leash's macOS native mode is experimental and lacks some features (no credential injection).
+Moat's Apple container support on macOS 26+ provides native virtualization without Docker Desktop. Leash's macOS native mode is experimental and does not support credential injection.
 
 ## Migration paths
 
@@ -175,13 +175,13 @@ If you need file-level and process-level policies:
 - **Dev Containers**: Familiar tooling for VS Code users. No agent-specific security features.
 
 Choose based on your priorities:
-- **Simplicity**: packnplay or Dev Containers
+- **Simplicity**: Moat or packnplay
 - **Credential security**: Moat or Leash
 - **Fine-grained policies**: Leash
 - **Audit trails**: Moat or Leash
 
 ## Links
 
-- [packnplay](https://github.com/obra/packnplay) — Jesse Vincent's containerization wrapper
-- [Leash](https://github.com/strongdm/leash) — StrongDM's policy enforcement tool
-- [Dev Containers](https://containers.dev/) — Development container specification
+- [packnplay](https://github.com/obra/packnplay) -- Jesse Vincent's containerization wrapper
+- [Leash](https://github.com/strongdm/leash) -- StrongDM's policy enforcement tool
+- [Dev Containers](https://containers.dev/) -- Development container specification

@@ -6,139 +6,49 @@ keywords: ["moat", "sandboxing", "containers", "docker", "apple containers", "is
 
 # Sandboxing
 
-Moat runs each agent in an isolated container. The container runs in an isolated network namespace. All outbound traffic is routed through Moat's proxy. This page explains how container isolation works and the differences between supported runtimes.
+Moat runs each agent in an isolated container with its own filesystem, process tree, and network namespace. All outbound traffic routes through Moat's proxy. This page explains the isolation model, its security properties, and its limitations.
 
 ## What isolation provides
 
-When code runs in a Moat container:
+Moat containers enforce four layers of isolation:
 
-- **Filesystem isolation** — The container has its own root filesystem. Your workspace is mounted at `/workspace`, but the container cannot access other directories on your host unless explicitly mounted.
+- **Filesystem isolation** — The container has its own root filesystem. Only explicitly mounted directories are shared with the host.
 
-- **Process isolation** — Processes inside the container cannot see or interact with processes on the host. A runaway process in the container does not affect your system.
+- **Process isolation** — Processes inside the container cannot see or interact with host processes. A runaway process does not affect your system.
 
-- **Network isolation** — Container traffic routes through Moat's proxy, which injects credentials and can enforce network policies. By default, the network policy is `permissive` — all outbound traffic is allowed. Set the policy to `strict` to block all traffic except hosts in an explicit allow list. See [Network policies](./05-networking.md) for details.
+- **Network isolation** — All container traffic routes through Moat's proxy, which injects credentials and enforces network policies. The default policy is `permissive` (all outbound traffic allowed). A `strict` policy blocks everything except explicitly allowed hosts. See [Network policies](./05-networking.md) for details.
 
-- **Resource limits** — Container resource consumption is managed by the container runtime. Docker and Apple containers can be configured with CPU and memory limits if needed.
+- **Resource isolation** — The container runtime manages CPU, memory, and disk consumption independently from the host.
 
 ## Supported runtimes
 
-Moat supports two container runtimes:
-
-| Runtime | Platform | Notes |
-|---------|----------|-------|
-| Docker | Linux, macOS, Windows | Supports gVisor sandboxing on Linux |
-| Apple containers | macOS 26+ (Apple Silicon) | macOS native containerization |
-
-Moat detects the available runtime automatically. On macOS 26+ with Apple Silicon, it prefers Apple containers. Otherwise, it uses Docker.
-
-Check the active runtime:
-
-```bash
-$ moat status
-
-Runtime: docker+gvisor  # or "docker" or "apple"
-```
-
-See [Container runtimes](./07-runtimes.md) for runtime selection, gVisor configuration, and security models.
+Moat supports Docker (Linux, macOS, Windows) and Apple containers (macOS 26+ with Apple Silicon). It detects the available runtime automatically, preferring Apple containers when available. See [Runtimes](./07-runtimes.md) for details.
 
 ## Workspace mounting
 
-Your project directory is mounted into the container at `/workspace`. This is the container's working directory.
+Your project directory is mounted into the container at `/workspace`. This is the container's working directory. Changes made by the agent are written back to your host filesystem and persist after the run.
 
-```bash
-$ moat run ./my-project -- pwd
-/workspace
+The workspace mount is a direct host bind mount. Files the agent reads or writes there are trusted input/output. Moat does not sandbox file access within the mounted directory -- the agent has the same read/write access as the user who started the run.
 
-$ moat run ./my-project -- ls
-agent.yaml
-src/
-package.json
-```
-
-Changes made by the container are written to your host filesystem. If the agent modifies files, those changes persist after the run.
-
-> [!NOTE]
-> `/workspace` is a direct host mount. Any files the agent can read or write there should be considered trusted input/output.
-
-### Additional mounts
-
-Mount additional directories with the `mounts` field in `agent.yaml`:
-
-```yaml
-mounts:
-  - ./data:/data:ro      # Read-only
-  - /host/path:/container/path:rw  # Read-write
-```
-
-Or via CLI:
-
-```bash
-moat run --mount ./data:/data:ro ./my-project
-```
-
-Mount format: `<host-path>:<container-path>:<mode>`
-
-- `ro` — Read-only (container cannot modify)
-- `rw` — Read-write (default)
+Additional host directories can be mounted into the container. See [Mount syntax](../reference/05-mounts.md) for the full specification.
 
 ## Image selection
 
-Moat selects a base image based on the `dependencies` field in `agent.yaml`:
+Moat selects a container base image from the `dependencies` field in `agent.yaml`. The first recognized runtime dependency (Node.js, Python, or Go) determines the base image. When no recognized runtime is declared, Moat falls back to a minimal Debian image. Additional dependencies are installed into the selected base image during the build step.
 
-| Dependency | Base image |
-|------------|------------|
-| `node@20` | `node:20-slim` |
-| `node@18` | `node:18-slim` |
-| `python@3.11` | `python:3.11-slim` |
-| `python@3.12` | `python:3.12-slim` |
-| `go@1.23` | `golang:1.23` |
-| (none or unknown) | `debian:bookworm-slim` |
-
-The first recognized dependency determines the base image. Additional dependencies are installed into that image.
-
-```yaml
-dependencies:
-  - node@20    # Base image: node:20-slim
-  - python@3.11  # Installed into node:20-slim
-```
+This means you declare what the agent needs, not which Docker image to use. See [Dependencies](../reference/06-dependencies.md) for the full resolution model and supported dependency types.
 
 ## Docker access modes
 
-Some workloads require Docker access inside the container. Moat supports two modes:
+Some workloads need Docker access inside the container. Moat provides two modes with different security trade-offs.
 
-### docker:host
+**Host socket mounting** (`docker:host`) shares the host's Docker daemon with the container. The agent can see and manage all host containers, pull and push images, and create containers with access to host network and resources. This is equivalent to root access on the host. Do not use it with untrusted agents.
 
-Mounts the host Docker socket (`/var/run/docker.sock`) into the container. This provides:
-- Fast startup (no daemon initialization)
-- Shared image cache with host
-- Full access to host Docker daemon
+**Docker-in-Docker** (`docker:dind`) runs an isolated Docker daemon inside the container with an automatic BuildKit sidecar. The agent cannot see or affect host containers, and the daemon and image cache live entirely inside the container. This mode requires privileged mode, which Moat sets automatically. Privileged mode grants broad kernel capabilities, but security is maintained because the inner daemon is isolated from host resources.
 
-**Security implications:**
-- Agent can see and interact with all host containers
-- Agent can create containers that access host network and resources
-- Images built inside are cached on host
+When using `docker+gvisor`, the container runs inside gVisor, but Docker-in-Docker still requires privileged mode inside that sandbox.
 
-**`docker:host` is equivalent to root access on the host. Do not use with untrusted agents.**
-
-### docker:dind
-
-Runs an isolated Docker daemon inside the container with automatic BuildKit sidecar:
-- Complete isolation from the host Docker daemon (the daemon and image cache live entirely inside the container)
-- Cannot see or affect host containers
-- Automatic BuildKit sidecar for optimized builds
-
-**Security implications:**
-- Requires privileged mode (Moat sets this automatically). Privileged mode grants the container broad kernel capabilities and device access. This is safe only because the Docker daemon is isolated and does not expose host resources.
-- Agent has full control over its own Docker daemon
-- No access to host containers or images
-
-Use this mode when you need isolation from the host Docker daemon or don't want agents to access host containers.
-
-> When using `docker+gvisor`, the container runs inside gVisor, but `docker:dind` still requires privileged mode inside that sandbox.
-
-**Runtime requirement:** Both modes require Docker runtime. Apple containers cannot mount the Docker socket or run in privileged mode.
-
-See [Dependencies](./06-dependencies.md#docker-dependencies) for configuration details.
+Both modes require Docker as the container runtime. Apple containers do not support Docker socket mounting or privileged mode. See [Dependencies](../reference/06-dependencies.md#docker-dependencies) for configuration details.
 
 ## Limitations
 

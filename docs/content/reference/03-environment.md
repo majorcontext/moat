@@ -21,23 +21,13 @@ Anthropic API key. Used by `moat grant anthropic` as an alternative to Claude Co
 export ANTHROPIC_API_KEY="sk-ant-api..."
 ```
 
-If set, `moat grant anthropic` uses this key instead of prompting.
+When set, `moat grant anthropic` uses this key instead of prompting.
 
 ### SSH_AUTH_SOCK
 
 Path to SSH agent socket. Required for `moat grant ssh`.
 
-```bash
-# Usually set automatically when SSH agent starts
-echo $SSH_AUTH_SOCK
-```
-
-If not set, start the SSH agent:
-
-```bash
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519
-```
+Set automatically by SSH agent. Start one with `eval "$(ssh-agent -s)"` and `ssh-add` if not running.
 
 ### MOAT_PROXY_PORT
 
@@ -59,8 +49,8 @@ export MOAT_RUNTIME=docker  # Force Docker runtime
 export MOAT_RUNTIME=apple   # Force Apple containers runtime
 ```
 
-- Default: Auto-detect (Apple containers on macOS 15+ with Apple Silicon, Docker otherwise)
-- If the requested runtime is unavailable, moat returns an error
+- Default: Auto-detect (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise)
+- When the requested runtime is unavailable, Moat returns an error
 
 See [Runtimes](../concepts/07-runtimes.md) for details on runtime selection.
 
@@ -124,6 +114,8 @@ echo $HTTPS_PROXY
 ```
 
 All HTTP/HTTPS traffic routes through this proxy for credential injection and network policy enforcement.
+
+> **Note:** On Apple containers (macOS 26+), the proxy URL includes a per-run authentication token: `http://moat:<token>@<host>:<port>`. The token is generated automatically and is different for each run. See [Proxy architecture](../concepts/09-proxy.md) for details on the security model.
 
 ### NO_PROXY
 
@@ -239,9 +231,9 @@ Environment variables are visible to all processes in the container. Any process
 - `/proc/*/environ`
 - Language-specific environment APIs
 
-### Not suitable for sensitive credentials
+### Do not use for sensitive credentials
 
-For sensitive credentials like OAuth tokens, use grants instead of environment variables. Grants inject credentials at the network layer where they're not visible in the environment.
+For sensitive credentials like OAuth tokens, use [grants](04-grants.md) instead of environment variables. Grants inject credentials at the network layer where they're not visible in the environment. See [Security model](../concepts/08-security.md) for a full discussion of credential safety.
 
 ```yaml
 # Prefer: Network-layer injection
@@ -257,63 +249,3 @@ secrets:
 
 Secret resolution is logged in the audit trail (which secrets were resolved, not their values). Environment variable usage is not logged.
 
----
-
-## Troubleshooting
-
-### Variable not set in container
-
-1. Check agent.yaml syntax:
-   ```yaml
-   env:
-     MY_VAR: "value"  # Correct
-     MY_VAR: value    # May cause issues with special characters
-   ```
-
-2. Check for typos in variable name
-
-3. Verify with verbose mode:
-   ```bash
-   moat run -v -- env | grep MY_VAR
-   ```
-
-### Secret resolution failed
-
-Check the error message for the specific backend:
-
-```bash
-# 1Password
-op read "op://Dev/OpenAI/api-key"
-
-# AWS SSM
-aws ssm get-parameter --name /path/to/secret
-```
-
-### Proxy variables interfering
-
-Some tools ignore proxy settings. Check tool-specific proxy configuration:
-
-```bash
-# curl respects HTTP_PROXY by default
-curl https://example.com
-
-# git may need explicit config
-git config --global http.proxy $HTTP_PROXY
-```
-
-### Variable expansion
-
-Variables in agent.yaml are not expanded on the host. They're set literally:
-
-```yaml
-env:
-  # Sets PATH to literal string "$PATH:/custom"
-  # Does NOT expand $PATH
-  PATH: "$PATH:/custom"
-```
-
-For variable expansion, use shell commands:
-
-```yaml
-command: ["sh", "-c", "export PATH=$PATH:/custom && my-command"]
-```
