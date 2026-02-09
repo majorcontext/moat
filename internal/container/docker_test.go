@@ -243,7 +243,7 @@ func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
-	defer rt.NetworkManager().RemoveNetwork(ctx, networkID)
+	defer rt.NetworkManager().ForceRemoveNetwork(ctx, networkID)
 
 	// Create a container attached to the network
 	containerName := "test-moat-container-" + strconv.FormatInt(time.Now().Unix(), 10)
@@ -264,14 +264,132 @@ func TestDockerRuntime_RemoveNetwork_ActiveEndpoints(t *testing.T) {
 	}
 
 	// Try to remove the network while the container is running
-	// This should NOT fail (best-effort cleanup)
-	if err := rt.NetworkManager().RemoveNetwork(ctx, networkID); err != nil {
-		t.Fatalf("RemoveNetwork should not fail for network with active endpoints: %v", err)
+	// This should now return an error (active endpoints are no longer silently swallowed)
+	if err := rt.NetworkManager().RemoveNetwork(ctx, networkID); err == nil {
+		t.Fatal("RemoveNetwork should fail for network with active endpoints")
+	}
+
+	// ForceRemoveNetwork should succeed even with active endpoints
+	if err := rt.NetworkManager().ForceRemoveNetwork(ctx, networkID); err != nil {
+		t.Fatalf("ForceRemoveNetwork failed: %v", err)
+	}
+
+	// Verify network is gone
+	_, err = rt.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	if err == nil {
+		t.Fatal("network still exists after force removal")
 	}
 
 	// Cleanup: stop and remove the container
 	rt.StopContainer(ctx, containerID)
 	rt.RemoveContainer(ctx, containerID)
+}
+
+func TestDockerRuntime_ForceRemoveNetwork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	// Create a network
+	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+
+	// Create and start a container attached to the network
+	containerName := "test-moat-container-" + strconv.FormatInt(time.Now().Unix(), 10)
+	containerID, err := rt.CreateContainer(ctx, Config{
+		Name:        containerName,
+		Image:       "alpine:latest",
+		Cmd:         []string{"sleep", "30"},
+		NetworkMode: networkName,
+	})
+	if err != nil {
+		t.Fatalf("CreateContainer failed: %v", err)
+	}
+	defer rt.RemoveContainer(ctx, containerID)
+
+	if err := rt.StartContainer(ctx, containerID); err != nil {
+		t.Fatalf("StartContainer failed: %v", err)
+	}
+
+	// ForceRemoveNetwork should disconnect the container and remove the network
+	if err := rt.NetworkManager().ForceRemoveNetwork(ctx, networkID); err != nil {
+		t.Fatalf("ForceRemoveNetwork failed: %v", err)
+	}
+
+	// Verify network is gone
+	_, err = rt.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	if err == nil {
+		t.Fatal("network still exists after force removal")
+	}
+
+	// Cleanup
+	rt.StopContainer(ctx, containerID)
+}
+
+func TestDockerRuntime_ForceRemoveNetwork_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	// ForceRemoveNetwork should not fail for a nonexistent network
+	if err := rt.NetworkManager().ForceRemoveNetwork(ctx, "nonexistent-network-id"); err != nil {
+		t.Fatalf("ForceRemoveNetwork should not fail for non-existent network: %v", err)
+	}
+}
+
+func TestDockerRuntime_ListNetworks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	// Create a moat-managed network (CreateNetwork adds moat.managed label)
+	networkName := "test-moat-network-" + strconv.FormatInt(time.Now().Unix(), 10)
+	networkID, err := rt.NetworkManager().CreateNetwork(ctx, networkName)
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+	defer rt.NetworkManager().RemoveNetwork(ctx, networkID)
+
+	// ListNetworks should include the network we just created
+	networks, err := rt.NetworkManager().ListNetworks(ctx)
+	if err != nil {
+		t.Fatalf("ListNetworks failed: %v", err)
+	}
+
+	found := false
+	for _, n := range networks {
+		if n.ID == networkID {
+			found = true
+			if n.Name != networkName {
+				t.Errorf("network name: got %q, want %q", n.Name, networkName)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("created network %s not found in ListNetworks results", networkName)
+	}
 }
 
 func TestDockerRuntime_StartSidecar(t *testing.T) {

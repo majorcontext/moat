@@ -19,6 +19,7 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -785,6 +786,7 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 func (m *dockerNetworkManager) CreateNetwork(ctx context.Context, name string) (string, error) {
 	resp, err := m.cli.NetworkCreate(ctx, name, network.CreateOptions{
 		Driver: "bridge", // Bridge network for inter-container communication
+		Labels: map[string]string{"moat.managed": "true"},
 	})
 	if err != nil {
 		return "", fmt.Errorf("creating network: %w", err)
@@ -793,23 +795,68 @@ func (m *dockerNetworkManager) CreateNetwork(ctx context.Context, name string) (
 }
 
 // RemoveNetwork removes a Docker network by ID.
-// Best-effort: does not fail if network doesn't exist or has active endpoints.
+// Returns an error if the network has active endpoints (use ForceRemoveNetwork as fallback).
+// Does not fail if network doesn't exist.
 func (m *dockerNetworkManager) RemoveNetwork(ctx context.Context, networkID string) error {
 	err := m.cli.NetworkRemove(ctx, networkID)
 	if err != nil {
-		// Ignore "not found" and "conflict" errors - network may already be
-		// removed or may have active endpoints during cleanup
-		if errdefs.IsNotFound(err) || errdefs.IsConflict(err) {
-			return nil
-		}
-		// Docker doesn't always return a proper conflict error code for active endpoints.
-		// Check the error message as a fallback.
-		if strings.Contains(err.Error(), "active endpoints") {
+		if errdefs.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("removing network: %w", err)
 	}
 	return nil
+}
+
+// ForceRemoveNetwork forcibly disconnects all containers from a network
+// and then removes it. This is a defense-in-depth fallback when RemoveNetwork
+// fails due to active endpoints (e.g., containers not yet fully removed).
+func (m *dockerNetworkManager) ForceRemoveNetwork(ctx context.Context, networkID string) error {
+	inspect, err := m.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil // Already gone
+		}
+		return fmt.Errorf("inspecting network for force removal: %w", err)
+	}
+
+	// Force-disconnect all connected containers
+	for containerID := range inspect.Containers {
+		log.Debug("force-disconnecting container from network", "container", containerID, "network", networkID)
+		if disconnectErr := m.cli.NetworkDisconnect(ctx, networkID, containerID, true); disconnectErr != nil {
+			if !errdefs.IsNotFound(disconnectErr) {
+				log.Debug("failed to disconnect container", "container", containerID, "error", disconnectErr)
+			}
+		}
+	}
+
+	// Now remove the network
+	if removeErr := m.cli.NetworkRemove(ctx, networkID); removeErr != nil {
+		if errdefs.IsNotFound(removeErr) {
+			return nil
+		}
+		return fmt.Errorf("removing network after force disconnect: %w", removeErr)
+	}
+	return nil
+}
+
+// ListNetworks returns all moat-managed networks (those with label moat.managed=true).
+func (m *dockerNetworkManager) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
+	networks, err := m.cli.NetworkList(ctx, network.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("label", "moat.managed=true")),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing networks: %w", err)
+	}
+
+	result := make([]NetworkInfo, 0, len(networks))
+	for _, n := range networks {
+		result = append(result, NetworkInfo{
+			ID:   n.ID,
+			Name: n.Name,
+		})
+	}
+	return result, nil
 }
 
 // dockerSidecarManager methods

@@ -41,3 +41,31 @@ func (m *appleNetworkManager) RemoveNetwork(ctx context.Context, name string) er
 	log.Debug("removed apple container network", "name", name)
 	return nil
 }
+
+// ForceRemoveNetwork delegates to RemoveNetwork for Apple containers.
+// Apple's container runtime handles disconnection automatically.
+func (m *appleNetworkManager) ForceRemoveNetwork(ctx context.Context, name string) error {
+	return m.RemoveNetwork(ctx, name)
+}
+
+// ListNetworks returns all moat-managed networks by filtering for moat- prefix.
+// Apple container CLI has no label support, so we filter by naming convention.
+func (m *appleNetworkManager) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
+	cmd := exec.CommandContext(ctx, m.containerBin, "network", "list")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("listing networks: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+
+	var result []NetworkInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		name := strings.TrimSpace(line)
+		if strings.HasPrefix(name, "moat-") {
+			result = append(result, NetworkInfo{
+				ID:   name,
+				Name: name,
+			})
+		}
+	}
+	return result, nil
+}
