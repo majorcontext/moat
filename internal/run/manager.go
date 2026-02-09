@@ -2272,12 +2272,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Stop BuildKit sidecar if present (before main container)
+	// Stop and remove BuildKit sidecar if present (before main container).
+	// Must remove before network cleanup — Docker refuses to remove networks
+	// with connected containers (#131).
 	if buildkitContainerID != "" {
 		log.Debug("stopping buildkit sidecar", "container_id", buildkitContainerID)
 		if err := m.runtime.StopContainer(ctx, buildkitContainerID); err != nil {
 			log.Debug("failed to stop buildkit sidecar", "error", err)
-			// Continue anyway - try to clean up network
+		}
+		if err := m.runtime.RemoveContainer(ctx, buildkitContainerID); err != nil {
+			log.Debug("failed to remove buildkit sidecar", "error", err)
 		}
 	}
 
@@ -2353,14 +2357,16 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Remove network if present (best-effort)
+	// Remove network if present (with force-disconnect fallback)
 	if networkID != "" {
 		log.Debug("removing docker network", "network_id", networkID)
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if err := netMgr.RemoveNetwork(ctx, networkID); err != nil {
-				log.Debug("failed to remove docker network", "error", err)
-				// Non-fatal - network may have active endpoints
+				log.Debug("network removal failed, trying force removal", "network_id", networkID, "error", err)
+				if forceErr := netMgr.ForceRemoveNetwork(ctx, networkID); forceErr != nil {
+					log.Debug("force network removal also failed", "network_id", networkID, "error", forceErr)
+				}
 			}
 		}
 	}
@@ -2615,12 +2621,32 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		}
 	}
 
-	// Remove network
+	// Remove containers before network — Docker refuses to remove networks
+	// with connected containers, causing network leaks (#131).
+	if r.BuildkitContainerID != "" {
+		log.Debug("removing buildkit sidecar after container exit", "container_id", r.BuildkitContainerID)
+		if stopErr := m.runtime.StopContainer(context.Background(), r.BuildkitContainerID); stopErr != nil {
+			log.Debug("failed to stop buildkit sidecar", "error", stopErr)
+		}
+		if rmErr := m.runtime.RemoveContainer(context.Background(), r.BuildkitContainerID); rmErr != nil {
+			log.Debug("failed to remove buildkit sidecar", "error", rmErr)
+		}
+	}
+	if !r.KeepContainer {
+		if rmErr := m.runtime.RemoveContainer(context.Background(), r.ContainerID); rmErr != nil {
+			log.Debug("failed to remove main container after exit", "error", rmErr)
+		}
+	}
+
+	// Remove network (with force-disconnect fallback)
 	if r.NetworkID != "" {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
-				log.Debug("failed to remove network after container exit", "network", r.NetworkID, "error", removeErr)
+				log.Debug("network removal failed, trying force removal", "network", r.NetworkID, "error", removeErr)
+				if forceErr := netMgr.ForceRemoveNetwork(context.Background(), r.NetworkID); forceErr != nil {
+					log.Debug("force network removal also failed", "network", r.NetworkID, "error", forceErr)
+				}
 			}
 		}
 	}
@@ -2677,13 +2703,15 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Remove BuildKit network if present
+	// Remove network if present (with force-disconnect fallback)
 	if r.NetworkID != "" {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if err := netMgr.RemoveNetwork(ctx, r.NetworkID); err != nil {
-				// This is best-effort - network may already be removed or in use
-				log.Debug("failed to remove BuildKit network", "network", r.NetworkID, "error", err)
+				log.Debug("network removal failed, trying force removal", "network", r.NetworkID, "error", err)
+				if forceErr := netMgr.ForceRemoveNetwork(ctx, r.NetworkID); forceErr != nil {
+					log.Debug("force network removal also failed", "network", r.NetworkID, "error", forceErr)
+				}
 			}
 		}
 	}

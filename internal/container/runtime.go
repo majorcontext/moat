@@ -131,8 +131,23 @@ type NetworkManager interface {
 	CreateNetwork(ctx context.Context, name string) (string, error)
 
 	// RemoveNetwork removes a network by ID.
-	// Best-effort: does not fail if network doesn't exist.
+	// Returns an error if the network has active endpoints.
+	// Does not fail if network doesn't exist.
 	RemoveNetwork(ctx context.Context, networkID string) error
+
+	// ForceRemoveNetwork forcibly disconnects all containers from a network
+	// and then removes it. Use as a fallback when RemoveNetwork fails due
+	// to active endpoints.
+	ForceRemoveNetwork(ctx context.Context, networkID string) error
+
+	// ListNetworks returns all moat-managed networks.
+	ListNetworks(ctx context.Context) ([]NetworkInfo, error)
+}
+
+// NetworkInfo contains information about a network.
+type NetworkInfo struct {
+	ID   string
+	Name string
 }
 
 // SidecarManager handles sidecar container operations.

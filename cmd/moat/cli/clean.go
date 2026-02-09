@@ -110,8 +110,31 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Find orphaned networks (moat-managed networks not associated with any known run)
+	var orphanedNetworks []container.NetworkInfo
+	netMgr := rt.NetworkManager()
+	if netMgr != nil {
+		allNetworks, netErr := netMgr.ListNetworks(ctx)
+		if netErr != nil {
+			ui.Warnf("Failed to list networks: %v", netErr)
+		} else {
+			// Build set of network IDs associated with known runs
+			knownNetworkIDs := make(map[string]bool)
+			for _, r := range runs {
+				if r.NetworkID != "" {
+					knownNetworkIDs[r.NetworkID] = true
+				}
+			}
+			for _, n := range allNetworks {
+				if !knownNetworkIDs[n.ID] {
+					orphanedNetworks = append(orphanedNetworks, n)
+				}
+			}
+		}
+	}
+
 	// Nothing to clean?
-	if len(stoppedRuns) == 0 && len(unusedImages) == 0 {
+	if len(stoppedRuns) == 0 && len(unusedImages) == 0 && len(orphanedNetworks) == 0 {
 		fmt.Println("Nothing to clean.")
 		return nil
 	}
@@ -142,7 +165,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	resourceCount := len(stoppedRuns) + len(unusedImages)
+	if len(orphanedNetworks) > 0 {
+		fmt.Printf("%s (%d):\n", ui.Bold("Orphaned networks"), len(orphanedNetworks))
+		for _, n := range orphanedNetworks {
+			fmt.Printf("  %s\n", n.Name)
+		}
+		fmt.Println()
+	}
+
+	resourceCount := len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks)
 	fmt.Printf("Total: %d resources, %d MB\n\n", resourceCount, totalSize/(1024*1024))
 
 	// Dry run - just show, don't prompt
@@ -198,6 +229,20 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Green("done"))
 		removedCount++
 		freedSize += img.Size
+	}
+
+	// Remove orphaned networks
+	if netMgr != nil {
+		for _, n := range orphanedNetworks {
+			fmt.Printf("Removing network %s... ", n.Name)
+			if err := netMgr.ForceRemoveNetwork(ctx, n.ID); err != nil {
+				fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
+				failedCount++
+				continue
+			}
+			fmt.Println(ui.Green("done"))
+			removedCount++
+		}
 	}
 
 	if failedCount > 0 {
