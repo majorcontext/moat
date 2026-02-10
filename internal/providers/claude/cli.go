@@ -3,9 +3,6 @@ package claude
 import (
 	"context"
 	"fmt"
-	"os"
-	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,8 +61,7 @@ Examples:
   # Require manual approval for each tool use (disable yolo mode)
   moat claude --noyolo
 
-Subcommands:
-  moat claude sessions    List Claude Code sessions`,
+Use 'moat list' to see running and recent runs.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runClaudeCode,
 	}
@@ -78,25 +74,6 @@ Subcommands:
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
 
-	// Add sessions subcommand
-	sessionsCmd := &cobra.Command{
-		Use:   "sessions",
-		Short: "List Claude Code sessions",
-		Long: `List all Claude Code sessions.
-
-Shows session name, workspace, state, and when it was last accessed.
-
-Examples:
-  # List all sessions
-  moat claude sessions
-
-  # List only active (running) sessions
-  moat claude sessions --active`,
-		RunE: runSessions,
-	}
-	sessionsCmd.Flags().Bool("active", false, "only show running sessions")
-
-	claudeCmd.AddCommand(sessionsCmd)
 	root.AddCommand(claudeCmd)
 }
 
@@ -224,17 +201,6 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		Config:      cfg,
 		Interactive: interactive,
 		TTY:         interactive,
-		OnRunCreated: func(info cli.RunInfo) {
-			// Create session record
-			sessionMgr, sessionErr := NewSessionManager()
-			if sessionErr != nil {
-				log.Debug("failed to create session manager", "error", sessionErr)
-				return
-			}
-			if _, sessionErr = sessionMgr.Create(absPath, info.ID, info.Name, grants); sessionErr != nil {
-				log.Debug("failed to create session", "error", sessionErr)
-			}
-		},
 	}
 
 	result, err := cli.ExecuteRun(ctx, opts)
@@ -244,7 +210,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 
 	if result != nil && !claudeFlags.Detach {
 		fmt.Printf("Starting Claude Code in %s\n", absPath)
-		fmt.Printf("Session: %s (run %s)\n", result.Name, result.ID)
+		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
 	}
 
 	return nil
@@ -268,125 +234,4 @@ func getClaudeCredentialName() string {
 		}
 	}
 	return ""
-}
-
-// runSessions lists Claude Code sessions.
-func runSessions(cmd *cobra.Command, args []string) error {
-	activeOnly, _ := cmd.Flags().GetBool("active")
-
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return fmt.Errorf("creating session manager: %w", err)
-	}
-
-	sessions, err := mgr.List()
-	if err != nil {
-		return fmt.Errorf("listing sessions: %w", err)
-	}
-
-	if len(sessions) == 0 {
-		fmt.Println("No Claude Code sessions found.")
-		fmt.Println("\nStart a new session with: moat claude")
-		return nil
-	}
-
-	// Filter if needed
-	var filtered []*struct {
-		ID             string
-		Name           string
-		Workspace      string
-		State          string
-		LastAccessedAt time.Time
-	}
-	for _, s := range sessions {
-		if activeOnly && s.State != "running" {
-			continue
-		}
-		filtered = append(filtered, &struct {
-			ID             string
-			Name           string
-			Workspace      string
-			State          string
-			LastAccessedAt time.Time
-		}{
-			ID:             s.ID,
-			Name:           s.Name,
-			Workspace:      s.Workspace,
-			State:          s.State,
-			LastAccessedAt: s.LastAccessedAt,
-		})
-	}
-
-	if len(filtered) == 0 {
-		if activeOnly {
-			fmt.Println("No running Claude Code sessions.")
-		} else {
-			fmt.Println("No Claude Code sessions found.")
-		}
-		return nil
-	}
-
-	// Print as table
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION\tWORKSPACE\tSTATE\tLAST ACCESSED")
-
-	for _, s := range filtered {
-		workspace := shortenPath(s.Workspace)
-		lastAccessed := formatTimeAgo(s.LastAccessedAt)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, workspace, s.State, lastAccessed)
-	}
-
-	w.Flush()
-
-	fmt.Println()
-	fmt.Println("Attach to a running session: moat attach <session>")
-
-	return nil
-}
-
-// shortenPath shortens a path for display.
-func shortenPath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-
-	if len(path) > len(home) && path[:len(home)] == home {
-		return "~" + path[len(home):]
-	}
-	return path
-}
-
-// formatTimeAgo formats a time as a human-readable "ago" string.
-func formatTimeAgo(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-
-	d := time.Since(t)
-
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 minute ago"
-		}
-		return fmt.Sprintf("%d minutes ago", m)
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", h)
-	case d < 7*24*time.Hour:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	default:
-		return t.Format("Jan 2, 2006")
-	}
 }

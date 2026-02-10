@@ -59,40 +59,6 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 	}, nil
 }
 
-// Sessions returns all Gemini sessions.
-func (p *Provider) Sessions() ([]provider.Session, error) {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return nil, err
-	}
-
-	sessions, err := mgr.List()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]provider.Session, len(sessions))
-	for i, s := range sessions {
-		result[i] = provider.Session{
-			ID:        s.ID,
-			Name:      s.Name,
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.LastAccessedAt,
-		}
-	}
-
-	return result, nil
-}
-
-// ResumeSession resumes an existing session by ID.
-func (p *Provider) ResumeSession(id string) error {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return err
-	}
-	return mgr.Touch(id)
-}
-
 // populateStagingDir populates the Gemini staging directory with auth configuration.
 func populateStagingDir(cred *provider.Credential, stagingDir string) error {
 	if IsOAuthCredential(cred) {

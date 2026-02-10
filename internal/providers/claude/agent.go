@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/provider"
-	"github.com/majorcontext/moat/internal/session"
-	"github.com/majorcontext/moat/internal/ui"
 )
 
 // PrepareContainer sets up staging directories and config files for Claude Code.
@@ -95,73 +93,4 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 			os.RemoveAll(tmpDir)
 		},
 	}, nil
-}
-
-// Sessions returns all Claude Code sessions.
-func (p *Provider) Sessions() ([]provider.Session, error) {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return nil, err
-	}
-
-	sessions, err := mgr.List()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]provider.Session, len(sessions))
-	for i, s := range sessions {
-		result[i] = provider.Session{
-			ID:        s.ID,
-			Name:      s.Name,
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.LastAccessedAt,
-		}
-	}
-
-	return result, nil
-}
-
-// ResumeSession resumes an existing session by ID.
-func (p *Provider) ResumeSession(id string) error {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return err
-	}
-
-	sess, err := mgr.Get(id)
-	if err != nil {
-		return fmt.Errorf("session not found: %s", id)
-	}
-
-	// Touch the session to update last accessed time
-	if err := mgr.Touch(sess.ID); err != nil {
-		// Log but don't fail - this is non-critical
-		ui.Warnf("Failed to update session timestamp: %v", err)
-	}
-
-	return nil
-}
-
-// SessionManager wraps session.Manager for Claude Code sessions.
-type SessionManager struct {
-	*session.Manager
-}
-
-// NewSessionManager creates a session manager for Claude Code sessions.
-func NewSessionManager() (*SessionManager, error) {
-	dir, err := DefaultSessionDir()
-	if err != nil {
-		return nil, err
-	}
-	return &SessionManager{Manager: session.NewManager(dir)}, nil
-}
-
-// DefaultSessionDir returns the default Claude session storage directory.
-func DefaultSessionDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, ".moat", "claude", "sessions"), nil
 }

@@ -55,18 +55,12 @@ type RefreshableProvider interface {
 }
 
 // AgentProvider extends CredentialProvider for AI agent runtimes.
-// Implemented by claude and codex providers.
+// Implemented by claude, codex, and gemini providers.
 type AgentProvider interface {
 	CredentialProvider
 
 	// PrepareContainer sets up staging directories and config files.
 	PrepareContainer(ctx context.Context, opts PrepareOpts) (*ContainerConfig, error)
-
-	// Sessions returns all sessions for this agent.
-	Sessions() ([]Session, error)
-
-	// ResumeSession resumes an existing session by ID.
-	ResumeSession(id string) error
 
 	// RegisterCLI adds provider-specific commands to the root command.
 	RegisterCLI(root *cobra.Command)

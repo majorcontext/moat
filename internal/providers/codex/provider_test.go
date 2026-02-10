@@ -262,18 +262,6 @@ func TestGenerateMCPConfig(t *testing.T) {
 	}
 }
 
-func TestSessionManager(t *testing.T) {
-	// Test DefaultSessionDir
-	dir, err := DefaultSessionDir()
-	if err != nil {
-		t.Fatalf("DefaultSessionDir() error = %v", err)
-	}
-
-	if !contains(dir, ".moat") || !contains(dir, "codex") || !contains(dir, "sessions") {
-		t.Errorf("DefaultSessionDir() = %q, want path containing .moat/codex/sessions", dir)
-	}
-}
-
 func TestNetworkHosts(t *testing.T) {
 	hosts := NetworkHosts()
 

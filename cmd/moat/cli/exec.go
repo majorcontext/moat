@@ -196,14 +196,6 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 
 	log.Info("created run", "id", r.ID, "name", r.Name)
 
-	// Call the OnRunCreated callback if provided
-	if opts.OnRunCreated != nil {
-		opts.OnRunCreated(intcli.RunInfo{
-			ID:   r.ID,
-			Name: r.Name,
-		})
-	}
-
 	// Interactive mode: use StartAttached to ensure TTY is connected before process starts
 	// This is required for TUI applications like Codex CLI that need to detect terminal
 	// capabilities immediately on startup.

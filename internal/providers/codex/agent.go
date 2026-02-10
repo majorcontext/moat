@@ -61,43 +61,6 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 	}, nil
 }
 
-// Sessions returns all Codex sessions.
-func (p *Provider) Sessions() ([]provider.Session, error) {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return nil, err
-	}
-
-	sessions, err := mgr.List()
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to provider.Session
-	result := make([]provider.Session, len(sessions))
-	for i, s := range sessions {
-		result[i] = provider.Session{
-			ID:        s.ID,
-			Name:      s.Name,
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.LastAccessedAt,
-		}
-	}
-
-	return result, nil
-}
-
-// ResumeSession resumes an existing session by ID.
-func (p *Provider) ResumeSession(id string) error {
-	mgr, err := NewSessionManager()
-	if err != nil {
-		return err
-	}
-
-	// Touch the session to update last accessed time
-	return mgr.Touch(id)
-}
-
 // PopulateStagingDir populates the Codex staging directory with auth configuration.
 //
 // Files added:
