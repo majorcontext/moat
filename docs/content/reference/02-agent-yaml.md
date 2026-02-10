@@ -161,7 +161,7 @@ name: my-agent
 - Default: Directory name
 - CLI override: `--name`
 
-When using `moat wt` or `--wt`, the `name` field is used to generate the run name as `{name}-{branch}`. If `name` is not set, the run is named after the branch.
+When using `moat wt` or `--worktree`, the `name` field is used to generate the run name as `{name}-{branch}`. If `name` is not set, the run is named after the branch.
 
 ### agent
 

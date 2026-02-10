@@ -24,9 +24,10 @@ var wtCmd = &cobra.Command{
 	Long: `Create or reuse a git worktree for a branch and run an agent in it.
 
 If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
-exist, it's created. If a run is already active in the worktree, attaches to it.
+exist, it's created. If a run is already active in the worktree, returns an
+error with instructions to attach or stop it.
 
-Agent configuration is read from agent.yaml in the current directory.
+Agent configuration is read from agent.yaml in the repository root.
 
 Worktrees are stored at ~/.moat/worktrees/<repo-id>/<branch>.
 Override with MOAT_WORKTREE_BASE environment variable.
@@ -137,8 +138,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	for _, r := range manager.List() {
 		if r.WorktreePath == result.WorkspacePath && r.State == run.StateRunning {
-			ui.Infof("Attaching to running session %s (%s)", r.Name, r.ID)
-			return RunAttached(cmd.Context(), manager, r)
+			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nAttach with 'moat attach %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
 		}
 	}
 
@@ -164,16 +164,14 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	opts := intcli.ExecOptions{
-		Flags:          wtFlags,
-		Workspace:      result.WorkspacePath,
-		Command:        containerCmd,
-		Config:         cfg,
-		Interactive:    !wtFlags.Detach,
-		TTY:            !wtFlags.Detach,
-		WorktreeBranch: branch,
-		WorktreePath:   result.WorkspacePath,
-		WorktreeRepoID: repoID,
+		Flags:       wtFlags,
+		Workspace:   result.WorkspacePath,
+		Command:     containerCmd,
+		Config:      cfg,
+		Interactive: !wtFlags.Detach,
+		TTY:         !wtFlags.Detach,
 	}
+	intcli.SetWorktreeFields(&opts, result)
 
 	_, err = ExecuteRun(ctx, opts)
 	return err

@@ -71,3 +71,62 @@ func TestListWorktrees(t *testing.T) {
 		t.Errorf("ListWorktrees() returned %d entries, want 2", len(entries))
 	}
 }
+
+func TestListWorktrees_SlashedBranch(t *testing.T) {
+	repoDir := initTestRepo(t)
+	defer os.RemoveAll(repoDir)
+
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	repoID := "github.com/acme/myrepo"
+
+	_, err = Resolve(repoDir, repoID, "feature/dark-mode", "")
+	if err != nil {
+		t.Fatalf("Resolve feature/dark-mode: %v", err)
+	}
+	_, err = Resolve(repoDir, repoID, "simple", "")
+	if err != nil {
+		t.Fatalf("Resolve simple: %v", err)
+	}
+
+	entries, err := ListWorktrees(repoID)
+	if err != nil {
+		t.Fatalf("ListWorktrees() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("ListWorktrees() returned %d entries, want 2", len(entries))
+	}
+
+	branches := map[string]bool{}
+	for _, e := range entries {
+		branches[e.Branch] = true
+	}
+	if !branches["feature/dark-mode"] {
+		t.Error("missing branch feature/dark-mode in entries")
+	}
+	if !branches["simple"] {
+		t.Error("missing branch simple in entries")
+	}
+}
+
+func TestListWorktrees_NoRepoDir(t *testing.T) {
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	entries, err := ListWorktrees("nonexistent/repo")
+	if err != nil {
+		t.Fatalf("ListWorktrees() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("ListWorktrees() returned %d entries, want 0", len(entries))
+	}
+}

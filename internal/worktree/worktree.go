@@ -14,7 +14,6 @@ type Result struct {
 	Branch        string // git branch name
 	RunName       string // auto-generated run name ({agent}-{branch} or {branch})
 	Reused        bool   // true if worktree already existed
-	ActiveRunID   string // non-empty if a run is already active in this worktree
 	RepoID        string // normalized repo identifier
 }
 

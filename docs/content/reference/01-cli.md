@@ -35,7 +35,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
 | `--keep` | Keep container after run completes |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
-| `--wt BRANCH` | Run in a git worktree for this branch |
+| `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
 Each agent command also accepts `-p`/`--prompt` for non-interactive mode, plus command-specific flags documented in their own sections.
 
@@ -168,7 +168,7 @@ moat claude --grant github
 moat claude --name feature-auth ./my-project
 
 # Run in a git worktree
-moat claude --wt=dark-mode --prompt "implement dark mode" --detach
+moat claude --worktree=dark-mode --prompt "implement dark mode" --detach
 
 # Background run
 moat claude -d ./my-project
@@ -230,7 +230,7 @@ moat codex --grant github
 moat codex --name my-feature
 
 # Run in a git worktree
-moat codex --wt=dark-mode --prompt "implement dark mode" --detach
+moat codex --worktree=dark-mode --prompt "implement dark mode" --detach
 
 # Run in background
 moat codex -d
@@ -288,7 +288,7 @@ moat gemini --grant github
 moat gemini --name my-feature
 
 # Run in a git worktree
-moat gemini --wt=dark-mode --prompt "implement dark mode" --detach
+moat gemini --worktree=dark-mode --prompt "implement dark mode" --detach
 
 # Run in background
 moat gemini -d
@@ -309,7 +309,7 @@ moat wt <branch> [-- command]
 
 The branch is created from HEAD if it doesn't exist. The worktree is created at `~/.moat/worktrees/<repo-id>/<branch>`.
 
-Agent configuration is read from `agent.yaml` in the current directory. If a run is already active in the worktree, attaches to it instead of starting a new one.
+Agent configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to attach or stop it.
 
 ### Arguments
 
@@ -328,6 +328,9 @@ Agent configuration is read from `agent.yaml` in the current directory. If a run
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
 | `--rebuild` | Force image rebuild |
 | `--keep` | Keep container after completion |
+| `--runtime` | Container runtime to use (`apple`, `docker`) |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--tty-trace FILE` | Capture terminal I/O to file for debugging |
 
 ### Run naming
 

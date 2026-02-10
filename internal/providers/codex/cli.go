@@ -10,8 +10,6 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/ui"
-	"github.com/majorcontext/moat/internal/worktree"
 )
 
 var (
@@ -98,7 +96,9 @@ Use 'moat list' to see running and recent runs.`,
 	codexCmd.Flags().StringVarP(&codexPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	codexCmd.Flags().StringSliceVar(&codexAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	codexCmd.Flags().BoolVar(&codexFullAuto, "full-auto", true, "enable full-auto mode (auto-approve tool use); set to false for manual approval")
-	codexCmd.Flags().StringVar(&codexWtFlag, "wt", "", "run in a git worktree for this branch")
+	codexCmd.Flags().StringVar(&codexWtFlag, "worktree", "", "run in a git worktree for this branch")
+	codexCmd.Flags().StringVar(&codexWtFlag, "wt", "", "alias for --worktree")
+	_ = codexCmd.Flags().MarkHidden("wt")
 
 	root.AddCommand(codexCmd)
 }
@@ -127,22 +127,12 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle --wt flag
-	var wtResult *worktree.Result
-	absPath, wtResult, err = cli.ResolveWorktreeWorkspace(codexWtFlag, absPath, &codexFlags, cfg)
+	wtOut, err := cli.ResolveWorktreeWorkspace(codexWtFlag, absPath, &codexFlags, cfg)
 	if err != nil {
 		return err
 	}
-	if wtResult != nil {
-		if wtResult.Reused {
-			ui.Infof("Using existing worktree at %s", wtResult.WorkspacePath)
-		} else {
-			ui.Infof("Created worktree at %s", wtResult.WorkspacePath)
-		}
-		// Reload config from worktree path if it has its own agent.yaml
-		if wtCfg, loadErr := config.Load(absPath); loadErr == nil && wtCfg != nil {
-			cfg = wtCfg
-		}
-	}
+	absPath = wtOut.Workspace
+	cfg = wtOut.Config
 
 	// Build grants list using a set for deduplication
 	grantSet := make(map[string]bool)
@@ -252,11 +242,7 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		TTY:         interactive,
 	}
 
-	if wtResult != nil {
-		opts.WorktreeBranch = wtResult.Branch
-		opts.WorktreePath = wtResult.WorkspacePath
-		opts.WorktreeRepoID = wtResult.RepoID
-	}
+	cli.SetWorktreeFields(&opts, wtOut.Result)
 
 	result, err := cli.ExecuteRun(ctx, opts)
 	if err != nil {
