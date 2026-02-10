@@ -2,7 +2,6 @@ package container
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 )
 
 func TestConfig_GroupAdd(t *testing.T) {
@@ -516,83 +516,87 @@ func TestDockerRuntime_StartSidecar_ValidationEmptyName(t *testing.T) {
 
 func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 	tests := []struct {
-		name               string
-		buildkitHost       string
-		expectBuildKitPath bool
+		name            string
+		buildkitHost    string
+		disableBuildKit string
+		wantLegacy      bool // true if we expect the legacy builder path
 	}{
 		{
-			name:               "uses buildkit when BUILDKIT_HOST is set",
-			buildkitHost:       "tcp://192.0.2.1:1", // non-routable TEST-NET-1 address (RFC 5737)
-			expectBuildKitPath: true,
+			name:         "uses standalone buildkit when BUILDKIT_HOST is set",
+			buildkitHost: "tcp://192.0.2.1:1", // non-routable TEST-NET-1 address (RFC 5737)
+			wantLegacy:   false,
 		},
 		{
-			name:               "uses docker sdk when BUILDKIT_HOST is empty",
-			buildkitHost:       "",
-			expectBuildKitPath: false,
+			name:            "uses legacy builder when MOAT_DISABLE_BUILDKIT is set",
+			disableBuildKit: "1",
+			wantLegacy:      true,
+		},
+		{
+			name:       "tries embedded buildkit then falls back to legacy builder",
+			wantLegacy: true, // embedded fails (non-existent socket), falls back
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore BUILDKIT_HOST
+			// Save and restore env vars
 			oldBuildKitHost := os.Getenv("BUILDKIT_HOST")
+			oldDisableBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT")
 			defer func() {
 				if oldBuildKitHost != "" {
 					os.Setenv("BUILDKIT_HOST", oldBuildKitHost)
 				} else {
 					os.Unsetenv("BUILDKIT_HOST")
 				}
+				if oldDisableBuildKit != "" {
+					os.Setenv("MOAT_DISABLE_BUILDKIT", oldDisableBuildKit)
+				} else {
+					os.Unsetenv("MOAT_DISABLE_BUILDKIT")
+				}
 			}()
 
-			// Set BUILDKIT_HOST for this test
+			// Set env vars for this test
 			if tt.buildkitHost != "" {
 				os.Setenv("BUILDKIT_HOST", tt.buildkitHost)
 			} else {
 				os.Unsetenv("BUILDKIT_HOST")
 			}
+			if tt.disableBuildKit != "" {
+				os.Setenv("MOAT_DISABLE_BUILDKIT", tt.disableBuildKit)
+			} else {
+				os.Unsetenv("MOAT_DISABLE_BUILDKIT")
+			}
 
-			// Create a minimal runtime
-			rt := &DockerRuntime{}
+			// Create a Docker client pointing to a non-existent socket.
+			// This avoids nil-pointer panics and produces proper errors from each path.
+			cli, err := client.NewClientWithOpts(client.WithHost("unix:///nonexistent.sock"))
+			if err != nil {
+				t.Fatalf("failed to create docker client: %v", err)
+			}
+			defer cli.Close()
 
-			// Use a short deadline so BuildKit connection to non-routable address fails fast.
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			mgr := &dockerBuildManager{cli: cli}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			dockerfile := "FROM alpine:latest\n"
-			tag := "test:latest"
-			opts := BuildOptions{}
 
-			// Call BuildImage via BuildManager - it will fail (no actual client or buildkit),
-			// but we can verify which path was taken by the error message.
-			// Recover from any panic (Docker SDK may panic with nil client).
-			var err error
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						// If we get a panic, it's from Docker SDK path (nil pointer)
-						err = fmt.Errorf("docker sdk panic: %v", r)
-					}
-				}()
-				err = rt.BuildManager().BuildImage(ctx, dockerfile, tag, opts)
-			}()
-
+			err = mgr.BuildImage(ctx, "FROM alpine:latest\n", "test:latest", BuildOptions{})
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
 
-			// Determine which path was taken:
-			// - Docker SDK path: nil *dockerBuildManager dereferences m.cli → panic
-			//   (caught by recover as "docker sdk panic: ...")
-			// - BuildKit path: returns a normal error (message varies by environment)
+			// Verify routing by checking whether the error came from the legacy builder.
+			// The legacy builder always wraps errors as "building image: ..." from
+			// buildImageWithBuilder's call to m.cli.ImageBuild. The standalone BuildKit
+			// path never reaches that code — its errors come from WaitForReady or Solve.
 			errMsg := strings.ToLower(err.Error())
-			isPanic := strings.Contains(errMsg, "docker sdk panic")
-			if tt.expectBuildKitPath {
-				if isPanic {
-					t.Errorf("expected buildkit path, but got docker sdk panic: %v", err)
-				}
-			} else {
-				if !isPanic {
-					t.Errorf("expected docker sdk path (panic), got: %v", err)
-				}
+			gotLegacy := strings.Contains(errMsg, "building image")
+
+			if tt.wantLegacy && !gotLegacy {
+				t.Errorf("expected legacy builder path (error containing \"building image\"), got: %v", err)
+			}
+			if !tt.wantLegacy && gotLegacy {
+				t.Errorf("expected standalone buildkit path, but got legacy builder error: %v", err)
 			}
 		})
 	}

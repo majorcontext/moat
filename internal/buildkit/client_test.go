@@ -2,6 +2,7 @@ package buildkit
 
 import (
 	"context"
+	"net"
 	"os"
 	"testing"
 )
@@ -48,6 +49,27 @@ func TestNewClient(t *testing.T) {
 				t.Errorf("addr = %v, want %v", client.addr, tt.envVal)
 			}
 		})
+	}
+}
+
+func TestNewEmbeddedClient(t *testing.T) {
+	contextDialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return nil, nil
+	}
+	sessionDialer := func(ctx context.Context, proto string, meta map[string][]string) (net.Conn, error) {
+		return nil, nil
+	}
+
+	c := NewEmbeddedClient(contextDialer, sessionDialer)
+
+	if !c.embedded {
+		t.Error("expected embedded to be true")
+	}
+	if c.addr != "" {
+		t.Errorf("expected empty addr, got %q", c.addr)
+	}
+	if len(c.clientOpts) != 2 {
+		t.Errorf("expected 2 clientOpts (context dialer + session dialer), got %d", len(c.clientOpts))
 	}
 }
 

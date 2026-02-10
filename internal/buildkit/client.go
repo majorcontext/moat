@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"time"
@@ -16,8 +17,13 @@ import (
 )
 
 // Client wraps BuildKit client operations.
+// Supports two connection modes:
+//   - Standalone: connects to an external BuildKit daemon via BUILDKIT_HOST (e.g., dind sidecar)
+//   - Embedded: connects to Docker Desktop's built-in BuildKit via DialHijack on /grpc and /session
 type Client struct {
-	addr string
+	addr       string             // for standalone BuildKit (BUILDKIT_HOST)
+	clientOpts []client.ClientOpt // for embedded BuildKit (DialHijack)
+	embedded   bool               // true when connected to Docker's embedded BuildKit
 }
 
 // NewClient creates a BuildKit client.
@@ -29,6 +35,36 @@ func NewClient() (*Client, error) {
 	}
 	log.Debug("creating buildkit client", "address", addr)
 	return &Client{addr: addr}, nil
+}
+
+// NewEmbeddedClient creates a BuildKit client that connects to Docker's embedded BuildKit
+// via DialHijack. This is the connection method used by `docker buildx` when talking to
+// Docker Desktop's built-in BuildKit instance.
+//
+// The contextDialer connects to /grpc for BuildKit RPCs.
+// The sessionDialer connects to /session for file sync, auth callbacks, etc.
+func NewEmbeddedClient(
+	contextDialer func(context.Context, string) (net.Conn, error),
+	sessionDialer func(context.Context, string, map[string][]string) (net.Conn, error),
+) *Client {
+	log.Debug("creating embedded buildkit client")
+	return &Client{
+		embedded: true,
+		clientOpts: []client.ClientOpt{
+			client.WithContextDialer(contextDialer),
+			client.WithSessionDialer(sessionDialer),
+		},
+	}
+}
+
+// connect establishes a connection to the BuildKit daemon.
+// For embedded mode, connects via the pre-configured DialHijack options.
+// For standalone mode, connects via the BUILDKIT_HOST address.
+func (c *Client) connect(ctx context.Context) (*client.Client, error) {
+	if c.embedded {
+		return client.New(ctx, "", c.clientOpts...)
+	}
+	return client.New(ctx, c.addr)
 }
 
 // BuildOptions configures a BuildKit build.
@@ -45,25 +81,29 @@ type BuildOptions struct {
 // Build executes a build using BuildKit.
 //
 // The build process:
-//  1. Connects to BuildKit sidecar via BUILDKIT_HOST (tcp://buildkit:1234)
+//  1. Connects to BuildKit (standalone via BUILDKIT_HOST, or embedded via DialHijack)
 //  2. Prepares build context from ContextDir using LocalMounts (BuildKit manages session internally)
 //  3. Executes build with dockerfile.v0 frontend
-//  4. Exports result as Docker image tar, piping directly to `docker load`
-//
-// This approach avoids manual session management and filesync complexity by:
-//   - Using LocalMounts for build context (BuildKit auto-manages the filesync session)
-//   - Using Output function to stream the docker exporter tar to `docker load`
+//  4. Exports the result:
+//     - Standalone: Docker image tar piped to `docker load`
+//     - Embedded: "moby" exporter stores image directly in Docker's image store
 func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
-	log.Debug("starting buildkit build", "tag", opts.Tag, "platform", opts.Platform)
+	log.Debug("starting buildkit build", "tag", opts.Tag, "platform", opts.Platform, "embedded", c.embedded)
 
-	// Wait for BuildKit to become ready (daemon init takes ~5-10s)
-	if err := c.WaitForReady(ctx); err != nil {
-		return fmt.Errorf("BuildKit not ready: %w", err)
+	// Wait for BuildKit to become ready (daemon init takes ~5-10s).
+	// Skip for embedded mode — Docker's embedded BuildKit is ready when Docker is running.
+	if !c.embedded {
+		if err := c.WaitForReady(ctx); err != nil {
+			return fmt.Errorf("BuildKit not ready: %w", err)
+		}
 	}
 
-	// Connect to BuildKit sidecar
-	bkClient, err := client.New(ctx, c.addr)
+	// Connect to BuildKit
+	bkClient, err := c.connect(ctx)
 	if err != nil {
+		if c.embedded {
+			return fmt.Errorf("failed to connect to Docker's embedded BuildKit: %w", err)
+		}
 		return fmt.Errorf("failed to connect to BuildKit at %s - check if docker:dind sidecar is running and BUILDKIT_HOST is configured correctly: %w", c.addr, err)
 	}
 	defer bkClient.Close()
@@ -98,19 +138,38 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions) error {
 		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
-	// Export as Docker image tar, piped to `docker load`
-	// The Output function receives the tar stream from BuildKit's docker exporter
-	// and pipes it to `docker load` for import into the Docker daemon
-	solveOpt.Exports = []client.ExportEntry{
-		{
-			Type: client.ExporterDocker,
-			Attrs: map[string]string{
-				"name": opts.Tag,
+	// Configure export strategy based on connection mode
+	if c.embedded {
+		// Embedded mode: use the "moby" exporter which stores images directly in
+		// Docker's image store. No tar round-trip or `docker load` needed.
+		//
+		// This is Docker's default exporter for embedded BuildKit, defined as
+		// exporter.Moby in github.com/docker/docker/builder/builder-next/exporter.
+		// We inline the string rather than importing that package to avoid pulling
+		// in Docker's internal builder machinery for a single constant.
+		solveOpt.Exports = []client.ExportEntry{
+			{
+				Type: "moby",
+				Attrs: map[string]string{
+					"name": opts.Tag,
+				},
 			},
-			Output: func(m map[string]string) (io.WriteCloser, error) {
-				return c.createDockerLoadPipe(ctx)
+		}
+	} else {
+		// Standalone mode: export as Docker image tar, piped to `docker load`.
+		// The Output function receives the tar stream from BuildKit's docker exporter
+		// and pipes it to `docker load` for import into the Docker daemon.
+		solveOpt.Exports = []client.ExportEntry{
+			{
+				Type: client.ExporterDocker,
+				Attrs: map[string]string{
+					"name": opts.Tag,
+				},
+				Output: func(m map[string]string) (io.WriteCloser, error) {
+					return c.createDockerLoadPipe(ctx)
+				},
 			},
-		},
+		}
 	}
 
 	// Progress writer
@@ -199,8 +258,11 @@ func (w *dockerLoadWriter) Close() error {
 
 // Ping checks if BuildKit is reachable.
 func (c *Client) Ping(ctx context.Context) error {
-	bkClient, err := client.New(ctx, c.addr)
+	bkClient, err := c.connect(ctx)
 	if err != nil {
+		if c.embedded {
+			return fmt.Errorf("Docker's embedded BuildKit not reachable: %w", err)
+		}
 		return fmt.Errorf("BuildKit not reachable at %s - verify docker:dind sidecar is running and network configuration is correct: %w", c.addr, err)
 	}
 	defer bkClient.Close()

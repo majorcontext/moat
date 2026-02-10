@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -1003,126 +1004,140 @@ func (m *dockerBuildManager) ImageExists(ctx context.Context, tag string) (bool,
 }
 
 // BuildImage builds a Docker image from Dockerfile content.
-// Routes to BuildKit client if BUILDKIT_HOST is set, otherwise uses Docker SDK.
+//
+// Build routing:
+//  1. BUILDKIT_HOST set       → standalone BuildKit (dind sidecar)
+//  2. MOAT_DISABLE_BUILDKIT=1 → legacy builder directly
+//  3. Default                 → try Docker's embedded BuildKit, fall back to legacy builder
+//
 // Note: opts.DNS is ignored for Docker builds; Docker uses daemon-level DNS configuration.
 func (m *dockerBuildManager) BuildImage(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Use BuildKit client if BUILDKIT_HOST is set (docker:dind mode with BuildKit sidecar)
+	// Use standalone BuildKit client if BUILDKIT_HOST is set (docker:dind mode with BuildKit sidecar)
 	if buildkitHost := os.Getenv("BUILDKIT_HOST"); buildkitHost != "" {
-		log.Debug("using buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
+		log.Debug("using standalone buildkit client for image build", "buildkit_host", buildkitHost, "tag", tag)
 		return m.buildImageWithBuildKit(ctx, dockerfile, tag, opts)
 	}
-	// Otherwise use Docker SDK (will use BuildKit by default, unless MOAT_DISABLE_BUILDKIT=1)
-	log.Debug("using docker sdk for image build", "tag", tag, "no_cache", opts.NoCache)
-	return m.buildImageWithDockerSDK(ctx, dockerfile, tag, opts)
+
+	// Skip BuildKit entirely if explicitly disabled
+	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
+		log.Debug("buildkit disabled via MOAT_DISABLE_BUILDKIT, using legacy builder", "tag", tag)
+		return m.buildImageWithLegacyBuilder(ctx, dockerfile, tag, opts)
+	}
+
+	// Default: try Docker's embedded BuildKit, fall back to legacy builder
+	log.Debug("trying embedded buildkit for image build", "tag", tag)
+	err := m.buildImageWithEmbeddedBuildKit(ctx, dockerfile, tag, opts)
+	if err == nil {
+		return nil
+	}
+	log.Debug("embedded buildkit unavailable, falling back to legacy builder", "error", err)
+	ui.Warn("BuildKit unavailable, falling back to legacy builder")
+	return m.buildImageWithLegacyBuilder(ctx, dockerfile, tag, opts)
 }
 
-// buildImageWithBuildKit builds an image using the BuildKit client.
-func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
-	// Create temp directory for build context
-	tmpDir, err := os.MkdirTemp("", "moat-build-*")
+// prepareBuildContext creates a temp directory with the Dockerfile and context files,
+// and returns the directory path and target platform. The caller must defer os.RemoveAll
+// on the returned directory.
+func prepareBuildContext(dockerfile string, opts BuildOptions) (tmpDir string, platform string, err error) {
+	tmpDir, err = os.MkdirTemp("", "moat-build-*")
 	if err != nil {
-		return fmt.Errorf("creating temp dir: %w", err)
+		return "", "", fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
-	// Write Dockerfile to temp directory
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
 	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); writeErr != nil {
-		return fmt.Errorf("writing Dockerfile: %w", writeErr)
+		os.RemoveAll(tmpDir)
+		return "", "", fmt.Errorf("writing Dockerfile: %w", writeErr)
 	}
 
-	// Write additional context files
 	for name, content := range opts.ContextFiles {
 		path := filepath.Join(tmpDir, name)
 		if dir := filepath.Dir(path); dir != tmpDir {
 			if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
-				return fmt.Errorf("creating context dir for %s: %w", name, mkdirErr)
+				os.RemoveAll(tmpDir)
+				return "", "", fmt.Errorf("creating context dir for %s: %w", name, mkdirErr)
 			}
 		}
 		if writeErr := os.WriteFile(path, content, 0644); writeErr != nil {
-			return fmt.Errorf("writing context file %s: %w", name, writeErr)
+			os.RemoveAll(tmpDir)
+			return "", "", fmt.Errorf("writing context file %s: %w", name, writeErr)
 		}
 	}
 
-	// Determine platform based on host architecture
-	platform := "linux/amd64"
+	platform = "linux/amd64"
 	if goruntime.GOARCH == "arm64" {
 		platform = "linux/arm64"
 	}
 
-	// Create BuildKit client
+	return tmpDir, platform, nil
+}
+
+// buildImageWithBuildKit builds an image using the standalone BuildKit client.
+func (m *dockerBuildManager) buildImageWithBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	tmpDir, platform, err := prepareBuildContext(dockerfile, opts)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
 	bkClient, err := buildkit.NewClient()
 	if err != nil {
 		return fmt.Errorf("creating buildkit client: %w", err)
 	}
 
-	// Build the image
 	return bkClient.Build(ctx, buildkit.BuildOptions{
 		Tag:        tag,
 		ContextDir: tmpDir,
 		NoCache:    opts.NoCache,
 		Platform:   platform,
-		BuildArgs:  map[string]string{}, // No build args exposed in container.BuildOptions yet
 	})
 }
 
-// buildImageWithDockerSDK builds an image using the Docker SDK.
-func (m *dockerBuildManager) buildImageWithDockerSDK(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+// buildImageWithEmbeddedBuildKit builds an image using Docker's embedded BuildKit.
+// Connects via DialHijack on /grpc and /session — the same mechanism `docker buildx` uses.
+// Returns an error if embedded BuildKit is not available (caller should fall back to legacy builder).
+func (m *dockerBuildManager) buildImageWithEmbeddedBuildKit(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
+	bkClient := buildkit.NewEmbeddedClient(
+		func(ctx context.Context, _ string) (net.Conn, error) {
+			return m.cli.DialHijack(ctx, "/grpc", "h2c", nil)
+		},
+		func(ctx context.Context, proto string, meta map[string][]string) (net.Conn, error) {
+			return m.cli.DialHijack(ctx, "/session", proto, meta)
+		},
+	)
+
+	// Quick ping to verify embedded BuildKit is available.
+	// If this fails, the caller falls back to the legacy builder.
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := bkClient.Ping(pingCtx); err != nil {
+		return fmt.Errorf("embedded BuildKit not available: %w", err)
+	}
+
+	tmpDir, platform, err := prepareBuildContext(dockerfile, opts)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	return bkClient.Build(ctx, buildkit.BuildOptions{
+		Tag:        tag,
+		ContextDir: tmpDir,
+		NoCache:    opts.NoCache,
+		Platform:   platform,
+	})
+}
+
+// buildImageWithLegacyBuilder builds an image using the Docker SDK's legacy (V1) builder.
+// This is the fallback when BuildKit is not available.
+func (m *dockerBuildManager) buildImageWithLegacyBuilder(ctx context.Context, dockerfile string, tag string, opts BuildOptions) error {
 	// Determine platform based on host architecture
 	platform := "linux/amd64"
 	if goruntime.GOARCH == "arm64" {
 		platform = "linux/arm64"
 	}
 
-	// Use BuildKit by default for faster builds, but allow opting out via MOAT_DISABLE_BUILDKIT=1
-	// for environments where Docker SDK's BuildKit integration has issues (e.g., some Docker Desktop configs).
-	builderVersion := build.BuilderBuildKit
-	if os.Getenv("MOAT_DISABLE_BUILDKIT") == "1" {
-		builderVersion = build.BuilderV1
-	}
-
-	// Try building with the selected builder
-	err := m.buildImageWithBuilder(ctx, dockerfile, tag, platform, builderVersion, opts)
-
-	// If BuildKit fails, provide helpful error message with clear resolution steps.
-	// The error will occur quickly (usually within seconds) when BuildKit isn't available.
-	if err != nil && builderVersion == build.BuilderBuildKit {
-		errMsg := err.Error()
-
-		// "no active sessions": BuildKit has stale sessions (intermittent issue)
-		if strings.Contains(errMsg, "no active sessions") {
-			return fmt.Errorf(`BuildKit has stale build sessions.
-
-This is usually caused by interrupted builds or Docker daemon state issues.
-
-Quick fix: Clean BuildKit cache
-  docker builder prune -f
-
-Or: Restart Docker Desktop
-
-Alternative: Use legacy builder (slower, no layer caching):
-  export MOAT_DISABLE_BUILDKIT=1
-  moat run ...
-
-Original error: %w`, err)
-		}
-
-		// "mount option requires BuildKit": Dockerfile has BuildKit syntax but builder doesn't support it
-		if strings.Contains(errMsg, "mount option requires BuildKit") {
-			return fmt.Errorf(`BuildKit not available.
-
-Recommended: Install Docker buildx (included in Docker Desktop 20.10+)
-  https://docs.docker.com/buildx/working-with-buildx/
-
-Alternative: Use legacy builder (slower, no layer caching):
-  export MOAT_DISABLE_BUILDKIT=1
-  moat run ...
-
-Original error: %w`, err)
-		}
-	}
-
-	return err
+	return m.buildImageWithBuilder(ctx, dockerfile, tag, platform, build.BuilderV1, opts)
 }
 
 // buildImageWithBuilder performs the actual image build with the specified builder.
