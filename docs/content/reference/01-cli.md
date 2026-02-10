@@ -28,7 +28,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 |------|-------------|
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
-| `-n`, `--name NAME` | Session name (default: from `agent.yaml` or random) |
+| `-n`, `--name NAME` | Run name (default: from `agent.yaml` or random) |
 | `-d`, `--detach` | Run in background |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
@@ -163,17 +163,15 @@ moat claude -p "fix the failing tests"
 # With GitHub access
 moat claude --grant github
 
-# Named session
+# Named run
 moat claude --name feature-auth ./my-project
 
-# Background session
+# Background run
 moat claude -d ./my-project
 
 # Require manual approval for each tool use
 moat claude --noyolo
 ```
-
-### Subcommands
 
 #### moat claude plugins list
 
@@ -224,7 +222,7 @@ moat codex -p "fix the bug in main.py"
 # With GitHub access
 moat codex --grant github
 
-# Named session
+# Named run
 moat codex --name my-feature
 
 # Run in background
@@ -235,32 +233,6 @@ moat codex --rebuild
 
 # Disable full-auto mode (require manual approval)
 moat codex --full-auto=false
-```
-
-### Subcommands
-
-#### moat codex sessions
-
-List Codex sessions.
-
-```bash
-moat codex sessions [flags]
-```
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--active` | Show only running sessions |
-
-**Examples:**
-
-```bash
-# List all sessions
-moat codex sessions
-
-# Show only active sessions
-moat codex sessions --active
 ```
 
 ---
@@ -305,7 +277,7 @@ moat gemini -p "fix the bug in main.py"
 # With GitHub access
 moat gemini --grant github
 
-# Named session
+# Named run
 moat gemini --name my-feature
 
 # Run in background
@@ -313,32 +285,6 @@ moat gemini -d
 
 # Force rebuild
 moat gemini --rebuild
-```
-
-### Subcommands
-
-#### moat gemini sessions
-
-List Gemini sessions.
-
-```bash
-moat gemini sessions [flags]
-```
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--active` | Show only running sessions |
-
-**Examples:**
-
-```bash
-# List all sessions
-moat gemini sessions
-
-# Show only active sessions
-moat gemini sessions --active
 ```
 
 ---
@@ -540,31 +486,6 @@ moat grant list
 ```bash
 moat grant list
 moat grant list --json
-```
-
----
-
-## moat sessions
-
-List sessions across all agent types.
-
-```
-moat sessions [flags]
-```
-
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--agent TYPE` | Filter by agent type (claude, codex, gemini) |
-| `--active` | Only show running sessions |
-
-### Examples
-
-```bash
-moat sessions
-moat sessions --active
-moat sessions --agent claude
 ```
 
 ---

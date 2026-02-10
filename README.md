@@ -142,12 +142,11 @@ See the [agent.yaml reference](docs/content/reference/02-agent-yaml.md) for all 
 | `moat grant <provider>` | Store credentials (github, anthropic, openai, aws, ssh) |
 | `moat grant list` | List stored credentials |
 | `moat revoke <provider>` | Remove credentials |
-| `moat sessions` | List all agent sessions |
+| `moat list` | List all runs |
 | `moat snapshot <run-id>` | Create/manage workspace snapshots |
 | `moat logs [run-id]` | View logs |
 | `moat trace [run-id]` | View network requests |
 | `moat audit [run-id]` | Verify audit log integrity |
-| `moat list` | List runs |
 | `moat stop [run-id]` | Stop a run |
 | `moat destroy [run-id]` | Remove a run and its artifacts |
 | `moat deps list/info` | Browse available dependencies |

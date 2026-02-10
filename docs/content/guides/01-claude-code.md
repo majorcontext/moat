@@ -141,17 +141,17 @@ moat claude --noyolo ./my-project
 
 With `--noyolo`, Claude Code prompts for confirmation before each potentially destructive operation, just as it would when running directly on your host machine.
 
-### Named sessions
+### Named runs
 
-Give your session a name for reference:
+Give your run a name for reference:
 
 ```bash
 moat claude --name feature-auth ./my-project
 ```
 
-The name appears in `moat list` and makes it easier to manage multiple sessions.
+The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background sessions
+### Background runs
 
 Run Claude Code in the background:
 
@@ -163,8 +163,8 @@ Reattach later:
 
 ```bash
 $ moat list
-NAME          RUN ID              STATE    SERVICES
-feature-auth  run_a1b2c3d4e5f6   running
+NAME          RUN ID              STATE    AGE
+feature-auth  run_a1b2c3d4e5f6   running  5m
 
 $ moat attach run_a1b2c3d4e5f6
 ```
@@ -187,7 +187,7 @@ This injects GitHub credentials alongside Anthropic credentials. Claude Code can
 Configure in `agent.yaml` for repeated use:
 
 ```yaml
-name: my-claude-session
+name: my-claude-project
 
 grants:
   - anthropic

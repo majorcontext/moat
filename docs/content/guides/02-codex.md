@@ -92,17 +92,17 @@ moat codex -p "refactor the API layer" --noyolo
 
 With manual approval enabled, Codex prompts for confirmation before each potentially destructive operation.
 
-### Named sessions
+### Named runs
 
-Give your session a name for reference:
+Give your run a name for reference:
 
 ```bash
 moat codex --name feature-auth ./my-project
 ```
 
-The name appears in `moat list` and makes it easier to manage multiple sessions.
+The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background sessions
+### Background runs
 
 Run Codex in the background:
 
@@ -114,8 +114,8 @@ Reattach later:
 
 ```bash
 $ moat list
-NAME          RUN ID              STATE    SERVICES
-feature-auth  run_a1b2c3d4e5f6   running
+NAME          RUN ID              STATE    AGE
+feature-auth  run_a1b2c3d4e5f6   running  5m
 
 $ moat attach run_a1b2c3d4e5f6
 ```
@@ -138,7 +138,7 @@ This injects GitHub credentials alongside OpenAI credentials. Codex can:
 Configure in `agent.yaml` for repeated use:
 
 ```yaml
-name: my-codex-session
+name: my-codex-project
 
 grants:
   - openai

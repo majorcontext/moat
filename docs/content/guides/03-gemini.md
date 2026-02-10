@@ -128,17 +128,17 @@ Gemini CLI does not have a per-tool confirmation prompt. File edits, command exe
 
 The container runs as a non-root user with filesystem access limited to the mounted workspace. Credentials are injected at the network layer and never appear in the container environment. See [Security model](../concepts/08-security.md) for the full threat model.
 
-### Named sessions
+### Named runs
 
-Give your session a name for reference:
+Give your run a name for reference:
 
 ```bash
 moat gemini --name feature-auth ./my-project
 ```
 
-The name appears in `moat list` and makes it easier to manage multiple sessions.
+The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background sessions
+### Background runs
 
 Run Gemini in the background:
 
@@ -150,32 +150,10 @@ Reattach later:
 
 ```bash
 $ moat list
-NAME          RUN ID              STATE    SERVICES
-feature-auth  run_a1b2c3d4e5f6   running
+NAME          RUN ID              STATE    AGE
+feature-auth  run_a1b2c3d4e5f6   running  5m
 
 $ moat attach run_a1b2c3d4e5f6
-```
-
-## Session management
-
-List Gemini sessions:
-
-```bash
-moat gemini sessions
-```
-
-Show only running sessions:
-
-```bash
-moat gemini sessions --active
-```
-
-The output shows session name, workspace, state, and when it was last accessed:
-
-```
-SESSION        WORKSPACE         STATE    LAST ACCESSED
-feature-auth   ~/my-project      running  5 minutes ago
-code-review    ~/other-project   stopped  2 hours ago
 ```
 
 ## Adding GitHub access
@@ -196,7 +174,7 @@ This injects GitHub credentials alongside Gemini credentials. Gemini can:
 Configure in `agent.yaml` for repeated use:
 
 ```yaml
-name: my-gemini-session
+name: my-gemini-project
 
 grants:
   - gemini

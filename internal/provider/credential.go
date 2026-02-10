@@ -44,14 +44,6 @@ type ContainerConfig struct {
 	Cleanup    func()
 }
 
-// Session represents an agent session.
-type Session struct {
-	ID        string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
 // LegacyCredential is an interface for converting from credential.Credential.
 // This avoids import cycles between provider and credential packages.
 type LegacyCredential interface {

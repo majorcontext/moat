@@ -59,20 +59,5 @@ func (d *DoctorSection) Print(w io.Writer) error {
 		}
 	}
 
-	// Check for sessions
-	sessionMgr, err := NewSessionManager()
-	if err == nil {
-		sessions, err := sessionMgr.List()
-		if err == nil {
-			activeCount := 0
-			for _, s := range sessions {
-				if s.State == SessionStateRunning {
-					activeCount++
-				}
-			}
-			fmt.Fprintf(tw, "Sessions:\t%d total, %d active\n", len(sessions), activeCount)
-		}
-	}
-
 	return tw.Flush()
 }

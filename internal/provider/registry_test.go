@@ -31,8 +31,6 @@ type mockAgentProvider struct {
 func (m *mockAgentProvider) PrepareContainer(context.Context, PrepareOpts) (*ContainerConfig, error) {
 	return nil, nil
 }
-func (m *mockAgentProvider) Sessions() ([]Session, error)    { return nil, nil }
-func (m *mockAgentProvider) ResumeSession(string) error      { return nil }
 func (m *mockAgentProvider) RegisterCLI(root *cobra.Command) {}
 
 // mockEndpointProvider implements both CredentialProvider and EndpointProvider.
