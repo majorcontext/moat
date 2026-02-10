@@ -10,6 +10,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/worktree"
 )
 
 var (
@@ -17,6 +18,7 @@ var (
 	claudePromptFlag   string
 	claudeAllowedHosts []string
 	claudeNoYolo       bool
+	claudeWtFlag       string
 )
 
 // RegisterCLI adds provider-specific commands to the root command.
@@ -73,6 +75,7 @@ Use 'moat list' to see running and recent runs.`,
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
+	claudeCmd.Flags().StringVar(&claudeWtFlag, "wt", "", "run in a git worktree for this branch")
 
 	root.AddCommand(claudeCmd)
 }
@@ -98,6 +101,24 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(absPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Handle --wt flag
+	var wtResult *worktree.Result
+	absPath, wtResult, err = cli.ResolveWorktreeWorkspace(claudeWtFlag, absPath, &claudeFlags, cfg)
+	if err != nil {
+		return err
+	}
+	if wtResult != nil {
+		if wtResult.Reused {
+			fmt.Fprintf(os.Stderr, "Using existing worktree at %s\n", wtResult.WorkspacePath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Created worktree at %s\n", wtResult.WorkspacePath)
+		}
+		// Reload config from worktree path if it has its own agent.yaml
+		if wtCfg, loadErr := config.Load(absPath); loadErr == nil && wtCfg != nil {
+			cfg = wtCfg
+		}
 	}
 
 	// Build grants list using a set for deduplication
@@ -201,6 +222,12 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		Config:      cfg,
 		Interactive: interactive,
 		TTY:         interactive,
+	}
+
+	if wtResult != nil {
+		opts.WorktreeBranch = wtResult.Branch
+		opts.WorktreePath = wtResult.WorkspacePath
+		opts.WorktreeRepoID = wtResult.RepoID
 	}
 
 	result, err := cli.ExecuteRun(ctx, opts)

@@ -9,12 +9,14 @@ import (
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/worktree"
 )
 
 var (
 	geminiFlags        cli.ExecFlags
 	geminiPromptFlag   string
 	geminiAllowedHosts []string
+	geminiWtFlag       string
 )
 
 // NetworkHosts returns the list of hosts that Gemini needs network access to.
@@ -83,6 +85,7 @@ Use 'moat list' to see running and recent runs.`,
 	// Add Gemini-specific flags
 	geminiCmd.Flags().StringVarP(&geminiPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	geminiCmd.Flags().StringSliceVar(&geminiAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
+	geminiCmd.Flags().StringVar(&geminiWtFlag, "wt", "", "run in a git worktree for this branch")
 
 	root.AddCommand(geminiCmd)
 }
@@ -108,6 +111,24 @@ func runGemini(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(absPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Handle --wt flag
+	var wtResult *worktree.Result
+	absPath, wtResult, err = cli.ResolveWorktreeWorkspace(geminiWtFlag, absPath, &geminiFlags, cfg)
+	if err != nil {
+		return err
+	}
+	if wtResult != nil {
+		if wtResult.Reused {
+			fmt.Fprintf(os.Stderr, "Using existing worktree at %s\n", wtResult.WorkspacePath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Created worktree at %s\n", wtResult.WorkspacePath)
+		}
+		// Reload config from worktree path if it has its own agent.yaml
+		if wtCfg, loadErr := config.Load(absPath); loadErr == nil && wtCfg != nil {
+			cfg = wtCfg
+		}
 	}
 
 	// Build grants list using a set for deduplication
@@ -214,6 +235,12 @@ func runGemini(cmd *cobra.Command, args []string) error {
 		Config:      cfg,
 		Interactive: interactive,
 		TTY:         interactive,
+	}
+
+	if wtResult != nil {
+		opts.WorktreeBranch = wtResult.Branch
+		opts.WorktreePath = wtResult.WorkspacePath
+		opts.WorktreeRepoID = wtResult.RepoID
 	}
 
 	result, err := cli.ExecuteRun(ctx, opts)
