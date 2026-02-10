@@ -196,6 +196,24 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 
 	log.Info("created run", "id", r.ID, "name", r.Name)
 
+	// Set worktree metadata if this run was created via moat wt or --wt
+	if opts.WorktreeBranch != "" {
+		r.WorktreeBranch = opts.WorktreeBranch
+		r.WorktreePath = opts.WorktreePath
+		r.WorktreeRepoID = opts.WorktreeRepoID
+		if err := r.SaveMetadata(); err != nil {
+			log.Warn("failed to save worktree metadata", "error", err)
+		}
+	}
+
+	// Call the OnRunCreated callback if provided
+	if opts.OnRunCreated != nil {
+		opts.OnRunCreated(intcli.RunInfo{
+			ID:   r.ID,
+			Name: r.Name,
+		})
+	}
+
 	// Interactive mode: use StartAttached to ensure TTY is connected before process starts
 	// This is required for TUI applications like Codex CLI that need to detect terminal
 	// capabilities immediately on startup.

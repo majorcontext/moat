@@ -29,6 +29,11 @@ type Metadata struct {
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
+	// Worktree fields (set when run was created via moat wt or --wt)
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	WorktreeRepoID string `json:"worktree_repo_id,omitempty"`
+
 	// Service dependency fields
 	ServiceContainers map[string]string `json:"service_containers,omitempty"` // service name -> container ID
 

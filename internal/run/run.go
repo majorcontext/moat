@@ -32,9 +32,13 @@ const (
 
 // Run represents an agent execution environment.
 type Run struct {
-	ID             string
-	Name           string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
-	Workspace      string
+	ID        string
+	Name      string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
+	Workspace string
+	// Worktree tracking (set when created via moat wt or --wt flag)
+	WorktreeBranch string
+	WorktreePath   string
+	WorktreeRepoID string
 	Grants         []string
 	Agent          string         // Agent type from config (e.g., "claude-code", "codex")
 	Image          string         // Container image used for this run
@@ -150,6 +154,9 @@ func (r *Run) SaveMetadata() error {
 		StartedAt:           r.StartedAt,
 		StoppedAt:           r.StoppedAt,
 		Error:               r.Error,
+		WorktreeBranch:      r.WorktreeBranch,
+		WorktreePath:        r.WorktreePath,
+		WorktreeRepoID:      r.WorktreeRepoID,
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
 		ServiceContainers:   r.ServiceContainers,
