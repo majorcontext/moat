@@ -21,7 +21,7 @@ internal/
   audit/             Tamper-proof audit logging with cryptographic verification
   claude/            Claude Code settings and Dockerfile generation
   cli/               Shared CLI helpers (environment parsing, mount helpers)
-  codex/             Codex CLI settings and session tracking
+  codex/             Codex CLI settings and Dockerfile generation
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)

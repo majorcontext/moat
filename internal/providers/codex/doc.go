@@ -23,7 +23,6 @@
 //
 // The agent provider handles:
 //   - Container preparation with staging directory
-//   - Session management for Codex runs
 //   - CLI registration for `moat codex` commands
 //   - Doctor diagnostics for Codex configuration
 //
