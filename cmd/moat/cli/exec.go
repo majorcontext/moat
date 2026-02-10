@@ -34,6 +34,23 @@ func init() {
 	// Register the ExecuteRun function in the internal/cli globals
 	// so that provider packages can use it without import cycles.
 	intcli.ExecuteRun = executeRunWrapper
+	intcli.CheckWorktreeActive = checkWorktreeActive
+}
+
+// checkWorktreeActive checks if there is a running run in the given worktree path.
+func checkWorktreeActive(worktreePath string) (string, string) {
+	manager, err := run.NewManager()
+	if err != nil {
+		return "", ""
+	}
+	defer manager.Close()
+
+	for _, r := range manager.List() {
+		if r.WorktreePath == worktreePath && r.State == run.StateRunning {
+			return r.Name, r.ID
+		}
+	}
+	return "", ""
 }
 
 // executeRunWrapper wraps ExecuteRun to match the function signature in intcli.

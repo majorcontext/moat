@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Result holds the outcome of a worktree resolution.
@@ -20,6 +21,13 @@ type Result struct {
 // Resolve ensures a branch and worktree exist for the given branch name.
 // It creates them if necessary, reuses them if they already exist.
 func Resolve(repoRoot, repoID, branch, agentName string) (*Result, error) {
+	if branch == "" {
+		return nil, fmt.Errorf("branch name cannot be empty")
+	}
+	if strings.Contains(branch, "..") {
+		return nil, fmt.Errorf("branch name cannot contain '..'")
+	}
+
 	wtPath := filepath.Join(BasePath(), repoID, branch)
 
 	runName := branch
@@ -62,7 +70,8 @@ func Resolve(repoRoot, repoID, branch, agentName string) (*Result, error) {
 
 // ensureBranch creates the branch from HEAD if it doesn't already exist.
 func ensureBranch(repoRoot, branch string) error {
-	cmd := exec.Command("git", "rev-parse", "--verify", branch)
+	// Use refs/heads/ prefix to check specifically for a branch, not a tag or other ref.
+	cmd := exec.Command("git", "rev-parse", "--verify", "refs/heads/"+branch)
 	cmd.Dir = repoRoot
 	if err := cmd.Run(); err == nil {
 		return nil

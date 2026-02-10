@@ -10,6 +10,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/majorcontext/moat/internal/worktree"
 )
 
@@ -133,9 +134,9 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	}
 	if wtResult != nil {
 		if wtResult.Reused {
-			fmt.Fprintf(os.Stderr, "Using existing worktree at %s\n", wtResult.WorkspacePath)
+			ui.Infof("Using existing worktree at %s", wtResult.WorkspacePath)
 		} else {
-			fmt.Fprintf(os.Stderr, "Created worktree at %s\n", wtResult.WorkspacePath)
+			ui.Infof("Created worktree at %s", wtResult.WorkspacePath)
 		}
 		// Reload config from worktree path if it has its own agent.yaml
 		if wtCfg, loadErr := config.Load(absPath); loadErr == nil && wtCfg != nil {

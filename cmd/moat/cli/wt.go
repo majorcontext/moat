@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -162,7 +161,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 
 	opts := intcli.ExecOptions{
 		Flags:          wtFlags,

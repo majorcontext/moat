@@ -99,6 +99,26 @@ func TestResolve_ReusesExistingWorktree(t *testing.T) {
 	}
 }
 
+func TestResolve_EmptyBranchName(t *testing.T) {
+	_, err := Resolve("/tmp/repo", "github.com/acme/myrepo", "", "myapp")
+	if err == nil {
+		t.Fatal("expected error for empty branch name")
+	}
+	if err.Error() != "branch name cannot be empty" {
+		t.Errorf("error = %q, want %q", err.Error(), "branch name cannot be empty")
+	}
+}
+
+func TestResolve_PathTraversalBranchName(t *testing.T) {
+	_, err := Resolve("/tmp/repo", "github.com/acme/myrepo", "../../etc/passwd", "myapp")
+	if err == nil {
+		t.Fatal("expected error for branch name containing '..'")
+	}
+	if err.Error() != "branch name cannot contain '..'" {
+		t.Errorf("error = %q, want %q", err.Error(), "branch name cannot contain '..'")
+	}
+}
+
 func TestResolve_NoAgentName(t *testing.T) {
 	repoDir := initTestRepo(t)
 	defer os.RemoveAll(repoDir)
