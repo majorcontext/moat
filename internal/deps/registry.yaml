@@ -57,6 +57,12 @@ typescript:
   package: typescript
   requires: [node]
 
+npm:
+  description: npm package manager (upgrade from bundled version)
+  type: custom
+  default: "11"
+  requires: [node]
+
 yarn:
   description: Yarn package manager
   type: custom

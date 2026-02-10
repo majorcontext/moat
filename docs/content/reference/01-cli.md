@@ -407,6 +407,7 @@ moat grant <provider>[:<scopes>]
 | `anthropic` | Anthropic (Claude Code OAuth or API key) |
 | `openai` | OpenAI (API key) |
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
+| `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
 | `aws` | AWS (IAM role assumption) |
 
 ### moat grant github
@@ -449,6 +450,30 @@ If no Gemini CLI credentials are found, falls directly to the API key prompt.
 ```bash
 # Import from Gemini CLI or enter API key
 moat grant gemini
+```
+
+### moat grant npm
+
+Grant npm registry credentials. Auto-discovers registries from `~/.npmrc` and `NPM_TOKEN` environment variable.
+
+```
+moat grant npm [flags]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--host HOSTNAME` | Specific registry host (e.g., `npm.company.com`) |
+
+### Examples
+
+```bash
+# Auto-discover registries from .npmrc
+moat grant npm
+
+# Add a specific registry
+moat grant npm --host=npm.company.com
 ```
 
 ### moat grant mcp \<name\>
@@ -582,6 +607,7 @@ moat revoke <provider>
 ```bash
 moat revoke github
 moat revoke anthropic
+moat revoke npm
 moat revoke ssh:github.com
 ```
 
@@ -1039,6 +1065,7 @@ This command scans for and removes temporary directories matching these patterns
 - `agentops-aws-*` - AWS credential helper directories
 - `moat-claude-staging-*` - Claude configuration staging directories
 - `moat-codex-staging-*` - Codex configuration staging directories
+- `moat-npm-*` - npm credential configuration directories
 - `moat-gemini-staging-*` - Gemini configuration staging directories
 
 Only directories older than `--min-age` are removed.

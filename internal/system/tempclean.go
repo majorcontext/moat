@@ -21,6 +21,7 @@ var MoatTempPatterns = []TempDirPattern{
 	{Pattern: "agentops-aws-*", Description: "AWS credential helper directories"},
 	{Pattern: "moat-claude-staging-*", Description: "Claude configuration staging directories"},
 	{Pattern: "moat-codex-staging-*", Description: "Codex configuration staging directories"},
+	{Pattern: "moat-npm-*", Description: "npm credential configuration directories"},
 }
 
 // OrphanedTempDir represents a temporary directory that may be orphaned

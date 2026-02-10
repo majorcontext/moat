@@ -112,9 +112,24 @@ func credType(c credential.Credential) string {
 			return "oauth"
 		}
 		return "token"
+	case credential.ProviderNpm:
+		entries, err := npmRegistryCount(c.Token)
+		if err == nil && entries > 1 {
+			return fmt.Sprintf("%d registries", entries)
+		}
+		return "registry"
 	default:
 		return "token"
 	}
+}
+
+// npmRegistryCount returns the number of registry entries in an npm credential token.
+func npmRegistryCount(token string) (int, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal([]byte(token), &entries); err != nil {
+		return 0, err
+	}
+	return len(entries), nil
 }
 
 // hasUnreadableCredentials checks if there are .enc files in the credential directory.

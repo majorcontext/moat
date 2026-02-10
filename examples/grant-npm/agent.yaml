@@ -1,0 +1,10 @@
+name: npm-example
+
+# Request npm credentials - this automatically includes npm and node dependencies
+grants:
+  - npm
+
+# Show authenticated user
+command:
+  - npm
+  - whoami

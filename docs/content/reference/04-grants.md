@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm"]
 ---
 
 # Grants reference
@@ -19,6 +19,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `anthropic` | `api.anthropic.com` | `Authorization: Bearer ...` (OAuth) or `x-api-key: ...` (API key) | `claude setup-token`, API key, or imported OAuth |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
+| `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
 | `mcp-<name>` | Host from MCP server `url` field | Configured per-server header | Interactive prompt |
@@ -234,6 +235,75 @@ Gemini credential saved to ~/.moat/credentials/gemini.enc
 $ moat gemini ./my-project
 ```
 
+## npm
+
+### CLI command
+
+```bash
+moat grant npm
+moat grant npm --host=<registry-host>
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--host HOSTNAME` | Specific registry host (e.g., `npm.company.com`) |
+
+Without `--host`, the command auto-discovers registries from `~/.npmrc` and the `NPM_TOKEN` environment variable.
+
+### Credential sources
+
+1. **`.npmrc` file** -- Parses `~/.npmrc` for `//host/:_authToken=` entries and `@scope:registry=` routing
+2. **Environment variable** -- Falls back to `NPM_TOKEN` for the default registry (`registry.npmjs.org`)
+3. **Manual entry** -- Interactive prompt for a token
+
+### What it injects
+
+The proxy injects an `Authorization: Bearer <token>` header for requests to each registered npm registry host. Each host gets its own credential — multiple registries are supported in a single grant.
+
+The container receives a generated `.npmrc` at `~/.npmrc` with:
+- Real scope-to-registry routing (npm needs this to resolve scoped packages)
+- Placeholder tokens (`npm_moatProxyInjected00000000`) — the proxy replaces `Authorization` headers at the network layer
+
+### Refresh behavior
+
+npm tokens are static and do not refresh. If a token expires, revoke and re-grant.
+
+### Stacking
+
+Multiple `moat grant npm --host=<host>` calls merge into a single credential. Each call adds or replaces the entry for that host. All registries are injected together at runtime.
+
+### agent.yaml
+
+```yaml
+grants:
+  - npm
+```
+
+### Example
+
+```bash
+$ moat grant npm
+
+Choose authentication method:
+
+  1. Import from .npmrc / environment
+     Found registries: registry.npmjs.org (default), npm.company.com (@myorg)
+     To import a single registry, use: moat grant npm --host=<host>
+
+  2. Enter token manually
+
+Enter choice [1-2]: 1
+Validating...
+  ✓ registry.npmjs.org — authenticated as "jsmith"
+  ✓ npm.company.com — authenticated as "jsmith"
+Credential saved to ~/.moat/credentials/npm.enc
+
+$ moat run --grant npm -- npm whoami
+jsmith
+```
+
 ## AWS
 
 ### CLI command
@@ -413,6 +483,7 @@ grants:
   - github
   - anthropic
   - openai
+  - npm
   - ssh:github.com
 ```
 
@@ -450,6 +521,7 @@ moat grant list --json
 ```bash
 moat revoke github
 moat revoke anthropic
+moat revoke npm
 moat revoke ssh:github.com
 moat revoke mcp-context7
 ```

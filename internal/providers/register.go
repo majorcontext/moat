@@ -11,6 +11,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/codex"  // registers Codex/OpenAI provider
 	_ "github.com/majorcontext/moat/internal/providers/gemini" // registers Gemini/Google provider
 	_ "github.com/majorcontext/moat/internal/providers/github" // registers GitHub provider
+	_ "github.com/majorcontext/moat/internal/providers/npm"    // registers npm provider
 )
 
 // RegisterAll is a no-op provided for explicit registration semantics.
