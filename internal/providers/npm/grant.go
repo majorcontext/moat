@@ -45,22 +45,34 @@ func (p *Provider) grantDiscover(ctx context.Context) (*provider.Credential, err
 	npmrcEntries, _ := discoverFromNpmrc()
 	entries = append(entries, npmrcEntries...)
 
-	// Check NPM_TOKEN env var
+	// Check NPM_TOKEN env var — fill in empty tokens from env var references
+	// (e.g., .npmrc has //registry.npmjs.org/:_authToken=${NPM_TOKEN})
 	if envToken := os.Getenv("NPM_TOKEN"); envToken != "" {
-		// Only add default registry from env if not already found in .npmrc
-		hasDefault := false
-		for _, e := range entries {
-			if e.Host == DefaultRegistry {
-				hasDefault = true
+		filled := false
+		for i, e := range entries {
+			if e.Host == DefaultRegistry && e.Token == "" {
+				entries[i].Token = envToken
+				entries[i].TokenSource = SourceEnv
+				filled = true
 				break
 			}
 		}
-		if !hasDefault {
-			entries = append(entries, RegistryEntry{
-				Host:        DefaultRegistry,
-				Token:       envToken,
-				TokenSource: SourceEnv,
-			})
+		if !filled {
+			// No default registry entry at all — add one from env
+			hasDefault := false
+			for _, e := range entries {
+				if e.Host == DefaultRegistry {
+					hasDefault = true
+					break
+				}
+			}
+			if !hasDefault {
+				entries = append(entries, RegistryEntry{
+					Host:        DefaultRegistry,
+					Token:       envToken,
+					TokenSource: SourceEnv,
+				})
+			}
 		}
 	}
 
