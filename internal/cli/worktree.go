@@ -43,7 +43,7 @@ func ResolveWorktreeWorkspace(wtBranch, workspace string, flags *ExecFlags, cfg 
 
 	repoRoot, err := worktree.FindRepoRoot(cwd)
 	if err != nil {
-		return nil, fmt.Errorf("--wt requires a git repository: %w", err)
+		return nil, fmt.Errorf("--worktree requires a git repository: %w", err)
 	}
 
 	repoID, err := worktree.ResolveRepoID(repoRoot)

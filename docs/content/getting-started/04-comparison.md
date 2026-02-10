@@ -16,6 +16,7 @@ These tools solve related problems. The right choice depends on what you're opti
 | Feature | Moat | packnplay | Leash | Dev Containers |
 |---------|------|-----------|-------|----------------|
 | **Primary goal** | Credential security + observability | Simple containerization | Policy enforcement | Development environments |
+| **Worktree management** | Built-in | Built-in | No | No |
 | **Credential handling** | Network-layer injection | Mount into container | Network-layer injection (Linux) | Environment variables |
 | **Agent sees tokens** | No | Yes | No (Linux only) | Yes |
 | **Network monitoring** | Yes | No | Yes | No |
@@ -32,6 +33,8 @@ These tools solve related problems. The right choice depends on what you're opti
 You want credentials injected at the network layer--the proxy adds authentication headers to requests, so tokens never appear in the container environment. Even if an agent logs all environment variables or gets compromised, your credentials remain safe.
 
 You also want observability. Every HTTP request the agent makes is logged with method, URL, status, and timing. Audit logs are hash-chained and can be cryptographically verified.
+
+Moat also manages git worktrees, so you can run multiple agents on separate branches simultaneously--each in its own container with its own checkout of the repository.
 
 ```bash
 # Credential never enters container
