@@ -20,26 +20,26 @@ var wtFlags intcli.ExecFlags
 
 var wtCmd = &cobra.Command{
 	Use:   "wt <branch> [-- command]",
-	Short: "Run agent in a git worktree",
-	Long: `Create or reuse a git worktree for a branch and run an agent in it.
+	Short: "Start a run in a git worktree",
+	Long: `Create or reuse a git worktree for a branch and start a run in it.
 
 If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
 exist, it's created. If a run is already active in the worktree, returns an
 error with instructions to attach or stop it.
 
-Agent configuration is read from agent.yaml in the repository root.
+Configuration is read from agent.yaml in the repository root.
 
 Worktrees are stored at ~/.moat/worktrees/<repo-id>/<branch>.
 Override with MOAT_WORKTREE_BASE environment variable.
 
 Examples:
-  # Start agent on a new feature branch
+  # Start a run on a new feature branch
   moat wt dark-mode
 
-  # Start agent in background
+  # Run in background
   moat wt dark-mode -d
 
-  # Start with a specific command
+  # Run a specific command in the worktree
   moat wt dark-mode -- make test
 
   # List worktree-based runs

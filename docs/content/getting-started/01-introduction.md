@@ -117,7 +117,11 @@ moat claude ./my-project
 
 ## Security model
 
-Moat provides container isolation and network-layer credential injection. It does not enforce fine-grained permissions on the actions agents take with those credentials. See [Security model](../concepts/08-security.md) for the trust model, threat boundaries, and defense-in-depth recommendations.
+Moat protects host systems by running agents inside a managed sandbox boundary. The container isolates the agent's filesystem, processes, and network traffic. Credentials are injected at the network layer so they never enter the container environment.
+
+This complements sandbox-as-tool patterns where specific capabilities (filesystem access, shell execution, web browsing) are exposed to the agent as external APIs. Moat operates at a different layer: rather than controlling what tools the agent can call, it controls the environment the agent runs in. The two approaches work together — an agent can run inside Moat's container while using tool-level sandboxes for individual operations.
+
+Moat does not enforce fine-grained permissions on the actions agents take with injected credentials. See [Security model](../concepts/08-security.md) for the trust model, threat boundaries, and defense-in-depth recommendations.
 
 ## Project status
 

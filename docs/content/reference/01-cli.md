@@ -301,7 +301,7 @@ moat gemini --rebuild
 
 ## moat wt
 
-Create or reuse a git worktree for a branch and run an agent in it.
+Create or reuse a git worktree for a branch and start a run in it.
 
 ```
 moat wt <branch> [-- command]
@@ -309,7 +309,7 @@ moat wt <branch> [-- command]
 
 The branch is created from HEAD if it doesn't exist. The worktree is created at `~/.moat/worktrees/<repo-id>/<branch>`.
 
-Agent configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to attach or stop it.
+Configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to attach or stop it.
 
 ### Arguments
 
@@ -334,7 +334,7 @@ Agent configuration is read from `agent.yaml` in the repository root. If a run i
 
 ### Run naming
 
-The run name is `{agent-name}-{branch}` when `agent.yaml` has a `name` field, otherwise just `{branch}`.
+The run name is `{name}-{branch}` when `agent.yaml` has a `name` field, otherwise just `{branch}`.
 
 ### Worktree base path
 
@@ -343,7 +343,7 @@ Override the default worktree base path (`~/.moat/worktrees/`) with the `MOAT_WO
 ### Examples
 
 ```bash
-# Run agent in a worktree for the dark-mode branch
+# Start a run in a worktree for the dark-mode branch
 moat wt dark-mode
 
 # Run in background

@@ -1,13 +1,13 @@
 ---
 title: "Git worktrees"
 navTitle: "Worktrees"
-description: "Run agents in isolated git worktrees for parallel work on multiple branches."
+description: "Use git worktrees for parallel work on multiple branches, each in its own container."
 keywords: ["moat", "worktree", "git", "branches", "parallel"]
 ---
 
 # Git worktrees
 
-This guide covers running agents in git worktrees — separate checkouts of your repository on different branches. Each worktree has its own working directory, so multiple agents work on separate branches simultaneously.
+This guide covers running commands in git worktrees — separate checkouts of your repository on different branches. Each worktree has its own working directory, so multiple runs work on separate branches simultaneously.
 
 ## Prerequisites
 
@@ -16,13 +16,13 @@ This guide covers running agents in git worktrees — separate checkouts of your
 
 ## Quick start
 
-Run an agent on a new branch:
+Start a run on a new branch:
 
 ```bash
 moat wt dark-mode
 ```
 
-This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a worktree at `~/.moat/worktrees/<repo-id>/dark-mode`, and starts the agent defined in `agent.yaml`.
+This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a worktree at `~/.moat/worktrees/<repo-id>/dark-mode`, and starts the command defined in `agent.yaml`.
 
 ## How it works
 
@@ -30,7 +30,7 @@ This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a w
 
 1. **Creates the branch** from HEAD if it doesn't already exist
 2. **Creates a git worktree** — a separate checkout of the branch at `~/.moat/worktrees/<repo-id>/<branch>`
-3. **Starts the agent** from `agent.yaml` with the worktree as its workspace
+3. **Starts a run** using the command from `agent.yaml` with the worktree as its workspace
 
 The repository is identified by its remote URL (or local path if no remote is configured). Each branch gets its own directory under that repo ID.
 
@@ -40,10 +40,10 @@ If the branch and worktree already exist, they are reused.
 
 ### The `moat wt` command
 
-`moat wt` reads `agent.yaml` from the repository root and runs that agent in the worktree:
+`moat wt` reads `agent.yaml` from the repository root and starts a run in the worktree:
 
 ```bash
-# Start the agent defined in agent.yaml on the dark-mode branch
+# Start the command defined in agent.yaml on the dark-mode branch
 moat wt dark-mode
 
 # Run in background
@@ -70,7 +70,7 @@ moat codex --worktree feature/auth -p "implement OAuth login" -d
 moat gemini --worktree cleanup
 ```
 
-The `--worktree` flag creates the branch and worktree the same way as `moat wt`, but runs the specific agent command instead of reading `agent.yaml`. `--wt` is accepted as a shorthand alias.
+The `--worktree` flag creates the branch and worktree the same way as `moat wt`, but starts the specified agent instead of reading `agent.yaml`. `--wt` is accepted as a shorthand alias.
 
 ## Run naming
 
@@ -87,7 +87,7 @@ moat wt dark-mode --name my-custom-name
 
 ## Parallel branches
 
-Run agents on multiple branches simultaneously:
+Start runs on multiple branches simultaneously:
 
 ```bash
 moat wt feature/auth -d
@@ -95,7 +95,7 @@ moat wt feature/dark-mode -d
 moat wt fix/login-bug -d
 ```
 
-Each agent gets its own worktree, its own container, and its own branch. Branch names with slashes (like `feature/auth`) are supported.
+Each run gets its own worktree, its own container, and its own branch. Branch names with slashes (like `feature/auth`) are supported.
 
 Check on all worktree runs:
 
@@ -133,7 +133,7 @@ moat wt clean dark-mode
 
 `moat wt clean` removes the worktree directory and runs `git worktree prune`. It never deletes branches — your work remains in git.
 
-Active worktrees (with running agents) are skipped.
+Active worktrees (with running containers) are skipped.
 
 ## Worktree storage
 
@@ -154,7 +154,7 @@ moat wt dark-mode
 
 ## Configuration
 
-The agent reads `agent.yaml` from the repository root. If the worktree directory also contains an `agent.yaml`, the worktree's copy takes precedence.
+`moat wt` reads `agent.yaml` from the repository root. If the worktree directory also contains an `agent.yaml`, the worktree's copy takes precedence.
 
 Branch-specific configuration works as follows:
 
@@ -164,7 +164,7 @@ Branch-specific configuration works as follows:
 
 ## Example: parallel feature development
 
-1. Configure your agent:
+1. Configure `agent.yaml`:
    ```yaml
    name: my-agent
 
@@ -178,7 +178,7 @@ Branch-specific configuration works as follows:
      - claude-code
    ```
 
-2. Start agents on multiple branches:
+2. Start runs on multiple branches:
    ```bash
    moat wt feature/auth -d
    moat wt feature/dark-mode -d
@@ -214,7 +214,7 @@ Run `moat wt` from within a git repository. Worktrees are a git feature and requ
 
 ### "a run is already active in worktree"
 
-Another agent is already running on that branch. Either attach to it or stop it first:
+Another run is already active on that branch. Either attach to it or stop it first:
 
 ```bash
 moat attach <run-id>
