@@ -42,6 +42,7 @@ Supported providers:
 Subcommands:
   ssh         Grant SSH access for a specific host
   mcp         Grant credentials for an MCP server
+  npm         Grant npm registry credentials (auto-discovers from .npmrc)
 
 GitHub authentication (in order of precedence):
   1. GITHUB_TOKEN or GH_TOKEN environment variable
@@ -95,6 +96,15 @@ Examples:
 
   # Use Gemini credential
   moat gemini ./my-project
+
+  # Grant npm registry access (auto-discovers from .npmrc)
+  moat grant npm
+
+  # Grant npm access for a specific registry
+  moat grant npm --host=npm.company.com
+
+  # Use npm credential in a run
+  moat run my-agent . --grant npm
 
 If you have Claude Code installed and logged in, 'moat grant anthropic' will
 offer to import your existing OAuth credentials.`,

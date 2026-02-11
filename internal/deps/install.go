@@ -391,6 +391,17 @@ func getCustomCommands(name, version string) InstallCommands {
 				"rm -rf /tmp/linux-*",
 			},
 		}
+	case "npm":
+		// Upgrade npm to the specified major version
+		v := version
+		if v == "" {
+			v = "11"
+		}
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf("npm install -g npm@%s", v),
+			},
+		}
 	case "yarn":
 		// Enable yarn via Corepack (Node.js 16.10+)
 		// Don't use npm install -g yarn - it conflicts with Corepack

@@ -345,6 +345,7 @@ grants:
 | `anthropic` | Anthropic API |
 | `openai` | OpenAI API |
 | `gemini` | Google Gemini API |
+| `npm` | npm registries |
 | `ssh:HOSTNAME` | SSH access to specific host |
 
 Credentials must be stored first with `moat grant`.
