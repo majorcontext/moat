@@ -276,6 +276,9 @@ func runWorktreeClean(cmd *cobra.Command, args []string) error {
 
 	if len(args) > 0 {
 		branch := args[0]
+		if validateErr := worktree.ValidateBranch(branch); validateErr != nil {
+			return validateErr
+		}
 		wtPath := worktree.Path(repoID, branch)
 
 		for _, r := range manager.List() {

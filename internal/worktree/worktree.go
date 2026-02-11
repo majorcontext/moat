@@ -17,14 +17,22 @@ type Result struct {
 	RepoID        string // normalized repo identifier
 }
 
+// ValidateBranch checks that a branch name is safe to use in filesystem paths.
+func ValidateBranch(branch string) error {
+	if branch == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+	if strings.Contains(branch, "..") {
+		return fmt.Errorf("branch name cannot contain '..'")
+	}
+	return nil
+}
+
 // Resolve ensures a branch and worktree exist for the given branch name.
 // It creates them if necessary, reuses them if they already exist.
 func Resolve(repoRoot, repoID, branch, agentName string) (*Result, error) {
-	if branch == "" {
-		return nil, fmt.Errorf("branch name cannot be empty")
-	}
-	if strings.Contains(branch, "..") {
-		return nil, fmt.Errorf("branch name cannot contain '..'")
+	if err := ValidateBranch(branch); err != nil {
+		return nil, err
 	}
 
 	wtPath := filepath.Join(BasePath(), repoID, branch)

@@ -35,9 +35,61 @@ func TestClean_NonExistentPath(t *testing.T) {
 	repoDir := initTestRepo(t)
 	defer os.RemoveAll(repoDir)
 
-	err := Clean(repoDir, "/nonexistent/path")
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	// Path is under base but doesn't exist
+	err = Clean(repoDir, wtBase+"/nonexistent/path")
 	if err == nil {
 		t.Error("Clean() expected error for nonexistent path, got nil")
+	}
+}
+
+func TestClean_RefusesPathOutsideBase(t *testing.T) {
+	repoDir := initTestRepo(t)
+	defer os.RemoveAll(repoDir)
+
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	// Create a directory outside the worktree base
+	outsideDir, err := os.MkdirTemp("", "test-outside-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(outsideDir)
+
+	err = Clean(repoDir, outsideDir)
+	if err == nil {
+		t.Fatal("Clean() expected error for path outside base, got nil")
+	}
+	if _, statErr := os.Stat(outsideDir); os.IsNotExist(statErr) {
+		t.Error("directory outside base was deleted")
+	}
+}
+
+func TestClean_RefusesPathTraversal(t *testing.T) {
+	repoDir := initTestRepo(t)
+	defer os.RemoveAll(repoDir)
+
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	err = Clean(repoDir, wtBase+"/repo/../../../../tmp")
+	if err == nil {
+		t.Fatal("Clean() expected error for traversal path, got nil")
 	}
 }
 

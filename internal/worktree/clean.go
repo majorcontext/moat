@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Entry represents a managed worktree on disk.
@@ -14,7 +15,21 @@ type Entry struct {
 }
 
 // Clean removes a worktree directory and runs git worktree prune.
+// The wtPath must be under BasePath() to prevent path traversal attacks.
 func Clean(repoRoot, wtPath string) error {
+	// Defense-in-depth: ensure the path is under the worktree base directory.
+	base, err := filepath.Abs(BasePath())
+	if err != nil {
+		return fmt.Errorf("resolving worktree base path: %w", err)
+	}
+	abs, err := filepath.Abs(wtPath)
+	if err != nil {
+		return fmt.Errorf("resolving worktree path: %w", err)
+	}
+	if !strings.HasPrefix(abs, base+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to clean path outside worktree base: %s", wtPath)
+	}
+
 	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
 		return fmt.Errorf("worktree path does not exist: %s", wtPath)
 	}
