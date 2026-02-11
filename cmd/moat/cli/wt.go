@@ -129,6 +129,11 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		ui.Infof("Created worktree at %s", result.WorkspacePath)
 	}
 
+	// Reload config from worktree if it has its own agent.yaml
+	if wtCfg, loadErr := config.Load(result.WorkspacePath); loadErr == nil && wtCfg != nil {
+		cfg = wtCfg
+	}
+
 	// Check for active run in this worktree
 	manager, err := run.NewManager()
 	if err != nil {
@@ -147,10 +152,28 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		wtFlags.Name = result.RunName
 	}
 
+	// Apply config defaults (same pattern as moat run)
+	if len(wtFlags.Grants) == 0 && len(cfg.Grants) > 0 {
+		wtFlags.Grants = cfg.Grants
+	}
+	if len(containerCmd) == 0 && len(cfg.Command) > 0 {
+		containerCmd = cfg.Command
+	}
+	if cfg.Sandbox == "none" && !wtFlags.NoSandbox {
+		wtFlags.NoSandbox = true
+	}
+
+	// Determine interactive mode: CLI flags > config > default
+	interactive := !wtFlags.Detach
+	if !interactive && cfg.Interactive {
+		interactive = true
+	}
+
 	log.Debug("starting worktree run",
 		"branch", branch,
 		"workspace", result.WorkspacePath,
 		"run_name", wtFlags.Name,
+		"grants", wtFlags.Grants,
 	)
 
 	if dryRun {
@@ -158,6 +181,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Branch: %s\n", branch)
 		fmt.Printf("Workspace: %s\n", result.WorkspacePath)
 		fmt.Printf("Run name: %s\n", wtFlags.Name)
+		fmt.Printf("Grants: %v\n", wtFlags.Grants)
 		return nil
 	}
 
@@ -168,8 +192,8 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		Workspace:   result.WorkspacePath,
 		Command:     containerCmd,
 		Config:      cfg,
-		Interactive: !wtFlags.Detach,
-		TTY:         !wtFlags.Detach,
+		Interactive: interactive,
+		TTY:         interactive,
 	}
 	intcli.SetWorktreeFields(&opts, result)
 
