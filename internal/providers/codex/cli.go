@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -65,6 +66,10 @@ Examples:
   # Start Codex CLI in a specific project
   moat codex ./my-project
 
+  # Start with an initial prompt (interactive - Codex stays open)
+  moat codex -- "testing"
+  moat codex ./my-project -- "explain this codebase"
+
   # Ask Codex to do something specific (non-interactive)
   moat codex -p "explain this codebase"
   moat codex -p "fix the bug in main.py"
@@ -85,7 +90,7 @@ Examples:
   moat codex --full-auto=false
 
 Use 'moat list' to see running and recent runs.`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: runCodex,
 	}
 
@@ -109,9 +114,24 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Determine workspace
+	// Separate workspace arg from initial prompt args.
+	// Everything after "--" is passed as an initial prompt to Codex.
+	//   moat codex -- "testing"                     → workspace=".", prompt="testing"
+	//   moat codex ./project -- "explain this"      → workspace="./project", prompt="explain this"
+	//   moat codex ./project                        → workspace="./project", no prompt
+	var initialPrompt string
 	workspace := "."
-	if len(args) > 0 {
+	dashIdx := cmd.ArgsLenAtDash()
+	if dashIdx >= 0 {
+		// Args before "--" are moat args (workspace), after are passthrough
+		if dashIdx > 0 {
+			workspace = args[0]
+		}
+		passthroughArgs := args[dashIdx:]
+		if len(passthroughArgs) > 0 {
+			initialPrompt = strings.Join(passthroughArgs, " ")
+		}
+	} else if len(args) > 0 {
 		workspace = args[0]
 	}
 
@@ -175,6 +195,9 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	} else {
 		// Interactive mode: just run `codex` for the TUI
 		containerCmd = []string{"codex"}
+		if initialPrompt != "" {
+			containerCmd = append(containerCmd, initialPrompt)
+		}
 	}
 
 	// Use name from flag, or config, or let manager generate one
