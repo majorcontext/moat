@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,6 +108,116 @@ func TestResolveRepoID_NoRemote(t *testing.T) {
 	want := "_local/" + filepath.Base(tmpDir)
 	if repoID != want {
 		t.Errorf("ResolveRepoID() = %q, want %q", repoID, want)
+	}
+}
+
+func TestResolveGitDir_RegularRepo(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "test-repo-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	info, err := ResolveGitDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ResolveGitDir() error = %v", err)
+	}
+	if info != nil {
+		t.Errorf("ResolveGitDir() = %+v, want nil for regular repo", info)
+	}
+}
+
+func TestResolveGitDir_NoGit(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "test-nogit-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	info, err := ResolveGitDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ResolveGitDir() error = %v", err)
+	}
+	if info != nil {
+		t.Errorf("ResolveGitDir() = %+v, want nil for non-git dir", info)
+	}
+}
+
+func TestResolveGitDir_Worktree(t *testing.T) {
+	repoDir := initTestRepo(t)
+	defer os.RemoveAll(repoDir)
+
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	result, err := Resolve(repoDir, "github.com/acme/myrepo", "test-branch", "myapp")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	info, err := ResolveGitDir(result.WorkspacePath)
+	if err != nil {
+		t.Fatalf("ResolveGitDir() error = %v", err)
+	}
+	if info == nil {
+		t.Fatal("ResolveGitDir() = nil, want non-nil for worktree")
+	}
+
+	// MainGitDir should be the repo's .git directory
+	wantMainGitDir := filepath.Join(repoDir, ".git")
+	if info.MainGitDir != wantMainGitDir {
+		t.Errorf("MainGitDir = %q, want %q", info.MainGitDir, wantMainGitDir)
+	}
+
+	// WorktreeGitDir should be under the main .git/worktrees/ directory
+	wantPrefix := filepath.Join(repoDir, ".git", "worktrees")
+	if !strings.HasPrefix(info.WorktreeGitDir, wantPrefix) {
+		t.Errorf("WorktreeGitDir = %q, want prefix %q", info.WorktreeGitDir, wantPrefix)
+	}
+}
+
+func TestResolveGitDir_SubdirInvariant(t *testing.T) {
+	repoDir := initTestRepo(t)
+	defer os.RemoveAll(repoDir)
+
+	wtBase, err := os.MkdirTemp("", "test-wt-base-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtBase)
+	t.Setenv("MOAT_WORKTREE_BASE", wtBase)
+
+	result, err := Resolve(repoDir, "github.com/acme/myrepo", "subdir-test", "myapp")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	info, err := ResolveGitDir(result.WorkspacePath)
+	if err != nil {
+		t.Fatalf("ResolveGitDir() error = %v", err)
+	}
+	if info == nil {
+		t.Fatal("ResolveGitDir() = nil, want non-nil for worktree")
+	}
+
+	// WorktreeGitDir must be a subdirectory of MainGitDir
+	rel, err := filepath.Rel(info.MainGitDir, info.WorktreeGitDir)
+	if err != nil {
+		t.Fatalf("filepath.Rel() error = %v", err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		t.Errorf("WorktreeGitDir %q is not under MainGitDir %q (rel=%q)",
+			info.WorktreeGitDir, info.MainGitDir, rel)
 	}
 }
 
