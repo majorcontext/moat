@@ -153,19 +153,21 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	// Apply config defaults (same pattern as moat run)
-	if len(wtFlags.Grants) == 0 && len(cfg.Grants) > 0 {
-		wtFlags.Grants = cfg.Grants
-	}
-	if len(containerCmd) == 0 && len(cfg.Command) > 0 {
-		containerCmd = cfg.Command
-	}
-	if cfg.Sandbox == "none" && !wtFlags.NoSandbox {
-		wtFlags.NoSandbox = true
+	if cfg != nil {
+		if len(wtFlags.Grants) == 0 && len(cfg.Grants) > 0 {
+			wtFlags.Grants = cfg.Grants
+		}
+		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
+			containerCmd = cfg.Command
+		}
+		if cfg.Sandbox == "none" && !wtFlags.NoSandbox {
+			wtFlags.NoSandbox = true
+		}
 	}
 
 	// Determine interactive mode: CLI flags > config > default
 	interactive := !wtFlags.Detach
-	if !interactive && cfg.Interactive {
+	if !interactive && cfg != nil && cfg.Interactive {
 		interactive = true
 	}
 
@@ -245,7 +247,7 @@ func runWorktreeList(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "BRANCH\tRUN NAME\tSTATUS\tWORKTREE")
 	for _, r := range wtRuns {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			r.WorktreeBranch, r.Name, r.State, r.WorktreePath)
+			r.WorktreeBranch, r.Name, r.State, intcli.ShortenPath(r.WorktreePath))
 	}
 	return w.Flush()
 }
