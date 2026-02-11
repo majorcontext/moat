@@ -35,6 +35,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
 | `--keep` | Keep container after run completes |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
 Each agent command also accepts `-p`/`--prompt` for non-interactive mode, plus command-specific flags documented in their own sections.
 
@@ -166,6 +167,9 @@ moat claude --grant github
 # Named run
 moat claude --name feature-auth ./my-project
 
+# Run in a git worktree
+moat claude --worktree=dark-mode --prompt "implement dark mode" --detach
+
 # Background run
 moat claude -d ./my-project
 
@@ -225,6 +229,9 @@ moat codex --grant github
 # Named run
 moat codex --name my-feature
 
+# Run in a git worktree
+moat codex --worktree=dark-mode --prompt "implement dark mode" --detach
+
 # Run in background
 moat codex -d
 
@@ -280,11 +287,107 @@ moat gemini --grant github
 # Named run
 moat gemini --name my-feature
 
+# Run in a git worktree
+moat gemini --worktree=dark-mode --prompt "implement dark mode" --detach
+
 # Run in background
 moat gemini -d
 
 # Force rebuild
 moat gemini --rebuild
+```
+
+---
+
+## moat wt
+
+Create or reuse a git worktree for a branch and run an agent in it.
+
+```
+moat wt <branch> [-- command]
+```
+
+The branch is created from HEAD if it doesn't exist. The worktree is created at `~/.moat/worktrees/<repo-id>/<branch>`.
+
+Agent configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to attach or stop it.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `branch` | Branch name to create or reuse a worktree for |
+| `command` | Command to run (overrides agent.yaml) |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-d`, `--detach` | Run in background |
+| `-n`, `--name NAME` | Override auto-generated run name |
+| `-g`, `--grant PROVIDER` | Inject credential (repeatable) |
+| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `--rebuild` | Force image rebuild |
+| `--keep` | Keep container after completion |
+| `--runtime` | Container runtime to use (`apple`, `docker`) |
+| `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--tty-trace FILE` | Capture terminal I/O to file for debugging |
+
+### Run naming
+
+The run name is `{agent-name}-{branch}` when `agent.yaml` has a `name` field, otherwise just `{branch}`.
+
+### Worktree base path
+
+Override the default worktree base path (`~/.moat/worktrees/`) with the `MOAT_WORKTREE_BASE` environment variable.
+
+### Examples
+
+```bash
+# Run agent in a worktree for the dark-mode branch
+moat wt dark-mode
+
+# Run in background
+moat wt dark-mode -d
+
+# Run a specific command in the worktree
+moat wt dark-mode -- make test
+
+# List worktree-based runs
+moat wt list
+
+# Clean all stopped worktrees
+moat wt clean
+
+# Clean a specific worktree
+moat wt clean dark-mode
+```
+
+### Subcommands
+
+#### moat wt list
+
+List worktree-based runs for the current repository.
+
+```bash
+moat wt list
+```
+
+#### moat wt clean
+
+Remove worktree directories for stopped runs. Without arguments, cleans all stopped worktrees for the current repository. Never deletes branches.
+
+```bash
+moat wt clean [branch]
+```
+
+**Examples:**
+
+```bash
+# Clean all stopped worktrees for the current repo
+moat wt clean
+
+# Clean a specific worktree
+moat wt clean dark-mode
 ```
 
 ---

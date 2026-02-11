@@ -33,6 +33,13 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringVar(&flags.TTYTrace, "tty-trace", "", "capture terminal I/O to file for debugging (e.g., session.json)")
 }
 
+// RunInfo contains minimal information about a run, extracted to avoid import cycles.
+// This is passed to callbacks instead of the full *run.Run type.
+type RunInfo struct {
+	ID   string
+	Name string
+}
+
 // ExecOptions contains all the options needed to execute a containerized command.
 type ExecOptions struct {
 	// From flags
@@ -44,6 +51,16 @@ type ExecOptions struct {
 	Config      *config.Config
 	Interactive bool // Can be set by flags or command logic
 	TTY         bool
+
+	// Worktree tracking (set by moat wt or --wt flag)
+	WorktreeBranch string
+	WorktreePath   string
+	WorktreeRepoID string
+
+	// Callbacks for command-specific behavior
+	// OnRunCreated is called after run is created, before start.
+	// The RunInfo parameter contains the run's ID and Name.
+	OnRunCreated func(info RunInfo)
 }
 
 // ExecResult contains the result of executing a run.

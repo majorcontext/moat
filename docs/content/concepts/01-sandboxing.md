@@ -30,6 +30,8 @@ Your project directory is mounted into the container at `/workspace`. This is th
 
 The workspace mount is a direct host bind mount. Files the agent reads or writes there are trusted input/output. Moat does not sandbox file access within the mounted directory -- the agent has the same read/write access as the user who started the run.
 
+When running multiple agents on the same repository, use git worktrees to give each agent its own working directory on a separate branch. This prevents agents from interfering with each other's file changes. See [Git worktrees](../guides/12-worktrees.md) for details.
+
 Additional host directories can be mounted into the container. See [Mount syntax](../reference/05-mounts.md) for the full specification.
 
 ## Image selection
@@ -71,3 +73,4 @@ For running code from unknown sources, run Moat inside a VM or on a dedicated ma
 - [Container runtimes](./07-runtimes.md) — Runtime selection, gVisor sandboxing, and security models
 - [Credential management](./02-credentials.md) — How credentials are injected through the proxy
 - [Network policies](./05-networking.md) — Controlling outbound network access
+- [Git worktrees](../guides/12-worktrees.md) — Workspace isolation for parallel agents on separate branches

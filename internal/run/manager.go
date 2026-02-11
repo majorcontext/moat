@@ -213,6 +213,9 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			exitCh:            make(chan struct{}),
 			ServiceContainers: serviceContainers,
 			NetworkID:         meta.NetworkID,
+			WorktreeBranch:    meta.WorktreeBranch,
+			WorktreePath:      meta.WorktreePath,
+			WorktreeRepoID:    meta.WorktreeRepoID,
 		}
 
 		// If container is already stopped, close exitCh immediately

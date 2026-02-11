@@ -253,12 +253,14 @@ $ sudo security add-trusted-cert -d -r trustRoot \
 
 Each agent has an isolated container filesystem, but they share the same workspace directory on your host. Changes by one agent are visible to others.
 
-For complete isolation, point each agent at a separate directory. Git worktrees work well for this — each agent gets its own working tree from the same repository:
+For complete isolation, use `moat wt` to give each agent its own git worktree from the same repository:
 
 ```bash
-$ moat run --name dark-mode .worktrees/dark-mode &
-$ moat run --name checkout .worktrees/checkout &
+$ moat wt dark-mode
+$ moat wt checkout-fix
 ```
+
+Each worktree gets its own branch and working directory at `~/.moat/worktrees/<repo-id>/<branch>`, so agents never interfere with each other's files. See [`moat wt`](../reference/01-cli.md#moat-wt) for details.
 
 ## Related
 

@@ -17,6 +17,7 @@ var (
 	codexPromptFlag   string
 	codexAllowedHosts []string
 	codexFullAuto     bool
+	codexWtFlag       string
 )
 
 // NetworkHosts returns the list of hosts that Codex needs network access to.
@@ -95,6 +96,9 @@ Use 'moat list' to see running and recent runs.`,
 	codexCmd.Flags().StringVarP(&codexPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	codexCmd.Flags().StringSliceVar(&codexAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	codexCmd.Flags().BoolVar(&codexFullAuto, "full-auto", true, "enable full-auto mode (auto-approve tool use); set to false for manual approval")
+	codexCmd.Flags().StringVar(&codexWtFlag, "worktree", "", "run in a git worktree for this branch")
+	codexCmd.Flags().StringVar(&codexWtFlag, "wt", "", "alias for --worktree")
+	_ = codexCmd.Flags().MarkHidden("wt")
 
 	root.AddCommand(codexCmd)
 }
@@ -121,6 +125,14 @@ func runCodex(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Handle --wt flag
+	wtOut, err := cli.ResolveWorktreeWorkspace(codexWtFlag, absPath, &codexFlags, cfg)
+	if err != nil {
+		return err
+	}
+	absPath = wtOut.Workspace
+	cfg = wtOut.Config
 
 	// Build grants list using a set for deduplication
 	grantSet := make(map[string]bool)
@@ -229,6 +241,8 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		Interactive: interactive,
 		TTY:         interactive,
 	}
+
+	cli.SetWorktreeFields(&opts, wtOut.Result)
 
 	result, err := cli.ExecuteRun(ctx, opts)
 	if err != nil {

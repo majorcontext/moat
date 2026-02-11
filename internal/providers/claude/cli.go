@@ -17,6 +17,7 @@ var (
 	claudePromptFlag   string
 	claudeAllowedHosts []string
 	claudeNoYolo       bool
+	claudeWtFlag       string
 )
 
 // RegisterCLI adds provider-specific commands to the root command.
@@ -73,6 +74,9 @@ Use 'moat list' to see running and recent runs.`,
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
+	claudeCmd.Flags().StringVar(&claudeWtFlag, "worktree", "", "run in a git worktree for this branch")
+	claudeCmd.Flags().StringVar(&claudeWtFlag, "wt", "", "alias for --worktree")
+	_ = claudeCmd.Flags().MarkHidden("wt")
 
 	root.AddCommand(claudeCmd)
 }
@@ -99,6 +103,14 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Handle --wt flag
+	wtOut, err := cli.ResolveWorktreeWorkspace(claudeWtFlag, absPath, &claudeFlags, cfg)
+	if err != nil {
+		return err
+	}
+	absPath = wtOut.Workspace
+	cfg = wtOut.Config
 
 	// Build grants list using a set for deduplication
 	grantSet := make(map[string]bool)
@@ -202,6 +214,8 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		Interactive: interactive,
 		TTY:         interactive,
 	}
+
+	cli.SetWorktreeFields(&opts, wtOut.Result)
 
 	result, err := cli.ExecuteRun(ctx, opts)
 	if err != nil {

@@ -34,6 +34,23 @@ func init() {
 	// Register the ExecuteRun function in the internal/cli globals
 	// so that provider packages can use it without import cycles.
 	intcli.ExecuteRun = executeRunWrapper
+	intcli.CheckWorktreeActive = checkWorktreeActive
+}
+
+// checkWorktreeActive checks if there is a running run in the given worktree path.
+func checkWorktreeActive(worktreePath string) (string, string) {
+	manager, err := run.NewManager()
+	if err != nil {
+		return "", ""
+	}
+	defer manager.Close()
+
+	for _, r := range manager.List() {
+		if r.WorktreePath == worktreePath && r.State == run.StateRunning {
+			return r.Name, r.ID
+		}
+	}
+	return "", ""
 }
 
 // executeRunWrapper wraps ExecuteRun to match the function signature in intcli.
@@ -195,6 +212,24 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 
 	log.Info("created run", "id", r.ID, "name", r.Name)
+
+	// Set worktree metadata if this run was created via moat wt or --wt
+	if opts.WorktreeBranch != "" {
+		r.WorktreeBranch = opts.WorktreeBranch
+		r.WorktreePath = opts.WorktreePath
+		r.WorktreeRepoID = opts.WorktreeRepoID
+		if err := r.SaveMetadata(); err != nil {
+			log.Warn("failed to save worktree metadata", "error", err)
+		}
+	}
+
+	// Call the OnRunCreated callback if provided
+	if opts.OnRunCreated != nil {
+		opts.OnRunCreated(intcli.RunInfo{
+			ID:   r.ID,
+			Name: r.Name,
+		})
+	}
 
 	// Interactive mode: use StartAttached to ensure TTY is connected before process starts
 	// This is required for TUI applications like Codex CLI that need to detect terminal

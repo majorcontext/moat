@@ -15,6 +15,7 @@ var (
 	geminiFlags        cli.ExecFlags
 	geminiPromptFlag   string
 	geminiAllowedHosts []string
+	geminiWtFlag       string
 )
 
 // NetworkHosts returns the list of hosts that Gemini needs network access to.
@@ -83,6 +84,9 @@ Use 'moat list' to see running and recent runs.`,
 	// Add Gemini-specific flags
 	geminiCmd.Flags().StringVarP(&geminiPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	geminiCmd.Flags().StringSliceVar(&geminiAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
+	geminiCmd.Flags().StringVar(&geminiWtFlag, "worktree", "", "run in a git worktree for this branch")
+	geminiCmd.Flags().StringVar(&geminiWtFlag, "wt", "", "alias for --worktree")
+	_ = geminiCmd.Flags().MarkHidden("wt")
 
 	root.AddCommand(geminiCmd)
 }
@@ -109,6 +113,14 @@ func runGemini(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Handle --wt flag
+	wtOut, err := cli.ResolveWorktreeWorkspace(geminiWtFlag, absPath, &geminiFlags, cfg)
+	if err != nil {
+		return err
+	}
+	absPath = wtOut.Workspace
+	cfg = wtOut.Config
 
 	// Build grants list using a set for deduplication
 	grantSet := make(map[string]bool)
@@ -215,6 +227,8 @@ func runGemini(cmd *cobra.Command, args []string) error {
 		Interactive: interactive,
 		TTY:         interactive,
 	}
+
+	cli.SetWorktreeFields(&opts, wtOut.Result)
 
 	result, err := cli.ExecuteRun(ctx, opts)
 	if err != nil {

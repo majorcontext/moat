@@ -128,6 +128,7 @@ Moat provides one layer of protection: container isolation with network-layer cr
 
 - **Service-level controls** -- Branch protection rules, scoped IAM roles with explicit denies, read-only API tokens, repository permission boundaries. These limit what an agent can do even with valid credentials.
 - **Read-only mounts** -- Mount the workspace as read-only (`ro`) when the agent only needs to read code, not modify it. See [Sandboxing](./01-sandboxing.md) for mount configuration.
+- **Worktree isolation** -- Use git worktrees to give each agent its own branch and working directory. Agents cannot modify each other's files or the main branch. See [Git worktrees](../guides/12-worktrees.md).
 - **Strict network policies** -- Restrict outbound traffic to only the hosts the agent needs. See [Networking](./05-networking.md) for policy configuration.
 - **Short-lived credentials** -- Use short session durations for AWS roles (the default is 15 minutes). Shorter sessions limit the window for credential misuse.
 - **Agent-level policy frameworks** -- Tools like [agentsh.org](https://www.agentsh.org/) provide declarative security policies for agent actions. agentsh is complementary to Moat: Moat handles container isolation and credential delivery, while agentsh enforces action-level policies.
