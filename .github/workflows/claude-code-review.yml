@@ -37,9 +37,21 @@ jobs:
           prompt: |
             Use the /code-review skill to review this pull request.
 
-            Focus on bugs, security issues, and correctness problems. Don't flag style nits
-            or documentation gaps unless they indicate a real problem. Be concise — only
-            comment if you found something worth calling out. If the PR looks good, say so
-            briefly.
+            Use the repository's CLAUDE.md for guidance on style, conventions, and architecture.
 
-            Use the repository's CLAUDE.md for guidance on style and conventions.
+            Review as a second pair of eyes — catch things the author or a coding agent
+            would miss. Think about:
+            - Bugs, logic errors, off-by-one mistakes, nil/zero-value pitfalls
+            - Security issues (injection, credential leaks, path traversal, TOCTOU)
+            - Race conditions, deadlocks, missing synchronization
+            - Error handling gaps — unchecked errors, swallowed failures, misleading messages
+            - Edge cases and failure modes that aren't covered
+            - Missing or outdated documentation when code changes user-facing behavior
+            - Misuse of internal conventions (e.g. log vs ui, error message quality)
+
+            Don't flag pure style preferences or formatting. Do flag naming or structure
+            issues that hurt readability or could cause confusion.
+
+            Be concise and specific — quote the relevant code, explain why it's a problem,
+            and suggest a fix when the solution isn't obvious. If the PR looks good, say so
+            briefly.
