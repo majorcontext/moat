@@ -39,6 +39,13 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 
 Each agent command also accepts `-p`/`--prompt` for non-interactive mode, plus command-specific flags documented in their own sections.
 
+All agent commands support passing an initial prompt after `--`. Unlike `-p`, which runs non-interactively and exits when done, arguments after `--` start an interactive session with the prompt pre-filled:
+
+```bash
+moat claude -- "is this thing on?"
+moat codex -- "explain this codebase"
+```
+
 ---
 
 ## moat run
@@ -131,7 +138,7 @@ moat run --no-sandbox ./my-project
 Run Claude Code in a container.
 
 ```
-moat claude [workspace] [flags]
+moat claude [workspace] [flags] [-- initial-prompt]
 ```
 
 In addition to the command-specific flags below, `moat claude` accepts all [common agent flags](#common-agent-flags).
@@ -141,6 +148,7 @@ In addition to the command-specific flags below, `moat claude` accepts all [comm
 | Argument | Description |
 |----------|-------------|
 | `workspace` | Workspace directory (default: current directory) |
+| `initial-prompt` | Text after `--` is passed to Claude as an initial prompt (interactive mode) |
 
 ### Command-specific flags
 
@@ -158,7 +166,11 @@ moat claude
 # In specific directory
 moat claude ./my-project
 
-# Non-interactive with prompt
+# Interactive with initial prompt (Claude stays open)
+moat claude -- "is this thing on?"
+moat claude ./my-project -- "explain this codebase"
+
+# Non-interactive with prompt (exits when done)
 moat claude -p "fix the failing tests"
 
 # With GitHub access
@@ -192,7 +204,7 @@ moat claude plugins list [path]
 Run OpenAI Codex CLI in a container.
 
 ```
-moat codex [workspace] [flags]
+moat codex [workspace] [flags] [-- initial-prompt]
 ```
 
 In addition to the command-specific flags below, `moat codex` accepts all [common agent flags](#common-agent-flags).
@@ -202,6 +214,7 @@ In addition to the command-specific flags below, `moat codex` accepts all [commo
 | Argument | Description |
 |----------|-------------|
 | `workspace` | Workspace directory (default: current directory) |
+| `initial-prompt` | Text after `--` is passed to Codex as an initial prompt (interactive mode) |
 
 ### Command-specific flags
 
@@ -219,7 +232,11 @@ moat codex
 # In specific directory
 moat codex ./my-project
 
-# Non-interactive with prompt
+# Interactive with initial prompt (Codex stays open)
+moat codex -- "testing"
+moat codex ./my-project -- "explain this codebase"
+
+# Non-interactive with prompt (exits when done)
 moat codex -p "explain this codebase"
 moat codex -p "fix the bug in main.py"
 

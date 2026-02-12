@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -43,7 +44,11 @@ Examples:
   # Start Claude Code in a specific project
   moat claude ./my-project
 
-  # Ask Claude to do something specific (non-interactive)
+  # Start with an initial prompt (interactive - Claude stays open)
+  moat claude -- "is this thing on?"
+  moat claude ./my-project -- "explain this codebase"
+
+  # Ask Claude to do something specific (non-interactive - exits when done)
   moat claude -p "explain this codebase"
   moat claude -p "fix the bug in main.py"
 
@@ -63,7 +68,7 @@ Examples:
   moat claude --noyolo
 
 Use 'moat list' to see running and recent runs.`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: runClaudeCode,
 	}
 
@@ -87,9 +92,24 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Determine workspace
+	// Separate workspace arg from initial prompt args.
+	// Everything after "--" is passed as an initial prompt to Claude.
+	//   moat claude -- "is this thing on?"          → workspace=".", prompt="is this thing on?"
+	//   moat claude ./project -- "explain this"     → workspace="./project", prompt="explain this"
+	//   moat claude ./project                       → workspace="./project", no prompt
+	var initialPrompt string
 	workspace := "."
-	if len(args) > 0 {
+	dashIdx := cmd.ArgsLenAtDash()
+	if dashIdx >= 0 {
+		// Args before "--" are moat args (workspace), after are passthrough
+		if dashIdx > 0 {
+			workspace = args[0]
+		}
+		passthroughArgs := args[dashIdx:]
+		if len(passthroughArgs) > 0 {
+			initialPrompt = strings.Join(passthroughArgs, " ")
+		}
+	} else if len(args) > 0 {
 		workspace = args[0]
 	}
 
@@ -148,6 +168,10 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 
 	if claudePromptFlag != "" {
 		containerCmd = append(containerCmd, "-p", claudePromptFlag)
+	}
+
+	if initialPrompt != "" {
+		containerCmd = append(containerCmd, initialPrompt)
 	}
 
 	// Use name from flag, or config, or let manager generate one
