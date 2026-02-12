@@ -270,6 +270,9 @@ func TestDecodeKeyWrongLength(t *testing.T) {
 }
 
 func TestKeychainBackend(t *testing.T) {
+	// Isolate from production keychain entry
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test-keychain-backend")
+
 	backend := &keychainBackend{}
 
 	// Generate a test key
@@ -414,6 +417,10 @@ func TestDefaultKeyFilePath(t *testing.T) {
 }
 
 func TestDeleteKey(t *testing.T) {
+	// Isolate from production key — without this, running unit tests
+	// deletes the real encryption key and breaks all existing credentials.
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test-delete-key")
+
 	// Create a key first
 	_, err := GetOrCreateKey()
 	if err != nil {

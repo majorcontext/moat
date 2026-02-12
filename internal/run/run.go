@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/id"
+	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
@@ -226,6 +227,54 @@ func (r *Run) SetStateWithTime(state State, timestamp time.Time) {
 	} else if state == StateStopped || state == StateFailed {
 		r.StoppedAt = timestamp
 	}
+}
+
+// validateGrants checks that all requested grants have credentials available.
+// Returns an error with actionable fix commands if any are missing.
+//
+// Some grant types are validated by their own specialized code paths and are
+// skipped here:
+//   - "ssh" / "ssh:<host>" — validated by the SSH agent setup in Create()
+//   - "mcp-*" — validated by validateMCPGrants
+//
+// For all other grants, we check that (1) the provider is registered and
+// (2) the credential exists and can be decrypted from the store.
+func validateGrants(grants []string, store *credential.FileStore) error {
+	var errs []string
+	for _, grant := range grants {
+		grantName := strings.Split(grant, ":")[0]
+
+		// Skip grants validated by dedicated code paths
+		if grantName == "ssh" || strings.HasPrefix(grantName, "mcp-") {
+			continue
+		}
+
+		// Check provider exists in registry (catches typos)
+		if provider.Get(grantName) == nil {
+			errs = append(errs, fmt.Sprintf("  - %s: unknown provider (available: %s)",
+				grantName, strings.Join(provider.Names(), ", ")))
+			continue
+		}
+
+		// Check credential exists and can be decrypted
+		_, err := store.Get(credential.Provider(grantName))
+		if err != nil {
+			errMsg := err.Error()
+			switch {
+			case strings.Contains(errMsg, "credential not found"):
+				errs = append(errs, fmt.Sprintf("  - %s: not configured\n    Run: moat grant %s", grantName, grantName))
+			case strings.Contains(errMsg, "decrypting credential"):
+				errs = append(errs, fmt.Sprintf("  - %s: encryption key changed\n    Run: moat grant %s", grantName, grantName))
+			default:
+				errs = append(errs, fmt.Sprintf("  - %s: %v\n    Run: moat grant %s", grantName, err, grantName))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("missing grants:\n%s\n\nConfigure the grants above, then run again.",
+			strings.Join(errs, "\n"))
+	}
+	return nil
 }
 
 // validateMCPGrants checks that all required MCP grants exist.
