@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -17,13 +18,15 @@ var (
 )
 
 var logsCmd = &cobra.Command{
-	Use:   "logs [run-id]",
+	Use:   "logs [run]",
 	Short: "View logs from a run",
-	Long: `View logs from a run. If no run-id is specified, shows logs from the most recent run.
+	Long: `View logs from a run. Accepts a run ID or name.
+If no argument is specified, shows logs from the most recent run.
 
 Examples:
   moat logs                    # Logs from most recent run
-  moat logs run_a1b2c3d4e5f6       # Logs from specific run
+  moat logs my-agent           # Logs from run by name
+  moat logs run_a1b2c3d4e5f6   # Logs from specific run
   moat logs -f                 # Follow logs (like tail -f)
   moat logs -n 50              # Show last 50 lines`,
 	Args: cobra.MaximumNArgs(1),
@@ -41,7 +44,17 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	var runID string
 	if len(args) > 0 {
-		runID = args[0]
+		// Use manager to resolve name or ID
+		manager, err := run.NewManager()
+		if err != nil {
+			return fmt.Errorf("creating run manager: %w", err)
+		}
+		defer manager.Close()
+
+		runID, err = resolveRunArgSingle(manager, args[0])
+		if err != nil {
+			return err
+		}
 	} else {
 		// Find most recent run
 		var err error

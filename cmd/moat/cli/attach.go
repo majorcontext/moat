@@ -33,9 +33,12 @@ var (
 )
 
 var attachCmd = &cobra.Command{
-	Use:   "attach <run-id>",
+	Use:   "attach <run>",
 	Short: "Attach to a running agent",
 	Long: `Attach local stdin, stdout, and stderr to a running agent.
+
+Accepts a run ID or name. If a name matches multiple runs, you must
+specify the run ID.
 
 By default, attaches in the same mode the run was started with:
   - If the run was started with -i, attach will use interactive mode
@@ -53,7 +56,8 @@ Interactive mode (-i):
   Ctrl+C            Sent to container process
 
 Examples:
-  # Attach to see output (or interactive if run was started with -i)
+  # Attach by name or ID
+  moat attach my-agent
   moat attach run_a1b2c3d4e5f6
 
   # Force interactive mode
@@ -72,14 +76,18 @@ func init() {
 }
 
 func attachToRun(cmd *cobra.Command, args []string) error {
-	runID := args[0]
-
 	// Create manager
 	manager, err := run.NewManager()
 	if err != nil {
 		return fmt.Errorf("creating run manager: %w", err)
 	}
 	defer manager.Close()
+
+	// Resolve argument to a single run
+	runID, err := resolveRunArgSingle(manager, args[0])
+	if err != nil {
+		return err
+	}
 
 	// Verify run exists and is running
 	r, err := manager.Get(runID)

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
@@ -20,19 +21,20 @@ var (
 )
 
 var snapshotCmd = &cobra.Command{
-	Use:   "snapshot <run-id>",
+	Use:   "snapshot <run>",
 	Short: "Create and manage workspace snapshots",
 	Long: `Create and manage workspace snapshots.
 
-When called with a run ID, creates a manual snapshot of the workspace.
-Use subcommands to list, prune, or restore snapshots.
+Accepts a run ID or name. When called with an argument, creates a manual
+snapshot of the workspace. Use subcommands to list, prune, or restore snapshots.
 
 Examples:
-  moat snapshot run_a1b2c3d4e5f6                            # Create snapshot
-  moat snapshot run_a1b2c3d4e5f6 --label "before refactor"  # Create with label
-  moat snapshot list run_a1b2c3d4e5f6                        # List snapshots
-  moat snapshot prune run_a1b2c3d4e5f6                       # Prune old snapshots
-  moat snapshot restore run_a1b2c3d4e5f6                     # Restore most recent`,
+  moat snapshot my-agent                                     # Create snapshot by name
+  moat snapshot run_a1b2c3d4e5f6                             # Create snapshot by ID
+  moat snapshot run_a1b2c3d4e5f6 --label "before refactor"   # Create with label
+  moat snapshot list run_a1b2c3d4e5f6                         # List snapshots
+  moat snapshot prune run_a1b2c3d4e5f6                        # Prune old snapshots
+  moat snapshot restore run_a1b2c3d4e5f6                      # Restore most recent`,
 	Args: cobra.ExactArgs(1),
 	RunE: createSnapshot,
 }
@@ -105,13 +107,26 @@ func init() {
 	snapshotRestoreCmd.Flags().StringVar(&snapshotRestoreTo, "to", "", "extract snapshot to a different directory instead of restoring in-place")
 }
 
+// resolveSnapshotRunID resolves a run argument for snapshot commands.
+func resolveSnapshotRunID(arg string) (string, error) {
+	manager, err := run.NewManager()
+	if err != nil {
+		return "", fmt.Errorf("creating run manager: %w", err)
+	}
+	defer manager.Close()
+	return resolveRunArgSingle(manager, arg)
+}
+
 func createSnapshot(cmd *cobra.Command, args []string) error {
-	runID := args[0]
+	runID, err := resolveSnapshotRunID(args[0])
+	if err != nil {
+		return err
+	}
 	baseDir := storage.DefaultBaseDir()
 	runDir := filepath.Join(baseDir, runID)
 
 	// Check if run directory exists
-	if _, err := os.Stat(runDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(runDir); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)
 	}
 
@@ -151,12 +166,15 @@ func createSnapshot(cmd *cobra.Command, args []string) error {
 }
 
 func listSnapshots(cmd *cobra.Command, args []string) error {
-	runID := args[0]
+	runID, err := resolveSnapshotRunID(args[0])
+	if err != nil {
+		return err
+	}
 	baseDir := storage.DefaultBaseDir()
 	runDir := filepath.Join(baseDir, runID)
 
 	// Check if run directory exists
-	if _, err := os.Stat(runDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(runDir); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)
 	}
 
@@ -224,12 +242,15 @@ func listSnapshots(cmd *cobra.Command, args []string) error {
 }
 
 func pruneSnapshots(cmd *cobra.Command, args []string) error {
-	runID := args[0]
+	runID, err := resolveSnapshotRunID(args[0])
+	if err != nil {
+		return err
+	}
 	baseDir := storage.DefaultBaseDir()
 	runDir := filepath.Join(baseDir, runID)
 
 	// Check if run directory exists
-	if _, err := os.Stat(runDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(runDir); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)
 	}
 
@@ -344,12 +365,15 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 }
 
 func runSnapshotRestore(cmd *cobra.Command, args []string) error {
-	runID := args[0]
+	runID, err := resolveSnapshotRunID(args[0])
+	if err != nil {
+		return err
+	}
 	baseDir := storage.DefaultBaseDir()
 	runDir := filepath.Join(baseDir, runID)
 
 	// Check if run directory exists
-	if _, err := os.Stat(runDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(runDir); os.IsNotExist(statErr) {
 		return fmt.Errorf("run not found: %s", runID)
 	}
 

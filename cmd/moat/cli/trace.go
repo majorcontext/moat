@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -16,13 +17,15 @@ var (
 )
 
 var traceCmd = &cobra.Command{
-	Use:   "trace [run-id]",
+	Use:   "trace [run]",
 	Short: "View trace spans from a run",
-	Long: `View trace spans from a run. If no run-id is specified, shows traces from the most recent run.
+	Long: `View trace spans from a run. Accepts a run ID or name.
+If no argument is specified, shows traces from the most recent run.
 
 Examples:
   moat trace                   # Traces from most recent run
-  moat trace run_a1b2c3d4e5f6      # Traces from specific run
+  moat trace my-agent          # Traces from run by name
+  moat trace run_a1b2c3d4e5f6  # Traces from specific run
   moat trace --network         # Show network requests
   moat trace --network -v      # Show network requests with headers and bodies
   moat trace --json            # Output as JSON`,
@@ -41,7 +44,17 @@ func runTrace(cmd *cobra.Command, args []string) error {
 
 	var runID string
 	if len(args) > 0 {
-		runID = args[0]
+		// Use manager to resolve name or ID
+		manager, err := run.NewManager()
+		if err != nil {
+			return fmt.Errorf("creating run manager: %w", err)
+		}
+		defer manager.Close()
+
+		runID, err = resolveRunArgSingle(manager, args[0])
+		if err != nil {
+			return err
+		}
 	} else {
 		var err error
 		runID, err = findLatestRun(baseDir)
