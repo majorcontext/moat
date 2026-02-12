@@ -251,7 +251,7 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 
 		// Check provider exists in registry (catches typos)
 		if provider.Get(grantName) == nil {
-			errs = append(errs, fmt.Sprintf("  - grant %q is not recognized (available: %s)",
+			errs = append(errs, fmt.Sprintf("  - %s: unknown provider (available: %s)",
 				grantName, strings.Join(provider.Names(), ", ")))
 			continue
 		}
@@ -259,7 +259,15 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 		// Check credential exists and can be decrypted
 		_, err := store.Get(credential.Provider(grantName))
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("  - grant %q: %v", grantName, err))
+			errMsg := err.Error()
+			switch {
+			case strings.Contains(errMsg, "credential not found"):
+				errs = append(errs, fmt.Sprintf("  - %s: not configured\n    Run: moat grant %s", grantName, grantName))
+			case strings.Contains(errMsg, "decrypting credential"):
+				errs = append(errs, fmt.Sprintf("  - %s: encryption key changed\n    Run: moat grant %s", grantName, grantName))
+			default:
+				errs = append(errs, fmt.Sprintf("  - %s: %v\n    Run: moat grant %s", grantName, err, grantName))
+			}
 		}
 	}
 	if len(errs) > 0 {

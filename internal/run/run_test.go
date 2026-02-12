@@ -201,19 +201,19 @@ func TestValidateGrants(t *testing.T) {
 			name:    "missing grant",
 			grants:  []string{"claude"},
 			wantErr: true,
-			errMsg:  "credential not found: claude",
+			errMsg:  "claude: not configured",
 		},
 		{
 			name:    "unrecognized provider",
 			grants:  []string{"nonexistent"},
 			wantErr: true,
-			errMsg:  "not recognized",
+			errMsg:  "unknown provider",
 		},
 		{
 			name:    "aws grant with role syntax",
 			grants:  []string{"aws:arn:aws:iam::123456:role/MyRole"},
 			wantErr: true,
-			errMsg:  "credential not found: aws",
+			errMsg:  "aws: not configured",
 		},
 		{
 			name:    "multiple grants one missing",
@@ -265,7 +265,7 @@ func TestValidateGrants(t *testing.T) {
 	}
 }
 
-func TestValidateGrantsErrorShowsProviderName(t *testing.T) {
+func TestValidateGrantsErrorFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	credDir := filepath.Join(tmpDir, "credentials")
 	os.MkdirAll(credDir, 0700)
@@ -279,9 +279,14 @@ func TestValidateGrantsErrorShowsProviderName(t *testing.T) {
 		t.Fatal("expected error for missing github grant")
 	}
 
-	// Error should identify the provider
-	if !strings.Contains(err.Error(), "github") {
-		t.Errorf("error should mention provider name, got: %s", err.Error())
+	msg := err.Error()
+	// Should show clean "not configured" message, not raw store error
+	if !strings.Contains(msg, "github: not configured") {
+		t.Errorf("error should say 'not configured', got: %s", msg)
+	}
+	// Should include fix command
+	if !strings.Contains(msg, "moat grant github") {
+		t.Errorf("error should include fix command, got: %s", msg)
 	}
 }
 
@@ -310,12 +315,13 @@ func TestValidateGrantsDecryptionFailure(t *testing.T) {
 		t.Fatal("expected error for credential encrypted with different key")
 	}
 
-	// Error should surface the decryption failure with re-auth hint
-	if !strings.Contains(err.Error(), "decrypting credential") {
-		t.Errorf("error should mention decryption failure, got: %s", err.Error())
+	msg := err.Error()
+	// Should show clean "encryption key changed" message, not raw cipher error
+	if !strings.Contains(msg, "encryption key changed") {
+		t.Errorf("error should mention key change, got: %s", msg)
 	}
-	if !strings.Contains(err.Error(), "moat grant github") {
-		t.Errorf("error should include re-auth command, got: %s", err.Error())
+	if !strings.Contains(msg, "moat grant github") {
+		t.Errorf("error should include fix command, got: %s", msg)
 	}
 }
 
