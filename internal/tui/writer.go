@@ -140,9 +140,12 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// For Apple containers, detect the ready marker and clear screen
+	// For Apple containers, buffer data to detect the ready marker.
+	// When found, the screen is cleared to remove the startup spinner.
+	// Data processing (alt screen detection, footer redraws) always runs
+	// below regardless of init state — this ensures the footer works even
+	// if the marker is delayed or never arrives.
 	if w.runtime == "apple" && !w.initialized {
-		// Buffer data up to maxInitBuffer to detect the ready marker
 		if len(w.buffer) < maxInitBuffer {
 			remaining := maxInitBuffer - len(w.buffer)
 			if len(p) <= remaining {
@@ -151,19 +154,6 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 				w.buffer = append(w.buffer, p[:remaining]...)
 			}
 		}
-
-		// Pass through the output
-		_, err = w.out.Write(p)
-
-		// Check if we've seen the ready marker
-		if bytes.Contains(w.buffer, []byte(appleContainerReadyMarker)) {
-			w.initialized = true
-			// Clear screen and re-setup scroll region to clear the spinner
-			_ = w.setupScrollRegionLocked()
-			// Clear buffer - no longer needed
-			w.buffer = nil
-		}
-		return len(p), err
 	}
 
 	// Prepend any buffered partial escape sequence from previous Write
@@ -179,6 +169,27 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 
 	// Process data, scanning for alt screen transitions
 	err = w.processDataLocked(data)
+
+	// For Apple containers, check if we've seen the ready marker.
+	// This runs after processDataLocked so the startup output is written
+	// to the terminal before the screen is cleared.
+	if w.runtime == "apple" && !w.initialized {
+		if bytes.Contains(w.buffer, []byte(appleContainerReadyMarker)) {
+			w.initialized = true
+			// Clear screen and re-setup scroll region to remove the spinner.
+			// Skip if in alt screen since the spinner is on the main screen.
+			if !w.altScreen {
+				_ = w.setupScrollRegionLocked()
+			}
+			w.buffer = nil
+		} else if len(w.buffer) >= maxInitBuffer {
+			// Buffer full without marker — give up waiting.
+			// The footer still works because processDataLocked and
+			// scheduleFooterRedrawLocked run on every Write regardless.
+			w.initialized = true
+			w.buffer = nil
+		}
+	}
 
 	// In scroll mode, schedule a debounced footer redraw. The child process
 	// can clobber the footer by resetting the scroll region, clearing the screen,

@@ -667,6 +667,136 @@ func TestWriter_RapidModeSwitch(t *testing.T) {
 	w.Cleanup()
 }
 
+func TestWriter_Apple_FooterRedrawDuringInit(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "apple")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "apple")
+	_ = w.Setup()
+	buf.Reset()
+
+	// During init phase (before marker), writes should still schedule
+	// footer redraws. This is the key fix — previously, the init phase
+	// returned early and never called scheduleFooterRedrawLocked.
+	_, err := w.Write([]byte("⠼ Starting container [0s]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify debounce timer was set
+	w.mu.Lock()
+	hasTimer := w.footerTimer != nil
+	w.mu.Unlock()
+
+	if !hasTimer {
+		t.Error("expected footer debounce timer to be set during init phase")
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_Apple_AltScreenDuringInit(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "apple")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "apple")
+	_ = w.Setup()
+	buf.Reset()
+
+	// If alt screen enter arrives during init phase (before marker),
+	// it should be detected and compositor mode activated.
+	_, err := w.Write([]byte("\x1b[?1049h"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	hasEmu := w.emulator != nil
+	initialized := w.initialized
+	w.mu.Unlock()
+
+	if !inAlt {
+		t.Error("expected altScreen=true during init phase")
+	}
+	if !hasEmu {
+		t.Error("expected emulator during init phase")
+	}
+	if initialized {
+		t.Error("expected initialized=false (marker not yet seen)")
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_Apple_FooterWorksWithoutMarker(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "apple")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "apple")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Write data without ever sending the ready marker.
+	// The footer should still work because processDataLocked and
+	// scheduleFooterRedrawLocked run on every Write.
+	_, _ = w.Write([]byte("some output\n"))
+	_, _ = w.Write([]byte("more output\n"))
+
+	w.mu.Lock()
+	hasTimer := w.footerTimer != nil
+	initialized := w.initialized
+	w.mu.Unlock()
+
+	if hasTimer == false {
+		t.Error("expected footer timer to be set even without marker")
+	}
+	if initialized {
+		t.Error("expected initialized=false without marker")
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_Apple_BufferFullFallback(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "apple")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "apple")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Fill buffer past maxInitBuffer without the ready marker.
+	// Writer should give up waiting and set initialized=true.
+	largeData := make([]byte, maxInitBuffer+1000)
+	for i := range largeData {
+		largeData[i] = 'x'
+	}
+
+	_, err := w.Write(largeData)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.mu.Lock()
+	initialized := w.initialized
+	bufNil := w.buffer == nil
+	w.mu.Unlock()
+
+	if !initialized {
+		t.Error("expected initialized=true after buffer full")
+	}
+	if !bufNil {
+		t.Error("expected buffer to be cleared after fallback")
+	}
+
+	w.Cleanup()
+}
+
 func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
