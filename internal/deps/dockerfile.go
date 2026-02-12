@@ -42,6 +42,10 @@ type DockerfileOptions struct {
 	// the moat-init entrypoint script.
 	NeedsGeminiInit bool
 
+	// NeedsFirewall indicates that iptables is needed for strict network
+	// policy enforcement. When false, iptables is omitted from base packages.
+	NeedsFirewall bool
+
 	// UseBuildKit enables BuildKit-specific features like cache mounts.
 	// When false, generates Dockerfiles compatible with the legacy builder.
 	// Defaults to true if not explicitly set (checked via useBuildKit method).
@@ -238,10 +242,14 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 	b.WriteString("FROM " + baseImage + "\n\n")
 	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
 
+	// Add iptables when firewall is needed
+	if opts.NeedsFirewall {
+		c.aptPkgs = append(c.aptPkgs, "iptables")
+	}
+
 	// Write all sections
-	writeBasePackages(&b, opts.useBuildKit())
+	writeAllAptPackages(&b, c.aptPkgs, opts.useBuildKit())
 	writeUserSetup(&b)
-	writeAptPackages(&b, c.aptPkgs, opts.useBuildKit())
 	writeDockerCLI(&b, c.dockerMode)
 	writeRuntimes(&b, c.runtimes, baseRuntime)
 	writeGithubBinaries(&b, c.githubBins)
@@ -299,10 +307,19 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 	return defaultBaseImage, nil
 }
 
-// writeBasePackages writes the base package installation.
+// baseAptPackages are always installed regardless of user configuration.
+// iptables is NOT included here; it is added conditionally via NeedsFirewall.
+var baseAptPackages = []string{"ca-certificates", "curl", "gnupg", "gosu", "unzip"}
+
+// writeAllAptPackages writes a single apt-get install layer combining base and user packages.
 // Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
-func writeBasePackages(b *strings.Builder, useBuildKit bool) {
-	b.WriteString("# Base packages\n")
+func writeAllAptPackages(b *strings.Builder, userPkgs []string, useBuildKit bool) {
+	allPkgs := make([]string, 0, len(baseAptPackages)+len(userPkgs))
+	allPkgs = append(allPkgs, baseAptPackages...)
+	allPkgs = append(allPkgs, userPkgs...)
+	sort.Strings(allPkgs)
+
+	b.WriteString("# System packages\n")
 	if useBuildKit {
 		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
 		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
@@ -311,13 +328,17 @@ func writeBasePackages(b *strings.Builder, useBuildKit bool) {
 		b.WriteString("RUN apt-get update \\\n")
 	}
 	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
-	b.WriteString("       ca-certificates \\\n")
-	b.WriteString("       curl \\\n")
-	b.WriteString("       gnupg \\\n")
-	b.WriteString("       gosu \\\n")
-	b.WriteString("       iptables \\\n")
-	b.WriteString("       unzip \\\n")
-	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+	for i, pkg := range allPkgs {
+		// Omit trailing backslash on last package when using BuildKit (no cleanup command follows).
+		if i < len(allPkgs)-1 || !useBuildKit {
+			b.WriteString("       " + pkg + " \\\n")
+		} else {
+			b.WriteString("       " + pkg + "\n\n")
+		}
+	}
+	if !useBuildKit {
+		b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
+	}
 }
 
 // writeUserSetup writes the non-root user creation commands.
@@ -331,28 +352,6 @@ func writeUserSetup(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("    useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
 	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects && \\\n", containerUser))
 	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))
-}
-
-// writeAptPackages writes user-specified apt package installation.
-// Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
-func writeAptPackages(b *strings.Builder, pkgs []string, useBuildKit bool) {
-	if len(pkgs) == 0 {
-		return
-	}
-	sort.Strings(pkgs)
-	b.WriteString("# Apt packages\n")
-	if useBuildKit {
-		b.WriteString("RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n")
-		b.WriteString("    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n")
-		b.WriteString("    apt-get update \\\n")
-	} else {
-		b.WriteString("RUN apt-get update \\\n")
-	}
-	b.WriteString("    && apt-get install -y --no-install-recommends \\\n")
-	for _, pkg := range pkgs {
-		b.WriteString("       " + pkg + " \\\n")
-	}
-	b.WriteString("    && rm -rf /var/lib/apt/lists/*\n\n")
 }
 
 // writeDockerCLI installs Docker CLI from Docker's official repository.

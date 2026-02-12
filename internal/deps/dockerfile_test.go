@@ -64,7 +64,21 @@ func TestGenerateDockerfileEmpty(t *testing.T) {
 }
 
 func TestGenerateDockerfileHasIptables(t *testing.T) {
-	// Verify iptables is installed in base packages for firewall support
+	// Verify iptables is installed when NeedsFirewall is true
+	deps := []Dependency{
+		{Name: "python", Version: "3.11"},
+	}
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsFirewall: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "iptables") {
+		t.Errorf("Dockerfile should install iptables when NeedsFirewall is true.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+}
+
+func TestGenerateDockerfileNoIptablesWithoutFirewall(t *testing.T) {
+	// Verify iptables is NOT installed when NeedsFirewall is false (default)
 	deps := []Dependency{
 		{Name: "python", Version: "3.11"},
 	}
@@ -72,8 +86,59 @@ func TestGenerateDockerfileHasIptables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	if !strings.Contains(result.Dockerfile, "iptables") {
-		t.Errorf("Dockerfile should install iptables for firewall support.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	if strings.Contains(result.Dockerfile, "iptables") {
+		t.Errorf("Dockerfile should NOT install iptables when NeedsFirewall is false.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+}
+
+func TestGenerateDockerfileMergedAptPackages(t *testing.T) {
+	// Verify base and user apt packages are merged into a single layer
+	deps := []Dependency{
+		{Name: "git"},
+		{Name: "psql"},
+	}
+	result, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	// Should have exactly one apt-get update
+	count := strings.Count(result.Dockerfile, "apt-get update")
+	if count != 1 {
+		t.Errorf("Dockerfile should have exactly 1 apt-get update, got %d.\nGenerated Dockerfile:\n%s", count, result.Dockerfile)
+	}
+	// Base packages and user packages should be in the same section
+	if !strings.Contains(result.Dockerfile, "ca-certificates") {
+		t.Error("Dockerfile should include base package ca-certificates")
+	}
+	if !strings.Contains(result.Dockerfile, "git") {
+		t.Error("Dockerfile should include user package git")
+	}
+	if !strings.Contains(result.Dockerfile, "postgresql-client") {
+		t.Error("Dockerfile should include user package postgresql-client")
+	}
+}
+
+func TestGenerateDockerfileBuildKitNoAptCleanup(t *testing.T) {
+	// Verify rm -rf /var/lib/apt/lists/* is NOT present when BuildKit is enabled
+	useBuildKit := true
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{UseBuildKit: &useBuildKit})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if strings.Contains(result.Dockerfile, "rm -rf /var/lib/apt/lists") {
+		t.Error("Dockerfile should NOT have apt lists cleanup when BuildKit is enabled")
+	}
+}
+
+func TestGenerateDockerfileNoBuildKitHasAptCleanup(t *testing.T) {
+	// Verify rm -rf /var/lib/apt/lists/* IS present when BuildKit is disabled
+	useBuildKit := false
+	result, err := GenerateDockerfile(nil, &DockerfileOptions{UseBuildKit: &useBuildKit})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "rm -rf /var/lib/apt/lists") {
+		t.Error("Dockerfile should have apt lists cleanup when BuildKit is disabled")
 	}
 }
 

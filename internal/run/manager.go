@@ -1194,6 +1194,7 @@ region = %s
 			NeedsClaudeInit:    needsClaudeInit,
 			NeedsCodexInit:     needsCodexInit,
 			NeedsGeminiInit:    needsGeminiInit,
+			NeedsFirewall:      needsProxyForFirewall,
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
