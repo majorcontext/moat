@@ -79,3 +79,77 @@ func BasePath() string {
 func Path(repoID, branch string) string {
 	return filepath.Join(BasePath(), repoID, branch)
 }
+
+// GitDirInfo holds the resolved git directory paths for a worktree workspace.
+type GitDirInfo struct {
+	// MainGitDir is the absolute path to the main .git directory (shared objects, refs).
+	MainGitDir string
+	// WorktreeGitDir is the absolute path to the worktree-specific git dir
+	// (e.g., main-repo/.git/worktrees/<branch>). Always a subdirectory of MainGitDir.
+	WorktreeGitDir string
+}
+
+// ResolveGitDir detects whether workspace is a git worktree and returns
+// the paths needed to make git operations work inside a container.
+// Returns (nil, nil) if workspace is not a worktree (regular repo or no .git).
+func ResolveGitDir(workspace string) (*GitDirInfo, error) {
+	dotGit := filepath.Join(workspace, ".git")
+
+	fi, err := os.Lstat(dotGit)
+	if err != nil {
+		// No .git at all — not a git repo or bare checkout
+		return nil, nil
+	}
+	if fi.IsDir() {
+		// Regular repo with .git directory — not a worktree
+		return nil, nil
+	}
+
+	// .git is a file — this is a worktree. Parse the gitdir reference.
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return nil, fmt.Errorf("reading .git file: %w", err)
+	}
+
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir: ") {
+		return nil, fmt.Errorf("unexpected .git file content: %q", line)
+	}
+	gitdir := strings.TrimPrefix(line, "gitdir: ")
+
+	// Resolve relative paths against the workspace directory
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(workspace, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+
+	// Resolve the main .git directory via commondir file
+	mainGitDir := resolveMainGitDir(gitdir)
+
+	// Validate the main .git directory
+	if _, err := os.Stat(filepath.Join(mainGitDir, "HEAD")); err != nil {
+		return nil, fmt.Errorf("main git dir missing HEAD: %w", err)
+	}
+
+	return &GitDirInfo{
+		MainGitDir:     mainGitDir,
+		WorktreeGitDir: gitdir,
+	}, nil
+}
+
+// resolveMainGitDir finds the main .git directory from a worktree gitdir path.
+// It reads the commondir file if present, otherwise falls back to ../../ relative to gitdir.
+func resolveMainGitDir(gitdir string) string {
+	commondirFile := filepath.Join(gitdir, "commondir")
+	data, err := os.ReadFile(commondirFile)
+	if err == nil {
+		commondir := strings.TrimSpace(string(data))
+		if !filepath.IsAbs(commondir) {
+			commondir = filepath.Join(gitdir, commondir)
+		}
+		return filepath.Clean(commondir)
+	}
+
+	// Fallback: worktree gitdirs are typically at <main>/.git/worktrees/<branch>
+	return filepath.Clean(filepath.Join(gitdir, "..", ".."))
+}

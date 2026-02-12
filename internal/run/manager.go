@@ -42,6 +42,7 @@ import (
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
+	"github.com/majorcontext/moat/internal/worktree"
 )
 
 // Timing constants for run lifecycle operations.
@@ -320,6 +321,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Target:   "/workspace",
 		ReadOnly: false,
 	})
+
+	// If workspace is a git worktree, mount the main .git directory so git
+	// operations work inside the container. The .git file in worktrees contains
+	// an absolute host path; mounting the main .git at that same path makes
+	// the reference resolve as-is.
+	if info, err := worktree.ResolveGitDir(opts.Workspace); err != nil {
+		log.Debug("failed to resolve worktree git dir", "error", err)
+	} else if info != nil {
+		mounts = append(mounts, container.MountConfig{
+			Source:   info.MainGitDir,
+			Target:   info.MainGitDir,
+			ReadOnly: false,
+		})
+		log.Debug("mounted main git dir for worktree", "path", info.MainGitDir)
+	}
 
 	// Add mounts from config
 	if opts.Config != nil {
