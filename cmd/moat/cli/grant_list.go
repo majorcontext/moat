@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/majorcontext/moat/internal/credential"
@@ -45,7 +46,10 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing credentials: %w", err)
 	}
 
-	if len(creds) == 0 {
+	// Load SSH mappings (stored separately from .enc credentials)
+	sshMappings, _ := store.GetSSHMappings()
+
+	if len(creds) == 0 && len(sshMappings) == 0 {
 		// Check if there are .enc files that couldn't be decrypted
 		if hasUnreadableCredentials(credential.DefaultStoreDir()) {
 			ui.Warn("Found encrypted credential files that cannot be decrypted.")
@@ -71,12 +75,19 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 			Type      string `json:"type"`
 			GrantedAt string `json:"granted_at"`
 		}
-		out := make([]jsonCred, 0, len(creds))
+		out := make([]jsonCred, 0, len(creds)+len(sshMappings))
 		for _, c := range creds {
 			out = append(out, jsonCred{
 				Provider:  string(c.Provider),
 				Type:      credType(c),
 				GrantedAt: c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			})
+		}
+		for _, m := range sshMappings {
+			out = append(out, jsonCred{
+				Provider:  "ssh:" + m.Host,
+				Type:      "key",
+				GrantedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			})
 		}
 		return json.NewEncoder(os.Stdout).Encode(out)
@@ -89,6 +100,13 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 			c.Provider,
 			credType(c),
 			formatAge(c.CreatedAt),
+		)
+	}
+	for _, m := range sshMappings {
+		fmt.Fprintf(w, "ssh:%s\tkey (%s)\t%s\n",
+			m.Host,
+			shortFingerprint(m.KeyFingerprint),
+			formatAge(m.CreatedAt),
 		)
 	}
 	w.Flush()
@@ -119,8 +137,21 @@ func credType(c credential.Credential) string {
 		}
 		return "registry"
 	default:
+		if strings.HasPrefix(string(c.Provider), "mcp-") {
+			return "mcp"
+		}
 		return "token"
 	}
+}
+
+// shortFingerprint abbreviates an SSH key fingerprint for display.
+func shortFingerprint(fp string) string {
+	// "SHA256:abc...xyz" → "SHA256:abc...xyz" (already short enough usually)
+	// Truncate very long fingerprints
+	if len(fp) > 20 {
+		return fp[:20] + "..."
+	}
+	return fp
 }
 
 // npmRegistryCount returns the number of registry entries in an npm credential token.
