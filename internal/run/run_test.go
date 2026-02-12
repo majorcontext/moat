@@ -158,6 +158,167 @@ func TestClaudeLogMountTargetUsesRuntimeHome(t *testing.T) {
 	}
 }
 
+func TestValidateGrants(t *testing.T) {
+	// Set up temporary credential store
+	tmpDir := t.TempDir()
+	credDir := filepath.Join(tmpDir, "credentials")
+	os.MkdirAll(credDir, 0700)
+
+	key := make([]byte, 32)
+	rand.Read(key)
+	store, _ := credential.NewFileStore(credDir, key)
+
+	// Save a github credential
+	store.Save(credential.Credential{
+		Provider:  "github",
+		Token:     "ghp_test",
+		CreatedAt: time.Now(),
+	})
+	// Save an MCP credential (no registered provider, store-only)
+	store.Save(credential.Credential{
+		Provider:  "mcp-test",
+		Token:     "mcp-token",
+		CreatedAt: time.Now(),
+	})
+
+	tests := []struct {
+		name    string
+		grants  []string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "no grants",
+			grants:  nil,
+			wantErr: false,
+		},
+		{
+			name:    "valid grant exists",
+			grants:  []string{"github"},
+			wantErr: false,
+		},
+		{
+			name:    "missing grant",
+			grants:  []string{"claude"},
+			wantErr: true,
+			errMsg:  "credential not found: claude",
+		},
+		{
+			name:    "unrecognized provider",
+			grants:  []string{"nonexistent"},
+			wantErr: true,
+			errMsg:  "not recognized",
+		},
+		{
+			name:    "aws grant with role syntax",
+			grants:  []string{"aws:arn:aws:iam::123456:role/MyRole"},
+			wantErr: true,
+			errMsg:  "credential not found: aws",
+		},
+		{
+			name:    "multiple grants one missing",
+			grants:  []string{"github", "claude"},
+			wantErr: true,
+			errMsg:  "claude",
+		},
+		{
+			name:    "multiple missing grants reports all",
+			grants:  []string{"claude", "aws"},
+			wantErr: true,
+			errMsg:  "Configure the grants above",
+		},
+		{
+			name:    "mcp grant skipped by validateGrants",
+			grants:  []string{"mcp-test"},
+			wantErr: false,
+		},
+		{
+			name:    "mcp grant without credential skipped by validateGrants",
+			grants:  []string{"mcp-missing"},
+			wantErr: false,
+		},
+		{
+			name:    "ssh grant skipped by validateGrants",
+			grants:  []string{"ssh:github.com"},
+			wantErr: false,
+		},
+		{
+			name:    "bare ssh grant skipped by validateGrants",
+			grants:  []string{"ssh"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGrants(tt.grants, store)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("expected error containing %q, got %q", tt.errMsg, err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateGrantsErrorShowsProviderName(t *testing.T) {
+	tmpDir := t.TempDir()
+	credDir := filepath.Join(tmpDir, "credentials")
+	os.MkdirAll(credDir, 0700)
+
+	key := make([]byte, 32)
+	rand.Read(key)
+	store, _ := credential.NewFileStore(credDir, key)
+
+	err := validateGrants([]string{"github"}, store)
+	if err == nil {
+		t.Fatal("expected error for missing github grant")
+	}
+
+	// Error should identify the provider
+	if !strings.Contains(err.Error(), "github") {
+		t.Errorf("error should mention provider name, got: %s", err.Error())
+	}
+}
+
+func TestValidateGrantsDecryptionFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	credDir := filepath.Join(tmpDir, "credentials")
+	os.MkdirAll(credDir, 0700)
+
+	// Create store with one key and save a credential
+	key1 := make([]byte, 32)
+	rand.Read(key1)
+	store1, _ := credential.NewFileStore(credDir, key1)
+	store1.Save(credential.Credential{
+		Provider:  "github",
+		Token:     "ghp_test",
+		CreatedAt: time.Now(),
+	})
+
+	// Open the same store with a different key
+	key2 := make([]byte, 32)
+	rand.Read(key2)
+	store2, _ := credential.NewFileStore(credDir, key2)
+
+	err := validateGrants([]string{"github"}, store2)
+	if err == nil {
+		t.Fatal("expected error for credential encrypted with different key")
+	}
+
+	// Error should surface the decryption failure with re-auth hint
+	if !strings.Contains(err.Error(), "decrypting credential") {
+		t.Errorf("error should mention decryption failure, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "moat grant github") {
+		t.Errorf("error should include re-auth command, got: %s", err.Error())
+	}
+}
+
 func TestValidateMCPGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()

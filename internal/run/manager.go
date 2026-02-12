@@ -269,8 +269,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Validate MCP grants before allocating any resources
-	if opts.Config != nil && len(opts.Config.MCP) > 0 {
+	// Validate grants before allocating any resources (proxy, container, etc.)
+	needsGrantValidation := len(opts.Grants) > 0 || (opts.Config != nil && len(opts.Config.MCP) > 0)
+	if needsGrantValidation {
 		key, keyErr := credential.DefaultEncryptionKey()
 		if keyErr != nil {
 			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
@@ -279,8 +280,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opening credential store: %w", err)
 		}
-		if err := validateMCPGrants(opts.Config, store); err != nil {
+		if err := validateGrants(opts.Grants, store); err != nil {
 			return nil, err
+		}
+		if opts.Config != nil && len(opts.Config.MCP) > 0 {
+			if err := validateMCPGrants(opts.Config, store); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -418,16 +424,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				log.Debug("processing grant", "grant", grant, "providerName", providerName)
 				cred, getErr := store.Get(providerName)
 				if getErr != nil {
-					log.Debug("credential not found in store", "provider", providerName, "error", getErr)
-					continue
+					// Should not happen: validateGrants checks before resource allocation.
+					cleanupProxy(proxyServer)
+					return nil, fmt.Errorf("grant %q: credential not found: %w", grantName, getErr)
 				}
 				// Convert credential for new provider interface
 				provCred := provider.FromLegacy(cred)
 
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")
+				// MCP grants (e.g., "mcp-test") have no registered provider — they are
+				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
 				prov := provider.Get(grantName)
 				if prov == nil {
-					log.Debug("provider not found in registry", "provider", grantName)
+					log.Debug("grant has no registered provider (e.g. MCP grant), skipping proxy config", "grant", grantName)
 					continue
 				}
 				prov.ConfigureProxy(p, provCred)
