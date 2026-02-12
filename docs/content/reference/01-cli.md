@@ -20,6 +20,20 @@ These flags apply to all commands:
 | `--json` | Output in JSON format |
 | `-h`, `--help` | Show help for command |
 
+## Run identification
+
+Commands that operate on a run (`stop`, `destroy`, `attach`, `logs`, `trace`, `audit`, `snapshot`) accept a run ID or a run name:
+
+```bash
+moat stop run_a1b2c3d4e5f6   # by full ID
+moat stop run_a1b2                # by ID prefix
+moat stop my-agent                # by name
+```
+
+Resolution priority: exact ID > ID prefix > exact name.
+
+If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for confirmation while single-target commands (`logs`, `attach`) list the matches and ask you to specify a run ID.
+
 ## Common agent flags
 
 The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the following flags. These flags work identically across `moat claude`, `moat codex`, and `moat gemini`.
@@ -414,14 +428,14 @@ moat wt clean dark-mode
 Attach to a running container.
 
 ```
-moat attach [flags] <run-id>
+moat attach [flags] <run>
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run-id` | Run ID to attach to |
+| `run` | Run ID or name |
 
 ### Flags
 
@@ -435,7 +449,10 @@ By default, uses the run's original mode (interactive or not).
 ### Examples
 
 ```bash
-# Attach with original mode
+# Attach by name
+moat attach my-agent
+
+# Attach by ID
 moat attach run_a1b2c3d4e5f6
 
 # Force interactive
@@ -659,14 +676,14 @@ moat revoke ssh:github.com
 View container logs.
 
 ```
-moat logs [flags] [run-id]
+moat logs [flags] [run]
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run-id` | Run ID (default: most recent) |
+| `run` | Run ID or name (default: most recent) |
 
 ### Flags
 
@@ -680,7 +697,10 @@ moat logs [flags] [run-id]
 # Most recent run
 moat logs
 
-# Specific run
+# By name
+moat logs my-agent
+
+# By ID
 moat logs run_a1b2c3d4e5f6
 
 # Last 50 lines
@@ -694,14 +714,14 @@ moat logs -n 50
 View execution traces and network requests.
 
 ```
-moat trace [flags] [run-id]
+moat trace [flags] [run]
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run-id` | Run ID (default: most recent) |
+| `run` | Run ID or name (default: most recent) |
 
 ### Flags
 
@@ -722,7 +742,8 @@ moat trace --network
 # Network with details
 moat trace --network -v
 
-# Specific run
+# By name or ID
+moat trace --network my-agent
 moat trace --network run_a1b2c3d4e5f6
 ```
 
@@ -733,14 +754,14 @@ moat trace --network run_a1b2c3d4e5f6
 Verify audit log integrity.
 
 ```
-moat audit [flags] <run-id>
+moat audit [flags] <run>
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run-id` | Run ID to audit |
+| `run` | Run ID or name |
 
 ### Flags
 
@@ -751,7 +772,8 @@ moat audit [flags] <run-id>
 ### Examples
 
 ```bash
-# Verify audit log
+# Verify by name or ID
+moat audit my-agent
 moat audit run_a1b2c3d4e5f6
 
 # Export proof bundle
@@ -820,14 +842,16 @@ For image details, use `moat system images`
 Stop a running container.
 
 ```
-moat stop [run-id]
+moat stop [run]
 ```
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run-id` | Run ID (default: most recent running) |
+| `run` | Run ID or name (default: most recent running) |
+
+If a name matches multiple runs, you'll be prompted to confirm stopping all of them.
 
 ### Flags
 
@@ -841,7 +865,10 @@ moat stop [run-id]
 # Stop most recent
 moat stop
 
-# Stop specific run
+# Stop by name
+moat stop my-agent
+
+# Stop by ID
 moat stop run_a1b2c3d4e5f6
 
 # Stop all
@@ -855,12 +882,24 @@ moat stop --all
 Remove a stopped run and its artifacts.
 
 ```
-moat destroy [run-id]
+moat destroy [run]
 ```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `run` | Run ID or name (default: most recent stopped) |
+
+If a name matches multiple runs, you'll be prompted to confirm destroying all of them.
 
 ### Examples
 
 ```bash
+# Destroy by name
+moat destroy my-agent
+
+# Destroy by ID
 moat destroy run_a1b2c3d4e5f6
 ```
 
@@ -900,10 +939,10 @@ moat clean --dry-run
 
 Create and manage workspace snapshots.
 
-When called with a run ID, creates a manual snapshot. Use subcommands to list, prune, or restore snapshots.
+When called with a run argument, creates a manual snapshot. Use subcommands to list, prune, or restore snapshots. All snapshot commands accept a run ID or name.
 
 ```
-moat snapshot <run-id> [flags]
+moat snapshot <run> [flags]
 ```
 
 ### Flags
@@ -915,6 +954,7 @@ moat snapshot <run-id> [flags]
 ### Examples
 
 ```bash
+moat snapshot my-agent
 moat snapshot run_a1b2c3d4e5f6
 moat snapshot run_a1b2c3d4e5f6 --label "before refactor"
 ```
@@ -924,13 +964,13 @@ moat snapshot run_a1b2c3d4e5f6 --label "before refactor"
 List snapshots for a run.
 
 ```
-moat snapshot list <run-id>
+moat snapshot list <run>
 ```
 
 #### Examples
 
 ```bash
-moat snapshot list run_a1b2c3d4e5f6
+moat snapshot list my-agent
 moat snapshot list run_a1b2c3d4e5f6 --json
 ```
 
@@ -939,7 +979,7 @@ moat snapshot list run_a1b2c3d4e5f6 --json
 Remove old snapshots, keeping the newest N. The pre-run snapshot is always preserved.
 
 ```
-moat snapshot prune <run-id> [flags]
+moat snapshot prune <run> [flags]
 ```
 
 #### Flags
@@ -952,7 +992,7 @@ moat snapshot prune <run-id> [flags]
 #### Examples
 
 ```bash
-moat snapshot prune run_a1b2c3d4e5f6 --keep 3
+moat snapshot prune my-agent --keep 3
 moat snapshot prune run_a1b2c3d4e5f6 --dry-run
 ```
 
@@ -961,7 +1001,7 @@ moat snapshot prune run_a1b2c3d4e5f6 --dry-run
 Restore workspace from a snapshot. If no snapshot ID is given, restores the most recent. A safety snapshot is created before in-place restores.
 
 ```
-moat snapshot restore <run-id> [snapshot-id] [flags]
+moat snapshot restore <run> [snapshot-id] [flags]
 ```
 
 #### Flags
@@ -973,7 +1013,7 @@ moat snapshot restore <run-id> [snapshot-id] [flags]
 #### Examples
 
 ```bash
-moat snapshot restore run_a1b2c3d4e5f6
+moat snapshot restore my-agent
 moat snapshot restore run_a1b2c3d4e5f6 snap_abc123
 moat snapshot restore run_a1b2c3d4e5f6 --to /tmp/recovery
 ```

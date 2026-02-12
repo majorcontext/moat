@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/audit"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -14,15 +15,17 @@ import (
 var auditExportFile string
 
 var auditCmd = &cobra.Command{
-	Use:   "audit <run-id>",
+	Use:   "audit <run>",
 	Short: "Verify the integrity of a run's audit logs",
 	Long: `Verify the cryptographic integrity of a run's audit logs.
+Accepts a run ID or name.
 
 Checks:
   - Hash chain: All entries are properly linked
   - Signatures: All attestations have valid signatures
 
 Example:
+  moat audit my-agent
   moat audit run_a1b2c3d4e5f6`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAudit,
@@ -48,7 +51,17 @@ func init() {
 }
 
 func runAudit(cmd *cobra.Command, args []string) error {
-	runID := args[0]
+	// Resolve argument to a single run
+	manager, err := run.NewManager()
+	if err != nil {
+		return fmt.Errorf("creating run manager: %w", err)
+	}
+	defer manager.Close()
+
+	runID, err := resolveRunArgSingle(manager, args[0])
+	if err != nil {
+		return err
+	}
 
 	// Find run directory
 	homeDir, err := os.UserHomeDir()

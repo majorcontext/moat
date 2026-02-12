@@ -9,11 +9,12 @@ import (
 )
 
 var stopCmd = &cobra.Command{
-	Use:   "stop [run-id]",
+	Use:   "stop [run]",
 	Short: "Stop a running run",
-	Long: `Stop a running run by its ID.
+	Long: `Stop a running run by its ID or name.
 
-If no run-id is provided, stops the most recent running run.`,
+If no argument is provided, stops the most recent running run.
+If a name matches multiple runs, you'll be prompted to confirm.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: stopRun,
 }
@@ -29,37 +30,43 @@ func stopRun(cmd *cobra.Command, args []string) error {
 	}
 	defer manager.Close()
 
-	var runID string
+	var runIDs []string
 	if len(args) > 0 {
-		runID = args[0]
+		var resolveErr error
+		runIDs, resolveErr = resolveRunArg(manager, args[0], "Stop")
+		if resolveErr != nil {
+			return resolveErr
+		}
 	} else {
 		// Find the most recent running run
 		runs := manager.List()
 		for _, r := range runs {
 			if r.State == run.StateRunning {
-				runID = r.ID
+				runIDs = []string{r.ID}
 				break
 			}
 		}
-		if runID == "" {
+		if len(runIDs) == 0 {
 			return fmt.Errorf("no running runs found")
 		}
 	}
 
-	if verbose {
-		fmt.Printf("Stopping run %s...\n", runID)
-	}
-
-	if dryRun {
-		fmt.Printf("Dry run - would stop run %s\n", runID)
-		return nil
-	}
-
 	ctx := context.Background()
-	if err := manager.Stop(ctx, runID); err != nil {
-		return fmt.Errorf("stopping run: %w", err)
-	}
+	for _, runID := range runIDs {
+		if verbose {
+			fmt.Printf("Stopping run %s...\n", runID)
+		}
 
-	fmt.Printf("Run %s stopped\n", runID)
+		if dryRun {
+			fmt.Printf("Dry run - would stop run %s\n", runID)
+			continue
+		}
+
+		if err := manager.Stop(ctx, runID); err != nil {
+			return fmt.Errorf("stopping run %s: %w", runID, err)
+		}
+
+		fmt.Printf("Run %s stopped\n", runID)
+	}
 	return nil
 }

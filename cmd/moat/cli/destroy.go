@@ -9,11 +9,12 @@ import (
 )
 
 var destroyCmd = &cobra.Command{
-	Use:   "destroy [run-id]",
+	Use:   "destroy [run]",
 	Short: "Destroy a run and its resources",
 	Long: `Remove a run and clean up its container and resources.
 
-The run must be stopped before it can be destroyed.`,
+Accepts a run ID or name. The run must be stopped before it can be destroyed.
+If a name matches multiple runs, you'll be prompted to confirm.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: destroyRun,
 }
@@ -29,37 +30,43 @@ func destroyRun(cmd *cobra.Command, args []string) error {
 	}
 	defer manager.Close()
 
-	var runID string
+	var runIDs []string
 	if len(args) > 0 {
-		runID = args[0]
+		var resolveErr error
+		runIDs, resolveErr = resolveRunArg(manager, args[0], "Destroy")
+		if resolveErr != nil {
+			return resolveErr
+		}
 	} else {
 		// Find the most recent stopped run
 		runs := manager.List()
 		for _, r := range runs {
 			if r.State == run.StateStopped {
-				runID = r.ID
+				runIDs = []string{r.ID}
 				break
 			}
 		}
-		if runID == "" {
+		if len(runIDs) == 0 {
 			return fmt.Errorf("no stopped runs found to destroy")
 		}
 	}
 
-	if verbose {
-		fmt.Printf("Destroying run %s...\n", runID)
-	}
-
-	if dryRun {
-		fmt.Printf("Dry run - would destroy run %s\n", runID)
-		return nil
-	}
-
 	ctx := context.Background()
-	if err := manager.Destroy(ctx, runID); err != nil {
-		return fmt.Errorf("destroying run: %w", err)
-	}
+	for _, runID := range runIDs {
+		if verbose {
+			fmt.Printf("Destroying run %s...\n", runID)
+		}
 
-	fmt.Printf("Run %s destroyed\n", runID)
+		if dryRun {
+			fmt.Printf("Dry run - would destroy run %s\n", runID)
+			continue
+		}
+
+		if err := manager.Destroy(ctx, runID); err != nil {
+			return fmt.Errorf("destroying run %s: %w", runID, err)
+		}
+
+		fmt.Printf("Run %s destroyed\n", runID)
+	}
 	return nil
 }
