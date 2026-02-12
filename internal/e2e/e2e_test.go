@@ -96,6 +96,23 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
 
+		// Set up a test credential so grant validation passes
+		encKey, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			t.Fatalf("DefaultEncryptionKey: %v", err)
+		}
+		credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		if err := credStore.Save(credential.Credential{
+			Provider: credential.ProviderGitHub,
+			Token:    "test-token-for-e2e-proxy-binding",
+		}); err != nil {
+			t.Fatalf("Save credential: %v", err)
+		}
+		defer credStore.Delete(credential.ProviderGitHub)
+
 		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 		if err != nil {
 			t.Fatalf("NewManager: %v", err)
@@ -164,6 +181,23 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
+
+		// Set up a test credential so grant validation passes
+		encKey, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			t.Fatalf("DefaultEncryptionKey: %v", err)
+		}
+		credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		if err := credStore.Save(credential.Credential{
+			Provider: credential.ProviderGitHub,
+			Token:    "test-token-for-e2e-proxy-network",
+		}); err != nil {
+			t.Fatalf("Save credential: %v", err)
+		}
+		defer credStore.Delete(credential.ProviderGitHub)
 
 		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 		if err != nil {
@@ -325,6 +359,23 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
+
+		// Set up a test credential so grant validation passes
+		encKey, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			t.Fatalf("DefaultEncryptionKey: %v", err)
+		}
+		credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		if err := credStore.Save(credential.Credential{
+			Provider: credential.ProviderGitHub,
+			Token:    "test-token-for-e2e-host-docker",
+		}); err != nil {
+			t.Fatalf("Save credential: %v", err)
+		}
+		defer credStore.Delete(credential.ProviderGitHub)
 
 		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 		if err != nil {

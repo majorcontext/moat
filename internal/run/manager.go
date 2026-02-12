@@ -420,6 +420,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if err == nil {
 			for _, grant := range opts.Grants {
 				grantName := strings.Split(grant, ":")[0]
+
+				// SSH grants are handled separately (SSH agent setup below)
+				if grantName == "ssh" {
+					continue
+				}
+
 				providerName := credential.Provider(grantName)
 				log.Debug("processing grant", "grant", grant, "providerName", providerName)
 				cred, getErr := store.Get(providerName)
