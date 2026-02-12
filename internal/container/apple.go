@@ -32,6 +32,11 @@ type AppleRuntime struct {
 	buildMgr   *appleBuildManager
 	networkMgr *appleNetworkManager
 	serviceMgr *appleServiceManager
+
+	// activePTY tracks PTY masters for attached containers so ResizeTTY
+	// can propagate terminal size changes. Protected by ptyMu.
+	ptyMu     sync.Mutex
+	activePTY map[string]*os.File
 }
 
 // appleBuildManager implements BuildManager for Apple containers.
@@ -1116,11 +1121,21 @@ func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts Atta
 }
 
 // ResizeTTY resizes the container's TTY to the given dimensions.
-// Note: Apple container CLI may not support dynamic resize.
+// For Apple containers, this resizes the PTY master created during StartAttached.
 func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
-	// Apple container doesn't have a direct resize command.
-	// The TTY size is typically inherited from the terminal running the attach command.
-	return nil
+	r.ptyMu.Lock()
+	ptmx := r.activePTY[containerID]
+	r.ptyMu.Unlock()
+
+	if ptmx == nil {
+		return nil
+	}
+
+	// #nosec G115 -- height/width are validated positive by callers
+	return pty.Setsize(ptmx, &pty.Winsize{
+		Rows: uint16(height), // #nosec G115
+		Cols: uint16(width),  // #nosec G115
+	})
 }
 
 // StartAttached starts a container with stdin/stdout/stderr already attached.
@@ -1147,13 +1162,13 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	// For TTY mode, use a PTY. For non-TTY mode, use regular pipes.
 	// This matches how the container was created (with -t flag for TTY, without for non-TTY).
 	if opts.TTY {
-		return r.startAttachedWithPTY(ctx, cmd, opts)
+		return r.startAttachedWithPTY(ctx, cmd, containerID, opts)
 	}
 	return r.startAttachedWithPipes(ctx, cmd, opts)
 }
 
 // startAttachedWithPTY handles TTY mode using a PTY
-func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
+func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
 	// Create a PTY for the command. This gives the Apple container CLI
 	// real PTY file descriptors while allowing us to intercept output.
 	ptmx, err := pty.Start(cmd)
@@ -1161,6 +1176,19 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 		return fmt.Errorf("starting container with pty: %w", err)
 	}
 	defer func() { _ = ptmx.Close() }()
+
+	// Track the PTY so ResizeTTY can propagate SIGWINCH.
+	r.ptyMu.Lock()
+	if r.activePTY == nil {
+		r.activePTY = make(map[string]*os.File)
+	}
+	r.activePTY[containerID] = ptmx
+	r.ptyMu.Unlock()
+	defer func() {
+		r.ptyMu.Lock()
+		delete(r.activePTY, containerID)
+		r.ptyMu.Unlock()
+	}()
 
 	// Set PTY size. Prefer explicit initial size from opts, fall back to querying terminal.
 	if opts.TTY {
