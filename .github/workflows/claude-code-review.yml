@@ -47,6 +47,7 @@ jobs:
             - Error handling gaps — unchecked errors, swallowed failures, misleading messages
             - Edge cases and failure modes that aren't covered
             - Missing or outdated documentation when code changes user-facing behavior
+            - For docs changes, check against docs/STYLE-GUIDE.md for tone, voice, and formatting
             - Misuse of internal conventions (e.g. log vs ui, error message quality)
 
             Don't flag pure style preferences or formatting. Do flag naming or structure
