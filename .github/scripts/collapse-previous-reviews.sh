@@ -13,9 +13,9 @@ set -euo pipefail
 
 # Claude's review comments are identified by:
 # 1. Being posted by claude[bot] or github-actions[bot] (depends on how the action is configured)
-# 2. Containing a review heading ("## ... Review" / "### ... Review") anywhere in the body,
-#    OR starting with the track_progress format ("**Claude finished")
-# This handles both direct posting and track_progress comment styles.
+# 2. Containing a review heading ("## ... Review" / "### ... Review") anywhere in the body
+#    (unanchored — heading may appear after track_progress prefix),
+#    OR starting with "**Claude finished" (anchored — track_progress always leads with this)
 COLLAPSED_MARKER="<!-- collapsed -->"
 
 # Get all comments from Claude that contain a review heading and haven't been collapsed
