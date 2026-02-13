@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -23,6 +23,15 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
 | `mcp-<name>` | Host from MCP server `url` field | Configured per-server header | Interactive prompt |
+| `gitlab` | `gitlab.com`, `*.gitlab.com` | `PRIVATE-TOKEN: ...` | `GITLAB_TOKEN`, `GL_TOKEN`, or prompt |
+| `brave-search` | `api.search.brave.com` | `X-Subscription-Token: ...` | `BRAVE_API_KEY`, `BRAVE_SEARCH_API_KEY`, or prompt |
+| `elevenlabs` | `api.elevenlabs.io` | `xi-api-key: ...` | `ELEVENLABS_API_KEY` or prompt |
+| `linear` | `api.linear.app` | `Authorization: ...` | `LINEAR_API_KEY` or prompt |
+| `vercel` | `api.vercel.com`, `*.vercel.com` | `Authorization: Bearer ...` | `VERCEL_TOKEN` or prompt |
+| `sentry` | `sentry.io`, `*.sentry.io` | `Authorization: Bearer ...` | `SENTRY_AUTH_TOKEN` or prompt |
+| `datadog` | `*.datadoghq.com` | `DD-API-KEY: ...` | `DD_API_KEY`, `DATADOG_API_KEY`, or prompt |
+
+Run `moat grant providers` to list all providers, including any [custom providers](#custom-providers) you've added.
 
 ## GitHub
 
@@ -532,9 +541,34 @@ This deletes the encrypted credential file. Future runs cannot use the credentia
 
 Credentials are stored encrypted in `~/.moat/credentials/`. See [Credential management](../concepts/02-credentials.md) for encryption and storage details.
 
+## Config-driven providers
+
+The providers from `gitlab` through `datadog` in the [grant types table](#grant-types) are defined as YAML configurations shipped with the binary. They work the same as the Go-implemented providers -- credentials are stored encrypted and injected at the network layer -- but are defined declaratively.
+
+Use them the same way:
+
+```bash
+moat grant gitlab
+moat run --grant gitlab ./my-project
+```
+
+### Custom providers
+
+Add your own providers by creating YAML files in `~/.moat/providers/`. Each file defines a provider with host matching rules, header injection, and credential sources. See [Provider YAML reference](./provider-yaml) for the full schema.
+
+### Listing providers
+
+List all available providers (built-in, packaged, and custom) with:
+
+```bash
+moat grant providers
+moat grant providers --json
+```
+
 ## Related pages
 
 - [Credential management](../concepts/02-credentials.md) -- How credential injection works conceptually
 - [Security model](../concepts/08-security.md) -- Threat model and security properties
 - [CLI reference](./01-cli.md) -- Full CLI command reference, including `moat grant` subcommands
 - [agent.yaml reference](./02-agent-yaml.md) -- All `agent.yaml` fields, including `grants` and `mcp`
+- [Provider YAML reference](./provider-yaml) -- Schema for YAML-defined credential providers

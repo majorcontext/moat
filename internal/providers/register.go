@@ -12,13 +12,15 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/gemini" // registers Gemini/Google provider
 	_ "github.com/majorcontext/moat/internal/providers/github" // registers GitHub provider
 	_ "github.com/majorcontext/moat/internal/providers/npm"    // registers npm provider
+
+	"github.com/majorcontext/moat/internal/providers/configprovider"
 )
 
-// RegisterAll is a no-op provided for explicit registration semantics.
-// All providers self-register via init() when this package is imported.
-// This function exists so callers can write providers.RegisterAll() to
-// make the registration explicit rather than relying on blank import side effects.
+// RegisterAll registers all credential providers.
+// Go providers self-register via init() when this package is imported.
+// Config-driven providers are loaded after, so Go providers take precedence.
 func RegisterAll() {
-	// Providers register themselves via init() on import.
-	// This function exists for documentation and explicit call semantics.
+	// Go providers already registered via init() on import.
+	// Config-driven providers loaded after, so Go providers take precedence.
+	configprovider.RegisterAll()
 }

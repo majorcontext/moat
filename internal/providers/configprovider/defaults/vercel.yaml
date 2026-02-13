@@ -1,0 +1,24 @@
+name: vercel
+description: "Vercel platform API token"
+
+hosts:
+  - "api.vercel.com"
+  - "*.vercel.com"
+
+inject:
+  header: "Authorization"
+  prefix: "Bearer "
+
+source_env: [VERCEL_TOKEN]
+container_env: VERCEL_TOKEN
+
+validate:
+  url: "https://api.vercel.com/v2/user"
+
+prompt: |
+  Create a Vercel API token:
+  1. Go to https://vercel.com/account/tokens
+  2. Click "Create Token"
+  3. Give it a name and select the scope
+  4. Click "Create Token"
+  5. Copy the token value

@@ -1,0 +1,24 @@
+name: gitlab
+description: "GitLab personal access token"
+aliases: [gl]
+
+hosts:
+  - "gitlab.com"
+  - "*.gitlab.com"
+
+inject:
+  header: "PRIVATE-TOKEN"
+
+source_env: [GITLAB_TOKEN, GL_TOKEN]
+container_env: GITLAB_TOKEN
+
+validate:
+  url: "https://gitlab.com/api/v4/user"
+
+prompt: |
+  Create a GitLab personal access token:
+  1. Go to https://gitlab.com/-/user_settings/personal_access_tokens
+  2. Click "Add new token"
+  3. Give it a name and select the scopes you need (e.g., api, read_repository)
+  4. Click "Create personal access token"
+  5. Copy the token value

@@ -32,82 +32,20 @@ var grantCmd = &cobra.Command{
 Credentials are stored securely and injected into agent containers when
 requested via the --grant flag on 'moat run'.
 
-Supported providers:
-  github      GitHub token (from gh CLI, environment, or interactive prompt)
-  anthropic   Anthropic API key or Claude Code OAuth credentials
-  openai      OpenAI API key
-  gemini      Gemini API key or Gemini CLI OAuth credentials
-  aws         AWS IAM role assumption (uses host credentials to assume role)
+Run 'moat grant providers' to list all available providers.
 
 Subcommands:
+  providers   List all available credential providers
   ssh         Grant SSH access for a specific host
   mcp         Grant credentials for an MCP server
-  npm         Grant npm registry credentials (auto-discovers from .npmrc)
-
-GitHub authentication (in order of precedence):
-  1. GITHUB_TOKEN or GH_TOKEN environment variable
-  2. gh CLI token (if gh is installed and authenticated)
-  3. Interactive prompt for Personal Access Token
 
 Examples:
-  # Grant GitHub access (auto-detects gh CLI or prompts for token)
-  moat grant github
-
-  # Grant GitHub access from environment variable
-  export GITHUB_TOKEN="ghp_..."
-  moat grant github
-
-  # Use the credential in a run
-  moat run my-agent . --grant github
-
-  # Grant Anthropic access (will auto-detect Claude Code credentials)
-  moat grant anthropic
-
-  # Grant Anthropic API access from environment variable
-  export ANTHROPIC_API_KEY="sk-ant-..."
-  moat grant anthropic
-
-  # Grant AWS access via IAM role
-  moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole
-
-  # Grant AWS with custom session duration and region
-  moat grant aws --role=arn:aws:iam::123456789012:role/AgentRole \
-    --region=us-west-2 --session-duration=1h
-
-  # Use AWS credential in a run (credentials auto-refresh)
-  moat run my-agent . --grant aws
-
-  # Grant OpenAI API access
-  moat grant openai
-
-  # Grant OpenAI API access from environment variable
-  export OPENAI_API_KEY="sk-..."  # set in your shell profile
-  moat grant openai
-
-  # Use OpenAI credential for Codex
-  moat run my-agent . --grant openai
-
-  # Grant Gemini access (will auto-detect Gemini CLI credentials)
-  moat grant gemini
-
-  # Grant Gemini API access from environment variable
-  export GEMINI_API_KEY="..."
-  moat grant gemini
-
-  # Use Gemini credential
-  moat gemini ./my-project
-
-  # Grant npm registry access (auto-discovers from .npmrc)
-  moat grant npm
-
-  # Grant npm access for a specific registry
-  moat grant npm --host=npm.company.com
-
-  # Use npm credential in a run
-  moat run my-agent . --grant npm
-
-If you have Claude Code installed and logged in, 'moat grant anthropic' will
-offer to import your existing OAuth credentials.`,
+  moat grant github                    # Grant GitHub access
+  moat grant anthropic                 # Grant Anthropic access
+  moat grant aws --role=arn:aws:...    # Grant AWS access via IAM role
+  moat grant gitlab                    # Grant GitLab access
+  moat grant providers                 # List all available providers
+  moat run my-agent . --grant github   # Use credential in a run`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runGrant,
 }
@@ -158,8 +96,8 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	// Look up provider in registry
 	prov := provider.Get(providerName)
 	if prov == nil {
-		return fmt.Errorf("unknown provider: %s\n\nAvailable providers: %s",
-			args[0], strings.Join(provider.Names(), ", "))
+		return fmt.Errorf("unknown provider: %s\n\nRun 'moat grant providers' to list all available providers",
+			args[0])
 	}
 
 	// For AWS, validate required flags before calling Grant

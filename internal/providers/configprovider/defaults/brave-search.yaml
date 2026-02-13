@@ -1,0 +1,22 @@
+name: brave-search
+description: "Brave Search API key"
+aliases: [brave]
+
+hosts:
+  - "api.search.brave.com"
+
+inject:
+  header: "X-Subscription-Token"
+
+source_env: [BRAVE_API_KEY, BRAVE_SEARCH_API_KEY]
+container_env: BRAVE_API_KEY
+
+validate:
+  url: "https://api.search.brave.com/res/v1/web/search?q=test&count=1"
+
+prompt: |
+  Get a Brave Search API key:
+  1. Go to https://brave.com/search/api/
+  2. Sign up or log in to your account
+  3. Subscribe to a plan (free tier available)
+  4. Copy your API key from the dashboard
