@@ -650,6 +650,23 @@ moat grant list
 moat grant list --json
 ```
 
+### moat grant providers
+
+List all available credential providers.
+
+```bash
+moat grant providers          # List all providers
+moat grant providers --json   # Output as JSON
+```
+
+Output columns:
+
+| Column | Description |
+|--------|-------------|
+| **PROVIDER** | Provider name (used with `moat grant <name>`) |
+| **DESCRIPTION** | Brief description |
+| **TYPE** | `builtin` or `custom` |
+
 ---
 
 ## moat revoke

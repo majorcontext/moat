@@ -1,0 +1,18 @@
+name: elevenlabs
+description: "ElevenLabs text-to-speech API key"
+
+hosts:
+  - "api.elevenlabs.io"
+
+inject:
+  header: "xi-api-key"
+
+source_env: [ELEVENLABS_API_KEY]
+container_env: ELEVENLABS_API_KEY
+
+prompt: |
+  Get an ElevenLabs API key:
+  1. Go to https://elevenlabs.io/app/settings/api-keys
+  2. Sign up or log in to your account
+  3. Click "Create API Key"
+  4. Copy the API key value

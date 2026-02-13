@@ -66,6 +66,13 @@ type AgentProvider interface {
 	RegisterCLI(root *cobra.Command)
 }
 
+// DescribableProvider is an optional interface for providers that describe
+// themselves in listings like 'moat grant providers'.
+type DescribableProvider interface {
+	Description() string
+	Source() string // "builtin" or "custom"
+}
+
 // EndpointProvider exposes HTTP endpoints to containers.
 // Implemented by aws for the credential endpoint.
 type EndpointProvider interface {

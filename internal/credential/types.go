@@ -41,9 +41,19 @@ type Store interface {
 	List() ([]Credential, error)
 }
 
+var dynamicProviders []Provider
+
+// RegisterDynamicProvider registers an additional provider at runtime.
+// This is used by config-driven providers to extend the known provider list.
+// Must be called during initialization only (before concurrent access).
+func RegisterDynamicProvider(p Provider) {
+	dynamicProviders = append(dynamicProviders, p)
+}
+
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	return []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm}
+	return append(base, dynamicProviders...)
 }
 
 // IsKnownProvider returns true if the provider is a known credential provider.
@@ -52,6 +62,11 @@ func IsKnownProvider(p Provider) bool {
 	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm:
 		return true
 	default:
+		for _, dp := range dynamicProviders {
+			if dp == p {
+				return true
+			}
+		}
 		return false
 	}
 }

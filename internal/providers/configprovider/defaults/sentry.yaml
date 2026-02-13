@@ -1,0 +1,24 @@
+name: sentry
+description: "Sentry error tracking API token"
+
+hosts:
+  - "sentry.io"
+  - "*.sentry.io"
+
+inject:
+  header: "Authorization"
+  prefix: "Bearer "
+
+source_env: [SENTRY_AUTH_TOKEN]
+container_env: SENTRY_AUTH_TOKEN
+
+validate:
+  url: "https://sentry.io/api/0/auth/"
+
+prompt: |
+  Create a Sentry auth token:
+  1. Go to https://sentry.io/settings/auth-tokens/
+  2. Click "Create New Token"
+  3. Select the required scopes for your use case
+  4. Click "Create Token"
+  5. Copy the token value

@@ -111,6 +111,13 @@ var grantHosts = map[string][]string{
 	},
 }
 
+// RegisterGrantHosts registers host patterns for a grant name.
+// This is used by config-driven providers to register their hosts dynamically.
+// Must be called during initialization only (before concurrent access).
+func RegisterGrantHosts(grant string, hosts []string) {
+	grantHosts[grant] = hosts
+}
+
 // GetHostsForGrant returns the host patterns for a given grant name.
 // Supports scoped grants like "github:repo" by extracting the provider name.
 // Returns an empty slice if the grant is unknown.
