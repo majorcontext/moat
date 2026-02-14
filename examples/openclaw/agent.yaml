@@ -12,7 +12,7 @@
 # Run with:
 #   moat run examples/openclaw
 
-name: openclaw-demo
+name: openclaw
 
 dependencies:
   - node@22

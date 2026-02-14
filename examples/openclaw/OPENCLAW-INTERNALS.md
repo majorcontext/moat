@@ -179,26 +179,54 @@ When is pairing required?
 
 ## The Fix for Moat
 
-**Problem:** Our `openclaw.json` contains `"bind": "lan"`, which makes the CLI
-resolve the gateway at the container's LAN IP instead of localhost, triggering
-device pairing.
+### What We Tried (and Why It Didn't Work)
 
-**Solution:** Mirror Docker's approach:
-1. Do NOT put `bind` in `openclaw.json`
-2. Pass `--bind lan` as a CLI flag to `openclaw gateway run`
-3. Let the token resolve from `OPENCLAW_GATEWAY_TOKEN` env var (already injected by moat)
-4. The CLI reads config, sees no `bind`, defaults to `ws://127.0.0.1:18789`
-5. Gateway listens on `0.0.0.0:18789` (from `--bind lan`), so localhost works
+**Attempt 1: `--bind lan` as CLI flag (Docker's approach)**
+The official Docker setup passes `--bind lan` to `node dist/index.js gateway`,
+keeping the config clean so the CLI defaults to `ws://127.0.0.1:18789`. But
+`openclaw gateway run --bind lan` does NOT work in v2026.2.13 — the flag is
+silently ignored and the gateway binds to loopback. Env var
+`OPENCLAW_GATEWAY_BIND` is also not read by the gateway process.
 
-**Minimal `openclaw.json`:**
+**Attempt 2: Remove `bind` from config entirely**
+Without `bind: "lan"` in the config, the gateway binds to `127.0.0.1` only.
+Docker port mapping can't reach a loopback-only listener inside the container,
+so the moat routing proxy gets "connection reset by peer".
+
+### Working Solution
+
+Put `bind: "lan"` in the config (only way to get `0.0.0.0` binding in this
+version), then disable device pairing since it's unnecessary in moat's
+security model.
+
+**Why pairing is unnecessary:** moat's routing proxy binds to localhost only,
+the container is ephemeral, and token auth (`OPENCLAW_GATEWAY_TOKEN`) is still
+active. Device identity adds no security value in a throwaway container that's
+only reachable from the local machine.
+
+**Key config fields:**
+- `bind: "lan"` — listen on `0.0.0.0` for Docker port mapping
+- `trustedProxies` — trust moat's routing proxy (RFC 1918 ranges cover any
+  Docker network subnet)
+- `controlUi.dangerouslyDisableDeviceAuth: true` — skip device pairing
+  (safe because access is localhost-only via moat)
+
+**`openclaw.json`:**
 ```json
 {
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "trustedProxies": ["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"],
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": true
+    }
+  },
   "agents": {
     "defaults": {
       "model": {
         "primary": "anthropic/claude-sonnet-4-5"
-      },
-      "workspace": "~/.openclaw/workspace"
+      }
     }
   }
 }
@@ -206,8 +234,17 @@ device pairing.
 
 **Gateway start command:**
 ```bash
-openclaw gateway run --bind lan &
+openclaw gateway run &
 ```
 
 Auth token comes from `OPENCLAW_GATEWAY_TOKEN` env var (injected by moat from
 1Password). No need to write it into the config file.
+
+### Config Options We Investigated
+
+| Config Key | Works? | Notes |
+|------------|--------|-------|
+| `gateway.auth.skipDevicePairingForTrustedProxy` | No | Unknown key in v2026.2.13 (from PR #8132, may be unreleased) |
+| `gateway.controlUi.dangerouslyDisableDeviceAuth` | Yes | Disables device identity for Control UI |
+| `gateway.controlUi.allowInsecureAuth` | Partial | Known bug: doesn't bypass pairing in Docker (Issue #1679) |
+| `gateway.trustedProxies` | Yes | Supports both IPs and CIDR notation |
