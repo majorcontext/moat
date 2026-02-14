@@ -58,6 +58,13 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !ok {
+		registered := rp.routes.Agents()
+		log.Debug("routing: unknown agent",
+			"agent", agent,
+			"service", service,
+			"host", r.Host,
+			"registered", registered,
+		)
 		rp.writeError(w, http.StatusNotFound, "unknown agent", agent)
 		return
 	}

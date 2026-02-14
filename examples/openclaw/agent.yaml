@@ -1,0 +1,35 @@
+# Example: OpenClaw AI gateway
+#
+# Run OpenClaw in an isolated container with credential injection.
+# The Anthropic API key is injected at the network layer — OpenClaw never sees it.
+# The gateway token is injected from 1Password via moat secrets.
+#
+# Prerequisites:
+#   1. Anthropic API key granted: moat grant anthropic
+#   2. 1Password CLI signed in: eval $(op signin)
+#   3. Gateway token stored in 1Password (see README)
+#
+# Run with:
+#   moat run examples/openclaw
+
+name: openclaw-demo
+
+dependencies:
+  - node@22
+  - git
+
+grants:
+  - anthropic              # LLM API key (injected at network layer by proxy)
+
+secrets:
+  OPENCLAW_GATEWAY_TOKEN: op://Private/OpenClaw Demo/password
+
+ports:
+  gateway: 18789           # OpenClaw Control UI
+
+hooks:
+  post_build_root: |
+    curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard
+
+interactive: true
+command: ["bash", "/workspace/start.sh"]
