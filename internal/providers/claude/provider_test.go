@@ -33,6 +33,18 @@ func TestProvider_ConfigureProxy_OAuth(t *testing.T) {
 		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], want)
 	}
 
+	// Should strip x-api-key to prevent conflict with Authorization header
+	removed := mockProxy.removedHeaders["api.anthropic.com"]
+	foundXAPIKey := false
+	for _, h := range removed {
+		if h == "x-api-key" {
+			foundXAPIKey = true
+		}
+	}
+	if !foundXAPIKey {
+		t.Error("expected x-api-key to be removed for OAuth tokens")
+	}
+
 	// Should have registered a transformer for OAuth tokens
 	if len(mockProxy.transformers["api.anthropic.com"]) == 0 {
 		t.Error("expected transformer to be registered for OAuth tokens")
@@ -433,9 +445,10 @@ func TestIsOAuthToken(t *testing.T) {
 
 // mockProxyConfigurer implements provider.ProxyConfigurer for testing.
 type mockProxyConfigurer struct {
-	credentials  map[string]string
-	extraHeaders map[string]map[string]string
-	transformers map[string][]provider.ResponseTransformer
+	credentials    map[string]string
+	extraHeaders   map[string]map[string]string
+	transformers   map[string][]provider.ResponseTransformer
+	removedHeaders map[string][]string // host -> []headerName
 }
 
 func (m *mockProxyConfigurer) SetCredential(host, value string) {
@@ -464,6 +477,11 @@ func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer pr
 	m.transformers[host] = append(m.transformers[host], transformer)
 }
 
-func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
+func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {
+	if m.removedHeaders == nil {
+		m.removedHeaders = make(map[string][]string)
+	}
+	m.removedHeaders[host] = append(m.removedHeaders[host], header)
+}
 
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}

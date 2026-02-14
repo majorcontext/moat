@@ -32,6 +32,16 @@ func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider
 		// The proxy injects this at the network layer
 		proxy.SetCredentialWithGrant("api.anthropic.com", "Authorization", "Bearer "+cred.Token, "anthropic")
 
+		// Strip any client-sent x-api-key header — it conflicts with the
+		// injected Authorization header and Anthropic rejects requests that
+		// have an invalid x-api-key even when Authorization is valid.
+		proxy.RemoveRequestHeader("api.anthropic.com", "x-api-key")
+
+		// OAuth tokens require the beta flag to be accepted by the API.
+		// Without this, the API returns "OAuth authentication is currently
+		// not supported."
+		proxy.AddExtraHeader("api.anthropic.com", "anthropic-beta", "oauth-2025-04-20")
+
 		// Register response transformer to handle 403s on OAuth endpoints
 		// that require scopes not available in long-lived tokens
 		proxy.AddResponseTransformer("api.anthropic.com", CreateOAuthEndpointTransformer())
