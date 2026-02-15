@@ -464,9 +464,9 @@ Unlike `mounts:` (bind mounts with a host-side source path), volumes are managed
 | `target` | `string` | yes | Absolute path inside the container. |
 | `readonly` | `bool` | no | Mount as read-only. Default: `false`. |
 
-#### Volume naming
+#### Storage
 
-Docker volumes are named `moat_<agent-name>_<volume-name>`. For example, an agent named `openclaw` with volume `state` creates Docker volume `moat_openclaw_state`.
+Volumes are stored on the host at `~/.moat/volumes/<agent-name>/<volume-name>/` and bind-mounted into the container. This works identically across Docker and Apple container runtimes.
 
 #### Volume lifecycle
 
