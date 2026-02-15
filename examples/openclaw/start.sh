@@ -4,19 +4,24 @@ set -euo pipefail
 # Create workspace directory
 mkdir -p ~/.openclaw/workspace
 
-# Register a stub API key with OpenClaw's auth system so it attempts
-# requests. The real credential is injected by moat's proxy at the
-# network layer — OpenClaw never sees the actual key.
-#
-# --no-install-daemon: skip systemd/launchd service (not needed in container)
-# --gateway-auth token: configure token auth mode
-openclaw onboard \
-  --non-interactive \
-  --accept-risk \
-  --no-install-daemon \
-  --anthropic-api-key "moat-proxy-injected" \
-  --gateway-auth token \
-  || true
+# Only run onboard if no existing config exists (first run).
+# On subsequent runs with persistent volumes, skip onboard to preserve
+# accumulated state (memories, sessions, skills).
+if [ ! -f ~/.openclaw/openclaw.json ]; then
+  # Register a stub API key with OpenClaw's auth system so it attempts
+  # requests. The real credential is injected by moat's proxy at the
+  # network layer — OpenClaw never sees the actual key.
+  #
+  # --no-install-daemon: skip systemd/launchd service (not needed in container)
+  # --gateway-auth token: configure token auth mode
+  openclaw onboard \
+    --non-interactive \
+    --accept-risk \
+    --no-install-daemon \
+    --anthropic-api-key "moat-proxy-injected" \
+    --gateway-auth token \
+    || true
+fi
 
 # Write config AFTER onboard (which overwrites openclaw.json).
 #

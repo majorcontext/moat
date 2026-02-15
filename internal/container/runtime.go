@@ -293,7 +293,7 @@ type SidecarConfig struct {
 	Labels map[string]string
 }
 
-// MountConfig describes a volume mount.
+// MountConfig describes a volume mount (bind mount from host to container).
 type MountConfig struct {
 	Source   string
 	Target   string

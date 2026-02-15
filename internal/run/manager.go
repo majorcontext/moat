@@ -363,6 +363,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Add volume mounts from config.
+	// All runtimes use host-backed bind mounts (~/.moat/volumes/<agent>/<name>/)
+	// so the directory is owned by the current user, matching the container user.
+	if opts.Config != nil && len(opts.Config.Volumes) > 0 {
+		for _, vol := range opts.Config.Volumes {
+			volDir := config.VolumeDir(opts.Config.Name, vol.Name)
+			if err := os.MkdirAll(volDir, 0755); err != nil {
+				return nil, fmt.Errorf("creating volume directory %s: %w", volDir, err)
+			}
+			mounts = append(mounts, container.MountConfig{
+				Source:   volDir,
+				Target:   vol.Target,
+				ReadOnly: vol.ReadOnly,
+			})
+			log.Debug("added volume mount", "dir", volDir, "target", vol.Target)
+		}
+	}
+
 	// Start proxy if we have grants (for credential injection) or strict network policy
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
