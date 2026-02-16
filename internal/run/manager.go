@@ -2200,6 +2200,36 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 	m.mu.Unlock()
 
+	// Get actual port bindings after container starts
+	if len(r.Ports) > 0 {
+		var bindings map[int]int
+		var bindErr error
+		for i := 0; i < 5; i++ {
+			bindings, bindErr = m.runtime.GetPortBindings(ctx, r.ContainerID)
+			if bindErr != nil || len(bindings) >= len(r.Ports) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if bindErr != nil {
+			ui.Warnf("Getting port bindings: %v", bindErr)
+		} else {
+			r.HostPorts = make(map[string]int)
+			services := make(map[string]string)
+			for serviceName, containerPort := range r.Ports {
+				if hostPort, ok := bindings[containerPort]; ok {
+					r.HostPorts[serviceName] = hostPort
+					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
+				}
+			}
+			if len(services) > 0 {
+				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
+					ui.Warnf("Registering routes: %v", routeErr)
+				}
+			}
+		}
+	}
+
 	// Save state to disk
 	_ = r.SaveMetadata()
 

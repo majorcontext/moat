@@ -58,6 +58,13 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !ok {
+		registered := rp.routes.Agents()
+		log.Debug("routing: unknown agent",
+			"agent", agent,
+			"service", service,
+			"host", r.Host,
+			"registered", registered,
+		)
 		rp.writeError(w, http.StatusNotFound, "unknown agent", agent)
 		return
 	}
@@ -70,6 +77,21 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Wrap the default Director to add standard proxy headers.
+	// httputil.NewSingleHostReverseProxy already sets X-Forwarded-For.
+	defaultDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		defaultDirector(req)
+		// Preserve original proto so backends behind TLS-terminating proxies
+		// can detect the original scheme (needed for secure-context checks).
+		if r.TLS != nil {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		} else if req.Header.Get("X-Forwarded-Proto") == "" {
+			req.Header.Set("X-Forwarded-Proto", "http")
+		}
+	}
+
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		rp.writeError(w, http.StatusBadGateway, "service unavailable", err.Error())
 	}

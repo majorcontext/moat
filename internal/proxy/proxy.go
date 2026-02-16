@@ -455,6 +455,32 @@ func (p *Proxy) getCredential(host string) (credentialHeader, bool) {
 	return credentialHeader{}, false
 }
 
+// mergeExtraHeaders injects extra headers into a request. If the request
+// already has a value for a header, the new value is appended with a comma
+// separator (standard HTTP multi-value format). This preserves client-sent
+// flags like anthropic-beta while adding proxy-injected flags.
+//
+// Note: comma-joining is correct for list-valued headers (RFC 9110 §5.3) like
+// anthropic-beta, Accept, Cache-Control, etc. It is NOT correct for headers
+// like Set-Cookie that cannot be combined. All headers currently registered
+// via routing.go are list-safe; if that changes, this function will need a
+// per-header strategy.
+func mergeExtraHeaders(req *http.Request, headers []extraHeader) {
+	for _, h := range headers {
+		if existing := req.Header.Get(h.Name); existing != "" {
+			req.Header.Set(h.Name, existing+","+h.Value)
+		} else {
+			req.Header.Set(h.Name, h.Value)
+		}
+	}
+	if len(headers) > 0 {
+		log.Debug("extra headers injected",
+			"subsystem", "proxy",
+			"action", "inject-extra",
+			"count", len(headers))
+	}
+}
+
 // getExtraHeaders returns additional headers to inject for a host.
 func (p *Proxy) getExtraHeaders(host string) []extraHeader {
 	p.mu.RLock()
@@ -639,6 +665,11 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			"method", r.Method,
 			"path", r.URL.Path)
 	}
+	// Inject any additional headers configured for this host.
+	// Merges with existing values (comma-separated) to preserve client
+	// headers like anthropic-beta that support multiple flags.
+	mergeExtraHeaders(outReq, p.getExtraHeaders(host))
+
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 
@@ -840,18 +871,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 				"method", req.Method,
 				"path", req.URL.Path)
 		}
-		// Inject any additional headers configured for this host
-		extraHeaders := p.getExtraHeaders(r.Host)
-		for _, h := range extraHeaders {
-			req.Header.Set(h.Name, h.Value)
-		}
-		if len(extraHeaders) > 0 {
-			log.Debug("extra headers injected",
-				"subsystem", "proxy",
-				"action", "inject-extra",
-				"host", host,
-				"count", len(extraHeaders))
-		}
+		// Inject any additional headers configured for this host.
+		// Merges with existing values (comma-separated) to preserve client
+		// headers like anthropic-beta that support multiple flags.
+		mergeExtraHeaders(req, p.getExtraHeaders(r.Host))
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")
 
