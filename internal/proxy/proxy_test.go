@@ -744,3 +744,118 @@ func TestFilterHeaders_NilHeaders(t *testing.T) {
 		t.Errorf("filtered = %v, want nil", filtered)
 	}
 }
+
+// TestApplyTokenSubstitution_URLPath verifies token substitution in URL paths.
+func TestApplyTokenSubstitution_URLPath(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "123456:ABC-DEF",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.telegram.org",
+			Path:   "/botmoat-proxy-injected/getMe",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	wantPath := "/bot123456:ABC-DEF/getMe"
+	if req.URL.Path != wantPath {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, wantPath)
+	}
+}
+
+// TestApplyTokenSubstitution_RawPath verifies token substitution in RawPath when set.
+func TestApplyTokenSubstitution_RawPath(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-abc123",
+		realToken:   "123456:ABC-DEF",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme:  "https",
+			Host:    "api.telegram.org",
+			Path:    "/botmoat-abc123/getMe",
+			RawPath: "/botmoat-abc123/getMe",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	wantPath := "/bot123456:ABC-DEF/getMe"
+	if req.URL.Path != wantPath {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, wantPath)
+	}
+	if req.URL.RawPath != wantPath {
+		t.Errorf("URL.RawPath = %q, want %q", req.URL.RawPath, wantPath)
+	}
+}
+
+// TestApplyTokenSubstitution_URLPathAndBody verifies substitution in both URL and body.
+func TestApplyTokenSubstitution_URLPathAndBody(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "real-token-value",
+	}
+
+	body := `{"token": "moat-proxy-injected"}`
+	req := &http.Request{
+		Method: "POST",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.example.com",
+			Path:   "/v1/moat-proxy-injected/action",
+		},
+		Header:        make(http.Header),
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	if req.URL.Path != "/v1/real-token-value/action" {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, "/v1/real-token-value/action")
+	}
+
+	gotBody, _ := io.ReadAll(req.Body)
+	wantBody := `{"token": "real-token-value"}`
+	if string(gotBody) != wantBody {
+		t.Errorf("Body = %q, want %q", string(gotBody), wantBody)
+	}
+}
+
+// TestApplyTokenSubstitution_NoMatch verifies no modification when placeholder is absent.
+func TestApplyTokenSubstitution_NoMatch(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "real-token",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.example.com",
+			Path:   "/v1/something-else/action",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	if req.URL.Path != "/v1/something-else/action" {
+		t.Errorf("URL.Path should be unchanged, got %q", req.URL.Path)
+	}
+}

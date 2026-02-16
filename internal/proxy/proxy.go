@@ -374,8 +374,18 @@ func (p *Proxy) getRemoveHeaders(host string) []string {
 const maxTokenSubBodySize = 64 * 1024
 
 // applyTokenSubstitution replaces placeholder tokens with real tokens in
-// the request's Authorization header and body.
+// the request's URL path, Authorization header, and body.
+// URL path substitution is needed for APIs like Telegram Bot API where
+// the token is embedded in the URL (e.g., /bot{TOKEN}/sendMessage).
 func (p *Proxy) applyTokenSubstitution(req *http.Request, sub *tokenSubstitution) {
+	// Replace in URL path
+	if newPath := strings.ReplaceAll(req.URL.Path, sub.placeholder, sub.realToken); newPath != req.URL.Path {
+		req.URL.Path = newPath
+		if req.URL.RawPath != "" {
+			req.URL.RawPath = strings.ReplaceAll(req.URL.RawPath, sub.placeholder, sub.realToken)
+		}
+	}
+
 	// Replace in Authorization header
 	if auth := req.Header.Get("Authorization"); auth != "" {
 		if newAuth := strings.ReplaceAll(auth, sub.placeholder, sub.realToken); newAuth != auth {
@@ -465,7 +475,7 @@ func (p *Proxy) getCredential(host string) (credentialHeader, bool) {
 // like Set-Cookie that cannot be combined. All headers currently registered
 // via routing.go are list-safe; if that changes, this function will need a
 // per-header strategy.
-func mergeExtraHeaders(req *http.Request, headers []extraHeader) {
+func mergeExtraHeaders(req *http.Request, host string, headers []extraHeader) {
 	for _, h := range headers {
 		if existing := req.Header.Get(h.Name); existing != "" {
 			req.Header.Set(h.Name, existing+","+h.Value)
@@ -477,6 +487,7 @@ func mergeExtraHeaders(req *http.Request, headers []extraHeader) {
 		log.Debug("extra headers injected",
 			"subsystem", "proxy",
 			"action", "inject-extra",
+			"host", host,
 			"count", len(headers))
 	}
 }
@@ -668,7 +679,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inject any additional headers configured for this host.
 	// Merges with existing values (comma-separated) to preserve client
 	// headers like anthropic-beta that support multiple flags.
-	mergeExtraHeaders(outReq, p.getExtraHeaders(host))
+	mergeExtraHeaders(outReq, host, p.getExtraHeaders(host))
 
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
@@ -677,7 +688,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, headerName := range p.getRemoveHeaders(host) {
 		outReq.Header.Del(headerName)
 	}
-	// Apply token substitution if configured
+	// Apply token substitution if configured.
+	// Substitution targets outReq (not r), so r.URL.String() used for logging
+	// below still contains the placeholder, not the real token.
 	if sub := p.getTokenSubstitution(host); sub != nil {
 		p.applyTokenSubstitution(outReq, sub)
 	}
@@ -874,7 +887,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// Inject any additional headers configured for this host.
 		// Merges with existing values (comma-separated) to preserve client
 		// headers like anthropic-beta that support multiple flags.
-		mergeExtraHeaders(req, p.getExtraHeaders(r.Host))
+		mergeExtraHeaders(req, r.Host, p.getExtraHeaders(r.Host))
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")
 
@@ -882,7 +895,9 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		for _, headerName := range p.getRemoveHeaders(host) {
 			req.Header.Del(headerName)
 		}
-		// Apply token substitution if configured for this host
+		// Apply token substitution if configured for this host.
+		// Capture the URL before substitution so logs don't contain real tokens.
+		logURL := req.URL.String()
 		if sub := p.getTokenSubstitution(host); sub != nil {
 			p.applyTokenSubstitution(req, sub)
 		}
@@ -923,7 +938,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if authInjected {
 			logCredHeaderName = cred.Name
 		}
-		p.logRequest(req.Method, req.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
+		p.logRequest(req.Method, logURL, statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
 
 		if err != nil {
 			errResp := &http.Response{
