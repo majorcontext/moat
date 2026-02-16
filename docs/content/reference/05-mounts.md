@@ -9,6 +9,8 @@ keywords: ["moat", "mounts", "volumes", "filesystem", "mount syntax", "read-only
 
 Mounts control which host directories are available inside the container. By default, Moat mounts the workspace directory at `/workspace`. Additional mounts are configured with the `--mount` CLI flag or the `mounts` field in `agent.yaml`.
 
+To persist data across runs, use [volumes](./02-agent-yaml.md#volumes) instead. Volumes are managed by moat and survive container destruction.
+
 ## Mount string format
 
 Each mount is a colon-separated string:
@@ -106,6 +108,6 @@ One difference: Apple containers only support directory mounts, not individual f
 ## Related pages
 
 - [CLI reference](./01-cli.md) -- `moat run` flags including `--mount`
-- [agent.yaml reference](./02-agent-yaml.md) -- `mounts` field and all configuration options
+- [agent.yaml reference](./02-agent-yaml.md) -- `mounts` field, `volumes` field, and all configuration options
 - [Sandboxing](../concepts/01-sandboxing.md) -- Workspace mounting and filesystem isolation
 - [Security model](../concepts/08-security.md) -- Trust boundaries and defense in depth

@@ -143,9 +143,9 @@ func TestParseProviderDefValidation(t *testing.T) {
 			wantErr: "description is required",
 		},
 		{
-			name:    "missing inject header",
+			name:    "missing inject header and container_env",
 			yaml:    "name: test\ndescription: Test\nhosts: [example.com]\n",
-			wantErr: "inject.header is required",
+			wantErr: "inject.header or container_env is required",
 		},
 	}
 	for _, tt := range tests {
@@ -202,11 +202,58 @@ func TestLoadEmbeddedAllDefaults(t *testing.T) {
 		"vercel",
 		"sentry",
 		"datadog",
+		"telegram",
 	}
 
 	for _, name := range expected {
 		if _, ok := defs[name]; !ok {
 			t.Errorf("expected %q in embedded defaults", name)
 		}
+	}
+}
+
+func TestParseProviderDefTokenSubstitution(t *testing.T) {
+	yaml := `
+name: telegram
+description: "Telegram Bot API token"
+aliases: [tg]
+hosts:
+  - "api.telegram.org"
+container_env: TELEGRAM_BOT_TOKEN
+source_env: [TELEGRAM_BOT_TOKEN]
+validate:
+  url: "https://api.telegram.org/bot${token}/getMe"
+`
+	def, err := parseProviderDef([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parseProviderDef() error: %v", err)
+	}
+
+	if def.Name != "telegram" {
+		t.Errorf("Name = %q, want %q", def.Name, "telegram")
+	}
+	if def.Inject.Header != "" {
+		t.Errorf("Inject.Header = %q, want empty", def.Inject.Header)
+	}
+	if def.HasHeaderInjection() {
+		t.Error("HasHeaderInjection() should be false for token substitution provider")
+	}
+	if def.ContainerEnv != "TELEGRAM_BOT_TOKEN" {
+		t.Errorf("ContainerEnv = %q, want %q", def.ContainerEnv, "TELEGRAM_BOT_TOKEN")
+	}
+}
+
+func TestParseProviderDefMissingHeaderAndContainerEnv(t *testing.T) {
+	yaml := `
+name: test
+description: "Test"
+hosts: ["example.com"]
+`
+	_, err := parseProviderDef([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing inject.header and container_env")
+	}
+	if !strings.Contains(err.Error(), "inject.header or container_env is required") {
+		t.Errorf("error = %q, want to contain 'inject.header or container_env is required'", err.Error())
 	}
 }

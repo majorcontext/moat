@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// volumeNameRe matches valid volume names: lowercase alphanumeric, hyphens, underscores.
+// Must start with a letter or digit.
+var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // Config represents an agent.yaml manifest.
 type Config struct {
@@ -41,6 +46,7 @@ type Config struct {
 	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
 	Runtime string `yaml:"runtime,omitempty"`
 
+	Volumes   []VolumeConfig         `yaml:"volumes,omitempty"`
 	Container ContainerConfig        `yaml:"container,omitempty"`
 	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
@@ -82,6 +88,14 @@ type ContainerConfig struct {
 	// Note: Using public DNS will send queries to that provider,
 	// potentially leaking information about your dependencies and internal services.
 	DNS []string `yaml:"dns,omitempty"`
+}
+
+// VolumeConfig defines a named volume to mount inside the container.
+// Volumes are managed by moat and persist across runs for the same agent name.
+type VolumeConfig struct {
+	Name     string `yaml:"name"`
+	Target   string `yaml:"target"`
+	ReadOnly bool   `yaml:"readonly,omitempty"`
 }
 
 // MCPServerConfig defines a remote MCP server configuration for top-level
@@ -425,6 +439,38 @@ func Load(dir string) (*Config, error) {
 	for i, spec := range cfg.MCP {
 		if err := validateTopLevelMCPServerSpec(i, spec, seenNames); err != nil {
 			return nil, err
+		}
+	}
+
+	// Validate volumes
+	if len(cfg.Volumes) > 0 {
+		if cfg.Name == "" {
+			return nil, fmt.Errorf("'name' is required when volumes are configured (volumes are scoped by agent name)")
+		}
+		seenVolNames := make(map[string]bool)
+		seenVolTargets := make(map[string]bool)
+		for i, vol := range cfg.Volumes {
+			prefix := fmt.Sprintf("volumes[%d]", i)
+			if vol.Name == "" {
+				return nil, fmt.Errorf("%s: 'name' is required", prefix)
+			}
+			if !volumeNameRe.MatchString(vol.Name) {
+				return nil, fmt.Errorf("%s: invalid name %q (must match [a-z0-9][a-z0-9_-]*)", prefix, vol.Name)
+			}
+			if vol.Target == "" {
+				return nil, fmt.Errorf("%s: 'target' is required", prefix)
+			}
+			if !filepath.IsAbs(vol.Target) {
+				return nil, fmt.Errorf("%s: 'target' must be an absolute path, got %q", prefix, vol.Target)
+			}
+			if seenVolNames[vol.Name] {
+				return nil, fmt.Errorf("%s: duplicate volume name %q", prefix, vol.Name)
+			}
+			seenVolNames[vol.Name] = true
+			if seenVolTargets[vol.Target] {
+				return nil, fmt.Errorf("%s: duplicate volume target %q", prefix, vol.Target)
+			}
+			seenVolTargets[vol.Target] = true
 		}
 	}
 

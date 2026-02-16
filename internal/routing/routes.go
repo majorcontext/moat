@@ -40,6 +40,7 @@ func (rt *RouteTable) Add(agent string, endpoints map[string]string) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
+	rt.reload() // pick up routes written by other processes
 	rt.routes[agent] = endpoints
 	return rt.save()
 }
@@ -50,6 +51,7 @@ func (rt *RouteTable) Remove(agent string) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
+	rt.reload() // pick up routes written by other processes
 	delete(rt.routes, agent)
 
 	// Delete the file if no routes remain

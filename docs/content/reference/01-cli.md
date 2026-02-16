@@ -952,6 +952,64 @@ moat clean --dry-run
 
 ---
 
+## moat volumes
+
+Manage persistent volumes.
+
+Volumes store data at `~/.moat/volumes/<agent-name>/<volume-name>/` and persist across runs for the same agent name. They are created automatically when `agent.yaml` specifies a `volumes:` section.
+
+### moat volumes ls
+
+List managed volumes.
+
+```
+moat volumes ls
+```
+
+### moat volumes rm
+
+Remove all volumes for an agent.
+
+```
+moat volumes rm <agent-name> [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--force` | Skip confirmation prompt |
+
+#### Examples
+
+```bash
+moat volumes rm my-agent
+moat volumes rm my-agent --force
+```
+
+### moat volumes prune
+
+Remove all managed volumes.
+
+```
+moat volumes prune [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--force` | Skip confirmation prompt |
+
+#### Examples
+
+```bash
+moat volumes prune
+moat volumes prune --force
+```
+
+---
+
 ## moat snapshot
 
 Create and manage workspace snapshots.

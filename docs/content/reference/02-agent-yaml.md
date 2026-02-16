@@ -49,6 +49,11 @@ secrets:
 mounts:
   - ./data:/data:ro
 
+# Persistent volumes
+volumes:
+  - name: state
+    target: /home/moatuser/.myapp
+
 # Endpoints
 ports:
   web: 3000
@@ -425,6 +430,61 @@ mounts:
 | `mode` | `ro` (read-only) or `rw` (read-write, default) |
 
 The workspace is always mounted at `/workspace`.
+
+---
+
+## Volumes
+
+### volumes
+
+Named volumes that persist data across runs for the same agent name.
+
+```yaml
+name: my-agent
+
+volumes:
+  - name: state
+    target: /home/moatuser/.myapp
+  - name: cache
+    target: /var/cache/myapp
+    readonly: true
+```
+
+- Type: `array[object]`
+- Default: `[]`
+- Requires: `name` field must be set (volumes are scoped by agent name)
+
+Unlike `mounts:` (bind mounts with a host-side source path), volumes are managed by moat. They have no host-side source — moat handles the storage.
+
+#### Volume fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | yes | Volume name, scoped to agent. Must match `[a-z0-9][a-z0-9_-]*`. |
+| `target` | `string` | yes | Absolute path inside the container. |
+| `readonly` | `bool` | no | Mount as read-only. Default: `false`. |
+
+#### Storage
+
+Volumes are stored on the host at `~/.moat/volumes/<agent-name>/<volume-name>/` and bind-mounted into the container. This works identically across Docker and Apple container runtimes.
+
+#### Volume lifecycle
+
+| Event | Behavior |
+|-------|----------|
+| First run | Volume created automatically |
+| Stop/Destroy | Volume persists |
+| Next run (same agent name) | Volume reattached |
+| `moat volumes rm <agent>` | Volume deleted |
+| `moat clean` | Volumes **not** deleted |
+
+#### Managing volumes
+
+```bash
+moat volumes ls                  # List managed volumes
+moat volumes rm <agent-name>     # Remove volumes for an agent
+moat volumes prune               # Remove all managed volumes
+```
 
 ---
 

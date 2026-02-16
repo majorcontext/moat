@@ -427,6 +427,111 @@ func TestProxy_SetCredential_UsesAuthorizationHeader(t *testing.T) {
 	}
 }
 
+// TestProxy_ExtraHeaders_MergesWithExisting verifies that extra headers are
+// merged with client-sent headers rather than replacing them.
+func TestProxy_ExtraHeaders_MergesWithExisting(t *testing.T) {
+	var receivedBeta string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("anthropic-beta")
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.AddExtraHeader("127.0.0.1", "anthropic-beta", "oauth-2025-04-20")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	want := "prompt-caching-2024-07-31,oauth-2025-04-20"
+	if receivedBeta != want {
+		t.Errorf("anthropic-beta = %q, want %q", receivedBeta, want)
+	}
+}
+
+// TestProxy_ExtraHeaders_SetsWhenAbsent verifies that extra headers are set
+// when the client doesn't send them.
+func TestProxy_ExtraHeaders_SetsWhenAbsent(t *testing.T) {
+	var receivedBeta string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("anthropic-beta")
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.AddExtraHeader("127.0.0.1", "anthropic-beta", "oauth-2025-04-20")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if receivedBeta != "oauth-2025-04-20" {
+		t.Errorf("anthropic-beta = %q, want %q", receivedBeta, "oauth-2025-04-20")
+	}
+}
+
+// TestProxy_RemoveRequestHeader verifies that client-sent headers can be
+// stripped before forwarding.
+func TestProxy_RemoveRequestHeader(t *testing.T) {
+	var receivedAPIKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKey = r.Header.Get("x-api-key")
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetCredential("127.0.0.1", "Bearer real-token")
+	p.RemoveRequestHeader("127.0.0.1", "x-api-key")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("x-api-key", "stale-placeholder")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if receivedAPIKey != "" {
+		t.Errorf("x-api-key should be stripped, got %q", receivedAPIKey)
+	}
+}
+
 // TestIsTextContentType verifies content type detection for body capture.
 func TestIsTextContentType(t *testing.T) {
 	tests := []struct {
@@ -637,5 +742,120 @@ func TestFilterHeaders_NilHeaders(t *testing.T) {
 
 	if filtered != nil {
 		t.Errorf("filtered = %v, want nil", filtered)
+	}
+}
+
+// TestApplyTokenSubstitution_URLPath verifies token substitution in URL paths.
+func TestApplyTokenSubstitution_URLPath(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "123456:ABC-DEF",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.telegram.org",
+			Path:   "/botmoat-proxy-injected/getMe",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	wantPath := "/bot123456:ABC-DEF/getMe"
+	if req.URL.Path != wantPath {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, wantPath)
+	}
+}
+
+// TestApplyTokenSubstitution_RawPath verifies token substitution in RawPath when set.
+func TestApplyTokenSubstitution_RawPath(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-abc123",
+		realToken:   "123456:ABC-DEF",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme:  "https",
+			Host:    "api.telegram.org",
+			Path:    "/botmoat-abc123/getMe",
+			RawPath: "/botmoat-abc123/getMe",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	wantPath := "/bot123456:ABC-DEF/getMe"
+	if req.URL.Path != wantPath {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, wantPath)
+	}
+	if req.URL.RawPath != wantPath {
+		t.Errorf("URL.RawPath = %q, want %q", req.URL.RawPath, wantPath)
+	}
+}
+
+// TestApplyTokenSubstitution_URLPathAndBody verifies substitution in both URL and body.
+func TestApplyTokenSubstitution_URLPathAndBody(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "real-token-value",
+	}
+
+	body := `{"token": "moat-proxy-injected"}`
+	req := &http.Request{
+		Method: "POST",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.example.com",
+			Path:   "/v1/moat-proxy-injected/action",
+		},
+		Header:        make(http.Header),
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	if req.URL.Path != "/v1/real-token-value/action" {
+		t.Errorf("URL.Path = %q, want %q", req.URL.Path, "/v1/real-token-value/action")
+	}
+
+	gotBody, _ := io.ReadAll(req.Body)
+	wantBody := `{"token": "real-token-value"}`
+	if string(gotBody) != wantBody {
+		t.Errorf("Body = %q, want %q", string(gotBody), wantBody)
+	}
+}
+
+// TestApplyTokenSubstitution_NoMatch verifies no modification when placeholder is absent.
+func TestApplyTokenSubstitution_NoMatch(t *testing.T) {
+	p := NewProxy()
+	sub := &tokenSubstitution{
+		placeholder: "moat-proxy-injected",
+		realToken:   "real-token",
+	}
+
+	req := &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "api.example.com",
+			Path:   "/v1/something-else/action",
+		},
+		Header: make(http.Header),
+	}
+
+	p.applyTokenSubstitution(req, sub)
+
+	if req.URL.Path != "/v1/something-else/action" {
+		t.Errorf("URL.Path should be unchanged, got %q", req.URL.Path)
 	}
 }

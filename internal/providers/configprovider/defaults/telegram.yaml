@@ -1,0 +1,22 @@
+name: telegram
+description: "Telegram Bot API token"
+aliases: [tg]
+
+hosts:
+  - "api.telegram.org"
+
+# Telegram Bot API embeds the token in URL paths (e.g., /bot{TOKEN}/sendMessage),
+# not in HTTP headers. No inject.header is set, so the proxy uses token substitution:
+# it replaces the placeholder in URL paths with the real token at the network layer.
+container_env: TELEGRAM_BOT_TOKEN
+
+source_env: [TELEGRAM_BOT_TOKEN]
+
+validate:
+  url: "https://api.telegram.org/bot${token}/getMe"
+
+prompt: |
+  Create a Telegram bot token:
+  1. Open Telegram and search for @BotFather
+  2. Send /newbot and follow the prompts
+  3. Copy the bot token (format: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ)

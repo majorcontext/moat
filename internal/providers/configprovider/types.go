@@ -13,6 +13,13 @@ type ProviderDef struct {
 	Prompt       string          `yaml:"prompt,omitempty"`
 }
 
+// HasHeaderInjection returns true if the provider injects credentials via HTTP headers.
+// When false and hosts are configured, the provider uses token substitution instead —
+// the proxy replaces placeholder tokens in URL paths, headers, and request bodies.
+func (d ProviderDef) HasHeaderInjection() bool {
+	return d.Inject.Header != ""
+}
+
 // InjectConfig defines how credentials are injected into HTTP requests.
 type InjectConfig struct {
 	Header string `yaml:"header"`

@@ -142,8 +142,8 @@ type ProxyConfigurer interface {
 	// RemoveRequestHeader removes a client-sent header before forwarding.
 	// Used when injected credentials conflict with client headers.
 	RemoveRequestHeader(host, headerName string)
-	// SetTokenSubstitution replaces placeholder tokens with real tokens in both
-	// Authorization headers and request bodies for a specific host.
+	// SetTokenSubstitution replaces placeholder tokens with real tokens in
+	// URL paths, Authorization headers, and request bodies for a specific host.
 	// Body substitution is limited to 64KB requests to avoid memory issues.
 	SetTokenSubstitution(host, placeholder, realToken string)
 }

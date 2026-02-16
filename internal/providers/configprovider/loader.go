@@ -157,8 +157,8 @@ func parseProviderDef(data []byte) (ProviderDef, error) {
 	if def.Description == "" {
 		return ProviderDef{}, fmt.Errorf("provider %q: description is required", def.Name)
 	}
-	if def.Inject.Header == "" {
-		return ProviderDef{}, fmt.Errorf("provider %q: inject.header is required", def.Name)
+	if def.Inject.Header == "" && def.ContainerEnv == "" {
+		return ProviderDef{}, fmt.Errorf("provider %q: inject.header or container_env is required", def.Name)
 	}
 	return def, nil
 }

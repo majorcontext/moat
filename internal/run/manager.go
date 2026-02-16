@@ -363,6 +363,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Add volume mounts from config.
+	// All runtimes use host-backed bind mounts (~/.moat/volumes/<agent>/<name>/)
+	// so the directory is owned by the current user, matching the container user.
+	if opts.Config != nil && len(opts.Config.Volumes) > 0 {
+		for _, vol := range opts.Config.Volumes {
+			volDir := config.VolumeDir(opts.Config.Name, vol.Name)
+			if err := os.MkdirAll(volDir, 0755); err != nil {
+				return nil, fmt.Errorf("creating volume directory %s: %w", volDir, err)
+			}
+			mounts = append(mounts, container.MountConfig{
+				Source:   volDir,
+				Target:   vol.Target,
+				ReadOnly: vol.ReadOnly,
+			})
+			log.Debug("added volume mount", "dir", volDir, "target", vol.Target)
+		}
+	}
+
 	// Start proxy if we have grants (for credential injection) or strict network policy
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
@@ -2199,6 +2217,36 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		r.StartedAt = time.Now()
 	}
 	m.mu.Unlock()
+
+	// Get actual port bindings after container starts
+	if len(r.Ports) > 0 {
+		var bindings map[int]int
+		var bindErr error
+		for i := 0; i < 5; i++ {
+			bindings, bindErr = m.runtime.GetPortBindings(ctx, r.ContainerID)
+			if bindErr != nil || len(bindings) >= len(r.Ports) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if bindErr != nil {
+			ui.Warnf("Getting port bindings: %v", bindErr)
+		} else {
+			r.HostPorts = make(map[string]int)
+			services := make(map[string]string)
+			for serviceName, containerPort := range r.Ports {
+				if hostPort, ok := bindings[containerPort]; ok {
+					r.HostPorts[serviceName] = hostPort
+					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
+				}
+			}
+			if len(services) > 0 {
+				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
+					ui.Warnf("Registering routes: %v", routeErr)
+				}
+			}
+		}
+	}
 
 	// Save state to disk
 	_ = r.SaveMetadata()
