@@ -1717,3 +1717,44 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 		t.Error("stale route for missing container should have been removed by loadPersistedRuns")
 	}
 }
+
+// TestHostGitIdentity verifies that hostGitIdentity returns env vars and the
+// hasGit flag based on the dependency list. When git is present on the host,
+// the function shells out to read user.name/user.email — we can't control that
+// in unit tests, but we can verify the dependency detection and that the
+// returned env vars (if any) have the correct prefix.
+func TestHostGitIdentity(t *testing.T) {
+	t.Run("no git dependency", func(t *testing.T) {
+		env, hasGit := hostGitIdentity([]deps.Dependency{{Name: "node"}})
+		if hasGit {
+			t.Error("hasGit should be false when git is not in deps")
+		}
+		if len(env) != 0 {
+			t.Errorf("env should be empty, got %v", env)
+		}
+	})
+
+	t.Run("git dependency present", func(t *testing.T) {
+		env, hasGit := hostGitIdentity([]deps.Dependency{{Name: "git"}})
+		if !hasGit {
+			t.Error("hasGit should be true when git is in deps")
+		}
+		// env may or may not have values depending on the host's git config,
+		// but any values present must have the correct prefix.
+		for _, v := range env {
+			if !strings.HasPrefix(v, "MOAT_GIT_USER_NAME=") && !strings.HasPrefix(v, "MOAT_GIT_USER_EMAIL=") {
+				t.Errorf("unexpected env var: %s", v)
+			}
+		}
+	})
+
+	t.Run("nil dependency list", func(t *testing.T) {
+		env, hasGit := hostGitIdentity(nil)
+		if hasGit {
+			t.Error("hasGit should be false for nil deps")
+		}
+		if len(env) != 0 {
+			t.Errorf("env should be empty, got %v", env)
+		}
+	})
+}
