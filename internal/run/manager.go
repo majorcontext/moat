@@ -220,9 +220,13 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		}
 
 		// If container is already stopped, close exitCh immediately
-		// so any Wait() calls don't hang
+		// so any Wait() calls don't hang, and clean up stale routes
+		// so the name can be reused without requiring "moat clean".
 		if runState == StateStopped || runState == StateFailed {
 			close(r.exitCh)
+			if r.Name != "" {
+				_ = m.routes.Remove(r.Name)
+			}
 		}
 
 		// Update metadata if state changed
