@@ -166,12 +166,27 @@ if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
 fi
 
 # MCP Server Setup
-# MCP servers are now configured via the .claude.json file in the staging directory.
-# The moat run manager writes MCP configuration directly to .claude.json with stub
-# credentials (moat-stub-{grant}). The proxy replaces these stub credentials with
-# real credentials at the network layer.
+# Remote/host-local MCP servers are configured via .claude.json for Claude Code.
+# Local process MCP servers (sandbox-local) are configured per-agent:
+# - Claude: Written to .claude.json mcpServers (type: stdio) by the claude provider
+# - Codex: Written to .mcp.json in workspace by the codex provider
+# - Gemini: Written to .mcp.json in workspace by the gemini provider
 #
-# This comment is kept as a placeholder in case Codex MCP support is added later.
+# Copy .mcp.json from Codex staging if present
+if [ -n "$MOAT_CODEX_INIT" ] && [ -f "$MOAT_CODEX_INIT/mcp.json" ]; then
+  cp -p "$MOAT_CODEX_INIT/mcp.json" /workspace/.mcp.json
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
+  fi
+fi
+
+# Copy .mcp.json from Gemini staging if present
+if [ -n "$MOAT_GEMINI_INIT" ] && [ -f "$MOAT_GEMINI_INIT/mcp.json" ]; then
+  cp -p "$MOAT_GEMINI_INIT/mcp.json" /workspace/.mcp.json
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
+  fi
+fi
 
 # Git Configuration
 # 1. Safe directory: The workspace is mounted from the host with different
