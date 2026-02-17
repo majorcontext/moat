@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -306,6 +307,141 @@ func TestDefaultDependencies(t *testing.T) {
 	}
 	if !hasCodexCLI {
 		t.Error("DefaultDependencies() should include codex-cli")
+	}
+}
+
+func TestPrepareContainer_LocalMCP(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"my-server": {
+				Command: "/usr/local/bin/mcp-server",
+				Args:    []string{"--verbose"},
+				Env:     map[string]string{"DEBUG": "1"},
+				Cwd:     "/workspace",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	// Verify mcp.json was written to staging dir
+	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("mcp.json not found in staging dir: %v", err)
+	}
+
+	// Verify content
+	want := `"my-server"`
+	if !contains(string(data), want) {
+		t.Errorf("mcp.json should contain %q, got: %s", want, data)
+	}
+	if !contains(string(data), `"command": "/usr/local/bin/mcp-server"`) {
+		t.Errorf("mcp.json should contain command, got: %s", data)
+	}
+	if !contains(string(data), `"--verbose"`) {
+		t.Errorf("mcp.json should contain args, got: %s", data)
+	}
+}
+
+func TestPrepareContainer_NoLocalMCP(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		// No LocalMCPServers
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	// mcp.json should NOT exist in staging dir when no local MCP servers
+	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
+	if _, err := os.Stat(mcpPath); err == nil {
+		t.Error("mcp.json should NOT exist when no local MCP servers configured")
+	}
+}
+
+func TestPrepareContainer_LocalMCP_MultipleServers(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"server-a": {
+				Command: "mcp-a",
+				Args:    []string{"--mode", "fast"},
+			},
+			"server-b": {
+				Command: "mcp-b",
+				Env:     map[string]string{"PORT": "3001"},
+				Cwd:     "/opt/tools",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
+	data, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("mcp.json not found: %v", err)
+	}
+
+	content := string(data)
+	if !contains(content, `"server-a"`) {
+		t.Error("mcp.json should contain server-a")
+	}
+	if !contains(content, `"server-b"`) {
+		t.Error("mcp.json should contain server-b")
+	}
+	if !contains(content, `"command": "mcp-a"`) {
+		t.Error("mcp.json should contain mcp-a command")
+	}
+	if !contains(content, `"command": "mcp-b"`) {
+		t.Error("mcp.json should contain mcp-b command")
+	}
+}
+
+func TestPrepareContainer_LocalMCP_MinimalFields(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"simple": {
+				Command: "bare-mcp",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, "mcp.json"))
+	if err != nil {
+		t.Fatalf("mcp.json not found: %v", err)
+	}
+
+	content := string(data)
+	if !contains(content, `"command": "bare-mcp"`) {
+		t.Errorf("mcp.json should contain command, got: %s", content)
+	}
+	// Should not have env or cwd fields when not set
+	if contains(content, `"env"`) {
+		t.Error("mcp.json should not contain env when not set")
+	}
+	if contains(content, `"cwd"`) {
+		t.Error("mcp.json should not contain cwd when not set")
 	}
 }
 

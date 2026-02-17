@@ -33,6 +33,8 @@ type MCPServerForContainer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
 }
 
 // HostConfigAllowlist lists fields from the host's ~/.claude.json that are

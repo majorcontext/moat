@@ -45,13 +45,24 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 
 	// Convert MCP servers to Claude's format
 	var mcpServers map[string]MCPServerForContainer
-	if len(opts.MCPServers) > 0 {
+	if len(opts.MCPServers) > 0 || len(opts.LocalMCPServers) > 0 {
 		mcpServers = make(map[string]MCPServerForContainer)
+		// Remote/relay MCP servers (type: http)
 		for name, cfg := range opts.MCPServers {
 			mcpServers[name] = MCPServerForContainer{
 				Type:    "http",
 				URL:     cfg.URL,
 				Headers: cfg.Headers,
+			}
+		}
+		// Local process MCP servers (type: stdio)
+		for name, cfg := range opts.LocalMCPServers {
+			mcpServers[name] = MCPServerForContainer{
+				Type:    "stdio",
+				Command: cfg.Command,
+				Args:    cfg.Args,
+				Env:     cfg.Env,
+				Cwd:     cfg.Cwd,
 			}
 		}
 	}

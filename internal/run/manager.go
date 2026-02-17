@@ -1589,13 +1589,28 @@ region = %s
 				}
 			}
 
+			// Build local MCP server config from claude.mcp entries
+			var claudeLocalMCP map[string]provider.LocalMCPServerConfig
+			if opts.Config != nil && len(opts.Config.Claude.MCP) > 0 {
+				claudeLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+				for name, spec := range opts.Config.Claude.MCP {
+					claudeLocalMCP[name] = provider.LocalMCPServerConfig{
+						Command: spec.Command,
+						Args:    spec.Args,
+						Env:     spec.Env,
+						Cwd:     spec.Cwd,
+					}
+				}
+			}
+
 			// Call provider to prepare container config
 			var prepErr error
 			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
-				Credential:     claudeCred,
-				ContainerHome:  containerHome,
-				MCPServers:     mcpServers,
-				RuntimeContext: renderedContext,
+				Credential:      claudeCred,
+				ContainerHome:   containerHome,
+				MCPServers:      mcpServers,
+				RuntimeContext:  renderedContext,
+				LocalMCPServers: claudeLocalMCP,
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {
@@ -1657,12 +1672,27 @@ region = %s
 			}
 		}
 
+		// Build local MCP server config from codex.mcp entries
+		var codexLocalMCP map[string]provider.LocalMCPServerConfig
+		if opts.Config != nil && len(opts.Config.Codex.MCP) > 0 {
+			codexLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+			for name, spec := range opts.Config.Codex.MCP {
+				codexLocalMCP[name] = provider.LocalMCPServerConfig{
+					Command: spec.Command,
+					Args:    spec.Args,
+					Env:     spec.Env,
+					Cwd:     spec.Cwd,
+				}
+			}
+		}
+
 		// Call provider to prepare container config
 		var prepErr error
 		codexConfig, prepErr = codexProvider.PrepareContainer(ctx, provider.PrepareOpts{
-			Credential:     codexCred,
-			ContainerHome:  containerHome,
-			RuntimeContext: renderedContext,
+			Credential:      codexCred,
+			ContainerHome:   containerHome,
+			RuntimeContext:  renderedContext,
+			LocalMCPServers: codexLocalMCP,
 		})
 		if prepErr != nil {
 			cleanupDaemonRun()
@@ -1701,12 +1731,27 @@ region = %s
 			}
 		}
 
+		// Build local MCP server config from gemini.mcp entries
+		var geminiLocalMCP map[string]provider.LocalMCPServerConfig
+		if opts.Config != nil && len(opts.Config.Gemini.MCP) > 0 {
+			geminiLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+			for name, spec := range opts.Config.Gemini.MCP {
+				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
+					Command: spec.Command,
+					Args:    spec.Args,
+					Env:     spec.Env,
+					Cwd:     spec.Cwd,
+				}
+			}
+		}
+
 		// Call provider to prepare container config
 		var prepErr error
 		geminiConfig, prepErr = geminiProvider.PrepareContainer(ctx, provider.PrepareOpts{
-			Credential:     geminiCred,
-			ContainerHome:  containerHome,
-			RuntimeContext: renderedContext,
+			Credential:      geminiCred,
+			ContainerHome:   containerHome,
+			RuntimeContext:  renderedContext,
+			LocalMCPServers: geminiLocalMCP,
 		})
 		if prepErr != nil {
 			cleanupDaemonRun()

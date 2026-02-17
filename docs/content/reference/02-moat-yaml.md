@@ -108,6 +108,18 @@ claude:
       grant: github
       cwd: /workspace
 
+# Codex
+codex:
+  sync_logs: true
+  mcp:
+    my_server:
+      command: /path/to/server
+      args: ["--flag"]
+      env:
+        VAR: value
+      grant: openai
+      cwd: /workspace
+
 # Gemini CLI
 gemini:
   sync_logs: true
@@ -1022,7 +1034,7 @@ claude:
 
 ### claude.mcp
 
-Local MCP servers that run as child processes inside the container. Configuration is written to `.claude.json` with `type: stdio`.
+Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to `.claude.json` with `type: stdio`.
 
 ```yaml
 claude:
@@ -1156,7 +1168,7 @@ mcp:
 
 MCP servers running on the host machine (e.g., `http://localhost:3000`) are not accessible from inside the container. Moat's proxy relay bridges this gap -- the relay runs on the host and forwards container requests to the host-local server.
 
-**Note:** For local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
+**Note:** For sandbox-local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
@@ -1178,6 +1190,45 @@ codex:
 
 When enabled, Codex session logs are synced to the host at `~/.moat/runs/<run-id>/codex/`.
 
+### codex.mcp
+
+Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
+
+```yaml
+codex:
+  mcp:
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+      env:
+        VAR: value
+      grant: openai
+      cwd: /workspace
+```
+
+- Type: `map[string]object`
+- Default: `{}`
+
+#### MCP server fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | `string` | Server executable path (required) |
+| `args` | `array[string]` | Command arguments |
+| `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
+| `grant` | `string` | Credential to inject as an environment variable |
+| `cwd` | `string` | Working directory for the server process |
+
+When `grant` is specified, the corresponding environment variable is set automatically:
+
+| Grant | Environment variable |
+|-------|---------------------|
+| `github` | `GITHUB_TOKEN` |
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
+
 ---
 
 ## Gemini
@@ -1198,7 +1249,7 @@ When enabled, Gemini session logs are synced to the host at `~/.moat/runs/<run-i
 
 ### gemini.mcp
 
-Local MCP servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
+Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
 
 ```yaml
 gemini:
