@@ -14,11 +14,11 @@ For architecture details on how this data is captured, see [Observability](../co
 ## Prerequisites
 
 - A working Moat installation with Docker or Apple container runtime
-- At least one completed run (use `moat list` to check)
+- At least one run, active or completed (use `moat list` to check)
 
 ## Viewing logs
 
-`moat logs` displays container stdout and stderr with timestamps.
+`moat logs` displays container stdout and stderr with timestamps. Logs are streamed to `logs.jsonl` in real time as the container produces output, so they are available while the run is still active.
 
 View logs for the most recent run:
 
@@ -42,7 +42,23 @@ Show the last N lines:
 $ moat logs -n 50
 ```
 
-> **Note:** The `--follow` flag for `moat logs` is not yet implemented. Use `moat attach` to see live output from a running container.
+### Following logs
+
+Use `-f`/`--follow` to stream log output from a running container:
+
+```bash
+$ moat logs -f my-agent
+
+[2025-01-21T10:23:44.512Z] Starting server on port 3000
+[2025-01-21T10:23:44.789Z] Connected to database
+... (new lines appear as the container writes them)
+```
+
+Press `Ctrl+C` to stop following. Combine with `-n` to show recent history before streaming:
+
+```bash
+$ moat logs -n 20 -f my-agent
+```
 
 See [CLI reference](../reference/01-cli.md) for the complete list of `moat logs` flags.
 
@@ -265,9 +281,10 @@ $ jq 'select(.status == 401)' ~/.moat/runs/run_*/network.jsonl
 
 ### No output from `moat logs`
 
-The run may not have produced any output. Verify the run exists with `moat list`. If the run is still active, use `moat attach` to see live output:
+The run may not have produced any output yet. Verify the run exists with `moat list`. If the run is still active, use `moat logs -f` to wait for new output, or `moat attach` to interact with the container directly:
 
 ```bash
+$ moat logs -f run_a1b2c3d4e5f6
 $ moat attach run_a1b2c3d4e5f6
 ```
 

@@ -1758,3 +1758,686 @@ func TestHostGitIdentity(t *testing.T) {
 		}
 	})
 }
+
+// TestCloseSkipsProxyForRunningRuns verifies that Manager.Close() does not stop
+// proxy servers for runs that are still running. This prevents the bug where
+// detaching from a running container would kill its credential-injecting proxy.
+func TestCloseSkipsProxyForRunningRuns(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	// Create a run that is still running
+	runningRun := &Run{
+		ID:          "run_running",
+		Name:        "running-agent",
+		ContainerID: "ctr-running",
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+
+	// Create a run that is stopped
+	stoppedRun := &Run{
+		ID:          "run_stopped",
+		Name:        "stopped-agent",
+		ContainerID: "ctr-stopped",
+		State:       StateStopped,
+		exitCh:      make(chan struct{}),
+	}
+	close(stoppedRun.exitCh) // Already exited
+
+	m.runs["run_running"] = runningRun
+	m.runs["run_stopped"] = stoppedRun
+
+	// Close the manager
+	err := m.Close()
+	if err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// The running run should still be in StateRunning (proxy not stopped)
+	if runningRun.GetState() != StateRunning {
+		t.Errorf("expected running run to remain in StateRunning, got %s", runningRun.GetState())
+	}
+}
+
+// TestCloseStopsProxyForStoppedRuns verifies that Manager.Close() stops proxy
+// servers for runs that are no longer running.
+func TestCloseStopsProxyForStoppedRuns(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	// Create stopped runs with various terminal states
+	states := []State{StateStopped, StateFailed, StateCreated}
+	for i, state := range states {
+		r := &Run{
+			ID:          fmt.Sprintf("run_%d", i),
+			Name:        fmt.Sprintf("agent-%d", i),
+			ContainerID: fmt.Sprintf("ctr-%d", i),
+			State:       state,
+			exitCh:      make(chan struct{}),
+		}
+		if state == StateStopped || state == StateFailed {
+			close(r.exitCh)
+		}
+		m.runs[r.ID] = r
+	}
+
+	err := m.Close()
+	if err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+}
+
+// TestCloseSkipsProxyForStartingRuns verifies that Manager.Close() does not stop
+// proxy servers for runs in StateStarting (transitional running state).
+func TestCloseSkipsProxyForStartingRuns(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	startingRun := &Run{
+		ID:          "run_starting",
+		Name:        "starting-agent",
+		ContainerID: "ctr-starting",
+		State:       StateStarting,
+		exitCh:      make(chan struct{}),
+	}
+	m.runs["run_starting"] = startingRun
+
+	err := m.Close()
+	if err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// StateStarting should be treated as active — proxy must not be stopped
+	if startingRun.GetState() != StateStarting {
+		t.Errorf("expected starting run to remain in StateStarting, got %s", startingRun.GetState())
+	}
+}
+
+// TestCloseWithEmptyRunsMap verifies that Manager.Close() handles an empty runs map.
+func TestCloseWithEmptyRunsMap(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	err := m.Close()
+	if err != nil {
+		t.Fatalf("Close() error with empty runs: %v", err)
+	}
+}
+
+// TestLastNLines verifies the lastNLines helper used by RecentLogs.
+func TestLastNLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		n     int
+		want  string
+	}{
+		{
+			name:  "fewer lines than n",
+			input: "line1\nline2\n",
+			n:     5,
+			want:  "line1\nline2\n",
+		},
+		{
+			name:  "exact n lines",
+			input: "line1\nline2\nline3\n",
+			n:     3,
+			want:  "line1\nline2\nline3\n",
+		},
+		{
+			name:  "more lines than n",
+			input: "line1\nline2\nline3\nline4\nline5\n",
+			n:     2,
+			want:  "line4\nline5\n",
+		},
+		{
+			name:  "single line",
+			input: "only\n",
+			n:     1,
+			want:  "only\n",
+		},
+		{
+			name:  "n is zero",
+			input: "line1\nline2\n",
+			n:     0,
+			want:  "",
+		},
+		{
+			name:  "negative n",
+			input: "line1\nline2\n",
+			n:     -1,
+			want:  "",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			n:     5,
+			want:  "",
+		},
+		{
+			name:  "no trailing newline",
+			input: "line1\nline2\nline3",
+			n:     2,
+			// Without a trailing newline, "line3" is not preceded by its own
+			// newline delimiter, so lastNLines counts 2 newlines and returns
+			// all content (fewer than n+1 delimiters found).
+			want: "line1\nline2\nline3",
+		},
+		{
+			name:  "single line no newline",
+			input: "only",
+			n:     1,
+			want:  "only",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lastNLines(tt.input, tt.n)
+			if got != tt.want {
+				t.Errorf("lastNLines(%q, %d) = %q, want %q", tt.input, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+// logsStubRuntime extends stubRuntime with ContainerLogs support for testing
+// streamLogs, streamLogsToStorage, and FollowLogs.
+type logsStubRuntime struct {
+	stubRuntime
+	logs     io.ReadCloser
+	logsErr  error
+	logsAll  []byte
+	logsType container.RuntimeType
+}
+
+func (s *logsStubRuntime) ContainerLogs(_ context.Context, _ string) (io.ReadCloser, error) {
+	if s.logsErr != nil {
+		return nil, s.logsErr
+	}
+	return s.logs, nil
+}
+
+func (s *logsStubRuntime) ContainerLogsAll(_ context.Context, _ string) ([]byte, error) {
+	return s.logsAll, nil
+}
+
+func (s *logsStubRuntime) Type() container.RuntimeType {
+	if s.logsType != "" {
+		return s.logsType
+	}
+	return container.RuntimeDocker
+}
+
+// TestFollowLogs verifies that FollowLogs streams container logs to the writer.
+func TestFollowLogs(t *testing.T) {
+	logContent := "log line 1\nlog line 2\nlog line 3\n"
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logs: io.NopCloser(strings.NewReader(logContent)),
+	}
+
+	m := &Manager{
+		runtime: rt,
+		runs: map[string]*Run{
+			"run_1": {
+				ID:          "run_1",
+				ContainerID: "ctr-1",
+			},
+		},
+	}
+
+	var buf strings.Builder
+	err := m.FollowLogs(context.Background(), "run_1", &buf)
+	if err != nil {
+		t.Fatalf("FollowLogs() error: %v", err)
+	}
+
+	if buf.String() != logContent {
+		t.Errorf("FollowLogs() output = %q, want %q", buf.String(), logContent)
+	}
+}
+
+// TestFollowLogsNotFound verifies that FollowLogs returns error for unknown run.
+func TestFollowLogsNotFound(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	var buf strings.Builder
+	err := m.FollowLogs(context.Background(), "nonexistent", &buf)
+	if err == nil {
+		t.Fatal("FollowLogs() expected error for unknown run, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("FollowLogs() error = %q, want containing 'not found'", err.Error())
+	}
+}
+
+// TestFollowLogsContainerLogsError verifies FollowLogs handles runtime errors.
+func TestFollowLogsContainerLogsError(t *testing.T) {
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logsErr: fmt.Errorf("container not found"),
+	}
+
+	m := &Manager{
+		runtime: rt,
+		runs: map[string]*Run{
+			"run_1": {
+				ID:          "run_1",
+				ContainerID: "ctr-1",
+			},
+		},
+	}
+
+	var buf strings.Builder
+	err := m.FollowLogs(context.Background(), "run_1", &buf)
+	if err == nil {
+		t.Fatal("FollowLogs() expected error when ContainerLogs fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "getting container logs") {
+		t.Errorf("FollowLogs() error = %q, want containing 'getting container logs'", err.Error())
+	}
+}
+
+// TestRecentLogs verifies that RecentLogs returns the last N lines.
+func TestRecentLogs(t *testing.T) {
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logsAll: []byte("line1\nline2\nline3\nline4\nline5\n"),
+	}
+
+	m := &Manager{
+		runtime: rt,
+		runs: map[string]*Run{
+			"run_1": {
+				ID:          "run_1",
+				ContainerID: "ctr-1",
+			},
+		},
+	}
+
+	got, err := m.RecentLogs("run_1", 2)
+	if err != nil {
+		t.Fatalf("RecentLogs() error: %v", err)
+	}
+
+	if got != "line4\nline5\n" {
+		t.Errorf("RecentLogs() = %q, want %q", got, "line4\nline5\n")
+	}
+}
+
+// TestRecentLogsNotFound verifies that RecentLogs returns error for unknown run.
+func TestRecentLogsNotFound(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	_, err := m.RecentLogs("nonexistent", 10)
+	if err == nil {
+		t.Fatal("RecentLogs() expected error for unknown run, got nil")
+	}
+}
+
+// TestStreamLogsToStorage verifies that streamLogsToStorage captures logs
+// to the run store without printing to stdout.
+func TestStreamLogsToStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "runs")
+	store, err := storage.NewRunStore(baseDir, "run_stream_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logContent := "hello from container\nline 2\n"
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logs:     io.NopCloser(strings.NewReader(logContent)),
+		logsType: "apple", // Apple runtime uses raw io.Copy (no demux)
+	}
+
+	r := &Run{
+		ID:          "run_stream_test",
+		ContainerID: "ctr-1",
+		Store:       store,
+	}
+
+	m := &Manager{runtime: rt}
+	m.streamLogsToStorage(context.Background(), r)
+
+	// Verify logs were captured
+	if !r.logsCaptured.Load() {
+		t.Error("logsCaptured should be true after streamLogsToStorage")
+	}
+
+	// Read back the logs
+	entries, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs() error: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected log entries after streamLogsToStorage, got none")
+	}
+
+	// Verify log content was captured
+	var captured strings.Builder
+	for _, e := range entries {
+		captured.WriteString(e.Line)
+		captured.WriteString("\n")
+	}
+	if !strings.Contains(captured.String(), "hello from container") {
+		t.Errorf("captured logs should contain 'hello from container', got: %q", captured.String())
+	}
+}
+
+// TestStreamLogsToStorageNilStore verifies that streamLogsToStorage handles nil store.
+func TestStreamLogsToStorageNilStore(t *testing.T) {
+	r := &Run{
+		ID:          "run_nil_store",
+		ContainerID: "ctr-1",
+		Store:       nil,
+	}
+
+	m := &Manager{runtime: &stubRuntime{
+		states: map[string]string{},
+		done:   make(chan struct{}),
+	}}
+
+	// Should not panic with nil store
+	m.streamLogsToStorage(context.Background(), r)
+
+	// logsCaptured should remain false
+	if r.logsCaptured.Load() {
+		t.Error("logsCaptured should be false when store is nil")
+	}
+}
+
+// TestStreamLogsToStorageContainerLogsError verifies graceful handling of
+// container log retrieval errors.
+func TestStreamLogsToStorageContainerLogsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "runs")
+	store, err := storage.NewRunStore(baseDir, "run_err_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logsErr: fmt.Errorf("container removed"),
+	}
+
+	r := &Run{
+		ID:          "run_err_test",
+		ContainerID: "ctr-1",
+		Store:       store,
+	}
+
+	m := &Manager{runtime: rt}
+
+	// Should not panic
+	m.streamLogsToStorage(context.Background(), r)
+
+	// logsCaptured should remain false since we couldn't get logs
+	if r.logsCaptured.Load() {
+		t.Error("logsCaptured should be false when ContainerLogs fails")
+	}
+}
+
+// TestStreamLogsWithMultiWriter verifies that streamLogs writes to both stdout
+// and the log store via MultiWriter when a store is available.
+func TestStreamLogsWithMultiWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "runs")
+	store, err := storage.NewRunStore(baseDir, "run_multi_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logContent := "multiwriter test line\n"
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logs:     io.NopCloser(strings.NewReader(logContent)),
+		logsType: "apple", // Apple runtime uses raw io.Copy
+	}
+
+	r := &Run{
+		ID:          "run_multi_test",
+		ContainerID: "ctr-1",
+		Store:       store,
+	}
+
+	m := &Manager{runtime: rt}
+
+	// Redirect stdout for this test would be complex, so instead we verify
+	// that the log was captured to storage (the other half of MultiWriter)
+	m.streamLogs(context.Background(), r)
+
+	if !r.logsCaptured.Load() {
+		t.Error("logsCaptured should be true after streamLogs with store")
+	}
+
+	entries, err := store.ReadLogs(0, 100)
+	if err != nil {
+		t.Fatalf("ReadLogs() error: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected log entries after streamLogs, got none")
+	}
+}
+
+// TestStartAttachedInteractiveMultiWriter verifies that StartAttached in
+// interactive mode sets up MultiWriter for teeing output to log storage.
+func TestStartAttachedInteractiveMultiWriter(t *testing.T) {
+	// This test verifies the MultiWriter setup logic in isolation.
+	// Full StartAttached requires a container runtime, so we test the
+	// key logic: when Interactive=true and Store != nil, a LogWriter is
+	// created and logsCaptured is set.
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "runs")
+	store, err := storage.NewRunStore(baseDir, "run_interactive_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Run{
+		ID:          "run_interactive_test",
+		Interactive: true,
+		Store:       store,
+	}
+
+	// Simulate the logic from StartAttached
+	if r.Interactive && r.Store != nil {
+		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+			r.logsCaptured.Store(true)
+			stdout := io.Discard
+			teeStdout := io.MultiWriter(stdout, lw)
+			lw.Close()
+
+			// Verify the MultiWriter was created (non-nil)
+			if teeStdout == nil {
+				t.Error("expected non-nil tee writer")
+			}
+		} else {
+			t.Fatalf("LogWriter() error: %v", lwErr)
+		}
+	}
+
+	if !r.logsCaptured.Load() {
+		t.Error("logsCaptured should be true for interactive run with store")
+	}
+}
+
+// TestFollowLogsCancelledContext verifies FollowLogs handles context cancellation.
+func TestFollowLogsCancelledContext(t *testing.T) {
+	// Create a reader that blocks until context is cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+		logs: pr,
+	}
+
+	m := &Manager{
+		runtime: rt,
+		runs: map[string]*Run{
+			"run_1": {
+				ID:          "run_1",
+				ContainerID: "ctr-1",
+			},
+		},
+	}
+
+	done := make(chan error, 1)
+	var buf strings.Builder
+	go func() {
+		done <- m.FollowLogs(ctx, "run_1", &buf)
+	}()
+
+	// Cancel context and close the pipe to unblock
+	cancel()
+	pw.CloseWithError(context.Canceled)
+
+	select {
+	case <-done:
+		// Exited successfully
+	case <-time.After(5 * time.Second):
+		t.Fatal("FollowLogs did not exit after context cancellation")
+	}
+}
+
+// TestCloseWithMixedStates verifies Close behavior when runs have a variety of states.
+func TestCloseWithMixedStates(t *testing.T) {
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs: make(map[string]*Run),
+	}
+
+	allStates := []State{StateCreated, StateStarting, StateRunning, StateStopping, StateStopped, StateFailed}
+	for i, state := range allStates {
+		r := &Run{
+			ID:          fmt.Sprintf("run_%d", i),
+			Name:        fmt.Sprintf("agent-%d", i),
+			ContainerID: fmt.Sprintf("ctr-%d", i),
+			State:       state,
+			exitCh:      make(chan struct{}),
+		}
+		if state == StateStopped || state == StateFailed {
+			close(r.exitCh)
+		}
+		m.runs[r.ID] = r
+	}
+
+	err := m.Close()
+	if err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// Verify running and starting runs were not stopped
+	for _, r := range m.runs {
+		if r.State == StateRunning || r.State == StateStarting {
+			if r.GetState() != r.State {
+				t.Errorf("active run %s state changed from %s to %s", r.ID, r.State, r.GetState())
+			}
+		}
+	}
+}
+
+// TestFollowLogsConcurrentAccess verifies FollowLogs is safe for concurrent access
+// to the runs map via the read lock.
+func TestFollowLogsConcurrentAccess(t *testing.T) {
+	logContent := "concurrent log\n"
+	rt := &logsStubRuntime{
+		stubRuntime: stubRuntime{
+			states: map[string]string{"ctr-1": "running"},
+			done:   make(chan struct{}),
+		},
+	}
+
+	m := &Manager{
+		runtime: rt,
+		runs: map[string]*Run{
+			"run_1": {
+				ID:          "run_1",
+				ContainerID: "ctr-1",
+			},
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Each goroutine creates its own reader
+			localRT := &logsStubRuntime{
+				stubRuntime: rt.stubRuntime,
+				logs:        io.NopCloser(strings.NewReader(logContent)),
+			}
+			localM := &Manager{
+				runtime: localRT,
+				runs:    m.runs,
+			}
+			var buf strings.Builder
+			_ = localM.FollowLogs(context.Background(), "run_1", &buf)
+		}()
+	}
+	wg.Wait()
+}

@@ -283,6 +283,21 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 		}
 	}()
 
+	// After attach is established, resize the container TTY to match
+	// current terminal dimensions. This triggers the TUI application
+	// (e.g., Claude Code) to repaint its screen, solving the blank
+	// screen problem when reattaching.
+	go func() {
+		time.Sleep(ttyStartupDelay)
+		if term.IsTerminal(os.Stdout) {
+			width, height := term.GetSize(os.Stdout)
+			if width > 0 && height > 0 {
+				// #nosec G115 -- width/height are validated positive above
+				_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+			}
+		}
+	}()
+
 	waitDone := make(chan error, 1)
 	go func() {
 		waitDone <- manager.Wait(ctx, r.ID)

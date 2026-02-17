@@ -15,7 +15,7 @@ This page explains what data Moat collects, how the audit log provides integrity
 
 Each run produces four types of observability data:
 
-- **Container logs** -- Timestamped stdout and stderr output from the container process. These are the raw output lines the agent produces during execution.
+- **Container logs** -- Timestamped stdout and stderr output from the container process, streamed to disk in real time. These are the raw output lines the agent produces during execution, available for inspection while the run is still active.
 
 - **Network traces** -- Every HTTP and HTTPS request that passes through the proxy. Each trace records the method, URL, response status, and request duration. Injected credentials are redacted in the trace output so that tokens do not appear in stored data.
 
@@ -23,7 +23,7 @@ Each run produces four types of observability data:
 
 - **Audit events** -- Structured records of security-relevant actions: credential injection, secret resolution, SSH agent operations, and container lifecycle transitions. These events feed into the hash-chained audit log described below.
 
-All four data types are written to per-run storage as the run executes. Nothing requires explicit opt-in -- observability is always on.
+All four data types are written to per-run storage in real time as the run executes. Nothing requires explicit opt-in -- observability is always on. Logs and network traces are available for querying while the container is still running.
 
 ## Why default-on observability matters
 
