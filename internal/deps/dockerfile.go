@@ -293,8 +293,8 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 	if inUserContext {
 		hasDynamicDeps := len(c.dynamicNpm)+len(c.dynamicPip)+len(c.dynamicUv)+len(c.dynamicCargo)+len(c.dynamicGo) > 0
 		hasSSHHosts := len(opts.SSHHosts) > 0
-		needsRootBuildHook := opts.Hooks != nil && opts.Hooks.PostBuildRoot != ""
-		if hasDynamicDeps || hasSSHHosts || needsRootBuildHook || opts.needsInit(c.dockerMode) {
+		hasBuildHooks := opts.Hooks != nil && (opts.Hooks.PostBuildRoot != "" || opts.Hooks.PostBuild != "")
+		if hasDynamicDeps || hasSSHHosts || hasBuildHooks || opts.needsInit(c.dockerMode) {
 			b.WriteString("USER root\n\n")
 		}
 	}
