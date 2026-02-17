@@ -1507,3 +1507,35 @@ func TestMoatInitScriptGitIdentity(t *testing.T) {
 		t.Error("moat-init.sh should set git user.email via --system config")
 	}
 }
+
+func TestDockerfileOptionsNeedsInit(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       *DockerfileOptions
+		dockerMode DockerMode
+		want       bool
+	}{
+		{"nil opts no docker", nil, "", false},
+		{"nil opts with docker", nil, DockerModeHost, true},
+		{"empty opts", &DockerfileOptions{}, "", false},
+		{"SSH", &DockerfileOptions{NeedsSSH: true}, "", true},
+		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, "", true},
+		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, "", true},
+		{"GeminiInit", &DockerfileOptions{NeedsGeminiInit: true}, "", true},
+		{"GitIdentity", &DockerfileOptions{NeedsGitIdentity: true}, "", true},
+		{"docker host", &DockerfileOptions{}, DockerModeHost, true},
+		{"docker dind", &DockerfileOptions{}, DockerModeDind, true},
+		{"pre_run hook", &DockerfileOptions{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
+		{"post_build only", &DockerfileOptions{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
+		{"firewall only", &DockerfileOptions{NeedsFirewall: true}, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.opts.needsInit(tt.dockerMode)
+			if got != tt.want {
+				t.Errorf("needsInit() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
