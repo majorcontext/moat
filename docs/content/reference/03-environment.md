@@ -82,6 +82,25 @@ export MOAT_NO_SANDBOX=1
 
 See [Sandboxing](../concepts/01-sandboxing.md) for security implications.
 
+### MOAT_PROFILE
+
+Selects the credential profile for all grant and run commands. The `--profile` flag overrides this variable when both are set.
+
+```bash
+export MOAT_PROFILE=work
+moat grant github        # Stored in work profile
+moat run --grant github  # Uses work profile credential
+```
+
+- Default: empty (uses default credential store at `~/.moat/credentials/`)
+- Profile credentials are stored in `~/.moat/credentials/profiles/<name>/`
+
+See [Credential profiles](./04-grants.md#credential-profiles) for details.
+
+### MOAT_WORKTREE_BASE
+
+Override the default worktree base path (`~/.moat/worktrees/`).
+
 ### AWS credentials
 
 For AWS SSM secrets, standard AWS environment variables are used:

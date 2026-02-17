@@ -72,6 +72,10 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("credential revoked", "provider", provider)
-	fmt.Printf("%s credential revoked\n", provider)
+	if credential.ActiveProfile != "" {
+		fmt.Printf("%s credential revoked (profile: %s)\n", provider, credential.ActiveProfile)
+	} else {
+		fmt.Printf("%s credential revoked\n", provider)
+	}
 	return nil
 }

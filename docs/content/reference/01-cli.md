@@ -18,6 +18,7 @@ These flags apply to all commands:
 | `-v`, `--verbose` | Enable verbose output (debug logs) |
 | `--dry-run` | Show what would happen without executing |
 | `--json` | Output in JSON format |
+| `--profile NAME` | Credential profile to use (env: `MOAT_PROFILE`) |
 | `-h`, `--help` | Show help for command |
 
 ## Run identification
@@ -446,6 +447,8 @@ moat attach [flags] <run>
 
 By default, uses the run's original mode (interactive or not).
 
+On attach, Moat sends a TTY resize signal to the container to force a screen repaint. This ensures the terminal displays the current state immediately, rather than waiting for new output.
+
 ### Examples
 
 ```bash
@@ -650,7 +653,7 @@ moat grant aws \
 
 ### moat grant list
 
-List all stored credentials.
+List stored credentials. Shows credentials from the active profile, or the default store if no profile is set.
 
 ```
 moat grant list
@@ -661,6 +664,7 @@ moat grant list
 ```bash
 moat grant list
 moat grant list --json
+moat grant list --profile work
 ```
 
 ### moat grant providers
@@ -684,7 +688,7 @@ Output columns:
 
 ## moat revoke
 
-Remove stored credentials.
+Remove stored credentials. Operates on the active profile, or the default store if no profile is set.
 
 ```
 moat revoke <provider>
@@ -698,6 +702,9 @@ moat revoke claude          # revokes OAuth token
 moat revoke anthropic       # revokes API key
 moat revoke npm
 moat revoke ssh:github.com
+
+# Revoke from a specific profile
+moat revoke github --profile work
 ```
 
 ---
@@ -721,6 +728,7 @@ moat logs [flags] [run]
 | Flag | Description |
 |------|-------------|
 | `-n`, `--lines N` | Show last N lines (default: 100) |
+| `-f`, `--follow` | Stream new log lines as they are written (exit with `Ctrl+C`) |
 
 ### Examples
 
@@ -736,6 +744,12 @@ moat logs run_a1b2c3d4e5f6
 
 # Last 50 lines
 moat logs -n 50
+
+# Follow logs from a running container
+moat logs -f my-agent
+
+# Show last 20 lines, then follow
+moat logs -n 20 -f my-agent
 ```
 
 ---

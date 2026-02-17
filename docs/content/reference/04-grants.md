@@ -575,6 +575,9 @@ Each grant type injects credentials independently. The proxy matches requests by
 ```bash
 moat grant list
 moat grant list --json
+
+# List grants in a specific profile
+moat grant list --profile work
 ```
 
 ### Revoke a grant
@@ -586,13 +589,60 @@ moat revoke anthropic
 moat revoke npm
 moat revoke ssh:github.com
 moat revoke mcp-context7
+
+# Revoke from a specific profile
+moat revoke github --profile work
 ```
 
 This deletes the encrypted credential file. Future runs cannot use the credential until you grant it again.
 
+## Credential profiles
+
+Profiles maintain separate sets of credentials. Use one profile for personal projects and another for work.
+
+### Setting a profile
+
+Set the active profile with the `--profile` global flag or the `MOAT_PROFILE` environment variable:
+
+```bash
+# Grant a credential to a profile
+moat grant github --profile work
+
+# Use profile credentials in a run
+moat run --grant github --profile work
+
+# List profile credentials
+moat grant list --profile work
+
+# Set via environment variable
+export MOAT_PROFILE=work
+moat grant github
+moat run --grant github
+```
+
+### Storage layout
+
+Profile credentials are stored separately from the default credential store:
+
+```
+~/.moat/credentials/           # Default (no profile)
+~/.moat/credentials/profiles/
+  work/                        # "work" profile
+  personal/                    # "personal" profile
+```
+
+Each profile has its own isolated set of encrypted credential files. Granting a credential in one profile does not affect another.
+
+### Profile names
+
+Profile names must start with a letter or digit and contain only letters, digits, hyphens, and underscores.
+
+Valid: `work`, `my-project`, `team_alpha`, `prod1`
+Invalid: `-leading-dash`, `has spaces`, `uses.dots`
+
 ## Credential storage
 
-Credentials are stored encrypted in `~/.moat/credentials/`. See [Credential management](../concepts/02-credentials.md) for encryption and storage details.
+Credentials are stored encrypted in `~/.moat/credentials/` (or `~/.moat/credentials/profiles/<name>/` when using a profile). See [Credential management](../concepts/02-credentials.md) for encryption and storage details.
 
 ## Config-driven providers
 
