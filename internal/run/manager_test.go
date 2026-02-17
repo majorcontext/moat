@@ -1608,10 +1608,10 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 // loadPersistedRuns does NOT remove routes for containers that are still running.
 func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	// Use os.MkdirTemp instead of t.TempDir() because loadPersistedRuns spawns
-	// a background monitorContainerExit goroutine for running containers. That
-	// goroutine writes files on exit, and t.TempDir() cleanup races with it.
-	// We manage cleanup explicitly: unblock the goroutine, wait for it to finish,
-	// then remove the directory.
+	// a background monitorContainerExit goroutine for running containers that
+	// writes files asynchronously. We skip explicit cleanup and let the OS
+	// reclaim the temp directory when the test process exits, avoiding any
+	// race between the goroutine's file I/O and directory removal.
 	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsKeepsRoutes")
 	if err != nil {
 		t.Fatal(err)
@@ -1619,8 +1619,7 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
-	runID := "run_livebeef1234"
-	store, err := storage.NewRunStore(baseDir, runID)
+	store, err := storage.NewRunStore(baseDir, "run_livebeef1234")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1646,12 +1645,10 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	done := make(chan struct{})
-
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{"container-live": "running"},
-			done:   done,
+			done:   make(chan struct{}),
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
@@ -1666,16 +1663,6 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	if !routes.AgentExists("live-agent") {
 		t.Error("route for running container should NOT be removed by loadPersistedRuns")
 	}
-
-	// Unblock the monitor goroutine and wait for it to finish writing before
-	// removing the temp directory.
-	close(done)
-	r := m.runs[runID]
-	<-r.exitCh // wait for monitorContainerExit to signal
-	// monitorContainerExit does file I/O (SaveMetadata, routes.Remove) after
-	// closing exitCh. Give it time to complete before removing the temp dir.
-	time.Sleep(100 * time.Millisecond)
-	_ = os.RemoveAll(tmpHome)
 }
 
 // TestLoadPersistedRunsCleansRoutesForMissingContainers verifies that
