@@ -78,6 +78,21 @@ func (o *DockerfileOptions) useBuildKit() bool {
 	return *o.UseBuildKit
 }
 
+// needsInit returns whether the moat-init entrypoint script is required.
+// This is true when any feature needs privilege management or startup setup:
+// SSH agent forwarding, Claude/Codex/Gemini file setup, Docker socket/daemon,
+// pre-run hooks, or git identity injection.
+//
+// dockerMode must be passed separately because it comes from dependency
+// categorization, not from DockerfileOptions.
+func (o *DockerfileOptions) needsInit(dockerMode DockerMode) bool {
+	if o == nil {
+		return dockerMode != ""
+	}
+	hasPreRun := o.Hooks != nil && o.Hooks.PreRun != ""
+	return o.NeedsSSH || o.NeedsClaudeInit || o.NeedsCodexInit || o.NeedsGeminiInit || dockerMode != "" || hasPreRun || o.NeedsGitIdentity
+}
+
 // DockerfileResult contains the generated Dockerfile and any additional context files
 // that should be placed alongside the Dockerfile in the build context directory.
 type DockerfileResult struct {
@@ -269,6 +284,19 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 	b.WriteString(pluginResult.DockerfileSnippet)
 	if pluginResult.ScriptName != "" {
 		contextFiles[pluginResult.ScriptName] = pluginResult.ScriptContent
+	}
+
+	// Restore root context only if user-space sections switched to moatuser
+	// and subsequent sections need root access. This avoids redundant
+	// USER root → USER moatuser transitions in the generated Dockerfile.
+	inUserContext := len(c.userCustomDeps) > 0 || pluginResult.DockerfileSnippet != ""
+	if inUserContext {
+		hasDynamicDeps := len(c.dynamicNpm)+len(c.dynamicPip)+len(c.dynamicUv)+len(c.dynamicCargo)+len(c.dynamicGo) > 0
+		hasSSHHosts := len(opts.SSHHosts) > 0
+		hasBuildHooks := opts.Hooks != nil && (opts.Hooks.PostBuildRoot != "" || opts.Hooks.PostBuild != "")
+		if hasDynamicDeps || hasSSHHosts || hasBuildHooks || opts.needsInit(c.dockerMode) {
+			b.WriteString("USER root\n\n")
+		}
 	}
 
 	// Dynamic package manager dependencies
@@ -507,7 +535,7 @@ func writeUserCustomDeps(b *strings.Builder, deps []Dependency) {
 			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
 		}
 	}
-	b.WriteString("USER root\n\n")
+	b.WriteString("\n")
 }
 
 // writeSSHKnownHosts writes known SSH host keys to /etc/ssh/ssh_known_hosts.
@@ -574,15 +602,7 @@ func writeBuildHooks(b *strings.Builder, hooks *HooksConfig) {
 // into the image. This avoids embedding a large base64 blob inline in a RUN
 // command, which triggers gRPC transport errors in Apple's container builder.
 func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode DockerMode, contextFiles map[string][]byte) {
-	// Features that require moat-init entrypoint:
-	// - SSH agent forwarding
-	// - Claude Code file setup
-	// - Codex file setup
-	// - Docker socket group setup (host mode)
-	// - Docker daemon startup (dind mode)
-	hasPreRun := opts.Hooks != nil && opts.Hooks.PreRun != ""
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != "" || hasPreRun || opts.NeedsGitIdentity
-	if needsInit {
+	if opts.needsInit(dockerMode) {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
 		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init\n")

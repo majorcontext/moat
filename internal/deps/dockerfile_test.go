@@ -654,7 +654,8 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 		t.Error("Dockerfile should add installer's PATH to environment")
 	}
 
-	// Should switch back to root after user-space install
+	// Should NOT have USER root after user-space install when no subsequent
+	// sections need root access (no dynamic deps, SSH, hooks, or init).
 	foundRoot := false
 	for i := installerIdx + 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "USER root" {
@@ -662,8 +663,8 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 			break
 		}
 	}
-	if !foundRoot {
-		t.Error("Dockerfile should switch back to USER root after user-space install")
+	if foundRoot {
+		t.Error("Dockerfile should not have USER root when no subsequent sections need root")
 	}
 }
 
@@ -779,21 +780,72 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 		t.Error("script should install claude-md-management plugin with error handling")
 	}
 
-	// Should switch back to root after plugin installation
+	// Should NOT have USER root after plugin installation when no subsequent
+	// sections need root access (no dynamic deps, SSH, hooks, or init).
 	lines := strings.Split(result.Dockerfile, "\n")
-	foundUserMoatuser := false
-	foundUserRoot := false
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "USER moatuser" {
-			foundUserMoatuser = true
-		}
-		if foundUserMoatuser && strings.TrimSpace(line) == "USER root" {
-			foundUserRoot = true
+	pluginIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "claude-plugins.sh") && strings.Contains(line, "RUN") {
+			pluginIdx = i
 			break
 		}
 	}
-	if !foundUserRoot {
-		t.Error("Dockerfile should switch back to USER root after plugin installation")
+	if pluginIdx < 0 {
+		t.Fatal("plugin RUN line not found")
+	}
+	for i := pluginIdx + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "USER root" {
+			t.Error("Dockerfile should not have USER root when no subsequent sections need root")
+			break
+		}
+	}
+}
+
+func TestGenerateDockerfilePluginsWithInitNeedsRoot(t *testing.T) {
+	// Verify USER root IS emitted after plugins when subsequent sections need root
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "claude-code"},
+	}
+
+	marketplaces := []claude.MarketplaceConfig{
+		{Name: "test-market", Source: "github", Repo: "test/repo"},
+	}
+	plugins := []string{
+		"test-plugin@test-market",
+	}
+
+	result, err := GenerateDockerfile(deps, &DockerfileOptions{
+		ClaudeMarketplaces: marketplaces,
+		ClaudePlugins:      plugins,
+		NeedsClaudeInit:    true,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	// Should have USER root after plugins because NeedsClaudeInit requires init
+	// script setup which needs root for COPY and chmod.
+	lines := strings.Split(result.Dockerfile, "\n")
+	pluginIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "claude-plugins.sh") && strings.Contains(line, "RUN") {
+			pluginIdx = i
+			break
+		}
+	}
+	if pluginIdx < 0 {
+		t.Fatal("plugin RUN line not found")
+	}
+	foundRoot := false
+	for i := pluginIdx + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "USER root" {
+			foundRoot = true
+			break
+		}
+	}
+	if !foundRoot {
+		t.Error("Dockerfile should have USER root after plugins when init is needed")
 	}
 }
 
@@ -1453,5 +1505,37 @@ func TestMoatInitScriptGitIdentity(t *testing.T) {
 	}
 	if !strings.Contains(MoatInitScript, "git config --system user.email") {
 		t.Error("moat-init.sh should set git user.email via --system config")
+	}
+}
+
+func TestDockerfileOptionsNeedsInit(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       *DockerfileOptions
+		dockerMode DockerMode
+		want       bool
+	}{
+		{"nil opts no docker", nil, "", false},
+		{"nil opts with docker", nil, DockerModeHost, true},
+		{"empty opts", &DockerfileOptions{}, "", false},
+		{"SSH", &DockerfileOptions{NeedsSSH: true}, "", true},
+		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, "", true},
+		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, "", true},
+		{"GeminiInit", &DockerfileOptions{NeedsGeminiInit: true}, "", true},
+		{"GitIdentity", &DockerfileOptions{NeedsGitIdentity: true}, "", true},
+		{"docker host", &DockerfileOptions{}, DockerModeHost, true},
+		{"docker dind", &DockerfileOptions{}, DockerModeDind, true},
+		{"pre_run hook", &DockerfileOptions{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
+		{"post_build only", &DockerfileOptions{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
+		{"firewall only", &DockerfileOptions{NeedsFirewall: true}, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.opts.needsInit(tt.dockerMode)
+			if got != tt.want {
+				t.Errorf("needsInit() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
