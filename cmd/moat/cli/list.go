@@ -15,8 +15,12 @@ import (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all runs",
-	Long:  `Show all runs including running, stopped, and recent runs.`,
-	RunE:  listRuns,
+	Long: `Show all runs including running, stopped, and recent runs.
+
+When any runs were started via 'moat wt', the output includes a WORKTREE
+column showing the branch name. Use 'moat wt list' to filter to worktree
+runs for the current repository only.`,
+	RunE: listRuns,
 }
 
 func init() {
@@ -46,8 +50,21 @@ func listRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Check if any runs have worktree info
+	hasWorktree := false
+	for _, r := range runs {
+		if r.WorktreeBranch != "" {
+			hasWorktree = true
+			break
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tENDPOINTS")
+	if hasWorktree {
+		fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tWORKTREE\tENDPOINTS")
+	} else {
+		fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tENDPOINTS")
+	}
 	for _, r := range runs {
 		endpoints := ""
 		if len(r.Ports) > 0 {
@@ -58,13 +75,28 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			sort.Strings(names)
 			endpoints = strings.Join(names, ", ")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			r.Name,
-			r.ID,
-			r.State,
-			formatAge(r.CreatedAt),
-			endpoints,
-		)
+		if hasWorktree {
+			wt := ""
+			if r.WorktreeBranch != "" {
+				wt = r.WorktreeBranch
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				r.Name,
+				r.ID,
+				r.State,
+				formatAge(r.CreatedAt),
+				wt,
+				endpoints,
+			)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				r.Name,
+				r.ID,
+				r.State,
+				formatAge(r.CreatedAt),
+				endpoints,
+			)
+		}
 	}
 	return w.Flush()
 }

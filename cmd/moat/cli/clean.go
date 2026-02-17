@@ -9,8 +9,10 @@ import (
 	"text/tabwriter"
 
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
+	"github.com/majorcontext/moat/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +22,9 @@ var (
 
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Remove stopped runs and unused images",
-	Long: `Interactively remove stopped runs and unused moat images.
+	Short: "Remove stopped runs, unused images, and worktree directories",
+	Long: `Interactively remove stopped runs, unused moat images, and worktree
+directories associated with stopped runs.
 
 Shows what will be removed and asks for confirmation before proceeding.
 Use --force to skip confirmation (for scripts).
@@ -57,11 +60,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	runs := manager.List()
 
-	// Find stopped runs
+	// Find stopped runs (and track which have worktrees)
 	var stoppedRuns []*run.Run
+	var worktreeRuns []*run.Run
 	for _, r := range runs {
 		if r.State == run.StateStopped {
 			stoppedRuns = append(stoppedRuns, r)
+			if r.WorktreePath != "" {
+				worktreeRuns = append(worktreeRuns, r)
+			}
 		}
 	}
 
@@ -139,6 +146,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Resolve repo root for worktree cleanup (best-effort, may fail if not in a git repo)
+	var repoRoot string
+	if len(worktreeRuns) > 0 {
+		cwd, _ := os.Getwd()
+		if cwd != "" {
+			repoRoot, _ = worktree.FindRepoRoot(cwd)
+		}
+	}
+
 	// Show what will be removed
 	var totalSize int64
 
@@ -173,7 +189,19 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	resourceCount := len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks)
+	if len(worktreeRuns) > 0 {
+		fmt.Printf("%s (%d):\n", ui.Bold("Worktree directories"), len(worktreeRuns))
+		for _, r := range worktreeRuns {
+			branch := r.WorktreeBranch
+			if branch == "" {
+				branch = "(unknown)"
+			}
+			fmt.Printf("  %s\t(%s)\n", branch, r.WorktreePath)
+		}
+		fmt.Println()
+	}
+
+	resourceCount := len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks) + len(worktreeRuns)
 	fmt.Printf("Total: %d resources, %d MB\n\n", resourceCount, totalSize/(1024*1024))
 
 	// Dry run - just show, don't prompt
@@ -243,6 +271,29 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			fmt.Println(ui.Green("done"))
 			removedCount++
 		}
+	}
+
+	// Clean worktree directories for stopped runs
+	for _, r := range worktreeRuns {
+		branch := r.WorktreeBranch
+		if branch == "" {
+			branch = r.WorktreePath
+		}
+		fmt.Printf("Removing worktree %s... ", branch)
+		root := repoRoot
+		if root == "" {
+			// Try to infer repo root from the worktree path itself
+			log.Debug("no repo root found, skipping worktree cleanup", "path", r.WorktreePath)
+			fmt.Println(ui.Yellow("skipped (not in a git repo)"))
+			continue
+		}
+		if err := worktree.Clean(root, r.WorktreePath); err != nil {
+			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
+			failedCount++
+			continue
+		}
+		fmt.Println(ui.Green("done"))
+		removedCount++
 	}
 
 	if failedCount > 0 {

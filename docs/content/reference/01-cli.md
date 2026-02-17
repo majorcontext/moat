@@ -410,7 +410,7 @@ moat wt clean dark-mode
 
 #### moat wt list
 
-List worktree-based runs for the current repository.
+List worktree-based runs for the current repository. Equivalent to `moat list` filtered to worktree runs in the current repo.
 
 ```bash
 moat wt list
@@ -419,6 +419,8 @@ moat wt list
 #### moat wt clean
 
 Remove worktree directories for stopped runs. Without arguments, cleans all stopped worktrees for the current repository. Never deletes branches.
+
+`moat clean` also removes worktree directories as part of its broader cleanup. Use `moat wt clean` to target a specific branch or limit cleanup to worktrees.
 
 ```bash
 moat wt clean [branch]
@@ -870,7 +872,10 @@ moat list
 | NAME | Run name |
 | RUN ID | Unique identifier |
 | STATE | running, stopped, failed |
-| SERVICES | Exposed services (from ports) |
+| WORKTREE | Branch name (appears when any run has a worktree) |
+| ENDPOINTS | Exposed services (from ports) |
+
+The WORKTREE column appears when any run has a worktree branch. To show only worktree runs for the current repository, use `moat wt list`.
 
 ---
 
@@ -964,11 +969,13 @@ moat destroy run_a1b2c3d4e5f6
 
 ## moat clean
 
-Clean up stopped runs and unused images.
+Clean up stopped runs, unused images, and worktree directories.
 
 ```
 moat clean [flags]
 ```
+
+Removes stopped runs, unused moat images, orphaned networks, and worktree directories for stopped runs. Worktree cleanup requires running from inside a git repository.
 
 ### Flags
 
@@ -989,6 +996,8 @@ moat clean -f
 # Preview cleanup
 moat clean --dry-run
 ```
+
+To clean a single branch's worktree, use `moat wt clean <branch>`.
 
 ---
 
