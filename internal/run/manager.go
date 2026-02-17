@@ -391,9 +391,29 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Start proxy if we have grants (for credential injection) or strict network policy
+	// Start proxy if we have grants (for credential injection), strict network policy,
+	// or a proxy chain is configured
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+	needsProxyForChain := opts.Config != nil && len(opts.Config.Proxies) > 0
+
+	// Start proxy chain if configured
+	var proxyChain *proxy.Chain
+	if needsProxyForChain {
+		var chainErr error
+		proxyChain, chainErr = proxy.NewChain(ctx, opts.Config.Proxies)
+		if chainErr != nil {
+			return nil, fmt.Errorf("starting proxy chain: %w", chainErr)
+		}
+		log.Debug("proxy chain started", "proxies", proxyChain.Names())
+	}
+
+	// cleanupChain stops the proxy chain during error cleanup.
+	cleanupChain := func() {
+		if proxyChain != nil {
+			proxyChain.Stop()
+		}
+	}
 
 	// cleanupProxy is a helper to stop the proxy server and log any errors.
 	// Used in error paths during run creation.
@@ -403,6 +423,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				log.Debug("failed to stop proxy during cleanup", "error", err)
 			}
 		}
+		cleanupChain()
 	}
 
 	// cleanupSSH is a helper to stop the SSH agent server and log any errors.
@@ -421,7 +442,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	if needsProxyForGrants || needsProxyForFirewall {
+	if needsProxyForGrants || needsProxyForFirewall || needsProxyForChain {
 		p := proxy.NewProxy()
 
 		// Create CA for TLS interception
@@ -585,6 +606,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if opts.Config != nil && len(opts.Config.MCP) > 0 {
 			proxyServer.Proxy().SetMCPServers(opts.Config.MCP)
 			proxyServer.Proxy().SetCredentialStore(store)
+		}
+
+		// Configure upstream proxy chain if present
+		if proxyChain != nil {
+			if t := proxyChain.UpstreamTransport(); t != nil {
+				proxyServer.Proxy().SetUpstreamTransport(t)
+				log.Debug("proxy upstream configured", "upstream", proxyChain.UpstreamURL())
+			}
 		}
 
 		if err := proxyServer.Start(); err != nil {
@@ -1899,6 +1928,7 @@ region = %s
 
 	r.ContainerID = containerID
 	r.ProxyServer = proxyServer
+	r.ProxyChain = proxyChain
 	r.SSHAgentServer = sshServer
 	if claudeConfig != nil {
 		r.ClaudeConfigTempDir = claudeConfig.StagingDir
@@ -2416,6 +2446,11 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Stop the proxy server if one was created
 	if err := r.stopProxyServer(ctx); err != nil {
 		ui.Warnf("Stopping proxy: %v", err)
+	}
+
+	// Stop the proxy chain if one was created
+	if r.ProxyChain != nil {
+		r.ProxyChain.Stop()
 	}
 
 	// Stop the SSH agent server if one was created
