@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // RuntimeOptions configures runtime creation.
@@ -53,7 +54,7 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 			if rt != nil {
 				return rt, nil
 			}
-			return nil, fmt.Errorf("Apple container runtime not available: %s", reason)
+			return nil, fmt.Errorf("Apple container runtime not available: %s\n\nTo start the container system manually:\n  container system start", reason)
 		default:
 			return nil, fmt.Errorf("unknown MOAT_RUNTIME value %q (use 'docker' or 'apple')", override)
 		}
@@ -76,7 +77,7 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 	rt, err := newDockerRuntimeWithPing(opts.Sandbox)
 	if err != nil {
 		if appleReason != "" {
-			return nil, fmt.Errorf("no container runtime available:\n  Apple containers: %s\n  Docker: %w", appleReason, err)
+			return nil, fmt.Errorf("no container runtime available:\n  Apple containers: %s\n  Docker: %w\n\nTo start Apple containers manually:\n  container system start\n\nTo force a specific runtime:\n  moat run --runtime apple\n  moat run --runtime docker", appleReason, err)
 		}
 		return nil, fmt.Errorf("no container runtime available: %w", err)
 	}
@@ -121,36 +122,35 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	return rt, nil
 }
 
-// tryAppleRuntime attempts to create an Apple runtime.
-// Returns (runtime, "") on success, (nil, reason) on failure with reason message,
-// or (nil, "") if Apple container is not available.
+// tryAppleRuntime attempts to create and verify an Apple runtime.
+// Returns (runtime, "") on success, or (nil, reason) on failure.
 func tryAppleRuntime() (Runtime, string) {
 	if !appleContainerAvailable() {
-		return nil, "'container' CLI not found in PATH (requires macOS 15+ with containerization framework)"
+		return nil, "'container' CLI not found in PATH (requires macOS 26+ with containerization framework)"
 	}
 
 	rt, err := NewAppleRuntime()
 	if err != nil {
-		return nil, fmt.Sprintf("Apple container not available, falling back to Docker: %v", err)
+		return nil, fmt.Sprintf("failed to initialize: %v", err)
 	}
 
-	// Verify it's actually working
+	// Verify the system is running
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if pingErr := rt.Ping(ctx); pingErr != nil {
-		// Try to start the Apple container system
-		log.Debug("Apple container system not running, attempting to start...")
+		// Try to auto-start the Apple container system
+		log.Debug("Apple container system not running, attempting to start...", "error", pingErr)
 		if startErr := startAppleContainerSystem(); startErr != nil {
-			return nil, fmt.Sprintf("Apple container system failed to start, falling back to Docker: %v", startErr)
+			return nil, fmt.Sprintf("system not running and failed to auto-start: %v", startErr)
 		}
 
-		// Verify it's now working
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+		// Verify it's now working with a longer timeout since the system just started
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel2()
 
 		if pingErr2 := rt.Ping(ctx2); pingErr2 != nil {
-			return nil, fmt.Sprintf("Apple container system started but not accessible, falling back to Docker: %v", pingErr2)
+			return nil, fmt.Sprintf("system started but not yet accessible: %v", pingErr2)
 		}
 	}
 
@@ -160,25 +160,27 @@ func tryAppleRuntime() (Runtime, string) {
 
 // startAppleContainerSystem starts the Apple container system using 'container system start'.
 func startAppleContainerSystem() error {
-	fmt.Println("Starting Apple container system...")
+	ui.Info("Starting Apple container system...")
 
 	// Use a single timeout for the entire operation (start + readiness check)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "container", "system", "start")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("container system start: %w", err)
+		return fmt.Errorf("'container system start' failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	// Wait for the system to be fully ready, respecting the parent context timeout
-	fmt.Println("Waiting for Apple container system to be ready...")
+	ui.Info("Waiting for Apple container system to be ready...")
 	const maxAttempts = 30
 	for i := 0; i < maxAttempts; i++ {
 		// Check if parent context is done
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for Apple container system to be ready: %w", ctx.Err())
+			return fmt.Errorf("timeout waiting for system to be ready: %w", ctx.Err())
 		default:
 		}
 
@@ -192,13 +194,13 @@ func startAppleContainerSystem() error {
 
 		// Log progress every 10 seconds
 		if (i+1)%10 == 0 {
-			fmt.Printf("Still waiting for Apple container system... (%d/%d attempts)\n", i+1, maxAttempts)
+			ui.Infof("Still waiting for Apple container system... (%d/%d attempts)", i+1, maxAttempts)
 		}
 
 		// Sleep with context awareness
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for Apple container system to be ready: %w", ctx.Err())
+			return fmt.Errorf("timeout waiting for system to be ready: %w", ctx.Err())
 		case <-time.After(time.Second):
 		}
 	}
@@ -207,6 +209,7 @@ func startAppleContainerSystem() error {
 }
 
 // appleContainerAvailable checks if Apple's container CLI is installed.
+// Requires macOS 26+ with the containerization framework.
 func appleContainerAvailable() bool {
 	_, err := exec.LookPath("container")
 	return err == nil

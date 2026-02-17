@@ -124,7 +124,13 @@ func kernelNotConfiguredError() error {
 func (r *AppleRuntime) Ping(ctx context.Context) error {
 	// Try to list containers to verify the system is working
 	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--quiet")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		errMsg := stderr.String()
+		if isKernelNotConfiguredError(errMsg) {
+			return kernelNotConfiguredError()
+		}
 		return fmt.Errorf("apple container system not accessible: %w", err)
 	}
 	return nil
