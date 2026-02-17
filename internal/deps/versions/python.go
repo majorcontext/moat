@@ -2,45 +2,26 @@ package versions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// PythonResolver resolves Python versions.
-// Unlike Go and Node, Python doesn't have a simple JSON API for versions.
-// We use a hardcoded list of commonly available versions that can be installed
-// via deadsnakes PPA or official Docker images.
-type PythonResolver struct{}
+const pythonVersionsURL = "https://endoflife.date/api/python.json"
 
-// pythonVersions lists available Python versions.
-// These correspond to versions available in:
-// - Official Python Docker images (python:X.Y-slim)
-// - Ubuntu deadsnakes PPA
-// - pyenv
-//
-// Sorted newest first within each minor version.
-//
-// MAINTENANCE: This list should be updated when new Python versions are released.
-// Check https://www.python.org/downloads/ for new releases, typically:
-//   - New patch versions every 1-2 months
-//   - New minor versions annually (October)
-//   - EOL versions can be removed after their end-of-life date
-//     See https://devguide.python.org/versions/ for EOL schedule.
-var pythonVersions = []string{
-	// 3.13 series
-	"3.13.1", "3.13.0",
-	// 3.12 series
-	"3.12.8", "3.12.7", "3.12.6", "3.12.5", "3.12.4", "3.12.3", "3.12.2", "3.12.1", "3.12.0",
-	// 3.11 series
-	"3.11.11", "3.11.10", "3.11.9", "3.11.8", "3.11.7", "3.11.6", "3.11.5", "3.11.4", "3.11.3", "3.11.2", "3.11.1", "3.11.0",
-	// 3.10 series
-	"3.10.16", "3.10.15", "3.10.14", "3.10.13", "3.10.12", "3.10.11", "3.10.10", "3.10.9", "3.10.8", "3.10.7", "3.10.6", "3.10.5", "3.10.4", "3.10.3", "3.10.2", "3.10.1", "3.10.0",
-	// 3.9 series
-	"3.9.21", "3.9.20", "3.9.19", "3.9.18", "3.9.17", "3.9.16", "3.9.15", "3.9.14", "3.9.13", "3.9.12", "3.9.11", "3.9.10", "3.9.9", "3.9.8", "3.9.7", "3.9.6", "3.9.5", "3.9.4", "3.9.3", "3.9.2", "3.9.1", "3.9.0",
-	// 3.8 series (security fixes only)
-	"3.8.20", "3.8.19", "3.8.18", "3.8.17", "3.8.16", "3.8.15", "3.8.14", "3.8.13", "3.8.12", "3.8.11", "3.8.10", "3.8.9", "3.8.8", "3.8.7", "3.8.6", "3.8.5", "3.8.4", "3.8.3", "3.8.2", "3.8.1", "3.8.0",
+// PythonResolver resolves Python versions using the endoflife.date API.
+type PythonResolver struct {
+	// HTTPClient is the HTTP client to use. If nil, http.DefaultClient is used.
+	HTTPClient *http.Client
+}
+
+// pythonCycle represents a Python release cycle from the endoflife.date API.
+type pythonCycle struct {
+	Cycle  string `json:"cycle"`  // e.g., "3.13"
+	Latest string `json:"latest"` // e.g., "3.13.1"
 }
 
 // Resolve resolves a Python version specification to a full version.
@@ -49,7 +30,67 @@ var pythonVersions = []string{
 //   - "3.12" -> "3.12.8" (latest patch)
 //   - "3.11.5" -> "3.11.5" (exact, verified to exist)
 func (r *PythonResolver) Resolve(ctx context.Context, version string) (string, error) {
-	// Parse the requested version
+	cycles, err := r.fetchCycles(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching Python releases: %w", err)
+	}
+	return resolvePythonVersion(version, cycles)
+}
+
+// Available returns all Python 3.x versions, newest first.
+func (r *PythonResolver) Available(ctx context.Context) ([]string, error) {
+	cycles, err := r.fetchCycles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching Python releases: %w", err)
+	}
+	return pythonVersionsFromCycles(cycles), nil
+}
+
+// LatestStable returns the latest stable Python version.
+func (r *PythonResolver) LatestStable(ctx context.Context) (string, error) {
+	cycles, err := r.fetchCycles(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching Python releases: %w", err)
+	}
+	return latestStablePython(cycles)
+}
+
+func (r *PythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error) {
+	client := r.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	// Always create a bounded context to prevent hangs.
+	// Use the minimum of existing deadline and our timeout.
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", pythonVersionsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, pythonVersionsURL)
+	}
+
+	var cycles []pythonCycle
+	if err := json.NewDecoder(resp.Body).Decode(&cycles); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	return cycles, nil
+}
+
+// resolvePythonVersion resolves a version string against a list of Python cycles.
+func resolvePythonVersion(version string, cycles []pythonCycle) (string, error) {
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 || len(parts) > 3 {
 		return "", fmt.Errorf("invalid Python version format %q: expected X.Y or X.Y.Z", version)
@@ -73,49 +114,113 @@ func (r *PythonResolver) Resolve(ctx context.Context, version string) (string, e
 		}
 	}
 
-	// If fully specified, verify it exists
+	// Find the matching cycle
+	cycleStr := fmt.Sprintf("%d.%d", major, minor)
+	var matched *pythonCycle
+	for i := range cycles {
+		if cycles[i].Cycle == cycleStr {
+			matched = &cycles[i]
+			break
+		}
+	}
+
+	if matched == nil {
+		if patch >= 0 {
+			return "", fmt.Errorf("Python version %s not found in available versions", version)
+		}
+		return "", fmt.Errorf("no Python %d.%d.x releases found", major, minor)
+	}
+
+	// If fully specified, verify it exists.
+	// CPython patches are sequential (0, 1, 2, ...), so a patch version exists
+	// if its number is between 0 and the latest known patch.
 	if patch >= 0 {
-		for _, v := range pythonVersions {
-			if v == version {
+		latestParts := strings.Split(matched.Latest, ".")
+		if len(latestParts) == 3 {
+			latestPatch, _ := strconv.Atoi(latestParts[2])
+			if patch <= latestPatch {
 				return version, nil
 			}
 		}
 		return "", fmt.Errorf("Python version %s not found in available versions", version)
 	}
 
-	// Find latest patch for major.minor
-	prefix := fmt.Sprintf("%d.%d.", major, minor)
-	var candidates []string
-	for _, v := range pythonVersions {
-		if strings.HasPrefix(v, prefix) {
-			candidates = append(candidates, v)
-		}
-	}
+	// Partial version: return latest patch
+	return matched.Latest, nil
+}
 
-	if len(candidates) == 0 {
-		return "", fmt.Errorf("no Python %d.%d.x releases found", major, minor)
-	}
+// pythonVersionsFromCycles generates all Python 3.x version strings from cycle data,
+// sorted newest first (by minor descending, then patch descending).
+func pythonVersionsFromCycles(cycles []pythonCycle) []string {
+	py3 := filterPython3Cycles(cycles)
 
-	// Sort by patch version descending
-	sort.Slice(candidates, func(i, j int) bool {
-		return compareVersions(candidates[i], candidates[j]) > 0
+	// Sort cycles by minor version descending
+	sort.Slice(py3, func(i, j int) bool {
+		_, mi, _ := parsePythonCycle(py3[i].Cycle)
+		_, mj, _ := parsePythonCycle(py3[j].Cycle)
+		return mi > mj
 	})
 
-	return candidates[0], nil
-}
-
-// Available returns all Python versions, newest first.
-func (r *PythonResolver) Available(ctx context.Context) ([]string, error) {
-	// Return a copy to prevent modification
-	versions := make([]string, len(pythonVersions))
-	copy(versions, pythonVersions)
-	return versions, nil
-}
-
-// LatestStable returns the latest stable Python version.
-func (r *PythonResolver) LatestStable(ctx context.Context) (string, error) {
-	if len(pythonVersions) == 0 {
-		return "", fmt.Errorf("no Python versions available")
+	var versions []string
+	for _, c := range py3 {
+		latestParts := strings.Split(c.Latest, ".")
+		if len(latestParts) != 3 {
+			continue
+		}
+		latestPatch, err := strconv.Atoi(latestParts[2])
+		if err != nil {
+			continue
+		}
+		// Generate all patches from latest down to 0
+		for p := latestPatch; p >= 0; p-- {
+			versions = append(versions, fmt.Sprintf("%s.%d", c.Cycle, p))
+		}
 	}
-	return pythonVersions[0], nil
+	return versions
+}
+
+// latestStablePython returns the latest stable Python 3.x version from cycle data.
+func latestStablePython(cycles []pythonCycle) (string, error) {
+	py3 := filterPython3Cycles(cycles)
+	if len(py3) == 0 {
+		return "", fmt.Errorf("no Python 3.x releases found")
+	}
+
+	// Sort by minor version descending to find newest
+	sort.Slice(py3, func(i, j int) bool {
+		_, mi, _ := parsePythonCycle(py3[i].Cycle)
+		_, mj, _ := parsePythonCycle(py3[j].Cycle)
+		return mi > mj
+	})
+
+	return py3[0].Latest, nil
+}
+
+// filterPython3Cycles returns only Python 3.x cycles.
+func filterPython3Cycles(cycles []pythonCycle) []pythonCycle {
+	var py3 []pythonCycle
+	for _, c := range cycles {
+		major, _, ok := parsePythonCycle(c.Cycle)
+		if ok && major == 3 {
+			py3 = append(py3, c)
+		}
+	}
+	return py3
+}
+
+// parsePythonCycle parses a cycle string like "3.13" into major, minor.
+func parsePythonCycle(cycle string) (major, minor int, ok bool) {
+	parts := strings.Split(cycle, ".")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, false
+	}
+	minor, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
