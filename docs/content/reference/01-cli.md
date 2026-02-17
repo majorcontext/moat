@@ -169,6 +169,8 @@ In addition to the command-specific flags below, `moat claude` accepts all [comm
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `-c`, `--continue` | Continue the most recent conversation |
+| `-r`, `--resume ID` | Resume a specific session by ID |
 | `--noyolo` | Restore Claude Code's per-operation confirmation prompts. By default, `moat claude` runs with `--dangerously-skip-permissions` because the container provides isolation. Use `--noyolo` to re-enable permission prompts. |
 
 ### Examples
@@ -186,6 +188,13 @@ moat claude ./my-project -- "explain this codebase"
 
 # Non-interactive with prompt (exits when done)
 moat claude -p "fix the failing tests"
+
+# Continue the most recent conversation
+moat claude --continue
+moat claude -c
+
+# Resume a specific session by ID
+moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
 
 # With GitHub access
 moat claude --grant github
@@ -209,6 +218,61 @@ List configured plugins for a workspace.
 
 ```bash
 moat claude plugins list [path]
+```
+
+---
+
+## moat resume
+
+Resume a Claude Code conversation from a previous run.
+
+```
+moat resume [run] [flags]
+```
+
+If the specified run is still running, attaches to it (same as `moat attach`). If the run has stopped, starts a new container with the same workspace and passes `--continue` to Claude Code, which picks up the most recent conversation from the synced session logs.
+
+Without an argument, finds the most recent Claude Code run (running or stopped) and resumes it.
+
+Session history is preserved across runs because Moat mounts the Claude projects directory (`~/.claude/projects/`) between host and container. Claude Code stores conversation logs as `.jsonl` files in this directory, so previous sessions are always available for resumption.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `run` | Run ID or name (default: most recent Claude Code run) |
+
+### Flags
+
+`moat resume` accepts all [common agent flags](#common-agent-flags) plus:
+
+| Flag | Description |
+|------|-------------|
+| `--noyolo` | Restore Claude Code's per-operation confirmation prompts |
+
+### Behavior
+
+| Previous run state | Action |
+|--------------------|--------|
+| running | Attach to existing container |
+| stopped / failed | Start new container with same workspace and `--continue` |
+
+When resuming a stopped run, the new container inherits the previous run's workspace path, grants, and name.
+
+### Examples
+
+```bash
+# Resume the most recent Claude Code run
+moat resume
+
+# Resume a specific run by name
+moat resume my-feature
+
+# Resume a specific run by ID
+moat resume run_a1b2c3d4e5f6
+
+# Resume with additional grants
+moat resume my-feature --grant github
 ```
 
 ---
