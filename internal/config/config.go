@@ -117,30 +117,20 @@ type MCPAuthConfig struct {
 }
 
 // ProxyChainEntry defines an upstream proxy in the proxy chain.
-// Proxies are applied in order: Moat's proxy -> proxy[0] -> proxy[1] -> ... -> internet.
+// Proxies run as sidecar containers in declared order:
+// container -> proxy[0] -> proxy[1] -> ... -> moat credential proxy -> internet.
 type ProxyChainEntry struct {
 	// Name is a unique identifier for this proxy.
 	Name string `yaml:"name"`
 
-	// URL is the proxy endpoint (e.g., "http://localhost:8080").
-	// If set, Moat connects to this already-running proxy.
-	URL string `yaml:"url,omitempty"`
+	// Image is the Docker image for the proxy sidecar.
+	Image string `yaml:"image"`
 
-	// Command starts the proxy as a managed process.
-	// Moat starts it before the run and stops it after.
-	Command string `yaml:"command,omitempty"`
+	// Port is the port the proxy listens on inside its container.
+	Port int `yaml:"port"`
 
-	// Args are command-line arguments for the managed process.
-	Args []string `yaml:"args,omitempty"`
-
-	// Env are environment variables for the managed process.
+	// Env are environment variables passed to the proxy container.
 	Env map[string]string `yaml:"env,omitempty"`
-
-	// PortEnv is the environment variable name where the proxy's
-	// listen port is passed. Moat assigns a random port and sets this
-	// variable so the proxy knows which port to listen on.
-	// Default: "PORT".
-	PortEnv string `yaml:"port_env,omitempty"`
 }
 
 // ServiceSpec allows customizing service behavior.
@@ -514,11 +504,11 @@ func Load(dir string) (*Config, error) {
 				return nil, fmt.Errorf("%s: duplicate name %q", prefix, entry.Name)
 			}
 			seenProxyNames[entry.Name] = true
-			if entry.URL == "" && entry.Command == "" {
-				return nil, fmt.Errorf("%s: either 'url' or 'command' is required", prefix)
+			if entry.Image == "" {
+				return nil, fmt.Errorf("%s: 'image' is required", prefix)
 			}
-			if entry.URL != "" && entry.Command != "" {
-				return nil, fmt.Errorf("%s: 'url' and 'command' are mutually exclusive", prefix)
+			if entry.Port <= 0 {
+				return nil, fmt.Errorf("%s: 'port' must be a positive integer", prefix)
 			}
 		}
 	}

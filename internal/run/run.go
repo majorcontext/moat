@@ -49,7 +49,7 @@ type Run struct {
 	State             State
 	ContainerID       string
 	ProxyServer       *proxy.Server     // Auth proxy for credential injection
-	ProxyChain        *proxy.Chain      // Upstream proxy chain (stopped with run)
+	ProxyChain        *proxy.Chain      // Proxy chain sidecars (nil if no chain configured)
 	SSHAgentServer    *sshagent.Server  // SSH agent proxy for SSH key access
 	Store             *storage.RunStore // Run data storage
 	storeRef          *atomic.Value     // Atomic reference for concurrent logger access
