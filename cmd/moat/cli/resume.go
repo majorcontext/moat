@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -17,30 +19,35 @@ var (
 )
 
 var resumeCmd = &cobra.Command{
-	Use:   "resume [workspace]",
-	Short: "Resume the most recent Claude Code conversation",
-	Long: `Resume the most recent Claude Code conversation in a new container.
+	Use:   "resume [run]",
+	Short: "Resume a Claude Code conversation",
+	Long: `Resume a Claude Code conversation from a previous run.
 
-This is a shortcut for 'moat claude --continue'. It starts a new container
-with the same workspace and passes --continue to Claude Code, which picks up
-the most recent conversation from the synced session logs.
+If the specified run is still running, attaches to it (same as 'moat attach').
+If the run has stopped, starts a new container with the same workspace and
+passes --continue to Claude Code, which picks up the most recent conversation
+from the synced session logs.
+
+Without an argument, finds the most recent Claude Code run (running or stopped)
+and resumes it.
 
 Session history is preserved across runs because moat mounts the Claude
 projects directory (~/.claude/projects/) between host and container. Claude
 Code stores conversation logs as .jsonl files in this directory, so previous
 sessions are always available for resumption.
 
-Without a workspace argument, uses the current directory.
-
 Examples:
-  # Resume the most recent conversation
+  # Resume the most recent Claude Code run
   moat resume
 
-  # Resume in a specific project
-  moat resume ./my-project
+  # Resume a specific run by name
+  moat resume my-feature
+
+  # Resume a specific run by ID
+  moat resume run_a1b2c3d4e5f6
 
   # Resume with additional grants
-  moat resume --grant github`,
+  moat resume my-feature --grant github`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runResume,
 }
@@ -52,15 +59,86 @@ func init() {
 }
 
 func runResume(cmd *cobra.Command, args []string) error {
-	workspace := "."
+	manager, err := run.NewManager()
+	if err != nil {
+		return fmt.Errorf("creating run manager: %w", err)
+	}
+	defer manager.Close()
+
+	var target *run.Run
 	if len(args) > 0 {
-		workspace = args[0]
+		// Resolve by name or ID
+		runID, resolveErr := resolveRunArgSingle(manager, args[0])
+		if resolveErr != nil {
+			return resolveErr
+		}
+		target, err = manager.Get(runID)
+		if err != nil {
+			return fmt.Errorf("run not found: %w", err)
+		}
+	} else {
+		// Find the most recent Claude Code run (running preferred, then stopped)
+		target = findMostRecentClaudeRun(manager)
+		if target == nil {
+			return fmt.Errorf("no Claude Code runs found\n\nStart a session first with: moat claude")
+		}
 	}
 
-	absPath, err := intcli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return err
+	// If running, attach to it
+	if target.State == run.StateRunning {
+		fmt.Printf("Run %s (%s) is still running, attaching...\n", target.Name, target.ID)
+		ctx := context.Background()
+		return attachInteractiveMode(ctx, manager, target, "")
 	}
+
+	// If stopped, start a new container with the same workspace
+	if target.State != run.StateStopped && target.State != run.StateFailed {
+		return fmt.Errorf("run %s is in state %q and cannot be resumed", target.ID, target.State)
+	}
+
+	return resumeStoppedRun(target)
+}
+
+// findMostRecentClaudeRun finds the most recent Claude Code run, preferring running ones.
+func findMostRecentClaudeRun(manager *run.Manager) *run.Run {
+	runs := manager.List()
+	if len(runs) == 0 {
+		return nil
+	}
+
+	// Sort newest first
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
+
+	// First pass: find most recent running Claude run
+	for _, r := range runs {
+		if r.State == run.StateRunning && isClaudeRun(r) {
+			return r
+		}
+	}
+
+	// Second pass: find most recent stopped/failed Claude run
+	for _, r := range runs {
+		if (r.State == run.StateStopped || r.State == run.StateFailed) && isClaudeRun(r) {
+			return r
+		}
+	}
+
+	return nil
+}
+
+// isClaudeRun returns true if the run was a Claude Code session.
+func isClaudeRun(r *run.Run) bool {
+	return r.Agent == "claude-code" || r.Agent == "claude"
+}
+
+// resumeStoppedRun starts a new container with the same workspace and --continue.
+func resumeStoppedRun(prev *run.Run) error {
+	absPath := prev.Workspace
+
+	fmt.Printf("Resuming Claude Code session from run %s (%s)\n", prev.Name, prev.ID)
+	fmt.Printf("Workspace: %s\n", absPath)
 
 	// Load agent.yaml if present
 	cfg, err := config.Load(absPath)
@@ -68,7 +146,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Build grants list
+	// Build grants list: previous run's grants + config grants + flag grants
 	grantSet := make(map[string]bool)
 	var grants []string
 	addGrant := func(g string) {
@@ -78,14 +156,26 @@ func runResume(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if credName := getResumeCredentialName(); credName != "" {
-		addGrant(credName)
+	// Start with the previous run's grants
+	for _, g := range prev.Grants {
+		addGrant(g)
 	}
+
+	// Auto-detect credential if previous run had none
+	if len(prev.Grants) == 0 {
+		if credName := getResumeCredentialName(); credName != "" {
+			addGrant(credName)
+		}
+	}
+
+	// Add config grants
 	if cfg != nil {
 		for _, g := range cfg.Grants {
 			addGrant(g)
 		}
 	}
+
+	// Add flag grants
 	for _, g := range resumeFlags.Grants {
 		addGrant(g)
 	}
@@ -98,9 +188,9 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 	containerCmd = append(containerCmd, "--continue")
 
-	// Use name from flag, or config
-	if resumeFlags.Name == "" && cfg != nil && cfg.Name != "" {
-		resumeFlags.Name = cfg.Name
+	// Use name from flag, or previous run's name
+	if resumeFlags.Name == "" {
+		resumeFlags.Name = prev.Name
 	}
 
 	// Ensure dependencies
@@ -131,11 +221,13 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 	log.Debug("resuming claude code session",
 		"workspace", absPath,
+		"previous_run", prev.ID,
 		"grants", grants,
 	)
 
 	if intcli.DryRun {
 		fmt.Println("Dry run - would resume Claude Code session")
+		fmt.Printf("Previous run: %s (%s)\n", prev.Name, prev.ID)
 		fmt.Printf("Workspace: %s\n", absPath)
 		fmt.Printf("Grants: %v\n", grants)
 		return nil
