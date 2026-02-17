@@ -943,6 +943,45 @@ mcp:
 
 ---
 
+## proxies
+
+Configures an ordered chain of upstream proxies. Moat's credential-injecting proxy forwards outbound traffic through these proxies in order.
+
+```yaml
+proxies:
+  - name: headroom
+    url: http://localhost:8080
+
+  - name: logger
+    command: /usr/local/bin/my-proxy
+    args: ["--verbose"]
+    env:
+      LOG_LEVEL: debug
+    port_env: LISTEN_PORT
+```
+
+- Type: `array[object]`
+- Default: `[]`
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Unique identifier for this proxy (required) |
+| `url` | `string` | URL of an already-running proxy (mutually exclusive with `command`) |
+| `command` | `string` | Command to start a managed proxy process (mutually exclusive with `url`) |
+| `args` | `array[string]` | Arguments for the managed proxy command |
+| `env` | `map[string]string` | Environment variables for the managed proxy |
+| `port_env` | `string` | Environment variable name for the listen port (default: `PORT`) |
+
+**External proxies** (`url`): Connect to an already-running proxy. Moat does not manage its lifecycle.
+
+**Managed proxies** (`command`): Moat starts the proxy before the run and stops it after. A free port is assigned and passed via the `port_env` environment variable.
+
+**Chain order:** Proxies are applied in declared order. Moat's proxy forwards to `proxies[0]`, which forwards to `proxies[1]`, and so on. Moat's own credential injection and TLS interception always happen first.
+
+---
+
 ## Codex
 
 ### codex.sync_logs

@@ -140,6 +140,24 @@ The model does not protect against a container that intercepts its own network t
 
 For a full discussion of the trust model and threat boundaries, see [Credential management: Security properties](./02-credentials.md#security-properties).
 
+## Proxy chaining
+
+Moat supports composing multiple proxies in a chain. This is useful for adding upstream proxies for LLM cost reduction, logging, policy enforcement, or other transparent proxy use cases.
+
+The chain is declared in `agent.yaml` under the `proxies:` field. Moat's own proxy (credential injection, TLS interception, network policy) always runs first. Outbound traffic then flows through each chained proxy in order:
+
+```text
+Container process
+  -> Moat proxy (credential injection, TLS, policy)
+  -> proxies[0] (e.g., cost optimizer)
+  -> proxies[1] (e.g., logging proxy)
+  -> upstream server
+```
+
+Chained proxies can be either **external** (already running, referenced by URL) or **managed** (started and stopped by Moat). Managed proxies receive a free port via an environment variable and are configured to forward to the next proxy in the chain via `HTTP_PROXY`/`HTTPS_PROXY`.
+
+See [agent.yaml reference: proxies](../reference/02-agent-yaml.md#proxies) for configuration details.
+
 ## Related concepts
 
 - [Credential management](./02-credentials.md) -- How credentials are stored, encrypted, and scoped to hosts

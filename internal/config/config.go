@@ -50,6 +50,7 @@ type Config struct {
 	Container ContainerConfig        `yaml:"container,omitempty"`
 	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+	Proxies   []ProxyChainEntry      `yaml:"proxies,omitempty"`
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
@@ -113,6 +114,33 @@ type MCPServerConfig struct {
 type MCPAuthConfig struct {
 	Grant  string `yaml:"grant"`
 	Header string `yaml:"header"`
+}
+
+// ProxyChainEntry defines an upstream proxy in the proxy chain.
+// Proxies are applied in order: Moat's proxy -> proxy[0] -> proxy[1] -> ... -> internet.
+type ProxyChainEntry struct {
+	// Name is a unique identifier for this proxy.
+	Name string `yaml:"name"`
+
+	// URL is the proxy endpoint (e.g., "http://localhost:8080").
+	// If set, Moat connects to this already-running proxy.
+	URL string `yaml:"url,omitempty"`
+
+	// Command starts the proxy as a managed process.
+	// Moat starts it before the run and stops it after.
+	Command string `yaml:"command,omitempty"`
+
+	// Args are command-line arguments for the managed process.
+	Args []string `yaml:"args,omitempty"`
+
+	// Env are environment variables for the managed process.
+	Env map[string]string `yaml:"env,omitempty"`
+
+	// PortEnv is the environment variable name where the proxy's
+	// listen port is passed. Moat assigns a random port and sets this
+	// variable so the proxy knows which port to listen on.
+	// Default: "PORT".
+	PortEnv string `yaml:"port_env,omitempty"`
 }
 
 // ServiceSpec allows customizing service behavior.
@@ -471,6 +499,27 @@ func Load(dir string) (*Config, error) {
 				return nil, fmt.Errorf("%s: duplicate volume target %q", prefix, vol.Target)
 			}
 			seenVolTargets[vol.Target] = true
+		}
+	}
+
+	// Validate proxy chain
+	if len(cfg.Proxies) > 0 {
+		seenProxyNames := make(map[string]bool)
+		for i, entry := range cfg.Proxies {
+			prefix := fmt.Sprintf("proxies[%d]", i)
+			if entry.Name == "" {
+				return nil, fmt.Errorf("%s: 'name' is required", prefix)
+			}
+			if seenProxyNames[entry.Name] {
+				return nil, fmt.Errorf("%s: duplicate name %q", prefix, entry.Name)
+			}
+			seenProxyNames[entry.Name] = true
+			if entry.URL == "" && entry.Command == "" {
+				return nil, fmt.Errorf("%s: either 'url' or 'command' is required", prefix)
+			}
+			if entry.URL != "" && entry.Command != "" {
+				return nil, fmt.Errorf("%s: 'url' and 'command' are mutually exclusive", prefix)
+			}
 		}
 	}
 

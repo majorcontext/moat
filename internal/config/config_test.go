@@ -1303,6 +1303,113 @@ mcp:
 	}
 }
 
+func TestLoad_ProxyChain(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+proxies:
+  - name: headroom
+    url: http://localhost:8080
+  - name: logger
+    command: /usr/bin/my-proxy
+    args: ["--verbose"]
+    env:
+      LOG_LEVEL: debug
+    port_env: LISTEN_PORT
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.Proxies) != 2 {
+		t.Fatalf("expected 2 proxies, got %d", len(cfg.Proxies))
+	}
+
+	h := cfg.Proxies[0]
+	if h.Name != "headroom" {
+		t.Errorf("expected name 'headroom', got %q", h.Name)
+	}
+	if h.URL != "http://localhost:8080" {
+		t.Errorf("expected URL 'http://localhost:8080', got %q", h.URL)
+	}
+
+	l := cfg.Proxies[1]
+	if l.Name != "logger" {
+		t.Errorf("expected name 'logger', got %q", l.Name)
+	}
+	if l.Command != "/usr/bin/my-proxy" {
+		t.Errorf("expected command, got %q", l.Command)
+	}
+	if len(l.Args) != 1 || l.Args[0] != "--verbose" {
+		t.Errorf("expected args [--verbose], got %v", l.Args)
+	}
+	if l.PortEnv != "LISTEN_PORT" {
+		t.Errorf("expected port_env 'LISTEN_PORT', got %q", l.PortEnv)
+	}
+}
+
+func TestLoad_ProxyChain_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "missing name",
+			yaml: `
+proxies:
+  - url: http://localhost:8080
+`,
+			wantErr: "'name' is required",
+		},
+		{
+			name: "duplicate names",
+			yaml: `
+proxies:
+  - name: dup
+    url: http://localhost:8080
+  - name: dup
+    url: http://localhost:9090
+`,
+			wantErr: "duplicate name",
+		},
+		{
+			name: "missing url and command",
+			yaml: `
+proxies:
+  - name: empty
+`,
+			wantErr: "either 'url' or 'command' is required",
+		},
+		{
+			name: "both url and command",
+			yaml: `
+proxies:
+  - name: both
+    url: http://localhost:8080
+    command: /usr/bin/proxy
+`,
+			wantErr: "'url' and 'command' are mutually exclusive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "agent.yaml", tt.yaml)
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
 func TestLoadConfigWithHooks(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "agent.yaml")
