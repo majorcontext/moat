@@ -28,12 +28,26 @@ type PrepareOpts struct {
 	ContainerHome string
 	MCPServers    map[string]MCPServerConfig
 	HostConfig    map[string]interface{}
+
+	// LocalMCPServers are MCP servers that run as child processes inside the
+	// container. These are defined under agent-specific sections in agent.yaml
+	// (e.g., claude.mcp, codex.mcp, gemini.mcp).
+	LocalMCPServers map[string]LocalMCPServerConfig
 }
 
-// MCPServerConfig defines an MCP server configuration.
+// MCPServerConfig defines a remote/relay MCP server configuration.
 type MCPServerConfig struct {
 	URL     string
 	Headers map[string]string
+}
+
+// LocalMCPServerConfig defines a local process MCP server that runs inside
+// the container as a child process.
+type LocalMCPServerConfig struct {
+	Command string
+	Args    []string
+	Env     map[string]string
+	Cwd     string
 }
 
 // ContainerConfig is returned by AgentProvider.PrepareContainer.

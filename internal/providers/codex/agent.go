@@ -39,6 +39,30 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		return nil, fmt.Errorf("writing codex config: %w", err)
 	}
 
+	// Write local MCP server configuration if present
+	if len(opts.LocalMCPServers) > 0 {
+		mcpConfig := MCPConfig{
+			MCPServers: make(map[string]MCPServer),
+		}
+		for name, cfg := range opts.LocalMCPServers {
+			mcpConfig.MCPServers[name] = MCPServer{
+				Command: cfg.Command,
+				Args:    cfg.Args,
+				Env:     cfg.Env,
+				Cwd:     cfg.Cwd,
+			}
+		}
+		mcpJSON, err := json.MarshalIndent(mcpConfig, "", "  ")
+		if err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("marshaling MCP config: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "mcp.json"), mcpJSON, 0644); err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing MCP config: %w", err)
+		}
+	}
+
 	// Build container environment
 	// Include credential env vars plus the init mount path for moat-init script
 	env := p.ContainerEnv(opts.Credential)
