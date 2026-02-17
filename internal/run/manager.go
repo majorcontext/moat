@@ -225,7 +225,9 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		if runState == StateStopped || runState == StateFailed {
 			close(r.exitCh)
 			if r.Name != "" {
-				_ = m.routes.Remove(r.Name)
+				if err := m.routes.Remove(r.Name); err != nil {
+					log.Debug("removing stale route", "name", r.Name, "error", err)
+				}
 			}
 		}
 

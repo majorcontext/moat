@@ -1464,9 +1464,11 @@ func TestRefreshToken_Revoked_WrappedError(t *testing.T) {
 // --- loadPersistedRuns stale route cleanup tests ---
 
 // stubRuntime is a minimal container.Runtime implementation for testing
-// loadPersistedRuns. Only ContainerState is implemented; all other methods panic.
+// loadPersistedRuns. Only ContainerState and WaitContainer are implemented;
+// all other methods panic.
 type stubRuntime struct {
 	states map[string]string // container ID -> state (e.g. "exited")
+	done   chan struct{}     // closed by test to unblock WaitContainer
 }
 
 func (s *stubRuntime) ContainerState(_ context.Context, id string) (string, error) {
@@ -1483,18 +1485,22 @@ func (s *stubRuntime) CreateContainer(context.Context, container.Config) (string
 	panic("not implemented")
 }
 func (s *stubRuntime) StartContainer(context.Context, string) error { panic("not implemented") }
-func (s *stubRuntime) StopContainer(context.Context, string) error  { panic("not implemented") }
+func (s *stubRuntime) StopContainer(context.Context, string) error  { return nil }
 func (s *stubRuntime) WaitContainer(ctx context.Context, _ string) (int64, error) {
-	// Block until context is canceled (test cleanup)
-	<-ctx.Done()
-	return 0, ctx.Err()
+	// Block until the test signals completion via the done channel
+	select {
+	case <-s.done:
+		return 0, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
 }
-func (s *stubRuntime) RemoveContainer(context.Context, string) error { panic("not implemented") }
+func (s *stubRuntime) RemoveContainer(context.Context, string) error { return nil }
 func (s *stubRuntime) ContainerLogs(context.Context, string) (io.ReadCloser, error) {
 	panic("not implemented")
 }
 func (s *stubRuntime) ContainerLogsAll(context.Context, string) ([]byte, error) {
-	panic("not implemented")
+	return nil, nil // called by captureLogs after WaitContainer returns
 }
 func (s *stubRuntime) GetPortBindings(context.Context, string) (map[int]int, error) {
 	panic("not implemented")
@@ -1572,6 +1578,7 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{"container-abc": "exited"},
+			done:   make(chan struct{}),
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
@@ -1631,9 +1638,13 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{"container-live": "running"},
+			done:   done,
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
@@ -1689,6 +1700,7 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{},
+			done:   make(chan struct{}),
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
