@@ -240,6 +240,7 @@ func TestGenerateDockerfileContextFiles(t *testing.T) {
 		{"SSH", &DockerfileOptions{NeedsSSH: true}, nil},
 		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, nil},
 		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, nil},
+		{"GitIdentity", &DockerfileOptions{NeedsGitIdentity: true}, nil},
 		{"DockerHost", nil, []Dependency{{Name: "docker", DockerMode: DockerModeHost}}},
 		{"DockerDind", nil, []Dependency{{Name: "docker", DockerMode: DockerModeDind}}},
 	}

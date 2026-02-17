@@ -173,20 +173,16 @@ fi
 #
 # This comment is kept as a placeholder in case Codex MCP support is added later.
 
-# Git Safe Directory
-# The workspace is mounted from the host with different ownership than the
-# container user. Git 2.35.2+ rejects operations on directories owned by
-# other users unless explicitly marked safe. We mark /workspace as safe
-# system-wide since it's always the moat workspace mount point.
+# Git Configuration
+# 1. Safe directory: The workspace is mounted from the host with different
+#    ownership than the container user. Git 2.35.2+ rejects operations on
+#    directories owned by other users unless explicitly marked safe.
+# 2. Identity: When the host has git user.name/user.email configured, moat
+#    passes them via MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL. Set them as
+#    system-level git config so commits inside the container use the host's
+#    identity.
 if command -v git >/dev/null 2>&1; then
   git config --system --add safe.directory /workspace 2>/dev/null || true
-fi
-
-# Git Identity
-# When the host has git user.name/user.email configured, moat passes them
-# via MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL. Set them as global git
-# config so commits inside the container use the host's identity.
-if command -v git >/dev/null 2>&1; then
   if [ -n "$MOAT_GIT_USER_NAME" ]; then
     git config --system user.name "$MOAT_GIT_USER_NAME" 2>/dev/null || true
   fi
