@@ -34,11 +34,9 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -226,7 +224,6 @@ type Proxy struct {
 	mcpServers           []config.MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
-	upstreamTransport    http.RoundTripper             // optional upstream proxy transport
 }
 
 // NewProxy creates a new auth proxy.
@@ -269,22 +266,6 @@ func (p *Proxy) SetMCPServers(servers []config.MCPServerConfig) {
 // SetCredentialStore sets the credential store for MCP credential retrieval.
 func (p *Proxy) SetCredentialStore(store credential.Store) {
 	p.credStore = store
-}
-
-// SetUpstreamTransport sets a transport for forwarding requests through
-// an upstream proxy chain. When set, all outbound requests use this
-// transport instead of http.DefaultTransport.
-func (p *Proxy) SetUpstreamTransport(t http.RoundTripper) {
-	p.upstreamTransport = t
-}
-
-// getTransport returns the transport to use for outbound requests.
-// Returns the upstream transport if set, otherwise http.DefaultTransport.
-func (p *Proxy) getTransport() http.RoundTripper {
-	if p.upstreamTransport != nil {
-		return p.upstreamTransport
-	}
-	return http.DefaultTransport
 }
 
 // SetCredential sets the credential for a host using the Authorization header.
@@ -715,7 +696,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Forward request through upstream chain (or direct)
-	resp, err := p.getTransport().RoundTrip(outReq)
+	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	duration := time.Since(start)
 
 	// Capture response body and headers
@@ -831,52 +812,9 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// dialTarget connects to a target host, either directly or through the upstream proxy.
+// dialTarget connects to a target host directly.
 func (p *Proxy) dialTarget(target string) (net.Conn, error) {
-	if ut, ok := p.upstreamTransport.(*http.Transport); ok && ut != nil && ut.Proxy != nil {
-		return dialViaProxy(ut.Proxy, target)
-	}
 	return net.Dial("tcp", target)
-}
-
-// dialViaProxy establishes a TCP connection through an HTTP CONNECT proxy.
-func dialViaProxy(proxyFunc func(*http.Request) (*url.URL, error), target string) (net.Conn, error) {
-	// Get the proxy URL
-	dummyReq, _ := http.NewRequest(http.MethodConnect, "https://"+target, nil)
-	proxyURL, err := proxyFunc(dummyReq)
-	if err != nil || proxyURL == nil {
-		// No proxy for this request, dial directly
-		return net.Dial("tcp", target)
-	}
-
-	// Connect to the proxy
-	proxyConn, dialErr := net.Dial("tcp", proxyURL.Host)
-	if dialErr != nil {
-		return nil, fmt.Errorf("connecting to upstream proxy %s: %w", proxyURL.Host, dialErr)
-	}
-
-	// Send CONNECT request
-	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
-	if _, writeErr := proxyConn.Write([]byte(connectReq)); writeErr != nil {
-		proxyConn.Close()
-		return nil, fmt.Errorf("sending CONNECT to upstream proxy: %w", writeErr)
-	}
-
-	// Read the response
-	br := bufio.NewReader(proxyConn)
-	resp, readErr := http.ReadResponse(br, dummyReq)
-	if readErr != nil {
-		proxyConn.Close()
-		return nil, fmt.Errorf("reading CONNECT response from upstream proxy: %w", readErr)
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		proxyConn.Close()
-		return nil, fmt.Errorf("upstream proxy CONNECT returned %d", resp.StatusCode)
-	}
-
-	return proxyConn, nil
 }
 
 func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Request, host string) {
@@ -920,11 +858,6 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// HTTP/1.1 requests read from the intercepted TLS connection. Enabling
 		// HTTP/2 on the upstream side causes framing mismatches and hangs.
 	}
-	// Route through upstream proxy chain if configured
-	if ut, ok := p.upstreamTransport.(*http.Transport); ok && ut != nil && ut.Proxy != nil {
-		transport.Proxy = ut.Proxy
-	}
-
 	clientReader := bufio.NewReader(tlsClientConn)
 	for {
 		req, err := http.ReadRequest(clientReader)

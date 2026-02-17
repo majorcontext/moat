@@ -1,5 +1,3 @@
-// Package proxy provides a TLS-intercepting HTTP proxy for credential injection.
-// This file implements proxy chain management for composing multiple upstream proxies.
 package proxy
 
 import (
@@ -8,134 +6,138 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
-	"strconv"
-	"sync"
 	"time"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/log"
 )
 
-// ChainEntry represents a running proxy in the chain.
-type ChainEntry struct {
-	Name string
-	URL  *url.URL // The proxy URL to connect to
-	cmd  *exec.Cmd
+// ChainProxy represents a running proxy sidecar in the chain.
+type ChainProxy struct {
+	Name        string
+	ContainerID string
+	Host        string // hostname or IP reachable from the network
+	Port        int    // listen port inside the container
 }
 
-// Chain manages an ordered list of upstream proxies.
-// Moat's proxy forwards through proxy[0], which forwards through proxy[1], etc.
-// Only the first proxy in the chain is directly used as the upstream for Moat's proxy.
-// Subsequent proxies are chained by configuring each proxy's HTTP_PROXY environment
-// variable to point to the next proxy in the chain.
+// Chain manages an ordered list of proxy sidecars.
+// Traffic flows: container -> proxy[0] -> proxy[1] -> ... -> moat proxy -> internet.
 type Chain struct {
-	entries []ChainEntry
-	mu      sync.Mutex
+	proxies []ChainProxy
 }
 
-// NewChain creates a proxy chain from configuration entries.
-// Managed proxies (those with Command) are started in order.
-// Each managed proxy receives the next proxy's URL as its HTTP_PROXY/HTTPS_PROXY.
-func NewChain(ctx context.Context, entries []config.ProxyChainEntry) (*Chain, error) {
+// StartChain starts proxy sidecar containers in order, wiring each to forward
+// to the next proxy in the chain. The last proxy forwards to moatProxyAddr,
+// which is Moat's credential-injecting proxy.
+//
+// Each proxy receives HTTP_PROXY/HTTPS_PROXY pointing to its upstream (the next
+// proxy in the chain, or the Moat proxy for the last entry).
+func StartChain(
+	ctx context.Context,
+	entries []config.ProxyChainEntry,
+	svcMgr container.ServiceManager,
+	runID string,
+	moatProxyAddr string,
+) (*Chain, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
 
 	chain := &Chain{
-		entries: make([]ChainEntry, 0, len(entries)),
+		proxies: make([]ChainProxy, 0, len(entries)),
 	}
 
-	// Resolve all entries, starting managed processes as needed.
-	// We process in reverse order so each proxy knows its upstream (the next in the chain).
-	resolved := make([]ChainEntry, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		var ce ChainEntry
-		ce.Name = entry.Name
-
-		if entry.URL != "" {
-			// External proxy -- just parse the URL
-			u, err := url.Parse(entry.URL)
-			if err != nil {
-				chain.Stop()
-				return nil, fmt.Errorf("proxies[%d] %q: invalid URL %q: %w", i, entry.Name, entry.URL, err)
-			}
-			ce.URL = u
+	// Start proxies in order. Each one's upstream is the next in the chain.
+	// The last proxy's upstream is the Moat credential proxy.
+	for i, entry := range entries {
+		// Determine upstream URL
+		var upstreamURL string
+		if i < len(entries)-1 {
+			// Upstream is the next proxy in chain (by container name on the Docker network)
+			next := entries[i+1]
+			upstreamURL = fmt.Sprintf("http://moat-proxy-%s-%s:%d", runID, next.Name, next.Port)
 		} else {
-			// Managed proxy -- start the process
-			port, err := findFreePort()
-			if err != nil {
-				chain.Stop()
-				return nil, fmt.Errorf("proxies[%d] %q: finding free port: %w", i, entry.Name, err)
-			}
-
-			portEnv := entry.PortEnv
-			if portEnv == "" {
-				portEnv = "PORT"
-			}
-
-			cmd := exec.CommandContext(ctx, entry.Command, entry.Args...) //nolint:gosec
-			cmd.Stdout = os.Stderr
-			cmd.Stderr = os.Stderr
-
-			// Set environment
-			cmd.Env = os.Environ()
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%d", portEnv, port))
-			for k, v := range entry.Env {
-				cmd.Env = append(cmd.Env, k+"="+v)
-			}
-
-			// If there's a next proxy in the chain, set it as the upstream
-			if i < len(entries)-1 && resolved[i+1].URL != nil {
-				nextURL := resolved[i+1].URL.String()
-				cmd.Env = append(cmd.Env,
-					"HTTP_PROXY="+nextURL,
-					"HTTPS_PROXY="+nextURL,
-					"http_proxy="+nextURL,
-					"https_proxy="+nextURL,
-				)
-			}
-
-			if err := cmd.Start(); err != nil {
-				chain.Stop()
-				return nil, fmt.Errorf("proxies[%d] %q: starting process: %w", i, entry.Name, err)
-			}
-
-			ce.cmd = cmd
-			ce.URL = &url.URL{
-				Scheme: "http",
-				Host:   fmt.Sprintf("127.0.0.1:%d", port),
-			}
-
-			log.Debug("chain proxy started",
-				"name", entry.Name,
-				"port", port,
-				"command", entry.Command)
-
-			// Wait briefly for the proxy to start listening
-			if err := waitForPort(port, 5*time.Second); err != nil {
-				chain.Stop()
-				return nil, fmt.Errorf("proxies[%d] %q: proxy did not start listening on port %d: %w", i, entry.Name, port, err)
-			}
+			// Last proxy in chain -> upstream is Moat's credential proxy
+			upstreamURL = "http://" + moatProxyAddr
 		}
 
-		resolved[i] = ce
+		// Build environment: pass upstream proxy info + user env
+		env := make(map[string]string)
+		for k, v := range entry.Env {
+			env[k] = v
+		}
+		env["HTTP_PROXY"] = upstreamURL
+		env["HTTPS_PROXY"] = upstreamURL
+		env["http_proxy"] = upstreamURL
+		env["https_proxy"] = upstreamURL
+
+		containerName := fmt.Sprintf("moat-proxy-%s-%s", runID, entry.Name)
+
+		svcCfg := container.ServiceConfig{
+			Name:    containerName,
+			Image:   entry.Image,
+			Env:     env,
+			RunID:   runID,
+			Version: "latest",
+		}
+
+		info, err := svcMgr.StartService(ctx, svcCfg)
+		if err != nil {
+			// Cleanup already-started proxies
+			chain.Stop(ctx, svcMgr)
+			return nil, fmt.Errorf("starting proxy %q: %w", entry.Name, err)
+		}
+
+		cp := ChainProxy{
+			Name:        entry.Name,
+			ContainerID: info.ID,
+			Host:        containerName, // use container name as hostname on Docker network
+			Port:        entry.Port,
+		}
+		chain.proxies = append(chain.proxies, cp)
+
+		log.Debug("chain proxy started",
+			"name", entry.Name,
+			"container_id", info.ID,
+			"image", entry.Image,
+			"upstream", upstreamURL)
 	}
 
-	chain.entries = resolved
+	// Wait for each proxy to be listening
+	for _, cp := range chain.proxies {
+		addr := fmt.Sprintf("%s:%d", cp.Host, cp.Port)
+		if err := waitForAddr(addr, 15*time.Second); err != nil {
+			log.Debug("chain proxy not ready, continuing anyway",
+				"name", cp.Name,
+				"addr", addr,
+				"error", err)
+		}
+	}
+
 	return chain, nil
 }
 
-// UpstreamURL returns the URL of the first proxy in the chain.
-// Moat's proxy should forward all outbound requests through this URL.
-// Returns nil if the chain is empty.
-func (c *Chain) UpstreamURL() *url.URL {
-	if c == nil || len(c.entries) == 0 {
+// EntryAddr returns the address (host:port) of the first proxy in the chain.
+// The main container's HTTP_PROXY should point here.
+// Returns empty string if the chain is empty.
+func (c *Chain) EntryAddr() string {
+	if c == nil || len(c.proxies) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", c.proxies[0].Host, c.proxies[0].Port)
+}
+
+// ContainerIDs returns all sidecar container IDs for metadata storage.
+func (c *Chain) ContainerIDs() map[string]string {
+	if c == nil {
 		return nil
 	}
-	return c.entries[0].URL
+	ids := make(map[string]string, len(c.proxies))
+	for _, p := range c.proxies {
+		ids[p.Name] = p.ContainerID
+	}
+	return ids
 }
 
 // Names returns the names of all proxies in the chain, in order.
@@ -143,81 +145,62 @@ func (c *Chain) Names() []string {
 	if c == nil {
 		return nil
 	}
-	names := make([]string, len(c.entries))
-	for i, e := range c.entries {
-		names[i] = e.Name
+	names := make([]string, len(c.proxies))
+	for i, p := range c.proxies {
+		names[i] = p.Name
 	}
 	return names
 }
 
-// Stop terminates all managed proxy processes.
-func (c *Chain) Stop() {
-	if c == nil {
+// Stop terminates all proxy sidecar containers.
+func (c *Chain) Stop(ctx context.Context, svcMgr container.ServiceManager) {
+	if c == nil || svcMgr == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := range c.entries {
-		if c.entries[i].cmd != nil && c.entries[i].cmd.Process != nil {
-			log.Debug("stopping chain proxy", "name", c.entries[i].Name)
-			_ = c.entries[i].cmd.Process.Signal(os.Interrupt)
-
-			// Give it a moment to shut down gracefully
-			done := make(chan error, 1)
-			go func(cmd *exec.Cmd) {
-				done <- cmd.Wait()
-			}(c.entries[i].cmd)
-
-			select {
-			case <-done:
-			case <-time.After(3 * time.Second):
-				_ = c.entries[i].cmd.Process.Kill()
-			}
-			c.entries[i].cmd = nil
+	// Stop in reverse order
+	for i := len(c.proxies) - 1; i >= 0; i-- {
+		p := c.proxies[i]
+		log.Debug("stopping chain proxy", "name", p.Name, "container_id", p.ContainerID)
+		if err := svcMgr.StopService(ctx, container.ServiceInfo{ID: p.ContainerID}); err != nil {
+			log.Debug("failed to stop chain proxy", "name", p.Name, "error", err)
 		}
 	}
 }
 
-// findFreePort finds a free TCP port on localhost.
-func findFreePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	tcpAddr, ok := l.Addr().(*net.TCPAddr)
-	if !ok {
-		l.Close()
-		return 0, fmt.Errorf("unexpected listener address type: %T", l.Addr())
-	}
-	port := tcpAddr.Port
-	l.Close()
-	return port, nil
-}
-
-// waitForPort waits for a TCP port to accept connections.
-func waitForPort(port int, timeout time.Duration) error {
+// waitForAddr waits for a TCP address to accept connections.
+func waitForAddr(addr string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	addr := "127.0.0.1:" + strconv.Itoa(port)
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for port %d", port)
+	return fmt.Errorf("timeout waiting for %s", addr)
 }
 
-// UpstreamTransport creates an http.Transport that routes through the
-// first proxy in the chain. Returns nil if no chain is configured.
-func (c *Chain) UpstreamTransport() *http.Transport {
-	if c == nil || c.UpstreamURL() == nil {
+// ChainEntryURL returns the proxy URL for the first proxy in the chain.
+// Returns nil if the chain is empty.
+func (c *Chain) ChainEntryURL() *url.URL {
+	if c == nil || len(c.proxies) == 0 {
 		return nil
 	}
-	upstreamURL := c.UpstreamURL()
+	return &url.URL{
+		Scheme: "http",
+		Host:   c.EntryAddr(),
+	}
+}
+
+// WrapTransport creates an http.Transport that routes through the first proxy
+// in the chain. Returns nil if no chain is configured.
+func (c *Chain) WrapTransport() *http.Transport {
+	u := c.ChainEntryURL()
+	if u == nil {
+		return nil
+	}
 	return &http.Transport{
-		Proxy: http.ProxyURL(upstreamURL),
+		Proxy: http.ProxyURL(u),
 	}
 }
