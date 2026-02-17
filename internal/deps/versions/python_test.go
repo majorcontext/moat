@@ -118,16 +118,16 @@ func TestPythonResolver_Resolve_malformedLatest(t *testing.T) {
 
 	resolver := newTestPythonResolver(server)
 
-	// Partial version still returns the raw latest (caller can validate downstream)
-	got, err := resolver.Resolve(context.Background(), "3.12")
-	if err != nil {
-		t.Fatalf("Resolve(partial) error = %v", err)
+	// Partial version with malformed latest returns a clear error
+	_, err := resolver.Resolve(context.Background(), "3.12")
+	if err == nil {
+		t.Fatal("Resolve(partial) expected error for malformed latest")
 	}
-	if got != "bad-version" {
-		t.Errorf("Resolve(partial) = %v, want bad-version", got)
+	if got := err.Error(); got != `malformed version "bad-version" in API response for cycle 3.12` {
+		t.Errorf("Resolve(partial) error = %q, want malformed version error", got)
 	}
 
-	// Exact version with malformed latest returns a clear error
+	// Exact version with malformed latest also returns a clear error
 	_, err = resolver.Resolve(context.Background(), "3.12.5")
 	if err == nil {
 		t.Fatal("Resolve(exact) expected error for malformed latest")

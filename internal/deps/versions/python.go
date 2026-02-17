@@ -122,14 +122,16 @@ func resolvePythonVersion(version string, cycles []pythonCycle) (string, error) 
 		return "", fmt.Errorf("no Python %d.%d.x releases found", major, minor)
 	}
 
+	// Validate the Latest field from the API before using it.
+	_, _, latestPatch, latestOK := parseSemver(matched.Latest)
+	if !latestOK || latestPatch < 0 {
+		return "", fmt.Errorf("malformed version %q in API response for cycle %s", matched.Latest, matched.Cycle)
+	}
+
 	// If fully specified, verify it exists.
 	// CPython patches are sequential (0, 1, 2, ...), so a patch version exists
 	// if its number is between 0 and the latest known patch.
 	if patch >= 0 {
-		_, _, latestPatch, ok := parseSemver(matched.Latest)
-		if !ok || latestPatch < 0 {
-			return "", fmt.Errorf("malformed version %q in API response for cycle %s", matched.Latest, matched.Cycle)
-		}
 		if patch <= latestPatch {
 			return version, nil
 		}
