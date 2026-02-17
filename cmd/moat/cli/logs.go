@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -42,22 +45,21 @@ func init() {
 func runLogs(cmd *cobra.Command, args []string) error {
 	baseDir := storage.DefaultBaseDir()
 
+	// Use manager to resolve name or ID and check run state
+	manager, err := run.NewManager()
+	if err != nil {
+		return fmt.Errorf("creating run manager: %w", err)
+	}
+	defer manager.Close()
+
 	var runID string
 	if len(args) > 0 {
-		// Use manager to resolve name or ID
-		manager, err := run.NewManager()
-		if err != nil {
-			return fmt.Errorf("creating run manager: %w", err)
-		}
-		defer manager.Close()
-
 		runID, err = resolveRunArgSingle(manager, args[0])
 		if err != nil {
 			return err
 		}
 	} else {
 		// Find most recent run
-		var err error
 		runID, err = findLatestRun(baseDir)
 		if err != nil {
 			return err
@@ -81,10 +83,56 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	if logsFollow {
-		log.Info("Follow mode not yet implemented")
+		return followLogs(manager, store, runID, len(entries))
 	}
 
 	return nil
+}
+
+// followLogs tails the log file, printing new entries as they appear.
+// Stops when the run completes or the user presses Ctrl+C.
+func followLogs(manager *run.Manager, store *storage.RunStore, runID string, offset int) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Monitor container exit in background
+	exitDone := make(chan struct{})
+	go func() {
+		_ = manager.Wait(ctx, runID)
+		close(exitDone)
+	}()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-sigCh:
+			return nil
+		case <-exitDone:
+			// Container exited - do one final read to catch remaining logs
+			entries, _ := store.ReadLogs(offset, 10000)
+			for _, entry := range entries {
+				ts := entry.Timestamp.Format("15:04:05.000")
+				fmt.Printf("[%s] %s\n", ts, entry.Line)
+			}
+			return nil
+		case <-ticker.C:
+			entries, err := store.ReadLogs(offset, 1000)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				ts := entry.Timestamp.Format("15:04:05.000")
+				fmt.Printf("[%s] %s\n", ts, entry.Line)
+				offset++
+			}
+		}
+	}
 }
 
 // findLatestRun finds the most recently modified run directory.

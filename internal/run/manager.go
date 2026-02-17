@@ -1,7 +1,6 @@
 package run
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -2132,9 +2131,14 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
-	// Stream logs to stdout (unless disabled for interactive mode)
+	// Stream logs to stdout (unless disabled for interactive mode).
+	// streamLogs also captures to logs.jsonl for `moat logs` support.
 	if opts.StreamLogs {
 		go m.streamLogs(context.Background(), r)
+	} else {
+		// Detached mode: stream logs only to storage (not stdout)
+		// so `moat logs` can show output from running containers.
+		go m.streamLogsToStorage(context.Background(), r)
 	}
 
 	// Start background monitor to capture logs when container exits.
@@ -2175,23 +2179,28 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// real terminal, so we use the same check here.
 	useTTY := term.IsTerminal(os.Stdin)
 
-	// For interactive mode, tee output to a buffer so we can capture logs.
-	// This is necessary because:
-	// 1. TTY mode: output goes through PTY, not container logs
-	// 2. Non-TTY interactive: we may still want to capture for tests/programmatic use
-	var logBuffer bytes.Buffer
+	// For interactive mode, tee output to the log file so we can capture logs
+	// continuously. This enables `moat logs` to show output from running
+	// interactive containers, not just after shutdown.
+	var logWriter *storage.LogWriter
 	var teeStdout, teeStderr io.Writer
 	teeStdout = stdout
 	teeStderr = stderr
 
 	if r.Interactive && r.Store != nil {
-		// Tee stdout and stderr to capture for logs.jsonl
-		teeStdout = io.MultiWriter(stdout, &logBuffer)
-		if stderr != stdout {
-			teeStderr = io.MultiWriter(stderr, &logBuffer)
+		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+			logWriter = lw
+			// Mark logs as being captured so captureLogs doesn't duplicate
+			r.logsCaptured.Store(true)
+			teeStdout = io.MultiWriter(stdout, lw)
+			if stderr != stdout {
+				teeStderr = io.MultiWriter(stderr, lw)
+			} else {
+				// stdout and stderr are the same writer - don't duplicate
+				teeStderr = teeStdout
+			}
 		} else {
-			// stdout and stderr are the same writer - don't duplicate
-			teeStderr = teeStdout
+			log.Debug("failed to open log writer for interactive streaming", "runID", r.ID, "error", lwErr)
 		}
 	}
 
@@ -2279,37 +2288,22 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
-	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
-	// (Apple TTY output doesn't go through container runtime logs)
-	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
-	// Always create the file for audit completeness, even if empty.
-	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
-		// Use CompareAndSwap to ensure single write
-		if r.logsCaptured.CompareAndSwap(false, true) {
-			if lw, err := r.Store.LogWriter(); err == nil {
-				if logBuffer.Len() > 0 {
-					_, _ = lw.Write(logBuffer.Bytes())
-				}
-				lw.Close()
-			} else {
-				// Failed to create file - reset flag so captureLogs can try
-				r.logsCaptured.Store(false)
-			}
-		}
+	// Close the streaming log writer if we were capturing interactively
+	if logWriter != nil {
+		logWriter.Close()
 	}
 
 	// Capture logs after container exits (critical for audit/observability)
+	// For interactive mode with streaming log writer, this is a no-op (logsCaptured is already set)
 	// For non-interactive mode, this fetches from container runtime logs
-	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
 	m.captureLogs(r)
 
 	return attachErr
 }
 
-// streamLogs streams container logs to stdout for real-time feedback.
-// Note: Final log capture to storage is handled by captureLogs() which is called
-// from all container exit paths (Wait, StartAttached, Stop) to ensure complete
-// logs are captured even for fast-exiting containers.
+// streamLogs streams container logs to stdout for real-time feedback and
+// simultaneously captures them to logs.jsonl for observability.
+// This enables `moat logs` to show output from running containers.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
@@ -2318,19 +2312,64 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	}
 	defer logs.Close()
 
-	// Stream to stdout only for real-time feedback
-	// Storage is handled by Wait() after container exits
-	//
+	// Set up the output destination. We always write to stdout for real-time
+	// feedback. If we have a store, also tee to the log file so `moat logs`
+	// can show output from running containers.
+	var dest io.Writer = os.Stdout
+	if r.Store != nil {
+		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+			dest = io.MultiWriter(os.Stdout, lw)
+			// Mark logs as being captured so captureLogs doesn't duplicate
+			r.logsCaptured.Store(true)
+			defer lw.Close()
+		} else {
+			log.Debug("failed to open log writer for streaming", "runID", r.ID, "error", lwErr)
+		}
+	}
+
 	// Note: streamLogs is only called for non-interactive runs (see exec.go).
 	// Interactive runs use StartAttached which handles I/O directly.
 	// Non-interactive Docker containers use multiplexed streams (no TTY),
 	// so we must demultiplex to avoid 8-byte headers leaking into output.
 	if m.runtime.Type() == container.RuntimeDocker {
-		// Docker non-interactive container: demultiplex the stream
-		_, _ = stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
+		// Docker non-interactive container: demultiplex the stream.
+		// Both stdout and stderr go to the same destination (teed to log file).
+		_, _ = stdcopy.StdCopy(dest, dest, logs)
 	} else {
 		// Apple container: output is already raw
-		_, _ = io.Copy(os.Stdout, logs)
+		_, _ = io.Copy(dest, logs)
+	}
+}
+
+// streamLogsToStorage captures container logs to logs.jsonl without printing to
+// stdout. Used for detached runs so `moat logs` can show output while the
+// container is still running.
+func (m *Manager) streamLogsToStorage(ctx context.Context, r *Run) {
+	if r.Store == nil {
+		return
+	}
+
+	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
+	if err != nil {
+		log.Debug("failed to get container logs for storage streaming", "runID", r.ID, "error", err)
+		return
+	}
+	defer logs.Close()
+
+	lw, lwErr := r.Store.LogWriter()
+	if lwErr != nil {
+		log.Debug("failed to open log writer for storage streaming", "runID", r.ID, "error", lwErr)
+		return
+	}
+	defer lw.Close()
+
+	// Mark logs as being captured so captureLogs doesn't duplicate
+	r.logsCaptured.Store(true)
+
+	if m.runtime.Type() == container.RuntimeDocker {
+		_, _ = stdcopy.StdCopy(lw, lw, logs)
+	} else {
+		_, _ = io.Copy(lw, logs)
 	}
 }
 
@@ -2998,9 +3037,15 @@ func (m *Manager) RuntimeType() string {
 
 // Close releases manager resources.
 func (m *Manager) Close() error {
-	// Stop all proxy servers
+	// Stop proxy servers only for runs that are no longer running.
+	// Running containers still need the proxy for credential injection,
+	// so we must not shut it down when the CLI process detaches.
 	m.mu.RLock()
 	for _, r := range m.runs {
+		state := r.GetState()
+		if state == StateRunning || state == StateStarting {
+			continue // Don't stop proxy for active runs
+		}
 		if err := r.stopProxyServer(context.Background()); err != nil {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}
