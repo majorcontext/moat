@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/id"
+	"github.com/majorcontext/moat/internal/oauthrelay"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/snapshot"
@@ -114,6 +115,10 @@ type Run struct {
 
 	// ServiceContainers maps service name to container ID (e.g., "postgres" -> "abc123").
 	ServiceContainers map[string]string
+
+	// OAuthRelayConfig holds the OAuth relay configuration for this run.
+	// Set when oauth_relay: true is configured in agent.yaml.
+	OAuthRelayConfig *oauthrelay.Config
 }
 
 // Options configures a new run.

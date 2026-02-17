@@ -119,6 +119,9 @@ gemini:
       grant: github
       cwd: /workspace
 
+# OAuth relay (Google OAuth for local development)
+oauth_relay: true
+
 # Remote MCP servers
 mcp:
   - name: context7
@@ -548,6 +551,37 @@ network:
 Supports wildcard patterns with `*`.
 
 Hosts from granted credentials are automatically allowed.
+
+---
+
+## OAuth relay
+
+### oauth_relay
+
+Enables the Google OAuth relay for local development. When enabled, Moat provides a single registered OAuth callback that routes authorization codes to the correct application container.
+
+```yaml
+oauth_relay: true
+ports:
+  web: 3000
+```
+
+- Type: `bool`
+- Default: `false`
+- Requires: at least one entry in `ports`
+- Requires: `moat grant google-oauth` (stores client ID and secret)
+
+When enabled, Moat injects three environment variables into the container:
+
+| Variable | Description |
+|----------|-------------|
+| `MOAT_OAUTH_RELAY_URL` | URL to start the OAuth flow via Moat relay |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+
+The application redirects the browser to `${MOAT_OAUTH_RELAY_URL}?app=<agent-name>` to start the OAuth flow. Moat handles the Google redirect and routes the authorization code back to the app via the routing proxy.
+
+See [OAuth relay guide](../guides/13-oauth-relay.md) for setup instructions and the full authentication flow.
 
 ---
 

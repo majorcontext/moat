@@ -46,10 +46,11 @@ type Config struct {
 	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
 	Runtime string `yaml:"runtime,omitempty"`
 
-	Volumes   []VolumeConfig         `yaml:"volumes,omitempty"`
-	Container ContainerConfig        `yaml:"container,omitempty"`
-	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
-	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+	Volumes    []VolumeConfig         `yaml:"volumes,omitempty"`
+	Container  ContainerConfig        `yaml:"container,omitempty"`
+	MCP        []MCPServerConfig      `yaml:"mcp,omitempty"`
+	Services   map[string]ServiceSpec `yaml:"services,omitempty"`
+	OAuthRelay bool                   `yaml:"oauth_relay,omitempty"`
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
@@ -440,6 +441,11 @@ func Load(dir string) (*Config, error) {
 		if err := validateTopLevelMCPServerSpec(i, spec, seenNames); err != nil {
 			return nil, err
 		}
+	}
+
+	// Validate oauth_relay
+	if cfg.OAuthRelay && len(cfg.Ports) == 0 {
+		return nil, fmt.Errorf("oauth_relay requires at least one port in 'ports' (the relay routes auth codes to your app via the routing proxy)")
 	}
 
 	// Validate volumes
