@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
-	"strings"
 )
 
 const pythonVersionsURL = "https://endoflife.date/api/python.json"
@@ -16,6 +14,9 @@ const pythonVersionsURL = "https://endoflife.date/api/python.json"
 type PythonResolver struct {
 	// HTTPClient is the HTTP client to use. If nil, http.DefaultClient is used.
 	HTTPClient *http.Client
+
+	// url overrides the API endpoint. Used for testing. If empty, pythonVersionsURL is used.
+	url string
 }
 
 // pythonCycle represents a Python release cycle from the endoflife.date API.
@@ -55,6 +56,13 @@ func (r *PythonResolver) LatestStable(ctx context.Context) (string, error) {
 	return latestStablePython(cycles)
 }
 
+func (r *PythonResolver) apiURL() string {
+	if r.url != "" {
+		return r.url
+	}
+	return pythonVersionsURL
+}
+
 func (r *PythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error) {
 	client := r.HTTPClient
 	if client == nil {
@@ -66,7 +74,8 @@ func (r *PythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error)
 	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", pythonVersionsURL, nil)
+	url := r.apiURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +87,7 @@ func (r *PythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, pythonVersionsURL)
+		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
 	}
 
 	var cycles []pythonCycle
@@ -91,27 +100,9 @@ func (r *PythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error)
 
 // resolvePythonVersion resolves a version string against a list of Python cycles.
 func resolvePythonVersion(version string, cycles []pythonCycle) (string, error) {
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 || len(parts) > 3 {
+	major, minor, patch, ok := parseSemver(version)
+	if !ok {
 		return "", fmt.Errorf("invalid Python version format %q: expected X.Y or X.Y.Z", version)
-	}
-
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return "", fmt.Errorf("invalid Python major version %q", parts[0])
-	}
-
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("invalid Python minor version %q", parts[1])
-	}
-
-	patch := -1
-	if len(parts) == 3 {
-		patch, err = strconv.Atoi(parts[2])
-		if err != nil {
-			return "", fmt.Errorf("invalid Python patch version %q", parts[2])
-		}
 	}
 
 	// Find the matching cycle
@@ -135,12 +126,12 @@ func resolvePythonVersion(version string, cycles []pythonCycle) (string, error) 
 	// CPython patches are sequential (0, 1, 2, ...), so a patch version exists
 	// if its number is between 0 and the latest known patch.
 	if patch >= 0 {
-		latestParts := strings.Split(matched.Latest, ".")
-		if len(latestParts) == 3 {
-			latestPatch, _ := strconv.Atoi(latestParts[2])
-			if patch <= latestPatch {
-				return version, nil
-			}
+		_, _, latestPatch, ok := parseSemver(matched.Latest)
+		if !ok || latestPatch < 0 {
+			return "", fmt.Errorf("malformed version %q in API response for cycle %s", matched.Latest, matched.Cycle)
+		}
+		if patch <= latestPatch {
+			return version, nil
 		}
 		return "", fmt.Errorf("Python version %s not found in available versions", version)
 	}
@@ -156,19 +147,15 @@ func pythonVersionsFromCycles(cycles []pythonCycle) []string {
 
 	// Sort cycles by minor version descending
 	sort.Slice(py3, func(i, j int) bool {
-		_, mi, _ := parsePythonCycle(py3[i].Cycle)
-		_, mj, _ := parsePythonCycle(py3[j].Cycle)
+		_, mi, _, _ := parseSemver(py3[i].Cycle)
+		_, mj, _, _ := parseSemver(py3[j].Cycle)
 		return mi > mj
 	})
 
 	var versions []string
 	for _, c := range py3 {
-		latestParts := strings.Split(c.Latest, ".")
-		if len(latestParts) != 3 {
-			continue
-		}
-		latestPatch, err := strconv.Atoi(latestParts[2])
-		if err != nil {
+		_, _, latestPatch, ok := parseSemver(c.Latest)
+		if !ok || latestPatch < 0 {
 			continue
 		}
 		// Generate all patches from latest down to 0
@@ -188,8 +175,8 @@ func latestStablePython(cycles []pythonCycle) (string, error) {
 
 	// Sort by minor version descending to find newest
 	sort.Slice(py3, func(i, j int) bool {
-		_, mi, _ := parsePythonCycle(py3[i].Cycle)
-		_, mj, _ := parsePythonCycle(py3[j].Cycle)
+		_, mi, _, _ := parseSemver(py3[i].Cycle)
+		_, mj, _, _ := parseSemver(py3[j].Cycle)
 		return mi > mj
 	})
 
@@ -200,27 +187,10 @@ func latestStablePython(cycles []pythonCycle) (string, error) {
 func filterPython3Cycles(cycles []pythonCycle) []pythonCycle {
 	var py3 []pythonCycle
 	for _, c := range cycles {
-		major, _, ok := parsePythonCycle(c.Cycle)
+		major, _, _, ok := parseSemver(c.Cycle)
 		if ok && major == 3 {
 			py3 = append(py3, c)
 		}
 	}
 	return py3
-}
-
-// parsePythonCycle parses a cycle string like "3.13" into major, minor.
-func parsePythonCycle(cycle string) (major, minor int, ok bool) {
-	parts := strings.Split(cycle, ".")
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, false
-	}
-	minor, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, false
-	}
-	return major, minor, true
 }

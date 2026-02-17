@@ -2,11 +2,17 @@ package versions
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+func newTestPythonResolver(server *httptest.Server) *PythonResolver {
+	return &PythonResolver{
+		HTTPClient: server.Client(),
+		url:        server.URL,
+	}
+}
 
 func TestPythonResolver_Resolve(t *testing.T) {
 	mockResponse := `[
@@ -25,7 +31,7 @@ func TestPythonResolver_Resolve(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := &testPythonResolver{url: server.URL, client: server.Client()}
+	resolver := newTestPythonResolver(server)
 
 	tests := []struct {
 		name    string
@@ -99,6 +105,38 @@ func TestPythonResolver_Resolve(t *testing.T) {
 	}
 }
 
+func TestPythonResolver_Resolve_malformedLatest(t *testing.T) {
+	mockResponse := `[
+		{"cycle": "3.12", "latest": "bad-version"}
+	]`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockResponse))
+	}))
+	defer server.Close()
+
+	resolver := newTestPythonResolver(server)
+
+	// Partial version still returns the raw latest (caller can validate downstream)
+	got, err := resolver.Resolve(context.Background(), "3.12")
+	if err != nil {
+		t.Fatalf("Resolve(partial) error = %v", err)
+	}
+	if got != "bad-version" {
+		t.Errorf("Resolve(partial) = %v, want bad-version", got)
+	}
+
+	// Exact version with malformed latest returns a clear error
+	_, err = resolver.Resolve(context.Background(), "3.12.5")
+	if err == nil {
+		t.Fatal("Resolve(exact) expected error for malformed latest")
+	}
+	if got := err.Error(); got != `malformed version "bad-version" in API response for cycle 3.12` {
+		t.Errorf("Resolve(exact) error = %q, want malformed version error", got)
+	}
+}
+
 func TestPythonResolver_LatestStable(t *testing.T) {
 	mockResponse := `[
 		{"cycle": "3.13", "latest": "3.13.1"},
@@ -112,7 +150,7 @@ func TestPythonResolver_LatestStable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := &testPythonResolver{url: server.URL, client: server.Client()}
+	resolver := newTestPythonResolver(server)
 
 	got, err := resolver.LatestStable(context.Background())
 	if err != nil {
@@ -136,7 +174,7 @@ func TestPythonResolver_LatestStable_noPython3(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := &testPythonResolver{url: server.URL, client: server.Client()}
+	resolver := newTestPythonResolver(server)
 
 	_, err := resolver.LatestStable(context.Background())
 	if err == nil {
@@ -157,7 +195,7 @@ func TestPythonResolver_Available(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := &testPythonResolver{url: server.URL, client: server.Client()}
+	resolver := newTestPythonResolver(server)
 
 	versions, err := resolver.Available(context.Background())
 	if err != nil {
@@ -197,7 +235,7 @@ func TestPythonResolver_Available_ordering(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resolver := &testPythonResolver{url: server.URL, client: server.Client()}
+	resolver := newTestPythonResolver(server)
 
 	versions, err := resolver.Available(context.Background())
 	if err != nil {
@@ -221,47 +259,26 @@ func TestPythonResolver_Available_ordering(t *testing.T) {
 	}
 }
 
-// testPythonResolver is a PythonResolver that uses a custom URL for testing.
-type testPythonResolver struct {
-	url    string
-	client *http.Client
-}
+func TestPythonResolver_httpError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
 
-func (r *testPythonResolver) Resolve(ctx context.Context, version string) (string, error) {
-	cycles, err := r.fetchCycles(ctx)
-	if err != nil {
-		return "", err
-	}
-	return resolvePythonVersion(version, cycles)
-}
+	resolver := newTestPythonResolver(server)
 
-func (r *testPythonResolver) Available(ctx context.Context) ([]string, error) {
-	cycles, err := r.fetchCycles(ctx)
-	if err != nil {
-		return nil, err
+	_, err := resolver.Resolve(context.Background(), "3.12")
+	if err == nil {
+		t.Error("Resolve() expected error for HTTP 500")
 	}
-	return pythonVersionsFromCycles(cycles), nil
-}
 
-func (r *testPythonResolver) LatestStable(ctx context.Context) (string, error) {
-	cycles, err := r.fetchCycles(ctx)
-	if err != nil {
-		return "", err
+	_, err = resolver.Available(context.Background())
+	if err == nil {
+		t.Error("Available() expected error for HTTP 500")
 	}
-	return latestStablePython(cycles)
-}
 
-func (r *testPythonResolver) fetchCycles(ctx context.Context) ([]pythonCycle, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", r.url, nil)
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
+	_, err = resolver.LatestStable(context.Background())
+	if err == nil {
+		t.Error("LatestStable() expected error for HTTP 500")
 	}
-	defer resp.Body.Close()
-
-	var cycles []pythonCycle
-	if err := json.NewDecoder(resp.Body).Decode(&cycles); err != nil {
-		return nil, err
-	}
-	return cycles, nil
 }
