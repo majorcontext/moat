@@ -15,12 +15,13 @@ const MetaKeyTokenSource = "token_source"
 type Provider string
 
 const (
-	ProviderGitHub    Provider = "github"
-	ProviderAWS       Provider = "aws"
-	ProviderAnthropic Provider = "anthropic"
-	ProviderOpenAI    Provider = "openai"
-	ProviderGemini    Provider = "gemini"
-	ProviderNpm       Provider = "npm"
+	ProviderGitHub      Provider = "github"
+	ProviderAWS         Provider = "aws"
+	ProviderAnthropic   Provider = "anthropic"
+	ProviderOpenAI      Provider = "openai"
+	ProviderGemini      Provider = "gemini"
+	ProviderNpm         Provider = "npm"
+	ProviderGoogleOAuth Provider = "google-oauth"
 )
 
 // Credential represents a stored credential.
@@ -52,14 +53,14 @@ func RegisterDynamicProvider(p Provider) {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGoogleOAuth}
 	return append(base, dynamicProviders...)
 }
 
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGoogleOAuth:
 		return true
 	default:
 		for _, dp := range dynamicProviders {

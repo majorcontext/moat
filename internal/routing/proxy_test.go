@@ -239,6 +239,80 @@ func TestEnableTLSValidation(t *testing.T) {
 	}
 }
 
+func TestReverseProxyOAuthRelay(t *testing.T) {
+	// Create a backend server (should NOT be hit for oauthrelay.localhost)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend"))
+	}))
+	defer backend.Close()
+
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	routes.Add("oauthrelay", map[string]string{
+		"web": backend.Listener.Addr().String(),
+	})
+
+	rp := NewReverseProxy(routes)
+
+	// Register OAuth relay handler
+	oauthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("oauth-relay-response"))
+	})
+	rp.SetOAuthRelay("oauthrelay.localhost:8080", oauthHandler)
+
+	// Request to oauthrelay.localhost should go to the OAuth handler
+	req := httptest.NewRequest("GET", "/start?app=myapp", nil)
+	req.Host = "oauthrelay.localhost:8080"
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Status = %d, want 200", rec.Code)
+	}
+	body, _ := io.ReadAll(rec.Body)
+	if string(body) != "oauth-relay-response" {
+		t.Errorf("Body = %q, want 'oauth-relay-response'", body)
+	}
+}
+
+func TestReverseProxyOAuthRelayNoPort(t *testing.T) {
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	rp := NewReverseProxy(routes)
+
+	// Register with port, but request without port should still match
+	oauthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("relay"))
+	})
+	rp.SetOAuthRelay("oauthrelay.localhost:8080", oauthHandler)
+
+	// Request without port in Host header
+	req := httptest.NewRequest("GET", "/callback", nil)
+	req.Host = "oauthrelay.localhost"
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Status = %d, want 200", rec.Code)
+	}
+}
+
+func TestReverseProxyOAuthRelayNotRegistered(t *testing.T) {
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	rp := NewReverseProxy(routes)
+
+	// No OAuth relay registered; request to oauthrelay.localhost should 404
+	req := httptest.NewRequest("GET", "/start", nil)
+	req.Host = "oauthrelay.localhost:8080"
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want 404", rec.Code)
+	}
+}
+
 func TestEnableTLSAfterStart(t *testing.T) {
 	dir := t.TempDir()
 	routes, _ := NewRouteTable(dir)
