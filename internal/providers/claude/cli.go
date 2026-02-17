@@ -19,6 +19,8 @@ var (
 	claudeAllowedHosts []string
 	claudeNoYolo       bool
 	claudeWtFlag       string
+	claudeContinue     bool
+	claudeResume       string
 )
 
 // RegisterCLI adds provider-specific commands to the root command.
@@ -67,6 +69,13 @@ Examples:
   # Require manual approval for each tool use (disable yolo mode)
   moat claude --noyolo
 
+  # Continue the most recent conversation
+  moat claude --continue
+  moat claude -c
+
+  # Resume a specific session by ID
+  moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
+
 Use 'moat list' to see running and recent runs.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: runClaudeCode,
@@ -79,6 +88,8 @@ Use 'moat list' to see running and recent runs.`,
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
+	claudeCmd.Flags().BoolVarP(&claudeContinue, "continue", "c", false, "continue the most recent conversation")
+	claudeCmd.Flags().StringVarP(&claudeResume, "resume", "r", "", "resume a specific session by ID")
 	claudeCmd.Flags().StringVar(&claudeWtFlag, "worktree", "", "run in a git worktree for this branch")
 	claudeCmd.Flags().StringVar(&claudeWtFlag, "wt", "", "alias for --worktree")
 	_ = claudeCmd.Flags().MarkHidden("wt")
@@ -164,6 +175,14 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	// By default, skip permission prompts since Moat provides isolation.
 	if !claudeNoYolo {
 		containerCmd = append(containerCmd, "--dangerously-skip-permissions")
+	}
+
+	if claudeContinue {
+		containerCmd = append(containerCmd, "--continue")
+	}
+
+	if claudeResume != "" {
+		containerCmd = append(containerCmd, "--resume", claudeResume)
 	}
 
 	if claudePromptFlag != "" {

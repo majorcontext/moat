@@ -170,6 +170,8 @@ In addition to the command-specific flags below, `moat claude` accepts all [comm
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `-c`, `--continue` | Continue the most recent conversation |
+| `-r`, `--resume ID` | Resume a specific session by ID |
 | `--noyolo` | Restore Claude Code's per-operation confirmation prompts. By default, `moat claude` runs with `--dangerously-skip-permissions` because the container provides isolation. Use `--noyolo` to re-enable permission prompts. |
 
 ### Examples
@@ -187,6 +189,13 @@ moat claude ./my-project -- "explain this codebase"
 
 # Non-interactive with prompt (exits when done)
 moat claude -p "fix the failing tests"
+
+# Continue the most recent conversation
+moat claude --continue
+moat claude -c
+
+# Resume a specific session by ID
+moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
 
 # With GitHub access
 moat claude --grant github
@@ -210,6 +219,45 @@ List configured plugins for a workspace.
 
 ```bash
 moat claude plugins list [path]
+```
+
+---
+
+## moat resume
+
+Resume the most recent Claude Code conversation in a new container. This is a shortcut for `moat claude --continue`.
+
+```
+moat resume [workspace] [flags]
+```
+
+Session history is preserved across runs because Moat mounts the Claude projects directory (`~/.claude/projects/`) between host and container. Claude Code stores conversation logs as `.jsonl` files in this directory, so previous sessions are always available for resumption.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+
+### Flags
+
+`moat resume` accepts all [common agent flags](#common-agent-flags) plus:
+
+| Flag | Description |
+|------|-------------|
+| `--noyolo` | Restore Claude Code's per-operation confirmation prompts |
+
+### Examples
+
+```bash
+# Resume the most recent conversation
+moat resume
+
+# Resume in a specific project
+moat resume ./my-project
+
+# Resume with additional grants
+moat resume --grant github
 ```
 
 ---
