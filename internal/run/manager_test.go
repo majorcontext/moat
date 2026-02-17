@@ -1578,7 +1578,6 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{"container-abc": "exited"},
-			done:   make(chan struct{}),
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
@@ -1704,7 +1703,6 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{},
-			done:   make(chan struct{}),
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
