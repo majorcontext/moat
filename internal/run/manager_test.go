@@ -1607,7 +1607,15 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 // TestLoadPersistedRunsKeepsRoutesForRunningContainers verifies that
 // loadPersistedRuns does NOT remove routes for containers that are still running.
 func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
-	tmpHome := t.TempDir()
+	// Use os.MkdirTemp instead of t.TempDir() because loadPersistedRuns spawns
+	// a background monitorContainerExit goroutine for running containers. That
+	// goroutine writes files on exit, and t.TempDir() cleanup races with it.
+	// We manage cleanup explicitly: unblock the goroutine, wait for it to finish,
+	// then remove the directory.
+	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsKeepsRoutes")
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", tmpHome)
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
@@ -1639,7 +1647,6 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	t.Cleanup(func() { close(done) })
 
 	m := &Manager{
 		runtime: &stubRuntime{
@@ -1659,6 +1666,16 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	if !routes.AgentExists("live-agent") {
 		t.Error("route for running container should NOT be removed by loadPersistedRuns")
 	}
+
+	// Unblock the monitor goroutine and wait for it to finish writing before
+	// removing the temp directory.
+	close(done)
+	r := m.runs[runID]
+	<-r.exitCh // wait for monitorContainerExit to signal
+	// monitorContainerExit does file I/O (SaveMetadata, routes.Remove) after
+	// closing exitCh. Give it time to complete before removing the temp dir.
+	time.Sleep(100 * time.Millisecond)
+	_ = os.RemoveAll(tmpHome)
 }
 
 // TestLoadPersistedRunsCleansRoutesForMissingContainers verifies that
