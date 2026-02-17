@@ -164,7 +164,10 @@ func startAppleContainerSystem() error {
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("'container system start' failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("'container system start' failed: %w\n%s", err, msg)
+		}
+		return fmt.Errorf("'container system start' failed: %w", err)
 	}
 
 	// Wait for the system to be fully ready, respecting the parent context timeout
@@ -202,7 +205,7 @@ func startAppleContainerSystem() error {
 		}
 	}
 
-	return fmt.Errorf("system started but did not become ready within 30 seconds")
+	return fmt.Errorf("system started but did not become ready within the allotted timeout")
 }
 
 // appleContainerAvailable checks if Apple's container CLI is installed.
