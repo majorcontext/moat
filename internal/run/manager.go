@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
@@ -983,6 +984,10 @@ region = %s
 		}
 	}
 
+	// Inject host git identity when git is a dependency.
+	gitEnv, hasGit := hostGitIdentity(depList)
+	proxyEnv = append(proxyEnv, gitEnv...)
+
 	// Split dependencies into installable and services
 	serviceDeps := deps.FilterServices(depList)
 	installableDeps := deps.FilterInstallable(depList)
@@ -1236,6 +1241,7 @@ region = %s
 			NeedsCodexInit:     needsCodexInit,
 			NeedsGeminiInit:    needsGeminiInit,
 			NeedsFirewall:      needsProxyForFirewall,
+			NeedsGitIdentity:   hasGit,
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
@@ -3031,6 +3037,39 @@ func workspaceToClaudeDir(absPath string) string {
 	normalized := filepath.ToSlash(absPath)
 	cleaned := strings.TrimPrefix(normalized, "/")
 	return "-" + strings.ReplaceAll(cleaned, "/", "-")
+}
+
+// hostGitIdentity reads the host's git user.name and user.email and returns
+// env vars for injecting them into the container. Returns nil if git is not
+// in the dependency list or the host has no identity configured.
+//
+// The env vars are consumed by moat-init.sh which writes them via
+// "git config --system". When the container runs as non-root (Linux
+// --user mode), --system writes to /etc/gitconfig which requires root
+// and silently fails. This is a pre-existing limitation shared with the
+// safe.directory config — both rely on the init script running as root
+// before dropping to moatuser.
+func hostGitIdentity(depList []deps.Dependency) (env []string, hasGit bool) {
+	for _, d := range depList {
+		if d.Name == "git" {
+			hasGit = true
+			break
+		}
+	}
+	if !hasGit {
+		return nil, false
+	}
+	if gitName, err := exec.Command("git", "config", "user.name").Output(); err == nil {
+		if v := strings.TrimSpace(string(gitName)); v != "" {
+			env = append(env, "MOAT_GIT_USER_NAME="+v)
+		}
+	}
+	if gitEmail, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		if v := strings.TrimSpace(string(gitEmail)); v != "" {
+			env = append(env, "MOAT_GIT_USER_EMAIL="+v)
+		}
+	}
+	return env, true
 }
 
 // filterSSHGrants extracts SSH host grants from the grants list.

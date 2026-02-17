@@ -226,6 +226,8 @@ dependencies:
 - Type: `array[string]`
 - Default: `[]` (uses `debian:bookworm-slim`)
 
+When `git` is listed as a dependency, the host's git identity (`user.name` and `user.email`) is automatically imported into the container. This can be overridden with a [`post_build` hook](/moat/guides/hooks).
+
 #### Supported dependencies
 
 | Dependency | Base image |

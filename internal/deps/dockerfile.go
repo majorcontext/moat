@@ -58,6 +58,11 @@ type DockerfileOptions struct {
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
 
+	// NeedsGitIdentity indicates the host's git identity should be injected
+	// into the container. This requires the moat-init entrypoint script to
+	// apply the MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL env vars.
+	NeedsGitIdentity bool
+
 	// Hooks contains user-defined lifecycle hook commands.
 	// PostBuild and PostBuildRoot are baked into the image as RUN commands.
 	// PreRun is passed to the init script to execute on every container start.
@@ -576,7 +581,7 @@ func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode Doc
 	// - Docker socket group setup (host mode)
 	// - Docker daemon startup (dind mode)
 	hasPreRun := opts.Hooks != nil && opts.Hooks.PreRun != ""
-	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != "" || hasPreRun
+	needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || dockerMode != "" || hasPreRun || opts.NeedsGitIdentity
 	if needsInit {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
