@@ -271,6 +271,21 @@ func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*Dockerfile
 		contextFiles[pluginResult.ScriptName] = pluginResult.ScriptContent
 	}
 
+	// Restore root context only if user-space sections switched to moatuser
+	// and subsequent sections need root access. This avoids redundant
+	// USER root → USER moatuser transitions in the generated Dockerfile.
+	inUserContext := len(c.userCustomDeps) > 0 || pluginResult.DockerfileSnippet != ""
+	if inUserContext {
+		hasDynamicDeps := len(c.dynamicNpm)+len(c.dynamicPip)+len(c.dynamicUv)+len(c.dynamicCargo)+len(c.dynamicGo) > 0
+		hasSSHHosts := len(opts.SSHHosts) > 0
+		needsRootBuildHook := opts.Hooks != nil && opts.Hooks.PostBuildRoot != ""
+		hasPreRun := opts.Hooks != nil && opts.Hooks.PreRun != ""
+		needsInit := opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || c.dockerMode != "" || hasPreRun || opts.NeedsGitIdentity
+		if hasDynamicDeps || hasSSHHosts || needsRootBuildHook || needsInit {
+			b.WriteString("USER root\n\n")
+		}
+	}
+
 	// Dynamic package manager dependencies
 	writeDynamicDeps(&b, "npm packages (dynamic)", c.dynamicNpm)
 	writeDynamicDeps(&b, "pip packages (dynamic)", c.dynamicPip)
@@ -507,7 +522,7 @@ func writeUserCustomDeps(b *strings.Builder, deps []Dependency) {
 			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
 		}
 	}
-	b.WriteString("USER root\n\n")
+	b.WriteString("\n")
 }
 
 // writeSSHKnownHosts writes known SSH host keys to /etc/ssh/ssh_known_hosts.

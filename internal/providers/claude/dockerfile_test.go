@@ -27,9 +27,9 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("should switch to moatuser")
 	}
 
-	// Should switch back to root
-	if !strings.Contains(result.DockerfileSnippet, "USER root") {
-		t.Error("should switch back to USER root")
+	// Should NOT include USER root — caller restores root context when needed
+	if strings.Contains(result.DockerfileSnippet, "USER root") {
+		t.Error("snippet should not include USER root (caller handles root restoration)")
 	}
 
 	// Should COPY and run the plugin script

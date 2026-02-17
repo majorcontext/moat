@@ -105,8 +105,7 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	dockerfile.WriteString(fmt.Sprintf("USER %s\n", containerUser))
 	dockerfile.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
 	dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s claude-plugins.sh /tmp/claude-plugins.sh\n", containerUser))
-	dockerfile.WriteString("RUN bash /tmp/claude-plugins.sh && rm /tmp/claude-plugins.sh\n")
-	dockerfile.WriteString("USER root\n\n")
+	dockerfile.WriteString("RUN bash /tmp/claude-plugins.sh && rm /tmp/claude-plugins.sh\n\n")
 
 	return PluginSnippetResult{
 		DockerfileSnippet: dockerfile.String(),
