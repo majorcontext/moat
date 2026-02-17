@@ -225,11 +225,15 @@ moat claude plugins list [path]
 
 ## moat resume
 
-Resume the most recent Claude Code conversation in a new container. This is a shortcut for `moat claude --continue`.
+Resume a Claude Code conversation from a previous run.
 
 ```
-moat resume [workspace] [flags]
+moat resume [run] [flags]
 ```
+
+If the specified run is still running, attaches to it (same as `moat attach`). If the run has stopped, starts a new container with the same workspace and passes `--continue` to Claude Code, which picks up the most recent conversation from the synced session logs.
+
+Without an argument, finds the most recent Claude Code run (running or stopped) and resumes it.
 
 Session history is preserved across runs because Moat mounts the Claude projects directory (`~/.claude/projects/`) between host and container. Claude Code stores conversation logs as `.jsonl` files in this directory, so previous sessions are always available for resumption.
 
@@ -237,7 +241,7 @@ Session history is preserved across runs because Moat mounts the Claude projects
 
 | Argument | Description |
 |----------|-------------|
-| `workspace` | Workspace directory (default: current directory) |
+| `run` | Run ID or name (default: most recent Claude Code run) |
 
 ### Flags
 
@@ -247,17 +251,29 @@ Session history is preserved across runs because Moat mounts the Claude projects
 |------|-------------|
 | `--noyolo` | Restore Claude Code's per-operation confirmation prompts |
 
+### Behavior
+
+| Previous run state | Action |
+|--------------------|--------|
+| running | Attach to existing container |
+| stopped / failed | Start new container with same workspace and `--continue` |
+
+When resuming a stopped run, the new container inherits the previous run's workspace path, grants, and name.
+
 ### Examples
 
 ```bash
-# Resume the most recent conversation
+# Resume the most recent Claude Code run
 moat resume
 
-# Resume in a specific project
-moat resume ./my-project
+# Resume a specific run by name
+moat resume my-feature
+
+# Resume a specific run by ID
+moat resume run_a1b2c3d4e5f6
 
 # Resume with additional grants
-moat resume --grant github
+moat resume my-feature --grant github
 ```
 
 ---
