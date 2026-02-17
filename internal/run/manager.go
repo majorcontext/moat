@@ -2503,9 +2503,8 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		_ = m.routes.Remove(r.Name)
 	}
 
+	r.SetStateWithTime(StateStopped, time.Now())
 	m.mu.Lock()
-	r.State = StateStopped
-	r.StoppedAt = time.Now()
 	keepContainer := r.KeepContainer
 	containerID := r.ContainerID
 	providerCleanupPaths := r.ProviderCleanupPaths

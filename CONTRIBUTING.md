@@ -11,17 +11,17 @@ go build ./...
 ## Running Tests
 
 ```bash
-# Unit tests
-go test ./...
+# Unit tests (includes race detector)
+make test-unit
 
 # Single test
-go test -run TestName ./path/to/package
+make test-unit ARGS='-run TestName'
 
 # E2E tests (requires container runtime)
 go test -tags=e2e -v ./internal/e2e/
 
-# With coverage
-go test -coverprofile=coverage.out ./...
+# With coverage (includes race detector)
+make coverage
 ```
 
 ## Linting

@@ -23,8 +23,8 @@ build-cli: ## Build the CLI binary ./moat
 
 test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 
-test-unit: ## Run unit tests (use ARGS for filtering, e.g., ARGS='-run TestName')
-	go test $(ARGS) ./...
+test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., ARGS='-run TestName')
+	go test -race $(ARGS) ./...
 
 test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -tags=e2e $(ARGS) ./internal/e2e/
@@ -42,7 +42,7 @@ fix: ## Auto-fix linter and formatter issues (requires golangci-lint v2)
 	golangci-lint run --fix
 
 coverage: ## Generate test coverage report
-	go test -coverprofile=coverage.out ./...
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
