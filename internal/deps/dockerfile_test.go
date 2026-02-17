@@ -1438,3 +1438,19 @@ func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
 		t.Error("pnpm should be installed via corepack")
 	}
 }
+
+func TestMoatInitScriptGitIdentity(t *testing.T) {
+	// Verify the embedded moat-init.sh contains git identity setup
+	if !strings.Contains(MoatInitScript, "MOAT_GIT_USER_NAME") {
+		t.Error("moat-init.sh should handle MOAT_GIT_USER_NAME env var")
+	}
+	if !strings.Contains(MoatInitScript, "MOAT_GIT_USER_EMAIL") {
+		t.Error("moat-init.sh should handle MOAT_GIT_USER_EMAIL env var")
+	}
+	if !strings.Contains(MoatInitScript, "git config --system user.name") {
+		t.Error("moat-init.sh should set git user.name via --system config")
+	}
+	if !strings.Contains(MoatInitScript, "git config --system user.email") {
+		t.Error("moat-init.sh should set git user.email via --system config")
+	}
+}

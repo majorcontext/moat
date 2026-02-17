@@ -182,6 +182,19 @@ if command -v git >/dev/null 2>&1; then
   git config --system --add safe.directory /workspace 2>/dev/null || true
 fi
 
+# Git Identity
+# When the host has git user.name/user.email configured, moat passes them
+# via MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL. Set them as global git
+# config so commits inside the container use the host's identity.
+if command -v git >/dev/null 2>&1; then
+  if [ -n "$MOAT_GIT_USER_NAME" ]; then
+    git config --system user.name "$MOAT_GIT_USER_NAME" 2>/dev/null || true
+  fi
+  if [ -n "$MOAT_GIT_USER_EMAIL" ]; then
+    git config --system user.email "$MOAT_GIT_USER_EMAIL" 2>/dev/null || true
+  fi
+fi
+
 # Docker Access Setup
 # Two mutually exclusive modes:
 # 1. MOAT_DOCKER_GID (host mode): Docker socket mounted from host, just need group access

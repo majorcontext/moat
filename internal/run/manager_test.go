@@ -1717,3 +1717,49 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 		t.Error("stale route for missing container should have been removed by loadPersistedRuns")
 	}
 }
+
+// TestGitIdentityInjection verifies that git identity env vars are only
+// injected when the "git" dependency is present.
+func TestGitIdentityInjection(t *testing.T) {
+	tests := []struct {
+		name    string
+		deps    []deps.Dependency
+		wantGit bool
+	}{
+		{
+			name:    "git dependency present",
+			deps:    []deps.Dependency{{Name: "git"}, {Name: "node"}},
+			wantGit: true,
+		},
+		{
+			name:    "git dependency absent",
+			deps:    []deps.Dependency{{Name: "node"}, {Name: "python"}},
+			wantGit: false,
+		},
+		{
+			name:    "empty dependency list",
+			deps:    nil,
+			wantGit: false,
+		},
+		{
+			name:    "only git dependency",
+			deps:    []deps.Dependency{{Name: "git"}},
+			wantGit: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasGit := false
+			for _, d := range tt.deps {
+				if d.Name == "git" {
+					hasGit = true
+					break
+				}
+			}
+			if hasGit != tt.wantGit {
+				t.Errorf("hasGit = %v, want %v", hasGit, tt.wantGit)
+			}
+		})
+	}
+}

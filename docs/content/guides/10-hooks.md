@@ -149,9 +149,11 @@ Chain commands with `&&` for multi-step setup within a single hook:
 ```yaml
 hooks:
   post_build_root: apt-get update -qq && apt-get install -y -qq curl gnupg
-  post_build: git config --global user.name "Agent" && git config --global user.email "agent@example.com"
+  post_build: git config --global core.autocrlf input && git config --global pull.rebase true
   pre_run: npm install && npm run build
 ```
+
+> **Note:** Git identity (`user.name` and `user.email`) is imported automatically from the host when `git` is listed as a dependency. Use a `post_build` hook only if you need to override the host identity or set other git configuration.
 
 ### Claude Code agent with setup
 

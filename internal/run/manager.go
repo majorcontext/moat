@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
@@ -980,6 +981,28 @@ region = %s
 		if err != nil {
 			cleanupProxy(proxyServer)
 			return nil, fmt.Errorf("resolving versions: %w", err)
+		}
+	}
+
+	// Inject host git identity when git is a dependency.
+	// Only imports user.name and user.email — not the full config — for safety.
+	hasGit := false
+	for _, d := range depList {
+		if d.Name == "git" {
+			hasGit = true
+			break
+		}
+	}
+	if hasGit {
+		if gitName, err := exec.Command("git", "config", "user.name").Output(); err == nil {
+			if v := strings.TrimSpace(string(gitName)); v != "" {
+				proxyEnv = append(proxyEnv, "MOAT_GIT_USER_NAME="+v)
+			}
+		}
+		if gitEmail, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+			if v := strings.TrimSpace(string(gitEmail)); v != "" {
+				proxyEnv = append(proxyEnv, "MOAT_GIT_USER_EMAIL="+v)
+			}
 		}
 	}
 
