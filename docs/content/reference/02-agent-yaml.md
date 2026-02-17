@@ -896,7 +896,7 @@ Environment variables support `${secrets.NAME}` interpolation.
 
 ## mcp
 
-Configures remote HTTP-based MCP (Model Context Protocol) servers accessed over HTTPS with credential injection.
+Configures MCP (Model Context Protocol) servers accessed through Moat's proxy relay. Supports both remote HTTPS servers and host-local HTTP servers.
 
 ```yaml
 mcp:
@@ -913,7 +913,7 @@ mcp:
 **Fields:**
 
 - `name` (required): Identifier for the MCP server (must be unique)
-- `url` (required): HTTPS endpoint for the MCP server (HTTP not allowed)
+- `url` (required): Endpoint for the MCP server. HTTPS is required for remote servers. HTTP is allowed for host-local servers (`localhost`, `127.0.0.1`, or `[::1]`)
 - `auth` (optional): Authentication configuration
   - `grant` (required if auth present): Name of grant to use (format: `mcp-<name>`)
   - `header` (required if auth present): HTTP header name for credential injection
@@ -922,7 +922,7 @@ mcp:
 
 Credentials are stored with `moat grant mcp <name>` and injected by the proxy at runtime. The agent never sees real credentials.
 
-**Example with multiple servers:**
+**Example with remote and host-local servers:**
 
 ```yaml
 mcp:
@@ -932,10 +932,18 @@ mcp:
       grant: mcp-context7
       header: CONTEXT7_API_KEY
 
+  - name: local-tools
+    url: http://localhost:3000/mcp
+    # Host-local server: auth optional, proxy bridges container to host
+
   - name: public-mcp
     url: https://public.example.com/mcp
     # No auth block = no credential injection
 ```
+
+**Host-local MCP servers:**
+
+MCP servers running on the host machine (e.g., `http://localhost:3000`) are not accessible from inside the container. Moat's proxy relay bridges this gap -- the relay runs on the host and forwards container requests to the host-local server.
 
 **Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
 

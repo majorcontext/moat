@@ -1303,6 +1303,111 @@ mcp:
 	}
 }
 
+func TestLoad_MCP_HostLocal(t *testing.T) {
+	// Host-local MCP servers (localhost/127.0.0.1) should be allowed with http://
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: local-server
+    url: http://localhost:3000/mcp
+  - name: local-ip
+    url: http://127.0.0.1:8080/sse
+  - name: remote-server
+    url: https://mcp.example.com/mcp
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.MCP) != 3 {
+		t.Fatalf("expected 3 MCP servers, got %d", len(cfg.MCP))
+	}
+
+	local := cfg.MCP[0]
+	if local.Name != "local-server" {
+		t.Errorf("expected name 'local-server', got %q", local.Name)
+	}
+	if local.URL != "http://localhost:3000/mcp" {
+		t.Errorf("expected URL 'http://localhost:3000/mcp', got %q", local.URL)
+	}
+
+	localIP := cfg.MCP[1]
+	if localIP.URL != "http://127.0.0.1:8080/sse" {
+		t.Errorf("expected URL 'http://127.0.0.1:8080/sse', got %q", localIP.URL)
+	}
+}
+
+func TestLoad_MCP_HostLocal_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "http non-localhost rejected",
+			yaml: `
+mcp:
+  - name: test
+    url: http://example.com/mcp
+`,
+			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost and 127.0.0.1)",
+		},
+		{
+			name: "http remote IP rejected",
+			yaml: `
+mcp:
+  - name: test
+    url: http://192.168.1.100:3000/mcp
+`,
+			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost and 127.0.0.1)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "agent.yaml", tt.yaml)
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestIsHostLocalURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"http://localhost:3000/mcp", true},
+		{"http://localhost/mcp", true},
+		{"http://127.0.0.1:8080/sse", true},
+		{"http://127.0.0.1/mcp", true},
+		{"http://[::1]:3000/mcp", true},
+		{"https://localhost:3000/mcp", false}, // HTTPS is not host-local
+		{"http://example.com/mcp", false},
+		{"http://192.168.1.100:3000/mcp", false},
+		{"https://mcp.example.com/mcp", false},
+		{"ftp://localhost/file", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := isHostLocalURL(tt.url)
+			if got != tt.want {
+				t.Errorf("isHostLocalURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadConfigWithHooks(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "agent.yaml")
@@ -1414,5 +1519,165 @@ func TestServiceWaitDefault(t *testing.T) {
 	s2 := ServiceSpec{Wait: &f}
 	if s2.ServiceWait() {
 		t.Error("expected ServiceWait() to return false when Wait is false")
+	}
+}
+
+// --- Additional host-local MCP tests ---
+
+func TestLoad_MCP_MixedHostAndRemote(t *testing.T) {
+	// Verify a config with both host-local and remote MCP servers parses correctly.
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+agent: test
+mcp:
+  - name: local-tools
+    url: http://localhost:3000/mcp
+  - name: remote-api
+    url: https://mcp.example.com/api
+    auth:
+      grant: mcp-example
+      header: Authorization
+  - name: local-auth
+    url: http://127.0.0.1:8080/sse
+    auth:
+      grant: local-key
+      header: X-API-Key
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.MCP) != 3 {
+		t.Fatalf("expected 3 MCP servers, got %d", len(cfg.MCP))
+	}
+
+	// Verify host-local without auth
+	if cfg.MCP[0].Name != "local-tools" {
+		t.Errorf("MCP[0].Name = %q, want %q", cfg.MCP[0].Name, "local-tools")
+	}
+	if cfg.MCP[0].Auth != nil {
+		t.Errorf("MCP[0].Auth should be nil for unauthenticated local server")
+	}
+
+	// Verify remote with auth
+	if cfg.MCP[1].Auth == nil {
+		t.Fatal("MCP[1].Auth should not be nil")
+	}
+	if cfg.MCP[1].Auth.Grant != "mcp-example" {
+		t.Errorf("MCP[1].Auth.Grant = %q, want %q", cfg.MCP[1].Auth.Grant, "mcp-example")
+	}
+
+	// Verify host-local with auth
+	if cfg.MCP[2].Auth == nil {
+		t.Fatal("MCP[2].Auth should not be nil")
+	}
+	if cfg.MCP[2].Auth.Header != "X-API-Key" {
+		t.Errorf("MCP[2].Auth.Header = %q, want %q", cfg.MCP[2].Auth.Header, "X-API-Key")
+	}
+}
+
+func TestLoad_MCP_HostLocalNoPort(t *testing.T) {
+	// Host-local server without explicit port should be accepted.
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: local-no-port
+    url: http://localhost/mcp
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.MCP) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.MCP))
+	}
+	if cfg.MCP[0].URL != "http://localhost/mcp" {
+		t.Errorf("URL = %q, want %q", cfg.MCP[0].URL, "http://localhost/mcp")
+	}
+}
+
+func TestLoad_MCP_HostLocalIPv6(t *testing.T) {
+	// IPv6 loopback should be accepted as host-local.
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: ipv6-local
+    url: "http://[::1]:3000/mcp"
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.MCP) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.MCP))
+	}
+}
+
+func TestIsHostLocalURL_EdgeCases(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"http://localhost", true},            // no port, no path
+		{"http://localhost/", true},           // no port, root path
+		{"http://127.0.0.1", true},            // no port, no path
+		{"http://LOCALHOST:3000/mcp", false},  // case-sensitive check
+		{"http://localhost.:3000/mcp", false}, // trailing dot
+		{"http://0.0.0.0:3000/mcp", false},    // 0.0.0.0 is not localhost
+		{"http://10.0.0.1:3000/mcp", false},   // private IP
+		{"", false},                           // empty string
+		{"not-a-url", false},                  // not a URL
+		{"http://", false},                    // empty host
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := isHostLocalURL(tt.url)
+			if got != tt.want {
+				t.Errorf("isHostLocalURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_MCP_HostLocalDuplicateNames(t *testing.T) {
+	// Duplicate names should be rejected even for host-local servers.
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: local
+    url: http://localhost:3000/mcp
+  - name: local
+    url: http://localhost:4000/mcp
+`)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate MCP server names")
+	}
+	if !strings.Contains(err.Error(), "duplicate name 'local'") {
+		t.Errorf("expected error about duplicate name, got: %v", err)
+	}
+}
+
+func TestLoad_MCP_HttpsLocalhostNotHostLocal(t *testing.T) {
+	// https://localhost should be treated as a remote server (not host-local),
+	// and should be accepted since it uses HTTPS.
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: secure-local
+    url: https://localhost:3000/mcp
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.MCP) != 1 {
+		t.Fatalf("expected 1 MCP server, got %d", len(cfg.MCP))
 	}
 }

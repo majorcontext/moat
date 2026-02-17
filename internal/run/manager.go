@@ -1368,20 +1368,22 @@ region = %s
 			// Build MCP server configuration for .claude.json
 			// Use proxy relay URLs instead of direct MCP server URLs to work around
 			// Claude Code's MCP client not respecting HTTP_PROXY environment variables.
+			// This also bridges host-local MCP servers (localhost/127.0.0.1) which
+			// the container cannot reach directly.
 			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
 				proxyAddr := fmt.Sprintf("%s:%s", m.runtime.GetHostAddress(), proxyServer.Port())
 				for _, mcp := range opts.Config.MCP {
-					if mcp.Auth == nil {
-						continue // Skip servers without auth
-					}
 					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
-					mcpServers[mcp.Name] = provider.MCPServerConfig{
+					mcpCfg := provider.MCPServerConfig{
 						URL: relayURL,
-						Headers: map[string]string{
-							mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
-						},
 					}
+					if mcp.Auth != nil {
+						mcpCfg.Headers = map[string]string{
+							mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
+						}
+					}
+					mcpServers[mcp.Name] = mcpCfg
 				}
 			}
 

@@ -1,20 +1,21 @@
 ---
 title: "MCP servers"
 navTitle: "MCP"
-description: "Configure remote and local MCP (Model Context Protocol) servers with credential injection in Moat."
+description: "Configure remote, host-local, and local MCP (Model Context Protocol) servers with credential injection in Moat."
 keywords: ["moat", "mcp", "model context protocol", "mcp servers", "credential injection"]
 ---
 
 # MCP servers
 
-MCP (Model Context Protocol) servers extend AI agents with additional tools and context. An MCP server exposes capabilities -- file search, database queries, API integrations -- that an agent can invoke during a session.
+MCP (Model Context Protocol) servers extend AI agents with additional tools and context. An MCP server exposes capabilities -- file search, database queries, API integrations -- that an agent can invoke during a run.
 
-Moat supports two types of MCP servers:
+Moat supports three types of MCP servers:
 
 - **Remote HTTP MCP servers** -- External HTTPS services accessed through Moat's credential-injecting proxy
+- **Host-local MCP servers** -- Services running on the host machine, bridged to the container through the proxy relay
 - **Local process MCP servers** -- Child processes running inside the container
 
-This guide covers configuring both types, granting credentials, and troubleshooting common issues.
+This guide covers configuring all three types, granting credentials, and troubleshooting common issues.
 
 ## Prerequisites
 
@@ -58,7 +59,7 @@ mcp:
 | Field | Description |
 |-------|-------------|
 | `name` | Unique identifier for the server |
-| `url` | HTTPS endpoint (HTTP is not allowed) |
+| `url` | HTTPS endpoint for remote servers. HTTP is allowed for host-local servers (`localhost`, `127.0.0.1`, `[::1]`) |
 
 **Optional fields:**
 
@@ -109,9 +110,64 @@ moat grant mcp context7
 moat grant mcp notion
 ```
 
+## Host-local MCP servers
+
+Host-local MCP servers run on your host machine (outside the container). Containers cannot reach `localhost` on the host directly, so Moat's proxy relay bridges the connection.
+
+### Configure in agent.yaml
+
+Declare host-local servers in the `mcp:` section with an `http://localhost` or `http://127.0.0.1` URL:
+
+```yaml
+mcp:
+  - name: my-tools
+    url: http://localhost:3000/mcp
+```
+
+Authentication is optional. If the host-local server requires credentials:
+
+```yaml
+mcp:
+  - name: my-tools
+    url: http://localhost:3000/mcp
+    auth:
+      grant: mcp-my-tools
+      header: Authorization
+```
+
+### Start the MCP server on the host
+
+Start your MCP server on the host before running the agent:
+
+```bash
+# Start your MCP server (example)
+my-mcp-server --port 3000 &
+
+# Run the agent
+moat claude ./my-project
+```
+
+The proxy relay forwards requests from the container to `localhost:3000` on the host.
+
+### Mixing remote and host-local servers
+
+Remote and host-local servers can be configured together:
+
+```yaml
+mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+
+  - name: local-tools
+    url: http://localhost:3000/mcp
+```
+
 ## How the relay works
 
-Some agent HTTP clients do not respect `HTTP_PROXY` for MCP connections, so Moat routes MCP traffic through a local relay endpoint on the proxy. The agent connects to the relay, the relay injects credentials from the grant store, and forwards requests to the real MCP server. The agent never has access to raw credentials, and all MCP traffic appears in network traces and audit logs.
+Some agent HTTP clients do not respect `HTTP_PROXY` for MCP connections, so Moat routes MCP traffic through a local relay endpoint on the proxy. The agent connects to the relay, the relay injects credentials from the grant store, and forwards requests to the real MCP server. For host-local servers, the relay forwards to `localhost` on the host, bridging the network boundary between the container and the host. The agent never has access to raw credentials, and all MCP traffic appears in network traces and audit logs.
 
 See [Proxy architecture](../concepts/09-proxy.md) for details on how the relay works.
 
@@ -213,7 +269,7 @@ moat logs
 ### MCP server not appearing in agent
 
 - Verify the MCP server is declared in `agent.yaml` (remote servers at the top level, local servers under the agent section)
-- Check that the grant exists: `moat grants list` should show `mcp-{name}`
+- Check that the grant exists: `moat grant list` should show `mcp-{name}`
 - Check container logs for configuration errors: `moat logs`
 
 ### Authentication failures (401 or 403)
@@ -235,7 +291,8 @@ If you see `moat-stub-{grant}` in error output, the proxy did not replace the st
 
 - The proxy may not be running. Check `moat list` to verify the run is active
 - For remote servers, verify the URL is reachable from your network
-- For local servers, verify the `command` path exists inside the container
+- For host-local servers, verify the server is running on the host and listening on the configured port
+- For local process servers, verify the `command` path exists inside the container
 
 ### SSE streaming issues
 
