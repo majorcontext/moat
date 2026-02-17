@@ -986,6 +986,13 @@ region = %s
 
 	// Inject host git identity when git is a dependency.
 	// Only imports user.name and user.email — not the full config — for safety.
+	//
+	// The env vars are consumed by moat-init.sh which writes them via
+	// "git config --system". When the container runs as non-root (Linux
+	// --user mode), --system writes to /etc/gitconfig which requires root
+	// and silently fails. This is a pre-existing limitation shared with the
+	// safe.directory config — both rely on the init script running as root
+	// before dropping to moatuser.
 	hasGit := false
 	for _, d := range depList {
 		if d.Name == "git" {
