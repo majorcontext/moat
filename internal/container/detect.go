@@ -139,18 +139,12 @@ func tryAppleRuntime() (Runtime, string) {
 	defer cancel()
 
 	if pingErr := rt.Ping(ctx); pingErr != nil {
-		// Try to auto-start the Apple container system
+		// Try to auto-start the Apple container system.
+		// startAppleContainerSystem polls for readiness internally, so if it
+		// returns nil, the system is verified as up and we don't need to ping again.
 		log.Debug("Apple container system not running, attempting to start...", "error", pingErr)
 		if startErr := startAppleContainerSystem(); startErr != nil {
 			return nil, fmt.Sprintf("system not running and failed to auto-start: %v", startErr)
-		}
-
-		// Verify it's now working with a longer timeout since the system just started
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel2()
-
-		if pingErr2 := rt.Ping(ctx2); pingErr2 != nil {
-			return nil, fmt.Sprintf("system started but not yet accessible: %v", pingErr2)
 		}
 	}
 
@@ -186,11 +180,14 @@ func startAppleContainerSystem() error {
 
 		checkCtx, checkCancel := context.WithTimeout(ctx, 2*time.Second)
 		checkCmd := exec.CommandContext(checkCtx, "container", "list", "--quiet")
-		if err := checkCmd.Run(); err == nil {
-			checkCancel()
+		var checkStderr strings.Builder
+		checkCmd.Stderr = &checkStderr
+		checkErr := checkCmd.Run()
+		checkCancel()
+		if checkErr == nil {
 			return nil
 		}
-		checkCancel()
+		log.Debug("readiness check failed", "attempt", i+1, "error", checkErr, "stderr", strings.TrimSpace(checkStderr.String()))
 
 		// Log progress every 10 seconds
 		if (i+1)%10 == 0 {
