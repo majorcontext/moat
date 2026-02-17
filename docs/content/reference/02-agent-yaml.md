@@ -915,12 +915,19 @@ mcp:
 - `name` (required): Identifier for the MCP server (must be unique)
 - `url` (required): HTTPS endpoint for the MCP server (HTTP not allowed)
 - `auth` (optional): Authentication configuration
-  - `grant` (required if auth present): Name of grant to use (format: `mcp-<name>`)
-  - `header` (required if auth present): HTTP header name for credential injection
+  - `grant` (required): Name of grant to use (format: `mcp-<name>`)
+  - `type` (optional): Auth type, either `token` (default) or `oauth`
+  - `header` (required for token type): HTTP header name for credential injection
+  - `client_id` (required for oauth): OAuth client ID
+  - `auth_url` (required for oauth): OAuth authorization endpoint
+  - `token_url` (required for oauth): OAuth token endpoint
+  - `scopes` (optional): Space-separated OAuth scopes
 
 **Credential injection:**
 
 Credentials are stored with `moat grant mcp <name>` and injected by the proxy at runtime. The agent never sees real credentials.
+
+For token auth, the credential is injected as-is into the configured header. For OAuth, the credential is injected as `Bearer <token>` into the `Authorization` header (or a custom header if specified). Expired OAuth tokens are refreshed automatically using the stored refresh token.
 
 **Example with multiple servers:**
 
@@ -931,6 +938,15 @@ mcp:
     auth:
       grant: mcp-context7
       header: CONTEXT7_API_KEY
+
+  - name: notion
+    url: https://api.notion.com/v2/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: YOUR_CLIENT_ID
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
 
   - name: public-mcp
     url: https://public.example.com/mcp

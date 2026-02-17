@@ -28,13 +28,28 @@ Remote MCP servers are external HTTPS services declared at the top level of `age
 
 ### 1. Grant credentials
 
-Store credentials for the MCP server with `moat grant mcp`:
+Store credentials for the MCP server with `moat grant mcp`. Two authentication methods are supported:
+
+**Static token (default):**
 
 ```bash
 $ moat grant mcp context7
 Enter credential for MCP server 'context7': ***************
 MCP credential 'mcp-context7' saved to ~/.moat/credentials/mcp-context7.enc
 ```
+
+**OAuth (browser-based authorization):**
+
+```bash
+$ moat grant mcp notion \
+    --oauth \
+    --client-id=YOUR_CLIENT_ID \
+    --auth-url=https://api.notion.com/v1/oauth/authorize \
+    --token-url=https://api.notion.com/v1/oauth/token \
+    --scopes="read_content write_content"
+```
+
+This opens a browser for authorization and stores the resulting access and refresh tokens. Moat automatically refreshes expired OAuth tokens during proxy injection.
 
 The credential is encrypted and stored locally. The grant name follows the pattern `mcp-<name>`.
 
@@ -43,6 +58,8 @@ For public MCP servers that do not require authentication, skip this step.
 ### 2. Configure in agent.yaml
 
 Declare the MCP server at the top level of `agent.yaml` (not under `claude:`, `codex:`, or `gemini:`):
+
+**Token auth (default):**
 
 ```yaml
 mcp:
@@ -53,6 +70,21 @@ mcp:
       header: CONTEXT7_API_KEY
 ```
 
+**OAuth auth:**
+
+```yaml
+mcp:
+  - name: notion
+    url: https://api.notion.com/v2/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: YOUR_CLIENT_ID
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
+      scopes: read_content write_content
+```
+
 **Required fields:**
 
 | Field | Description |
@@ -60,12 +92,26 @@ mcp:
 | `name` | Unique identifier for the server |
 | `url` | HTTPS endpoint (HTTP is not allowed) |
 
-**Optional fields:**
+**Auth fields (token type):**
 
 | Field | Description |
 |-------|-------------|
 | `auth.grant` | Grant name to use (format: `mcp-<name>`) |
 | `auth.header` | HTTP header name for credential injection |
+
+**Auth fields (OAuth type):**
+
+| Field | Description |
+|-------|-------------|
+| `auth.type` | Set to `oauth` |
+| `auth.grant` | Grant name to use (format: `mcp-<name>`) |
+| `auth.client_id` | OAuth client ID |
+| `auth.auth_url` | OAuth authorization endpoint |
+| `auth.token_url` | OAuth token endpoint |
+| `auth.scopes` | Space-separated OAuth scopes (optional) |
+| `auth.header` | Override the default `Authorization` header (optional) |
+
+For OAuth, the proxy injects credentials as `Bearer <token>` in the `Authorization` header by default. Expired tokens are refreshed automatically using the stored refresh token.
 
 Omit the `auth` block for public MCP servers that do not require authentication:
 
@@ -85,7 +131,7 @@ No additional flags are needed. Moat reads the `mcp:` section from `agent.yaml` 
 
 ### Multiple remote servers
 
-Configure multiple MCP servers in a single `agent.yaml`:
+Configure multiple MCP servers in a single `agent.yaml`, mixing auth types:
 
 ```yaml
 mcp:
@@ -96,17 +142,22 @@ mcp:
       header: CONTEXT7_API_KEY
 
   - name: notion
-    url: https://notion-mcp.example.com
+    url: https://api.notion.com/v2/mcp
     auth:
+      type: oauth
       grant: mcp-notion
-      header: Notion-Token
+      client_id: YOUR_CLIENT_ID
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
 ```
 
 Grant all required credentials before running:
 
 ```bash
 moat grant mcp context7
-moat grant mcp notion
+moat grant mcp notion --oauth --client-id=YOUR_CLIENT_ID \
+    --auth-url=https://api.notion.com/v1/oauth/authorize \
+    --token-url=https://api.notion.com/v1/oauth/token
 ```
 
 ## How the relay works
@@ -221,7 +272,8 @@ moat logs
 - Verify the grant exists and the credential is correct
 - Revoke and re-grant: `moat revoke mcp-{name}` then `moat grant mcp {name}`
 - Verify the `url` in `agent.yaml` matches the actual MCP server endpoint
-- Verify the `header` name matches what the MCP server expects
+- For token auth: verify the `header` name matches what the MCP server expects
+- For OAuth: the access token may have expired and refresh failed. Re-run the OAuth flow: `moat grant mcp {name} --oauth ...`
 
 ### Stub credential in error messages
 

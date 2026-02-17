@@ -249,6 +249,161 @@ func TestMCPCredentialInjection_NoHeader(t *testing.T) {
 	}
 }
 
+func TestMCPAuthHelpers(t *testing.T) {
+	t.Run("mcpAuthType defaults to token", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: ""}
+		if got := mcpAuthType(auth); got != "token" {
+			t.Errorf("mcpAuthType() = %q, want %q", got, "token")
+		}
+	})
+
+	t.Run("mcpAuthType returns oauth", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: "oauth"}
+		if got := mcpAuthType(auth); got != "oauth" {
+			t.Errorf("mcpAuthType() = %q, want %q", got, "oauth")
+		}
+	})
+
+	t.Run("mcpAuthHeader returns configured header", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Header: "X-Custom"}
+		if got := mcpAuthHeader(auth); got != "X-Custom" {
+			t.Errorf("mcpAuthHeader() = %q, want %q", got, "X-Custom")
+		}
+	})
+
+	t.Run("mcpAuthHeader defaults to Authorization for oauth", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: "oauth"}
+		if got := mcpAuthHeader(auth); got != "Authorization" {
+			t.Errorf("mcpAuthHeader() = %q, want %q", got, "Authorization")
+		}
+	})
+
+	t.Run("mcpAuthHeader returns empty for token without header", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: "token"}
+		if got := mcpAuthHeader(auth); got != "" {
+			t.Errorf("mcpAuthHeader() = %q, want %q", got, "")
+		}
+	})
+
+	t.Run("formatMCPToken adds Bearer for oauth", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: "oauth"}
+		if got := formatMCPToken(auth, "my-token"); got != "Bearer my-token" {
+			t.Errorf("formatMCPToken() = %q, want %q", got, "Bearer my-token")
+		}
+	})
+
+	t.Run("formatMCPToken returns raw for token type", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{Type: "token"}
+		if got := formatMCPToken(auth, "my-key"); got != "my-key" {
+			t.Errorf("formatMCPToken() = %q, want %q", got, "my-key")
+		}
+	})
+
+	t.Run("formatMCPToken returns raw for default type", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{}
+		if got := formatMCPToken(auth, "my-key"); got != "my-key" {
+			t.Errorf("formatMCPToken() = %q, want %q", got, "my-key")
+		}
+	})
+}
+
+func TestMCPOAuthCredentialInjection(t *testing.T) {
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider: "mcp-notion",
+				Token:    "oauth-access-token-123",
+			},
+		},
+	}
+
+	// Mock backend that echoes the Authorization header
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "notion",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:    "mcp-notion",
+				Type:     "oauth",
+				ClientID: "test-client",
+				AuthURL:  "https://example.com/authorize",
+				TokenURL: "https://example.com/token",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "moat-stub-mcp-notion")
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	// Verify Bearer prefix was added for OAuth
+	expected := "Bearer oauth-access-token-123"
+	if rec.Body.String() != expected {
+		t.Errorf("expected body %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthRelayInjection(t *testing.T) {
+	// Test that handleMCPRelay injects OAuth credentials with Bearer prefix
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider: "mcp-notion",
+				Token:    "oauth-token-456",
+			},
+		},
+	}
+
+	// Mock MCP backend that echoes the Authorization header
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "notion",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:    "mcp-notion",
+				Type:     "oauth",
+				ClientID: "test-client",
+				AuthURL:  "https://example.com/authorize",
+				TokenURL: "https://example.com/token",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	// Request to MCP relay endpoint
+	req := httptest.NewRequest("POST", "http://localhost/mcp/notion", nil)
+	rec := httptest.NewRecorder()
+
+	p.handleMCPRelay(rec, req)
+
+	expected := "Bearer oauth-token-456"
+	if rec.Body.String() != expected {
+		t.Errorf("expected body %q, got %q", expected, rec.Body.String())
+	}
+}
+
 // mockCredentialStore for testing
 type mockCredentialStore struct {
 	creds map[credential.Provider]*credential.Credential
