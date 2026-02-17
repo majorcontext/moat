@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -764,5 +765,123 @@ func TestRegisterCLI_PromptFlag(t *testing.T) {
 	}
 	if f.Shorthand != "p" {
 		t.Errorf("--prompt shorthand = %q, want %q", f.Shorthand, "p")
+	}
+}
+
+func TestPrepareContainer_LanguageServerMCPs(t *testing.T) {
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LanguageServerMCPs: map[string]provider.LanguageServerMCP{
+			"gopls": {
+				Command: "gopls",
+				Args:    []string{"mcp"},
+			},
+		},
+		HostConfig: map[string]any{}, // empty to prevent host file read
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	// Read .claude.json from staging dir
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpServers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers should be present in .claude.json")
+	}
+
+	gopls, ok := mcpServers["gopls"].(map[string]any)
+	if !ok {
+		t.Fatal("gopls should be present in mcpServers")
+	}
+
+	if gopls["type"] != "stdio" {
+		t.Errorf("gopls type = %v, want 'stdio'", gopls["type"])
+	}
+	if gopls["command"] != "gopls" {
+		t.Errorf("gopls command = %v, want 'gopls'", gopls["command"])
+	}
+
+	args, ok := gopls["args"].([]any)
+	if !ok || len(args) != 1 || args[0] != "mcp" {
+		t.Errorf("gopls args = %v, want [mcp]", gopls["args"])
+	}
+
+	// stdio server should not have url or headers
+	if _, ok := gopls["url"]; ok && gopls["url"] != "" {
+		t.Error("stdio server should not have url field")
+	}
+	if _, ok := gopls["headers"]; ok {
+		t.Error("stdio server should not have headers field")
+	}
+}
+
+func TestPrepareContainer_LanguageServerWithRemoteMCP(t *testing.T) {
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		MCPServers: map[string]provider.MCPServerConfig{
+			"remote-api": {
+				URL:     "http://proxy:8080/mcp/remote-api",
+				Headers: map[string]string{"X-API-Key": "stub-key"},
+			},
+		},
+		LanguageServerMCPs: map[string]provider.LanguageServerMCP{
+			"gopls": {
+				Command: "gopls",
+				Args:    []string{"mcp"},
+			},
+		},
+		HostConfig: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpServers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers should be present")
+	}
+
+	// Both remote and language server should be present
+	if _, ok := mcpServers["remote-api"]; !ok {
+		t.Error("remote-api should be present in mcpServers")
+	}
+	if _, ok := mcpServers["gopls"]; !ok {
+		t.Error("gopls should be present in mcpServers")
+	}
+
+	// Verify types
+	remote := mcpServers["remote-api"].(map[string]any)
+	if remote["type"] != "http" {
+		t.Errorf("remote-api type = %v, want 'http'", remote["type"])
+	}
+	local := mcpServers["gopls"].(map[string]any)
+	if local["type"] != "stdio" {
+		t.Errorf("gopls type = %v, want 'stdio'", local["type"])
 	}
 }

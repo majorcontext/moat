@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/majorcontext/moat/internal/langserver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,10 +48,11 @@ type Config struct {
 	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
 	Runtime string `yaml:"runtime,omitempty"`
 
-	Volumes   []VolumeConfig         `yaml:"volumes,omitempty"`
-	Container ContainerConfig        `yaml:"container,omitempty"`
-	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
-	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+	Volumes         []VolumeConfig         `yaml:"volumes,omitempty"`
+	Container       ContainerConfig        `yaml:"container,omitempty"`
+	MCP             []MCPServerConfig      `yaml:"mcp,omitempty"`
+	Services        map[string]ServiceSpec `yaml:"services,omitempty"`
+	LanguageServers []string               `yaml:"language_servers,omitempty"`
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
@@ -462,6 +464,11 @@ func Load(dir string) (*Config, error) {
 		if err := validateTopLevelMCPServerSpec(i, spec, seenNames); err != nil {
 			return nil, err
 		}
+	}
+
+	// Validate language servers
+	if err := langserver.Validate(cfg.LanguageServers); err != nil {
+		return nil, err
 	}
 
 	// Validate volumes

@@ -30,6 +30,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/image"
+	"github.com/majorcontext/moat/internal/langserver"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
 	"github.com/majorcontext/moat/internal/provider"
@@ -1015,6 +1016,11 @@ region = %s
 		}
 	}
 
+	// Add dependencies from language servers (e.g., gopls requires go)
+	if opts.Config != nil && len(opts.Config.LanguageServers) > 0 {
+		allDeps = append(allDeps, langserver.AllDependencies(opts.Config.LanguageServers)...)
+	}
+
 	if len(allDeps) > 0 {
 		var err error
 		depList, err = deps.ParseAll(allDeps)
@@ -1191,6 +1197,10 @@ region = %s
 				break
 			}
 		}
+	}
+	// Language servers inject MCP config into .claude.json, which requires the init script
+	if !needsClaudeInit && opts.Config != nil && len(opts.Config.LanguageServers) > 0 {
+		needsClaudeInit = true
 	}
 
 	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
@@ -1412,12 +1422,14 @@ region = %s
 		// claudeSettings was loaded earlier for plugin detection
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
+		hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0
 
 		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
 		// - hasPlugins (plugin settings to configure)
 		// - isClaudeCode (need to copy onboarding state from host)
-		if needsClaudeInit || hasPlugins || isClaudeCode {
+		// - hasLangServers (language server MCP config to inject)
+		if needsClaudeInit || hasPlugins || isClaudeCode || hasLangServers {
 			claudeProvider := provider.GetAgent("claude")
 			if claudeProvider == nil {
 				cleanupProxy(proxyServer)
@@ -1444,6 +1456,12 @@ region = %s
 				}
 			}
 
+			// Add language server MCP configs (stdio-based, run inside container)
+			var langServerMCPConfigs map[string]langserver.MCPConfig
+			if hasLangServers {
+				langServerMCPConfigs = langserver.MCPConfigs(opts.Config.LanguageServers)
+			}
+
 			// Get Claude credential for PrepareContainer
 			// Preference: claude > anthropic (for backward compatibility)
 			var claudeCred *provider.Credential
@@ -1464,12 +1482,25 @@ region = %s
 				}
 			}
 
+			// Convert language server MCP configs to provider types
+			var lsMCPs map[string]provider.LanguageServerMCP
+			if len(langServerMCPConfigs) > 0 {
+				lsMCPs = make(map[string]provider.LanguageServerMCP, len(langServerMCPConfigs))
+				for name, cfg := range langServerMCPConfigs {
+					lsMCPs[name] = provider.LanguageServerMCP{
+						Command: cfg.Command,
+						Args:    cfg.Args,
+					}
+				}
+			}
+
 			// Call provider to prepare container config
 			var prepErr error
 			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
-				Credential:    claudeCred,
-				ContainerHome: containerHome,
-				MCPServers:    mcpServers,
+				Credential:         claudeCred,
+				ContainerHome:      containerHome,
+				MCPServers:         mcpServers,
+				LanguageServerMCPs: lsMCPs,
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {
