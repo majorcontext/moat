@@ -695,7 +695,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		p.applyTokenSubstitution(outReq, sub)
 	}
 
-	// Forward request
+	// Forward request through upstream chain (or direct)
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	duration := time.Since(start)
 
@@ -772,7 +772,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
-	targetConn, err := net.Dial("tcp", r.Host)
+	targetConn, err := p.dialTarget(r.Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -810,6 +810,11 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(clientConn, targetConn)
 		closeConns()
 	}()
+}
+
+// dialTarget connects to a target host directly.
+func (p *Proxy) dialTarget(target string) (net.Conn, error) {
+	return net.Dial("tcp", target)
 }
 
 func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Request, host string) {
@@ -853,7 +858,6 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// HTTP/1.1 requests read from the intercepted TLS connection. Enabling
 		// HTTP/2 on the upstream side causes framing mismatches and hangs.
 	}
-
 	clientReader := bufio.NewReader(tlsClientConn)
 	for {
 		req, err := http.ReadRequest(clientReader)

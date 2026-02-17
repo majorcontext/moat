@@ -2,7 +2,7 @@
 title: "Proxy architecture"
 navTitle: "Proxy"
 description: "How Moat's TLS-intercepting proxy handles credential injection, MCP relay, network policies, and traffic observability."
-keywords: ["moat", "proxy", "tls", "credential injection", "mcp relay", "network policy"]
+keywords: ["moat", "proxy", "tls", "credential injection", "mcp relay", "network policy", "proxy chaining"]
 ---
 
 # Proxy architecture
@@ -101,12 +101,13 @@ The proxy binds to different interfaces depending on the container runtime:
 The proxy starts before the container and stops after the container exits. The sequence:
 
 1. Moat generates (or loads) the CA certificate
-2. Moat starts the proxy on a random high port
-3. Moat creates the container with `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` set
-4. The CA certificate is mounted into the container's trust store
-5. The container runs, with all HTTP/HTTPS traffic routed through the proxy
-6. The container exits
-7. Moat stops the proxy
+2. Moat starts the credential-injecting proxy on a random high port
+3. If `proxies:` is configured, Moat starts proxy chain sidecars (see [Proxy chaining](#proxy-chaining))
+4. Moat creates the container with `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` set
+5. The CA certificate is mounted into the container's trust store
+6. The container runs, with all HTTP/HTTPS traffic routed through the proxy (or the proxy chain)
+7. The container exits
+8. Moat stops proxy chain sidecars (in reverse order), then stops the credential-injecting proxy
 
 When multiple agents run simultaneously with port routing configured, they share the same routing proxy instance. The credential injection proxy runs per-session. The routing proxy port defaults to `8080` and can be changed with `MOAT_PROXY_PORT`.
 
@@ -127,6 +128,29 @@ The allow list supports exact hostnames and wildcard patterns (e.g., `*.amazonaw
 For non-HTTP traffic in strict mode, iptables rules provide enforcement independently of the proxy. The firewall blocks all outbound traffic except loopback, DNS (UDP port 53), established connections, and traffic to the proxy itself. This prevents code from bypassing the proxy by making direct socket connections.
 
 See [Networking](./05-networking.md) for the full network policy model, including wildcard patterns and firewall rules.
+
+## Proxy chaining
+
+Moat supports inserting additional proxy sidecars between the container and Moat's credential-injecting proxy. Each sidecar runs as a separate Docker container on the same network. Traffic flows through the chain in declared order:
+
+```text
+Container process
+  → proxy[0] (first sidecar)
+  → proxy[1] (second sidecar)
+  → ...
+  → Moat credential-injecting proxy
+  → Upstream server
+```
+
+Moat's credential injection, TLS interception, and network policy enforcement always happen last, after traffic passes through all user-defined proxies.
+
+Each sidecar receives `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to the next proxy in the chain. The last sidecar's `HTTP_PROXY` points to Moat's credential proxy. This allows standard forward proxies (Squid, mitmproxy, Envoy) to participate in the chain without custom configuration.
+
+Sidecar containers share a Docker network (`moat-<run-id>`) and communicate by container name. Moat starts all sidecars before the main container and stops them (in reverse order) after the container exits.
+
+Proxy chaining requires Docker runtime. Apple containers do not support sidecar containers.
+
+Configure proxy chains with the `proxies:` field in `agent.yaml`. See the [agent.yaml reference](../reference/02-agent-yaml.md#proxies) for field details.
 
 ## Security boundaries
 
