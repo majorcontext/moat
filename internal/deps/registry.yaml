@@ -205,6 +205,12 @@ gofumpt:
     amd64: amd64
     arm64: arm64
 
+gopls:
+  description: Go language server (LSP + MCP support)
+  type: go-install
+  go-package: golang.org/x/tools/gopls
+  requires: [go]
+
 govulncheck:
   description: Go vulnerability scanner
   type: go-install
