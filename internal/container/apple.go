@@ -22,6 +22,7 @@ import (
 	"github.com/majorcontext/moat/internal/container/output"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // AppleRuntime implements Runtime using Apple's container CLI tool.
@@ -111,6 +112,8 @@ func findFreePort() (int, error) {
 
 // isKernelNotConfiguredError checks if an error message indicates
 // that the Apple container kernel is not configured.
+// The container CLI outputs "kernel not configured" when no kernel is set,
+// and "default kernel" in related diagnostic messages about missing kernel config.
 func isKernelNotConfiguredError(errMsg string) bool {
 	return strings.Contains(errMsg, "kernel not configured") || strings.Contains(errMsg, "default kernel")
 }
@@ -124,7 +127,13 @@ func kernelNotConfiguredError() error {
 func (r *AppleRuntime) Ping(ctx context.Context) error {
 	// Try to list containers to verify the system is working
 	cmd := exec.CommandContext(ctx, r.containerBin, "list", "--quiet")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		errMsg := stderr.String()
+		if isKernelNotConfiguredError(errMsg) {
+			return kernelNotConfiguredError()
+		}
 		return fmt.Errorf("apple container system not accessible: %w", err)
 	}
 	return nil
@@ -623,7 +632,7 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 		return fmt.Errorf("building image (retry failed): %w (original error: %v)", err, buildErr)
 	}
 
-	fmt.Println("Retrying build...")
+	ui.Info("Retrying build...")
 	if err := m.runBuild(ctx, dockerfilePath, tag, opts.NoCache, tmpDir); err != nil {
 		return fmt.Errorf("building image (retry failed): %w", err)
 	}
