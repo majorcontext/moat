@@ -49,7 +49,7 @@ $ moat grant mcp notion \
     --scopes="read_content write_content"
 ```
 
-This opens a browser for authorization and stores the resulting access and refresh tokens. Moat automatically refreshes expired OAuth tokens during proxy injection.
+This starts a local callback server and prints an authorization URL to open in your browser. After authorization, the access and refresh tokens are stored. Moat automatically refreshes expired OAuth tokens during proxy injection.
 
 The credential is encrypted and stored locally. The grant name follows the pattern `mcp-<name>`.
 
@@ -264,7 +264,7 @@ moat logs
 ### MCP server not appearing in agent
 
 - Verify the MCP server is declared in `agent.yaml` (remote servers at the top level, local servers under the agent section)
-- Check that the grant exists: `moat grants list` should show `mcp-{name}`
+- Check that the grant exists: `moat grant list` should show `mcp-{name}`
 - Check container logs for configuration errors: `moat logs`
 
 ### Authentication failures (401 or 403)
@@ -273,7 +273,7 @@ moat logs
 - Revoke and re-grant: `moat revoke mcp-{name}` then `moat grant mcp {name}`
 - Verify the `url` in `agent.yaml` matches the actual MCP server endpoint
 - For token auth: verify the `header` name matches what the MCP server expects
-- For OAuth: the access token may have expired and refresh failed. Re-run the OAuth flow: `moat grant mcp {name} --oauth ...`
+- For OAuth: if the access token expired and automatic refresh failed, re-run the OAuth flow: `moat grant mcp {name} --oauth ...`
 
 ### Stub credential in error messages
 

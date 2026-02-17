@@ -217,3 +217,272 @@ func containsImpl(s, substr string) bool {
 	}
 	return false
 }
+
+func TestRefreshAccessToken_MalformedJSON(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{not valid json`))
+	}))
+	defer tokenServer.Close()
+
+	_, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "refresh-token")
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+	if !contains(err.Error(), "parsing refresh response") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "parsing refresh response")
+	}
+}
+
+func TestRefreshAccessToken_EmptyAccessToken(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer tokenServer.Close()
+
+	_, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "refresh-token")
+	if err == nil {
+		t.Fatal("expected error for empty access_token, got nil")
+	}
+	if !contains(err.Error(), "no access_token in refresh response") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "no access_token in refresh response")
+	}
+}
+
+func TestRefreshAccessToken_NoExpiresIn(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "new-token",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer tokenServer.Close()
+
+	resp, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "refresh-token")
+	if err != nil {
+		t.Fatalf("RefreshAccessToken failed: %v", err)
+	}
+	if resp.AccessToken != "new-token" {
+		t.Errorf("AccessToken = %q, want %q", resp.AccessToken, "new-token")
+	}
+	if !resp.ExpiresAt.IsZero() {
+		t.Errorf("ExpiresAt should be zero when expires_in is absent, got %v", resp.ExpiresAt)
+	}
+}
+
+func TestRefreshAccessToken_ConcurrentRequests(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "concurrent-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	const goroutines = 10
+	errCh := make(chan error, goroutines)
+	tokenCh := make(chan string, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			resp, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "refresh-token")
+			if err != nil {
+				errCh <- err
+				tokenCh <- ""
+				return
+			}
+			errCh <- nil
+			tokenCh <- resp.AccessToken
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		if err := <-errCh; err != nil {
+			t.Errorf("goroutine %d: %v", i, err)
+		}
+		if token := <-tokenCh; token != "concurrent-token" {
+			t.Errorf("goroutine %d: token = %q, want %q", i, token, "concurrent-token")
+		}
+	}
+}
+
+func TestRefreshAccessToken_ContextCancelled(t *testing.T) {
+	// Server that delays long enough for context cancellation to take effect
+	started := make(chan struct{})
+	done := make(chan struct{})
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-done // Wait until test signals we can finish
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"too-late","token_type":"Bearer"}`))
+	}))
+	defer tokenServer.Close()
+	defer close(done) // Allow handler to return so server can shut down
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := RefreshAccessToken(ctx, tokenServer.URL, "test-client", "refresh-token")
+		errCh <- err
+	}()
+
+	// Wait for the request to reach the server, then cancel
+	<-started
+	cancel()
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected error for canceled context, got nil")
+	}
+}
+
+func TestExchangeCode_MalformedJSON(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`not json at all`))
+	}))
+	defer tokenServer.Close()
+
+	cfg := Config{
+		TokenURL: tokenServer.URL,
+		ClientID: "test-client",
+	}
+
+	_, err := exchangeCode(context.Background(), cfg, "code", "http://localhost/callback")
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+	if !contains(err.Error(), "parsing token response") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "parsing token response")
+	}
+}
+
+func TestExchangeCode_EmptyAccessToken(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer tokenServer.Close()
+
+	cfg := Config{
+		TokenURL: tokenServer.URL,
+		ClientID: "test-client",
+	}
+
+	_, err := exchangeCode(context.Background(), cfg, "code", "http://localhost/callback")
+	if err == nil {
+		t.Fatal("expected error for empty access_token, got nil")
+	}
+	if !contains(err.Error(), "no access_token in token response") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "no access_token in token response")
+	}
+}
+
+func TestExchangeCode_ServerError(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`Internal Server Error`))
+	}))
+	defer tokenServer.Close()
+
+	cfg := Config{
+		TokenURL: tokenServer.URL,
+		ClientID: "test-client",
+	}
+
+	_, err := exchangeCode(context.Background(), cfg, "code", "http://localhost/callback")
+	if err == nil {
+		t.Fatal("expected error for 500, got nil")
+	}
+	if !contains(err.Error(), "HTTP 500") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "HTTP 500")
+	}
+}
+
+func TestRefreshAccessToken_PreservesNewRefreshToken(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token":  "rotated-access-token",
+			"refresh_token": "rotated-refresh-token",
+			"token_type":    "Bearer",
+			"expires_in":    1800,
+		})
+	}))
+	defer tokenServer.Close()
+
+	resp, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "old-refresh")
+	if err != nil {
+		t.Fatalf("RefreshAccessToken failed: %v", err)
+	}
+	if resp.RefreshToken != "rotated-refresh-token" {
+		t.Errorf("RefreshToken = %q, want %q", resp.RefreshToken, "rotated-refresh-token")
+	}
+	if resp.ExpiresIn != 1800 {
+		t.Errorf("ExpiresIn = %d, want 1800", resp.ExpiresIn)
+	}
+}
+
+func TestRefreshAccessToken_NoRefreshTokenInResponse(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "new-access-only",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	resp, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "old-refresh")
+	if err != nil {
+		t.Fatalf("RefreshAccessToken failed: %v", err)
+	}
+	if resp.AccessToken != "new-access-only" {
+		t.Errorf("AccessToken = %q, want %q", resp.AccessToken, "new-access-only")
+	}
+	if resp.RefreshToken != "" {
+		t.Errorf("RefreshToken = %q, want empty", resp.RefreshToken)
+	}
+}
+
+func TestBuildAuthURL_InvalidURL(t *testing.T) {
+	cfg := Config{
+		AuthURL:  "://not-a-url",
+		ClientID: "test-client",
+	}
+
+	_, err := buildAuthURL(cfg, "http://localhost/callback", "state")
+	if err == nil {
+		t.Fatal("expected error for invalid auth URL, got nil")
+	}
+	if !contains(err.Error(), "invalid auth URL") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid auth URL")
+	}
+}
+
+func TestRefreshAccessToken_HTTP403(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":"access_denied","error_description":"client revoked"}`))
+	}))
+	defer tokenServer.Close()
+
+	_, err := RefreshAccessToken(context.Background(), tokenServer.URL, "test-client", "refresh-token")
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if !contains(err.Error(), "HTTP 403") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "HTTP 403")
+	}
+}

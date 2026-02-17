@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
@@ -432,4 +433,397 @@ func (m *mockCredentialStore) List() ([]credential.Credential, error) {
 		list = append(list, *c)
 	}
 	return list, nil
+}
+
+func TestResolveOAuthToken_ValidToken(t *testing.T) {
+	// Token that is not expired should be returned as-is
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "valid-access-token",
+				ExpiresAt: time.Now().Add(10 * time.Minute),
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: "https://example.com/token",
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	if token != "valid-access-token" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "valid-access-token")
+	}
+}
+
+func TestResolveOAuthToken_ExpiredTokenRefreshed(t *testing.T) {
+	// Mock a token server that returns a new token
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"refreshed-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-token",
+				ExpiresAt: time.Now().Add(-5 * time.Minute), // expired
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: tokenServer.URL,
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	if token != "refreshed-token" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "refreshed-token")
+	}
+
+	// Verify stored credential was updated
+	stored := mockStore.creds["mcp-notion"]
+	if stored.Token != "refreshed-token" {
+		t.Errorf("stored token = %q, want %q", stored.Token, "refreshed-token")
+	}
+}
+
+func TestResolveOAuthToken_ExpiredNoRefreshToken(t *testing.T) {
+	// Expired token with no refresh token should return the expired token
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-no-refresh",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				Metadata:  map[string]string{},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: "https://example.com/token",
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	if token != "expired-no-refresh" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "expired-no-refresh")
+	}
+}
+
+func TestResolveOAuthToken_ExpiredMissingTokenURL(t *testing.T) {
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-no-url",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant: "mcp-notion",
+			Type:  "oauth",
+			// No TokenURL, no ClientID
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	// Should fall back to expired token since there's no token_url
+	if token != "expired-no-url" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "expired-no-url")
+	}
+}
+
+func TestResolveOAuthToken_RefreshFailsFallsBack(t *testing.T) {
+	// Token server that returns an error
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer tokenServer.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-but-only-option",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				Metadata: map[string]string{
+					"refresh_token": "revoked-refresh-token",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: tokenServer.URL,
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	// Should fall back to expired token since refresh failed
+	if token != "expired-but-only-option" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "expired-but-only-option")
+	}
+}
+
+func TestResolveOAuthToken_WithinBufferRefreshes(t *testing.T) {
+	// Token that expires within 60 seconds should trigger refresh
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"buffer-refreshed","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "about-to-expire",
+				ExpiresAt: time.Now().Add(30 * time.Second), // within 60s buffer
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: tokenServer.URL,
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	if token != "buffer-refreshed" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "buffer-refreshed")
+	}
+}
+
+func TestResolveOAuthToken_MetadataFallback(t *testing.T) {
+	// When auth config doesn't have token_url/client_id, falls back to credential metadata
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"metadata-refreshed","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-token",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+					"token_url":     tokenServer.URL,
+					"client_id":     "metadata-client-id",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant: "mcp-notion",
+			Type:  "oauth",
+			// No TokenURL, no ClientID - should fall back to metadata
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	if token != "metadata-refreshed" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "metadata-refreshed")
+	}
+}
+
+func TestResolveOAuthToken_NilMetadata(t *testing.T) {
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-nil-metadata",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				// Metadata is nil
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: "https://example.com/token",
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	// No refresh token in nil metadata, should return expired token
+	if token != "expired-nil-metadata" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "expired-nil-metadata")
+	}
+}
+
+func TestResolveOAuthToken_ZeroExpiresAtRefreshes(t *testing.T) {
+	// Zero ExpiresAt means we don't know if it's valid - should try refresh
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"zero-refreshed","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider: "mcp-notion",
+				Token:    "unknown-expiry",
+				// ExpiresAt is zero
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+				},
+			},
+		},
+	}
+
+	server := &config.MCPServerConfig{
+		Name: "notion",
+		Auth: &config.MCPAuthConfig{
+			Grant:    "mcp-notion",
+			Type:     "oauth",
+			TokenURL: tokenServer.URL,
+			ClientID: "client-id",
+		},
+	}
+
+	p := &Proxy{credStore: mockStore}
+	cred := mockStore.creds["mcp-notion"]
+	token := p.resolveOAuthToken(server, cred)
+
+	// Zero ExpiresAt means time.Until(zero) is very negative, so it should refresh
+	if token != "zero-refreshed" {
+		t.Errorf("resolveOAuthToken() = %q, want %q", token, "zero-refreshed")
+	}
+}
+
+func TestMCPOAuthInjection_EndToEnd(t *testing.T) {
+	// Full end-to-end: expired OAuth token triggers refresh, injects Bearer into request
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"fresh-e2e-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-notion": {
+				Provider:  "mcp-notion",
+				Token:     "expired-oauth-token",
+				ExpiresAt: time.Now().Add(-5 * time.Minute),
+				Metadata: map[string]string{
+					"refresh_token": "my-refresh-token",
+				},
+			},
+		},
+	}
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "notion",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:    "mcp-notion",
+				Type:     "oauth",
+				TokenURL: tokenServer.URL,
+				ClientID: "client-id",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "moat-stub-mcp-notion")
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	expected := "Bearer fresh-e2e-token"
+	if rec.Body.String() != expected {
+		t.Errorf("expected body %q, got %q", expected, rec.Body.String())
+	}
 }

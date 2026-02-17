@@ -582,7 +582,7 @@ moat grant mcp notion \
     --scopes="read_content write_content"
 ```
 
-Opens a browser for authorization and stores the resulting access and refresh tokens.
+Starts a local callback server and prints an authorization URL. After authorizing in your browser, the access and refresh tokens are stored.
 
 | Flag | Description |
 |------|-------------|
