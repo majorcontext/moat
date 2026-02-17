@@ -19,10 +19,12 @@ var grantListCmd = &cobra.Command{
 	Long: `List all credentials stored in the credential store.
 
 Shows the provider, type, and when each credential was granted.
+Use --profile to list credentials for a specific profile.
 
 Examples:
-  moat grant list          # List all credentials
-  moat grant list --json   # Output as JSON`,
+  moat grant list                        # List default credentials
+  moat grant list --profile myproject    # List profile credentials
+  moat grant list --json                 # Output as JSON`,
 	RunE: runGrantList,
 }
 
@@ -48,6 +50,10 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 
 	// Load SSH mappings (stored separately from .enc credentials)
 	sshMappings, _ := store.GetSSHMappings()
+
+	if credential.ActiveProfile != "" {
+		fmt.Printf("Profile: %s\n\n", credential.ActiveProfile)
+	}
 
 	if len(creds) == 0 && len(sshMappings) == 0 {
 		// Check if there are .enc files that couldn't be decrypted

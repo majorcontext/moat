@@ -4,10 +4,12 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 
 	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/spf13/cobra"
@@ -17,6 +19,7 @@ var (
 	verbose bool
 	dryRun  bool
 	jsonOut bool
+	profile string
 )
 
 var rootCmd = &cobra.Command{
@@ -29,7 +32,18 @@ code, dependencies, tools, credentials, and observability.
 Core promise: moat run my-agent . just works — zero Docker knowledge,
 zero secret copying, full visibility.`,
 	SilenceUsage: true,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Resolve profile: --profile flag > MOAT_PROFILE env var
+		if profile == "" {
+			profile = os.Getenv("MOAT_PROFILE")
+		}
+		if profile != "" {
+			if err := credential.ValidateProfile(profile); err != nil {
+				return err
+			}
+			credential.ActiveProfile = profile
+		}
+
 		// Load global config for debug settings
 		globalCfg, _ := config.LoadGlobal()
 		debugDir := filepath.Join(config.GlobalConfigDir(), "debug")
@@ -54,6 +68,7 @@ zero secret copying, full visibility.`,
 
 		// Sync dry-run state to internal/cli package for providers
 		intcli.DryRun = dryRun
+		return nil
 	},
 }
 
@@ -75,6 +90,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "show what would happen without executing")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "output in JSON format")
+	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "credential profile to use (env: MOAT_PROFILE)")
 
 	// Store root command for providers that may need it
 	intcli.RootCmd = rootCmd
