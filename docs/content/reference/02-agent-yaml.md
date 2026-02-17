@@ -127,6 +127,12 @@ mcp:
       grant: mcp-context7
       header: CONTEXT7_API_KEY
 
+# Proxy chain (Docker only)
+proxies:
+  - name: logging-proxy
+    image: mitmproxy/mitmproxy:latest
+    port: 8080
+
 # Snapshots
 snapshots:
   disabled: false
@@ -945,19 +951,27 @@ mcp:
 
 ## proxies
 
-Configures an ordered chain of upstream proxies. Moat's credential-injecting proxy forwards outbound traffic through these proxies in order.
+Configures a chain of proxy sidecar containers that sit between the agent container and Moat's credential-injecting proxy. Each sidecar runs as a separate Docker container on the same network.
+
+Traffic flows through the chain in declared order:
+
+```text
+container -> proxies[0] -> proxies[1] -> ... -> Moat proxy -> internet
+```
+
+Moat's credential injection, TLS interception, and network policy enforcement always happen last.
 
 ```yaml
 proxies:
-  - name: headroom
-    url: http://localhost:8080
-
-  - name: logger
-    command: /usr/local/bin/my-proxy
-    args: ["--verbose"]
+  - name: logging-proxy
+    image: mitmproxy/mitmproxy:latest
+    port: 8080
     env:
-      LOG_LEVEL: debug
-    port_env: LISTEN_PORT
+      MITMPROXY_MODE: upstream
+
+  - name: corporate-proxy
+    image: ubuntu/squid:latest
+    port: 3128
 ```
 
 - Type: `array[object]`
@@ -965,20 +979,28 @@ proxies:
 
 **Fields:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `string` | Unique identifier for this proxy (required) |
-| `url` | `string` | URL of an already-running proxy (mutually exclusive with `command`) |
-| `command` | `string` | Command to start a managed proxy process (mutually exclusive with `url`) |
-| `args` | `array[string]` | Arguments for the managed proxy command |
-| `env` | `map[string]string` | Environment variables for the managed proxy |
-| `port_env` | `string` | Environment variable name for the listen port (default: `PORT`) |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | yes | Unique identifier for the proxy sidecar |
+| `image` | `string` | yes | Docker image for the proxy sidecar container |
+| `port` | `integer` | yes | Port the proxy listens on inside its container (must be positive) |
+| `env` | `map[string]string` | no | Environment variables passed to the proxy container |
 
-**External proxies** (`url`): Connect to an already-running proxy. Moat does not manage its lifecycle.
+Each proxy sidecar automatically receives `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to the next proxy in the chain. The last proxy's `HTTP_PROXY` points to Moat's credential-injecting proxy.
 
-**Managed proxies** (`command`): Moat starts the proxy before the run and stops it after. A free port is assigned and passed via the `port_env` environment variable.
+**Validation rules:**
 
-**Chain order:** Proxies are applied in declared order. Moat's proxy forwards to `proxies[0]`, which forwards to `proxies[1]`, and so on. Moat's own credential injection and TLS interception always happen first.
+- `name` is required and must be unique across all entries
+- `image` is required
+- `port` must be a positive integer
+- Duplicate names produce a configuration error
+
+**Requirements:**
+
+- Proxy chaining requires Docker runtime. Apple containers do not support sidecar containers.
+- Sidecars share a Docker network (`moat-<run-id>`) and communicate by container name.
+
+**See also:** [Proxy architecture: Proxy chaining](../concepts/09-proxy.md#proxy-chaining)
 
 ---
 
