@@ -12,12 +12,15 @@ import (
 	"time"
 
 	"errors"
+	"io"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration
@@ -1455,5 +1458,262 @@ func TestRefreshToken_Revoked_WrappedError(t *testing.T) {
 
 	if !target.revoked {
 		t.Error("target.revoked should be true for wrapped ErrTokenRevoked")
+	}
+}
+
+// --- loadPersistedRuns stale route cleanup tests ---
+
+// stubRuntime is a minimal container.Runtime implementation for testing
+// loadPersistedRuns. Only ContainerState and WaitContainer are implemented;
+// all other methods panic.
+type stubRuntime struct {
+	states map[string]string // container ID -> state (e.g. "exited")
+	done   chan struct{}     // closed by test to unblock WaitContainer
+}
+
+func (s *stubRuntime) ContainerState(_ context.Context, id string) (string, error) {
+	state, ok := s.states[id]
+	if !ok {
+		return "", fmt.Errorf("container %q not found", id)
+	}
+	return state, nil
+}
+
+func (s *stubRuntime) Type() container.RuntimeType { return container.RuntimeDocker }
+func (s *stubRuntime) Ping(context.Context) error  { return nil }
+func (s *stubRuntime) CreateContainer(context.Context, container.Config) (string, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) StartContainer(context.Context, string) error { panic("not implemented") }
+func (s *stubRuntime) StopContainer(context.Context, string) error  { return nil }
+func (s *stubRuntime) WaitContainer(ctx context.Context, _ string) (int64, error) {
+	// Block until the test signals completion via the done channel
+	select {
+	case <-s.done:
+		return 0, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+func (s *stubRuntime) RemoveContainer(context.Context, string) error { return nil }
+func (s *stubRuntime) ContainerLogs(context.Context, string) (io.ReadCloser, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) ContainerLogsAll(context.Context, string) ([]byte, error) {
+	return nil, nil // called by captureLogs after WaitContainer returns
+}
+func (s *stubRuntime) GetPortBindings(context.Context, string) (map[int]int, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) GetHostAddress() string                   { return "127.0.0.1" }
+func (s *stubRuntime) SupportsHostNetwork() bool                { return true }
+func (s *stubRuntime) NetworkManager() container.NetworkManager { return nil }
+func (s *stubRuntime) SidecarManager() container.SidecarManager { return nil }
+func (s *stubRuntime) BuildManager() container.BuildManager     { return nil }
+func (s *stubRuntime) ServiceManager() container.ServiceManager { return nil }
+func (s *stubRuntime) Close() error                             { return nil }
+func (s *stubRuntime) SetupFirewall(context.Context, string, string, int) error {
+	panic("not implemented")
+}
+func (s *stubRuntime) ListImages(context.Context) ([]container.ImageInfo, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) ListContainers(context.Context) ([]container.Info, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) RemoveImage(context.Context, string) error { panic("not implemented") }
+func (s *stubRuntime) Attach(context.Context, string, container.AttachOptions) error {
+	panic("not implemented")
+}
+func (s *stubRuntime) StartAttached(context.Context, string, container.AttachOptions) error {
+	panic("not implemented")
+}
+func (s *stubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
+	panic("not implemented")
+}
+
+// TestLoadPersistedRunsCleansStaleRoutes verifies that loadPersistedRuns removes
+// routes for containers that are no longer running. This prevents the bug where
+// a stale routes.json entry blocks reuse of a run name after the container has stopped.
+func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Set up persisted run metadata on disk
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	runID := "run_deadbeef1234"
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "my-agent",
+		ContainerID: "container-abc",
+		State:       "running",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-populate routes.json with a stale route for this agent
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = routes.Add("my-agent", map[string]string{"default": "127.0.0.1:8080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the route exists before loading
+	if !routes.AgentExists("my-agent") {
+		t.Fatal("route should exist before loadPersistedRuns")
+	}
+
+	// Create a manager with a stub runtime that reports the container as exited
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{"container-abc": "exited"},
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The stale route should have been cleaned up
+	if routes.AgentExists("my-agent") {
+		t.Error("stale route for stopped container should have been removed by loadPersistedRuns")
+	}
+
+	// The run should still be loaded (just with stopped state)
+	if len(m.runs) != 1 {
+		t.Fatalf("expected 1 loaded run, got %d", len(m.runs))
+	}
+	r := m.runs[runID]
+	if r.State != StateStopped {
+		t.Errorf("expected run state %q, got %q", StateStopped, r.State)
+	}
+}
+
+// TestLoadPersistedRunsKeepsRoutesForRunningContainers verifies that
+// loadPersistedRuns does NOT remove routes for containers that are still running.
+func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
+	// Use os.MkdirTemp instead of t.TempDir() because loadPersistedRuns spawns
+	// a background monitorContainerExit goroutine for running containers that
+	// writes files asynchronously. We skip explicit cleanup and let the OS
+	// reclaim the temp directory when the test process exits, avoiding any
+	// race between the goroutine's file I/O and directory removal.
+	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsKeepsRoutes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	store, err := storage.NewRunStore(baseDir, "run_livebeef1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "live-agent",
+		ContainerID: "container-live",
+		State:       "running",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = routes.Add("live-agent", map[string]string{"default": "127.0.0.1:9090"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{"container-live": "running"},
+			done:   make(chan struct{}),
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Route should be preserved for a running container
+	if !routes.AgentExists("live-agent") {
+		t.Error("route for running container should NOT be removed by loadPersistedRuns")
+	}
+}
+
+// TestLoadPersistedRunsCleansRoutesForMissingContainers verifies that
+// loadPersistedRuns removes routes when the container no longer exists at all
+// (e.g., was manually removed via docker rm).
+func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	runID := "run_gone12345678"
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "gone-agent",
+		ContainerID: "container-gone",
+		State:       "running",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = routes.Add("gone-agent", map[string]string{"default": "127.0.0.1:7070"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stub runtime with NO containers — ContainerState will return error
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if routes.AgentExists("gone-agent") {
+		t.Error("stale route for missing container should have been removed by loadPersistedRuns")
 	}
 }
