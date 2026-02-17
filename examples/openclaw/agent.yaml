@@ -2,7 +2,7 @@
 #
 # Run OpenClaw in an isolated container with credential injection.
 # The Anthropic API key is injected at the network layer — OpenClaw never sees it.
-# The Telegram bot token is injected as an env var via the telegram credential provider.
+# The Telegram bot token is injected at the network layer via URL path token substitution.
 # The gateway token is injected from 1Password via moat secrets.
 #
 # Prerequisites:
