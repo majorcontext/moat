@@ -113,6 +113,18 @@ type MCPServerConfig struct {
 type MCPAuthConfig struct {
 	Grant  string `yaml:"grant"`
 	Header string `yaml:"header"`
+
+	// Type specifies the authentication method: "token" (default) or "oauth".
+	// When "token", the stored credential is injected as-is into the header.
+	// When "oauth", the stored credential is injected as "Bearer <token>"
+	// into the header (defaults to "Authorization" if header is not set).
+	Type string `yaml:"type,omitempty"`
+
+	// OAuth configuration fields (only used when type: oauth)
+	ClientID string `yaml:"client_id,omitempty"` // OAuth client ID
+	AuthURL  string `yaml:"auth_url,omitempty"`  // OAuth authorization endpoint
+	TokenURL string `yaml:"token_url,omitempty"` // OAuth token endpoint
+	Scopes   string `yaml:"scopes,omitempty"`    // Space-separated OAuth scopes
 }
 
 // ServiceSpec allows customizing service behavior.
@@ -545,8 +557,33 @@ func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames ma
 		if spec.Auth.Grant == "" {
 			return fmt.Errorf("%s: 'auth.grant' is required when auth is specified", prefix)
 		}
-		if spec.Auth.Header == "" {
-			return fmt.Errorf("%s: 'auth.header' is required when auth is specified", prefix)
+
+		// Validate auth type
+		authType := spec.Auth.Type
+		if authType == "" {
+			authType = "token"
+		}
+		if authType != "token" && authType != "oauth" {
+			return fmt.Errorf("%s: 'auth.type' must be 'token' or 'oauth', got %q", prefix, authType)
+		}
+
+		// For token type, header is required
+		// For oauth type, header defaults to Authorization
+		if authType == "token" && spec.Auth.Header == "" {
+			return fmt.Errorf("%s: 'auth.header' is required when auth.type is 'token'", prefix)
+		}
+
+		// Validate OAuth-specific fields
+		if authType == "oauth" {
+			if spec.Auth.TokenURL == "" {
+				return fmt.Errorf("%s: 'auth.token_url' is required when auth.type is 'oauth'", prefix)
+			}
+			if spec.Auth.AuthURL == "" {
+				return fmt.Errorf("%s: 'auth.auth_url' is required when auth.type is 'oauth'", prefix)
+			}
+			if spec.Auth.ClientID == "" {
+				return fmt.Errorf("%s: 'auth.client_id' is required when auth.type is 'oauth'", prefix)
+			}
 		}
 	}
 

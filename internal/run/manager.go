@@ -1376,10 +1376,25 @@ region = %s
 						continue // Skip servers without auth
 					}
 					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
+
+					// Determine header and stub format based on auth type
+					header := mcp.Auth.Header
+					stub := "moat-stub-" + mcp.Auth.Grant
+					authType := mcp.Auth.Type
+					if authType == "" {
+						authType = "token"
+					}
+					if authType == "oauth" {
+						if header == "" {
+							header = "Authorization"
+						}
+						stub = "moat-stub-" + mcp.Auth.Grant
+					}
+
 					mcpServers[mcp.Name] = provider.MCPServerConfig{
 						URL: relayURL,
 						Headers: map[string]string{
-							mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
+							header: stub,
 						},
 					}
 				}
