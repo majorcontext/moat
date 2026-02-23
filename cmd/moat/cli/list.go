@@ -50,7 +50,10 @@ func listRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check if any runs have worktree info
+	// Check if any runs have worktree info. We check WorktreeBranch (not
+	// WorktreePath) because the branch name is the meaningful display value
+	// shown in the WORKTREE column — a path without a branch name isn't
+	// useful to show.
 	hasWorktree := false
 	for _, r := range runs {
 		if r.WorktreeBranch != "" {

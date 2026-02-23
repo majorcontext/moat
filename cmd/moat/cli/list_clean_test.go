@@ -146,6 +146,7 @@ func TestIsImageInUse_NoContainers(t *testing.T) {
 
 // --- List worktree column display logic tests ---
 // These test the conditional column display logic extracted from listRuns.
+// TODO: refactor to call production functions directly instead of duplicating logic.
 
 func TestListWorktreeColumnDetection(t *testing.T) {
 	tests := []struct {
@@ -209,6 +210,7 @@ func TestListWorktreeColumnDetection(t *testing.T) {
 
 // --- Clean worktree run detection logic tests ---
 // These test the logic that identifies stopped runs with worktree paths.
+// TODO: refactor to call production functions directly instead of duplicating logic.
 
 func TestCleanWorktreeRunDetection(t *testing.T) {
 	now := time.Now()
@@ -290,6 +292,7 @@ func TestCleanWorktreeRunDetection_RunningWorktreesExcluded(t *testing.T) {
 
 // --- List sorting tests ---
 // Verify that list sorts runs newest-first (consistent with list.go line 40-42).
+// TODO: refactor to call production functions directly instead of duplicating logic.
 
 func TestListRunsSortOrder(t *testing.T) {
 	now := time.Now()
@@ -316,6 +319,7 @@ func TestListRunsSortOrder(t *testing.T) {
 }
 
 // --- Worktree branch display in clean output ---
+// TODO: refactor to call production functions directly instead of duplicating logic.
 
 func TestCleanWorktreeBranchFallback(t *testing.T) {
 	// In clean.go lines 278-281, when displaying worktree info,
@@ -344,23 +348,24 @@ func TestCleanWorktreeBranchFallback(t *testing.T) {
 	}
 }
 
-// --- Resource count includes worktrees ---
+// --- Resource count does not double-count worktrees ---
+// TODO: refactor to call production functions directly instead of testing arithmetic.
 
-func TestCleanResourceCountIncludesWorktrees(t *testing.T) {
-	// clean.go line 204: resourceCount = len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks) + len(worktreeRuns)
-	// Verify worktree runs are counted in the total.
+func TestCleanResourceCountDoesNotDoubleCountWorktrees(t *testing.T) {
+	// clean.go: resourceCount = len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks)
+	// worktreeRuns is a subset of stoppedRuns, so it must not be added separately.
 	stoppedRuns := 3
 	unusedImages := 2
 	orphanedNetworks := 1
-	worktreeRuns := 2
 
-	resourceCount := stoppedRuns + unusedImages + orphanedNetworks + worktreeRuns
-	if resourceCount != 8 {
-		t.Errorf("resourceCount = %d, want 8", resourceCount)
+	resourceCount := stoppedRuns + unusedImages + orphanedNetworks
+	if resourceCount != 6 {
+		t.Errorf("resourceCount = %d, want 6", resourceCount)
 	}
 }
 
 // --- Backward compatibility: non-worktree usage ---
+// TODO: refactor to call production functions directly instead of duplicating logic.
 
 func TestListBackwardCompat_NoWorktreeColumn(t *testing.T) {
 	// When no runs have WorktreeBranch set, the hasWorktree flag should be
