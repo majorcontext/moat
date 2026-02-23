@@ -2,6 +2,7 @@ package oauthrelay
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -319,7 +320,7 @@ func TestConcurrentOAuthFlows(t *testing.T) {
 	for i := 0; i < numFlows; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			app := "app" + string(rune('A'+idx))
+			app := fmt.Sprintf("app%d", idx)
 			req := httptest.NewRequest("GET", "/start?app="+app, nil)
 			w := httptest.NewRecorder()
 			relay.ServeHTTP(w, req)

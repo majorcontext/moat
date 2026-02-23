@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -19,6 +20,7 @@ import (
 // ReverseProxy routes requests based on Host header to container services.
 type ReverseProxy struct {
 	routes        *RouteTable
+	oauthMu       sync.RWMutex
 	oauthHandler  http.Handler // optional OAuth relay handler
 	oauthHostname string       // hostname without port (e.g. "oauthrelay.localhost")
 }
@@ -36,8 +38,10 @@ func (rp *ReverseProxy) SetOAuthRelay(hostname string, handler http.Handler) {
 	if idx := strings.LastIndex(hostname, ":"); idx != -1 {
 		hostname = hostname[:idx]
 	}
+	rp.oauthMu.Lock()
 	rp.oauthHostname = hostname
 	rp.oauthHandler = handler
+	rp.oauthMu.Unlock()
 }
 
 // ServeHTTP handles incoming requests and routes them to backends.
@@ -49,8 +53,12 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for OAuth relay requests before normal routing
-	if rp.oauthHandler != nil && host == rp.oauthHostname {
-		rp.oauthHandler.ServeHTTP(w, r)
+	rp.oauthMu.RLock()
+	oauthHandler := rp.oauthHandler
+	oauthHostname := rp.oauthHostname
+	rp.oauthMu.RUnlock()
+	if oauthHandler != nil && host == oauthHostname {
+		oauthHandler.ServeHTTP(w, r)
 		return
 	}
 

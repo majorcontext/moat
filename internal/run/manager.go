@@ -1982,7 +1982,10 @@ region = %s
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
 
-		// Set up OAuth relay handler if configured
+		// Set up OAuth relay handler if configured.
+		// Note: only one relay can be active at a time. If multiple runs use
+		// oauth_relay, the last one registered wins. In-flight OAuth flows from
+		// earlier runs will be lost. This is a known limitation.
 		if r.OAuthRelayConfig != nil {
 			relay := oauthrelay.New(*r.OAuthRelayConfig)
 			m.proxyLifecycle.SetOAuthRelay(relay.Hostname(), relay)

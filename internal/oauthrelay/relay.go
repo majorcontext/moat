@@ -20,8 +20,11 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 )
 
-// validAppName matches safe app names: starts with alphanumeric, may contain alphanumeric, dots, hyphens, underscores.
-var validAppName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+// validAppName matches safe app names: starts with lowercase alphanumeric,
+// may contain lowercase alphanumeric and hyphens. Dots are forbidden because
+// they create multi-level subdomains that break the router. Uppercase is
+// forbidden because agent names are lowercase.
+var validAppName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // Config holds the OAuth relay configuration.
 type Config struct {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
 )
 
@@ -134,6 +135,8 @@ func (lc *Lifecycle) Routes() *RouteTable {
 func (lc *Lifecycle) SetOAuthRelay(hostname string, handler http.Handler) {
 	if lc.server != nil {
 		lc.server.ReverseProxy().SetOAuthRelay(hostname, handler)
+	} else {
+		log.Warn("OAuth relay not registered: proxy owned by another process; OAuth logins will not work for this run")
 	}
 }
 

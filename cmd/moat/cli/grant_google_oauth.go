@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/spf13/cobra"
 )
@@ -93,9 +94,12 @@ func runGrantGoogleOAuth(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nGoogle OAuth credentials saved to %s\n", credPath)
 	fmt.Println()
-	// TODO: use configured proxy port instead of hardcoded 8080
+	proxyPort := 8080
+	if globalCfg, loadErr := config.LoadGlobal(); loadErr == nil {
+		proxyPort = globalCfg.Proxy.Port
+	}
 	fmt.Println("Register this redirect URI in the Google Cloud Console:")
-	fmt.Println("  http://oauthrelay.localhost:8080/callback")
+	fmt.Printf("  http://oauthrelay.localhost:%d/callback\n", proxyPort)
 	fmt.Println()
 	fmt.Println("Enable in agent.yaml:")
 	fmt.Println()
