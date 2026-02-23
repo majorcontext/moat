@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -249,6 +250,117 @@ func TestMCPCredentialInjection_NoHeader(t *testing.T) {
 	}
 }
 
+func TestMCPRelay_HostLocal(t *testing.T) {
+	// Host-local MCP server (no auth) should relay requests directly
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tools":["read","write"]}`))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-tools",
+			URL:  backend.URL, // http://127.0.0.1:PORT
+			Auth: nil,         // No auth for host-local server
+		},
+	}
+
+	p := &Proxy{
+		mcpServers: mcpServers,
+	}
+
+	// Request to /mcp/local-tools should be relayed to backend
+	req := httptest.NewRequest("POST", "/mcp/local-tools", nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != `{"tools":["read","write"]}` {
+		t.Errorf("expected backend response, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_HostLocalWithPath(t *testing.T) {
+	// Host-local MCP server should preserve path after server name
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("path:" + r.URL.Path))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-server",
+			URL:  backend.URL + "/mcp",
+			Auth: nil,
+		},
+	}
+
+	p := &Proxy{
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/local-server/v1/tools", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	expected := "path:/mcp/v1/tools"
+	if rec.Body.String() != expected {
+		t.Errorf("expected %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
+	// Host-local MCP server with auth should inject credentials
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"local-api-key": {
+				Provider: "local-api-key",
+				Token:    "secret-local-token",
+			},
+		},
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("X-API-Key")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-auth",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:  "local-api-key",
+				Header: "X-API-Key",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/local-auth", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "secret-local-token" {
+		t.Errorf("expected 'secret-local-token', got %q", rec.Body.String())
+	}
+}
+
 // mockCredentialStore for testing
 type mockCredentialStore struct {
 	creds map[credential.Provider]*credential.Credential
@@ -277,4 +389,188 @@ func (m *mockCredentialStore) List() ([]credential.Credential, error) {
 		list = append(list, *c)
 	}
 	return list, nil
+}
+
+// --- Additional host-local MCP relay tests ---
+
+func TestMCPRelay_UnknownServer_Returns404(t *testing.T) {
+	p := &Proxy{
+		mcpServers: []config.MCPServerConfig{
+			{Name: "known-server", URL: "http://localhost:3000/mcp"},
+		},
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/unknown-server", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "unknown-server") {
+		t.Errorf("error message should mention the server name, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_QueryStringPreserved(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("query:" + r.URL.RawQuery))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{Name: "local", URL: backend.URL + "/api", Auth: nil},
+	}
+
+	p := &Proxy{mcpServers: mcpServers}
+
+	req := httptest.NewRequest("GET", "/mcp/local?cursor=abc123&limit=10", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	expected := "query:cursor=abc123&limit=10"
+	if rec.Body.String() != expected {
+		t.Errorf("expected %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPRelay_MissingCredentialStore(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("should not reach here"))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "auth-server",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{Grant: "some-grant", Header: "X-Key"},
+		},
+	}
+
+	// credStore is nil
+	p := &Proxy{
+		mcpServers: mcpServers,
+		credStore:  nil,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/auth-server", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Credential store not initialized") {
+		t.Errorf("error should mention credential store, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_MissingCredentialForGrant(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("should not reach here"))
+	}))
+	defer backend.Close()
+
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{},
+	}
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "auth-server",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{Grant: "missing-grant", Header: "X-Key"},
+		},
+	}
+
+	p := &Proxy{
+		mcpServers: mcpServers,
+		credStore:  mockStore,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/auth-server", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Failed to load credential") {
+		t.Errorf("error should mention credential loading failure, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_HeadersCopied(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo back a custom header to verify it was forwarded
+		w.Write([]byte("ct:" + r.Header.Get("Content-Type") + ",accept:" + r.Header.Get("Accept")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{Name: "local", URL: backend.URL, Auth: nil},
+	}
+
+	p := &Proxy{mcpServers: mcpServers}
+
+	req := httptest.NewRequest("POST", "/mcp/local", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	expected := "ct:application/json,accept:text/event-stream"
+	if rec.Body.String() != expected {
+		t.Errorf("expected %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPRelay_ProxyHeadersStripped(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Proxy-Authorization and Proxy-Connection should not be forwarded
+		w.Write([]byte("pa:" + r.Header.Get("Proxy-Authorization") + ",pc:" + r.Header.Get("Proxy-Connection")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{Name: "local", URL: backend.URL, Auth: nil},
+	}
+
+	p := &Proxy{mcpServers: mcpServers}
+
+	req := httptest.NewRequest("POST", "/mcp/local", nil)
+	req.Header.Set("Proxy-Authorization", "Basic secret")
+	req.Header.Set("Proxy-Connection", "keep-alive")
+
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "pa:,pc:" {
+		t.Errorf("proxy headers should be stripped, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_EmptyServerList(t *testing.T) {
+	p := &Proxy{
+		mcpServers: nil,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/anything", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rec.Code)
+	}
 }
