@@ -1921,6 +1921,8 @@ region = %s
 		// Override HTTP_PROXY to point to chain entry instead of moat proxy.
 		// The main container sends traffic to the first chain proxy, which
 		// forwards through the chain, ending at moat's credential proxy.
+		// This intentionally strips the moat auth token (moat:token@host:port)
+		// from the URL — chain proxies don't need it; only moat's proxy does.
 		chainEntryURL := fmt.Sprintf("http://%s", chain.EntryAddr())
 		for i, env := range proxyEnv {
 			switch {
@@ -2524,11 +2526,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		ui.Warnf("Stopping proxy: %v", err)
 	}
 
-	// Stop proxy chain sidecars
-	if r.ProxyChain != nil {
-		svcMgr := m.runtime.ServiceManager()
-		r.ProxyChain.Stop(ctx, svcMgr)
-	}
+	// Note: proxy chain sidecars were already stopped at the top of Stop()
+	// and their containers are also in ServiceContainers, so no additional
+	// ProxyChain.Stop() call is needed here.
 
 	// Stop the SSH agent server if one was created
 	if err := r.stopSSHAgentServer(); err != nil {
@@ -2868,6 +2868,12 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Save updated state
 	_ = r.SaveMetadata()
 
+	// Stop proxy chain sidecars before the proxy server, matching Stop() order.
+	if r.ProxyChain != nil {
+		svcMgr := m.runtime.ServiceManager()
+		r.ProxyChain.Stop(context.Background(), svcMgr)
+	}
+
 	// Stop the proxy server if one was created
 	if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
 		log.Debug("stopping proxy after container exit", "error", stopErr)
@@ -2878,13 +2884,8 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
 	}
 
-	// Stop proxy chain sidecars
-	if r.ProxyChain != nil {
-		svcMgr := m.runtime.ServiceManager()
-		r.ProxyChain.Stop(context.Background(), svcMgr)
-	}
-
-	// Stop service containers
+	// Stop service containers (chain containers are also in here but
+	// ProxyChain.Stop above is idempotent, so double-stop is safe).
 	if len(r.ServiceContainers) > 0 {
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr != nil {

@@ -15,6 +15,9 @@ import (
 // Must start with a letter or digit.
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// validProxyName validates proxy chain entry names.
+var validProxyName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
 // Config represents an agent.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
@@ -499,6 +502,9 @@ func Load(dir string) (*Config, error) {
 			prefix := fmt.Sprintf("proxies[%d]", i)
 			if entry.Name == "" {
 				return nil, fmt.Errorf("%s: 'name' is required", prefix)
+			}
+			if !validProxyName.MatchString(entry.Name) {
+				return nil, fmt.Errorf("%s: 'name' must start with a letter or digit and contain only letters, digits, hyphens, and underscores", prefix)
 			}
 			if seenProxyNames[entry.Name] {
 				return nil, fmt.Errorf("%s: duplicate name %q", prefix, entry.Name)

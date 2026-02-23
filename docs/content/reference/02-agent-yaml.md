@@ -983,7 +983,7 @@ proxies:
 |-------|------|----------|-------------|
 | `name` | `string` | yes | Unique identifier for the proxy sidecar |
 | `image` | `string` | yes | Docker image for the proxy sidecar container |
-| `port` | `integer` | yes | Port the proxy listens on inside its container (must be positive) |
+| `port` | `integer` | yes | Port the proxy listens on inside its container (1–65535) |
 | `env` | `map[string]string` | no | Environment variables passed to the proxy container |
 
 Each proxy sidecar automatically receives `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to the next proxy in the chain. The last proxy's `HTTP_PROXY` points to Moat's credential-injecting proxy.
