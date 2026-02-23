@@ -1847,6 +1847,9 @@ region = %s
 	// Start proxy chain sidecars (if configured).
 	// Chain order: container -> proxy[0] -> proxy[1] -> ... -> moat proxy -> internet.
 	// The chain needs a Docker network so sidecars can communicate by container name.
+	if opts.Config != nil && len(opts.Config.Proxies) > 0 && proxyServer == nil {
+		ui.Warn("proxies configured in agent.yaml but no credential proxy is running (no grants or strict mode); proxy chain will not be started")
+	}
 	if opts.Config != nil && len(opts.Config.Proxies) > 0 && proxyServer != nil {
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr == nil {
@@ -1885,10 +1888,18 @@ region = %s
 		svcMgr.SetNetworkID(networkID)
 
 		// moatProxyAddr is the address of Moat's credential-injecting proxy
-		// as reachable from inside the Docker network.
-		proxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		// as reachable from inside the Docker network. On Apple containers the
+		// proxy requires token authentication, so include credentials in the
+		// URL (http://moat:token@host:port) so each sidecar can authenticate.
+		chainProxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		var chainUpstream string
+		if r.ProxyAuthToken != "" {
+			chainUpstream = "moat:" + r.ProxyAuthToken + "@" + chainProxyHost
+		} else {
+			chainUpstream = chainProxyHost
+		}
 
-		chain, chainErr := proxy.StartChain(ctx, opts.Config.Proxies, svcMgr, r.ID, proxyHost)
+		chain, chainErr := proxy.StartChain(ctx, opts.Config.Proxies, svcMgr, r.ID, chainUpstream)
 		if chainErr != nil {
 			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)

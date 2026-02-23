@@ -3,10 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
@@ -104,16 +101,11 @@ func StartChain(
 			"upstream", upstreamURL)
 	}
 
-	// Wait for each proxy to be listening
-	for _, cp := range chain.proxies {
-		addr := fmt.Sprintf("%s:%d", cp.Host, cp.Port)
-		if err := waitForAddr(addr, 15*time.Second); err != nil {
-			log.Debug("chain proxy not ready, continuing anyway",
-				"name", cp.Name,
-				"addr", addr,
-				"error", err)
-		}
-	}
+	// Sidecar containers communicate via the Docker network using container
+	// names as hostnames. These names only resolve inside the network, so we
+	// cannot dial them from the host. Docker networking handles container
+	// readiness — the first connection attempt from the main container will
+	// retry via the kernel TCP backlog until the proxy is listening.
 
 	return chain, nil
 }
@@ -167,20 +159,6 @@ func (c *Chain) Stop(ctx context.Context, svcMgr container.ServiceManager) {
 	}
 }
 
-// waitForAddr waits for a TCP address to accept connections.
-func waitForAddr(addr string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout waiting for %s", addr)
-}
-
 // ChainEntryURL returns the proxy URL for the first proxy in the chain.
 // Returns nil if the chain is empty.
 func (c *Chain) ChainEntryURL() *url.URL {
@@ -190,17 +168,5 @@ func (c *Chain) ChainEntryURL() *url.URL {
 	return &url.URL{
 		Scheme: "http",
 		Host:   c.EntryAddr(),
-	}
-}
-
-// WrapTransport creates an http.Transport that routes through the first proxy
-// in the chain. Returns nil if no chain is configured.
-func (c *Chain) WrapTransport() *http.Transport {
-	u := c.ChainEntryURL()
-	if u == nil {
-		return nil
-	}
-	return &http.Transport{
-		Proxy: http.ProxyURL(u),
 	}
 }

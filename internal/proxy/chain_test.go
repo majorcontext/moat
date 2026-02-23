@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -237,7 +238,7 @@ func TestStartChain_StartFailure_CleansUp(t *testing.T) {
 	}
 
 	// Error message should identify the failed proxy
-	if got := err.Error(); !containsSubstr(got, "second") {
+	if got := err.Error(); !strings.Contains(got, "second") {
 		t.Errorf("error %q should mention proxy name 'second'", got)
 	}
 
@@ -468,30 +469,6 @@ func TestChainEntryURL_ReturnsHTTPScheme(t *testing.T) {
 	}
 }
 
-// --- WrapTransport tests ---
-
-func TestWrapTransport_NilChain(t *testing.T) {
-	var c *Chain
-	if tr := c.WrapTransport(); tr != nil {
-		t.Errorf("WrapTransport() = %v, want nil", tr)
-	}
-}
-
-func TestWrapTransport_ReturnsTransportWithProxy(t *testing.T) {
-	c := &Chain{
-		proxies: []ChainProxy{
-			{Name: "proxy", Host: "127.0.0.1", Port: 3128},
-		},
-	}
-	tr := c.WrapTransport()
-	if tr == nil {
-		t.Fatal("WrapTransport() returned nil")
-	}
-	if tr.Proxy == nil {
-		t.Error("Transport.Proxy should be set")
-	}
-}
-
 // --- Integration: StartChain -> EntryAddr round trip ---
 
 func TestStartChain_EntryAddr_MatchesFirstProxy(t *testing.T) {
@@ -531,14 +508,4 @@ func TestStartChain_ContainerIDs_MatchStarted(t *testing.T) {
 	if ids["b"] != "container-moat-proxy-r2-b" {
 		t.Errorf("ids[b] = %q, want %q", ids["b"], "container-moat-proxy-r2-b")
 	}
-}
-
-// helper
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

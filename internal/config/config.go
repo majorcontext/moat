@@ -510,6 +510,9 @@ func Load(dir string) (*Config, error) {
 			if entry.Port <= 0 {
 				return nil, fmt.Errorf("%s: 'port' must be a positive integer", prefix)
 			}
+			if entry.Port > 65535 {
+				return nil, fmt.Errorf("%s: port %d exceeds maximum (65535)", prefix, entry.Port)
+			}
 		}
 	}
 
