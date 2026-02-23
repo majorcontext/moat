@@ -453,9 +453,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					continue
 				}
 
-				providerName := credential.Provider(grantName)
-				log.Debug("processing grant", "grant", grant, "providerName", providerName)
-				cred, getErr := store.Get(providerName)
+				// Resolve to canonical provider name for credential lookup.
+				credName := credential.Provider(provider.ResolveName(grantName))
+				log.Debug("processing grant", "grant", grant, "credName", credName)
+				cred, getErr := store.Get(credName)
 				if getErr != nil {
 					// Should not happen: validateGrants checks before resource allocation.
 					cleanupProxy(proxyServer)
@@ -474,13 +475,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 				prov.ConfigureProxy(p, provCred)
 				envVars := prov.ContainerEnv(provCred)
-				log.Debug("adding provider env vars", "provider", providerName, "vars", envVars)
+				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				providerEnv = append(providerEnv, envVars...)
 
 				// Check if this provider supports token refresh
 				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
 					refreshTargets = append(refreshTargets, refreshTarget{
-						providerName: providerName,
+						providerName: credName,
 						refresher:    rp,
 						cred:         cred,
 						store:        store,
@@ -488,7 +489,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 
 				// Handle AWS endpoint provider
-				if ep := provider.GetEndpoint(string(providerName)); ep != nil {
+				if ep := provider.GetEndpoint(string(credName)); ep != nil {
 					// AWS credentials are handled via credential endpoint
 					// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
 					awsCfg, err := awsprov.ConfigFromCredential(provCred)
@@ -1105,18 +1106,25 @@ region = %s
 
 	// Determine if we need Claude init (for OAuth credentials and host files)
 	// This is triggered by:
-	// - a claude/anthropic grant with an OAuth token, OR
+	// - a claude/claude grant (always needs init for OAuth credentials), OR
+	// - an anthropic grant with an OAuth token (legacy migration case), OR
 	// - claude-code in the dependencies list (user may run Claude without credential injection)
 	var needsClaudeInit bool
 	for _, grant := range opts.Grants {
-		providerName := credential.Provider(strings.Split(grant, ":")[0])
-		// Check for both "claude" (new) and "anthropic" (legacy) provider names
-		if providerName == "claude" || providerName == credential.ProviderAnthropic {
+		grantName := strings.Split(grant, ":")[0]
+		canonicalName := credential.Provider(provider.ResolveName(grantName))
+		if canonicalName == credential.ProviderClaude {
+			// claude/claude grants always need Claude init
+			needsClaudeInit = true
+			break
+		}
+		if canonicalName == credential.ProviderAnthropic {
+			// anthropic grants only need Claude init if it's an OAuth token (legacy migration case)
 			key, keyErr := credential.DefaultEncryptionKey()
 			if keyErr == nil {
 				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 				if storeErr == nil {
-					if cred, err := store.Get(providerName); err == nil {
+					if cred, err := store.Get(canonicalName); err == nil {
 						if credential.IsOAuthToken(cred.Token) {
 							needsClaudeInit = true
 						}
@@ -1323,20 +1331,21 @@ region = %s
 			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 			if storeErr == nil {
 				for _, grant := range opts.Grants {
-					providerName := credential.Provider(strings.Split(grant, ":")[0])
-					if cred, err := store.Get(providerName); err == nil {
-						if prov := provider.Get(string(providerName)); prov != nil {
+					grantName := strings.Split(grant, ":")[0]
+					credName := credential.Provider(provider.ResolveName(grantName))
+					if cred, err := store.Get(credName); err == nil {
+						if prov := provider.Get(grantName); prov != nil {
 							provCred := provider.FromLegacy(cred)
 							providerMounts, cleanupPath, mountErr := prov.ContainerMounts(provCred, containerHome)
 							if mountErr != nil {
-								log.Debug("failed to set up provider mounts", "provider", providerName, "error", mountErr)
+								log.Debug("failed to set up provider mounts", "provider", credName, "error", mountErr)
 							} else {
 								mounts = append(mounts, providerMounts...)
 								if cleanupPath != "" {
 									if r.ProviderCleanupPaths == nil {
 										r.ProviderCleanupPaths = make(map[string]string)
 									}
-									r.ProviderCleanupPaths[string(providerName)] = cleanupPath
+									r.ProviderCleanupPaths[string(credName)] = cleanupPath
 								}
 							}
 						}
@@ -1386,14 +1395,15 @@ region = %s
 			}
 
 			// Get Claude credential for PrepareContainer
+			// Preference: claude > anthropic (for backward compatibility)
 			var claudeCred *provider.Credential
 			if needsClaudeInit {
 				key, keyErr := credential.DefaultEncryptionKey()
 				if keyErr == nil {
 					store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
 					if storeErr == nil {
-						// Try "claude" first, fall back to "anthropic" (legacy)
-						cred, err := store.Get(credential.Provider("claude"))
+						// Try claude first, fall back to anthropic
+						cred, err := store.Get(credential.ProviderClaude)
 						if err != nil {
 							cred, err = store.Get(credential.ProviderAnthropic)
 						}

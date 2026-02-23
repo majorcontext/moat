@@ -14,7 +14,7 @@ dependencies:
   - git
 
 grants:
-  - anthropic
+  - claude # Change to anthropic to use an api key
   - github
   - ssh:github.com  # For git operations (clone, push, etc.)
 

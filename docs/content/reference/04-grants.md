@@ -16,7 +16,8 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | Grant | Hosts matched | Header injected | Credential source |
 |-------|---------------|-----------------|-------------------|
 | `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
-| `anthropic` | `api.anthropic.com` | `Authorization: Bearer ...` (OAuth) or `x-api-key: ...` (API key) | `claude setup-token`, API key, or imported OAuth |
+| `claude` | `api.anthropic.com` | `Authorization: Bearer ...` | `claude setup-token` or imported OAuth |
+| `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
@@ -83,61 +84,112 @@ GitHub credential saved
 $ moat run --grant github ./my-project
 ```
 
-## Anthropic
+## Anthropic / Claude
 
-### CLI command
+Anthropic credentials are split into two separate grant types:
+
+- **`claude`** -- OAuth tokens from Claude Pro/Max subscriptions. Restricted by Anthropic's ToS to Claude Code only. Uses `Authorization: Bearer` auth.
+- **`anthropic`** -- API keys from `console.anthropic.com`. Works with any tool or agent. Uses `x-api-key` auth.
+
+Each command grants its own credential type. Both can coexist and `moat grant list` shows both.
+
+### CLI commands
 
 ```bash
-moat grant anthropic
+moat grant claude       # OAuth token (for moat claude / Claude Code)
+moat grant anthropic    # API key (for any agent or tool)
 ```
 
-No flags. The command presents a menu with three authentication options.
+No flags.
 
-### Credential sources
+### `moat grant claude`
 
-1. **Claude subscription (recommended)** -- Runs `claude setup-token` to obtain a long-lived OAuth token. Requires a Claude Pro or Max subscription and the Claude CLI installed.
-2. **API key** -- Enter an API key directly or set `ANTHROPIC_API_KEY` in your environment. Billed per token to your API account.
-3. **Import existing credentials** -- Imports OAuth tokens from your local Claude Code installation. Imported tokens do not auto-refresh; re-run `moat grant anthropic` when they expire.
+Presents a menu of OAuth token sources:
+
+1. **Claude subscription** -- Runs `claude setup-token` to obtain a long-lived OAuth token. Requires a Claude Pro/Max subscription and the Claude CLI installed.
+2. **Existing OAuth token** -- Paste a token from a previous `claude setup-token` run.
+3. **Import existing credentials** -- Imports OAuth tokens from your local Claude Code installation.
+
+Stored as `claude.enc`.
+
+### `moat grant anthropic`
+
+Prompts for an API key directly, or uses `ANTHROPIC_API_KEY` from the environment.
+
+Stored as `anthropic.enc`.
 
 ### What it injects
 
 The proxy injects credentials for requests to `api.anthropic.com`:
 
-- **OAuth tokens** (`sk-ant-oat` prefix): `Authorization: Bearer <token>`
-- **API keys** (`sk-ant-api` prefix): `x-api-key: <key>`
-
-The container receives either `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` set to a placeholder value.
+- **`claude` grant**: `Authorization: Bearer <token>` with OAuth beta flag. Container receives `CLAUDE_CODE_OAUTH_TOKEN` placeholder.
+- **`anthropic` grant**: `x-api-key: <key>`. Container receives `ANTHROPIC_API_KEY` placeholder.
 
 ### Refresh behavior
 
-OAuth tokens imported from a local Claude Code installation do not auto-refresh. When the token expires, run a Claude Code session on your host to refresh it, then re-import with `moat grant anthropic`.
+OAuth tokens imported from a local Claude Code installation do not auto-refresh. When the token expires, run a Claude Code session on your host to refresh it, then re-import with `moat grant claude`.
 
 API keys do not expire.
+
+### `moat claude` grant resolution
+
+When you run `moat claude`, the credential is selected automatically:
+
+1. If `claude` exists, use it (preferred for Claude Code)
+2. If only `anthropic` exists, use it as fallback
+3. If neither exists, error with instructions to run `moat grant claude`
+
+### Using both grants
+
+You can grant both and use them together. This is useful when Claude Code needs its OAuth token and sub-tools in the same container need an API key:
+
+```bash
+moat run --grant claude --grant anthropic ./my-project
+```
 
 ### agent.yaml
 
 ```yaml
 grants:
-  - anthropic
+  - claude        # OAuth token for Claude Code
+  - anthropic     # API key for any tool
 ```
 
-### Example
+### Backward compatibility
+
+Existing users with an OAuth token stored under `anthropic` (the old single-provider model) are auto-migrated: `moat claude` detects the OAuth token prefix, copies it to `claude.enc`, and removes the old `anthropic` entry.
+
+### Examples
 
 ```bash
-$ moat grant anthropic
+# Grant an OAuth token for Claude Code
+$ moat grant claude
 
 Choose authentication method:
 
-  1. Claude subscription (recommended)
-  2. Anthropic API key
+  1. Claude subscription (OAuth token)
+     Runs 'claude setup-token' to get a long-lived token.
+  2. Existing OAuth token
   3. Import existing Claude Code credentials
 
-Enter choice [1, 2, or 3]: 1
+Enter choice [1-3]: 1
 
 Running 'claude setup-token' to obtain authentication token...
-Anthropic credential saved to ~/.moat/credentials/anthropic.enc
+Credential saved to ~/.moat/credentials/claude.enc
 
+# Grant an API key for general use
+$ moat grant anthropic
+
+Enter your Anthropic API key: ••••••••
+Validating API key...
+API key is valid.
+Credential saved to ~/.moat/credentials/anthropic.enc
+
+# Use Claude Code (picks up OAuth token automatically)
 $ moat claude ./my-project
+
+# Use both in a single run
+$ moat run --grant claude --grant anthropic ./my-project
 ```
 
 ## OpenAI
@@ -529,6 +581,7 @@ moat grant list --json
 
 ```bash
 moat revoke github
+moat revoke claude
 moat revoke anthropic
 moat revoke npm
 moat revoke ssh:github.com

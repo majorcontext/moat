@@ -18,20 +18,16 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// Grant acquires Anthropic credentials interactively or from environment.
-func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
+// Grant acquires a Claude Code OAuth token interactively.
+// Offers OAuth-specific options: setup-token, paste existing token, or import
+// from local Claude Code installation.
+func (p *OAuthProvider) Grant(ctx context.Context) (*provider.Credential, error) {
 	reader := bufio.NewReader(os.Stdin)
 
-	// Check if claude is available for setup-token
 	claudeAvailable := isClaudeAvailable()
-
-	// Check for existing Claude Code credentials (shown as last option)
 	hasExistingCreds := hasClaudeCodeCredentials()
 
-	// Always show the menu — at minimum, existing OAuth token and API key are available
-
 	for {
-		// Offer choices to user
 		fmt.Println("Choose authentication method:")
 		fmt.Println()
 
@@ -40,23 +36,15 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 		setupTokenOpt := 0
 		if claudeAvailable {
 			setupTokenOpt = optNum
-			fmt.Printf("  %d. Claude subscription (recommended)\n", optNum)
-			fmt.Println("     Runs 'claude setup-token' to get a long-lived OAuth token.")
-			fmt.Println("     Requires a Claude Pro/Max subscription.")
+			fmt.Printf("  %d. Claude subscription (OAuth token)\n", optNum)
+			fmt.Println("     Runs 'claude setup-token' to get a long-lived token.")
 			fmt.Println()
 			optNum++
 		}
 
 		existingTokenOpt := optNum
 		fmt.Printf("  %d. Existing OAuth token\n", optNum)
-		fmt.Println("     Paste an OAuth token you've already obtained via 'claude setup-token'.")
-		fmt.Println()
-		optNum++
-
-		apiKeyOpt := optNum
-		fmt.Printf("  %d. Anthropic API key\n", optNum)
-		fmt.Println("     Use an API key from console.anthropic.com")
-		fmt.Println("     Billed per token to your API account.")
+		fmt.Println("     Paste a token from a previous 'claude setup-token' run.")
 		fmt.Println()
 		optNum++
 
@@ -64,7 +52,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 		if hasExistingCreds {
 			importCredsOpt = optNum
 			fmt.Printf("  %d. Import existing Claude Code credentials\n", optNum)
-			fmt.Println("     Use OAuth tokens from your local Claude Code installation.")
+			fmt.Println("     Import OAuth tokens from your local Claude Code installation.")
 			fmt.Println()
 			optNum++
 		}
@@ -74,7 +62,6 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(response)
 
-		// Default to option 1
 		if response == "" {
 			response = "1"
 		}
@@ -90,9 +77,6 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 		case fmt.Sprint(existingTokenOpt):
 			return grantViaExistingOAuthToken(ctx)
 
-		case fmt.Sprint(apiKeyOpt):
-			return grantViaAPIKey(ctx)
-
 		case fmt.Sprint(importCredsOpt):
 			if importCredsOpt == 0 {
 				fmt.Printf("Invalid choice: %s\n", response)
@@ -105,6 +89,11 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 			continue
 		}
 	}
+}
+
+// Grant acquires an Anthropic API key interactively.
+func (p *AnthropicProvider) Grant(ctx context.Context) (*provider.Credential, error) {
+	return grantViaAPIKey(ctx)
 }
 
 // isClaudeAvailable checks if the claude CLI is installed.
@@ -228,7 +217,7 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 	fmt.Println("OAuth token is valid.")
 
 	cred := &provider.Credential{
-		Provider:  "anthropic",
+		Provider:  "claude",
 		Token:     token,
 		CreatedAt: time.Now(),
 	}
@@ -273,7 +262,7 @@ func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, erro
 	fmt.Println("OAuth token is valid.")
 
 	cred := &provider.Credential{
-		Provider:  "anthropic",
+		Provider:  "claude",
 		Token:     token,
 		CreatedAt: time.Now(),
 	}
@@ -546,7 +535,7 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 	fmt.Println("OAuth token is valid.")
 
 	cred := &provider.Credential{
-		Provider:  "anthropic",
+		Provider:  "claude",
 		Token:     token.AccessToken,
 		Scopes:    token.Scopes,
 		ExpiresAt: expiresAt,
