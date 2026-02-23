@@ -70,7 +70,11 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Println("No credentials found.")
-		fmt.Println("\nGrant a credential with: moat grant <provider>")
+		if credential.ActiveProfile != "" {
+			fmt.Printf("\nGrant a credential with: moat grant <provider> --profile %s\n", credential.ActiveProfile)
+		} else {
+			fmt.Println("\nGrant a credential with: moat grant <provider>")
+		}
 		return nil
 	}
 

@@ -69,17 +69,15 @@ func saveCredential(cred credential.Credential) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("getting encryption key: %w", err)
 	}
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		key,
-	)
+	storeDir := credential.DefaultStoreDir()
+	store, err := credential.NewFileStore(storeDir, key)
 	if err != nil {
 		return "", fmt.Errorf("opening credential store: %w", err)
 	}
 	if err := store.Save(cred); err != nil {
 		return "", fmt.Errorf("saving credential: %w", err)
 	}
-	return filepath.Join(credential.DefaultStoreDir(), string(cred.Provider)+".enc"), nil
+	return filepath.Join(storeDir, string(cred.Provider)+".enc"), nil
 }
 
 func runGrant(cmd *cobra.Command, args []string) error {

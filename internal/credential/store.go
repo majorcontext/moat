@@ -140,6 +140,7 @@ func (s *FileStore) List() ([]Credential, error) {
 // stored in a profile-specific subdirectory (~/.moat/credentials/profiles/<name>/).
 // Set via --profile flag or MOAT_PROFILE environment variable.
 // Empty string means use the default (unscoped) credential store.
+// Not safe for concurrent use; set once during CLI initialization.
 var ActiveProfile string
 
 // DefaultStoreDir returns the credential store directory for the active profile.
@@ -148,8 +149,9 @@ var ActiveProfile string
 func DefaultStoreDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Fall back to current directory if home is unavailable
-		home = "."
+		// Fall back to temp directory to avoid dumping credentials in the working directory.
+		log.Warn("could not determine home directory, using temp directory for credentials", "error", err)
+		home = os.TempDir()
 	}
 	base := filepath.Join(home, ".moat", "credentials")
 	if ActiveProfile != "" {
@@ -188,7 +190,7 @@ func ListProfiles() ([]string, error) {
 	}
 	var profiles []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() && ValidateProfile(entry.Name()) == nil {
 			profiles = append(profiles, entry.Name())
 		}
 	}
