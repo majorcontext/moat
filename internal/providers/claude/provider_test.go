@@ -8,18 +8,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-func TestProvider_Name(t *testing.T) {
-	p := &Provider{}
+func TestOAuthProvider_Name(t *testing.T) {
+	p := &OAuthProvider{}
 	if got := p.Name(); got != "claude" {
 		t.Errorf("Name() = %q, want %q", got, "claude")
 	}
 }
 
-func TestProvider_ConfigureProxy_OAuth(t *testing.T) {
-	p := &Provider{}
+func TestAnthropicProvider_Name(t *testing.T) {
+	p := &AnthropicProvider{}
+	if got := p.Name(); got != "anthropic" {
+		t.Errorf("Name() = %q, want %q", got, "anthropic")
+	}
+}
+
+func TestOAuthProvider_ConfigureProxy(t *testing.T) {
+	p := &OAuthProvider{}
 	mockProxy := &mockProxyConfigurer{
 		credentials:  make(map[string]string),
 		extraHeaders: make(map[string]map[string]string),
@@ -46,14 +54,19 @@ func TestProvider_ConfigureProxy_OAuth(t *testing.T) {
 		t.Error("expected x-api-key to be removed for OAuth tokens")
 	}
 
+	// Should have beta header
+	if mockProxy.extraHeaders["api.anthropic.com"]["anthropic-beta"] != "oauth-2025-04-20" {
+		t.Error("expected anthropic-beta header for OAuth tokens")
+	}
+
 	// Should have registered a transformer for OAuth tokens
 	if len(mockProxy.transformers["api.anthropic.com"]) == 0 {
 		t.Error("expected transformer to be registered for OAuth tokens")
 	}
 }
 
-func TestProvider_ConfigureProxy_APIKey(t *testing.T) {
-	p := &Provider{}
+func TestAnthropicProvider_ConfigureProxy(t *testing.T) {
+	p := &AnthropicProvider{}
 	mockProxy := &mockProxyConfigurer{
 		credentials:  make(map[string]string),
 		extraHeaders: make(map[string]map[string]string),
@@ -71,10 +84,20 @@ func TestProvider_ConfigureProxy_APIKey(t *testing.T) {
 	if len(mockProxy.transformers["api.anthropic.com"]) != 0 {
 		t.Error("expected no transformer for API keys")
 	}
+
+	// Should NOT have removed any headers
+	if len(mockProxy.removedHeaders["api.anthropic.com"]) != 0 {
+		t.Error("expected no removed headers for API keys")
+	}
+
+	// Should NOT have extra headers
+	if len(mockProxy.extraHeaders["api.anthropic.com"]) != 0 {
+		t.Error("expected no extra headers for API keys")
+	}
 }
 
-func TestProvider_ContainerEnv_OAuth(t *testing.T) {
-	p := &Provider{}
+func TestOAuthProvider_ContainerEnv(t *testing.T) {
+	p := &OAuthProvider{}
 	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
 
 	env := p.ContainerEnv(cred)
@@ -89,8 +112,8 @@ func TestProvider_ContainerEnv_OAuth(t *testing.T) {
 	}
 }
 
-func TestProvider_ContainerEnv_APIKey(t *testing.T) {
-	p := &Provider{}
+func TestAnthropicProvider_ContainerEnv(t *testing.T) {
+	p := &AnthropicProvider{}
 	cred := &provider.Credential{Token: "sk-ant-api01-abc123"}
 
 	env := p.ContainerEnv(cred)
@@ -105,31 +128,49 @@ func TestProvider_ContainerEnv_APIKey(t *testing.T) {
 	}
 }
 
-func TestProvider_ContainerEnv_NilCredential(t *testing.T) {
-	p := &Provider{}
+func TestContainerEnvForCredential(t *testing.T) {
+	t.Run("nil credential uses API key placeholder", func(t *testing.T) {
+		env := containerEnvForCredential(nil)
+		if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
+			t.Errorf("env = %v, want ANTHROPIC_API_KEY placeholder", env)
+		}
+	})
 
-	env := p.ContainerEnv(nil)
+	t.Run("claude provider uses CLAUDE_CODE_OAUTH_TOKEN", func(t *testing.T) {
+		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc123"}
+		env := containerEnvForCredential(cred)
+		if len(env) != 1 || env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
+			t.Errorf("env = %v, want CLAUDE_CODE_OAUTH_TOKEN placeholder", env)
+		}
+	})
 
-	// Nil credential should fall back to API key placeholder
-	if len(env) != 1 {
-		t.Errorf("ContainerEnv(nil) returned %d vars, want 1", len(env))
-		return
-	}
-	if env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder)
-	}
+	t.Run("anthropic provider uses ANTHROPIC_API_KEY", func(t *testing.T) {
+		cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api01-abc123"}
+		env := containerEnvForCredential(cred)
+		if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
+			t.Errorf("env = %v, want ANTHROPIC_API_KEY placeholder", env)
+		}
+	})
 }
 
-func TestProvider_ImpliedDependencies(t *testing.T) {
-	p := &Provider{}
+func TestOAuthProvider_ImpliedDependencies(t *testing.T) {
+	p := &OAuthProvider{}
 	deps := p.ImpliedDependencies()
 	if deps != nil {
 		t.Errorf("ImpliedDependencies() = %v, want nil", deps)
 	}
 }
 
-func TestProvider_ContainerMounts(t *testing.T) {
-	p := &Provider{}
+func TestAnthropicProvider_ImpliedDependencies(t *testing.T) {
+	p := &AnthropicProvider{}
+	deps := p.ImpliedDependencies()
+	if deps != nil {
+		t.Errorf("ImpliedDependencies() = %v, want nil", deps)
+	}
+}
+
+func TestOAuthProvider_ContainerMounts(t *testing.T) {
+	p := &OAuthProvider{}
 	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
 
 	mounts, cleanupPath, err := p.ContainerMounts(cred, "/home/user")
@@ -145,13 +186,30 @@ func TestProvider_ContainerMounts(t *testing.T) {
 }
 
 func TestProvider_Registration(t *testing.T) {
-	// The init() function should have registered the provider
+	// OAuthProvider should be registered as "claude"
 	p := provider.Get("claude")
 	if p == nil {
-		t.Fatal("provider.Get(\"claude\") returned nil - init() may not have run")
+		t.Fatal("provider.Get(\"claude\") returned nil")
 	}
 	if p.Name() != "claude" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "claude")
+	}
+
+	// AnthropicProvider should be registered as "anthropic"
+	p2 := provider.Get("anthropic")
+	if p2 == nil {
+		t.Fatal("provider.Get(\"anthropic\") returned nil")
+	}
+	if p2.Name() != "anthropic" {
+		t.Errorf("Name() = %q, want %q", p2.Name(), "anthropic")
+	}
+
+	// ResolveName should pass through canonical names unchanged
+	if got := provider.ResolveName("claude"); got != "claude" {
+		t.Errorf("ResolveName(\"claude\") = %q, want %q", got, "claude")
+	}
+	if got := provider.ResolveName("anthropic"); got != "anthropic" {
+		t.Errorf("ResolveName(\"anthropic\") = %q, want %q", got, "anthropic")
 	}
 }
 
@@ -446,9 +504,10 @@ func TestReadHostConfig(t *testing.T) {
 }
 
 func TestWriteCredentialsFile(t *testing.T) {
-	t.Run("OAuth token creates file", func(t *testing.T) {
+	t.Run("claude provider creates file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{
+			Provider:  "claude",
 			Token:     "sk-ant-oat01-abc123",
 			ExpiresAt: time.Now().Add(time.Hour),
 			Scopes:    []string{"user:read"},
@@ -484,10 +543,11 @@ func TestWriteCredentialsFile(t *testing.T) {
 		}
 	})
 
-	t.Run("API key does not create file", func(t *testing.T) {
+	t.Run("anthropic provider does not create file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{
-			Token: "sk-ant-api01-abc123", // API key, not OAuth
+			Provider: "anthropic",
+			Token:    "sk-ant-api01-abc123",
 		}
 
 		err := WriteCredentialsFile(cred, stagingDir)
@@ -518,8 +578,8 @@ func TestIsOAuthToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.token, func(t *testing.T) {
-			if got := isOAuthToken(tt.token); got != tt.want {
-				t.Errorf("isOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
+			if got := credential.IsOAuthToken(tt.token); got != tt.want {
+				t.Errorf("IsOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
 			}
 		})
 	}
@@ -569,7 +629,7 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
 
 func TestPrepareContainer_LocalMCPServers(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -643,7 +703,7 @@ func TestPrepareContainer_LocalMCPServers(t *testing.T) {
 }
 
 func TestPrepareContainer_MixedRemoteAndLocal(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -705,7 +765,7 @@ func TestPrepareContainer_MixedRemoteAndLocal(t *testing.T) {
 }
 
 func TestPrepareContainer_NoMCPServers(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -734,7 +794,7 @@ func TestPrepareContainer_NoMCPServers(t *testing.T) {
 
 func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
 	// Test that a local MCP server with only command (no args, env, cwd) works
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",

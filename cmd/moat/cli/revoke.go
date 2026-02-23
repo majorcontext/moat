@@ -16,7 +16,8 @@ var revokeCmd = &cobra.Command{
 
 Supported providers:
   github            GitHub token
-  anthropic         Anthropic API key or OAuth credentials
+  claude            Claude Code OAuth token
+  anthropic         Anthropic API key
   openai            OpenAI API key or OAuth credentials
   aws               AWS IAM role configuration
   mcp-<name>        MCP server credential
@@ -24,6 +25,12 @@ Supported providers:
 The credential file is permanently deleted.
 
 Examples:
+  # Revoke Claude OAuth token
+  moat revoke claude
+
+  # Revoke Anthropic API key
+  moat revoke anthropic
+
   # Revoke GitHub access
   moat revoke github
 
@@ -39,7 +46,9 @@ func init() {
 }
 
 func runRevoke(cmd *cobra.Command, args []string) error {
-	provider := credential.Provider(args[0])
+	providerName := args[0]
+
+	provider := credential.Provider(providerName)
 
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
