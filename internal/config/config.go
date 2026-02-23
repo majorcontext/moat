@@ -103,7 +103,7 @@ type VolumeConfig struct {
 // and optional authentication settings for credential injection.
 //
 // Supports both remote HTTPS servers and host-local HTTP servers.
-// Host-local servers (http://localhost or http://127.0.0.1) are reached
+// Host-local servers (http://localhost, http://127.0.0.1, or http://[::1]) are reached
 // through the proxy relay, which runs on the host and can connect to
 // host-local services that the container cannot reach directly.
 type MCPServerConfig struct {
@@ -526,8 +526,8 @@ func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 }
 
 // isHostLocalURL returns true if the URL points to a host-local address
-// (localhost or 127.0.0.1). These are MCP servers running on the host machine
-// that the container cannot reach directly.
+// (localhost, 127.0.0.1, or [::1]). These are MCP servers running on the
+// host machine that the container cannot reach directly.
 func isHostLocalURL(rawURL string) bool {
 	if !strings.HasPrefix(rawURL, "http://") {
 		return false
@@ -538,9 +538,15 @@ func isHostLocalURL(rawURL string) bool {
 	if idx := strings.IndexByte(hostPart, '/'); idx >= 0 {
 		hostPart = hostPart[:idx]
 	}
-	// Strip port
+	// Strip port — for IPv6 bracket notation like [::1]:8080, only strip
+	// the port after the closing bracket to avoid splitting the address.
 	host := hostPart
-	if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
+	if strings.HasPrefix(host, "[") {
+		// IPv6: look for ]:port
+		if idx := strings.LastIndex(host, "]:"); idx >= 0 {
+			host = host[:idx+1]
+		}
+	} else if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
 		host = host[:idx]
 	}
 	return host == "localhost" || host == "127.0.0.1" || host == "[::1]"

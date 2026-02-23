@@ -1391,6 +1391,7 @@ func TestIsHostLocalURL(t *testing.T) {
 		{"http://127.0.0.1:8080/sse", true},
 		{"http://127.0.0.1/mcp", true},
 		{"http://[::1]:3000/mcp", true},
+		{"http://[::1]/mcp", true},            // IPv6 loopback without port
 		{"https://localhost:3000/mcp", false}, // HTTPS is not host-local
 		{"http://example.com/mcp", false},
 		{"http://192.168.1.100:3000/mcp", false},
