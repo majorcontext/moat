@@ -120,11 +120,10 @@ func credType(c credential.Credential) string {
 		return "role"
 	case credential.ProviderGitHub:
 		return "token"
+	case credential.ProviderClaude:
+		return "oauth"
 	case credential.ProviderAnthropic:
-		if c.Metadata != nil && c.Metadata["auth_type"] == "oauth" {
-			return "oauth"
-		}
-		return "token"
+		return "api-key"
 	case credential.ProviderOpenAI:
 		if c.Metadata != nil && c.Metadata["auth_type"] == "oauth" {
 			return "oauth"

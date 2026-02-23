@@ -40,10 +40,10 @@ Subcommands:
   mcp         Grant credentials for an MCP server
 
 Examples:
+  moat grant claude                    # Grant Claude OAuth token (for moat claude)
+  moat grant anthropic                 # Grant Anthropic API key (for any agent)
   moat grant github                    # Grant GitHub access
-  moat grant anthropic                 # Grant Anthropic access
   moat grant aws --role=arn:aws:...    # Grant AWS access via IAM role
-  moat grant gitlab                    # Grant GitLab access
   moat grant providers                 # List all available providers
   moat run my-agent . --grant github   # Use credential in a run`,
 	Args: cobra.MinimumNArgs(1),
@@ -81,12 +81,10 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	providerName := args[0]
 
 	// Map CLI names to provider names
-	// "anthropic" is the CLI name, but the provider is registered as "claude"
 	// "openai" is the CLI name, but the provider is registered as "codex"
 	// "google" is an alias for "gemini"
+	// "anthropic" and "claude" are handled by the provider registry (aliases)
 	switch providerName {
-	case "anthropic":
-		providerName = "claude"
 	case "openai":
 		providerName = "codex"
 	case "google":

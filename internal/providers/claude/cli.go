@@ -23,7 +23,7 @@ var (
 
 // RegisterCLI adds provider-specific commands to the root command.
 // This adds the `moat claude` command group with subcommands.
-func (p *Provider) RegisterCLI(root *cobra.Command) {
+func (p *OAuthProvider) RegisterCLI(root *cobra.Command) {
 	claudeCmd := &cobra.Command{
 		Use:   "claude [workspace] [flags]",
 		Short: "Run Claude Code in an isolated container",
@@ -254,22 +254,64 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getClaudeCredentialName returns the name under which the Claude credential is stored.
+// getClaudeCredentialName returns the grant name to use for moat claude.
+//
+// Preference order:
+//  1. claude (OAuth token) — preferred for Claude Code
+//  2. anthropic (API key) — fallback, works with Claude Code too
+//
+// Auto-migration:
+//   - claude-oauth.enc (old name) → claude.enc
+//   - anthropic.enc with OAuth token → claude.enc
+//
 // Returns empty string if no credential exists.
 func getClaudeCredentialName() string {
-	// Check both provider names (claude is the internal name, anthropic is legacy)
-	for _, name := range []string{"claude", "anthropic"} {
-		key, err := credential.DefaultEncryptionKey()
-		if err != nil {
-			continue
-		}
-		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
-		if err != nil {
-			continue
-		}
-		if _, err := store.Get(credential.Provider(name)); err == nil {
-			return name
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		return ""
+	}
+	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	if err != nil {
+		return ""
+	}
+
+	// Prefer claude if it exists
+	if _, getErr := store.Get(credential.ProviderClaude); getErr == nil {
+		return "claude"
+	}
+
+	// Auto-migrate: claude-oauth.enc (old provider name) → claude.enc
+	if oldCred, getErr := store.Get("claude-oauth"); getErr == nil {
+		migrated := *oldCred
+		migrated.Provider = credential.ProviderClaude
+		if saveErr := store.Save(migrated); saveErr == nil {
+			_ = store.Delete("claude-oauth")
+			log.Info("migrated credential from claude-oauth to claude",
+				"subsystem", "grant",
+			)
+			return "claude"
 		}
 	}
-	return ""
+
+	// Check anthropic
+	cred, getErr := store.Get(credential.ProviderAnthropic)
+	if getErr != nil {
+		return ""
+	}
+
+	// Auto-migrate: if anthropic.enc contains an OAuth token, move it to claude.enc
+	if credential.IsOAuthToken(cred.Token) {
+		migrated := *cred
+		migrated.Provider = credential.ProviderClaude
+		if saveErr := store.Save(migrated); saveErr == nil {
+			_ = store.Delete(credential.ProviderAnthropic)
+			log.Info("migrated OAuth token from anthropic to claude",
+				"subsystem", "grant",
+			)
+			return "claude"
+		}
+		// Migration failed — fall through to use anthropic as-is
+	}
+
+	return "anthropic"
 }

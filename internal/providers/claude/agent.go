@@ -13,7 +13,10 @@ import (
 // It creates the necessary files that will be copied into the container at startup.
 //
 // If opts.HostConfig is nil, this method reads the host's ~/.claude.json automatically.
-func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOpts) (*provider.ContainerConfig, error) {
+//
+// This method works with both OAuth tokens and API keys. The credential type
+// determines which environment variable placeholder is set.
+func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.PrepareOpts) (*provider.ContainerConfig, error) {
 	// Create a temporary staging directory
 	tmpDir, err := os.MkdirTemp("", "moat-claude-*")
 	if err != nil {
@@ -79,9 +82,9 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		},
 	}
 
-	// Build environment variables
-	// Include credential env vars plus the init mount path for moat-init script
-	env := p.ContainerEnv(opts.Credential)
+	// Build environment variables based on credential type.
+	// PrepareContainer can be called with either OAuth or API key credentials.
+	env := containerEnvForCredential(opts.Credential)
 	env = append(env, "MOAT_CLAUDE_INIT="+ClaudeInitMountPath)
 
 	success = true
@@ -93,4 +96,15 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 			os.RemoveAll(tmpDir)
 		},
 	}, nil
+}
+
+// containerEnvForCredential returns the correct environment variable based on
+// the credential type. OAuth tokens get CLAUDE_CODE_OAUTH_TOKEN, API keys get
+// ANTHROPIC_API_KEY. Both use placeholder values — real credentials are injected
+// by the proxy at the network layer.
+func containerEnvForCredential(cred *provider.Credential) []string {
+	if cred != nil && isOAuthToken(cred.Token) {
+		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+	}
+	return []string{"ANTHROPIC_API_KEY=" + ProxyInjectedPlaceholder}
 }

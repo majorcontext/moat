@@ -283,8 +283,9 @@ func checkHostClaudeConfig(diag *claudeDiagnostic) error {
 	return nil
 }
 
-// getAnthropicCredential reads the Anthropic credential from the encrypted store.
-// Returns nil and an error description if the credential cannot be read.
+// getAnthropicCredential reads the Anthropic/Claude credential from the encrypted store.
+// It checks claude first (preferred for Claude Code), then falls back to anthropic.
+// Returns nil and an error description if no credential can be read.
 func getAnthropicCredential() (*credential.Credential, string) {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
@@ -296,7 +297,11 @@ func getAnthropicCredential() (*credential.Credential, string) {
 		return nil, fmt.Sprintf("cannot open credential store: %v", err)
 	}
 
-	cred, err := store.Get(credential.ProviderAnthropic)
+	// Prefer claude, fall back to anthropic
+	cred, err := store.Get(credential.ProviderClaude)
+	if err != nil {
+		cred, err = store.Get(credential.ProviderAnthropic)
+	}
 	if err != nil {
 		return nil, "no Anthropic credential granted"
 	}
@@ -313,7 +318,7 @@ func checkCredentialStatus(diag *claudeDiagnostic) {
 				Severity:    "error",
 				Component:   "credential",
 				Description: "No Anthropic credential granted",
-				Fix:         "Run 'moat grant anthropic' to grant credentials",
+				Fix:         "Run 'moat grant claude' to grant credentials",
 			})
 		} else if errMsg == "cannot access credential store encryption key" {
 			diag.Issues = append(diag.Issues, issue{
@@ -355,7 +360,7 @@ func checkCredentialStatus(diag *claudeDiagnostic) {
 					Severity:    "warning",
 					Component:   "credential",
 					Description: fmt.Sprintf("OAuth token expires soon (%s remaining)", status.TimeRemaining),
-					Fix:         "Run 'moat grant anthropic' to refresh the token",
+					Fix:         "Run 'moat grant claude' to refresh the token",
 				})
 			}
 		} else {
@@ -363,7 +368,7 @@ func checkCredentialStatus(diag *claudeDiagnostic) {
 				Severity:    "error",
 				Component:   "credential",
 				Description: "OAuth token has expired",
-				Fix:         "Run 'moat grant anthropic' to refresh the token",
+				Fix:         "Run 'moat grant claude' to refresh the token",
 			})
 		}
 	}
@@ -511,7 +516,7 @@ func outputHuman(diag *claudeDiagnostic) error {
 				fmt.Printf("  %s Direct test skipped (%s)\n", ui.Dim("-"), dt.SkipReason)
 			} else {
 				fmt.Printf("  %s Direct API call failed: %s\n", ui.FailTag(), dt.Error)
-				fmt.Printf("    Fix: Run 'moat grant anthropic' to get a new token\n")
+				fmt.Printf("    Fix: Run 'moat grant claude' to get a new token\n")
 			}
 		}
 
@@ -827,7 +832,7 @@ func runProgressiveValidation(ctx context.Context, diag *claudeDiagnostic) {
 			Severity:    "error",
 			Component:   "token-validation",
 			Description: fmt.Sprintf("Cannot validate token: %s", errMsg),
-			Fix:         "Run 'moat grant anthropic' to grant credentials",
+			Fix:         "Run 'moat grant claude' to grant credentials",
 		})
 		return
 	}
@@ -842,9 +847,9 @@ func runProgressiveValidation(ctx context.Context, diag *claudeDiagnostic) {
 			SkipReason: "token is invalid",
 		}
 
-		fix := "Run 'moat grant anthropic' to get a new token"
+		fix := "Run 'moat grant claude' to get a new token"
 		if validation.DirectTest.StatusCode == 403 {
-			fix = "Token lacks required permissions. Run 'moat grant anthropic' to get a new token with correct scopes"
+			fix = "Token lacks required permissions. Run 'moat grant claude' to get a new token with correct scopes"
 		}
 
 		diag.Issues = append(diag.Issues, issue{
@@ -891,10 +896,18 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Determine which grant to use based on stored credential type.
+	// This mirrors the preference logic in moat claude: claude first, anthropic fallback.
+	grantName := "anthropic"
+	cred, _ := getAnthropicCredential()
+	if cred != nil && credential.IsOAuthToken(cred.Token) {
+		grantName = "claude"
+	}
+
 	// Create config programmatically with claude-code dependency
 	cfg := &config.Config{
 		Dependencies: []string{"claude-code"},
-		Grants:       []string{"anthropic"},
+		Grants:       []string{grantName},
 	}
 
 	// Create manager
@@ -915,7 +928,7 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 		Name:          "doctor-claude-test",
 		Workspace:     tmpDir,
 		Config:        cfg,
-		Grants:        []string{"anthropic"},
+		Grants:        []string{grantName},
 		Cmd:           testCmd,
 		KeepContainer: false,
 	})
@@ -1004,7 +1017,7 @@ func analyzeNetworkAuth(requests []storage.NetworkRequest, result *containerTest
 			Severity:    "error",
 			Component:   "container-auth",
 			Description: fmt.Sprintf("API authentication failed: %d of %d Anthropic requests returned 401", len(result.AuthErrors), anthropicTotal),
-			Fix:         "Run 'moat grant anthropic' to refresh credentials, then retry",
+			Fix:         "Run 'moat grant claude' to refresh credentials, then retry",
 		})
 	}
 

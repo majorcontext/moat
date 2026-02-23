@@ -256,8 +256,11 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 			continue
 		}
 
+		// Resolve to canonical provider name for credential lookup.
+		credName := credential.Provider(provider.ResolveName(grantName))
+
 		// Check credential exists and can be decrypted
-		_, err := store.Get(credential.Provider(grantName))
+		_, err := store.Get(credName)
 		if err != nil {
 			errMsg := err.Error()
 			switch {

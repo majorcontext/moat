@@ -487,7 +487,8 @@ moat grant <provider>[:<scopes>]
 | Provider | Description |
 |----------|-------------|
 | `github` | GitHub (gh CLI, env var, or PAT) |
-| `anthropic` | Anthropic (Claude Code OAuth or API key) |
+| `claude` | Claude Code OAuth token |
+| `anthropic` | Anthropic API key |
 | `openai` | OpenAI (API key) |
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
 | `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
@@ -505,9 +506,21 @@ GitHub credentials are obtained from multiple sources, in order of preference:
 moat grant github
 ```
 
+### moat grant claude
+
+Stores a Claude Code OAuth token. Presents a menu of OAuth token sources (setup-token, paste existing, or import from local Claude Code).
+
+OAuth tokens are stored as `claude.enc`. See [Grants reference](./04-grants.md#anthropic--claude) for details.
+
+```bash
+moat grant claude
+```
+
 ### moat grant anthropic
 
-Stores an Anthropic credential for Claude Code. Supports OAuth tokens (from `claude setup-token`) or API keys.
+Stores an Anthropic API key. Reads from `ANTHROPIC_API_KEY` environment variable, or prompts interactively.
+
+API keys are stored as `anthropic.enc`. Both credentials can coexist with `claude`.
 
 ```bash
 moat grant anthropic
@@ -681,7 +694,8 @@ moat revoke <provider>
 
 ```bash
 moat revoke github
-moat revoke anthropic
+moat revoke claude          # revokes OAuth token
+moat revoke anthropic       # revokes API key
 moat revoke npm
 moat revoke ssh:github.com
 ```

@@ -28,6 +28,18 @@ func RegisterAlias(alias, canonical string) {
 	aliases[alias] = canonical
 }
 
+// ResolveName returns the canonical provider name for a given name or alias.
+// If the name is directly registered or unknown, it is returned as-is.
+// If the name is an alias, the canonical name is returned.
+func ResolveName(name string) string {
+	mu.RLock()
+	defer mu.RUnlock()
+	if canonical, ok := aliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
 // Get returns a provider by name or alias, or nil if not found.
 func Get(name string) CredentialProvider {
 	mu.RLock()
