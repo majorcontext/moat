@@ -197,10 +197,11 @@ The agent starts the MCP server process inside the container and connects to it 
 
 ### Injecting credentials
 
-Use the `grant` field to inject a credential as an environment variable:
+Use the `grant` field to inject a credential as an environment variable.
+This is supported for Codex and Gemini agents:
 
 ```yaml
-claude:
+codex:
   mcp:
     github_server:
       command: /path/to/github-mcp-server
