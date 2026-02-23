@@ -40,6 +40,18 @@ type TokenResponse struct {
 // callbackTimeout is how long to wait for the OAuth callback.
 const callbackTimeout = 5 * time.Minute
 
+// maxTokenResponseBytes limits the size of OAuth token endpoint responses
+// to prevent unbounded reads from a malicious or misconfigured server.
+const maxTokenResponseBytes = 1 << 20 // 1 MB
+
+// tokenHTTPClient is a dedicated client for OAuth token requests. Using a
+// private transport avoids routing through the credential-injecting proxy
+// if http.DefaultTransport is patched elsewhere.
+var tokenHTTPClient = &http.Client{
+	Transport: &http.Transport{},
+	Timeout:   30 * time.Second,
+}
+
 // Authorize runs the OAuth authorization code flow:
 // 1. Starts a local HTTP server for the callback
 // 2. Returns the authorization URL for the user to open
@@ -111,7 +123,11 @@ func Authorize(ctx context.Context, cfg Config) (*TokenResponse, error) {
 			errCh <- fmt.Errorf("callback server error: %w", serveErr)
 		}
 	}()
-	defer server.Shutdown(context.Background()) //nolint:errcheck
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx) //nolint:errcheck
+	}()
 
 	// Build authorization URL
 	authURL, err := buildAuthURL(cfg, redirectURI, state)
@@ -156,13 +172,13 @@ func RefreshAccessToken(ctx context.Context, tokenURL, clientID, refreshToken st
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := tokenHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token refresh request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("reading refresh response: %w", err)
 	}
@@ -222,13 +238,13 @@ func exchangeCode(ctx context.Context, cfg Config, code, redirectURI string) (*T
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := tokenHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("reading token response: %w", err)
 	}

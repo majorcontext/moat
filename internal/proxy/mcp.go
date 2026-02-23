@@ -282,6 +282,10 @@ func formatMCPToken(auth *config.MCPAuthConfig, token string) string {
 
 // resolveOAuthToken returns the access token, refreshing it if expired.
 // If refresh fails, returns the existing (possibly expired) token.
+//
+// Note: concurrent requests for the same expired token may each trigger a
+// refresh independently. This is harmless (last writer wins in the credential
+// store) but slightly wasteful. A singleflight could coalesce them.
 func (p *Proxy) resolveOAuthToken(ctx context.Context, server *config.MCPServerConfig, cred *credential.Credential) string {
 	// Check if token is still valid (with 60s buffer)
 	if !cred.ExpiresAt.IsZero() && time.Until(cred.ExpiresAt) > 60*time.Second {
