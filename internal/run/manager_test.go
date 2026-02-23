@@ -2294,13 +2294,15 @@ func TestStartAttachedInteractiveMultiWriter(t *testing.T) {
 		Store:       store,
 	}
 
-	// Simulate the logic from StartAttached
+	// Simulate the logic from StartAttached: the logsCaptured flag is set
+	// AFTER the log writer is closed, not before, to avoid a race where
+	// captureLogs sees the flag and skips capture before data is written.
 	if r.Interactive && r.Store != nil {
 		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
-			r.logsCaptured.Store(true)
 			stdout := io.Discard
 			teeStdout := io.MultiWriter(stdout, lw)
 			lw.Close()
+			r.logsCaptured.Store(true)
 
 			// Verify the MultiWriter was created (non-nil)
 			if teeStdout == nil {
@@ -2316,9 +2318,9 @@ func TestStartAttachedInteractiveMultiWriter(t *testing.T) {
 	}
 }
 
-// TestFollowLogsCancelledContext verifies FollowLogs handles context cancellation.
-func TestFollowLogsCancelledContext(t *testing.T) {
-	// Create a reader that blocks until context is cancelled
+// TestFollowLogsCanceledContext verifies FollowLogs handles context cancellation.
+func TestFollowLogsCanceledContext(t *testing.T) {
+	// Create a reader that blocks until context is canceled
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pr, pw := io.Pipe()

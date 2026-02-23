@@ -2190,8 +2190,6 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	if r.Interactive && r.Store != nil {
 		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
 			logWriter = lw
-			// Mark logs as being captured so captureLogs doesn't duplicate
-			r.logsCaptured.Store(true)
 			teeStdout = io.MultiWriter(stdout, lw)
 			if stderr != stdout {
 				teeStderr = io.MultiWriter(stderr, lw)
@@ -2288,14 +2286,17 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
-	// Close the streaming log writer if we were capturing interactively
+	// Close the streaming log writer if we were capturing interactively.
+	// Mark logs as captured AFTER close so captureLogs doesn't duplicate.
 	if logWriter != nil {
 		logWriter.Close()
+		r.logsCaptured.Store(true)
 	}
 
-	// Capture logs after container exits (critical for audit/observability)
-	// For interactive mode with streaming log writer, this is a no-op (logsCaptured is already set)
-	// For non-interactive mode, this fetches from container runtime logs
+	// Capture logs after container exits (critical for audit/observability).
+	// For interactive mode with streaming log writer, this is a no-op
+	// because logsCaptured was set above after the writer was closed.
+	// For non-interactive mode, this fetches from container runtime logs.
 	m.captureLogs(r)
 
 	return attachErr
@@ -2316,11 +2317,11 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	// feedback. If we have a store, also tee to the log file so `moat logs`
 	// can show output from running containers.
 	var dest io.Writer = os.Stdout
+	var hasLogWriter bool
 	if r.Store != nil {
 		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
 			dest = io.MultiWriter(os.Stdout, lw)
-			// Mark logs as being captured so captureLogs doesn't duplicate
-			r.logsCaptured.Store(true)
+			hasLogWriter = true
 			defer lw.Close()
 		} else {
 			log.Debug("failed to open log writer for streaming", "runID", r.ID, "error", lwErr)
@@ -2338,6 +2339,13 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	} else {
 		// Apple container: output is already raw
 		_, _ = io.Copy(dest, logs)
+	}
+
+	// Mark logs as captured AFTER the copy completes so captureLogs doesn't
+	// duplicate. Setting this before the copy could cause captureLogs to skip
+	// capture if the copy fails early, leaving logs.jsonl empty.
+	if hasLogWriter {
+		r.logsCaptured.Store(true)
 	}
 }
 
@@ -2363,14 +2371,16 @@ func (m *Manager) streamLogsToStorage(ctx context.Context, r *Run) {
 	}
 	defer lw.Close()
 
-	// Mark logs as being captured so captureLogs doesn't duplicate
-	r.logsCaptured.Store(true)
-
 	if m.runtime.Type() == container.RuntimeDocker {
 		_, _ = stdcopy.StdCopy(lw, lw, logs)
 	} else {
 		_, _ = io.Copy(lw, logs)
 	}
+
+	// Mark logs as captured AFTER the copy completes so captureLogs doesn't
+	// duplicate. Setting this before the copy could cause captureLogs to skip
+	// capture if the copy fails early, leaving logs.jsonl empty.
+	r.logsCaptured.Store(true)
 }
 
 // Stop terminates a running run.

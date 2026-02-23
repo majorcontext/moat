@@ -293,7 +293,7 @@ func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run
 			width, height := term.GetSize(os.Stdout)
 			if width > 0 && height > 0 {
 				// #nosec G115 -- width/height are validated positive above
-				_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+				_ = manager.ResizeTTY(attachCtx, r.ID, uint(height), uint(width))
 			}
 		}
 	}()

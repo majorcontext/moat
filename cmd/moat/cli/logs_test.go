@@ -112,8 +112,9 @@ func TestFollowLogsTimingConstants(t *testing.T) {
 	if logsFollow {
 		t.Error("logsFollow should default to false")
 	}
-	if logsLines != 0 {
-		// logsLines is set via flag with default 100, but the package-level
-		// var starts at 0 before flags are parsed. This is fine.
+	// logsLines is set via flag with default 100. Verify the flag default is
+	// wired up correctly (IntVarP sets it at init time).
+	if logsLines != 100 {
+		t.Errorf("logsLines should default to 100, got %d", logsLines)
 	}
 }
