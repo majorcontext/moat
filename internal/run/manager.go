@@ -2287,16 +2287,30 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	attachErr := <-attachDone
 
 	// Close the streaming log writer if we were capturing interactively.
-	// Mark logs as captured AFTER close so captureLogs doesn't duplicate.
 	if logWriter != nil {
 		logWriter.Close()
-		r.logsCaptured.Store(true)
+
+		if m.runtime.Type() == container.RuntimeApple {
+			// Apple containers: TTY output doesn't go to container runtime logs,
+			// so the tee is the only source of truth. Mark as captured to prevent
+			// captureLogs from overwriting with empty data.
+			r.logsCaptured.Store(true)
+		} else {
+			// Docker: The tee may not receive data when stdin is not a real
+			// terminal (e.g., CI, piped input). Docker's ContainerAttach closes
+			// the hijacked connection when the stdin writer calls CloseWrite(),
+			// which can happen before any output is read. Remove the potentially
+			// empty log file and let captureLogs use ContainerLogsAll which
+			// reliably fetches all output from Docker's log storage.
+			logsPath := filepath.Join(r.Store.Dir(), "logs.jsonl")
+			_ = os.Remove(logsPath)
+		}
 	}
 
 	// Capture logs after container exits (critical for audit/observability).
-	// For interactive mode with streaming log writer, this is a no-op
-	// because logsCaptured was set above after the writer was closed.
-	// For non-interactive mode, this fetches from container runtime logs.
+	// For Docker: always runs and uses ContainerLogsAll (reliable source).
+	// For Apple interactive: skipped because logsCaptured was set above.
+	// For non-interactive: fetches from container runtime logs.
 	m.captureLogs(r)
 
 	return attachErr
