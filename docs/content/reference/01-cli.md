@@ -872,6 +872,7 @@ moat list
 | NAME | Run name |
 | RUN ID | Unique identifier |
 | STATE | running, stopped, failed |
+| AGE | Time since run was created |
 | WORKTREE | Branch name (appears when any run has a worktree) |
 | ENDPOINTS | Exposed services (from ports) |
 

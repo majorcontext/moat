@@ -105,7 +105,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	} else {
 		// Log the error so users know why we might not detect in-use images
 		ui.Warnf("Failed to list containers: %v", containerErr)
-		ui.Info("Proceeding with image cleanup but cannot verify images are unused")
+		ui.Info("Images will be skipped if running containers cannot be verified")
 	}
 
 	var unusedImages []container.ImageInfo
@@ -228,6 +228,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Remove stopped runs
 	var freedSize int64
 	var removedCount, failedCount int
+	destroyedRunIDs := make(map[string]bool)
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
 		if err := manager.Destroy(ctx, r.ID); err != nil {
@@ -237,6 +238,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println(ui.Green("done"))
 		removedCount++
+		destroyedRunIDs[r.ID] = true
 	}
 
 	// Remove unused images
@@ -275,8 +277,13 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Clean worktree directories for stopped runs
+	// Clean worktree directories only for runs that were successfully destroyed.
+	// If destroy failed, the run record still exists and removing its worktree
+	// would leave it visible in "moat list" but with a missing directory.
 	for _, r := range worktreeRuns {
+		if !destroyedRunIDs[r.ID] {
+			continue
+		}
 		branch := r.WorktreeBranch
 		if branch == "" {
 			branch = r.WorktreePath
