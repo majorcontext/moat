@@ -83,7 +83,7 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	// Map CLI names to provider names
 	// "openai" is the CLI name, but the provider is registered as "codex"
 	// "google" is an alias for "gemini"
-	// "anthropic" and "claude" are handled by the provider registry (aliases)
+	// "anthropic" and "claude" are separate registered providers; no remapping needed
 	switch providerName {
 	case "openai":
 		providerName = "codex"

@@ -832,7 +832,7 @@ func runProgressiveValidation(ctx context.Context, diag *claudeDiagnostic) {
 			Severity:    "error",
 			Component:   "token-validation",
 			Description: fmt.Sprintf("Cannot validate token: %s", errMsg),
-			Fix:         "Run 'moat grant claude' to grant credentials",
+			Fix:         "Run 'moat grant claude' (OAuth) or 'moat grant anthropic' (API key) to grant credentials",
 		})
 		return
 	}
@@ -847,9 +847,9 @@ func runProgressiveValidation(ctx context.Context, diag *claudeDiagnostic) {
 			SkipReason: "token is invalid",
 		}
 
-		fix := "Run 'moat grant claude' to get a new token"
+		fix := "Run 'moat grant claude' (OAuth) or 'moat grant anthropic' (API key) to get a new token"
 		if validation.DirectTest.StatusCode == 403 {
-			fix = "Token lacks required permissions. Run 'moat grant claude' to get a new token with correct scopes"
+			fix = "Token lacks required permissions. Re-run 'moat grant claude' or 'moat grant anthropic' to get a new token with correct scopes"
 		}
 
 		diag.Issues = append(diag.Issues, issue{
