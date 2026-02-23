@@ -85,7 +85,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify this is a Claude Code run
-	if target.Agent != "" && !isClaudeRun(target) {
+	if !isClaudeRun(target) {
 		return fmt.Errorf("run %s uses agent %q, but resume is only supported for Claude Code runs", target.ID[:8], target.Agent)
 	}
 
@@ -98,7 +98,10 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 	// If stopped, start a new container with the same workspace
 	if target.State != run.StateStopped && target.State != run.StateFailed {
-		return fmt.Errorf("run %s is in state %q and cannot be resumed", target.ID, target.State)
+		if target.State == run.StateCreated || target.State == run.StateStarting {
+			return fmt.Errorf("run %s is still starting up; use 'moat attach %s' once it is running", target.ID[:8], target.Name)
+		}
+		return fmt.Errorf("run %s is in state %q and cannot be resumed", target.ID[:8], target.State)
 	}
 
 	return resumeStoppedRun(target)

@@ -94,11 +94,7 @@ func TestIsClaudeRun(t *testing.T) {
 	}
 }
 
-func TestFindMostRecentClaudeRun_PrefersRunning(t *testing.T) {
-	// This tests the sorting and preference logic.
-	// We can't easily test with a real manager, but we can test
-	// the isClaudeRun helper and verify the command structure.
-
+func TestResumeCommand_Structure(t *testing.T) {
 	// Verify the command uses a run argument, not workspace
 	if resumeCmd.Use != "resume [run]" {
 		t.Errorf("resume command Use = %q, want %q", resumeCmd.Use, "resume [run]")
