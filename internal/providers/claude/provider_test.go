@@ -548,7 +548,7 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
 
 func TestRegisterCLI_ContinueFlag(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 	root := &cobra.Command{Use: "test"}
 	p.RegisterCLI(root)
 
@@ -570,7 +570,7 @@ func TestRegisterCLI_ContinueFlag(t *testing.T) {
 }
 
 func TestRegisterCLI_ResumeFlag(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 	root := &cobra.Command{Use: "test"}
 	p.RegisterCLI(root)
 
@@ -592,7 +592,7 @@ func TestRegisterCLI_ResumeFlag(t *testing.T) {
 }
 
 func TestRegisterCLI_WorktreeFlags(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 	root := &cobra.Command{Use: "test"}
 	p.RegisterCLI(root)
 
@@ -618,7 +618,7 @@ func TestRegisterCLI_WorktreeFlags(t *testing.T) {
 }
 
 func TestRegisterCLI_NoYoloFlag(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 	root := &cobra.Command{Use: "test"}
 	p.RegisterCLI(root)
 
@@ -637,7 +637,7 @@ func TestRegisterCLI_NoYoloFlag(t *testing.T) {
 }
 
 func TestRegisterCLI_PromptFlag(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 	root := &cobra.Command{Use: "test"}
 	p.RegisterCLI(root)
 
