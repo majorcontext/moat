@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -18,12 +19,29 @@ import (
 
 // ReverseProxy routes requests based on Host header to container services.
 type ReverseProxy struct {
-	routes *RouteTable
+	routes        *RouteTable
+	oauthMu       sync.RWMutex
+	oauthHandler  http.Handler // optional OAuth relay handler
+	oauthHostname string       // hostname without port (e.g. "oauthrelay.localhost")
 }
 
 // NewReverseProxy creates a reverse proxy with the given route table.
 func NewReverseProxy(routes *RouteTable) *ReverseProxy {
 	return &ReverseProxy{routes: routes}
+}
+
+// SetOAuthRelay registers an OAuth relay handler. Requests to the given hostname
+// (e.g. "oauthrelay.localhost") are routed to this handler instead of the normal
+// agent routing logic.
+func (rp *ReverseProxy) SetOAuthRelay(hostname string, handler http.Handler) {
+	// Strip port from hostname if present
+	if idx := strings.LastIndex(hostname, ":"); idx != -1 {
+		hostname = hostname[:idx]
+	}
+	rp.oauthMu.Lock()
+	rp.oauthHostname = hostname
+	rp.oauthHandler = handler
+	rp.oauthMu.Unlock()
 }
 
 // ServeHTTP handles incoming requests and routes them to backends.
@@ -32,6 +50,16 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx] // Remove port
+	}
+
+	// Check for OAuth relay requests before normal routing
+	rp.oauthMu.RLock()
+	oauthHandler := rp.oauthHandler
+	oauthHostname := rp.oauthHostname
+	rp.oauthMu.RUnlock()
+	if oauthHandler != nil && host == oauthHostname {
+		oauthHandler.ServeHTTP(w, r)
+		return
 	}
 
 	// Remove .localhost suffix
@@ -124,6 +152,11 @@ func NewProxyServer(routes *RouteTable) *ProxyServer {
 	return &ProxyServer{
 		rp: NewReverseProxy(routes),
 	}
+}
+
+// ReverseProxy returns the underlying reverse proxy for configuration.
+func (ps *ProxyServer) ReverseProxy() *ReverseProxy {
+	return ps.rp
 }
 
 // EnableTLS configures TLS support using the given CA.

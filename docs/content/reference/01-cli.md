@@ -588,6 +588,26 @@ The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be refer
 **Storage:**
 - `~/.moat/credentials/mcp-<name>.enc`
 
+### moat grant google-oauth
+
+Store Google OAuth client credentials for the OAuth relay.
+
+```bash
+moat grant google-oauth
+```
+
+The client ID and secret are used by the OAuth relay to redirect Google authorization codes to the correct application container. See [OAuth relay guide](../guides/13-oauth-relay.md).
+
+**Interactive prompts:**
+- Client ID (visible input)
+- Client Secret (hidden input)
+
+**Storage:**
+- `~/.moat/credentials/google-oauth.enc`
+
+**Register this redirect URI in the Google Cloud Console:**
+- `http://oauthrelay.localhost:8080/callback`
+
 ### moat grant ssh
 
 Grant SSH access to a specific host.

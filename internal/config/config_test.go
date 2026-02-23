@@ -1416,3 +1416,59 @@ func TestServiceWaitDefault(t *testing.T) {
 		t.Error("expected ServiceWait() to return false when Wait is false")
 	}
 }
+
+func TestLoadConfig_OAuthRelay(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "oauth_relay with ports",
+			yaml: `agent: claude-code
+oauth_relay: true
+ports:
+  web: 3000
+`,
+		},
+		{
+			name: "oauth_relay without ports",
+			yaml: `agent: claude-code
+oauth_relay: true
+`,
+			wantErr: "oauth_relay requires at least one port",
+		},
+		{
+			name: "no oauth_relay",
+			yaml: `agent: claude-code
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(tt.yaml), 0644)
+
+			cfg, err := Load(dir)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if tt.name == "oauth_relay with ports" && !cfg.OAuthRelay {
+				t.Error("OAuthRelay should be true")
+			}
+			if tt.name == "no oauth_relay" && cfg.OAuthRelay {
+				t.Error("OAuthRelay should be false")
+			}
+		})
+	}
+}

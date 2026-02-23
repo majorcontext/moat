@@ -31,6 +31,7 @@ import (
 	"github.com/majorcontext/moat/internal/image"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
+	"github.com/majorcontext/moat/internal/oauthrelay"
 	"github.com/majorcontext/moat/internal/provider"
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
@@ -947,6 +948,54 @@ region = %s
 			endpointHost := fmt.Sprintf("%s.%s.localhost:%d", endpointName, agentName, proxyPort)
 			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_HOST_%s=%s", upperName, endpointHost))
 			proxyEnv = append(proxyEnv, fmt.Sprintf("MOAT_URL_%s=http://%s", upperName, endpointHost))
+		}
+	}
+
+	// Set up OAuth relay environment variables if enabled
+	if opts.Config != nil && opts.Config.OAuthRelay {
+		globalCfg, cfgErr := config.LoadGlobal()
+		if cfgErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("loading global config for OAuth relay: %w", cfgErr)
+		}
+		proxyPort := globalCfg.Proxy.Port
+
+		// Load Google OAuth credentials
+		key, keyErr := credential.DefaultEncryptionKey()
+		if keyErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("getting encryption key for OAuth relay: %w", keyErr)
+		}
+		oauthStore, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+		if storeErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("opening credential store for OAuth relay: %w", storeErr)
+		}
+		oauthCred, oauthErr := oauthStore.Get(credential.ProviderGoogleOAuth)
+		if oauthErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("Google OAuth credentials not found.\n\nGrant them first:\n  moat grant google-oauth")
+		}
+
+		clientID := oauthCred.Metadata["client_id"]
+		clientSecret := oauthCred.Token
+		if clientID == "" {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("Google OAuth credential is missing client_id. Re-grant:\n  moat grant google-oauth")
+		}
+
+		relayURL := fmt.Sprintf("http://oauthrelay.localhost:%d/start", proxyPort)
+		proxyEnv = append(proxyEnv,
+			"MOAT_OAUTH_RELAY_URL="+relayURL,
+			"GOOGLE_CLIENT_ID="+clientID,
+			"GOOGLE_CLIENT_SECRET="+clientSecret,
+		)
+
+		// Store OAuth relay config on the run for lifecycle setup later
+		r.OAuthRelayConfig = &oauthrelay.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			ProxyPort:    proxyPort,
 		}
 	}
 
@@ -1931,6 +1980,18 @@ region = %s
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
+		}
+
+		// Set up OAuth relay handler if configured.
+		// Note: only one relay can be active at a time. If multiple runs use
+		// oauth_relay, the last one registered wins. In-flight OAuth flows from
+		// earlier runs will be lost. This is a known limitation.
+		if r.OAuthRelayConfig != nil {
+			relay := oauthrelay.New(*r.OAuthRelayConfig)
+			m.proxyLifecycle.SetOAuthRelay(relay.Hostname(), relay)
+			log.Debug("OAuth relay registered",
+				"hostname", relay.Hostname(),
+				"app", r.Name)
 		}
 	}
 

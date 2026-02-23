@@ -3,9 +3,11 @@ package routing
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
 )
 
@@ -124,6 +126,18 @@ func (lc *Lifecycle) Port() int {
 // Routes returns the route table.
 func (lc *Lifecycle) Routes() *RouteTable {
 	return lc.routes
+}
+
+// SetOAuthRelay registers an OAuth relay handler on the proxy server.
+// Must be called after EnsureRunning(). If the proxy was already running
+// (not owned by this instance), this is a no-op since the owning process
+// manages the relay.
+func (lc *Lifecycle) SetOAuthRelay(hostname string, handler http.Handler) {
+	if lc.server != nil {
+		lc.server.ReverseProxy().SetOAuthRelay(hostname, handler)
+	} else {
+		log.Warn("OAuth relay not registered: proxy owned by another process; OAuth logins will not work for this run")
+	}
 }
 
 // Stop stops the proxy if this instance owns it.
