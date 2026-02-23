@@ -1,15 +1,18 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/mcpoauth"
 )
 
 // mcpRelayClient is a reused HTTP client for MCP relay requests.
@@ -62,13 +65,16 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		return // No matching MCP server
 	}
 
+	// Determine the header to check
+	header := mcpAuthHeader(matchedServer.Auth)
+
 	// Check if the specified header exists
-	headerValue := req.Header.Get(matchedServer.Auth.Header)
+	headerValue := req.Header.Get(header)
 
 	if headerValue == "" {
 		log.Debug("MCP: header not present in request",
 			"server", matchedServer.Name,
-			"header", matchedServer.Auth.Header)
+			"header", header)
 		return // Header not present
 	}
 
@@ -80,13 +86,13 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		if strings.HasPrefix(headerValue, "moat-stub-") {
 			log.Debug("MCP request has stub-like header value that doesn't match expected grant",
 				"server", matchedServer.Name,
-				"header", matchedServer.Auth.Header,
+				"header", header,
 				"expected", expectedStub,
 				"got", headerValue[:min(20, len(headerValue))]+"...")
 		} else {
 			log.Debug("MCP header has non-stub value",
 				"server", matchedServer.Name,
-				"header", matchedServer.Auth.Header,
+				"header", header,
 				"value", headerValue[:min(20, len(headerValue))]+"...")
 		}
 		return
@@ -106,16 +112,24 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		return
 	}
 
-	// Replace stub with real credential
-	req.Header.Set(matchedServer.Auth.Header, cred.Token)
+	// For OAuth, attempt token refresh if expired
+	token := cred.Token
+	if mcpAuthType(matchedServer.Auth) == "oauth" {
+		token = p.resolveOAuthToken(req.Context(), matchedServer, cred)
+	}
+
+	// Format the header value based on auth type
+	headerVal := formatMCPToken(matchedServer.Auth, token)
+	req.Header.Set(header, headerVal)
 
 	log.Debug("credential injected",
 		"subsystem", "proxy",
 		"action", "inject",
 		"grant", matchedServer.Auth.Grant,
 		"host", reqHost,
-		"header", matchedServer.Auth.Header,
+		"header", header,
 		"server", matchedServer.Name,
+		"auth_type", mcpAuthType(matchedServer.Auth),
 		"path", req.URL.Path)
 }
 
@@ -196,8 +210,15 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Inject the real credential
-		proxyReq.Header.Set(mcpServer.Auth.Header, cred.Token)
+		// Resolve token (refresh if OAuth and expired)
+		token := cred.Token
+		if mcpAuthType(mcpServer.Auth) == "oauth" {
+			token = p.resolveOAuthToken(r.Context(), mcpServer, cred)
+		}
+
+		// Inject the credential with proper formatting
+		header := mcpAuthHeader(mcpServer.Auth)
+		proxyReq.Header.Set(header, formatMCPToken(mcpServer.Auth, token))
 	}
 
 	// Send request to actual MCP server using the reused client
@@ -226,4 +247,113 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 	// Copy response body with streaming support
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// mcpAuthType returns the auth type for an MCP server, defaulting to "token".
+func mcpAuthType(auth *config.MCPAuthConfig) string {
+	if auth.Type == "" {
+		return "token"
+	}
+	return auth.Type
+}
+
+// mcpAuthHeader returns the HTTP header to use for credential injection.
+// For OAuth, defaults to "Authorization" if no header is specified.
+// For other auth types, returns the configured header (may be empty).
+func mcpAuthHeader(auth *config.MCPAuthConfig) string {
+	if auth.Header != "" {
+		return auth.Header
+	}
+	if mcpAuthType(auth) == "oauth" {
+		return "Authorization"
+	}
+	return ""
+}
+
+// formatMCPToken formats a token for injection into the HTTP header.
+// For OAuth, the token is prefixed with "Bearer ".
+// For static tokens, the token is used as-is.
+func formatMCPToken(auth *config.MCPAuthConfig, token string) string {
+	if mcpAuthType(auth) == "oauth" {
+		return "Bearer " + token
+	}
+	return token
+}
+
+// resolveOAuthToken returns the access token, refreshing it if expired.
+// If refresh fails, returns the existing (possibly expired) token.
+//
+// Note: concurrent requests for the same expired token may each trigger a
+// refresh independently. This is harmless (last writer wins in the credential
+// store) but slightly wasteful. A singleflight could coalesce them.
+func (p *Proxy) resolveOAuthToken(ctx context.Context, server *config.MCPServerConfig, cred *credential.Credential) string {
+	// Check if token is still valid (with 60s buffer)
+	if !cred.ExpiresAt.IsZero() && time.Until(cred.ExpiresAt) > 60*time.Second {
+		return cred.Token
+	}
+
+	// Check if we have a refresh token
+	refreshToken := ""
+	if cred.Metadata != nil {
+		refreshToken = cred.Metadata["refresh_token"]
+	}
+	if refreshToken == "" {
+		log.Debug("MCP OAuth token expired but no refresh token available",
+			"server", server.Name,
+			"expires_at", cred.ExpiresAt)
+		return cred.Token
+	}
+
+	// Get OAuth config from either the credential metadata or the server config
+	tokenURL := server.Auth.TokenURL
+	clientID := server.Auth.ClientID
+	if tokenURL == "" && cred.Metadata != nil {
+		tokenURL = cred.Metadata["token_url"]
+	}
+	if clientID == "" && cred.Metadata != nil {
+		clientID = cred.Metadata["client_id"]
+	}
+
+	if tokenURL == "" || clientID == "" {
+		log.Debug("MCP OAuth token expired but missing token_url or client_id for refresh",
+			"server", server.Name,
+			"has_token_url", tokenURL != "",
+			"has_client_id", clientID != "")
+		return cred.Token
+	}
+
+	// Attempt refresh
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	newToken, err := mcpoauth.RefreshAccessToken(ctx, tokenURL, clientID, refreshToken)
+	if err != nil {
+		log.Error("MCP OAuth token refresh failed",
+			"server", server.Name,
+			"error", err,
+			"fix", "Run: moat grant mcp "+strings.TrimPrefix(server.Auth.Grant, "mcp-")+" --oauth")
+		return cred.Token
+	}
+
+	// Update the stored credential with the new token
+	cred.Token = newToken.AccessToken
+	if !newToken.ExpiresAt.IsZero() {
+		cred.ExpiresAt = newToken.ExpiresAt
+	}
+	if newToken.RefreshToken != "" && cred.Metadata != nil {
+		cred.Metadata["refresh_token"] = newToken.RefreshToken
+	}
+
+	// Persist the refreshed credential
+	if err := p.credStore.Save(*cred); err != nil {
+		log.Error("Failed to save refreshed MCP OAuth token",
+			"server", server.Name,
+			"error", err)
+	} else {
+		log.Debug("MCP OAuth token refreshed",
+			"server", server.Name,
+			"expires_at", cred.ExpiresAt)
+	}
+
+	return newToken.AccessToken
 }

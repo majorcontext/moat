@@ -1215,6 +1215,69 @@ mcp:
 	}
 }
 
+func TestLoad_MCPServers_OAuth(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: notion
+    url: https://api.notion.com/v2/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: my-client-id
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
+      scopes: read_content write_content
+  - name: context7
+    url: https://mcp.context7.com/mcp
+    auth:
+      grant: mcp-context7
+      header: CONTEXT7_API_KEY
+`)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.MCP) != 2 {
+		t.Fatalf("expected 2 MCP servers, got %d", len(cfg.MCP))
+	}
+
+	// Check OAuth server
+	notion := cfg.MCP[0]
+	if notion.Name != "notion" {
+		t.Errorf("expected name 'notion', got %q", notion.Name)
+	}
+	if notion.Auth == nil {
+		t.Fatal("expected auth to be set")
+	}
+	if notion.Auth.Type != "oauth" {
+		t.Errorf("expected type 'oauth', got %q", notion.Auth.Type)
+	}
+	if notion.Auth.Grant != "mcp-notion" {
+		t.Errorf("expected grant 'mcp-notion', got %q", notion.Auth.Grant)
+	}
+	if notion.Auth.ClientID != "my-client-id" {
+		t.Errorf("expected client_id 'my-client-id', got %q", notion.Auth.ClientID)
+	}
+	if notion.Auth.AuthURL != "https://api.notion.com/v1/oauth/authorize" {
+		t.Errorf("expected auth_url, got %q", notion.Auth.AuthURL)
+	}
+	if notion.Auth.TokenURL != "https://api.notion.com/v1/oauth/token" {
+		t.Errorf("expected token_url, got %q", notion.Auth.TokenURL)
+	}
+	if notion.Auth.Scopes != "read_content write_content" {
+		t.Errorf("expected scopes 'read_content write_content', got %q", notion.Auth.Scopes)
+	}
+
+	// Check token server (no explicit type = token default)
+	ctx7 := cfg.MCP[1]
+	if ctx7.Auth.Type != "" {
+		t.Errorf("expected empty type (default token), got %q", ctx7.Auth.Type)
+	}
+}
+
 func TestLoad_MCP_Validation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1272,7 +1335,61 @@ mcp:
     auth:
       grant: mcp-test
 `,
-			wantErr: "mcp[0]: 'auth.header' is required when auth is specified",
+			wantErr: "mcp[0]: 'auth.header' is required when auth.type is 'token'",
+		},
+		{
+			name: "auth invalid type",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      grant: mcp-test
+      type: invalid
+`,
+			wantErr: "'auth.type' must be 'token' or 'oauth'",
+		},
+		{
+			name: "oauth missing token_url",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      grant: mcp-test
+      type: oauth
+      auth_url: https://example.com/authorize
+      client_id: my-client
+`,
+			wantErr: "'auth.token_url' is required when auth.type is 'oauth'",
+		},
+		{
+			name: "oauth missing auth_url",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      grant: mcp-test
+      type: oauth
+      token_url: https://example.com/token
+      client_id: my-client
+`,
+			wantErr: "'auth.auth_url' is required when auth.type is 'oauth'",
+		},
+		{
+			name: "oauth missing client_id",
+			yaml: `
+mcp:
+  - name: test
+    url: https://example.com
+    auth:
+      grant: mcp-test
+      type: oauth
+      token_url: https://example.com/token
+      auth_url: https://example.com/authorize
+`,
+			wantErr: "'auth.client_id' is required when auth.type is 'oauth'",
 		},
 		{
 			name: "duplicate names",
@@ -1414,5 +1531,158 @@ func TestServiceWaitDefault(t *testing.T) {
 	s2 := ServiceSpec{Wait: &f}
 	if s2.ServiceWait() {
 		t.Error("expected ServiceWait() to return false when Wait is false")
+	}
+}
+
+func TestLoad_MCP_OAuthComplete(t *testing.T) {
+	// Valid complete OAuth config should load without errors
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: notion
+    url: https://api.notion.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: client-123
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
+      scopes: read_content write_content
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.MCP[0].Auth.Scopes != "read_content write_content" {
+		t.Errorf("scopes = %q, want %q", cfg.MCP[0].Auth.Scopes, "read_content write_content")
+	}
+}
+
+func TestLoad_MCP_OAuthNoScopes(t *testing.T) {
+	// OAuth without scopes should be valid (scopes are optional)
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: notion
+    url: https://api.notion.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: client-123
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.MCP[0].Auth.Scopes != "" {
+		t.Errorf("scopes = %q, want empty", cfg.MCP[0].Auth.Scopes)
+	}
+}
+
+func TestLoad_MCP_OAuthWithCustomHeader(t *testing.T) {
+	// OAuth with a custom header should be valid
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: custom-oauth
+    url: https://api.example.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-custom
+      header: X-Custom-Auth
+      client_id: client-123
+      auth_url: https://example.com/authorize
+      token_url: https://example.com/token
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.MCP[0].Auth.Header != "X-Custom-Auth" {
+		t.Errorf("header = %q, want %q", cfg.MCP[0].Auth.Header, "X-Custom-Auth")
+	}
+}
+
+func TestLoad_MCP_OAuthNoHeader(t *testing.T) {
+	// OAuth without header should be valid (defaults to Authorization at runtime)
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: notion
+    url: https://api.notion.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-notion
+      client_id: client-123
+      auth_url: https://api.notion.com/v1/oauth/authorize
+      token_url: https://api.notion.com/v1/oauth/token
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.MCP[0].Auth.Header != "" {
+		t.Errorf("header = %q, want empty (runtime defaults to Authorization)", cfg.MCP[0].Auth.Header)
+	}
+}
+
+func TestLoad_MCP_TokenMixedWithOAuth(t *testing.T) {
+	// Mix of token and OAuth MCP servers in the same config
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: token-server
+    url: https://api.example.com/mcp
+    auth:
+      grant: mcp-token
+      header: API_KEY
+  - name: oauth-server
+    url: https://api.other.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-oauth
+      client_id: client-123
+      auth_url: https://other.com/authorize
+      token_url: https://other.com/token
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.MCP) != 2 {
+		t.Fatalf("expected 2 MCP servers, got %d", len(cfg.MCP))
+	}
+	// First is token (default type)
+	if cfg.MCP[0].Auth.Type != "" {
+		t.Errorf("token server type = %q, want empty", cfg.MCP[0].Auth.Type)
+	}
+	// Second is oauth
+	if cfg.MCP[1].Auth.Type != "oauth" {
+		t.Errorf("oauth server type = %q, want %q", cfg.MCP[1].Auth.Type, "oauth")
+	}
+}
+
+func TestLoad_MCP_OAuthAllMissingFields(t *testing.T) {
+	// OAuth with all three required fields missing should fail on the first one checked
+	dir := t.TempDir()
+	writeFile(t, dir, "agent.yaml", `
+mcp:
+  - name: bad-oauth
+    url: https://api.example.com/mcp
+    auth:
+      type: oauth
+      grant: mcp-test
+`)
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for OAuth with all required fields missing")
+	}
+	// Should report the first missing field it finds
+	errStr := err.Error()
+	hasFieldError := strings.Contains(errStr, "token_url") || strings.Contains(errStr, "auth_url") || strings.Contains(errStr, "client_id")
+	if !hasFieldError {
+		t.Errorf("error should mention a missing OAuth field, got: %v", err)
 	}
 }

@@ -574,16 +574,38 @@ moat grant npm --host=npm.company.com
 
 ### moat grant mcp \<name\>
 
-Store a credential for an MCP server.
+Store a credential for an MCP server. Supports static tokens (default) and OAuth authorization.
+
+**Token auth (default):**
 
 ```bash
 moat grant mcp context7
 ```
 
-The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in agent.yaml.
+Prompts for a credential (hidden input) and stores it directly.
 
-**Interactive prompts:**
-- Credential (hidden input)
+**OAuth auth:**
+
+```bash
+moat grant mcp notion \
+    --oauth \
+    --client-id=YOUR_CLIENT_ID \
+    --auth-url=https://api.notion.com/v1/oauth/authorize \
+    --token-url=https://api.notion.com/v1/oauth/token \
+    --scopes="read_content write_content"
+```
+
+Starts a local callback server and prints an authorization URL. After authorizing in your browser, the access and refresh tokens are stored.
+
+| Flag | Description |
+|------|-------------|
+| `--oauth` | Use OAuth authorization code flow |
+| `--client-id` | OAuth client ID (required with `--oauth`) |
+| `--auth-url` | OAuth authorization URL (required with `--oauth`) |
+| `--token-url` | OAuth token URL (required with `--oauth`) |
+| `--scopes` | Space-separated OAuth scopes (optional) |
+
+The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in agent.yaml.
 
 **Storage:**
 - `~/.moat/credentials/mcp-<name>.enc`
