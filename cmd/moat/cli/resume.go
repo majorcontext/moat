@@ -7,8 +7,8 @@ import (
 
 	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	claudeprovider "github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/spf13/cobra"
 )
@@ -82,6 +82,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 		if target == nil {
 			return fmt.Errorf("no Claude Code runs found\n\nStart a session first with: moat claude")
 		}
+	}
+
+	// Verify this is a Claude Code run
+	if target.Agent != "" && !isClaudeRun(target) {
+		return fmt.Errorf("run %s uses agent %q, but resume is only supported for Claude Code runs", target.ID[:8], target.Agent)
 	}
 
 	// If running, attach to it
@@ -163,7 +168,7 @@ func resumeStoppedRun(prev *run.Run) error {
 
 	// Auto-detect credential if previous run had none
 	if len(prev.Grants) == 0 {
-		if credName := getResumeCredentialName(); credName != "" {
+		if credName := claudeprovider.GetClaudeCredentialName(); credName != "" {
 			addGrant(credName)
 		}
 	}
@@ -244,33 +249,14 @@ func resumeStoppedRun(prev *run.Run) error {
 		TTY:         true,
 	}
 
-	result, err := intcli.ExecuteRun(ctx, opts)
+	if !resumeFlags.Detach {
+		fmt.Printf("Resuming Claude Code in %s\n", absPath)
+	}
+
+	_, err = intcli.ExecuteRun(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	if result != nil && !resumeFlags.Detach {
-		fmt.Printf("Resuming Claude Code in %s\n", absPath)
-		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
-	}
-
 	return nil
-}
-
-// getResumeCredentialName returns the credential name for Claude, same as in the claude provider.
-func getResumeCredentialName() string {
-	for _, name := range []string{"claude", "anthropic"} {
-		key, err := credential.DefaultEncryptionKey()
-		if err != nil {
-			continue
-		}
-		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
-		if err != nil {
-			continue
-		}
-		if _, err := store.Get(credential.Provider(name)); err == nil {
-			return name
-		}
-	}
-	return ""
 }

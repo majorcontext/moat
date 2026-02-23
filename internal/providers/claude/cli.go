@@ -153,7 +153,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if credName := getOrMigrateClaudeCredentialName(); credName != "" {
+	if credName := GetClaudeCredentialName(); credName != "" {
 		addGrant(credName) // Use the actual name the credential is stored under
 	}
 	if cfg != nil {
@@ -168,6 +168,11 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 
 	// Determine interactive mode
 	interactive := claudePromptFlag == ""
+
+	// Validate mutually exclusive flags
+	if claudeContinue && claudeResume != "" {
+		return fmt.Errorf("--continue and --resume are mutually exclusive")
+	}
 
 	// Build container command
 	containerCmd := []string{"claude"}
@@ -273,7 +278,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getOrMigrateClaudeCredentialName returns the grant name to use for moat claude.
+// GetClaudeCredentialName returns the grant name to use for moat claude.
 //
 // Preference order:
 //  1. claude (OAuth token) — preferred for Claude Code
@@ -284,7 +289,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 //   - anthropic.enc with OAuth token → claude.enc
 //
 // Returns empty string if no credential exists.
-func getOrMigrateClaudeCredentialName() string {
+func GetClaudeCredentialName() string {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return ""
