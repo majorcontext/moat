@@ -467,6 +467,15 @@ func Load(dir string) (*Config, error) {
 	}
 
 	// Validate language servers
+	if len(cfg.LanguageServers) > 0 {
+		seen := make(map[string]bool)
+		for _, ls := range cfg.LanguageServers {
+			if seen[ls] {
+				return nil, fmt.Errorf("duplicate language server: %s", ls)
+			}
+			seen[ls] = true
+		}
+	}
 	if err := langserver.Validate(cfg.LanguageServers); err != nil {
 		return nil, err
 	}

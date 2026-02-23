@@ -1533,7 +1533,7 @@ agent: claude
 		}
 	})
 
-	t.Run("duplicate language servers parsed as-is", func(t *testing.T) {
+	t.Run("duplicate language servers rejected", func(t *testing.T) {
 		dir := t.TempDir()
 		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
 agent: claude
@@ -1542,13 +1542,12 @@ language_servers:
   - gopls
 `), 0644)
 
-		cfg, err := Load(dir)
-		if err != nil {
-			t.Fatalf("Load() error = %v (duplicate names are valid YAML)", err)
+		_, err := Load(dir)
+		if err == nil {
+			t.Fatal("Load() should return error for duplicate language servers")
 		}
-		// YAML parses duplicates in a list; Validate doesn't reject them
-		if len(cfg.LanguageServers) != 2 {
-			t.Errorf("LanguageServers length = %d, want 2", len(cfg.LanguageServers))
+		if !strings.Contains(err.Error(), "duplicate language server") {
+			t.Errorf("error should mention duplicate language server, got: %v", err)
 		}
 	})
 

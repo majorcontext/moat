@@ -1198,9 +1198,14 @@ region = %s
 			}
 		}
 	}
-	// Language servers inject MCP config into .claude.json, which requires the init script
+	// Language servers inject MCP config into .claude.json, which requires the init script.
+	// They are currently only supported with Claude Code agent.
 	if !needsClaudeInit && opts.Config != nil && len(opts.Config.LanguageServers) > 0 {
-		needsClaudeInit = true
+		if strings.HasPrefix(opts.Config.Agent, "claude") {
+			needsClaudeInit = true
+		} else {
+			ui.Warnf("language_servers are currently only supported with Claude Code agent; ignoring for %s", opts.Config.Agent)
+		}
 	}
 
 	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)

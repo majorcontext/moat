@@ -6,7 +6,10 @@
 // go-to-definition, find-references, and diagnostics.
 package langserver
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // ServerSpec defines a prepackaged language server.
 type ServerSpec struct {
@@ -114,6 +117,7 @@ func List() []string {
 	for name := range registry {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
