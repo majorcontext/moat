@@ -1016,8 +1016,9 @@ region = %s
 		}
 	}
 
-	// Add dependencies from language servers (e.g., gopls requires go)
-	if opts.Config != nil && len(opts.Config.LanguageServers) > 0 {
+	// Add dependencies from language servers (e.g., gopls requires go).
+	// Language servers are only supported with Claude Code agent.
+	if opts.Config != nil && len(opts.Config.LanguageServers) > 0 && strings.HasPrefix(opts.Config.Agent, "claude") {
 		allDeps = append(allDeps, langserver.AllDependencies(opts.Config.LanguageServers)...)
 	}
 
@@ -1427,7 +1428,7 @@ region = %s
 		// claudeSettings was loaded earlier for plugin detection
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
-		hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0
+		hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0 && strings.HasPrefix(opts.Config.Agent, "claude")
 
 		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
