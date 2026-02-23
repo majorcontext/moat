@@ -178,6 +178,7 @@ func ValidateProfile(name string) error {
 func ListProfiles() ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		log.Warn("cannot determine home directory for credential profiles", "error", err)
 		return nil, nil
 	}
 	profilesDir := filepath.Join(home, ".moat", "credentials", "profiles")
