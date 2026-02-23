@@ -134,16 +134,16 @@ func TestContainerEnvForCredential(t *testing.T) {
 		}
 	})
 
-	t.Run("OAuth token uses CLAUDE_CODE_OAUTH_TOKEN", func(t *testing.T) {
-		cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}
+	t.Run("claude provider uses CLAUDE_CODE_OAUTH_TOKEN", func(t *testing.T) {
+		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc123"}
 		env := containerEnvForCredential(cred)
 		if len(env) != 1 || env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
 			t.Errorf("env = %v, want CLAUDE_CODE_OAUTH_TOKEN placeholder", env)
 		}
 	})
 
-	t.Run("API key uses ANTHROPIC_API_KEY", func(t *testing.T) {
-		cred := &provider.Credential{Token: "sk-ant-api01-abc123"}
+	t.Run("anthropic provider uses ANTHROPIC_API_KEY", func(t *testing.T) {
+		cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api01-abc123"}
 		env := containerEnvForCredential(cred)
 		if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
 			t.Errorf("env = %v, want ANTHROPIC_API_KEY placeholder", env)

@@ -318,7 +318,7 @@ func checkCredentialStatus(diag *claudeDiagnostic) {
 				Severity:    "error",
 				Component:   "credential",
 				Description: "No Anthropic credential granted",
-				Fix:         "Run 'moat grant claude' to grant credentials",
+				Fix:         "Run 'moat grant claude' (OAuth) or 'moat grant anthropic' (API key) to grant credentials",
 			})
 		} else if errMsg == "cannot access credential store encryption key" {
 			diag.Issues = append(diag.Issues, issue{
@@ -896,12 +896,12 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Determine which grant to use based on stored credential type.
+	// Determine which grant to use based on the stored provider name.
 	// This mirrors the preference logic in moat claude: claude first, anthropic fallback.
 	grantName := "anthropic"
 	cred, _ := getAnthropicCredential()
-	if cred != nil && credential.IsOAuthToken(cred.Token) {
-		grantName = "claude"
+	if cred != nil {
+		grantName = string(cred.Provider)
 	}
 
 	// Create config programmatically with claude-code dependency

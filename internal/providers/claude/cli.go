@@ -142,7 +142,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if credName := getClaudeCredentialName(); credName != "" {
+	if credName := getOrMigrateClaudeCredentialName(); credName != "" {
 		addGrant(credName) // Use the actual name the credential is stored under
 	}
 	if cfg != nil {
@@ -254,18 +254,18 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getClaudeCredentialName returns the grant name to use for moat claude.
+// getOrMigrateClaudeCredentialName returns the grant name to use for moat claude.
 //
 // Preference order:
 //  1. claude (OAuth token) — preferred for Claude Code
 //  2. anthropic (API key) — fallback, works with Claude Code too
 //
-// Auto-migration:
+// Auto-migration (runs once, on first moat claude after upgrade):
 //   - claude-oauth.enc (old name) → claude.enc
 //   - anthropic.enc with OAuth token → claude.enc
 //
 // Returns empty string if no credential exists.
-func getClaudeCredentialName() string {
+func getOrMigrateClaudeCredentialName() string {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return ""
@@ -275,7 +275,18 @@ func getClaudeCredentialName() string {
 		return ""
 	}
 
-	// Prefer claude if it exists
+	return resolveClaudeCredential(store)
+}
+
+// resolveClaudeCredential checks the credential store for a Claude-compatible
+// credential. It performs one-time migrations from legacy credential names
+// (claude-oauth, or OAuth tokens stored under anthropic) to the canonical
+// "claude" provider slot.
+//
+// This function mutates the store when migration is needed. It is safe to call
+// multiple times — once migrated, subsequent calls hit the fast path.
+func resolveClaudeCredential(store *credential.FileStore) string {
+	// Fast path: claude credential already exists
 	if _, getErr := store.Get(credential.ProviderClaude); getErr == nil {
 		return "claude"
 	}

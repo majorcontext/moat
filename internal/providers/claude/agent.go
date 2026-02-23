@@ -99,11 +99,12 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 }
 
 // containerEnvForCredential returns the correct environment variable based on
-// the credential type. OAuth tokens get CLAUDE_CODE_OAUTH_TOKEN, API keys get
+// the credential's provider identity. OAuth credentials (provider "claude") get
+// CLAUDE_CODE_OAUTH_TOKEN, API key credentials (provider "anthropic") get
 // ANTHROPIC_API_KEY. Both use placeholder values — real credentials are injected
 // by the proxy at the network layer.
 func containerEnvForCredential(cred *provider.Credential) []string {
-	if cred != nil && isOAuthToken(cred.Token) {
+	if cred != nil && cred.Provider == "claude" {
 		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
 	}
 	return []string{"ANTHROPIC_API_KEY=" + ProxyInjectedPlaceholder}
