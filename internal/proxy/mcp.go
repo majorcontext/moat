@@ -115,7 +115,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	// For OAuth, attempt token refresh if expired
 	token := cred.Token
 	if mcpAuthType(matchedServer.Auth) == "oauth" {
-		token = p.resolveOAuthToken(matchedServer, cred)
+		token = p.resolveOAuthToken(req.Context(), matchedServer, cred)
 	}
 
 	// Format the header value based on auth type
@@ -213,7 +213,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		// Resolve token (refresh if OAuth and expired)
 		token := cred.Token
 		if mcpAuthType(mcpServer.Auth) == "oauth" {
-			token = p.resolveOAuthToken(mcpServer, cred)
+			token = p.resolveOAuthToken(r.Context(), mcpServer, cred)
 		}
 
 		// Inject the credential with proper formatting
@@ -259,6 +259,7 @@ func mcpAuthType(auth *config.MCPAuthConfig) string {
 
 // mcpAuthHeader returns the HTTP header to use for credential injection.
 // For OAuth, defaults to "Authorization" if no header is specified.
+// For other auth types, returns the configured header (may be empty).
 func mcpAuthHeader(auth *config.MCPAuthConfig) string {
 	if auth.Header != "" {
 		return auth.Header
@@ -266,7 +267,7 @@ func mcpAuthHeader(auth *config.MCPAuthConfig) string {
 	if mcpAuthType(auth) == "oauth" {
 		return "Authorization"
 	}
-	return auth.Header
+	return ""
 }
 
 // formatMCPToken formats a token for injection into the HTTP header.
@@ -281,7 +282,7 @@ func formatMCPToken(auth *config.MCPAuthConfig, token string) string {
 
 // resolveOAuthToken returns the access token, refreshing it if expired.
 // If refresh fails, returns the existing (possibly expired) token.
-func (p *Proxy) resolveOAuthToken(server *config.MCPServerConfig, cred *credential.Credential) string {
+func (p *Proxy) resolveOAuthToken(ctx context.Context, server *config.MCPServerConfig, cred *credential.Credential) string {
 	// Check if token is still valid (with 60s buffer)
 	if !cred.ExpiresAt.IsZero() && time.Until(cred.ExpiresAt) > 60*time.Second {
 		return cred.Token
@@ -318,7 +319,7 @@ func (p *Proxy) resolveOAuthToken(server *config.MCPServerConfig, cred *credenti
 	}
 
 	// Attempt refresh
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	newToken, err := mcpoauth.RefreshAccessToken(ctx, tokenURL, clientID, refreshToken)

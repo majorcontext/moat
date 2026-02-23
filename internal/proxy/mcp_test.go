@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -459,7 +460,7 @@ func TestResolveOAuthToken_ValidToken(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	if token != "valid-access-token" {
 		t.Errorf("resolveOAuthToken() = %q, want %q", token, "valid-access-token")
@@ -499,7 +500,7 @@ func TestResolveOAuthToken_ExpiredTokenRefreshed(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	if token != "refreshed-token" {
 		t.Errorf("resolveOAuthToken() = %q, want %q", token, "refreshed-token")
@@ -537,7 +538,7 @@ func TestResolveOAuthToken_ExpiredNoRefreshToken(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	if token != "expired-no-refresh" {
 		t.Errorf("resolveOAuthToken() = %q, want %q", token, "expired-no-refresh")
@@ -569,7 +570,7 @@ func TestResolveOAuthToken_ExpiredMissingTokenURL(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	// Should fall back to expired token since there's no token_url
 	if token != "expired-no-url" {
@@ -610,7 +611,7 @@ func TestResolveOAuthToken_RefreshFailsFallsBack(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	// Should fall back to expired token since refresh failed
 	if token != "expired-but-only-option" {
@@ -651,7 +652,7 @@ func TestResolveOAuthToken_WithinBufferRefreshes(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	if token != "buffer-refreshed" {
 		t.Errorf("resolveOAuthToken() = %q, want %q", token, "buffer-refreshed")
@@ -692,7 +693,7 @@ func TestResolveOAuthToken_MetadataFallback(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	if token != "metadata-refreshed" {
 		t.Errorf("resolveOAuthToken() = %q, want %q", token, "metadata-refreshed")
@@ -723,7 +724,7 @@ func TestResolveOAuthToken_NilMetadata(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	// No refresh token in nil metadata, should return expired token
 	if token != "expired-nil-metadata" {
@@ -764,7 +765,7 @@ func TestResolveOAuthToken_ZeroExpiresAtRefreshes(t *testing.T) {
 
 	p := &Proxy{credStore: mockStore}
 	cred := mockStore.creds["mcp-notion"]
-	token := p.resolveOAuthToken(server, cred)
+	token := p.resolveOAuthToken(context.Background(), server, cred)
 
 	// Zero ExpiresAt means time.Until(zero) is very negative, so it should refresh
 	if token != "zero-refreshed" {

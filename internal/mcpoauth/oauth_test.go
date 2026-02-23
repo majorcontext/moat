@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -149,7 +150,7 @@ func TestExchangeCode_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if got := err.Error(); !contains(got, "HTTP 400") {
+	if got := err.Error(); !strings.Contains(got, "HTTP 400") {
 		t.Errorf("error = %q, want to contain %q", got, "HTTP 400")
 	}
 }
@@ -200,22 +201,9 @@ func TestRefreshAccessToken_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if got := err.Error(); !contains(got, "HTTP 401") {
+	if got := err.Error(); !strings.Contains(got, "HTTP 401") {
 		t.Errorf("error = %q, want to contain %q", got, "HTTP 401")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsImpl(s, substr)
-}
-
-func containsImpl(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestRefreshAccessToken_MalformedJSON(t *testing.T) {
@@ -229,7 +217,7 @@ func TestRefreshAccessToken_MalformedJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
-	if !contains(err.Error(), "parsing refresh response") {
+	if !strings.Contains(err.Error(), "parsing refresh response") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "parsing refresh response")
 	}
 }
@@ -248,7 +236,7 @@ func TestRefreshAccessToken_EmptyAccessToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty access_token, got nil")
 	}
-	if !contains(err.Error(), "no access_token in refresh response") {
+	if !strings.Contains(err.Error(), "no access_token in refresh response") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "no access_token in refresh response")
 	}
 }
@@ -359,7 +347,7 @@ func TestExchangeCode_MalformedJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
-	if !contains(err.Error(), "parsing token response") {
+	if !strings.Contains(err.Error(), "parsing token response") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "parsing token response")
 	}
 }
@@ -383,7 +371,7 @@ func TestExchangeCode_EmptyAccessToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty access_token, got nil")
 	}
-	if !contains(err.Error(), "no access_token in token response") {
+	if !strings.Contains(err.Error(), "no access_token in token response") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "no access_token in token response")
 	}
 }
@@ -404,7 +392,7 @@ func TestExchangeCode_ServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 500, got nil")
 	}
-	if !contains(err.Error(), "HTTP 500") {
+	if !strings.Contains(err.Error(), "HTTP 500") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "HTTP 500")
 	}
 }
@@ -466,7 +454,7 @@ func TestBuildAuthURL_InvalidURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid auth URL, got nil")
 	}
-	if !contains(err.Error(), "invalid auth URL") {
+	if !strings.Contains(err.Error(), "invalid auth URL") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid auth URL")
 	}
 }
@@ -482,7 +470,7 @@ func TestRefreshAccessToken_HTTP403(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 403, got nil")
 	}
-	if !contains(err.Error(), "HTTP 403") {
+	if !strings.Contains(err.Error(), "HTTP 403") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "HTTP 403")
 	}
 }

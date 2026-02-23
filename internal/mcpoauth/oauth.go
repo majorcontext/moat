@@ -9,12 +9,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Config holds the OAuth configuration for an MCP server.
@@ -84,7 +87,7 @@ func Authorize(ctx context.Context, cfg Config) (*TokenResponse, error) {
 				errMsg = errMsg + ": " + desc
 			}
 			errCh <- fmt.Errorf("OAuth error: %s", errMsg)
-			_, _ = fmt.Fprintf(w, "<html><body><h1>Authorization Failed</h1><p>%s</p><p>You can close this tab.</p></body></html>", errMsg)
+			_, _ = fmt.Fprintf(w, "<html><body><h1>Authorization Failed</h1><p>%s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errMsg))
 			return
 		}
 
@@ -116,8 +119,8 @@ func Authorize(ctx context.Context, cfg Config) (*TokenResponse, error) {
 		return nil, err
 	}
 
-	fmt.Printf("\nOpen this URL in your browser to authorize:\n\n  %s\n\n", authURL)
-	fmt.Println("Waiting for authorization...")
+	ui.Infof("\nOpen this URL in your browser to authorize:\n\n  %s\n", authURL)
+	ui.Info("Waiting for authorization...")
 
 	// Wait for callback or timeout
 	var code string
@@ -133,7 +136,7 @@ func Authorize(ctx context.Context, cfg Config) (*TokenResponse, error) {
 		return nil, fmt.Errorf("authorization timed out after %s", callbackTimeout)
 	}
 
-	fmt.Println("Authorization received, exchanging for tokens...")
+	ui.Info("Authorization received, exchanging for tokens...")
 
 	// Exchange auth code for tokens
 	return exchangeCode(ctx, cfg, code, redirectURI)

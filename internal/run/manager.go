@@ -1388,7 +1388,6 @@ region = %s
 						if header == "" {
 							header = "Authorization"
 						}
-						stub = "moat-stub-" + mcp.Auth.Grant
 					}
 
 					mcpServers[mcp.Name] = provider.MCPServerConfig{
