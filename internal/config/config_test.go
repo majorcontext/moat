@@ -1352,7 +1352,7 @@ mcp:
   - name: test
     url: http://example.com/mcp
 `,
-			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost and 127.0.0.1)",
+			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost, 127.0.0.1, and [::1])",
 		},
 		{
 			name: "http remote IP rejected",
@@ -1361,7 +1361,7 @@ mcp:
   - name: test
     url: http://192.168.1.100:3000/mcp
 `,
-			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost and 127.0.0.1)",
+			wantErr: "mcp[0]: 'url' must use HTTPS (http:// is only allowed for localhost, 127.0.0.1, and [::1])",
 		},
 	}
 

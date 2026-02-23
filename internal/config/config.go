@@ -567,7 +567,7 @@ func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames ma
 	// require https:// for all other servers.
 	if !strings.HasPrefix(spec.URL, "https://") {
 		if !isHostLocalURL(spec.URL) {
-			return fmt.Errorf("%s: 'url' must use HTTPS (http:// is only allowed for localhost and 127.0.0.1)", prefix)
+			return fmt.Errorf("%s: 'url' must use HTTPS (http:// is only allowed for localhost, 127.0.0.1, and [::1])", prefix)
 		}
 	}
 
