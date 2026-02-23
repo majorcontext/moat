@@ -2371,9 +2371,18 @@ func (m *Manager) streamLogsToStorage(ctx context.Context, r *Run) {
 		return
 	}
 
+	// Claim the capture flag BEFORE opening the LogWriter. This prevents
+	// captureLogs (called from monitorContainerExit) from writing duplicate
+	// entries while we are still streaming.
+	if !r.logsCaptured.CompareAndSwap(false, true) {
+		log.Debug("logs already being captured, skipping storage stream", "runID", r.ID)
+		return
+	}
+
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
 		log.Debug("failed to get container logs for storage streaming", "runID", r.ID, "error", err)
+		r.logsCaptured.Store(false) // Release so captureLogs can retry
 		return
 	}
 	defer logs.Close()
@@ -2381,6 +2390,7 @@ func (m *Manager) streamLogsToStorage(ctx context.Context, r *Run) {
 	lw, lwErr := r.Store.LogWriter()
 	if lwErr != nil {
 		log.Debug("failed to open log writer for storage streaming", "runID", r.ID, "error", lwErr)
+		r.logsCaptured.Store(false) // Release so captureLogs can retry
 		return
 	}
 	defer lw.Close()
@@ -2390,11 +2400,7 @@ func (m *Manager) streamLogsToStorage(ctx context.Context, r *Run) {
 	} else {
 		_, _ = io.Copy(lw, logs)
 	}
-
-	// Mark logs as captured AFTER the copy completes so captureLogs doesn't
-	// duplicate. Setting this before the copy could cause captureLogs to skip
-	// capture if the copy fails early, leaving logs.jsonl empty.
-	r.logsCaptured.Store(true)
+	// Flag stays true — file is created and populated.
 }
 
 // Stop terminates a running run.
@@ -3007,7 +3013,13 @@ func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) err
 	}
 	defer logs.Close()
 
-	_, err = io.Copy(w, logs)
+	// Docker non-TTY containers return multiplexed stdout/stderr with 8-byte
+	// headers. Use stdcopy.StdCopy to demux, matching streamLogs behavior.
+	if m.runtime.Type() == container.RuntimeDocker {
+		_, err = stdcopy.StdCopy(w, w, logs)
+	} else {
+		_, err = io.Copy(w, logs)
+	}
 	return err
 }
 

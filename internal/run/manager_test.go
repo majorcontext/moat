@@ -1998,7 +1998,8 @@ func TestFollowLogs(t *testing.T) {
 			states: map[string]string{"ctr-1": "running"},
 			done:   make(chan struct{}),
 		},
-		logs: io.NopCloser(strings.NewReader(logContent)),
+		logs:     io.NopCloser(strings.NewReader(logContent)),
+		logsType: "apple", // Raw text — no Docker demux headers
 	}
 
 	m := &Manager{
@@ -2331,7 +2332,8 @@ func TestFollowLogsCanceledContext(t *testing.T) {
 			states: map[string]string{"ctr-1": "running"},
 			done:   make(chan struct{}),
 		},
-		logs: pr,
+		logs:     pr,
+		logsType: "apple", // Raw pipe — no Docker demux headers
 	}
 
 	m := &Manager{
@@ -2432,6 +2434,7 @@ func TestFollowLogsConcurrentAccess(t *testing.T) {
 			localRT := &logsStubRuntime{
 				stubRuntime: rt.stubRuntime,
 				logs:        io.NopCloser(strings.NewReader(logContent)),
+				logsType:    "apple", // Raw text — no Docker demux headers
 			}
 			localM := &Manager{
 				runtime: localRT,
