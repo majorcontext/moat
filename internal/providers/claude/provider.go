@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -111,7 +110,3 @@ func (p *AnthropicProvider) Cleanup(cleanupPath string) {}
 func (p *AnthropicProvider) ImpliedDependencies() []string {
 	return nil
 }
-
-// isOAuthToken is a package-level alias for credential.IsOAuthToken.
-// Kept for convenience within the claude package.
-var isOAuthToken = credential.IsOAuthToken

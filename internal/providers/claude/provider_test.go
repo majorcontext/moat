@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -421,9 +422,10 @@ func TestReadHostConfig(t *testing.T) {
 }
 
 func TestWriteCredentialsFile(t *testing.T) {
-	t.Run("OAuth token creates file", func(t *testing.T) {
+	t.Run("claude provider creates file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{
+			Provider:  "claude",
 			Token:     "sk-ant-oat01-abc123",
 			ExpiresAt: time.Now().Add(time.Hour),
 			Scopes:    []string{"user:read"},
@@ -459,10 +461,11 @@ func TestWriteCredentialsFile(t *testing.T) {
 		}
 	})
 
-	t.Run("API key does not create file", func(t *testing.T) {
+	t.Run("anthropic provider does not create file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{
-			Token: "sk-ant-api01-abc123", // API key, not OAuth
+			Provider: "anthropic",
+			Token:    "sk-ant-api01-abc123",
 		}
 
 		err := WriteCredentialsFile(cred, stagingDir)
@@ -493,8 +496,8 @@ func TestIsOAuthToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.token, func(t *testing.T) {
-			if got := isOAuthToken(tt.token); got != tt.want {
-				t.Errorf("isOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
+			if got := credential.IsOAuthToken(tt.token); got != tt.want {
+				t.Errorf("IsOAuthToken(%q) = %v, want %v", tt.token, got, tt.want)
 			}
 		})
 	}

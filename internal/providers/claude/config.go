@@ -133,8 +133,9 @@ func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForCont
 // SECURITY: The real OAuth token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
 func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
-	if !isOAuthToken(cred.Token) {
-		// API keys don't need credential files
+	if cred.Provider != "claude" {
+		// Only OAuth credentials (provider "claude") need credential files.
+		// API key credentials (provider "anthropic") skip this.
 		return nil
 	}
 
