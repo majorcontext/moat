@@ -2160,6 +2160,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 			// Firewall setup failed - this is fatal for strict policy since the user
 			// explicitly requested network isolation. Without iptables, only proxy-level
 			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
+			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
 				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
@@ -2346,6 +2347,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	if r.FirewallEnabled && r.ProxyPort > 0 {
 		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
 			// Firewall setup failed - this is fatal for strict policy
+			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
 				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
@@ -2811,8 +2813,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 			} else {
 				errMsg = fmt.Sprintf("exit code %d", exitCode)
 			}
-			r.SetStateWithError(StateFailed, errMsg)
-			r.SetStateWithTime(StateFailed, time.Now())
+			r.SetStateFailedAt(errMsg, time.Now())
 		} else {
 			r.SetStateWithTime(StateStopped, time.Now())
 		}

@@ -232,6 +232,17 @@ func (r *Run) SetStateWithTime(state State, timestamp time.Time) {
 	}
 }
 
+// SetStateFailedAt atomically sets state to StateFailed with both error and
+// timestamp in a single lock acquisition. This prevents a concurrent reader
+// from observing StateFailed with no StoppedAt set.
+func (r *Run) SetStateFailedAt(errMsg string, timestamp time.Time) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.State = StateFailed
+	r.Error = errMsg
+	r.StoppedAt = timestamp
+}
+
 // validateGrants checks that all requested grants have credentials available.
 // Returns an error with actionable fix commands if any are missing.
 //
