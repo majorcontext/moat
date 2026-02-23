@@ -434,6 +434,12 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
+	// Validate that codex.mcp and gemini.mcp don't both define local MCP servers.
+	// Both write to /workspace/.mcp.json, so only one can be used at a time.
+	if len(cfg.Codex.MCP) > 0 && len(cfg.Gemini.MCP) > 0 {
+		return nil, fmt.Errorf("both codex.mcp and gemini.mcp define local MCP servers, but they share the same .mcp.json file — only one agent section can define local MCP servers")
+	}
+
 	// Validate top-level MCP server specs
 	seenNames := make(map[string]bool)
 	for i, spec := range cfg.MCP {

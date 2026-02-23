@@ -1416,3 +1416,80 @@ func TestServiceWaitDefault(t *testing.T) {
 		t.Error("expected ServiceWait() to return false when Wait is false")
 	}
 }
+
+func TestLoadConfigRejectsCodexAndGeminiLocalMCP(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+codex:
+  mcp:
+    filesystem:
+      command: npx
+      args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+gemini:
+  mcp:
+    github:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when both codex.mcp and gemini.mcp have local MCP servers")
+	}
+	if !strings.Contains(err.Error(), "codex.mcp and gemini.mcp") {
+		t.Errorf("error should mention codex.mcp and gemini.mcp conflict, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), ".mcp.json") {
+		t.Errorf("error should mention .mcp.json file, got: %v", err)
+	}
+}
+
+func TestLoadConfigAllowsCodexLocalMCPAlone(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+codex:
+  mcp:
+    filesystem:
+      command: npx
+      args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept codex.mcp alone: %v", err)
+	}
+	if len(cfg.Codex.MCP) != 1 {
+		t.Errorf("Codex.MCP = %d, want 1", len(cfg.Codex.MCP))
+	}
+}
+
+func TestLoadConfigAllowsGeminiLocalMCPAlone(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+gemini:
+  mcp:
+    github:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept gemini.mcp alone: %v", err)
+	}
+	if len(cfg.Gemini.MCP) != 1 {
+		t.Errorf("Gemini.MCP = %d, want 1", len(cfg.Gemini.MCP))
+	}
+}

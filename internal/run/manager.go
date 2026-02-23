@@ -1409,6 +1409,10 @@ region = %s
 			if opts.Config != nil && len(opts.Config.Claude.MCP) > 0 {
 				claudeLocalMCP = make(map[string]provider.LocalMCPServerConfig)
 				for name, spec := range opts.Config.Claude.MCP {
+					if spec.Grant != "" {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude local MCP servers (credential injection for local MCP is only supported for codex and gemini)", name)
+					}
 					claudeLocalMCP[name] = provider.LocalMCPServerConfig{
 						Command: spec.Command,
 						Args:    spec.Args,
