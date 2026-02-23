@@ -24,7 +24,7 @@ This command stores the Google OAuth client ID and client secret that Moat
 injects into containers as GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
 
 Register your redirect URI in the Google Cloud Console:
-  http://oauthrelay.localhost:8080/callback
+  http://oauthrelay.localhost:8080/callback  (TODO: use configured proxy port)
 
 Examples:
   # Grant Google OAuth credentials
@@ -93,6 +93,7 @@ func runGrantGoogleOAuth(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nGoogle OAuth credentials saved to %s\n", credPath)
 	fmt.Println()
+	// TODO: use configured proxy port instead of hardcoded 8080
 	fmt.Println("Register this redirect URI in the Google Cloud Console:")
 	fmt.Println("  http://oauthrelay.localhost:8080/callback")
 	fmt.Println()

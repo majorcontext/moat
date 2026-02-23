@@ -12,11 +12,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 )
+
+// validAppName matches safe app names: starts with alphanumeric, may contain alphanumeric, dots, hyphens, underscores.
+var validAppName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Config holds the OAuth relay configuration.
 type Config struct {
@@ -85,10 +90,18 @@ func (r *Relay) handleStart(w http.ResponseWriter, req *http.Request) {
 		})
 		return
 	}
+	if !validAppName.MatchString(app) {
+		http.Error(w, "invalid app parameter", http.StatusBadRequest)
+		return
+	}
 
 	callbackPath := req.URL.Query().Get("callback_path")
 	if callbackPath == "" {
 		callbackPath = "/__auth/callback"
+	}
+	if !strings.HasPrefix(callbackPath, "/") || strings.Contains(callbackPath, "..") || strings.ContainsAny(callbackPath, "?#") {
+		http.Error(w, "invalid callback_path parameter", http.StatusBadRequest)
+		return
 	}
 
 	// Generate cryptographic state parameter to track this flow
@@ -113,10 +126,11 @@ func (r *Relay) handleStart(w http.ResponseWriter, req *http.Request) {
 	log.Debug("oauthrelay: starting OAuth flow",
 		"app", app,
 		"callback_path", callbackPath,
-		"state", state[:8]+"...")
+		"state", truncateState(state))
 
 	// Build Google OAuth authorization URL
 	redirectURI := fmt.Sprintf("http://%s/callback", r.hostname)
+	// TODO: allow apps to request custom scopes via query parameter
 	googleURL := fmt.Sprintf(
 		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s&access_type=offline",
 		url.QueryEscape(r.cfg.ClientID),
@@ -154,6 +168,11 @@ func (r *Relay) handleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if len(state) < 8 {
+		http.Error(w, "invalid state parameter", http.StatusBadRequest)
+		return
+	}
+
 	// Look up the pending flow
 	r.mu.Lock()
 	flow, ok := r.flows[state]
@@ -163,7 +182,7 @@ func (r *Relay) handleCallback(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 
 	if !ok {
-		log.Debug("oauthrelay: unknown state parameter", "state", state[:8]+"...")
+		log.Debug("oauthrelay: unknown state parameter", "state", truncateState(state))
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "unknown or expired state parameter",
 		})
@@ -223,6 +242,14 @@ func generateState() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// truncateState returns a truncated state string safe for logging.
+func truncateState(state string) string {
+	if len(state) < 8 {
+		return state + "..."
+	}
+	return state[:8] + "..."
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

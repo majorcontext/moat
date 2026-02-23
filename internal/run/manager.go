@@ -953,7 +953,11 @@ region = %s
 
 	// Set up OAuth relay environment variables if enabled
 	if opts.Config != nil && opts.Config.OAuthRelay {
-		globalCfg, _ := config.LoadGlobal()
+		globalCfg, cfgErr := config.LoadGlobal()
+		if cfgErr != nil {
+			cleanupProxy(proxyServer)
+			return nil, fmt.Errorf("loading global config for OAuth relay: %w", cfgErr)
+		}
 		proxyPort := globalCfg.Proxy.Port
 
 		// Load Google OAuth credentials
