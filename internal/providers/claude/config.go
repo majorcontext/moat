@@ -26,10 +26,15 @@ const ClaudePluginsPath = "/home/moatuser/.claude/plugins"
 const ClaudeMarketplacesPath = ClaudePluginsPath + "/marketplaces"
 
 // MCPServerForContainer represents an MCP server in Claude's .claude.json format.
+// Supports both HTTP (remote/relay) and stdio (local process) server types.
 type MCPServerForContainer struct {
 	Type    string            `json:"type"`
-	URL     string            `json:"url"`
+	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
 }
 
 // HostConfigAllowlist lists fields from the host's ~/.claude.json that are

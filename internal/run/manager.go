@@ -1363,11 +1363,13 @@ region = %s
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
 
+		hasClaudeLocalMCP := opts.Config != nil && len(opts.Config.Claude.MCP) > 0
 		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
 		// - hasPlugins (plugin settings to configure)
 		// - isClaudeCode (need to copy onboarding state from host)
-		if needsClaudeInit || hasPlugins || isClaudeCode {
+		// - hasClaudeLocalMCP (local MCP servers to configure)
+		if needsClaudeInit || hasPlugins || isClaudeCode || hasClaudeLocalMCP {
 			claudeProvider := provider.GetAgent("claude")
 			if claudeProvider == nil {
 				cleanupProxy(proxyServer)
@@ -1414,12 +1416,31 @@ region = %s
 				}
 			}
 
+			// Build local MCP server config from claude.mcp entries
+			var claudeLocalMCP map[string]provider.LocalMCPServerConfig
+			if opts.Config != nil && len(opts.Config.Claude.MCP) > 0 {
+				claudeLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+				for name, spec := range opts.Config.Claude.MCP {
+					if spec.Grant != "" {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude local MCP servers; use codex.mcp or gemini.mcp instead, or set the env var directly", name)
+					}
+					claudeLocalMCP[name] = provider.LocalMCPServerConfig{
+						Command: spec.Command,
+						Args:    spec.Args,
+						Env:     spec.Env,
+						Cwd:     spec.Cwd,
+					}
+				}
+			}
+
 			// Call provider to prepare container config
 			var prepErr error
 			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
-				Credential:    claudeCred,
-				ContainerHome: containerHome,
-				MCPServers:    mcpServers,
+				Credential:      claudeCred,
+				ContainerHome:   containerHome,
+				MCPServers:      mcpServers,
+				LocalMCPServers: claudeLocalMCP,
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {
@@ -1444,7 +1465,8 @@ region = %s
 	// Set up Codex staging directory for init script using the provider interface.
 	// This includes auth config for OpenAI tokens.
 	var codexConfig *provider.ContainerConfig
-	if needsCodexInit || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
+	hasCodexLocalMCP := opts.Config != nil && len(opts.Config.Codex.MCP) > 0
+	if needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {
 			cleanupProxy(proxyServer)
@@ -1466,11 +1488,42 @@ region = %s
 			}
 		}
 
+		// Build local MCP server config from codex.mcp entries
+		var codexLocalMCP map[string]provider.LocalMCPServerConfig
+		if opts.Config != nil && len(opts.Config.Codex.MCP) > 0 {
+			codexLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+			for name, spec := range opts.Config.Codex.MCP {
+				env := spec.Env
+				if spec.Grant != "" {
+					if env == nil {
+						env = make(map[string]string)
+					} else {
+						// Copy to avoid mutating the original config
+						envCopy := make(map[string]string, len(env)+1)
+						for k, v := range env {
+							envCopy[k] = v
+						}
+						env = envCopy
+					}
+					if v, ok := grantToEnvVar(spec.Grant); ok {
+						env[v] = credential.ProxyInjectedPlaceholder
+					}
+				}
+				codexLocalMCP[name] = provider.LocalMCPServerConfig{
+					Command: spec.Command,
+					Args:    spec.Args,
+					Env:     env,
+					Cwd:     spec.Cwd,
+				}
+			}
+		}
+
 		// Call provider to prepare container config
 		var prepErr error
 		codexConfig, prepErr = codexProvider.PrepareContainer(ctx, provider.PrepareOpts{
-			Credential:    codexCred,
-			ContainerHome: containerHome,
+			Credential:      codexCred,
+			ContainerHome:   containerHome,
+			LocalMCPServers: codexLocalMCP,
 		})
 		if prepErr != nil {
 			cleanupProxy(proxyServer)
@@ -1486,7 +1539,8 @@ region = %s
 	// Set up Gemini staging directory for init script using the provider interface.
 	// This includes settings.json and optionally oauth_creds.json.
 	var geminiConfig *provider.ContainerConfig
-	if needsGeminiInit || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
+	hasGeminiLocalMCP := opts.Config != nil && len(opts.Config.Gemini.MCP) > 0
+	if needsGeminiInit || hasGeminiLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
 		geminiProvider := provider.GetAgent("gemini")
 		if geminiProvider == nil {
 			cleanupProxy(proxyServer)
@@ -1509,11 +1563,41 @@ region = %s
 			}
 		}
 
+		// Build local MCP server config from gemini.mcp entries
+		var geminiLocalMCP map[string]provider.LocalMCPServerConfig
+		if opts.Config != nil && len(opts.Config.Gemini.MCP) > 0 {
+			geminiLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+			for name, spec := range opts.Config.Gemini.MCP {
+				env := spec.Env
+				if spec.Grant != "" {
+					if env == nil {
+						env = make(map[string]string)
+					} else {
+						envCopy := make(map[string]string, len(env)+1)
+						for k, v := range env {
+							envCopy[k] = v
+						}
+						env = envCopy
+					}
+					if v, ok := grantToEnvVar(spec.Grant); ok {
+						env[v] = credential.ProxyInjectedPlaceholder
+					}
+				}
+				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
+					Command: spec.Command,
+					Args:    spec.Args,
+					Env:     env,
+					Cwd:     spec.Cwd,
+				}
+			}
+		}
+
 		// Call provider to prepare container config
 		var prepErr error
 		geminiConfig, prepErr = geminiProvider.PrepareContainer(ctx, provider.PrepareOpts{
-			Credential:    geminiCred,
-			ContainerHome: containerHome,
+			Credential:      geminiCred,
+			ContainerHome:   containerHome,
+			LocalMCPServers: geminiLocalMCP,
 		})
 		if prepErr != nil {
 			cleanupProxy(proxyServer)
@@ -3282,4 +3366,22 @@ func minRefreshInterval(targets []refreshTarget) time.Duration {
 		min = 30 * time.Minute // Default fallback
 	}
 	return min
+}
+
+// grantToEnvVar maps a grant name to the environment variable that local MCP
+// servers expect. The env var is set to a proxy placeholder so the proxy can
+// intercept and substitute the real credential.
+func grantToEnvVar(grant string) (string, bool) {
+	switch grant {
+	case "github":
+		return "GITHUB_TOKEN", true
+	case "openai":
+		return "OPENAI_API_KEY", true
+	case "anthropic":
+		return "ANTHROPIC_API_KEY", true
+	case "gemini":
+		return "GEMINI_API_KEY", true
+	default:
+		return "", false
+	}
 }

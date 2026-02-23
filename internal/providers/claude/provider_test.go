@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -352,6 +353,87 @@ func TestWriteClaudeConfig(t *testing.T) {
 	})
 }
 
+func TestWriteClaudeConfig_StdioMCPServers(t *testing.T) {
+	stagingDir := t.TempDir()
+
+	mcpServers := map[string]MCPServerForContainer{
+		"local-tools": {
+			Type:    "stdio",
+			Command: "/usr/local/bin/my-mcp-server",
+			Args:    []string{"--port", "3000"},
+			Env: map[string]string{
+				"API_KEY": "test-key",
+			},
+			Cwd: "/workspace",
+		},
+		"remote-server": {
+			Type: "http",
+			URL:  "http://proxy:8080/mcp/remote",
+			Headers: map[string]string{
+				"API_KEY": "moat-stub-mcp-remote",
+			},
+		},
+	}
+
+	err := WriteClaudeConfig(stagingDir, mcpServers, nil)
+	if err != nil {
+		t.Fatalf("WriteClaudeConfig() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(stagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpData, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers should be present")
+	}
+
+	// Verify stdio server
+	local, ok := mcpData["local-tools"].(map[string]any)
+	if !ok {
+		t.Fatal("local-tools server should be present")
+	}
+	if local["type"] != "stdio" {
+		t.Errorf("expected type 'stdio', got %v", local["type"])
+	}
+	if local["command"] != "/usr/local/bin/my-mcp-server" {
+		t.Errorf("expected command '/usr/local/bin/my-mcp-server', got %v", local["command"])
+	}
+	args, ok := local["args"].([]any)
+	if !ok || len(args) != 2 {
+		t.Fatalf("expected 2 args, got %v", local["args"])
+	}
+	if args[0] != "--port" || args[1] != "3000" {
+		t.Errorf("expected args ['--port', '3000'], got %v", args)
+	}
+	env, ok := local["env"].(map[string]any)
+	if !ok {
+		t.Fatal("env should be present")
+	}
+	if env["API_KEY"] != "test-key" {
+		t.Errorf("expected env API_KEY='test-key', got %v", env["API_KEY"])
+	}
+	if local["cwd"] != "/workspace" {
+		t.Errorf("expected cwd '/workspace', got %v", local["cwd"])
+	}
+
+	// Verify HTTP server also present
+	remote, ok := mcpData["remote-server"].(map[string]any)
+	if !ok {
+		t.Fatal("remote-server should be present")
+	}
+	if remote["type"] != "http" {
+		t.Errorf("expected type 'http', got %v", remote["type"])
+	}
+}
+
 func TestReadHostConfig(t *testing.T) {
 	t.Run("missing file returns nil", func(t *testing.T) {
 		result, err := ReadHostConfig(filepath.Join(t.TempDir(), "nonexistent.json"))
@@ -545,3 +627,214 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {
 }
 
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
+
+func TestPrepareContainer_LocalMCPServers(t *testing.T) {
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"my-lsp": {
+				Command: "node",
+				Args:    []string{"server.js", "--stdio"},
+				Env:     map[string]string{"NODE_ENV": "production"},
+				Cwd:     "/workspace",
+			},
+		},
+		HostConfig: map[string]any{}, // empty to prevent host file read
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	// Read .claude.json from staging dir
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpData, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers should be present in .claude.json")
+	}
+
+	server, ok := mcpData["my-lsp"].(map[string]any)
+	if !ok {
+		t.Fatal("my-lsp server should be present")
+	}
+
+	if server["type"] != "stdio" {
+		t.Errorf("expected type 'stdio', got %v", server["type"])
+	}
+	if server["command"] != "node" {
+		t.Errorf("expected command 'node', got %v", server["command"])
+	}
+	args, ok := server["args"].([]any)
+	if !ok || len(args) != 2 {
+		t.Fatalf("expected 2 args, got %v", server["args"])
+	}
+	if args[0] != "server.js" || args[1] != "--stdio" {
+		t.Errorf("expected args ['server.js', '--stdio'], got %v", args)
+	}
+	env, ok := server["env"].(map[string]any)
+	if !ok {
+		t.Fatal("env should be present")
+	}
+	if env["NODE_ENV"] != "production" {
+		t.Errorf("expected env NODE_ENV='production', got %v", env["NODE_ENV"])
+	}
+	if server["cwd"] != "/workspace" {
+		t.Errorf("expected cwd '/workspace', got %v", server["cwd"])
+	}
+
+	// URL and headers should be omitted for stdio servers
+	if _, ok := server["url"]; ok {
+		t.Error("stdio server should not have url field")
+	}
+	if _, ok := server["headers"]; ok {
+		t.Error("stdio server should not have headers field")
+	}
+}
+
+func TestPrepareContainer_MixedRemoteAndLocal(t *testing.T) {
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		MCPServers: map[string]provider.MCPServerConfig{
+			"remote-api": {
+				URL:     "http://proxy:8080/mcp/remote-api",
+				Headers: map[string]string{"API_KEY": "moat-stub-mcp-remote"},
+			},
+		},
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"local-tools": {
+				Command: "npx",
+				Args:    []string{"-y", "@modelcontextprotocol/server-filesystem"},
+			},
+		},
+		HostConfig: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpData, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("mcpServers should be present")
+	}
+
+	// Verify both servers present
+	if _, ok := mcpData["remote-api"]; !ok {
+		t.Error("remote-api server should be present")
+	}
+	if _, ok := mcpData["local-tools"]; !ok {
+		t.Error("local-tools server should be present")
+	}
+
+	// Verify types
+	remote := mcpData["remote-api"].(map[string]any)
+	if remote["type"] != "http" {
+		t.Errorf("remote-api should be type 'http', got %v", remote["type"])
+	}
+
+	local := mcpData["local-tools"].(map[string]any)
+	if local["type"] != "stdio" {
+		t.Errorf("local-tools should be type 'stdio', got %v", local["type"])
+	}
+	if local["command"] != "npx" {
+		t.Errorf("expected command 'npx', got %v", local["command"])
+	}
+}
+
+func TestPrepareContainer_NoMCPServers(t *testing.T) {
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		HostConfig:    map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	// mcpServers should NOT be in config when no MCP servers
+	if _, ok := config["mcpServers"]; ok {
+		t.Error("mcpServers should not be present when no MCP servers configured")
+	}
+}
+
+func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
+	// Test that a local MCP server with only command (no args, env, cwd) works
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+			"simple": {
+				Command: "my-mcp",
+			},
+		},
+		HostConfig: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("failed to read .claude.json: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse .claude.json: %v", err)
+	}
+
+	mcpData := config["mcpServers"].(map[string]any)
+	server := mcpData["simple"].(map[string]any)
+
+	if server["type"] != "stdio" {
+		t.Errorf("expected type 'stdio', got %v", server["type"])
+	}
+	if server["command"] != "my-mcp" {
+		t.Errorf("expected command 'my-mcp', got %v", server["command"])
+	}
+
+	// Args, env, cwd should be absent or empty when not set
+	// JSON encoding omits empty slices/maps via omitempty
+	if args, ok := server["args"]; ok {
+		if a, ok := args.([]any); ok && len(a) > 0 {
+			t.Errorf("args should be omitted or empty, got %v", args)
+		}
+	}
+}

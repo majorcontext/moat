@@ -38,6 +38,30 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		}
 	}
 
+	// Write local MCP server configuration if present
+	if len(opts.LocalMCPServers) > 0 {
+		mcpConfig := MCPConfig{
+			MCPServers: make(map[string]MCPServer),
+		}
+		for name, cfg := range opts.LocalMCPServers {
+			mcpConfig.MCPServers[name] = MCPServer{
+				Command: cfg.Command,
+				Args:    cfg.Args,
+				Env:     cfg.Env,
+				Cwd:     cfg.Cwd,
+			}
+		}
+		mcpJSON, err := json.MarshalIndent(mcpConfig, "", "  ")
+		if err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("marshaling MCP config: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "mcp.json"), mcpJSON, 0644); err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing MCP config: %w", err)
+		}
+	}
+
 	// Build container environment
 	env := p.ContainerEnv(opts.Credential)
 	env = append(env, "MOAT_GEMINI_INIT="+GeminiInitMountPath)
