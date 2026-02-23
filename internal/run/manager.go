@@ -2135,8 +2135,8 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		m.mu.Unlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-	r.State = StateStarting
 	m.mu.Unlock()
+	r.SetState(StateStarting)
 
 	// Set run context in logger for correlation
 	log.SetRunContext(log.RunContext{
@@ -2149,10 +2149,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	})
 
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
-		m.mu.Lock()
-		r.State = StateFailed
-		r.Error = err.Error()
-		m.mu.Unlock()
+		r.SetStateWithError(StateFailed, err.Error())
 		return err
 	}
 
@@ -2203,10 +2200,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
-	m.mu.Lock()
-	r.State = StateRunning
-	r.StartedAt = time.Now()
-	m.mu.Unlock()
+	r.SetStateWithTime(StateRunning, time.Now())
 
 	// Save state to disk
 	_ = r.SaveMetadata()
@@ -2241,9 +2235,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		m.mu.Unlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-	r.State = StateStarting
 	containerID := r.ContainerID
 	m.mu.Unlock()
+	r.SetState(StateStarting)
 
 	// Set run context in logger for correlation
 	log.SetRunContext(log.RunContext{
@@ -2311,12 +2305,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	time.Sleep(containerStartDelay)
 
 	// Update state to running (the container has started)
-	m.mu.Lock()
-	if r.State == StateStarting {
-		r.State = StateRunning
-		r.StartedAt = time.Now()
+	if r.GetState() == StateStarting {
+		r.SetStateWithTime(StateRunning, time.Now())
 	}
-	m.mu.Unlock()
 
 	// Get actual port bindings after container starts
 	if len(r.Ports) > 0 {

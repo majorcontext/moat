@@ -1016,7 +1016,7 @@ func TestLastNLinesEdgeCases(t *testing.T) {
 }
 
 // TestMonitorContainerExitWaitError verifies that monitorContainerExit handles
-// WaitContainer errors (e.g., context cancelled or runtime error) correctly.
+// WaitContainer errors (e.g., context canceled or runtime error) correctly.
 func TestMonitorContainerExitWaitError(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "TestMonitorContainerExitWaitError")
 	if err != nil {
@@ -1078,11 +1078,11 @@ func TestMonitorContainerExitWaitError(t *testing.T) {
 // captureLogs and stopProxyServer/stopSSHAgent are safe when called
 // concurrently from both Stop() and monitorContainerExit().
 //
-// NOTE: There is a known data race in Stop() where r.State and r.StoppedAt
-// are written under m.mu instead of r.stateMu, while monitorContainerExit
-// reads them via r.GetState() which uses r.stateMu. This test exercises the
-// captureLogs and sync.Once paths which ARE safe. A separate fix is needed
-// for the state mutation race in Stop().
+// The state mutation race in Stop() (where r.State and r.StoppedAt were written
+// under m.mu instead of r.stateMu) has been fixed: Stop() now uses
+// r.SetStateWithTime() which correctly acquires r.stateMu. Start() and
+// StartAttached() also use the proper setters (SetState, SetStateWithError,
+// SetStateWithTime) for all state mutations.
 func TestConcurrentStopAndMonitorExit_CaptureLogsIdempotent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "TestConcurrentStopAndMonitor")
 	if err != nil {
