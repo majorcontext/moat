@@ -225,9 +225,7 @@ func TestProfileIsolation(t *testing.T) {
 func TestListProfiles(t *testing.T) {
 	// Create temp home with profile directories
 	tmpHome := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
 
 	// No profiles dir yet
 	profiles, err := ListProfiles()
@@ -458,9 +456,7 @@ func TestProfileIsolation_SameProviderDifferentTokens(t *testing.T) {
 func TestListProfiles_IgnoresFiles(t *testing.T) {
 	// ListProfiles should only return directories, not regular files.
 	tmpHome := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
 
 	profilesDir := filepath.Join(tmpHome, ".moat", "credentials", "profiles")
 	os.MkdirAll(filepath.Join(profilesDir, "real-profile"), 0700)
