@@ -56,6 +56,9 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		}
 		// Language servers run as stdio MCP processes inside the container
 		for name, cfg := range opts.LanguageServerMCPs {
+			if _, exists := mcpServers[name]; exists {
+				return nil, fmt.Errorf("language server %q conflicts with an MCP server of the same name", name)
+			}
 			mcpServers[name] = MCPServerForContainer{
 				Type:    "stdio",
 				Command: cfg.Command,

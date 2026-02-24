@@ -9,6 +9,7 @@ package langserver
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // ServerSpec defines a prepackaged language server.
@@ -127,9 +128,5 @@ func listNames() string {
 	if len(names) == 0 {
 		return "(none)"
 	}
-	result := names[0]
-	for _, n := range names[1:] {
-		result += ", " + n
-	}
-	return result
+	return strings.Join(names, ", ")
 }

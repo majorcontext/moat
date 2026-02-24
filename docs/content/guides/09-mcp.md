@@ -1,30 +1,29 @@
 ---
 title: "MCP servers"
 navTitle: "MCP"
-description: "Configure remote, host-local, and sandbox-local MCP (Model Context Protocol) servers in Moat."
-keywords: ["moat", "mcp", "model context protocol", "mcp servers", "credential injection", "sandbox-local", "language servers"]
+description: "Configure remote and local MCP (Model Context Protocol) servers with credential injection in Moat."
+keywords: ["moat", "mcp", "model context protocol", "mcp servers", "credential injection", "language servers"]
 ---
 
 # MCP servers
 
 MCP (Model Context Protocol) servers extend AI agents with additional tools and context. An MCP server exposes capabilities -- file search, database queries, API integrations -- that an agent can invoke during a run.
 
-Moat supports three types of MCP servers:
+Moat supports two types of MCP servers:
 
 - **Remote MCP servers** -- External HTTPS services accessed through Moat's credential-injecting proxy
-- **Host-local MCP servers** -- Services running on the host machine, accessed via `localhost`, `127.0.0.1`, or `[::1]`
-- **Sandbox-local MCP servers** -- Child processes running inside the container
+- **Local MCP servers** -- Child processes running inside the container
 
 For common language servers, Moat provides [prepackaged configurations](#prepackaged-language-servers) that handle installation and setup automatically.
 
-This guide covers configuring all three types, granting credentials, and troubleshooting common issues.
+This guide covers configuring both types, granting credentials, and troubleshooting common issues.
 
 ## Prerequisites
 
 - Moat installed
 - An agent configured (Claude Code, Codex, or Gemini)
 - For remote MCP servers: the server URL and any required credentials
-- For sandbox-local MCP servers: the server package name or executable
+- For local MCP servers: the server package name or executable
 
 ## Remote MCP servers
 
@@ -113,27 +112,15 @@ moat grant mcp context7
 moat grant mcp notion
 ```
 
-## Host-local MCP servers
-
-Host-local MCP servers run on the host machine and are accessed from the container via `localhost`, `127.0.0.1`, or `[::1]`. Configure them the same way as remote servers, using the top-level `mcp:` section. HTTP URLs are allowed for host-local addresses:
-
-```yaml
-mcp:
-  - name: my-local-server
-    url: http://localhost:8080/mcp
-```
-
-Authentication is optional for host-local servers. Add an `auth` block if the server requires credentials.
-
 ## How the relay works
 
 Some agent HTTP clients do not respect `HTTP_PROXY` for MCP connections, so Moat routes MCP traffic through a local relay endpoint on the proxy. The agent connects to the relay, the relay injects credentials from the grant store, and forwards requests to the real MCP server. The agent never has access to raw credentials, and all MCP traffic appears in network traces and audit logs.
 
 See [Proxy architecture](../concepts/09-proxy.md) for details on how the relay works.
 
-## Sandbox-local MCP servers
+## Local MCP servers
 
-Sandbox-local MCP servers run as child processes inside the container. The agent starts them directly -- no proxy is involved. Configure them under the agent-specific section of `agent.yaml`.
+Local MCP servers run as child processes inside the container. The agent starts them directly -- no proxy is involved. Configure them under the agent-specific section of `agent.yaml`.
 
 ### 1. Install the MCP server
 
@@ -239,7 +226,7 @@ claude:
       cwd: /workspace
 ```
 
-### Sandbox-local MCP server fields
+### Local MCP server fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -267,7 +254,7 @@ $ moat audit
 [10:23:44.500] credential.injected grant=mcp-context7 host=mcp.context7.com header=CONTEXT7_API_KEY
 ```
 
-Sandbox-local MCP server output appears in container logs:
+Local MCP server output appears in container logs:
 
 ```bash
 moat logs
@@ -280,6 +267,7 @@ Language servers provide code intelligence (go-to-definition, find-references, d
 Add `language_servers` to your `agent.yaml`:
 
 ```yaml
+agent: claude
 language_servers:
   - gopls
 grants:
@@ -310,7 +298,7 @@ No proxy or network configuration is needed -- the language server runs inside t
 
 ### MCP server not appearing in agent
 
-- Verify the MCP server is declared in `agent.yaml` (remote servers at the top level, sandbox-local servers under the agent section)
+- Verify the MCP server is declared in `agent.yaml` (remote servers at the top level, local servers under the agent section)
 - For remote servers, check that the grant exists: `moat grant list` should show `mcp-{name}`
 - Check container logs for configuration errors: `moat logs`
 
@@ -333,7 +321,7 @@ If you see `moat-stub-{grant}` in error output, the proxy did not replace the st
 
 - The proxy may not be running. Check `moat list` to verify the run is active
 - For remote servers, verify the URL is reachable from your network
-- For sandbox-local servers, verify the `command` path exists inside the container
+- For local servers, verify the `command` path exists inside the container
 
 ### Sandbox-local server not starting
 
@@ -353,21 +341,21 @@ Remote MCP servers that use SSE (Server-Sent Events) for streaming responses are
 
 ### Claude Code
 
-Remote MCP servers, sandbox-local MCP servers, and prepackaged language servers are all configured in the generated `.claude.json`. Remote servers use `type: http` with relay URLs pointing to the proxy. Sandbox-local and language servers use `type: stdio`. Claude Code discovers all types through this config file automatically. See [Running Claude Code](./01-claude-code.md) for other Claude Code configuration options.
+Remote MCP servers, local MCP servers, and prepackaged language servers are all configured in the generated `.claude.json`. Remote servers use `type: http` with relay URLs pointing to the proxy. Local and language servers use `type: stdio`. Claude Code discovers all types through this config file automatically. See [Running Claude Code](./01-claude-code.md) for other Claude Code configuration options.
 
 ### Codex
 
-Sandbox-local MCP servers are configured under `codex.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Codex](./02-codex.md) for Codex-specific configuration.
+Local MCP servers are configured under `codex.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Codex](./02-codex.md) for Codex-specific configuration.
 
 ### Gemini
 
-Sandbox-local MCP servers are configured under `gemini.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Gemini](./03-gemini.md) for Gemini-specific configuration.
+Local MCP servers are configured under `gemini.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Gemini](./03-gemini.md) for Gemini-specific configuration.
 
 ## Related guides
 
 - [Credential management](../concepts/02-credentials.md) -- How credential injection works
 - [Observability](../concepts/03-observability.md) -- Network traces and audit logs
-- [agent.yaml reference](../reference/02-agent-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, `codex.mcp:`, `gemini.mcp:`, and `language_servers:`
+- [agent.yaml reference](../reference/02-agent-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, `gemini.mcp:`, and `language_servers:`
 - [CLI reference](../reference/01-cli.md) -- `moat grant mcp` command details
 - [Running Claude Code](./01-claude-code.md) -- Claude Code agent guide
 - [Running Codex](./02-codex.md) -- Codex agent guide

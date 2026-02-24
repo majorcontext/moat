@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -825,6 +826,33 @@ func TestPrepareContainer_LanguageServerMCPs(t *testing.T) {
 	}
 	if _, ok := gopls["headers"]; ok {
 		t.Error("stdio server should not have headers field")
+	}
+}
+
+func TestPrepareContainer_LanguageServerNameCollision(t *testing.T) {
+	p := &OAuthProvider{}
+
+	_, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		MCPServers: map[string]provider.MCPServerConfig{
+			"gopls": {
+				URL:     "http://proxy:8080/mcp/gopls",
+				Headers: map[string]string{"X-API-Key": "stub-key"},
+			},
+		},
+		LanguageServerMCPs: map[string]provider.LanguageServerMCP{
+			"gopls": {
+				Command: "gopls",
+				Args:    []string{"mcp"},
+			},
+		},
+		HostConfig: map[string]any{},
+	})
+	if err == nil {
+		t.Fatal("PrepareContainer() should return error when language server name collides with remote MCP server")
+	}
+	if !strings.Contains(err.Error(), "conflicts") {
+		t.Errorf("error should mention conflict, got: %v", err)
 	}
 }
 
