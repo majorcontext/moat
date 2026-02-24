@@ -1921,7 +1921,12 @@ region = %s
 		}
 		r.ProxyChain = chain
 
-		// Store chain sidecar container IDs in service containers for metadata
+		// Store chain container IDs in ServiceContainers for metadata
+		// persistence. This allows Destroy() to clean up chain containers
+		// after a manager restart (when ProxyChain is not reconstructed).
+		// The live Stop/monitorContainerExit paths stop them via
+		// ProxyChain.Stop() first; the ServiceContainers loop may stop
+		// them again, but StopService is idempotent.
 		if r.ServiceContainers == nil {
 			r.ServiceContainers = make(map[string]string)
 		}
@@ -2537,9 +2542,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		ui.Warnf("Stopping proxy: %v", err)
 	}
 
-	// Note: proxy chain sidecars were already stopped at the top of Stop()
-	// and their containers are also in ServiceContainers, so no additional
-	// ProxyChain.Stop() call is needed here.
+	// Note: proxy chain sidecars were already stopped via proxyChain.Stop()
+	// at the top of Stop(). They're also in ServiceContainers for metadata
+	// persistence but that loop already ran too — StopService is idempotent.
 
 	// Stop the SSH agent server if one was created
 	if err := r.stopSSHAgentServer(); err != nil {
@@ -2895,8 +2900,9 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
 	}
 
-	// Stop service containers (chain containers are also in here but
-	// ProxyChain.Stop above is idempotent, so double-stop is safe).
+	// Stop service containers. Chain containers are also in here but
+	// were already stopped by ProxyChain.Stop above; StopService is
+	// idempotent so the duplicate call is harmless.
 	if len(r.ServiceContainers) > 0 {
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr != nil {
@@ -2977,7 +2983,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		ui.Warnf("%v", err)
 	}
 
-	// Remove service containers
+	// Remove service containers (includes proxy chain sidecars)
 	for svcName, svcContainerID := range r.ServiceContainers {
 		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
 			ui.Warnf("Removing %s service container: %v", svcName, err)

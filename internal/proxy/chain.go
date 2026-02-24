@@ -51,7 +51,10 @@ func StartChain(
 		// Determine upstream URL
 		var upstreamURL string
 		if i < len(entries)-1 {
-			// Upstream is the next proxy in chain (by container name on the Docker network)
+			// Upstream is the next proxy in chain. We use the Docker container
+			// name as hostname since the next proxy hasn't started yet and
+			// Docker DNS resolves container names within the shared network.
+			// (Apple containers are rejected at the manager level.)
 			next := entries[i+1]
 			upstreamURL = fmt.Sprintf("http://moat-proxy-%s-%s:%d", runID, next.Name, next.Port)
 		} else {
@@ -86,10 +89,19 @@ func StartChain(
 			return nil, fmt.Errorf("starting proxy %q: %w", entry.Name, err)
 		}
 
+		// Use the host returned by StartService — for Docker this is the
+		// container name (resolvable via Docker DNS); for other runtimes it
+		// may be an IP address. Fall back to the container name if the
+		// service manager didn't provide a host.
+		host := info.Host
+		if host == "" {
+			host = containerName
+		}
+
 		cp := ChainProxy{
 			Name:        entry.Name,
 			ContainerID: info.ID,
-			Host:        containerName, // use container name as hostname on Docker network
+			Host:        host,
 			Port:        entry.Port,
 		}
 		chain.proxies = append(chain.proxies, cp)
