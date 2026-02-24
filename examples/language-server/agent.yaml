@@ -1,0 +1,27 @@
+# Example: Go development with language server
+#
+# Runs Claude Code with gopls as an MCP language server, giving Claude
+# access to code intelligence (go-to-definition, find-references,
+# diagnostics) when working on Go code.
+#
+# Prerequisites:
+#   moat grant claude
+#
+# Run with:
+#   moat claude examples/language-server
+#   moat claude examples/language-server -p "add a Deposit method to Account and update the tests"
+
+agent: claude
+
+dependencies:
+  - claude-code
+  - git
+
+grants:
+  - claude
+
+language_servers:
+  - gopls
+
+command: ["claude"]
+interactive: true
