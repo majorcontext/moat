@@ -25,6 +25,10 @@ var cleanCmd = &cobra.Command{
 	Long: `Interactively remove stopped runs, unused moat images, and worktree
 directories associated with stopped runs.
 
+Worktree cleanup prunes git metadata for the current repository only.
+Worktrees created from other repos will have their directories removed,
+but you may need to run 'git worktree prune' in those repos separately.
+
 Shows what will be removed and asks for confirmation before proceeding.
 Use --force to skip confirmation (for scripts).
 Use --dry-run to see what would be removed without prompting.`,
@@ -145,11 +149,18 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve repo root for worktree cleanup (best-effort, may fail if not in a git repo)
+	// Resolve repo root for worktree cleanup (best-effort, may fail if not in a git repo).
+	// This only prunes worktrees belonging to the current repository; worktrees
+	// created from other repos will have their directories removed but stale
+	// .git/worktrees/ entries in those repos will remain until `git worktree prune`
+	// is run there.
 	var repoRoot string
 	if len(worktreeRuns) > 0 {
-		cwd, _ := os.Getwd()
-		if cwd != "" {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			ui.Warnf("Cannot determine working directory: %v", cwdErr)
+			ui.Info("Worktree cleanup will be skipped")
+		} else if cwd != "" {
 			repoRoot, _ = worktree.FindRepoRoot(cwd)
 		}
 	}
@@ -280,6 +291,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Clean worktree directories only for runs that were successfully destroyed.
 	// If destroy failed, the run record still exists and removing its worktree
 	// would leave it visible in "moat list" but with a missing directory.
+	var wtFailedCount int
 	for _, r := range worktreeRuns {
 		if !destroyedRunIDs[r.ID] {
 			continue
@@ -296,7 +308,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 		if err := worktree.Clean(root, r.WorktreePath); err != nil {
 			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
-			failedCount++
+			wtFailedCount++
 			continue
 		}
 		// Don't increment removedCount here — worktree cleanup is part of
@@ -304,9 +316,16 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Green("done"))
 	}
 
-	if failedCount > 0 {
+	switch {
+	case failedCount > 0 && wtFailedCount > 0:
+		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed, %d worktree cleanups failed)\n",
+			removedCount, freedSize/(1024*1024), failedCount, wtFailedCount)
+	case failedCount > 0:
 		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed)\n", removedCount, freedSize/(1024*1024), failedCount)
-	} else {
+	case wtFailedCount > 0:
+		fmt.Printf("\nCleaned %d resources, freed %d MB (%d worktree cleanups failed)\n",
+			removedCount, freedSize/(1024*1024), wtFailedCount)
+	default:
 		fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
 	}
 	return nil
