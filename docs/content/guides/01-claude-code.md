@@ -141,38 +141,6 @@ moat claude --noyolo ./my-project
 
 With `--noyolo`, Claude Code prompts for confirmation before each potentially destructive operation, just as it would when running directly on your host machine.
 
-### Resuming sessions
-
-Claude Code sessions persist across container runs. Moat mounts the Claude projects directory (`~/.claude/projects/`) between host and container, so conversation logs are always available.
-
-**Resume a previous run:**
-
-```bash
-# Resume the most recent Claude Code run
-moat resume
-
-# Resume a specific run by name or ID
-moat resume my-feature
-moat resume run_a1b2c3d4e5f6
-```
-
-If the run is still active, `moat resume` attaches to it. If the run has stopped, it starts a new container with the same workspace and passes `--continue` to Claude Code, which picks up the most recent conversation.
-
-**Continue from `moat claude`:**
-
-```bash
-moat claude --continue
-moat claude -c
-```
-
-**Resume a specific Claude Code session by ID:**
-
-```bash
-moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
-```
-
-Session IDs are stored as `.jsonl` filenames under `~/.claude/projects/`. You can also find them in the Claude Code conversation list.
-
 ### Named runs
 
 Give your run a name for reference:
