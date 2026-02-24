@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"net"
+
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -124,14 +126,22 @@ func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential
 		return
 	}
 
+	// Strip port if present — proxy credential methods (SetCredentialWithGrant,
+	// AddExtraHeader, etc.) validate via isValidHost which rejects colons.
+	// The relay handler uses getCredential() which handles host:port fallback.
+	host := baseURLHost
+	if h, _, err := net.SplitHostPort(baseURLHost); err == nil {
+		host = h
+	}
+
 	switch cred.Provider {
 	case "claude":
-		p.SetCredentialWithGrant(baseURLHost, "Authorization", "Bearer "+cred.Token, "claude")
-		p.RemoveRequestHeader(baseURLHost, "x-api-key")
-		p.AddExtraHeader(baseURLHost, "anthropic-beta", "oauth-2025-04-20")
-		p.AddResponseTransformer(baseURLHost, CreateOAuthEndpointTransformer())
+		p.SetCredentialWithGrant(host, "Authorization", "Bearer "+cred.Token, "claude")
+		p.RemoveRequestHeader(host, "x-api-key")
+		p.AddExtraHeader(host, "anthropic-beta", "oauth-2025-04-20")
+		p.AddResponseTransformer(host, CreateOAuthEndpointTransformer())
 	default:
 		// API key (anthropic or unknown provider)
-		p.SetCredentialWithGrant(baseURLHost, "x-api-key", cred.Token, "anthropic")
+		p.SetCredentialWithGrant(host, "x-api-key", cred.Token, "anthropic")
 	}
 }

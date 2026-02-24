@@ -105,14 +105,15 @@ func TestConfigureBaseURLProxy_OAuth(t *testing.T) {
 
 	ConfigureBaseURLProxy(mockProxy, cred, "localhost:8080")
 
-	// OAuth should use Bearer auth on the custom host
+	// Port should be stripped — credentials registered under hostname only
+	// (proxy's isValidHost rejects colons; relay uses getCredential for host:port fallback)
 	want := "Authorization: Bearer sk-ant-oat01-abc123"
-	if mockProxy.credentials["localhost:8080"] != want {
-		t.Errorf("localhost:8080 credential = %q, want %q", mockProxy.credentials["localhost:8080"], want)
+	if mockProxy.credentials["localhost"] != want {
+		t.Errorf("localhost credential = %q, want %q", mockProxy.credentials["localhost"], want)
 	}
 
 	// Should strip x-api-key on the custom host
-	removed := mockProxy.removedHeaders["localhost:8080"]
+	removed := mockProxy.removedHeaders["localhost"]
 	foundXAPIKey := false
 	for _, h := range removed {
 		if h == "x-api-key" {
@@ -124,12 +125,12 @@ func TestConfigureBaseURLProxy_OAuth(t *testing.T) {
 	}
 
 	// Should have beta header on the custom host
-	if mockProxy.extraHeaders["localhost:8080"]["anthropic-beta"] != "oauth-2025-04-20" {
+	if mockProxy.extraHeaders["localhost"]["anthropic-beta"] != "oauth-2025-04-20" {
 		t.Error("expected anthropic-beta header on custom host")
 	}
 
 	// Should have transformer on the custom host
-	if len(mockProxy.transformers["localhost:8080"]) == 0 {
+	if len(mockProxy.transformers["localhost"]) == 0 {
 		t.Error("expected transformer on custom host for OAuth")
 	}
 
@@ -148,16 +149,16 @@ func TestConfigureBaseURLProxy_APIKey(t *testing.T) {
 
 	ConfigureBaseURLProxy(mockProxy, cred, "proxy.internal:3000")
 
-	// API key should use x-api-key on the custom host
-	if mockProxy.credentials["proxy.internal:3000"] != "x-api-key: sk-ant-api01-abc123" {
-		t.Errorf("proxy.internal:3000 credential = %q, want %q", mockProxy.credentials["proxy.internal:3000"], "x-api-key: sk-ant-api01-abc123")
+	// Port should be stripped — credentials registered under hostname only
+	if mockProxy.credentials["proxy.internal"] != "x-api-key: sk-ant-api01-abc123" {
+		t.Errorf("proxy.internal credential = %q, want %q", mockProxy.credentials["proxy.internal"], "x-api-key: sk-ant-api01-abc123")
 	}
 
 	// Should NOT have beta header or transformer
-	if len(mockProxy.extraHeaders["proxy.internal:3000"]) != 0 {
+	if len(mockProxy.extraHeaders["proxy.internal"]) != 0 {
 		t.Error("expected no extra headers for API key on custom host")
 	}
-	if len(mockProxy.transformers["proxy.internal:3000"]) != 0 {
+	if len(mockProxy.transformers["proxy.internal"]) != 0 {
 		t.Error("expected no transformer for API key on custom host")
 	}
 }

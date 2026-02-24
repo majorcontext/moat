@@ -82,29 +82,26 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Inject credentials and extra headers for the target host
-	p.mu.RLock()
-	if cred, ok := p.credentials[targetURL.Host]; ok {
+	// Inject credentials and extra headers for the target host.
+	// Use the helper methods (getCredential, getExtraHeaders, getRemoveHeaders)
+	// which handle host:port fallback — credentials are registered by hostname
+	// only (isValidHost rejects colons), but targetURL.Host may include a port.
+	host := targetURL.Host
+	if cred, ok := p.getCredential(host); ok {
 		proxyReq.Header.Set(cred.Name, cred.Value)
 		log.Debug("credential injected",
 			"subsystem", "proxy",
 			"action", "inject",
 			"grant", cred.Grant,
-			"host", targetURL.Host,
+			"host", host,
 			"header", cred.Name,
 			"method", r.Method,
 			"path", rest)
 	}
-	if extras, ok := p.extraHeaders[targetURL.Host]; ok {
-		for _, h := range extras {
-			if existing := proxyReq.Header.Get(h.Name); existing != "" {
-				proxyReq.Header.Set(h.Name, existing+","+h.Value)
-			} else {
-				proxyReq.Header.Set(h.Name, h.Value)
-			}
-		}
+	mergeExtraHeaders(proxyReq, host, p.getExtraHeaders(host))
+	for _, headerName := range p.getRemoveHeaders(host) {
+		proxyReq.Header.Del(headerName)
 	}
-	p.mu.RUnlock()
 
 	// Forward to target
 	resp, err := relayClient.Do(proxyReq)
