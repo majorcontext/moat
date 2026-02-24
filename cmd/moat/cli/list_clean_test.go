@@ -12,8 +12,8 @@ import (
 )
 
 // listCleanStubRuntime is a minimal mock of container.Runtime for testing
-// isImageInUse. Only ListContainers is implemented; all other methods panic
-// to catch unexpected calls.
+// isImageInUse. Only ListContainers is implemented; all other methods return
+// zero values.
 type listCleanStubRuntime struct {
 	containers []container.Info
 	listErr    error

@@ -160,7 +160,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		if cwdErr != nil {
 			ui.Warnf("Cannot determine working directory: %v", cwdErr)
 			ui.Info("Worktree cleanup will be skipped")
-		} else if cwd != "" {
+		} else {
 			repoRoot, _ = worktree.FindRepoRoot(cwd)
 		}
 	}
