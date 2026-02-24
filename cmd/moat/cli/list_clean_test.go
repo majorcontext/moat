@@ -21,59 +21,74 @@ func (s *listCleanStubRuntime) ListContainers(ctx context.Context) ([]container.
 }
 
 // Stubs for the rest of container.Runtime — not exercised by isImageInUse.
-func (s *listCleanStubRuntime) Type() container.RuntimeType    { return "" }
-func (s *listCleanStubRuntime) Ping(ctx context.Context) error { return nil }
+// These panic to catch unexpected calls if isImageInUse is ever extended.
+func (s *listCleanStubRuntime) Type() container.RuntimeType { panic("unexpected call to Type") }
+func (s *listCleanStubRuntime) Ping(ctx context.Context) error {
+	panic("unexpected call to Ping")
+}
 func (s *listCleanStubRuntime) CreateContainer(ctx context.Context, cfg container.Config) (string, error) {
-	return "", nil
+	panic("unexpected call to CreateContainer")
 }
-func (s *listCleanStubRuntime) StartContainer(ctx context.Context, id string) error { return nil }
-func (s *listCleanStubRuntime) StopContainer(ctx context.Context, id string) error  { return nil }
+func (s *listCleanStubRuntime) StartContainer(ctx context.Context, id string) error {
+	panic("unexpected call to StartContainer")
+}
+func (s *listCleanStubRuntime) StopContainer(ctx context.Context, id string) error {
+	panic("unexpected call to StopContainer")
+}
 func (s *listCleanStubRuntime) WaitContainer(ctx context.Context, id string) (int64, error) {
-	return 0, nil
+	panic("unexpected call to WaitContainer")
 }
-func (s *listCleanStubRuntime) RemoveContainer(ctx context.Context, id string) error { return nil }
+func (s *listCleanStubRuntime) RemoveContainer(ctx context.Context, id string) error {
+	panic("unexpected call to RemoveContainer")
+}
 func (s *listCleanStubRuntime) ContainerLogs(ctx context.Context, id string) (io.ReadCloser, error) {
-	return nil, nil
+	panic("unexpected call to ContainerLogs")
 }
 func (s *listCleanStubRuntime) ContainerLogsAll(ctx context.Context, id string) ([]byte, error) {
-	return nil, nil
+	panic("unexpected call to ContainerLogsAll")
 }
 func (s *listCleanStubRuntime) GetPortBindings(ctx context.Context, id string) (map[int]int, error) {
-	return nil, nil
+	panic("unexpected call to GetPortBindings")
 }
-func (s *listCleanStubRuntime) GetHostAddress() string    { return "" }
-func (s *listCleanStubRuntime) SupportsHostNetwork() bool { return false }
+func (s *listCleanStubRuntime) GetHostAddress() string {
+	panic("unexpected call to GetHostAddress")
+}
+func (s *listCleanStubRuntime) SupportsHostNetwork() bool {
+	panic("unexpected call to SupportsHostNetwork")
+}
 func (s *listCleanStubRuntime) NetworkManager() container.NetworkManager {
-	return nil
+	panic("unexpected call to NetworkManager")
 }
 func (s *listCleanStubRuntime) SidecarManager() container.SidecarManager {
-	return nil
+	panic("unexpected call to SidecarManager")
 }
 func (s *listCleanStubRuntime) BuildManager() container.BuildManager {
-	return nil
+	panic("unexpected call to BuildManager")
 }
 func (s *listCleanStubRuntime) ServiceManager() container.ServiceManager {
-	return nil
+	panic("unexpected call to ServiceManager")
 }
-func (s *listCleanStubRuntime) Close() error { return nil }
+func (s *listCleanStubRuntime) Close() error { panic("unexpected call to Close") }
 func (s *listCleanStubRuntime) SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error {
-	return nil
+	panic("unexpected call to SetupFirewall")
 }
 func (s *listCleanStubRuntime) ListImages(ctx context.Context) ([]container.ImageInfo, error) {
-	return nil, nil
+	panic("unexpected call to ListImages")
 }
 func (s *listCleanStubRuntime) ContainerState(ctx context.Context, id string) (string, error) {
-	return "", nil
+	panic("unexpected call to ContainerState")
 }
-func (s *listCleanStubRuntime) RemoveImage(ctx context.Context, id string) error { return nil }
+func (s *listCleanStubRuntime) RemoveImage(ctx context.Context, id string) error {
+	panic("unexpected call to RemoveImage")
+}
 func (s *listCleanStubRuntime) Attach(ctx context.Context, id string, opts container.AttachOptions) error {
-	return nil
+	panic("unexpected call to Attach")
 }
 func (s *listCleanStubRuntime) StartAttached(ctx context.Context, id string, opts container.AttachOptions) error {
-	return nil
+	panic("unexpected call to StartAttached")
 }
 func (s *listCleanStubRuntime) ResizeTTY(ctx context.Context, id string, height, width uint) error {
-	return nil
+	panic("unexpected call to ResizeTTY")
 }
 
 // --- isImageInUse tests ---

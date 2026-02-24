@@ -291,7 +291,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Clean worktree directories only for runs that were successfully destroyed.
 	// If destroy failed, the run record still exists and removing its worktree
 	// would leave it visible in "moat list" but with a missing directory.
-	var wtFailedCount int
+	var wtFailedCount, wtSkippedCount int
 	for _, r := range worktreeRuns {
 		if !destroyedRunIDs[r.ID] {
 			continue
@@ -304,6 +304,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		root := repoRoot
 		if root == "" {
 			fmt.Println(ui.Yellow("skipped (not in a git repo)"))
+			wtSkippedCount++
 			continue
 		}
 		if err := worktree.Clean(root, r.WorktreePath); err != nil {
@@ -316,18 +317,17 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Green("done"))
 	}
 
-	switch {
-	case failedCount > 0 && wtFailedCount > 0:
-		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed, %d worktree cleanups failed)\n",
-			removedCount, freedSize/(1024*1024), failedCount, wtFailedCount)
-	case failedCount > 0:
-		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed)\n", removedCount, freedSize/(1024*1024), failedCount)
-	case wtFailedCount > 0:
-		fmt.Printf("\nCleaned %d resources, freed %d MB (%d worktree cleanups failed)\n",
-			removedCount, freedSize/(1024*1024), wtFailedCount)
-	default:
-		fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
+	fmt.Printf("\nCleaned %d resources, freed %d MB", removedCount, freedSize/(1024*1024))
+	if failedCount > 0 {
+		fmt.Printf(" (%d failed)", failedCount)
 	}
+	if wtFailedCount > 0 {
+		fmt.Printf(" (%d worktree cleanups failed)", wtFailedCount)
+	}
+	if wtSkippedCount > 0 {
+		fmt.Printf(" (%d worktree dirs skipped — run from within the repo to clean)", wtSkippedCount)
+	}
+	fmt.Println()
 	return nil
 }
 
