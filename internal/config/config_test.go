@@ -1486,7 +1486,7 @@ agent: claude
 dependencies:
   - go
 language_servers:
-  - gopls
+  - go
 `), 0644)
 
 		cfg, err := Load(dir)
@@ -1496,8 +1496,8 @@ language_servers:
 		if len(cfg.LanguageServers) != 1 {
 			t.Fatalf("LanguageServers length = %d, want 1", len(cfg.LanguageServers))
 		}
-		if cfg.LanguageServers[0] != "gopls" {
-			t.Errorf("LanguageServers[0] = %q, want %q", cfg.LanguageServers[0], "gopls")
+		if cfg.LanguageServers[0] != "go" {
+			t.Errorf("LanguageServers[0] = %q, want %q", cfg.LanguageServers[0], "go")
 		}
 	})
 
@@ -1538,8 +1538,8 @@ agent: claude
 		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
 agent: claude
 language_servers:
-  - gopls
-  - gopls
+  - go
+  - go
 `), 0644)
 
 		_, err := Load(dir)
@@ -1561,15 +1561,15 @@ dependencies:
 grants:
   - anthropic
 language_servers:
-  - gopls
+  - go
 `), 0644)
 
 		cfg, err := Load(dir)
 		if err != nil {
 			t.Fatalf("Load() error = %v", err)
 		}
-		if len(cfg.LanguageServers) != 1 || cfg.LanguageServers[0] != "gopls" {
-			t.Errorf("LanguageServers = %v, want [gopls]", cfg.LanguageServers)
+		if len(cfg.LanguageServers) != 1 || cfg.LanguageServers[0] != "go" {
+			t.Errorf("LanguageServers = %v, want [go]", cfg.LanguageServers)
 		}
 		// Other fields should be unaffected
 		if len(cfg.Dependencies) != 2 {

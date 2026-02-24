@@ -45,24 +45,13 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 
 	// Convert MCP servers to Claude's format
 	var mcpServers map[string]MCPServerForContainer
-	if len(opts.MCPServers) > 0 || len(opts.LanguageServerMCPs) > 0 {
+	if len(opts.MCPServers) > 0 {
 		mcpServers = make(map[string]MCPServerForContainer)
 		for name, cfg := range opts.MCPServers {
 			mcpServers[name] = MCPServerForContainer{
 				Type:    "http",
 				URL:     cfg.URL,
 				Headers: cfg.Headers,
-			}
-		}
-		// Language servers run as stdio MCP processes inside the container
-		for name, cfg := range opts.LanguageServerMCPs {
-			if _, exists := mcpServers[name]; exists {
-				return nil, fmt.Errorf("language server %q conflicts with an MCP server of the same name", name)
-			}
-			mcpServers[name] = MCPServerForContainer{
-				Type:    "stdio",
-				Command: cfg.Command,
-				Args:    cfg.Args,
 			}
 		}
 	}

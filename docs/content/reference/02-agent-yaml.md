@@ -121,7 +121,7 @@ gemini:
 
 # Language servers
 language_servers:
-  - gopls
+  - go
 
 # Remote MCP servers
 mcp:
@@ -923,37 +923,41 @@ When `grant` is specified, the corresponding environment variable is set automat
 
 ### language_servers
 
-Prepackaged language servers that run inside the container as MCP stdio processes. Each entry installs the server binary and its runtime dependencies during image build, then registers it as an MCP server in `.claude.json`.
+Prepackaged language servers that provide code intelligence inside the container via Claude Code plugins. Each entry installs the server binary and its runtime dependencies during image build, then enables the corresponding Claude Code plugin.
 
 ```yaml
 language_servers:
-  - gopls
+  - go
+  - typescript
+  - python
 ```
 
 - Type: `array[string]`
 - Default: `[]`
 
 Adding a language server automatically:
-- Installs the server binary and its runtime dependencies during image build (e.g., `gopls` adds `go` and `gopls`)
-- Registers the server as an MCP entry with `type: stdio` in `.claude.json`
+- Installs the server binary and its runtime dependencies during image build
+- Enables the corresponding Claude Code plugin (from the `claude-plugins-official` marketplace)
 
 **Available language servers:**
 
 | Name | Description | Dependencies installed |
 |------|-------------|----------------------|
-| `gopls` | Go language server with MCP support (code intelligence, refactoring, diagnostics) | `go`, `gopls` |
+| `go` | Go language server (code intelligence, refactoring, diagnostics) | `go`, `gopls` |
+| `typescript` | TypeScript/JavaScript language server (code intelligence, diagnostics) | `node`, `typescript`, `typescript-language-server` |
+| `python` | Python language server (code intelligence, type checking, diagnostics) | `python`, `pyright` |
 
 **Example:**
 
 ```yaml
 agent: claude
 language_servers:
-  - gopls
+  - go
 grants:
   - anthropic
 ```
 
-The `go` dependency is added automatically -- listing it in `dependencies:` is not required.
+Runtime dependencies are added automatically -- listing them in `dependencies:` is not required.
 
 > **Note:** Prepackaged language servers are currently supported with Claude Code only.
 

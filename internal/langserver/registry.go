@@ -1,7 +1,7 @@
 // Package langserver provides a registry of prepackaged language servers
 // that can be enabled with a single line in agent.yaml.
 //
-// Language servers run inside the container as MCP (stdio) processes,
+// Language servers run inside the container via Claude Code plugins,
 // giving AI agents access to code intelligence features like
 // go-to-definition, find-references, and diagnostics.
 package langserver
@@ -20,31 +20,40 @@ type ServerSpec struct {
 	// Description is a short human-readable description.
 	Description string
 
-	// Command is the executable to run inside the container.
-	Command string
+	// Plugin is the Claude Code plugin ID (e.g., "gopls-lsp@claude-plugins-official").
+	Plugin string
 
-	// Args are command-line arguments for the server process.
-	Args []string
-
-	// Dependencies are additional entries to add to the dependency list.
-	// These are installed during image build (e.g., "go" for gopls).
+	// Dependencies are runtime dependencies added to the dependency list
+	// (e.g., "go@1.25" for the Go language server).
 	Dependencies []string
 
-	// InstallDep is the dependency registry name that installs the server binary.
-	// If empty, the server is assumed to already be available via Dependencies.
-	// Example: "gopls" installs via go-install in the deps registry.
-	InstallDep string
+	// InstallDeps are binary install dependencies added to the dependency list
+	// (e.g., "gopls" or "npm:pyright").
+	InstallDeps []string
 }
 
-// registry holds all known language server specs keyed by name.
+// registry holds all known language server specs keyed by language name.
 var registry = map[string]ServerSpec{
-	"gopls": {
-		Name:         "gopls",
-		Description:  "Go language server with MCP support (code intelligence, refactoring, diagnostics)",
-		Command:      "gopls",
-		Args:         []string{"mcp"},
+	"go": {
+		Name:         "go",
+		Description:  "Go language server (code intelligence, refactoring, diagnostics)",
+		Plugin:       "gopls-lsp@claude-plugins-official",
 		Dependencies: []string{"go@1.25"},
-		InstallDep:   "gopls",
+		InstallDeps:  []string{"gopls"},
+	},
+	"typescript": {
+		Name:         "typescript",
+		Description:  "TypeScript/JavaScript language server (code intelligence, diagnostics)",
+		Plugin:       "typescript-lsp@claude-plugins-official",
+		Dependencies: []string{"node@20"},
+		InstallDeps:  []string{"npm:typescript", "npm:typescript-language-server"},
+	},
+	"python": {
+		Name:         "python",
+		Description:  "Python language server (code intelligence, type checking, diagnostics)",
+		Plugin:       "pyright-lsp@claude-plugins-official",
+		Dependencies: []string{"python"},
+		InstallDeps:  []string{"npm:pyright"},
 	},
 }
 
@@ -65,7 +74,7 @@ func Validate(names []string) error {
 }
 
 // AllDependencies returns the union of all dependencies required by the
-// given language servers, including the install dependency for each server.
+// given language servers, including the install dependencies for each server.
 func AllDependencies(names []string) []string {
 	seen := make(map[string]bool)
 	var deps []string
@@ -80,36 +89,32 @@ func AllDependencies(names []string) []string {
 				deps = append(deps, d)
 			}
 		}
-		if spec.InstallDep != "" && !seen[spec.InstallDep] {
-			seen[spec.InstallDep] = true
-			deps = append(deps, spec.InstallDep)
+		for _, d := range spec.InstallDeps {
+			if !seen[d] {
+				seen[d] = true
+				deps = append(deps, d)
+			}
 		}
 	}
 	return deps
 }
 
-// MCPConfigs returns MCP server configurations for the given language servers.
-// Each entry maps the server name to its command/args for use as a
-// stdio-based MCP server inside the container.
-func MCPConfigs(names []string) map[string]MCPConfig {
-	configs := make(map[string]MCPConfig)
+// Plugins returns the Claude Code plugin IDs for the given language servers.
+// Unknown names are silently skipped.
+func Plugins(names []string) []string {
+	var plugins []string
+	seen := make(map[string]bool)
 	for _, name := range names {
 		spec, ok := registry[name]
 		if !ok {
 			continue
 		}
-		configs[name] = MCPConfig{
-			Command: spec.Command,
-			Args:    spec.Args,
+		if spec.Plugin != "" && !seen[spec.Plugin] {
+			seen[spec.Plugin] = true
+			plugins = append(plugins, spec.Plugin)
 		}
 	}
-	return configs
-}
-
-// MCPConfig holds the MCP server configuration for a language server.
-type MCPConfig struct {
-	Command string
-	Args    []string
+	return plugins
 }
 
 // List returns all available language server names sorted.

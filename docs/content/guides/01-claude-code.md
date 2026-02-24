@@ -322,6 +322,51 @@ moat claude plugins list ./my-project
 
 This shows plugins from all sources: host settings, project settings, and `agent.yaml`.
 
+## Language servers
+
+Moat includes prepackaged language server configurations that give Claude Code access to code intelligence features like go-to-definition, find-references, and diagnostics. Language servers are installed as Claude Code plugins during image build.
+
+Add `language_servers` to your `agent.yaml`:
+
+```yaml
+agent: claude
+language_servers:
+  - go
+grants:
+  - anthropic
+```
+
+Moat installs the language server binary and its runtime dependencies during image build, then enables the corresponding Claude Code plugin. No additional setup is needed.
+
+### Available language servers
+
+| Name | Language | Description | Dependencies installed |
+|------|----------|-------------|----------------------|
+| `go` | Go | Code intelligence, refactoring, diagnostics | `go`, `gopls` |
+| `typescript` | TypeScript/JavaScript | Code intelligence, diagnostics | `node`, `typescript`, `typescript-language-server` |
+| `python` | Python | Code intelligence, type checking, diagnostics | `python`, `pyright` |
+
+### How it works
+
+When you add a language server to `language_servers`:
+
+1. Moat adds required dependencies to the image build (e.g., `go` and `gopls` for the Go language server)
+2. The corresponding Claude Code plugin is enabled and baked into the container image
+3. Claude Code discovers and manages the language server through its plugin system
+
+Runtime dependencies are added automatically -- listing them in `dependencies:` is not required. Use `--rebuild` to update the container image after changing language server configuration.
+
+### Multiple language servers
+
+You can enable multiple language servers for polyglot projects:
+
+```yaml
+language_servers:
+  - go
+  - typescript
+  - python
+```
+
 ## MCP servers
 
 Moat supports both remote and local MCP servers with credential injection. See [MCP servers](./09-mcp.md) for configuration and usage.

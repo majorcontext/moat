@@ -2,7 +2,7 @@
 title: "MCP servers"
 navTitle: "MCP"
 description: "Configure remote and local MCP (Model Context Protocol) servers with credential injection in Moat."
-keywords: ["moat", "mcp", "model context protocol", "mcp servers", "credential injection", "language servers"]
+keywords: ["moat", "mcp", "model context protocol", "mcp servers", "credential injection"]
 ---
 
 # MCP servers
@@ -14,9 +14,9 @@ Moat supports two types of MCP servers:
 - **Remote MCP servers** -- External HTTPS services accessed through Moat's credential-injecting proxy
 - **Local MCP servers** -- Child processes running inside the container
 
-For common language servers, Moat provides [prepackaged configurations](#prepackaged-language-servers) that handle installation and setup automatically.
-
 This guide covers configuring both types, granting credentials, and troubleshooting common issues.
+
+For prepackaged language servers (Go, TypeScript, Python), see [Language servers](./01-claude-code.md#language-servers) in the Claude Code guide.
 
 ## Prerequisites
 
@@ -260,40 +260,6 @@ Local MCP server output appears in container logs:
 moat logs
 ```
 
-## Prepackaged language servers
-
-Language servers provide code intelligence (go-to-definition, find-references, diagnostics) to AI agents through MCP. Moat includes prepackaged configurations that handle installation and setup automatically.
-
-Add `language_servers` to your `agent.yaml`:
-
-```yaml
-agent: claude
-language_servers:
-  - gopls
-grants:
-  - anthropic
-```
-
-Moat installs the language server and its runtime dependencies (e.g., `go` and `gopls`) during image build, then configures it as a stdio MCP server in `.claude.json`. No additional setup is needed.
-
-### Available language servers
-
-| Name | Language | Description | Dependencies installed |
-|------|----------|-------------|----------------------|
-| `gopls` | Go | Code intelligence, refactoring, diagnostics via `gopls mcp` | `go`, `gopls` |
-
-### How it works
-
-When you add a language server to `language_servers`:
-
-1. Moat adds required dependencies to the image build (e.g., `go` and `gopls` for the gopls server)
-2. The server is registered as an MCP server in `.claude.json` with `type: stdio`
-3. The agent starts the server process and communicates with it over stdin/stdout
-
-No proxy or network configuration is needed -- the language server runs inside the container alongside the agent.
-
-> **Note:** Prepackaged language servers are currently supported with Claude Code only.
-
 ## Troubleshooting
 
 ### MCP server not appearing in agent
@@ -341,7 +307,7 @@ Remote MCP servers that use SSE (Server-Sent Events) for streaming responses are
 
 ### Claude Code
 
-Remote MCP servers, local MCP servers, and prepackaged language servers are all configured in the generated `.claude.json`. Remote servers use `type: http` with relay URLs pointing to the proxy. Local and language servers use `type: stdio`. Claude Code discovers all types through this config file automatically. See [Running Claude Code](./01-claude-code.md) for other Claude Code configuration options.
+Remote MCP servers and local MCP servers are configured in the generated `.claude.json`. Remote servers use `type: http` with relay URLs pointing to the proxy, local servers use `type: stdio`. Claude Code discovers both types through this config file automatically. See [Running Claude Code](./01-claude-code.md) for other Claude Code configuration options.
 
 ### Codex
 
@@ -355,7 +321,7 @@ Local MCP servers are configured under `gemini.mcp:` in `agent.yaml`. Configurat
 
 - [Credential management](../concepts/02-credentials.md) -- How credential injection works
 - [Observability](../concepts/03-observability.md) -- Network traces and audit logs
-- [agent.yaml reference](../reference/02-agent-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, `gemini.mcp:`, and `language_servers:`
+- [agent.yaml reference](../reference/02-agent-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, and `gemini.mcp:`
 - [CLI reference](../reference/01-cli.md) -- `moat grant mcp` command details
 - [Running Claude Code](./01-claude-code.md) -- Claude Code agent guide
 - [Running Codex](./02-codex.md) -- Codex agent guide

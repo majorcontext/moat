@@ -28,16 +28,6 @@ type PrepareOpts struct {
 	ContainerHome string
 	MCPServers    map[string]MCPServerConfig
 	HostConfig    map[string]interface{}
-
-	// LanguageServerMCPs holds MCP configurations for prepackaged language
-	// servers (e.g., gopls). These run as stdio processes inside the container.
-	LanguageServerMCPs map[string]LanguageServerMCP
-}
-
-// LanguageServerMCP holds the MCP configuration for a language server.
-type LanguageServerMCP struct {
-	Command string
-	Args    []string
 }
 
 // MCPServerConfig defines an MCP server configuration.

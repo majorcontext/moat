@@ -1100,6 +1100,7 @@ region = %s
 	// This allows plugins configured on the host to work in containers.
 	var claudeMarketplaces []claude.MarketplaceConfig
 	var claudePlugins []string
+	marketplaceRepos := make(map[string]string)
 
 	if claudeSettings != nil {
 		// Build a map of marketplace name -> repo URL from merged settings.
@@ -1109,7 +1110,6 @@ region = %s
 		// - SSH URLs: git@github.com:owner/repo.git
 		// We normalize GitHub HTTPS URLs to owner/repo format for cleaner output.
 		// Other URL formats are passed through unchanged.
-		marketplaceRepos := make(map[string]string)
 		for name, entry := range claudeSettings.ExtraKnownMarketplaces {
 			if entry.Source.URL != "" {
 				// Convert GitHub HTTPS URL to owner/repo format
@@ -1161,6 +1161,27 @@ region = %s
 		}
 	}
 
+	// Inject language server plugins into the plugin baking flow.
+	// Language servers use Claude Code plugins instead of MCP stdio processes.
+	hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0
+	if hasLangServers && !strings.HasPrefix(opts.Config.Agent, "claude") {
+		ui.Warnf("language_servers are currently only supported with Claude Code agent; ignoring for %s", opts.Config.Agent)
+		hasLangServers = false
+	}
+	if hasLangServers {
+		lsPlugins := langserver.Plugins(opts.Config.LanguageServers)
+		claudePlugins = append(claudePlugins, lsPlugins...)
+		// Ensure claude-plugins-official marketplace is registered
+		if _, exists := marketplaceRepos["claude-plugins-official"]; !exists {
+			marketplaceRepos["claude-plugins-official"] = "anthropics/claude-plugins-official"
+			claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
+				Name:   "claude-plugins-official",
+				Source: "github",
+				Repo:   "anthropics/claude-plugins-official",
+			})
+		}
+	}
+
 	// Determine if we need Claude init (for OAuth credentials and host files)
 	// This is triggered by:
 	// - a claude/claude grant (always needs init for OAuth credentials), OR
@@ -1199,16 +1220,6 @@ region = %s
 			}
 		}
 	}
-	// Language servers inject MCP config into .claude.json, which requires the init script.
-	// They are currently only supported with Claude Code agent.
-	if !needsClaudeInit && opts.Config != nil && len(opts.Config.LanguageServers) > 0 {
-		if strings.HasPrefix(opts.Config.Agent, "claude") {
-			needsClaudeInit = true
-		} else {
-			ui.Warnf("language_servers are currently only supported with Claude Code agent; ignoring for %s", opts.Config.Agent)
-		}
-	}
-
 	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
 	// This is triggered by an openai grant
 	var needsCodexInit bool
@@ -1428,14 +1439,11 @@ region = %s
 		// claudeSettings was loaded earlier for plugin detection
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
-		hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0 && strings.HasPrefix(opts.Config.Agent, "claude")
-
 		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
 		// - hasPlugins (plugin settings to configure)
 		// - isClaudeCode (need to copy onboarding state from host)
-		// - hasLangServers (language server MCP config to inject)
-		if needsClaudeInit || hasPlugins || isClaudeCode || hasLangServers {
+		if needsClaudeInit || hasPlugins || isClaudeCode {
 			claudeProvider := provider.GetAgent("claude")
 			if claudeProvider == nil {
 				cleanupProxy(proxyServer)
@@ -1462,12 +1470,6 @@ region = %s
 				}
 			}
 
-			// Add language server MCP configs (stdio-based, run inside container)
-			var langServerMCPConfigs map[string]langserver.MCPConfig
-			if hasLangServers {
-				langServerMCPConfigs = langserver.MCPConfigs(opts.Config.LanguageServers)
-			}
-
 			// Get Claude credential for PrepareContainer
 			// Preference: claude > anthropic (for backward compatibility)
 			var claudeCred *provider.Credential
@@ -1488,25 +1490,12 @@ region = %s
 				}
 			}
 
-			// Convert language server MCP configs to provider types
-			var lsMCPs map[string]provider.LanguageServerMCP
-			if len(langServerMCPConfigs) > 0 {
-				lsMCPs = make(map[string]provider.LanguageServerMCP, len(langServerMCPConfigs))
-				for name, cfg := range langServerMCPConfigs {
-					lsMCPs[name] = provider.LanguageServerMCP{
-						Command: cfg.Command,
-						Args:    cfg.Args,
-					}
-				}
-			}
-
 			// Call provider to prepare container config
 			var prepErr error
 			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
-				Credential:         claudeCred,
-				ContainerHome:      containerHome,
-				MCPServers:         mcpServers,
-				LanguageServerMCPs: lsMCPs,
+				Credential:    claudeCred,
+				ContainerHome: containerHome,
+				MCPServers:    mcpServers,
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {

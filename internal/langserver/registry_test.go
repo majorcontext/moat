@@ -6,22 +6,48 @@ import (
 )
 
 func TestGet(t *testing.T) {
-	t.Run("known server", func(t *testing.T) {
-		spec, ok := Get("gopls")
+	t.Run("go server", func(t *testing.T) {
+		spec, ok := Get("go")
 		if !ok {
-			t.Fatal("gopls should be in the registry")
+			t.Fatal("go should be in the registry")
 		}
-		if spec.Name != "gopls" {
-			t.Errorf("Name = %q, want %q", spec.Name, "gopls")
+		if spec.Name != "go" {
+			t.Errorf("Name = %q, want %q", spec.Name, "go")
 		}
-		if spec.Command != "gopls" {
-			t.Errorf("Command = %q, want %q", spec.Command, "gopls")
+		if spec.Plugin != "gopls-lsp@claude-plugins-official" {
+			t.Errorf("Plugin = %q, want %q", spec.Plugin, "gopls-lsp@claude-plugins-official")
 		}
-		if len(spec.Args) != 1 || spec.Args[0] != "mcp" {
-			t.Errorf("Args = %v, want [mcp]", spec.Args)
+		if len(spec.InstallDeps) != 1 || spec.InstallDeps[0] != "gopls" {
+			t.Errorf("InstallDeps = %v, want [gopls]", spec.InstallDeps)
 		}
-		if spec.InstallDep != "gopls" {
-			t.Errorf("InstallDep = %q, want %q", spec.InstallDep, "gopls")
+	})
+
+	t.Run("typescript server", func(t *testing.T) {
+		spec, ok := Get("typescript")
+		if !ok {
+			t.Fatal("typescript should be in the registry")
+		}
+		if spec.Plugin != "typescript-lsp@claude-plugins-official" {
+			t.Errorf("Plugin = %q, want %q", spec.Plugin, "typescript-lsp@claude-plugins-official")
+		}
+		if len(spec.Dependencies) != 1 || spec.Dependencies[0] != "node@20" {
+			t.Errorf("Dependencies = %v, want [node@20]", spec.Dependencies)
+		}
+		if len(spec.InstallDeps) != 2 {
+			t.Errorf("InstallDeps = %v, want 2 entries", spec.InstallDeps)
+		}
+	})
+
+	t.Run("python server", func(t *testing.T) {
+		spec, ok := Get("python")
+		if !ok {
+			t.Fatal("python should be in the registry")
+		}
+		if spec.Plugin != "pyright-lsp@claude-plugins-official" {
+			t.Errorf("Plugin = %q, want %q", spec.Plugin, "pyright-lsp@claude-plugins-official")
+		}
+		if len(spec.InstallDeps) != 1 || spec.InstallDeps[0] != "npm:pyright" {
+			t.Errorf("InstallDeps = %v, want [npm:pyright]", spec.InstallDeps)
 		}
 	})
 
@@ -35,7 +61,7 @@ func TestGet(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	t.Run("valid names", func(t *testing.T) {
-		err := Validate([]string{"gopls"})
+		err := Validate([]string{"go", "typescript", "python"})
 		if err != nil {
 			t.Errorf("Validate() error = %v, want nil", err)
 		}
@@ -57,8 +83,8 @@ func TestValidate(t *testing.T) {
 }
 
 func TestAllDependencies(t *testing.T) {
-	t.Run("gopls dependencies", func(t *testing.T) {
-		deps := AllDependencies([]string{"gopls"})
+	t.Run("go dependencies", func(t *testing.T) {
+		deps := AllDependencies([]string{"go"})
 		hasGo := false
 		hasGopls := false
 		for _, d := range deps {
@@ -70,10 +96,56 @@ func TestAllDependencies(t *testing.T) {
 			}
 		}
 		if !hasGo {
-			t.Error("gopls dependencies should include 'go@1.25'")
+			t.Error("go dependencies should include 'go@1.25'")
 		}
 		if !hasGopls {
-			t.Error("gopls dependencies should include 'gopls' (install dep)")
+			t.Error("go dependencies should include 'gopls' (install dep)")
+		}
+	})
+
+	t.Run("typescript dependencies", func(t *testing.T) {
+		deps := AllDependencies([]string{"typescript"})
+		hasNode := false
+		hasTS := false
+		hasTSServer := false
+		for _, d := range deps {
+			switch d {
+			case "node@20":
+				hasNode = true
+			case "npm:typescript":
+				hasTS = true
+			case "npm:typescript-language-server":
+				hasTSServer = true
+			}
+		}
+		if !hasNode {
+			t.Error("typescript dependencies should include 'node@20'")
+		}
+		if !hasTS {
+			t.Error("typescript dependencies should include 'npm:typescript'")
+		}
+		if !hasTSServer {
+			t.Error("typescript dependencies should include 'npm:typescript-language-server'")
+		}
+	})
+
+	t.Run("python dependencies", func(t *testing.T) {
+		deps := AllDependencies([]string{"python"})
+		hasPython := false
+		hasPyright := false
+		for _, d := range deps {
+			switch d {
+			case "python":
+				hasPython = true
+			case "npm:pyright":
+				hasPyright = true
+			}
+		}
+		if !hasPython {
+			t.Error("python dependencies should include 'python'")
+		}
+		if !hasPyright {
+			t.Error("python dependencies should include 'npm:pyright'")
 		}
 	})
 
@@ -85,8 +157,7 @@ func TestAllDependencies(t *testing.T) {
 	})
 
 	t.Run("deduplication", func(t *testing.T) {
-		// If we add a server that shares deps with gopls, they shouldn't duplicate
-		deps := AllDependencies([]string{"gopls"})
+		deps := AllDependencies([]string{"go"})
 		goCount := 0
 		for _, d := range deps {
 			if d == "go@1.25" {
@@ -99,50 +170,57 @@ func TestAllDependencies(t *testing.T) {
 	})
 }
 
-func TestMCPConfigs(t *testing.T) {
-	t.Run("gopls config", func(t *testing.T) {
-		configs := MCPConfigs([]string{"gopls"})
-		cfg, ok := configs["gopls"]
-		if !ok {
-			t.Fatal("gopls should have an MCP config")
+func TestPlugins(t *testing.T) {
+	t.Run("single server", func(t *testing.T) {
+		plugins := Plugins([]string{"go"})
+		if len(plugins) != 1 || plugins[0] != "gopls-lsp@claude-plugins-official" {
+			t.Errorf("Plugins([go]) = %v, want [gopls-lsp@claude-plugins-official]", plugins)
 		}
-		if cfg.Command != "gopls" {
-			t.Errorf("Command = %q, want %q", cfg.Command, "gopls")
-		}
-		if len(cfg.Args) != 1 || cfg.Args[0] != "mcp" {
-			t.Errorf("Args = %v, want [mcp]", cfg.Args)
+	})
+
+	t.Run("multiple servers", func(t *testing.T) {
+		plugins := Plugins([]string{"go", "typescript", "python"})
+		if len(plugins) != 3 {
+			t.Errorf("Plugins() returned %d plugins, want 3", len(plugins))
 		}
 	})
 
 	t.Run("empty list", func(t *testing.T) {
-		configs := MCPConfigs(nil)
-		if len(configs) != 0 {
-			t.Errorf("MCPConfigs(nil) = %v, want empty", configs)
+		plugins := Plugins(nil)
+		if len(plugins) != 0 {
+			t.Errorf("Plugins(nil) = %v, want empty", plugins)
 		}
 	})
 
 	t.Run("unknown server ignored", func(t *testing.T) {
-		configs := MCPConfigs([]string{"nonexistent"})
-		if len(configs) != 0 {
-			t.Errorf("MCPConfigs(unknown) = %v, want empty", configs)
+		plugins := Plugins([]string{"nonexistent"})
+		if len(plugins) != 0 {
+			t.Errorf("Plugins(unknown) = %v, want empty", plugins)
+		}
+	})
+
+	t.Run("deduplication", func(t *testing.T) {
+		plugins := Plugins([]string{"go", "go"})
+		if len(plugins) != 1 {
+			t.Errorf("Plugins() with duplicate input returned %d, want 1", len(plugins))
 		}
 	})
 }
 
 func TestList(t *testing.T) {
 	names := List()
-	if len(names) == 0 {
-		t.Error("List() should return at least one server")
+	if len(names) != 3 {
+		t.Errorf("List() returned %d names, want 3", len(names))
 	}
 
-	hasGopls := false
+	hasGo := false
 	for _, n := range names {
-		if n == "gopls" {
-			hasGopls = true
+		if n == "go" {
+			hasGo = true
 		}
 	}
-	if !hasGopls {
-		t.Error("List() should include gopls")
+	if !hasGo {
+		t.Error("List() should include go")
 	}
 }
 
@@ -155,8 +233,8 @@ func TestValidate_ErrorContainsAvailableNames(t *testing.T) {
 	if !strings.Contains(msg, "bogus-lsp") {
 		t.Errorf("error should mention the unknown name, got: %s", msg)
 	}
-	if !strings.Contains(msg, "gopls") {
-		t.Errorf("error should list available servers including gopls, got: %s", msg)
+	if !strings.Contains(msg, "go") {
+		t.Errorf("error should list available servers including go, got: %s", msg)
 	}
 	if !strings.Contains(msg, "Available language servers") {
 		t.Errorf("error should say 'Available language servers', got: %s", msg)
@@ -164,7 +242,7 @@ func TestValidate_ErrorContainsAvailableNames(t *testing.T) {
 }
 
 func TestValidate_MultipleNamesFirstBadStops(t *testing.T) {
-	err := Validate([]string{"gopls", "nonexistent"})
+	err := Validate([]string{"go", "nonexistent"})
 	if err == nil {
 		t.Fatal("Validate() should return error when any name is unknown")
 	}
@@ -181,8 +259,8 @@ func TestAllDependencies_UnknownNameSkipped(t *testing.T) {
 }
 
 func TestAllDependencies_DuplicateInputs(t *testing.T) {
-	// Passing gopls twice should not duplicate its dependencies
-	deps := AllDependencies([]string{"gopls", "gopls"})
+	// Passing go twice should not duplicate its dependencies
+	deps := AllDependencies([]string{"go", "go"})
 	goCount := 0
 	goplsCount := 0
 	for _, d := range deps {
@@ -202,8 +280,8 @@ func TestAllDependencies_DuplicateInputs(t *testing.T) {
 }
 
 func TestAllDependencies_MixedKnownAndUnknown(t *testing.T) {
-	deps := AllDependencies([]string{"gopls", "unknown-lsp"})
-	// gopls deps should still be returned; unknown is skipped
+	deps := AllDependencies([]string{"go", "unknown-lsp"})
+	// go deps should still be returned; unknown is skipped
 	hasGo := false
 	for _, d := range deps {
 		if d == "go@1.25" {
@@ -215,33 +293,23 @@ func TestAllDependencies_MixedKnownAndUnknown(t *testing.T) {
 	}
 }
 
-func TestMCPConfigs_MixedKnownAndUnknown(t *testing.T) {
-	configs := MCPConfigs([]string{"gopls", "unknown-server"})
-	if len(configs) != 1 {
-		t.Errorf("MCPConfigs() returned %d configs, want 1 (only gopls)", len(configs))
-	}
-	if _, ok := configs["gopls"]; !ok {
-		t.Error("gopls should be in configs")
-	}
-	if _, ok := configs["unknown-server"]; ok {
-		t.Error("unknown-server should NOT be in configs")
-	}
-}
-
-func TestGet_GoplsSpec_Complete(t *testing.T) {
-	spec, ok := Get("gopls")
+func TestGet_GoSpec_Complete(t *testing.T) {
+	spec, ok := Get("go")
 	if !ok {
-		t.Fatal("gopls should be in the registry")
+		t.Fatal("go should be in the registry")
 	}
 
 	// Verify all required fields are populated
 	if spec.Description == "" {
 		t.Error("Description should not be empty")
 	}
+	if spec.Plugin == "" {
+		t.Error("Plugin should not be empty")
+	}
 	if len(spec.Dependencies) == 0 {
 		t.Error("Dependencies should not be empty")
 	}
-	// Dependencies should contain "go@1.25" (gopls needs Go >= 1.25)
+	// Dependencies should contain "go@1.25"
 	hasGo := false
 	for _, d := range spec.Dependencies {
 		if d == "go@1.25" {
@@ -249,7 +317,7 @@ func TestGet_GoplsSpec_Complete(t *testing.T) {
 		}
 	}
 	if !hasGo {
-		t.Error("gopls Dependencies should include 'go@1.25'")
+		t.Error("go Dependencies should include 'go@1.25'")
 	}
 }
 
@@ -265,15 +333,15 @@ func TestListNames(t *testing.T) {
 	if result == "" {
 		t.Error("listNames() should not be empty")
 	}
-	if !strings.Contains(result, "gopls") {
-		t.Errorf("listNames() = %q, should contain 'gopls'", result)
+	if !strings.Contains(result, "go") {
+		t.Errorf("listNames() = %q, should contain 'go'", result)
 	}
 }
 
-func TestAllDependencies_GoplsDependencyCount(t *testing.T) {
-	deps := AllDependencies([]string{"gopls"})
-	// gopls should have exactly 2 dependencies: "go" (from Dependencies) + "gopls" (InstallDep)
+func TestAllDependencies_GoDependencyCount(t *testing.T) {
+	deps := AllDependencies([]string{"go"})
+	// go should have exactly 2 dependencies: "go@1.25" (from Dependencies) + "gopls" (InstallDeps)
 	if len(deps) != 2 {
-		t.Errorf("AllDependencies(gopls) = %v (len %d), want exactly 2 (go + gopls)", deps, len(deps))
+		t.Errorf("AllDependencies(go) = %v (len %d), want exactly 2 (go + gopls)", deps, len(deps))
 	}
 }
