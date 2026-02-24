@@ -524,11 +524,14 @@ func (p *Proxy) getResponseTransformers(host string) []credential.ResponseTransf
 
 // ServeHTTP handles proxy requests.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Relay endpoints are checked before auth because they are accessed
-	// directly (via NO_PROXY bypass), not through the proxy mechanism.
-	// The client doesn't send Proxy-Authorization for direct HTTP requests.
+	// Relay endpoints are accessed directly (via NO_PROXY bypass), not through
+	// the proxy mechanism, so they appear as direct HTTP requests (r.URL.Host is
+	// empty). We check r.URL.Host == "" to distinguish direct requests from
+	// proxied requests that happen to have /relay/ in the path — without this,
+	// a proxied request to http://anything.com/relay/foo would match and bypass auth.
+	// Auth is skipped because direct requests don't carry Proxy-Authorization.
 	// Safety: relays only forward to pre-configured URLs, not arbitrary hosts.
-	if len(p.relays) > 0 && strings.HasPrefix(r.URL.Path, "/relay/") {
+	if len(p.relays) > 0 && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/relay/") {
 		p.handleRelay(w, r)
 		return
 	}
