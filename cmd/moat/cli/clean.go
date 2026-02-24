@@ -11,6 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
+	"github.com/majorcontext/moat/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +21,13 @@ var (
 
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Remove stopped runs and unused images",
-	Long: `Interactively remove stopped runs and unused moat images.
+	Short: "Remove stopped runs, unused images, and worktree directories",
+	Long: `Interactively remove stopped runs, unused moat images, and worktree
+directories associated with stopped runs.
+
+Worktree cleanup prunes git metadata for the current repository only.
+Worktrees created from other repos will have their directories removed,
+but you may need to run 'git worktree prune' in those repos separately.
 
 Shows what will be removed and asks for confirmation before proceeding.
 Use --force to skip confirmation (for scripts).
@@ -57,11 +63,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	runs := manager.List()
 
-	// Find stopped runs
+	// Find stopped runs (and track which have worktrees)
 	var stoppedRuns []*run.Run
+	var worktreeRuns []*run.Run
 	for _, r := range runs {
 		if r.State == run.StateStopped {
 			stoppedRuns = append(stoppedRuns, r)
+			if r.WorktreePath != "" {
+				worktreeRuns = append(worktreeRuns, r)
+			}
 		}
 	}
 
@@ -99,7 +109,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	} else {
 		// Log the error so users know why we might not detect in-use images
 		ui.Warnf("Failed to list containers: %v", containerErr)
-		ui.Info("Proceeding with image cleanup but cannot verify images are unused")
+		ui.Info("Images will be skipped if running containers cannot be verified")
 	}
 
 	var unusedImages []container.ImageInfo
@@ -139,6 +149,22 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Resolve repo root for worktree cleanup (best-effort, may fail if not in a git repo).
+	// This only prunes worktrees belonging to the current repository; worktrees
+	// created from other repos will have their directories removed but stale
+	// .git/worktrees/ entries in those repos will remain until `git worktree prune`
+	// is run there.
+	var repoRoot string
+	if len(worktreeRuns) > 0 {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			ui.Warnf("Cannot determine working directory: %v", cwdErr)
+			ui.Info("Worktree cleanup will be skipped")
+		} else {
+			repoRoot, _ = worktree.FindRepoRoot(cwd)
+		}
+	}
+
 	// Show what will be removed
 	var totalSize int64
 
@@ -173,6 +199,21 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	if len(worktreeRuns) > 0 {
+		fmt.Printf("%s (%d):\n", ui.Bold("Worktree directories"), len(worktreeRuns))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		for _, r := range worktreeRuns {
+			branch := r.WorktreeBranch
+			if branch == "" {
+				branch = "(unknown)"
+			}
+			fmt.Fprintf(w, "  %s\t(%s)\n", branch, r.WorktreePath)
+		}
+		w.Flush()
+		fmt.Println()
+	}
+
+	// worktreeRuns is a subset of stoppedRuns, so don't count them separately.
 	resourceCount := len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks)
 	fmt.Printf("Total: %d resources, %d MB\n\n", resourceCount, totalSize/(1024*1024))
 
@@ -198,6 +239,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Remove stopped runs
 	var freedSize int64
 	var removedCount, failedCount int
+	destroyedRunIDs := make(map[string]bool)
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
 		if err := manager.Destroy(ctx, r.ID); err != nil {
@@ -207,6 +249,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println(ui.Green("done"))
 		removedCount++
+		destroyedRunIDs[r.ID] = true
 	}
 
 	// Remove unused images
@@ -245,11 +288,46 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if failedCount > 0 {
-		fmt.Printf("\nCleaned %d resources, freed %d MB (%d failed)\n", removedCount, freedSize/(1024*1024), failedCount)
-	} else {
-		fmt.Printf("\nCleaned %d resources, freed %d MB\n", removedCount, freedSize/(1024*1024))
+	// Clean worktree directories only for runs that were successfully destroyed.
+	// If destroy failed, the run record still exists and removing its worktree
+	// would leave it visible in "moat list" but with a missing directory.
+	var wtFailedCount, wtSkippedCount int
+	for _, r := range worktreeRuns {
+		if !destroyedRunIDs[r.ID] {
+			continue
+		}
+		branch := r.WorktreeBranch
+		if branch == "" {
+			branch = r.WorktreePath
+		}
+		fmt.Printf("Removing worktree %s... ", branch)
+		root := repoRoot
+		if root == "" {
+			fmt.Println(ui.Yellow("skipped (not in a git repo)"))
+			wtSkippedCount++
+			continue
+		}
+		if err := worktree.Clean(root, r.WorktreePath); err != nil {
+			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
+			wtFailedCount++
+			continue
+		}
+		// Don't increment removedCount here — worktree cleanup is part of
+		// the run removal already counted in the stopped-runs loop above.
+		fmt.Println(ui.Green("done"))
 	}
+
+	fmt.Printf("\nCleaned %d resources, freed %d MB", removedCount, freedSize/(1024*1024))
+	if failedCount > 0 {
+		fmt.Printf(" (%d failed)", failedCount)
+	}
+	if wtFailedCount > 0 {
+		fmt.Printf(" (%d worktree cleanups failed)", wtFailedCount)
+	}
+	if wtSkippedCount > 0 {
+		fmt.Printf(" (%d worktree dirs skipped — run from within the repo to clean)", wtSkippedCount)
+	}
+	fmt.Println()
 	return nil
 }
 

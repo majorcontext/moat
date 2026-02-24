@@ -131,9 +131,11 @@ moat wt clean
 moat wt clean dark-mode
 ```
 
-`moat wt clean` removes the worktree directory and runs `git worktree prune`. It never deletes branches — your work remains in git.
+`moat wt clean` removes the worktree directory and runs `git worktree prune`. It never deletes branches -- your work remains in git.
 
 Active worktrees (with running containers) are skipped.
+
+`moat clean` also removes worktree directories as part of its broader cleanup (stopped runs, unused images, orphaned networks).
 
 ## Worktree storage
 
@@ -223,7 +225,7 @@ moat stop <run-id>
 
 ### Worktree persists after stop
 
-`moat stop` stops the container but does not remove the worktree. Use `moat wt clean` to remove stopped worktree directories.
+`moat stop` stops the container but does not remove the worktree. Use `moat wt clean` to remove stopped worktree directories, or `moat clean` to remove all stopped resources including worktrees.
 
 ## Related guides
 
