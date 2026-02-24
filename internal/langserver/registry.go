@@ -43,7 +43,7 @@ var registry = map[string]ServerSpec{
 		Description:  "Go language server with MCP support (code intelligence, refactoring, diagnostics)",
 		Command:      "gopls",
 		Args:         []string{"mcp"},
-		Dependencies: []string{"go"},
+		Dependencies: []string{"go@1.25"},
 		InstallDep:   "gopls",
 	},
 }

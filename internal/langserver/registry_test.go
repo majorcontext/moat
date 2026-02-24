@@ -62,7 +62,7 @@ func TestAllDependencies(t *testing.T) {
 		hasGo := false
 		hasGopls := false
 		for _, d := range deps {
-			if d == "go" {
+			if d == "go@1.25" {
 				hasGo = true
 			}
 			if d == "gopls" {
@@ -70,7 +70,7 @@ func TestAllDependencies(t *testing.T) {
 			}
 		}
 		if !hasGo {
-			t.Error("gopls dependencies should include 'go'")
+			t.Error("gopls dependencies should include 'go@1.25'")
 		}
 		if !hasGopls {
 			t.Error("gopls dependencies should include 'gopls' (install dep)")
@@ -89,12 +89,12 @@ func TestAllDependencies(t *testing.T) {
 		deps := AllDependencies([]string{"gopls"})
 		goCount := 0
 		for _, d := range deps {
-			if d == "go" {
+			if d == "go@1.25" {
 				goCount++
 			}
 		}
 		if goCount != 1 {
-			t.Errorf("'go' appears %d times, want 1", goCount)
+			t.Errorf("'go@1.25' appears %d times, want 1", goCount)
 		}
 	})
 }
@@ -186,7 +186,7 @@ func TestAllDependencies_DuplicateInputs(t *testing.T) {
 	goCount := 0
 	goplsCount := 0
 	for _, d := range deps {
-		if d == "go" {
+		if d == "go@1.25" {
 			goCount++
 		}
 		if d == "gopls" {
@@ -194,7 +194,7 @@ func TestAllDependencies_DuplicateInputs(t *testing.T) {
 		}
 	}
 	if goCount != 1 {
-		t.Errorf("'go' appears %d times with duplicate input, want 1", goCount)
+		t.Errorf("'go@1.25' appears %d times with duplicate input, want 1", goCount)
 	}
 	if goplsCount != 1 {
 		t.Errorf("'gopls' appears %d times with duplicate input, want 1", goplsCount)
@@ -206,7 +206,7 @@ func TestAllDependencies_MixedKnownAndUnknown(t *testing.T) {
 	// gopls deps should still be returned; unknown is skipped
 	hasGo := false
 	for _, d := range deps {
-		if d == "go" {
+		if d == "go@1.25" {
 			hasGo = true
 		}
 	}
@@ -241,15 +241,15 @@ func TestGet_GoplsSpec_Complete(t *testing.T) {
 	if len(spec.Dependencies) == 0 {
 		t.Error("Dependencies should not be empty")
 	}
-	// Dependencies should contain "go" (gopls needs Go runtime)
+	// Dependencies should contain "go@1.25" (gopls needs Go >= 1.25)
 	hasGo := false
 	for _, d := range spec.Dependencies {
-		if d == "go" {
+		if d == "go@1.25" {
 			hasGo = true
 		}
 	}
 	if !hasGo {
-		t.Error("gopls Dependencies should include 'go'")
+		t.Error("gopls Dependencies should include 'go@1.25'")
 	}
 }
 
