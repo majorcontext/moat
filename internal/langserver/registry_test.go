@@ -46,8 +46,8 @@ func TestGet(t *testing.T) {
 		if spec.Plugin != "pyright-lsp@claude-plugins-official" {
 			t.Errorf("Plugin = %q, want %q", spec.Plugin, "pyright-lsp@claude-plugins-official")
 		}
-		if len(spec.InstallDeps) != 1 || spec.InstallDeps[0] != "npm:pyright" {
-			t.Errorf("InstallDeps = %v, want [npm:pyright]", spec.InstallDeps)
+		if len(spec.InstallDeps) != 1 || spec.InstallDeps[0] != "pip:pyright" {
+			t.Errorf("InstallDeps = %v, want [pip:pyright]", spec.InstallDeps)
 		}
 	})
 
@@ -137,7 +137,7 @@ func TestAllDependencies(t *testing.T) {
 			switch d {
 			case "python":
 				hasPython = true
-			case "npm:pyright":
+			case "pip:pyright":
 				hasPyright = true
 			}
 		}
@@ -145,7 +145,7 @@ func TestAllDependencies(t *testing.T) {
 			t.Error("python dependencies should include 'python'")
 		}
 		if !hasPyright {
-			t.Error("python dependencies should include 'npm:pyright'")
+			t.Error("python dependencies should include 'pip:pyright'")
 		}
 	})
 

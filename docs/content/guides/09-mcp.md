@@ -289,7 +289,7 @@ If you see `moat-stub-{grant}` in error output, the proxy did not replace the st
 - For remote servers, verify the URL is reachable from your network
 - For local servers, verify the `command` path exists inside the container
 
-### Sandbox-local server not starting
+### Local server not starting
 
 - Verify the server executable is installed inside the container. Use a `pre_run` hook or include it in your project dependencies.
 - Check that `command` is an absolute path or available on `$PATH` inside the container
