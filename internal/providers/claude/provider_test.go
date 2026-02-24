@@ -9,6 +9,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/spf13/cobra"
 )
 
 func TestOAuthProvider_Name(t *testing.T) {
@@ -545,3 +546,111 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {
 }
 
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
+
+func TestRegisterCLI_ContinueFlag(t *testing.T) {
+	p := &OAuthProvider{}
+	root := &cobra.Command{Use: "test"}
+	p.RegisterCLI(root)
+
+	claudeCmd, _, err := root.Find([]string{"claude"})
+	if err != nil {
+		t.Fatalf("claude command not found: %v", err)
+	}
+
+	f := claudeCmd.Flags().Lookup("continue")
+	if f == nil {
+		t.Fatal("--continue flag not registered on claude command")
+	}
+	if f.Shorthand != "c" {
+		t.Errorf("--continue shorthand = %q, want %q", f.Shorthand, "c")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--continue default = %q, want %q", f.DefValue, "false")
+	}
+}
+
+func TestRegisterCLI_ResumeFlag(t *testing.T) {
+	p := &OAuthProvider{}
+	root := &cobra.Command{Use: "test"}
+	p.RegisterCLI(root)
+
+	claudeCmd, _, err := root.Find([]string{"claude"})
+	if err != nil {
+		t.Fatalf("claude command not found: %v", err)
+	}
+
+	f := claudeCmd.Flags().Lookup("resume")
+	if f == nil {
+		t.Fatal("--resume flag not registered on claude command")
+	}
+	if f.Shorthand != "r" {
+		t.Errorf("--resume shorthand = %q, want %q", f.Shorthand, "r")
+	}
+	if f.DefValue != "" {
+		t.Errorf("--resume default = %q, want empty", f.DefValue)
+	}
+}
+
+func TestRegisterCLI_WorktreeFlags(t *testing.T) {
+	p := &OAuthProvider{}
+	root := &cobra.Command{Use: "test"}
+	p.RegisterCLI(root)
+
+	claudeCmd, _, err := root.Find([]string{"claude"})
+	if err != nil {
+		t.Fatalf("claude command not found: %v", err)
+	}
+
+	// --worktree should exist
+	wt := claudeCmd.Flags().Lookup("worktree")
+	if wt == nil {
+		t.Fatal("--worktree flag not registered")
+	}
+
+	// --wt alias should exist and be hidden
+	wtAlias := claudeCmd.Flags().Lookup("wt")
+	if wtAlias == nil {
+		t.Fatal("--wt flag not registered")
+	}
+	if wtAlias.Hidden != true {
+		t.Error("--wt flag should be hidden")
+	}
+}
+
+func TestRegisterCLI_NoYoloFlag(t *testing.T) {
+	p := &OAuthProvider{}
+	root := &cobra.Command{Use: "test"}
+	p.RegisterCLI(root)
+
+	claudeCmd, _, err := root.Find([]string{"claude"})
+	if err != nil {
+		t.Fatalf("claude command not found: %v", err)
+	}
+
+	f := claudeCmd.Flags().Lookup("noyolo")
+	if f == nil {
+		t.Fatal("--noyolo flag not registered")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--noyolo default = %q, want %q", f.DefValue, "false")
+	}
+}
+
+func TestRegisterCLI_PromptFlag(t *testing.T) {
+	p := &OAuthProvider{}
+	root := &cobra.Command{Use: "test"}
+	p.RegisterCLI(root)
+
+	claudeCmd, _, err := root.Find([]string{"claude"})
+	if err != nil {
+		t.Fatalf("claude command not found: %v", err)
+	}
+
+	f := claudeCmd.Flags().Lookup("prompt")
+	if f == nil {
+		t.Fatal("--prompt flag not registered")
+	}
+	if f.Shorthand != "p" {
+		t.Errorf("--prompt shorthand = %q, want %q", f.Shorthand, "p")
+	}
+}

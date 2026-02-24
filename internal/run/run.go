@@ -37,30 +37,32 @@ type Run struct {
 	Name      string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Workspace string
 	// Worktree tracking (set when created via moat wt or --wt flag)
-	WorktreeBranch string
-	WorktreePath   string
-	WorktreeRepoID string
-	Grants         []string
-	Agent          string         // Agent type from config (e.g., "claude-code", "codex")
-	Image          string         // Container image used for this run
-	Ports          map[string]int // endpoint name -> container port
-	HostPorts      map[string]int // endpoint name -> host port (after binding)
-	State          State
-	ContainerID    string
-	ProxyServer    *proxy.Server     // Auth proxy for credential injection
-	SSHAgentServer *sshagent.Server  // SSH agent proxy for SSH key access
-	Store          *storage.RunStore // Run data storage
-	storeRef       *atomic.Value     // Atomic reference for concurrent logger access
-	logsCaptured   atomic.Bool       // Track if logs have been captured (for idempotency)
-	exitCh         chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
-	AuditStore     *audit.Store      // Tamper-proof audit log
-	SnapEngine     *snapshot.Engine  // Snapshot engine for workspace protection
-	KeepContainer  bool              // If true, don't auto-remove container after run
-	Interactive    bool              // If true, run was started in interactive mode
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	StoppedAt      time.Time
-	Error          string
+	WorktreeBranch    string
+	WorktreePath      string
+	WorktreeRepoID    string
+	Grants            []string
+	Agent             string            // Agent type from config (e.g., "claude-code", "codex")
+	Image             string            // Container image used for this run
+	ProviderMeta      map[string]string // Provider-specific metadata (e.g., claude_session_id)
+	Ports             map[string]int    // endpoint name -> container port
+	HostPorts         map[string]int    // endpoint name -> host port (after binding)
+	State             State
+	ContainerID       string
+	ProxyServer       *proxy.Server     // Auth proxy for credential injection
+	SSHAgentServer    *sshagent.Server  // SSH agent proxy for SSH key access
+	Store             *storage.RunStore // Run data storage
+	storeRef          *atomic.Value     // Atomic reference for concurrent logger access
+	logsCaptured      atomic.Bool       // Track if logs have been captured (for idempotency)
+	providerHooksDone atomic.Bool       // Track if provider stopped hooks have run (for idempotency)
+	exitCh            chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
+	AuditStore        *audit.Store      // Tamper-proof audit log
+	SnapEngine        *snapshot.Engine  // Snapshot engine for workspace protection
+	KeepContainer     bool              // If true, don't auto-remove container after run
+	Interactive       bool              // If true, run was started in interactive mode
+	CreatedAt         time.Time
+	StartedAt         time.Time
+	StoppedAt         time.Time
+	Error             string
 
 	// Shutdown coordination to prevent race conditions
 	proxyStopOnce    sync.Once // Ensures ProxyServer.Stop() called only once
@@ -155,6 +157,7 @@ func (r *Run) SaveMetadata() error {
 		StartedAt:           r.StartedAt,
 		StoppedAt:           r.StoppedAt,
 		Error:               r.Error,
+		ProviderMeta:        r.ProviderMeta,
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,
 		WorktreeRepoID:      r.WorktreeRepoID,

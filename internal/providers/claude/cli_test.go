@@ -2,11 +2,14 @@ package claude
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 func newTestStore(t *testing.T) *credential.FileStore {
@@ -247,5 +250,148 @@ func TestResolveClaudeCredential_SkipsMigrationInReadOnlyDir(t *testing.T) {
 	got := resolveClaudeCredential(store)
 	if got != "anthropic" {
 		t.Errorf("resolveClaudeCredential() = %q, want %q (migration should fail gracefully)", got, "anthropic")
+	}
+}
+
+// writeTestMetadata writes a metadata.json file to the run directory.
+func writeTestMetadata(t *testing.T, baseDir, runID string, meta storage.Metadata) {
+	t.Helper()
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.Dir()+"/metadata.json", data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveResumeSession_RawUUID(t *testing.T) {
+	uuid := "b281f735-7d2b-4979-95de-0e2a7a9c2315"
+	got, err := resolveResumeSession(uuid)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != uuid {
+		t.Errorf("got %q, want %q", got, uuid)
+	}
+}
+
+func TestResolveResumeSession_ByRunName(t *testing.T) {
+	baseDir := t.TempDir()
+
+	writeTestMetadata(t, baseDir, "run_abc123def456", storage.Metadata{
+		Name:         "my-feature",
+		ContainerID:  "abc",
+		ProviderMeta: map[string]string{"claude_session_id": "aaaabbbb-1111-2222-3333-444455556666"},
+		CreatedAt:    time.Now(),
+	})
+
+	got, err := resolveResumeSessionInDir("my-feature", baseDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "aaaabbbb-1111-2222-3333-444455556666" {
+		t.Errorf("got %q, want session UUID", got)
+	}
+}
+
+func TestResolveResumeSession_ByRunID(t *testing.T) {
+	baseDir := t.TempDir()
+
+	writeTestMetadata(t, baseDir, "run_abc123def456", storage.Metadata{
+		Name:         "my-feature",
+		ContainerID:  "abc",
+		ProviderMeta: map[string]string{"claude_session_id": "aaaabbbb-1111-2222-3333-444455556666"},
+		CreatedAt:    time.Now(),
+	})
+
+	got, err := resolveResumeSessionInDir("run_abc123def456", baseDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "aaaabbbb-1111-2222-3333-444455556666" {
+		t.Errorf("got %q, want session UUID", got)
+	}
+}
+
+func TestResolveResumeSession_NoSessionID(t *testing.T) {
+	baseDir := t.TempDir()
+
+	writeTestMetadata(t, baseDir, "run_abc123def456", storage.Metadata{
+		Name:        "my-feature",
+		ContainerID: "abc",
+		CreatedAt:   time.Now(),
+	})
+
+	_, err := resolveResumeSessionInDir("my-feature", baseDir)
+	if err == nil {
+		t.Fatal("expected error for missing session ID")
+	}
+	if !strings.Contains(err.Error(), "no recorded Claude session ID") {
+		t.Errorf("error = %q, want mention of 'no recorded Claude session ID'", err)
+	}
+}
+
+func TestResolveResumeSession_StillRunning(t *testing.T) {
+	baseDir := t.TempDir()
+
+	writeTestMetadata(t, baseDir, "run_abc123def456", storage.Metadata{
+		Name:        "my-feature",
+		ContainerID: "abc",
+		State:       "running",
+		CreatedAt:   time.Now(),
+	})
+
+	_, err := resolveResumeSessionInDir("my-feature", baseDir)
+	if err == nil {
+		t.Fatal("expected error for running run")
+	}
+	if !strings.Contains(err.Error(), "still running") {
+		t.Errorf("error = %q, want mention of 'still running'", err)
+	}
+	if !strings.Contains(err.Error(), "moat attach") {
+		t.Errorf("error = %q, want mention of 'moat attach'", err)
+	}
+}
+
+func TestResolveResumeSession_NotFound(t *testing.T) {
+	baseDir := t.TempDir()
+
+	_, err := resolveResumeSessionInDir("nonexistent", baseDir)
+	if err == nil {
+		t.Fatal("expected error for nonexistent run")
+	}
+	if !strings.Contains(err.Error(), "no run found") {
+		t.Errorf("error = %q, want mention of 'no run found'", err)
+	}
+}
+
+func TestResolveResumeSession_MostRecentNameWins(t *testing.T) {
+	baseDir := t.TempDir()
+
+	// Two runs with the same name, different session IDs
+	writeTestMetadata(t, baseDir, "run_aaa111bbb222", storage.Metadata{
+		Name:         "my-feature",
+		ContainerID:  "old",
+		ProviderMeta: map[string]string{"claude_session_id": "old-session-1111-2222-3333-444455556666"},
+		CreatedAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	writeTestMetadata(t, baseDir, "run_ccc333ddd444", storage.Metadata{
+		Name:         "my-feature",
+		ContainerID:  "new",
+		ProviderMeta: map[string]string{"claude_session_id": "new-session-1111-2222-3333-444455556666"},
+		CreatedAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+
+	got, err := resolveResumeSessionInDir("my-feature", baseDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "new-session-1111-2222-3333-444455556666" {
+		t.Errorf("got %q, want most recent session UUID", got)
 	}
 }

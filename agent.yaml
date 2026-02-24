@@ -23,7 +23,7 @@ dependencies:
   # - docker:dind
 
 grants:
-  - anthropic
+  - claude
   - github
   - ssh:github.com
 

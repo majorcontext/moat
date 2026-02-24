@@ -11,6 +11,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/providers/claude"
 )
 
 func TestGenerateID(t *testing.T) {
@@ -99,9 +100,9 @@ func TestWorkspaceToClaudeDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := workspaceToClaudeDir(tt.input)
+			result := claude.WorkspaceToClaudeDir(tt.input)
 			if result != tt.expected {
-				t.Errorf("workspaceToClaudeDir(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("WorkspaceToClaudeDir(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

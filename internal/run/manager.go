@@ -212,6 +212,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			StartedAt:         meta.StartedAt,
 			StoppedAt:         meta.StoppedAt,
 			Error:             meta.Error,
+			ProviderMeta:      meta.ProviderMeta,
 			exitCh:            make(chan struct{}),
 			ServiceContainers: serviceContainers,
 			NetworkID:         meta.NetworkID,
@@ -1305,7 +1306,7 @@ region = %s
 		imageHome := m.runtime.BuildManager().GetImageHomeDir(ctx, containerImage)
 		containerHome = resolveContainerHome(needsCustomImage, imageHome)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
-			claudeDir := workspaceToClaudeDir(opts.Workspace)
+			claudeDir := claude.WorkspaceToClaudeDir(opts.Workspace)
 			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
 
 			// Ensure directory exists on host
@@ -2313,6 +2314,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
 	m.captureLogs(r)
 
+	// Run provider stopped hooks (e.g., Claude session ID extraction).
+	// Must happen after the container has exited so session files are flushed.
+	runProviderStoppedHooks(r)
+	_ = r.SaveMetadata()
+
 	return attachErr
 }
 
@@ -2403,6 +2409,9 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// but capturing here provides a safety net if moat crashes before that.
 	// captureLogs is idempotent so multiple calls are safe.
 	m.captureLogs(r)
+
+	// Run provider stopped hooks before saving metadata.
+	runProviderStoppedHooks(r)
 
 	// Stop the proxy server if one was created
 	if err := r.stopProxyServer(ctx); err != nil {
@@ -2668,6 +2677,44 @@ func (m *Manager) captureLogs(r *Run) {
 	log.Debug("logs captured successfully", "runID", r.ID, "bytes", len(allLogs))
 }
 
+// runProviderStoppedHooks iterates the run's grant providers and calls
+// OnRunStopped on each that implements provider.RunStoppedHook. Returned
+// metadata is merged into r.ProviderMeta.
+func runProviderStoppedHooks(r *Run) {
+	// Ensure hooks run exactly once — multiple call sites race
+	// (monitorContainerExit goroutine vs StartAttached/Stop on main goroutine).
+	if !r.providerHooksDone.CompareAndSwap(false, true) {
+		return
+	}
+
+	ctx := provider.RunStoppedContext{
+		Workspace: r.Workspace,
+		StartedAt: r.StartedAt,
+	}
+
+	for _, grant := range r.Grants {
+		grantName := strings.Split(grant, ":")[0]
+		prov := provider.Get(grantName)
+		if prov == nil {
+			continue
+		}
+		hook, ok := prov.(provider.RunStoppedHook)
+		if !ok {
+			continue
+		}
+		meta := hook.OnRunStopped(ctx)
+		if len(meta) == 0 {
+			continue
+		}
+		if r.ProviderMeta == nil {
+			r.ProviderMeta = make(map[string]string)
+		}
+		for k, v := range meta {
+			r.ProviderMeta[k] = v
+		}
+	}
+}
+
 // monitorContainerExit watches for container exit and captures logs.
 // This runs in the background for ALL runs to ensure logs are captured
 // even in detached mode where Wait() is never called.
@@ -2681,6 +2728,10 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Docker may start removing/cleaning the container at any moment after exit.
 	// We must get the logs while the container is still in "exited" state.
 	m.captureLogs(r)
+
+	// Run provider stopped hooks (e.g., Claude session ID extraction).
+	// Must happen after captureLogs and before SaveMetadata.
+	runProviderStoppedHooks(r)
 
 	// Now signal that container has exited (and logs are captured)
 	close(r.exitCh)
@@ -3038,15 +3089,6 @@ func resolveContainerHome(needsCustomImage bool, imageHome string) string {
 		return "/home/moatuser"
 	}
 	return imageHome
-}
-
-// workspaceToClaudeDir converts an absolute workspace path to Claude's project directory format.
-// Example: /home/alice/projects/myapp -> -home-alice-projects-myapp
-func workspaceToClaudeDir(absPath string) string {
-	// Normalize to forward slashes for cross-platform consistency
-	normalized := filepath.ToSlash(absPath)
-	cleaned := strings.TrimPrefix(normalized, "/")
-	return "-" + strings.ReplaceAll(cleaned, "/", "-")
 }
 
 // hostGitIdentity reads the host's git user.name and user.email and returns

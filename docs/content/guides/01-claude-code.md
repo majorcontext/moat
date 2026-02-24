@@ -141,6 +141,26 @@ moat claude --noyolo ./my-project
 
 With `--noyolo`, Claude Code prompts for confirmation before each potentially destructive operation, just as it would when running directly on your host machine.
 
+### Resuming sessions
+
+When Claude Code exits, Moat captures the session ID from the Claude projects directory on the host filesystem. You can resume a previous session by run name:
+
+```bash
+moat claude --resume my-feature
+```
+
+This looks up the stored Claude session UUID for the run named `my-feature` and passes it to Claude Code. You can also pass a raw Claude session UUID directly:
+
+```bash
+moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
+```
+
+To continue the most recent conversation without specifying a session:
+
+```bash
+moat claude --continue
+```
+
 ### Named runs
 
 Give your run a name for reference:

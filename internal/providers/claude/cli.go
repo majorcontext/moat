@@ -11,6 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 var (
@@ -19,6 +20,8 @@ var (
 	claudeAllowedHosts []string
 	claudeNoYolo       bool
 	claudeWtFlag       string
+	claudeContinue     bool
+	claudeResume       string
 )
 
 // RegisterCLI adds provider-specific commands to the root command.
@@ -67,6 +70,13 @@ Examples:
   # Require manual approval for each tool use (disable yolo mode)
   moat claude --noyolo
 
+  # Continue the most recent conversation
+  moat claude --continue
+  moat claude -c
+
+  # Resume a specific session by ID
+  moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
+
 Use 'moat list' to see running and recent runs.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: runClaudeCode,
@@ -79,6 +89,8 @@ Use 'moat list' to see running and recent runs.`,
 	claudeCmd.Flags().StringVarP(&claudePromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	claudeCmd.Flags().StringSliceVar(&claudeAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	claudeCmd.Flags().BoolVar(&claudeNoYolo, "noyolo", false, "disable --dangerously-skip-permissions (require manual approval for each tool use)")
+	claudeCmd.Flags().BoolVarP(&claudeContinue, "continue", "c", false, "continue the most recent conversation")
+	claudeCmd.Flags().StringVarP(&claudeResume, "resume", "r", "", "resume a specific session by ID")
 	claudeCmd.Flags().StringVar(&claudeWtFlag, "worktree", "", "run in a git worktree for this branch")
 	claudeCmd.Flags().StringVar(&claudeWtFlag, "wt", "", "alias for --worktree")
 	_ = claudeCmd.Flags().MarkHidden("wt")
@@ -142,7 +154,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if credName := getOrMigrateClaudeCredentialName(); credName != "" {
+	if credName := getClaudeCredentialName(); credName != "" {
 		addGrant(credName) // Use the actual name the credential is stored under
 	}
 	if cfg != nil {
@@ -158,12 +170,29 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	// Determine interactive mode
 	interactive := claudePromptFlag == ""
 
+	// Validate mutually exclusive flags
+	if claudeContinue && claudeResume != "" {
+		return fmt.Errorf("--continue and --resume are mutually exclusive")
+	}
+
 	// Build container command
 	containerCmd := []string{"claude"}
 
 	// By default, skip permission prompts since Moat provides isolation.
 	if !claudeNoYolo {
 		containerCmd = append(containerCmd, "--dangerously-skip-permissions")
+	}
+
+	if claudeContinue {
+		containerCmd = append(containerCmd, "--continue")
+	}
+
+	if claudeResume != "" {
+		sessionID, resolveErr := resolveResumeSession(claudeResume)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		containerCmd = append(containerCmd, "--resume", sessionID)
 	}
 
 	if claudePromptFlag != "" {
@@ -254,7 +283,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getOrMigrateClaudeCredentialName returns the grant name to use for moat claude.
+// getClaudeCredentialName returns the grant name to use for moat claude.
 //
 // Preference order:
 //  1. claude (OAuth token) — preferred for Claude Code
@@ -265,7 +294,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 //   - anthropic.enc with OAuth token → claude.enc
 //
 // Returns empty string if no credential exists.
-func getOrMigrateClaudeCredentialName() string {
+func getClaudeCredentialName() string {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return ""
@@ -325,4 +354,85 @@ func resolveClaudeCredential(store *credential.FileStore) string {
 	}
 
 	return "anthropic"
+}
+
+// resolveResumeSession resolves a --resume argument to a Claude session UUID.
+//
+// If the argument is already a UUID, it is returned as-is (backward compatible).
+// Otherwise, we treat it as a moat run name or ID, look up the run's stored
+// ClaudeSessionID from metadata, and return that.
+func resolveResumeSession(arg string) (string, error) {
+	return resolveResumeSessionInDir(arg, storage.DefaultBaseDir())
+}
+
+// resolveResumeSessionInDir is the testable core of resolveResumeSession.
+func resolveResumeSessionInDir(arg, baseDir string) (string, error) {
+	// If it looks like a raw Claude session UUID, pass through directly.
+	if uuidPattern.MatchString(arg) {
+		return arg, nil
+	}
+
+	// Try to resolve as a moat run name or ID by scanning stored runs.
+	runIDs, err := storage.ListRunDirs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("listing runs: %w", err)
+	}
+
+	var match *storage.Metadata
+	var matchID string
+
+	for _, runID := range runIDs {
+		store, storeErr := storage.NewRunStore(baseDir, runID)
+		if storeErr != nil {
+			continue
+		}
+		meta, metaErr := store.LoadMetadata()
+		if metaErr != nil {
+			continue
+		}
+
+		// Exact ID match
+		if runID == arg {
+			match = &meta
+			matchID = runID
+			break
+		}
+
+		// ID prefix match
+		if strings.HasPrefix(runID, arg) && strings.HasPrefix(arg, "run_") {
+			match = &meta
+			matchID = runID
+			// Don't break — keep looking for exact match
+		}
+
+		// Exact name match (most recent wins since ListRunDirs order is stable)
+		if meta.Name == arg {
+			if match == nil || meta.CreatedAt.After(match.CreatedAt) {
+				match = &meta
+				matchID = runID
+			}
+		}
+	}
+
+	if match == nil {
+		return "", fmt.Errorf("no run found matching %q\n\nRun 'moat list' to see available runs.", arg)
+	}
+
+	// If the run is still active, the session ID hasn't been captured yet.
+	// Tell the user to attach instead of starting a new container.
+	if match.State == "running" || match.State == "starting" {
+		return "", fmt.Errorf("run %s (%s) is still running\n\nUse 'moat attach %s' to reconnect.", matchID, match.Name, arg)
+	}
+
+	sessionID := match.ProviderMeta["claude_session_id"]
+	if sessionID == "" {
+		return "", fmt.Errorf("run %s (%s) has no recorded Claude session ID\n\nThe session ID is captured when Claude Code exits normally.", matchID, match.Name)
+	}
+
+	log.Debug("resolved --resume to claude session",
+		"arg", arg,
+		"runID", matchID,
+		"sessionID", sessionID,
+	)
+	return sessionID, nil
 }
