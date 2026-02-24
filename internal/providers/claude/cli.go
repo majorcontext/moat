@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -155,7 +154,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if credName := GetClaudeCredentialName(); credName != "" {
+	if credName := getClaudeCredentialName(); credName != "" {
 		addGrant(credName) // Use the actual name the credential is stored under
 	}
 	if cfg != nil {
@@ -284,7 +283,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// GetClaudeCredentialName returns the grant name to use for moat claude.
+// getClaudeCredentialName returns the grant name to use for moat claude.
 //
 // Preference order:
 //  1. claude (OAuth token) — preferred for Claude Code
@@ -295,7 +294,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 //   - anthropic.enc with OAuth token → claude.enc
 //
 // Returns empty string if no credential exists.
-func GetClaudeCredentialName() string {
+func getClaudeCredentialName() string {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return ""
@@ -357,9 +356,6 @@ func resolveClaudeCredential(store *credential.FileStore) string {
 	return "anthropic"
 }
 
-// claudeUUIDPattern matches a Claude Code session UUID (e.g., b281f735-7d2b-4979-95de-0e2a7a9c2315).
-var claudeUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
 // resolveResumeSession resolves a --resume argument to a Claude session UUID.
 //
 // If the argument is already a UUID, it is returned as-is (backward compatible).
@@ -372,7 +368,7 @@ func resolveResumeSession(arg string) (string, error) {
 // resolveResumeSessionInDir is the testable core of resolveResumeSession.
 func resolveResumeSessionInDir(arg, baseDir string) (string, error) {
 	// If it looks like a raw Claude session UUID, pass through directly.
-	if claudeUUIDPattern.MatchString(arg) {
+	if uuidPattern.MatchString(arg) {
 		return arg, nil
 	}
 

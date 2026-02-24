@@ -143,7 +143,7 @@ With `--noyolo`, Claude Code prompts for confirmation before each potentially de
 
 ### Resuming sessions
 
-When Claude Code exits, Moat captures the session ID from the container logs. You can resume a previous session by run name:
+When Claude Code exits, Moat captures the session ID from the Claude projects directory on the host filesystem. You can resume a previous session by run name:
 
 ```bash
 moat claude --resume my-feature

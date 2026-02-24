@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -330,7 +331,7 @@ func TestResolveResumeSession_NoSessionID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing session ID")
 	}
-	if !containsString(err.Error(), "no recorded Claude session ID") {
+	if !strings.Contains(err.Error(), "no recorded Claude session ID") {
 		t.Errorf("error = %q, want mention of 'no recorded Claude session ID'", err)
 	}
 }
@@ -349,10 +350,10 @@ func TestResolveResumeSession_StillRunning(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for running run")
 	}
-	if !containsString(err.Error(), "still running") {
+	if !strings.Contains(err.Error(), "still running") {
 		t.Errorf("error = %q, want mention of 'still running'", err)
 	}
-	if !containsString(err.Error(), "moat attach") {
+	if !strings.Contains(err.Error(), "moat attach") {
 		t.Errorf("error = %q, want mention of 'moat attach'", err)
 	}
 }
@@ -364,7 +365,7 @@ func TestResolveResumeSession_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nonexistent run")
 	}
-	if !containsString(err.Error(), "no run found") {
+	if !strings.Contains(err.Error(), "no run found") {
 		t.Errorf("error = %q, want mention of 'no run found'", err)
 	}
 }
@@ -393,13 +394,4 @@ func TestResolveResumeSession_MostRecentNameWins(t *testing.T) {
 	if got != "new-session-1111-2222-3333-444455556666" {
 		t.Errorf("got %q, want most recent session UUID", got)
 	}
-}
-
-func containsString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

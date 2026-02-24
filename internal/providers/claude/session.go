@@ -11,8 +11,9 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// claudeSessionUUIDPattern matches a UUID filename (e.g., "b281f735-7d2b-4979-95de-0e2a7a9c2315.jsonl").
-var claudeSessionUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+// uuidPattern matches a lowercase UUID (e.g., "b281f735-7d2b-4979-95de-0e2a7a9c2315").
+// Used by both session extraction (JSONL filenames) and --resume argument validation.
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // OnRunStopped extracts the Claude session ID from the projects directory
 // after the container exits. It implements provider.RunStoppedHook.
@@ -61,7 +62,7 @@ func findLatestSessionID(projectsDir string, startedAt time.Time) string {
 			continue
 		}
 		stem := strings.TrimSuffix(name, ".jsonl")
-		if !claudeSessionUUIDPattern.MatchString(stem) {
+		if !uuidPattern.MatchString(stem) {
 			continue
 		}
 

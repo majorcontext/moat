@@ -2681,6 +2681,12 @@ func (m *Manager) captureLogs(r *Run) {
 // OnRunStopped on each that implements provider.RunStoppedHook. Returned
 // metadata is merged into r.ProviderMeta.
 func runProviderStoppedHooks(r *Run) {
+	// Ensure hooks run exactly once — multiple call sites race
+	// (monitorContainerExit goroutine vs StartAttached/Stop on main goroutine).
+	if !r.providerHooksDone.CompareAndSwap(false, true) {
+		return
+	}
+
 	ctx := provider.RunStoppedContext{
 		Workspace: r.Workspace,
 		StartedAt: r.StartedAt,
