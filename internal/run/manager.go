@@ -2330,14 +2330,19 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	// Set up the output destination. We always write to stdout for real-time
 	// feedback. If we have a store, also tee to the log file so `moat logs`
 	// can show output from running containers.
+	//
+	// Claim logsCaptured BEFORE opening the LogWriter to prevent captureLogs
+	// (called from monitorContainerExit) from writing duplicate entries while
+	// we are still streaming. This mirrors streamLogsToStorage's pattern.
 	var dest io.Writer = os.Stdout
-	var hasLogWriter bool
 	if r.Store != nil {
-		if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+		if !r.logsCaptured.CompareAndSwap(false, true) {
+			log.Debug("logs already being captured, skipping log writer in streamLogs", "runID", r.ID)
+		} else if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
 			dest = io.MultiWriter(os.Stdout, lw)
-			hasLogWriter = true
 			defer lw.Close()
 		} else {
+			r.logsCaptured.Store(false) // Release so captureLogs can retry
 			log.Debug("failed to open log writer for streaming", "runID", r.ID, "error", lwErr)
 		}
 	}
@@ -2353,13 +2358,6 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	} else {
 		// Apple container: output is already raw
 		_, _ = io.Copy(dest, logs)
-	}
-
-	// Mark logs as captured AFTER the copy completes so captureLogs doesn't
-	// duplicate. Setting this before the copy could cause captureLogs to skip
-	// capture if the copy fails early, leaving logs.jsonl empty.
-	if hasLogWriter {
-		r.logsCaptured.Store(true)
 	}
 }
 

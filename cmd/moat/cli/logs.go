@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"sort"
@@ -115,7 +116,7 @@ func followLogs(manager *run.Manager, store *storage.RunStore, runID string, off
 			return nil
 		case <-exitDone:
 			// Container exited - do one final read to catch remaining logs
-			entries, _ := store.ReadLogs(offset, 10000)
+			entries, _ := store.ReadLogs(offset, math.MaxInt)
 			for _, entry := range entries {
 				ts := entry.Timestamp.Format("15:04:05.000")
 				fmt.Printf("[%s] %s\n", ts, entry.Line)
