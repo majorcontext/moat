@@ -1416,3 +1416,64 @@ func TestServiceWaitDefault(t *testing.T) {
 		t.Error("expected ServiceWait() to return false when Wait is false")
 	}
 }
+
+func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		wantErr string
+	}{
+		{
+			name:    "valid http localhost",
+			baseURL: "http://localhost:8080",
+		},
+		{
+			name:    "valid https proxy",
+			baseURL: "https://proxy.internal:3000",
+		},
+		{
+			name:    "valid http with path",
+			baseURL: "http://localhost:8080/v1",
+		},
+		{
+			name:    "invalid scheme ftp",
+			baseURL: "ftp://localhost:8080",
+			wantErr: "scheme must be http or https",
+		},
+		{
+			name:    "missing scheme",
+			baseURL: "localhost:8080",
+			wantErr: "scheme must be http or https",
+		},
+		{
+			name:    "empty scheme with slashes",
+			baseURL: "://localhost:8080",
+			wantErr: "invalid URL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			content := "agent: claude-code\nclaude:\n  base_url: " + tt.baseURL + "\n"
+			os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+			cfg, err := Load(dir)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.Claude.BaseURL != tt.baseURL {
+				t.Errorf("BaseURL = %q, want %q", cfg.Claude.BaseURL, tt.baseURL)
+			}
+		})
+	}
+}

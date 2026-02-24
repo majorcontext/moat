@@ -795,6 +795,21 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 
 ## Claude Code
 
+### claude.base_url
+
+Redirect Claude Code API traffic through a host-side LLM proxy. Sets `ANTHROPIC_BASE_URL` inside the container and registers credential injection for the proxy host.
+
+```yaml
+claude:
+  base_url: http://localhost:8787
+```
+
+- Type: `string` (URL)
+- Default: none (Claude Code connects to `api.anthropic.com` directly)
+- Scheme must be `http` or `https`
+
+Moat routes traffic through a relay endpoint on the Moat proxy, which forwards requests to the configured URL with credentials injected. This works transparently with `localhost` URLs because the relay runs on the host where `localhost` resolves correctly. Credentials from the `anthropic` or `claude` grant are injected for the base URL host in addition to the standard `api.anthropic.com` injection.
+
 ### claude.sync_logs
 
 Mount Claude Code's log directory for observability.

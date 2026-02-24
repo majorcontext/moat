@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"net"
+
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -109,4 +111,37 @@ func (p *AnthropicProvider) Cleanup(cleanupPath string) {}
 // ImpliedDependencies returns dependencies implied by the Anthropic provider.
 func (p *AnthropicProvider) ImpliedDependencies() []string {
 	return nil
+}
+
+// ConfigureBaseURLProxy registers credential injection for a custom base URL
+// host, mirroring the standard api.anthropic.com injection. This is called by
+// the run manager when claude.base_url is configured, so that a host-side LLM
+// proxy receives requests with credentials already injected.
+//
+// The function checks cred.Provider to determine the correct header format:
+// - "claude" (OAuth): Bearer Authorization header + beta flag + response transformer
+// - "anthropic" (API key): x-api-key header
+func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential, baseURLHost string) {
+	if cred == nil || baseURLHost == "" {
+		return
+	}
+
+	// Strip port if present — proxy credential methods (SetCredentialWithGrant,
+	// AddExtraHeader, etc.) validate via isValidHost which rejects colons.
+	// The relay handler uses getCredential() which handles host:port fallback.
+	host := baseURLHost
+	if h, _, err := net.SplitHostPort(baseURLHost); err == nil {
+		host = h
+	}
+
+	switch cred.Provider {
+	case "claude":
+		p.SetCredentialWithGrant(host, "Authorization", "Bearer "+cred.Token, "claude")
+		p.RemoveRequestHeader(host, "x-api-key")
+		p.AddExtraHeader(host, "anthropic-beta", "oauth-2025-04-20")
+		p.AddResponseTransformer(host, CreateOAuthEndpointTransformer())
+	default:
+		// API key (anthropic or unknown provider)
+		p.SetCredentialWithGrant(host, "x-api-key", cred.Token, "anthropic")
+	}
 }

@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -152,6 +153,13 @@ type NetworkConfig struct {
 
 // ClaudeConfig configures Claude Code integration options.
 type ClaudeConfig struct {
+	// BaseURL sets ANTHROPIC_BASE_URL inside the container, redirecting Claude
+	// Code API traffic through a host-side LLM proxy (e.g., Headroom).
+	// Traffic is routed through a relay endpoint on the Moat proxy, which
+	// forwards to the configured URL with credentials injected. Localhost
+	// URLs work because the relay runs on the host.
+	BaseURL string `yaml:"base_url,omitempty"`
+
 	// SyncLogs enables mounting Claude's session logs directory so logs from
 	// inside the container appear on the host at the correct project location.
 	// Default: false, unless the "anthropic" grant is configured (then true).
@@ -417,6 +425,20 @@ func Load(dir string) (*Config, error) {
 	for name, spec := range cfg.Claude.MCP {
 		if err := validateMCPServerSpec("claude", name, spec); err != nil {
 			return nil, err
+		}
+	}
+
+	// Validate claude.base_url
+	if cfg.Claude.BaseURL != "" {
+		u, err := url.Parse(cfg.Claude.BaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("claude.base_url: invalid URL %q: %w", cfg.Claude.BaseURL, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("claude.base_url: scheme must be http or https, got %q", u.Scheme)
+		}
+		if u.Host == "" {
+			return nil, fmt.Errorf("claude.base_url: missing host in %q", cfg.Claude.BaseURL)
 		}
 	}
 
