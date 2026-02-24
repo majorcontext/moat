@@ -113,9 +113,9 @@ func TestResumeCommand_ClaudeFlags(t *testing.T) {
 	}
 }
 
-// TestFindMostRecentClaudeRun_Ordering verifies the run selection logic
-// by directly testing the helper functions with mock data.
-func TestFindMostRecentClaudeRun_Ordering(t *testing.T) {
+// TestFindMostRecentClaudeRun_Candidates verifies which runs qualify as
+// resumable candidates by testing the filtering predicates with mock data.
+func TestFindMostRecentClaudeRun_Candidates(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {

@@ -146,7 +146,6 @@ func resumeStoppedRun(prev *run.Run) error {
 	absPath := prev.Workspace
 
 	fmt.Printf("Resuming Claude Code session from run %s (%s)\n", prev.Name, prev.ID)
-	fmt.Printf("Workspace: %s\n", absPath)
 
 	// Load agent.yaml if present
 	cfg, err := config.Load(absPath)

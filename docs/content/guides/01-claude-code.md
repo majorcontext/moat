@@ -171,7 +171,7 @@ moat claude -c
 moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
 ```
 
-Session IDs are stored in `.jsonl` files under `~/.claude/projects/`. You can find session IDs in the Claude Code conversation list or in the log filenames under `.moat/runs/<id>/`.
+Session IDs are stored as `.jsonl` filenames under `~/.claude/projects/`. You can also find them in the Claude Code conversation list.
 
 ### Named runs
 
