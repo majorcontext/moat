@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -445,6 +446,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Collect refreshable targets during grant loop
 		var refreshTargets []refreshTarget
 
+		// Track Anthropic/Claude credential for base URL proxy setup
+		var anthropicCred *provider.Credential
+
 		if err == nil {
 			for _, grant := range opts.Grants {
 				grantName := strings.Split(grant, ":")[0]
@@ -478,6 +482,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				envVars := prov.ContainerEnv(provCred)
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				providerEnv = append(providerEnv, envVars...)
+
+				// Capture Anthropic/Claude credential for base URL proxy setup
+				if credName == credential.ProviderClaude || credName == credential.ProviderAnthropic {
+					anthropicCred = provCred
+				}
 
 				// Check if this provider supports token refresh
 				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
@@ -665,6 +674,36 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
+
+		// Configure custom base URL for Claude Code LLM proxy (e.g., Headroom).
+		// Uses a relay pattern: ANTHROPIC_BASE_URL points to a relay endpoint on
+		// the Moat proxy, which forwards to the actual host-side LLM proxy with
+		// credentials injected. This avoids the NO_PROXY issue where the rewritten
+		// base URL host would bypass the proxy (it's the same hostAddr).
+		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred != nil {
+			baseURL, parseErr := url.Parse(opts.Config.Claude.BaseURL)
+			if parseErr == nil {
+				// Register credential injection for the base URL host so the
+				// relay handler can inject credentials before forwarding.
+				claude.ConfigureBaseURLProxy(p, anthropicCred, baseURL.Host)
+
+				// Register a relay endpoint on the proxy. The proxy runs on
+				// the host, so the original URL (e.g., http://localhost:8787)
+				// correctly reaches the host-side LLM proxy without rewriting.
+				p.AddRelay("anthropic", opts.Config.Claude.BaseURL)
+
+				// Set ANTHROPIC_BASE_URL to the relay endpoint on the Moat proxy.
+				// Since proxyHost is in NO_PROXY, Claude Code connects directly
+				// to the proxy's HTTP handler (not through the CONNECT tunnel),
+				// which routes /relay/anthropic/ to the relay handler.
+				relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
+				proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
+
+				log.Debug("configured base URL relay for Claude Code",
+					"baseURL", opts.Config.Claude.BaseURL,
+					"relayURL", relayURL)
+			}
+		}
 
 		// Set up AWS credential_process if AWS grant is active
 		// Instead of static credential injection, we use credential_process for dynamic refresh.

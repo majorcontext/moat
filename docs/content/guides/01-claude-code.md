@@ -220,6 +220,40 @@ Then:
 moat claude ./my-project
 ```
 
+## Using an LLM proxy
+
+Route Claude Code API traffic through a host-side proxy for caching, logging, or policy enforcement. Tools like [Headroom](https://github.com/chopratejas/headroom) sit between Claude Code and the Anthropic API.
+
+Install and start Headroom:
+
+```bash
+pip install "headroom-ai[all]"
+headroom proxy --port 8787
+```
+
+Configure `claude.base_url` in `agent.yaml`:
+
+```yaml
+grants:
+  - anthropic
+
+claude:
+  base_url: http://localhost:8787
+```
+
+Moat handles the details:
+
+- Rewrites `localhost` to the container-reachable host address
+- Sets `ANTHROPIC_BASE_URL` inside the container
+- Injects credentials for both `api.anthropic.com` and the proxy host
+- Allows the proxy host under `network.policy: strict`
+
+Start the proxy on your host, then run as usual:
+
+```bash
+moat claude ./my-project
+```
+
 ## Adding SSH access
 
 For SSH-based git operations:

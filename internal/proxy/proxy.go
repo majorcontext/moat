@@ -224,6 +224,7 @@ type Proxy struct {
 	mcpServers           []config.MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
+	relays               map[string]string             // name -> target URL for relay endpoints
 }
 
 // NewProxy creates a new auth proxy.
@@ -523,6 +524,15 @@ func (p *Proxy) getResponseTransformers(host string) []credential.ResponseTransf
 
 // ServeHTTP handles proxy requests.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Relay endpoints are checked before auth because they are accessed
+	// directly (via NO_PROXY bypass), not through the proxy mechanism.
+	// The client doesn't send Proxy-Authorization for direct HTTP requests.
+	// Safety: relays only forward to pre-configured URLs, not arbitrary hosts.
+	if len(p.relays) > 0 && strings.HasPrefix(r.URL.Path, "/relay/") {
+		p.handleRelay(w, r)
+		return
+	}
+
 	if p.authToken != "" && !p.checkAuth(r) {
 		http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 		return

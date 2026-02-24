@@ -96,6 +96,101 @@ func TestAnthropicProvider_ConfigureProxy(t *testing.T) {
 	}
 }
 
+func TestConfigureBaseURLProxy_OAuth(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc123"}
+
+	ConfigureBaseURLProxy(mockProxy, cred, "localhost:8080")
+
+	// OAuth should use Bearer auth on the custom host
+	want := "Authorization: Bearer sk-ant-oat01-abc123"
+	if mockProxy.credentials["localhost:8080"] != want {
+		t.Errorf("localhost:8080 credential = %q, want %q", mockProxy.credentials["localhost:8080"], want)
+	}
+
+	// Should strip x-api-key on the custom host
+	removed := mockProxy.removedHeaders["localhost:8080"]
+	foundXAPIKey := false
+	for _, h := range removed {
+		if h == "x-api-key" {
+			foundXAPIKey = true
+		}
+	}
+	if !foundXAPIKey {
+		t.Error("expected x-api-key to be removed for OAuth on custom host")
+	}
+
+	// Should have beta header on the custom host
+	if mockProxy.extraHeaders["localhost:8080"]["anthropic-beta"] != "oauth-2025-04-20" {
+		t.Error("expected anthropic-beta header on custom host")
+	}
+
+	// Should have transformer on the custom host
+	if len(mockProxy.transformers["localhost:8080"]) == 0 {
+		t.Error("expected transformer on custom host for OAuth")
+	}
+
+	// Should NOT have touched api.anthropic.com
+	if _, ok := mockProxy.credentials["api.anthropic.com"]; ok {
+		t.Error("should not register credentials for api.anthropic.com")
+	}
+}
+
+func TestConfigureBaseURLProxy_APIKey(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api01-abc123"}
+
+	ConfigureBaseURLProxy(mockProxy, cred, "proxy.internal:3000")
+
+	// API key should use x-api-key on the custom host
+	if mockProxy.credentials["proxy.internal:3000"] != "x-api-key: sk-ant-api01-abc123" {
+		t.Errorf("proxy.internal:3000 credential = %q, want %q", mockProxy.credentials["proxy.internal:3000"], "x-api-key: sk-ant-api01-abc123")
+	}
+
+	// Should NOT have beta header or transformer
+	if len(mockProxy.extraHeaders["proxy.internal:3000"]) != 0 {
+		t.Error("expected no extra headers for API key on custom host")
+	}
+	if len(mockProxy.transformers["proxy.internal:3000"]) != 0 {
+		t.Error("expected no transformer for API key on custom host")
+	}
+}
+
+func TestConfigureBaseURLProxy_NilCred(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+
+	// Should not panic with nil credential
+	ConfigureBaseURLProxy(mockProxy, nil, "localhost:8080")
+
+	if len(mockProxy.credentials) != 0 {
+		t.Error("should not register credentials with nil cred")
+	}
+}
+
+func TestConfigureBaseURLProxy_EmptyHost(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api01-abc123"}
+
+	// Should not panic with empty host
+	ConfigureBaseURLProxy(mockProxy, cred, "")
+
+	if len(mockProxy.credentials) != 0 {
+		t.Error("should not register credentials with empty host")
+	}
+}
+
 func TestOAuthProvider_ContainerEnv(t *testing.T) {
 	p := &OAuthProvider{}
 	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}

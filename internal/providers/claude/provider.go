@@ -110,3 +110,28 @@ func (p *AnthropicProvider) Cleanup(cleanupPath string) {}
 func (p *AnthropicProvider) ImpliedDependencies() []string {
 	return nil
 }
+
+// ConfigureBaseURLProxy registers credential injection for a custom base URL
+// host, mirroring the standard api.anthropic.com injection. This is called by
+// the run manager when claude.base_url is configured, so that a host-side LLM
+// proxy receives requests with credentials already injected.
+//
+// The function checks cred.Provider to determine the correct header format:
+// - "claude" (OAuth): Bearer Authorization header + beta flag + response transformer
+// - "anthropic" (API key): x-api-key header
+func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential, baseURLHost string) {
+	if cred == nil || baseURLHost == "" {
+		return
+	}
+
+	switch cred.Provider {
+	case "claude":
+		p.SetCredentialWithGrant(baseURLHost, "Authorization", "Bearer "+cred.Token, "claude")
+		p.RemoveRequestHeader(baseURLHost, "x-api-key")
+		p.AddExtraHeader(baseURLHost, "anthropic-beta", "oauth-2025-04-20")
+		p.AddResponseTransformer(baseURLHost, CreateOAuthEndpointTransformer())
+	default:
+		// API key (anthropic or unknown provider)
+		p.SetCredentialWithGrant(baseURLHost, "x-api-key", cred.Token, "anthropic")
+	}
+}

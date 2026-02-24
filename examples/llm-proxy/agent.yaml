@@ -1,0 +1,41 @@
+# Example: Host-side LLM proxy with Claude Code
+#
+# Routes Claude Code API traffic through Headroom, a host-side LLM proxy
+# that provides caching, logging, and telemetry for Anthropic API calls.
+# https://github.com/chopratejas/headroom
+#
+# Traffic flow:
+#   Claude Code -> Headroom (localhost:8787) -> api.anthropic.com
+#
+# Moat handles:
+#   - Rewriting localhost to the container-reachable host address
+#   - Setting ANTHROPIC_BASE_URL inside the container
+#   - Injecting credentials for both api.anthropic.com and the proxy host
+#
+# Prerequisites:
+#   1. Anthropic credentials:
+#        moat grant anthropic
+#
+#   2. Install Headroom:
+#        pip install "headroom-ai[all]"
+#      or with uv:
+#        uv pip install "headroom-ai[all]"
+#
+#   3. Start Headroom on port 8787:
+#        headroom proxy --port 8787
+#
+# Run with:
+#   moat claude examples/llm-proxy
+#   moat claude examples/llm-proxy -p "explain what files are in this directory"
+
+dependencies:
+  - claude-code
+
+grants:
+  - claude
+
+command: ["claude"]
+interactive: true
+
+claude:
+  base_url: http://localhost:8787
