@@ -1,29 +1,27 @@
-# Example: Go development environment
+# Example: Go development with language server
 #
-# This example demonstrates a complete Go development environment with
-# common tooling pre-installed via the go-extras meta dependency and
-# a dynamic dependency (go:) for installing packages from source.
+# Runs Claude Code with gopls as an MCP language server, giving Claude
+# access to code intelligence (go-to-definition, find-references,
+# diagnostics) when working on Go code.
+#
+# Prerequisites:
+#   moat grant claude
 #
 # Run with:
-#   moat run examples/go-dev
-#
-# Available tools:
-#   - go: Go compiler and tools
-#   - gofumpt: Stricter gofmt formatting
-#   - govulncheck: Vulnerability scanner
-#   - goreleaser: Release automation
-#   - golangci-lint: Linter aggregator
-#   - gopls: Language server (installed via go: dynamic dep)
-#
-# The demo script shows version info for all installed tools.
+#   moat claude examples/go-dev
+#   moat claude examples/go-dev -p "add a Deposit method to Account and update the tests"
 
-name: go-dev
+agent: claude
 
 dependencies:
-  - go@1.25           # Go runtime
-  - go-extras         # Meta: gofumpt, govulncheck, goreleaser
-  - golangci-lint     # Linter aggregator
-  - git               # Version control
-  - go:golang.org/x/tools/gopls  # Dynamic: language server
+  - claude-code
+  - git
 
-command: ["sh", "/workspace/demo.sh"]
+grants:
+  - claude
+
+language_servers:
+  - gopls
+
+command: ["claude"]
+interactive: true
