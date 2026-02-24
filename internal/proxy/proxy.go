@@ -695,7 +695,11 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		p.applyTokenSubstitution(outReq, sub)
 	}
 
-	// Forward request
+	// Forward request directly to the origin server. In the sidecar proxy
+	// chain model, chaining is wired via container HTTP_PROXY env vars —
+	// each sidecar forwards to the next via its own proxy settings. The
+	// Moat credential proxy is always the last hop, so it sends requests
+	// directly to the origin without going through the chain again.
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	duration := time.Since(start)
 
@@ -772,7 +776,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
-	targetConn, err := net.Dial("tcp", r.Host)
+	targetConn, err := p.dialTarget(r.Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -812,6 +816,11 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// dialTarget connects to a target host directly.
+func (p *Proxy) dialTarget(target string) (net.Conn, error) {
+	return net.Dial("tcp", target)
+}
+
 func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Request, host string) {
 	cred, authInjected := p.getCredential(host)
 
@@ -845,6 +854,11 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	}
 	defer tlsClientConn.Close()
 
+	// Direct transport to origin — no Proxy field set. In the sidecar chain
+	// model, the proxy chain is composed via container networking (each
+	// sidecar's HTTP_PROXY points to the next hop). This transport is only
+	// used by the Moat credential proxy (the final hop) to reach the real
+	// upstream server, so it correctly bypasses the chain.
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 		MaxIdleConns:    100,
@@ -853,7 +867,6 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// HTTP/1.1 requests read from the intercepted TLS connection. Enabling
 		// HTTP/2 on the upstream side causes framing mismatches and hangs.
 	}
-
 	clientReader := bufio.NewReader(tlsClientConn)
 	for {
 		req, err := http.ReadRequest(clientReader)

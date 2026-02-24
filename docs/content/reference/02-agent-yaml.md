@@ -127,6 +127,12 @@ mcp:
       grant: mcp-context7
       header: CONTEXT7_API_KEY
 
+# Proxy chain (Docker only)
+proxies:
+  - name: logging-proxy
+    image: mitmproxy/mitmproxy:latest
+    port: 8080
+
 # Snapshots
 snapshots:
   disabled: false
@@ -940,6 +946,62 @@ mcp:
 **Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
+
+---
+
+## proxies
+
+Configures a chain of proxy sidecar containers that sit between the agent container and Moat's credential-injecting proxy. Each sidecar runs as a separate Docker container on the same network.
+
+Traffic flows through the chain in declared order:
+
+```text
+container -> proxies[0] -> proxies[1] -> ... -> Moat proxy -> internet
+```
+
+Moat's credential injection, TLS interception, and network policy enforcement always happen last.
+
+```yaml
+proxies:
+  - name: logging-proxy
+    image: mitmproxy/mitmproxy:latest
+    port: 8080
+    env:
+      MITMPROXY_MODE: upstream
+
+  - name: corporate-proxy
+    image: ubuntu/squid:latest
+    port: 3128
+```
+
+- Type: `array[object]`
+- Default: `[]`
+
+**Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | yes | Unique identifier for the proxy sidecar |
+| `image` | `string` | yes | Docker image for the proxy sidecar container |
+| `port` | `integer` | yes | Port the proxy listens on inside its container (1–65535) |
+| `env` | `map[string]string` | no | Environment variables passed to the proxy container |
+
+Each proxy sidecar automatically receives `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to the next proxy in the chain. The last proxy's `HTTP_PROXY` points to Moat's credential-injecting proxy.
+
+**Validation rules:**
+
+- `name` is required and must be unique across all entries
+- `image` is required
+- `name` must contain only letters, digits, hyphens, and underscores
+- `port` must be between 1 and 65535
+- Duplicate names produce a configuration error
+
+**Requirements:**
+
+- Proxy chaining requires Docker runtime. Apple containers do not support sidecar containers.
+- Sidecars share a Docker network (`moat-<run-id>`) and communicate by container name.
+
+**See also:** [Proxy architecture: Proxy chaining](../concepts/09-proxy.md#proxy-chaining)
 
 ---
 

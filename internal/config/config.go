@@ -15,6 +15,9 @@ import (
 // Must start with a letter or digit.
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// validProxyName validates proxy chain entry names.
+var validProxyName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
 // Config represents an agent.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
@@ -50,6 +53,7 @@ type Config struct {
 	Container ContainerConfig        `yaml:"container,omitempty"`
 	MCP       []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+	Proxies   []ProxyChainEntry      `yaml:"proxies,omitempty"`
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
@@ -113,6 +117,23 @@ type MCPServerConfig struct {
 type MCPAuthConfig struct {
 	Grant  string `yaml:"grant"`
 	Header string `yaml:"header"`
+}
+
+// ProxyChainEntry defines an upstream proxy in the proxy chain.
+// Proxies run as sidecar containers in declared order:
+// container -> proxy[0] -> proxy[1] -> ... -> moat credential proxy -> internet.
+type ProxyChainEntry struct {
+	// Name is a unique identifier for this proxy.
+	Name string `yaml:"name"`
+
+	// Image is the Docker image for the proxy sidecar.
+	Image string `yaml:"image"`
+
+	// Port is the port the proxy listens on inside its container.
+	Port int `yaml:"port"`
+
+	// Env are environment variables passed to the proxy container.
+	Env map[string]string `yaml:"env,omitempty"`
 }
 
 // ServiceSpec allows customizing service behavior.
@@ -471,6 +492,33 @@ func Load(dir string) (*Config, error) {
 				return nil, fmt.Errorf("%s: duplicate volume target %q", prefix, vol.Target)
 			}
 			seenVolTargets[vol.Target] = true
+		}
+	}
+
+	// Validate proxy chain
+	if len(cfg.Proxies) > 0 {
+		seenProxyNames := make(map[string]bool)
+		for i, entry := range cfg.Proxies {
+			prefix := fmt.Sprintf("proxies[%d]", i)
+			if entry.Name == "" {
+				return nil, fmt.Errorf("%s: 'name' is required", prefix)
+			}
+			if !validProxyName.MatchString(entry.Name) {
+				return nil, fmt.Errorf("%s: 'name' must start with a letter or digit and contain only letters, digits, hyphens, and underscores", prefix)
+			}
+			if seenProxyNames[entry.Name] {
+				return nil, fmt.Errorf("%s: duplicate name %q", prefix, entry.Name)
+			}
+			seenProxyNames[entry.Name] = true
+			if entry.Image == "" {
+				return nil, fmt.Errorf("%s: 'image' is required", prefix)
+			}
+			if entry.Port <= 0 {
+				return nil, fmt.Errorf("%s: 'port' must be a positive integer", prefix)
+			}
+			if entry.Port > 65535 {
+				return nil, fmt.Errorf("%s: port %d exceeds maximum (65535)", prefix, entry.Port)
+			}
 		}
 	}
 

@@ -1844,6 +1844,123 @@ region = %s
 		networkMode = networkID
 	}
 
+	// Start proxy chain sidecars (if configured).
+	// Chain order: container -> proxy[0] -> proxy[1] -> ... -> moat proxy -> internet.
+	// The chain needs a Docker network so sidecars can communicate by container name.
+	if opts.Config != nil && len(opts.Config.Proxies) > 0 && proxyServer == nil {
+		ui.Warn("proxies configured in agent.yaml but no credential proxy is running (no grants or strict mode); proxy chain will not be started")
+	}
+	if opts.Config != nil && len(opts.Config.Proxies) > 0 && proxyServer != nil {
+		// Proxy chaining requires Docker — Apple containers don't support
+		// container-name DNS resolution, so sidecar-to-sidecar routing fails.
+		if m.runtime.Type() == container.RuntimeApple {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("proxy chaining is not supported on Apple containers (requires Docker)")
+		}
+
+		svcMgr := m.runtime.ServiceManager()
+		if svcMgr == nil {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("proxy chain requires a runtime with service support")
+		}
+
+		// Ensure network exists (reuse if already created for services or BuildKit)
+		if networkID == "" {
+			netMgr := m.runtime.NetworkManager()
+			if netMgr == nil {
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
+				return nil, fmt.Errorf("proxy chain requires network support")
+			}
+			networkName := fmt.Sprintf("moat-%s", r.ID)
+			var netErr error
+			networkID, netErr = netMgr.CreateNetwork(ctx, networkName)
+			if netErr != nil {
+				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
+				cleanupAgentConfig(claudeConfig)
+				cleanupAgentConfig(codexConfig)
+				cleanupAgentConfig(geminiConfig)
+				return nil, fmt.Errorf("creating proxy chain network: %w", netErr)
+			}
+			r.NetworkID = networkID
+		}
+		svcMgr.SetNetworkID(networkID)
+
+		// moatProxyAddr is the address of Moat's credential-injecting proxy
+		// as reachable from inside the Docker network. On Apple containers the
+		// proxy requires token authentication, so include credentials in the
+		// URL (http://moat:token@host:port) so each sidecar can authenticate.
+		chainProxyHost := m.runtime.GetHostAddress() + ":" + proxyServer.Port()
+		var chainUpstream string
+		if r.ProxyAuthToken != "" {
+			chainUpstream = "moat:" + r.ProxyAuthToken + "@" + chainProxyHost
+		} else {
+			chainUpstream = chainProxyHost
+		}
+
+		chain, chainErr := proxy.StartChain(ctx, opts.Config.Proxies, svcMgr, r.ID, chainUpstream)
+		if chainErr != nil {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("starting proxy chain: %w", chainErr)
+		}
+		r.ProxyChain = chain
+
+		// Store chain container IDs in ServiceContainers for metadata
+		// persistence. This allows Destroy() to clean up chain containers
+		// after a manager restart (when ProxyChain is not reconstructed).
+		// The live Stop/monitorContainerExit paths stop them via
+		// ProxyChain.Stop() first; the ServiceContainers loop may stop
+		// them again, but StopService is idempotent.
+		if r.ServiceContainers == nil {
+			r.ServiceContainers = make(map[string]string)
+		}
+		for name, id := range chain.ContainerIDs() {
+			r.ServiceContainers["proxy-chain-"+name] = id
+		}
+
+		// Override HTTP_PROXY to point to chain entry instead of moat proxy.
+		// The main container sends traffic to the first chain proxy, which
+		// forwards through the chain, ending at moat's credential proxy.
+		// This intentionally strips the moat auth token (moat:token@host:port)
+		// from the URL — chain proxies don't need it; only moat's proxy does.
+		chainEntryURL := fmt.Sprintf("http://%s", chain.EntryAddr())
+		for i, env := range proxyEnv {
+			switch {
+			case strings.HasPrefix(env, "HTTP_PROXY="):
+				proxyEnv[i] = "HTTP_PROXY=" + chainEntryURL
+			case strings.HasPrefix(env, "HTTPS_PROXY="):
+				proxyEnv[i] = "HTTPS_PROXY=" + chainEntryURL
+			case strings.HasPrefix(env, "http_proxy="):
+				proxyEnv[i] = "http_proxy=" + chainEntryURL
+			case strings.HasPrefix(env, "https_proxy="):
+				proxyEnv[i] = "https_proxy=" + chainEntryURL
+			}
+		}
+
+		// Use network for main container so it can reach chain proxies
+		networkMode = networkID
+
+		log.Debug("proxy chain started",
+			"entry", chain.EntryAddr(),
+			"proxies", chain.Names())
+	}
+
 	// Add BuildKit env vars if enabled
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
@@ -2370,7 +2487,14 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	buildkitContainerID := r.BuildkitContainerID
 	networkID := r.NetworkID
 	serviceContainers := r.ServiceContainers
+	proxyChain := r.ProxyChain
 	m.mu.Unlock()
+
+	// Stop proxy chain sidecars
+	if proxyChain != nil {
+		svcMgr := m.runtime.ServiceManager()
+		proxyChain.Stop(ctx, svcMgr)
+	}
 
 	// Stop service containers
 	if len(serviceContainers) > 0 {
@@ -2417,6 +2541,10 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	if err := r.stopProxyServer(ctx); err != nil {
 		ui.Warnf("Stopping proxy: %v", err)
 	}
+
+	// Note: proxy chain sidecars were already stopped via proxyChain.Stop()
+	// at the top of Stop(). They're also in ServiceContainers for metadata
+	// persistence but that loop already ran too — StopService is idempotent.
 
 	// Stop the SSH agent server if one was created
 	if err := r.stopSSHAgentServer(); err != nil {
@@ -2756,6 +2884,12 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Save updated state
 	_ = r.SaveMetadata()
 
+	// Stop proxy chain sidecars before the proxy server, matching Stop() order.
+	if r.ProxyChain != nil {
+		svcMgr := m.runtime.ServiceManager()
+		r.ProxyChain.Stop(context.Background(), svcMgr)
+	}
+
 	// Stop the proxy server if one was created
 	if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
 		log.Debug("stopping proxy after container exit", "error", stopErr)
@@ -2766,7 +2900,9 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
 	}
 
-	// Stop service containers
+	// Stop service containers. Chain containers are also in here but
+	// were already stopped by ProxyChain.Stop above; StopService is
+	// idempotent so the duplicate call is harmless.
 	if len(r.ServiceContainers) > 0 {
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr != nil {
@@ -2847,7 +2983,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		ui.Warnf("%v", err)
 	}
 
-	// Remove service containers
+	// Remove service containers (includes proxy chain sidecars)
 	for svcName, svcContainerID := range r.ServiceContainers {
 		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
 			ui.Warnf("Removing %s service container: %v", svcName, err)

@@ -1303,6 +1303,267 @@ mcp:
 	}
 }
 
+func TestLoad_Proxies_Valid(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    image: squid:latest
+    port: 3128
+  - name: tinyproxy
+    image: tinyproxy:latest
+    port: 8888
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Proxies) != 2 {
+		t.Fatalf("Proxies = %d, want 2", len(cfg.Proxies))
+	}
+	if cfg.Proxies[0].Name != "squid" {
+		t.Errorf("Proxies[0].Name = %q, want %q", cfg.Proxies[0].Name, "squid")
+	}
+	if cfg.Proxies[0].Image != "squid:latest" {
+		t.Errorf("Proxies[0].Image = %q, want %q", cfg.Proxies[0].Image, "squid:latest")
+	}
+	if cfg.Proxies[0].Port != 3128 {
+		t.Errorf("Proxies[0].Port = %d, want %d", cfg.Proxies[0].Port, 3128)
+	}
+	if cfg.Proxies[1].Name != "tinyproxy" {
+		t.Errorf("Proxies[1].Name = %q, want %q", cfg.Proxies[1].Name, "tinyproxy")
+	}
+}
+
+func TestLoad_Proxies_WithEnv(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    image: squid:latest
+    port: 3128
+    env:
+      SQUID_MAX_CACHE: "1024"
+      DEBUG: "true"
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Proxies[0].Env["SQUID_MAX_CACHE"] != "1024" {
+		t.Errorf("Env[SQUID_MAX_CACHE] = %q, want %q", cfg.Proxies[0].Env["SQUID_MAX_CACHE"], "1024")
+	}
+	if cfg.Proxies[0].Env["DEBUG"] != "true" {
+		t.Errorf("Env[DEBUG] = %q, want %q", cfg.Proxies[0].Env["DEBUG"], "true")
+	}
+}
+
+func TestLoad_Proxies_MissingName(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - image: squid:latest
+    port: 3128
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for missing proxy name")
+	}
+	if !strings.Contains(err.Error(), "'name' is required") {
+		t.Errorf("error = %q, want to contain 'name' is required", err.Error())
+	}
+}
+
+func TestLoad_Proxies_MissingImage(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    port: 3128
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for missing proxy image")
+	}
+	if !strings.Contains(err.Error(), "'image' is required") {
+		t.Errorf("error = %q, want to contain 'image' is required", err.Error())
+	}
+}
+
+func TestLoad_Proxies_MissingPort(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    image: squid:latest
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for missing proxy port")
+	}
+	if !strings.Contains(err.Error(), "'port' must be a positive integer") {
+		t.Errorf("error = %q, want to contain 'port' must be a positive integer", err.Error())
+	}
+}
+
+func TestLoad_Proxies_NegativePort(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    image: squid:latest
+    port: -1
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for negative port")
+	}
+	if !strings.Contains(err.Error(), "'port' must be a positive integer") {
+		t.Errorf("error = %q, want to contain 'port' must be a positive integer", err.Error())
+	}
+}
+
+func TestLoad_Proxies_DuplicateName(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: squid
+    image: squid:latest
+    port: 3128
+  - name: squid
+    image: squid2:latest
+    port: 3129
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate proxy name")
+	}
+	if !strings.Contains(err.Error(), "duplicate name") {
+		t.Errorf("error = %q, want to contain 'duplicate name'", err.Error())
+	}
+}
+
+func TestLoad_Proxies_EmptyList(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies: []
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Proxies) != 0 {
+		t.Errorf("Proxies = %d, want 0", len(cfg.Proxies))
+	}
+}
+
+func TestLoad_Proxies_SingleProxy(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: corporate
+    image: corp-proxy:latest
+    port: 8080
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Proxies) != 1 {
+		t.Fatalf("Proxies = %d, want 1", len(cfg.Proxies))
+	}
+	if cfg.Proxies[0].Name != "corporate" {
+		t.Errorf("Name = %q, want %q", cfg.Proxies[0].Name, "corporate")
+	}
+}
+
+func TestLoad_Proxies_NoEnvField(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: simple
+    image: simple:latest
+    port: 3128
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Proxies[0].Env) != 0 {
+		t.Errorf("Env = %v, want nil or empty", cfg.Proxies[0].Env)
+	}
+}
+
+func TestLoad_Proxies_InvalidName(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: "my proxy!"
+    image: proxy:latest
+    port: 3128
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid proxy name")
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Errorf("error = %q, want mention of 'name'", err)
+	}
+}
+
+func TestLoad_Proxies_PortTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: valid
+    image: proxy:latest
+    port: 99999
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for port > 65535")
+	}
+	if !strings.Contains(err.Error(), "65535") {
+		t.Errorf("error = %q, want mention of '65535'", err)
+	}
+}
+
 func TestLoadConfigWithHooks(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "agent.yaml")
