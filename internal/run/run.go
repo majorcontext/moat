@@ -41,10 +41,11 @@ type Run struct {
 	WorktreePath   string
 	WorktreeRepoID string
 	Grants         []string
-	Agent          string         // Agent type from config (e.g., "claude-code", "codex")
-	Image          string         // Container image used for this run
-	Ports          map[string]int // endpoint name -> container port
-	HostPorts      map[string]int // endpoint name -> host port (after binding)
+	Agent          string            // Agent type from config (e.g., "claude-code", "codex")
+	Image          string            // Container image used for this run
+	ProviderMeta   map[string]string // Provider-specific metadata (e.g., claude_session_id)
+	Ports          map[string]int    // endpoint name -> container port
+	HostPorts      map[string]int    // endpoint name -> host port (after binding)
 	State          State
 	ContainerID    string
 	ProxyServer    *proxy.Server     // Auth proxy for credential injection
@@ -155,6 +156,7 @@ func (r *Run) SaveMetadata() error {
 		StartedAt:           r.StartedAt,
 		StoppedAt:           r.StoppedAt,
 		Error:               r.Error,
+		ProviderMeta:        r.ProviderMeta,
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,
 		WorktreeRepoID:      r.WorktreeRepoID,

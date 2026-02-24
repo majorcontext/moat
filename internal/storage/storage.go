@@ -29,6 +29,10 @@ type Metadata struct {
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
+	// ProviderMeta holds provider-specific metadata captured during the run lifecycle.
+	// For example, the Claude provider stores {"claude_session_id": "<uuid>"}.
+	ProviderMeta map[string]string `json:"provider_meta,omitempty"`
+
 	// Worktree fields (set when run was created via moat wt or --wt)
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`

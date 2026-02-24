@@ -171,7 +171,7 @@ In addition to the command-specific flags below, `moat claude` accepts all [comm
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `-c`, `--continue` | Continue the most recent conversation |
-| `-r`, `--resume ID` | Resume a specific session by ID |
+| `-r`, `--resume RUN\|UUID` | Resume a specific session by moat run name/ID or raw Claude session UUID |
 | `--noyolo` | Restore Claude Code's per-operation confirmation prompts. By default, `moat claude` runs with `--dangerously-skip-permissions` because the container provides isolation. Use `--noyolo` to re-enable permission prompts. |
 
 ### Examples
@@ -194,7 +194,10 @@ moat claude -p "fix the failing tests"
 moat claude --continue
 moat claude -c
 
-# Resume a specific session by ID
+# Resume a specific session by run name
+moat claude --resume my-feature
+
+# Resume by raw Claude session UUID
 moat claude --resume ae150251-d90a-4f85-a9da-2281e8e0518d
 
 # With GitHub access

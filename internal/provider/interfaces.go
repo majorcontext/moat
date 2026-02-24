@@ -9,6 +9,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// RunStoppedContext provides run information to shutdown hooks.
+type RunStoppedContext struct {
+	Workspace string
+	StartedAt time.Time
+}
+
+// RunStoppedHook is an optional interface for providers that need to perform
+// actions after a run stops. The manager calls OnRunStopped for each grant
+// provider that implements this interface.
+type RunStoppedHook interface {
+	// OnRunStopped is called after the container exits and logs are captured.
+	// It receives run context and returns metadata key-value pairs to persist.
+	// Returned metadata is stored in the run's metadata.json under "provider_meta".
+	OnRunStopped(ctx RunStoppedContext) map[string]string
+}
+
 // ProxyConfigurer configures proxy credentials and response transformations.
 // This is an alias for credential.ProxyConfigurer to ensure type compatibility.
 type ProxyConfigurer = credential.ProxyConfigurer

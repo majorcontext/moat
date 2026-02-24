@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 var (
@@ -187,7 +189,11 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	}
 
 	if claudeResume != "" {
-		containerCmd = append(containerCmd, "--resume", claudeResume)
+		sessionID, resolveErr := resolveResumeSession(claudeResume)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		containerCmd = append(containerCmd, "--resume", sessionID)
 	}
 
 	if claudePromptFlag != "" {
@@ -349,4 +355,88 @@ func resolveClaudeCredential(store *credential.FileStore) string {
 	}
 
 	return "anthropic"
+}
+
+// claudeUUIDPattern matches a Claude Code session UUID (e.g., b281f735-7d2b-4979-95de-0e2a7a9c2315).
+var claudeUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// resolveResumeSession resolves a --resume argument to a Claude session UUID.
+//
+// If the argument is already a UUID, it is returned as-is (backward compatible).
+// Otherwise, we treat it as a moat run name or ID, look up the run's stored
+// ClaudeSessionID from metadata, and return that.
+func resolveResumeSession(arg string) (string, error) {
+	return resolveResumeSessionInDir(arg, storage.DefaultBaseDir())
+}
+
+// resolveResumeSessionInDir is the testable core of resolveResumeSession.
+func resolveResumeSessionInDir(arg, baseDir string) (string, error) {
+	// If it looks like a raw Claude session UUID, pass through directly.
+	if claudeUUIDPattern.MatchString(arg) {
+		return arg, nil
+	}
+
+	// Try to resolve as a moat run name or ID by scanning stored runs.
+	runIDs, err := storage.ListRunDirs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("listing runs: %w", err)
+	}
+
+	var match *storage.Metadata
+	var matchID string
+
+	for _, runID := range runIDs {
+		store, storeErr := storage.NewRunStore(baseDir, runID)
+		if storeErr != nil {
+			continue
+		}
+		meta, metaErr := store.LoadMetadata()
+		if metaErr != nil {
+			continue
+		}
+
+		// Exact ID match
+		if runID == arg {
+			match = &meta
+			matchID = runID
+			break
+		}
+
+		// ID prefix match
+		if strings.HasPrefix(runID, arg) && strings.HasPrefix(arg, "run_") {
+			match = &meta
+			matchID = runID
+			// Don't break — keep looking for exact match
+		}
+
+		// Exact name match (most recent wins since ListRunDirs order is stable)
+		if meta.Name == arg {
+			if match == nil || meta.CreatedAt.After(match.CreatedAt) {
+				match = &meta
+				matchID = runID
+			}
+		}
+	}
+
+	if match == nil {
+		return "", fmt.Errorf("no run found matching %q\n\nRun 'moat list' to see available runs.", arg)
+	}
+
+	// If the run is still active, the session ID hasn't been captured yet.
+	// Tell the user to attach instead of starting a new container.
+	if match.State == "running" || match.State == "starting" {
+		return "", fmt.Errorf("run %s (%s) is still running\n\nUse 'moat attach %s' to reconnect.", matchID, match.Name, arg)
+	}
+
+	sessionID := match.ProviderMeta["claude_session_id"]
+	if sessionID == "" {
+		return "", fmt.Errorf("run %s (%s) has no recorded Claude session ID\n\nThe session ID is captured when Claude Code exits normally.", matchID, match.Name)
+	}
+
+	log.Debug("resolved --resume to claude session",
+		"arg", arg,
+		"runID", matchID,
+		"sessionID", sessionID,
+	)
+	return sessionID, nil
 }
