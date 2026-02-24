@@ -1477,3 +1477,106 @@ func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_LanguageServers(t *testing.T) {
+	t.Run("valid language server", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+agent: claude
+dependencies:
+  - go
+language_servers:
+  - go
+`), 0644)
+
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if len(cfg.LanguageServers) != 1 {
+			t.Fatalf("LanguageServers length = %d, want 1", len(cfg.LanguageServers))
+		}
+		if cfg.LanguageServers[0] != "go" {
+			t.Errorf("LanguageServers[0] = %q, want %q", cfg.LanguageServers[0], "go")
+		}
+	})
+
+	t.Run("unknown language server", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+agent: claude
+language_servers:
+  - unknown-lsp
+`), 0644)
+
+		_, err := Load(dir)
+		if err == nil {
+			t.Error("Load() should return error for unknown language server")
+		}
+		if !strings.Contains(err.Error(), "unknown language server") {
+			t.Errorf("error should mention unknown language server, got: %v", err)
+		}
+	})
+
+	t.Run("empty language servers", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+agent: claude
+`), 0644)
+
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if len(cfg.LanguageServers) != 0 {
+			t.Errorf("LanguageServers = %v, want empty", cfg.LanguageServers)
+		}
+	})
+
+	t.Run("duplicate language servers rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+agent: claude
+language_servers:
+  - go
+  - go
+`), 0644)
+
+		_, err := Load(dir)
+		if err == nil {
+			t.Fatal("Load() should return error for duplicate language servers")
+		}
+		if !strings.Contains(err.Error(), "duplicate language server") {
+			t.Errorf("error should mention duplicate language server, got: %v", err)
+		}
+	})
+
+	t.Run("language servers with other config", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+agent: claude
+dependencies:
+  - node@20
+  - go
+grants:
+  - anthropic
+language_servers:
+  - go
+`), 0644)
+
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if len(cfg.LanguageServers) != 1 || cfg.LanguageServers[0] != "go" {
+			t.Errorf("LanguageServers = %v, want [go]", cfg.LanguageServers)
+		}
+		// Other fields should be unaffected
+		if len(cfg.Dependencies) != 2 {
+			t.Errorf("Dependencies = %v, want 2 entries", cfg.Dependencies)
+		}
+		if len(cfg.Grants) != 1 {
+			t.Errorf("Grants = %v, want 1 entry", cfg.Grants)
+		}
+	})
+}

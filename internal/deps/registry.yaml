@@ -11,7 +11,7 @@ node:
 go:
   description: Go programming language
   type: runtime
-  default: "1.22"
+  default: "1.25"
 
 python:
   description: Python programming language
@@ -204,6 +204,12 @@ gofumpt:
   targets:
     amd64: amd64
     arm64: arm64
+
+gopls:
+  description: Go language server (LSP + MCP support)
+  type: go-install
+  go-package: golang.org/x/tools/gopls
+  requires: [go]
 
 govulncheck:
   description: Go vulnerability scanner

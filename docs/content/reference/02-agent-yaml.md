@@ -119,6 +119,10 @@ gemini:
       grant: github
       cwd: /workspace
 
+# Language servers
+language_servers:
+  - go
+
 # Remote MCP servers
 mcp:
   - name: context7
@@ -876,14 +880,14 @@ claude:
 
 ### claude.mcp
 
-Local MCP (Model Context Protocol) servers that run as child processes inside the container.
+Local MCP servers that run as child processes inside the container. Configuration is written to `.claude.json` with `type: stdio`.
 
 ```yaml
 claude:
   mcp:
-    my_server:
-      command: /path/to/server
-      args: ["--flag", "value"]
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
       env:
         API_KEY: ${secrets.MY_KEY}
       grant: github
@@ -897,15 +901,65 @@ claude:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `command` | `string` | Server executable path |
+| `command` | `string` | Server executable path (required) |
 | `args` | `array[string]` | Command arguments |
-| `env` | `map[string]string` | Environment variables |
-| `grant` | `string` | Credential to inject |
-| `cwd` | `string` | Working directory |
+| `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
+| `grant` | `string` | Credential to inject as an environment variable |
+| `cwd` | `string` | Working directory for the server process |
 
-Environment variables support `${secrets.NAME}` interpolation.
+When `grant` is specified, the corresponding environment variable is set automatically:
 
-**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/09-mcp.md#remote-mcp-servers) guide.
+| Grant | Environment variable |
+|-------|---------------------|
+| `github` | `GITHUB_TOKEN` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
+
+---
+
+## Language servers
+
+### language_servers
+
+Prepackaged language servers that provide code intelligence inside the container via Claude Code plugins. Each entry installs the server binary and its runtime dependencies during image build, then enables the corresponding Claude Code plugin.
+
+```yaml
+language_servers:
+  - go
+  - typescript
+  - python
+```
+
+- Type: `array[string]`
+- Default: `[]`
+
+Adding a language server automatically:
+- Installs the server binary and its runtime dependencies during image build
+- Enables the corresponding Claude Code plugin (from the `claude-plugins-official` marketplace)
+
+**Available language servers:**
+
+| Name | Description | Dependencies installed |
+|------|-------------|----------------------|
+| `go` | Go language server (code intelligence, refactoring, diagnostics) | `go`, `gopls` |
+| `typescript` | TypeScript/JavaScript language server (code intelligence, diagnostics) | `node`, `typescript`, `typescript-language-server` |
+| `python` | Python language server (code intelligence, type checking, diagnostics) | `python`, `pyright` |
+
+**Example:**
+
+```yaml
+agent: claude
+language_servers:
+  - go
+grants:
+  - anthropic
+```
+
+Runtime dependencies are added automatically -- listing them in `dependencies:` is not required.
+
+> **Note:** Prepackaged language servers are currently supported with Claude Code only.
 
 ---
 
@@ -952,7 +1006,7 @@ mcp:
     # No auth block = no credential injection
 ```
 
-**Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
+**Note:** For local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
@@ -994,14 +1048,14 @@ When enabled, Gemini session logs are synced to the host at `~/.moat/runs/<run-i
 
 ### gemini.mcp
 
-Local MCP (Model Context Protocol) servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
+Local MCP servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
 
 ```yaml
 gemini:
   mcp:
-    my_server:
-      command: /path/to/server
-      args: ["--flag", "value"]
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
       env:
         API_KEY: my-key
       grant: github
@@ -1015,13 +1069,13 @@ gemini:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `command` | `string` | Server executable path |
+| `command` | `string` | Server executable path (required) |
 | `args` | `array[string]` | Command arguments |
-| `env` | `map[string]string` | Environment variables |
-| `grant` | `string` | Credential to inject |
-| `cwd` | `string` | Working directory |
+| `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
+| `grant` | `string` | Credential to inject as an environment variable |
+| `cwd` | `string` | Working directory for the server process |
 
-When a `grant` is specified, the corresponding environment variable is set automatically:
+When `grant` is specified, the corresponding environment variable is set automatically:
 
 | Grant | Environment variable |
 |-------|---------------------|
@@ -1029,7 +1083,7 @@ When a `grant` is specified, the corresponding environment variable is set autom
 | `gemini` | `GEMINI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 
-**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers](../guides/03-gemini.md#mcp-servers) in the Gemini guide.
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
 
 ---
 

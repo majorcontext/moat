@@ -1,0 +1,29 @@
+# Example: Go development with language server
+#
+# Runs Claude Code with the Go language server plugin, giving Claude
+# access to code intelligence (go-to-definition, find-references,
+# diagnostics) when working on Go code.
+#
+# Available language servers: go, typescript, python
+#
+# Prerequisites:
+#   moat grant claude
+#
+# Run with:
+#   moat claude examples/language-server
+#   moat claude examples/language-server -p "add a Deposit method to Account and update the tests"
+
+agent: claude
+
+dependencies:
+  - claude-code
+  - git
+
+grants:
+  - claude
+
+language_servers:
+  - go
+
+command: ["claude"]
+interactive: true

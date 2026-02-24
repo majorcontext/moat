@@ -30,6 +30,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/image"
+	"github.com/majorcontext/moat/internal/langserver"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
 	"github.com/majorcontext/moat/internal/provider"
@@ -1015,6 +1016,12 @@ region = %s
 		}
 	}
 
+	// Add dependencies from language servers (e.g., gopls requires go).
+	// Language servers are only supported with Claude Code agent.
+	if opts.Config != nil && len(opts.Config.LanguageServers) > 0 && strings.HasPrefix(opts.Config.Agent, "claude") {
+		allDeps = append(allDeps, langserver.AllDependencies(opts.Config.LanguageServers)...)
+	}
+
 	if len(allDeps) > 0 {
 		var err error
 		depList, err = deps.ParseAll(allDeps)
@@ -1093,6 +1100,7 @@ region = %s
 	// This allows plugins configured on the host to work in containers.
 	var claudeMarketplaces []claude.MarketplaceConfig
 	var claudePlugins []string
+	marketplaceRepos := make(map[string]string)
 
 	if claudeSettings != nil {
 		// Build a map of marketplace name -> repo URL from merged settings.
@@ -1102,7 +1110,6 @@ region = %s
 		// - SSH URLs: git@github.com:owner/repo.git
 		// We normalize GitHub HTTPS URLs to owner/repo format for cleaner output.
 		// Other URL formats are passed through unchanged.
-		marketplaceRepos := make(map[string]string)
 		for name, entry := range claudeSettings.ExtraKnownMarketplaces {
 			if entry.Source.URL != "" {
 				// Convert GitHub HTTPS URL to owner/repo format
@@ -1154,6 +1161,27 @@ region = %s
 		}
 	}
 
+	// Inject language server plugins into the plugin baking flow.
+	// Language servers use Claude Code plugins instead of MCP stdio processes.
+	hasLangServers := opts.Config != nil && len(opts.Config.LanguageServers) > 0
+	if hasLangServers && !strings.HasPrefix(opts.Config.Agent, "claude") {
+		ui.Warnf("language_servers are currently only supported with Claude Code agent; ignoring for %s", opts.Config.Agent)
+		hasLangServers = false
+	}
+	if hasLangServers {
+		lsPlugins := langserver.Plugins(opts.Config.LanguageServers)
+		claudePlugins = append(claudePlugins, lsPlugins...)
+		// Ensure claude-plugins-official marketplace is registered
+		if _, exists := marketplaceRepos["claude-plugins-official"]; !exists {
+			marketplaceRepos["claude-plugins-official"] = "anthropics/claude-plugins-official"
+			claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
+				Name:   "claude-plugins-official",
+				Source: "github",
+				Repo:   "anthropics/claude-plugins-official",
+			})
+		}
+	}
+
 	// Determine if we need Claude init (for OAuth credentials and host files)
 	// This is triggered by:
 	// - a claude/claude grant (always needs init for OAuth credentials), OR
@@ -1192,7 +1220,6 @@ region = %s
 			}
 		}
 	}
-
 	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
 	// This is triggered by an openai grant
 	var needsCodexInit bool
@@ -1412,7 +1439,6 @@ region = %s
 		// claudeSettings was loaded earlier for plugin detection
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
-
 		// We need PrepareContainer if:
 		// - needsClaudeInit (OAuth credentials to set up)
 		// - hasPlugins (plugin settings to configure)
