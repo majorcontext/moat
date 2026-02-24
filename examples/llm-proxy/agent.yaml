@@ -8,8 +8,8 @@
 #   Claude Code -> Headroom (localhost:8787) -> api.anthropic.com
 #
 # Moat handles:
-#   - Rewriting localhost to the container-reachable host address
 #   - Setting ANTHROPIC_BASE_URL inside the container
+#   - Routing traffic through a relay on the Moat proxy
 #   - Injecting credentials for both api.anthropic.com and the proxy host
 #
 # Prerequisites:

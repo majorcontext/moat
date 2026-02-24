@@ -235,7 +235,7 @@ Configure `claude.base_url` in `agent.yaml`:
 
 ```yaml
 grants:
-  - anthropic
+  - claude
 
 claude:
   base_url: http://localhost:8787
@@ -243,10 +243,9 @@ claude:
 
 Moat handles the details:
 
-- Rewrites `localhost` to the container-reachable host address
 - Sets `ANTHROPIC_BASE_URL` inside the container
+- Routes traffic through a relay on the Moat proxy (`localhost` works because the relay runs on the host)
 - Injects credentials for both `api.anthropic.com` and the proxy host
-- Allows the proxy host under `network.policy: strict`
 
 Start the proxy on your host, then run as usual:
 

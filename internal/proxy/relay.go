@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 )
@@ -14,7 +16,9 @@ import (
 // where localhost correctly reaches host-side services.
 var relayClient = &http.Client{
 	Transport: &http.Transport{
-		Proxy: nil, // Disable proxy - connect directly to target
+		Proxy:                 nil, // Disable proxy - connect directly to target
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
 	},
 }
 
@@ -23,13 +27,23 @@ var relayClient = &http.Client{
 // the target host would be in NO_PROXY (e.g., a host-side proxy reachable via
 // the same address as the Moat proxy), which would cause direct connections to
 // bypass credential injection.
-func (p *Proxy) AddRelay(name, targetURL string) {
+//
+// AddRelay must be called before the proxy starts serving.
+func (p *Proxy) AddRelay(name, targetURL string) error {
+	if name == "" || strings.ContainsAny(name, "/ \t\n\r") {
+		return fmt.Errorf("invalid relay name %q: must be non-empty with no slashes or whitespace", name)
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid relay target URL %q", targetURL)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.relays == nil {
 		p.relays = make(map[string]string)
 	}
 	p.relays[name] = targetURL
+	return nil
 }
 
 // handleRelay proxies requests through the Moat proxy to a configured target
@@ -112,8 +126,7 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 			"relay", name,
 			"target", targetURL.String(),
 			"error", err)
-		http.Error(w, "MOAT: Failed to connect to "+name+" relay at "+targetURL.Host+": "+err.Error(),
-			http.StatusBadGateway)
+		http.Error(w, "MOAT: Relay '"+name+"' connection failed", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

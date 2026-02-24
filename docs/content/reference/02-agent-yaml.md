@@ -808,7 +808,7 @@ claude:
 - Default: none (Claude Code connects to `api.anthropic.com` directly)
 - Scheme must be `http` or `https`
 
-When the URL contains `localhost` or `127.0.0.1`, Moat automatically rewrites the host to the container-reachable address (e.g., `host.docker.internal` on macOS Docker). Credentials are injected for both `api.anthropic.com` and the custom base URL host. With `network.policy: strict`, the base URL host is automatically allowed.
+Moat routes traffic through a relay endpoint on the Moat proxy, which forwards requests to the configured URL with credentials injected. This works transparently with `localhost` URLs because the relay runs on the host where `localhost` resolves correctly. Credentials from the `anthropic` or `claude` grant are injected for the base URL host in addition to the standard `api.anthropic.com` injection.
 
 ### claude.sync_logs
 

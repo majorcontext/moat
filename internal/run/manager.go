@@ -682,7 +682,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// base URL host would bypass the proxy (it's the same hostAddr).
 		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred != nil {
 			baseURL, parseErr := url.Parse(opts.Config.Claude.BaseURL)
-			if parseErr == nil {
+			if parseErr != nil {
+				// Should not happen: config.Load() validates the URL.
+				log.Warn("invalid claude.base_url, skipping relay setup",
+					"url", opts.Config.Claude.BaseURL, "error", parseErr)
+			} else {
 				// Register credential injection for the base URL host so the
 				// relay handler can inject credentials before forwarding.
 				claude.ConfigureBaseURLProxy(p, anthropicCred, baseURL.Host)
@@ -690,18 +694,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Register a relay endpoint on the proxy. The proxy runs on
 				// the host, so the original URL (e.g., http://localhost:8787)
 				// correctly reaches the host-side LLM proxy without rewriting.
-				p.AddRelay("anthropic", opts.Config.Claude.BaseURL)
+				if err := p.AddRelay("anthropic", opts.Config.Claude.BaseURL); err != nil {
+					log.Warn("failed to register base URL relay",
+						"url", opts.Config.Claude.BaseURL, "error", err)
+				} else {
+					// Set ANTHROPIC_BASE_URL to the relay endpoint on the Moat proxy.
+					// Since proxyHost is in NO_PROXY, Claude Code connects directly
+					// to the proxy's HTTP handler (not through the CONNECT tunnel),
+					// which routes /relay/anthropic/ to the relay handler.
+					relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
+					proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
 
-				// Set ANTHROPIC_BASE_URL to the relay endpoint on the Moat proxy.
-				// Since proxyHost is in NO_PROXY, Claude Code connects directly
-				// to the proxy's HTTP handler (not through the CONNECT tunnel),
-				// which routes /relay/anthropic/ to the relay handler.
-				relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
-				proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
-
-				log.Debug("configured base URL relay for Claude Code",
-					"baseURL", opts.Config.Claude.BaseURL,
-					"relayURL", relayURL)
+					log.Debug("configured base URL relay for Claude Code",
+						"baseURL", opts.Config.Claude.BaseURL,
+						"relayURL", relayURL)
+				}
 			}
 		}
 

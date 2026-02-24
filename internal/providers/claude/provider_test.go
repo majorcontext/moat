@@ -192,6 +192,22 @@ func TestConfigureBaseURLProxy_EmptyHost(t *testing.T) {
 	}
 }
 
+func TestConfigureBaseURLProxy_HostWithoutPort(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api01-abc123"}
+
+	// Host without port — net.SplitHostPort fails, host used as-is
+	ConfigureBaseURLProxy(mockProxy, cred, "proxy.internal")
+
+	if mockProxy.credentials["proxy.internal"] != "x-api-key: sk-ant-api01-abc123" {
+		t.Errorf("proxy.internal credential = %q, want %q",
+			mockProxy.credentials["proxy.internal"], "x-api-key: sk-ant-api01-abc123")
+	}
+}
+
 func TestOAuthProvider_ContainerEnv(t *testing.T) {
 	p := &OAuthProvider{}
 	cred := &provider.Credential{Token: "sk-ant-oat01-abc123"}

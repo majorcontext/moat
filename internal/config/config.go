@@ -155,9 +155,9 @@ type NetworkConfig struct {
 type ClaudeConfig struct {
 	// BaseURL sets ANTHROPIC_BASE_URL inside the container, redirecting Claude
 	// Code API traffic through a host-side LLM proxy (e.g., Headroom).
-	// Localhost addresses are automatically rewritten to reach the host from
-	// inside the container. Credentials are injected for both api.anthropic.com
-	// and the custom base URL host.
+	// Traffic is routed through a relay endpoint on the Moat proxy, which
+	// forwards to the configured URL with credentials injected. Localhost
+	// URLs work because the relay runs on the host.
 	BaseURL string `yaml:"base_url,omitempty"`
 
 	// SyncLogs enables mounting Claude's session logs directory so logs from
