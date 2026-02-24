@@ -113,37 +113,57 @@ func TestResumeCommand_ClaudeFlags(t *testing.T) {
 	}
 }
 
-// TestFindMostRecentClaudeRun_Candidates verifies which runs qualify as
-// resumable candidates by testing the filtering predicates with mock data.
-func TestFindMostRecentClaudeRun_Candidates(t *testing.T) {
+func TestSelectResumableRun(t *testing.T) {
 	now := time.Now()
 
-	tests := []struct {
-		name  string
-		agent string
-		state run.State
-		age   time.Duration
-		want  bool
-	}{
-		{"running claude", "claude-code", run.StateRunning, 1 * time.Minute, true},
-		{"stopped claude", "claude-code", run.StateStopped, 5 * time.Minute, true},
-		{"failed claude", "claude-code", run.StateFailed, 10 * time.Minute, true},
-		{"running codex", "codex", run.StateRunning, 1 * time.Minute, false},
-		{"creating claude", "claude-code", run.StateCreated, 1 * time.Minute, false},
-	}
+	t.Run("prefers running over stopped", func(t *testing.T) {
+		stopped := &run.Run{Agent: "claude-code", State: run.StateStopped, CreatedAt: now.Add(-1 * time.Minute)}
+		running := &run.Run{Agent: "claude-code", State: run.StateRunning, CreatedAt: now.Add(-5 * time.Minute)}
+		got := selectResumableRun([]*run.Run{stopped, running})
+		if got != running {
+			t.Errorf("expected running run to be preferred over stopped")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &run.Run{
-				Agent:     tt.agent,
-				State:     tt.state,
-				CreatedAt: now.Add(-tt.age),
-			}
-			isCandidate := isClaudeRun(r) && (r.State == run.StateRunning || r.State == run.StateStopped || r.State == run.StateFailed)
-			if isCandidate != tt.want {
-				t.Errorf("run %q (state=%s, agent=%s): candidate=%v, want %v",
-					tt.name, tt.state, tt.agent, isCandidate, tt.want)
-			}
-		})
-	}
+	t.Run("prefers newest running", func(t *testing.T) {
+		older := &run.Run{Agent: "claude-code", State: run.StateRunning, CreatedAt: now.Add(-10 * time.Minute)}
+		newer := &run.Run{Agent: "claude-code", State: run.StateRunning, CreatedAt: now.Add(-1 * time.Minute)}
+		got := selectResumableRun([]*run.Run{older, newer})
+		if got != newer {
+			t.Errorf("expected newest running run")
+		}
+	})
+
+	t.Run("prefers newest stopped when no running", func(t *testing.T) {
+		older := &run.Run{Agent: "claude-code", State: run.StateStopped, CreatedAt: now.Add(-10 * time.Minute)}
+		newer := &run.Run{Agent: "claude-code", State: run.StateFailed, CreatedAt: now.Add(-1 * time.Minute)}
+		got := selectResumableRun([]*run.Run{older, newer})
+		if got != newer {
+			t.Errorf("expected newest stopped/failed run")
+		}
+	})
+
+	t.Run("skips non-claude runs", func(t *testing.T) {
+		codex := &run.Run{Agent: "codex", State: run.StateRunning, CreatedAt: now}
+		claude := &run.Run{Agent: "claude-code", State: run.StateStopped, CreatedAt: now.Add(-5 * time.Minute)}
+		got := selectResumableRun([]*run.Run{codex, claude})
+		if got != claude {
+			t.Errorf("expected codex to be skipped, got %v", got)
+		}
+	})
+
+	t.Run("skips creating state", func(t *testing.T) {
+		creating := &run.Run{Agent: "claude-code", State: run.StateCreated, CreatedAt: now}
+		got := selectResumableRun([]*run.Run{creating})
+		if got != nil {
+			t.Errorf("expected nil for creating-only runs, got %v", got)
+		}
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		got := selectResumableRun(nil)
+		if got != nil {
+			t.Errorf("expected nil for empty list, got %v", got)
+		}
+	})
 }

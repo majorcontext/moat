@@ -109,7 +109,14 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 // findMostRecentClaudeRun finds the most recent Claude Code run, preferring running ones.
 func findMostRecentClaudeRun(manager *run.Manager) *run.Run {
-	runs := manager.List()
+	return selectResumableRun(manager.List())
+}
+
+// selectResumableRun picks the best Claude run to resume from a list.
+// Running runs are preferred over stopped/failed; within each tier the
+// most recently created run wins. Non-Claude and still-starting runs
+// are excluded.
+func selectResumableRun(runs []*run.Run) *run.Run {
 	if len(runs) == 0 {
 		return nil
 	}
