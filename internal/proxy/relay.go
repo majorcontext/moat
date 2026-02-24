@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -138,10 +137,26 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Copy status code and body with streaming support
+	// Copy status code and body with streaming support.
+	// Use a flushing copy loop so SSE/chunked streaming responses
+	// (e.g., Claude Code's /v1/messages with stream:true) are flushed
+	// incrementally rather than buffered in io.Copy's 32KB buffer.
 	w.WriteHeader(resp.StatusCode)
-	if flusher, ok := w.(http.Flusher); ok {
+	flusher, canFlush := w.(http.Flusher)
+	if canFlush {
 		flusher.Flush()
 	}
-	_, _ = io.Copy(w, resp.Body)
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
 }

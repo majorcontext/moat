@@ -680,6 +680,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// the Moat proxy, which forwards to the actual host-side LLM proxy with
 		// credentials injected. This avoids the NO_PROXY issue where the rewritten
 		// base URL host would bypass the proxy (it's the same hostAddr).
+		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred == nil {
+			ui.Warn("claude.base_url is set but no anthropic or claude grant is active — ANTHROPIC_BASE_URL will not be set")
+		}
 		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred != nil {
 			baseURL, parseErr := url.Parse(opts.Config.Claude.BaseURL)
 			if parseErr != nil {

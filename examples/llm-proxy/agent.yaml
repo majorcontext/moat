@@ -13,8 +13,8 @@
 #   - Injecting credentials for both api.anthropic.com and the proxy host
 #
 # Prerequisites:
-#   1. Anthropic credentials:
-#        moat grant anthropic
+#   1. Claude credentials (Claude Pro/Max subscription):
+#        moat grant claude
 #
 #   2. Install Headroom:
 #        pip install "headroom-ai[all]"
