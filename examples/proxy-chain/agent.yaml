@@ -1,0 +1,28 @@
+# Example: Proxy chaining with Claude Code
+#
+# Routes Claude Code traffic through a Squid caching proxy before
+# reaching Moat's credential-injecting proxy. This is useful for:
+#   - Corporate environments that require all traffic through an approved proxy
+#   - Caching API responses to reduce latency and bandwidth
+#   - Adding additional access controls or logging at the proxy layer
+#
+# Traffic flow:
+#   Claude Code -> Squid (cache + ACLs) -> Moat proxy (credential injection) -> internet
+#
+# Prerequisites:
+#   - Docker runtime (proxy chaining is not supported on Apple containers)
+#   - Anthropic credentials: moat grant anthropic
+#
+# Run with:
+#   moat claude examples/proxy-chain
+#   moat claude examples/proxy-chain -p "explain what files are in this directory"
+
+name: proxy-chain-demo
+
+grants:
+  - anthropic
+
+proxies:
+  - name: squid
+    image: ubuntu/squid:latest
+    port: 3128

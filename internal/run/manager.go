@@ -1851,6 +1851,17 @@ region = %s
 		ui.Warn("proxies configured in agent.yaml but no credential proxy is running (no grants or strict mode); proxy chain will not be started")
 	}
 	if opts.Config != nil && len(opts.Config.Proxies) > 0 && proxyServer != nil {
+		// Proxy chaining requires Docker — Apple containers don't support
+		// container-name DNS resolution, so sidecar-to-sidecar routing fails.
+		if m.runtime.Type() == container.RuntimeApple {
+			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("proxy chaining is not supported on Apple containers (requires Docker)")
+		}
+
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr == nil {
 			cleanupProxy(proxyServer)

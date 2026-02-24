@@ -1524,6 +1524,46 @@ proxies:
 	}
 }
 
+func TestLoad_Proxies_InvalidName(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: "my proxy!"
+    image: proxy:latest
+    port: 3128
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid proxy name")
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Errorf("error = %q, want mention of 'name'", err)
+	}
+}
+
+func TestLoad_Proxies_PortTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: claude-code
+proxies:
+  - name: valid
+    image: proxy:latest
+    port: 99999
+`
+	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for port > 65535")
+	}
+	if !strings.Contains(err.Error(), "65535") {
+		t.Errorf("error = %q, want mention of '65535'", err)
+	}
+}
+
 func TestLoadConfigWithHooks(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "agent.yaml")

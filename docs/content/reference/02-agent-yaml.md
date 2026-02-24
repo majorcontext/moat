@@ -992,7 +992,8 @@ Each proxy sidecar automatically receives `HTTP_PROXY` and `HTTPS_PROXY` environ
 
 - `name` is required and must be unique across all entries
 - `image` is required
-- `port` must be a positive integer
+- `name` must contain only letters, digits, hyphens, and underscores
+- `port` must be between 1 and 65535
 - Duplicate names produce a configuration error
 
 **Requirements:**
