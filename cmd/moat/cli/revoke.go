@@ -24,6 +24,8 @@ Supported providers:
 
 The credential file is permanently deleted.
 
+Use --profile (or MOAT_PROFILE env var) to revoke credentials from a named profile.
+
 Examples:
   # Revoke Claude OAuth token
   moat revoke claude
@@ -36,6 +38,9 @@ Examples:
 
   # Revoke MCP server credential
   moat revoke mcp-context7
+
+  # Revoke a credential from a specific profile
+  moat revoke github --profile myproject
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: runRevoke,
@@ -72,6 +77,10 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("credential revoked", "provider", provider)
-	fmt.Printf("%s credential revoked\n", provider)
+	if credential.ActiveProfile != "" {
+		fmt.Printf("%s credential revoked (profile: %s)\n", provider, credential.ActiveProfile)
+	} else {
+		fmt.Printf("%s credential revoked\n", provider)
+	}
 	return nil
 }

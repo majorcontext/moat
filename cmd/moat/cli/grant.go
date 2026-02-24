@@ -32,6 +32,9 @@ var grantCmd = &cobra.Command{
 Credentials are stored securely and injected into agent containers when
 requested via the --grant flag on 'moat run'.
 
+Use --profile (or MOAT_PROFILE env var) to store credentials in a named profile.
+Profile-scoped credentials are isolated from the default store.
+
 Run 'moat grant providers' to list all available providers.
 
 Subcommands:
@@ -40,12 +43,14 @@ Subcommands:
   mcp         Grant credentials for an MCP server
 
 Examples:
-  moat grant claude                    # Grant Claude OAuth token (for moat claude)
-  moat grant anthropic                 # Grant Anthropic API key (for any agent)
-  moat grant github                    # Grant GitHub access
-  moat grant aws --role=arn:aws:...    # Grant AWS access via IAM role
-  moat grant providers                 # List all available providers
-  moat run my-agent . --grant github   # Use credential in a run`,
+  moat grant claude                              # Grant Claude OAuth token (for moat claude)
+  moat grant anthropic                           # Grant Anthropic API key (for any agent)
+  moat grant github                              # Grant GitHub access
+  moat grant aws --role=arn:aws:...              # Grant AWS access via IAM role
+  moat grant github --profile myproject          # Grant GitHub access in a profile
+  moat grant providers                           # List all available providers
+  moat run my-agent . --grant github             # Use credential in a run
+  moat run --grant github --profile myproject    # Use profile-scoped credential`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runGrant,
 }
@@ -64,17 +69,15 @@ func saveCredential(cred credential.Credential) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("getting encryption key: %w", err)
 	}
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
-		key,
-	)
+	storeDir := credential.DefaultStoreDir()
+	store, err := credential.NewFileStore(storeDir, key)
 	if err != nil {
 		return "", fmt.Errorf("opening credential store: %w", err)
 	}
 	if err := store.Save(cred); err != nil {
 		return "", fmt.Errorf("saving credential: %w", err)
 	}
-	return filepath.Join(credential.DefaultStoreDir(), string(cred.Provider)+".enc"), nil
+	return filepath.Join(storeDir, string(cred.Provider)+".enc"), nil
 }
 
 func runGrant(cmd *cobra.Command, args []string) error {
@@ -142,7 +145,11 @@ Options:
 		return err
 	}
 
-	fmt.Printf("Credential saved to %s\n", credPath)
+	if credential.ActiveProfile != "" {
+		fmt.Printf("Credential saved to %s (profile: %s)\n", credPath, credential.ActiveProfile)
+	} else {
+		fmt.Printf("Credential saved to %s\n", credPath)
+	}
 	return nil
 }
 

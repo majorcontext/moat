@@ -19,10 +19,12 @@ var grantListCmd = &cobra.Command{
 	Long: `List all credentials stored in the credential store.
 
 Shows the provider, type, and when each credential was granted.
+Use --profile to list credentials for a specific profile.
 
 Examples:
-  moat grant list          # List all credentials
-  moat grant list --json   # Output as JSON`,
+  moat grant list                        # List default credentials
+  moat grant list --profile myproject    # List profile credentials
+  moat grant list --json                 # Output as JSON`,
 	RunE: runGrantList,
 }
 
@@ -36,7 +38,8 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
 
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	storeDir := credential.DefaultStoreDir()
+	store, err := credential.NewFileStore(storeDir, key)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
 	}
@@ -49,9 +52,13 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	// Load SSH mappings (stored separately from .enc credentials)
 	sshMappings, _ := store.GetSSHMappings()
 
+	if credential.ActiveProfile != "" {
+		fmt.Printf("Profile: %s\n\n", credential.ActiveProfile)
+	}
+
 	if len(creds) == 0 && len(sshMappings) == 0 {
 		// Check if there are .enc files that couldn't be decrypted
-		if hasUnreadableCredentials(credential.DefaultStoreDir()) {
+		if hasUnreadableCredentials(storeDir) {
 			ui.Warn("Found encrypted credential files that cannot be decrypted.")
 			ui.Warn("This usually means the encryption key has changed.")
 			ui.Warn("")
@@ -64,7 +71,11 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Println("No credentials found.")
-		fmt.Println("\nGrant a credential with: moat grant <provider>")
+		if credential.ActiveProfile != "" {
+			fmt.Printf("\nGrant a credential with: moat grant <provider> --profile %s\n", credential.ActiveProfile)
+		} else {
+			fmt.Println("\nGrant a credential with: moat grant <provider>")
+		}
 		return nil
 	}
 

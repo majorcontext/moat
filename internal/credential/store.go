@@ -9,10 +9,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/majorcontext/moat/internal/credential/keyring"
 	"github.com/majorcontext/moat/internal/log"
 )
+
+// validProfileName matches alphanumeric characters, hyphens, and underscores.
+var validProfileName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // FileStore implements Store using encrypted files.
 type FileStore struct {
@@ -132,14 +136,66 @@ func (s *FileStore) List() ([]Credential, error) {
 	return creds, nil
 }
 
-// DefaultStoreDir returns the default credential store directory.
+// ActiveProfile is the credential profile to use. When set, credentials are
+// stored in a profile-specific subdirectory (~/.moat/credentials/profiles/<name>/).
+// Set via --profile flag or MOAT_PROFILE environment variable.
+// Empty string means use the default (unscoped) credential store.
+// Not safe for concurrent use; set once during CLI initialization.
+var ActiveProfile string
+
+// DefaultStoreDir returns the credential store directory for the active profile.
+// When ActiveProfile is set, returns ~/.moat/credentials/profiles/<name>/.
+// Otherwise returns the default ~/.moat/credentials/.
 func DefaultStoreDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Fall back to current directory if home is unavailable
-		return filepath.Join(".", ".moat", "credentials")
+		// Fall back to temp directory to avoid dumping credentials in the working directory.
+		log.Warn("could not determine home directory, using temp directory for credentials", "error", err)
+		home = os.TempDir()
 	}
-	return filepath.Join(home, ".moat", "credentials")
+	base := filepath.Join(home, ".moat", "credentials")
+	if ActiveProfile != "" {
+		return filepath.Join(base, "profiles", ActiveProfile)
+	}
+	return base
+}
+
+// ValidateProfile checks if a profile name is valid.
+// Profile names must start with an alphanumeric character and contain only
+// alphanumeric characters, hyphens, and underscores.
+func ValidateProfile(name string) error {
+	if name == "" {
+		return nil
+	}
+	if !validProfileName.MatchString(name) {
+		return fmt.Errorf("invalid profile name %q: must start with a letter or digit and contain only letters, digits, hyphens, and underscores", name)
+	}
+	return nil
+}
+
+// ListProfiles returns the names of all credential profiles.
+// Does not include the default (unscoped) profile.
+func ListProfiles() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Warn("cannot determine home directory for credential profiles", "error", err)
+		return nil, nil
+	}
+	profilesDir := filepath.Join(home, ".moat", "credentials", "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading profiles directory: %w", err)
+	}
+	var profiles []string
+	for _, entry := range entries {
+		if entry.IsDir() && ValidateProfile(entry.Name()) == nil {
+			profiles = append(profiles, entry.Name())
+		}
+	}
+	return profiles, nil
 }
 
 // DefaultEncryptionKey retrieves the encryption key from secure storage.
