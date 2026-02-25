@@ -1598,8 +1598,8 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 		t.Fatalf("expected 1 loaded run, got %d", len(m.runs))
 	}
 	r := m.runs[runID]
-	if r.State != StateStopped {
-		t.Errorf("expected run state %q, got %q", StateStopped, r.State)
+	if r.GetState() != StateStopped {
+		t.Errorf("expected run state %q, got %q", StateStopped, r.GetState())
 	}
 }
 

@@ -41,7 +41,7 @@ func stopRun(cmd *cobra.Command, args []string) error {
 		// Find the most recent running run
 		runs := manager.List()
 		for _, r := range runs {
-			if r.State == run.StateRunning {
+			if r.GetState() == run.StateRunning {
 				runIDs = []string{r.ID}
 				break
 			}

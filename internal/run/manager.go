@@ -2135,8 +2135,8 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		m.mu.Unlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-	r.State = StateStarting
 	m.mu.Unlock()
+	r.SetState(StateStarting)
 
 	// Set run context in logger for correlation
 	log.SetRunContext(log.RunContext{
@@ -2149,10 +2149,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	})
 
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
-		m.mu.Lock()
-		r.State = StateFailed
-		r.Error = err.Error()
-		m.mu.Unlock()
+		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
 
@@ -2163,6 +2160,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 			// Firewall setup failed - this is fatal for strict policy since the user
 			// explicitly requested network isolation. Without iptables, only proxy-level
 			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
+			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
 				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
@@ -2203,10 +2201,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
-	m.mu.Lock()
-	r.State = StateRunning
-	r.StartedAt = time.Now()
-	m.mu.Unlock()
+	r.SetStateWithTime(StateRunning, time.Now())
 
 	// Save state to disk
 	_ = r.SaveMetadata()
@@ -2241,9 +2236,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		m.mu.Unlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-	r.State = StateStarting
 	containerID := r.ContainerID
 	m.mu.Unlock()
+	r.SetState(StateStarting)
 
 	// Set run context in logger for correlation
 	log.SetRunContext(log.RunContext{
@@ -2311,12 +2306,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	time.Sleep(containerStartDelay)
 
 	// Update state to running (the container has started)
-	m.mu.Lock()
-	if r.State == StateStarting {
-		r.State = StateRunning
-		r.StartedAt = time.Now()
+	if r.GetState() == StateStarting {
+		r.SetStateWithTime(StateRunning, time.Now())
 	}
-	m.mu.Unlock()
 
 	// Get actual port bindings after container starts
 	if len(r.Ports) > 0 {
@@ -2355,6 +2347,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	if r.FirewallEnabled && r.ProxyPort > 0 {
 		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
 			// Firewall setup failed - this is fatal for strict policy
+			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
 				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 			}
@@ -2503,9 +2496,8 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 		_ = m.routes.Remove(r.Name)
 	}
 
+	r.SetStateWithTime(StateStopped, time.Now())
 	m.mu.Lock()
-	r.State = StateStopped
-	r.StoppedAt = time.Now()
 	keepContainer := r.KeepContainer
 	containerID := r.ContainerID
 	providerCleanupPaths := r.ProviderCleanupPaths
@@ -2821,8 +2813,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 			} else {
 				errMsg = fmt.Sprintf("exit code %d", exitCode)
 			}
-			r.SetStateWithError(StateFailed, errMsg)
-			r.SetStateWithTime(StateFailed, time.Now())
+			r.SetStateFailedAt(errMsg, time.Now())
 		} else {
 			r.SetStateWithTime(StateStopped, time.Now())
 		}
@@ -2911,11 +2902,11 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		return fmt.Errorf("run %s not found", runID)
 	}
 
-	if r.State == StateRunning {
-		m.mu.Unlock()
+	m.mu.Unlock()
+
+	if r.GetState() == StateRunning {
 		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
 	}
-	m.mu.Unlock()
 
 	// Remove container
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {

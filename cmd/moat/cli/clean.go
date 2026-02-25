@@ -67,7 +67,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	var stoppedRuns []*run.Run
 	var worktreeRuns []*run.Run
 	for _, r := range runs {
-		if r.State == run.StateStopped {
+		if r.GetState() == run.StateStopped {
 			stoppedRuns = append(stoppedRuns, r)
 			if r.WorktreePath != "" {
 				worktreeRuns = append(worktreeRuns, r)

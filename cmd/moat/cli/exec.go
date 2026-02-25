@@ -46,7 +46,7 @@ func checkWorktreeActive(worktreePath string) (string, string) {
 	defer manager.Close()
 
 	for _, r := range manager.List() {
-		if r.WorktreePath == worktreePath && r.State == run.StateRunning {
+		if r.WorktreePath == worktreePath && r.GetState() == run.StateRunning {
 			return r.Name, r.ID
 		}
 	}

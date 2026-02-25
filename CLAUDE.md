@@ -89,17 +89,17 @@ The proxy relay pattern works around Claude Code's HTTP client not respecting `H
 # Build
 go build ./...
 
-# Run unit tests
-go test ./...
+# Run unit tests (includes race detector)
+make test-unit
 
 # Run a single test
-go test -run TestName ./path/to/package
+make test-unit ARGS='-run TestName'
 
 # Run E2E tests (requires container runtime)
 go test -tags=e2e -v ./internal/e2e/
 
-# Run tests with coverage
-go test -coverprofile=coverage.out ./...
+# Run tests with coverage (includes race detector)
+make coverage
 
 # Lint (if golangci-lint is installed)
 golangci-lint run

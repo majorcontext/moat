@@ -143,6 +143,16 @@ func (r *Run) SaveMetadata() error {
 	if r.Store == nil {
 		return nil // No store configured
 	}
+
+	// Snapshot stateMu-protected fields under the lock to avoid races
+	// between Stop() and monitorContainerExit() calling SaveMetadata concurrently.
+	r.stateMu.Lock()
+	state := r.State
+	startedAt := r.StartedAt
+	stoppedAt := r.StoppedAt
+	errMsg := r.Error
+	r.stateMu.Unlock()
+
 	return r.Store.SaveMetadata(storage.Metadata{
 		Name:                r.Name,
 		Workspace:           r.Workspace,
@@ -151,12 +161,12 @@ func (r *Run) SaveMetadata() error {
 		Image:               r.Image,
 		Ports:               r.Ports,
 		ContainerID:         r.ContainerID,
-		State:               string(r.State),
+		State:               string(state),
 		Interactive:         r.Interactive,
 		CreatedAt:           r.CreatedAt,
-		StartedAt:           r.StartedAt,
-		StoppedAt:           r.StoppedAt,
-		Error:               r.Error,
+		StartedAt:           startedAt,
+		StoppedAt:           stoppedAt,
+		Error:               errMsg,
 		ProviderMeta:        r.ProviderMeta,
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,
@@ -230,6 +240,17 @@ func (r *Run) SetStateWithTime(state State, timestamp time.Time) {
 	} else if state == StateStopped || state == StateFailed {
 		r.StoppedAt = timestamp
 	}
+}
+
+// SetStateFailedAt atomically sets state to StateFailed with both error and
+// timestamp in a single lock acquisition. This prevents a concurrent reader
+// from observing StateFailed with no StoppedAt set.
+func (r *Run) SetStateFailedAt(errMsg string, timestamp time.Time) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.State = StateFailed
+	r.Error = errMsg
+	r.StoppedAt = timestamp
 }
 
 // validateGrants checks that all requested grants have credentials available.

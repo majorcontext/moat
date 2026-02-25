@@ -88,7 +88,7 @@ func printMatchingRuns(matches []*run.Run, arg string) {
 		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
 			r.Name,
 			r.ID,
-			r.State,
+			r.GetState(),
 			formatTimeAgo(r.CreatedAt),
 		)
 	}

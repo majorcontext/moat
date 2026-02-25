@@ -86,7 +86,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.Name,
 				r.ID,
-				r.State,
+				r.GetState(),
 				formatAge(r.CreatedAt),
 				wt,
 				endpoints,
@@ -95,7 +95,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				r.Name,
 				r.ID,
-				r.State,
+				r.GetState(),
 				formatAge(r.CreatedAt),
 				endpoints,
 			)
