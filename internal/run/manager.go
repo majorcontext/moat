@@ -1423,6 +1423,7 @@ region = %s
 				for name, spec := range opts.Config.Claude.MCP {
 					if spec.Grant != "" {
 						cleanupProxy(proxyServer)
+						cleanupSSH(sshServer)
 						return nil, fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude local MCP servers; use codex.mcp or gemini.mcp instead, or set the env var directly", name)
 					}
 					claudeLocalMCP[name] = provider.LocalMCPServerConfig{
@@ -1445,6 +1446,7 @@ region = %s
 			})
 			if prepErr != nil {
 				cleanupProxy(proxyServer)
+				cleanupSSH(sshServer)
 				return nil, fmt.Errorf("preparing Claude container config: %w", prepErr)
 			}
 
@@ -1498,10 +1500,14 @@ region = %s
 					v, ok := grantToEnvVar(spec.Grant)
 					if !ok {
 						cleanupProxy(proxyServer)
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
 						return nil, fmt.Errorf("codex.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
 					}
 					if !hasGrant(opts.Config.Grants, spec.Grant) {
 						cleanupProxy(proxyServer)
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
 						return nil, fmt.Errorf("codex.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
 					}
 					if env == nil {
@@ -1534,6 +1540,7 @@ region = %s
 		})
 		if prepErr != nil {
 			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)
 		}
@@ -1580,10 +1587,16 @@ region = %s
 					v, ok := grantToEnvVar(spec.Grant)
 					if !ok {
 						cleanupProxy(proxyServer)
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
+						cleanupAgentConfig(codexConfig)
 						return nil, fmt.Errorf("gemini.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
 					}
 					if !hasGrant(opts.Config.Grants, spec.Grant) {
 						cleanupProxy(proxyServer)
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
+						cleanupAgentConfig(codexConfig)
 						return nil, fmt.Errorf("gemini.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
 					}
 					if env == nil {
@@ -1615,6 +1628,7 @@ region = %s
 		})
 		if prepErr != nil {
 			cleanupProxy(proxyServer)
+			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("preparing Gemini container config: %w", prepErr)
