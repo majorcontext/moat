@@ -95,8 +95,8 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("run not found: %w", err)
 	}
 
-	if r.State != run.StateRunning {
-		return fmt.Errorf("run %s is not running (state: %s)", runID, r.State)
+	if state := r.GetState(); state != run.StateRunning {
+		return fmt.Errorf("run %s is not running (state: %s)", runID, state)
 	}
 
 	// Determine interactive mode:

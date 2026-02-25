@@ -18,20 +18,20 @@ import (
 	"github.com/majorcontext/moat/internal/storage"
 )
 
-// flexibleRuntime extends stubRuntime with configurable behavior for
-// testing error paths and edge cases. Methods can be overridden by
-// setting the corresponding function fields.
+// flexibleRuntime provides configurable behavior similar to stubRuntime for
+// testing error paths and edge cases. Methods can be overridden by setting
+// the corresponding function fields.
 type flexibleRuntime struct {
-	states           map[string]string
-	done             chan struct{}
-	startFn          func(ctx context.Context, id string) error
-	stopFn           func(ctx context.Context, id string) error
-	removeFn         func(ctx context.Context, id string) error
-	setupFirewallFn  func(ctx context.Context, id, host string, port int) error
-	waitFn           func(ctx context.Context, id string) (int64, error)
-	containerLogsFn  func(ctx context.Context, id string) (io.ReadCloser, error)
-	containerLogsAll func(ctx context.Context, id string) ([]byte, error)
-	runtimeType      container.RuntimeType
+	states             map[string]string
+	done               chan struct{}
+	startFn            func(ctx context.Context, id string) error
+	stopFn             func(ctx context.Context, id string) error
+	removeFn           func(ctx context.Context, id string) error
+	setupFirewallFn    func(ctx context.Context, id, host string, port int) error
+	waitFn             func(ctx context.Context, id string) (int64, error)
+	containerLogsFn    func(ctx context.Context, id string) (io.ReadCloser, error)
+	containerLogsAllFn func(ctx context.Context, id string) ([]byte, error)
+	runtimeType        container.RuntimeType
 }
 
 func (f *flexibleRuntime) Type() container.RuntimeType {
@@ -80,8 +80,8 @@ func (f *flexibleRuntime) ContainerLogs(ctx context.Context, id string) (io.Read
 	return io.NopCloser(strings.NewReader("")), nil
 }
 func (f *flexibleRuntime) ContainerLogsAll(ctx context.Context, id string) ([]byte, error) {
-	if f.containerLogsAll != nil {
-		return f.containerLogsAll(ctx, id)
+	if f.containerLogsAllFn != nil {
+		return f.containerLogsAllFn(ctx, id)
 	}
 	return nil, nil
 }
@@ -193,6 +193,9 @@ func TestStartFirewallFailureStopsContainer(t *testing.T) {
 	if !containerStopped {
 		t.Error("container should be stopped after firewall failure")
 	}
+	if r.GetState() != StateFailed {
+		t.Errorf("expected StateFailed after firewall error, got %s", r.GetState())
+	}
 }
 
 // TestStartFirewallFailureStopContainerAlsoFails verifies graceful handling
@@ -236,6 +239,9 @@ func TestStartFirewallFailureStopContainerAlsoFails(t *testing.T) {
 	// Should still report the firewall error even though stop also failed
 	if !strings.Contains(err.Error(), "firewall setup failed") {
 		t.Errorf("expected firewall error, got: %v", err)
+	}
+	if r.GetState() != StateFailed {
+		t.Errorf("expected StateFailed after firewall error, got %s", r.GetState())
 	}
 }
 
@@ -720,7 +726,7 @@ func TestCaptureLogsIdempotent(t *testing.T) {
 	writeCount := 0
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			writeCount++
 			return []byte("test log line\n"), nil
 		},
@@ -765,7 +771,7 @@ func TestCaptureLogsConcurrent(t *testing.T) {
 
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			return []byte("concurrent log\n"), nil
 		},
 	}
@@ -809,7 +815,7 @@ func TestCaptureLogsContainerLogsError(t *testing.T) {
 
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			return nil, errors.New("container not found")
 		},
 	}
@@ -847,7 +853,7 @@ func TestCaptureLogsSkipsInteractiveApple(t *testing.T) {
 	rt := &flexibleRuntime{
 		done:        make(chan struct{}),
 		runtimeType: container.RuntimeApple,
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			logsFetched = true
 			return []byte("should not see this"), nil
 		},
@@ -1096,7 +1102,7 @@ func TestConcurrentStopAndMonitorExit_CaptureLogsIdempotent(t *testing.T) {
 
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			return []byte("test log\n"), nil
 		},
 	}
@@ -1146,7 +1152,7 @@ func TestCaptureLogsSkipsWhenAlreadyCaptured(t *testing.T) {
 	fetchCount := 0
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		containerLogsAll: func(context.Context, string) ([]byte, error) {
+		containerLogsAllFn: func(context.Context, string) ([]byte, error) {
 			fetchCount++
 			return []byte("fetched log\n"), nil
 		},

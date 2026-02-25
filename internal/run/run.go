@@ -143,6 +143,16 @@ func (r *Run) SaveMetadata() error {
 	if r.Store == nil {
 		return nil // No store configured
 	}
+
+	// Snapshot stateMu-protected fields under the lock to avoid races
+	// between Stop() and monitorContainerExit() calling SaveMetadata concurrently.
+	r.stateMu.Lock()
+	state := r.State
+	startedAt := r.StartedAt
+	stoppedAt := r.StoppedAt
+	errMsg := r.Error
+	r.stateMu.Unlock()
+
 	return r.Store.SaveMetadata(storage.Metadata{
 		Name:                r.Name,
 		Workspace:           r.Workspace,
@@ -151,12 +161,12 @@ func (r *Run) SaveMetadata() error {
 		Image:               r.Image,
 		Ports:               r.Ports,
 		ContainerID:         r.ContainerID,
-		State:               string(r.State),
+		State:               string(state),
 		Interactive:         r.Interactive,
 		CreatedAt:           r.CreatedAt,
-		StartedAt:           r.StartedAt,
-		StoppedAt:           r.StoppedAt,
-		Error:               r.Error,
+		StartedAt:           startedAt,
+		StoppedAt:           stoppedAt,
+		Error:               errMsg,
 		ProviderMeta:        r.ProviderMeta,
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,

@@ -107,7 +107,8 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		runDir := filepath.Join(baseDir, r.ID)
 		size := getDirSizeWithTimeout(runDir, 2*time.Second)
 
-		if r.State == run.StateStopped || r.State == run.StateFailed {
+		state := r.GetState()
+		if state == run.StateStopped || state == run.StateFailed {
 			stoppedCount++
 			if size >= 0 {
 				stoppedDisk += size
@@ -146,7 +147,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		output.ActiveRuns = append(output.ActiveRuns, runInfo{
 			Name:      r.Name,
 			ID:        r.ID,
-			State:     string(r.State),
+			State:     string(r.GetState()),
 			Age:       age,
 			DiskMB:    diskMB,
 			Endpoints: endpoints,

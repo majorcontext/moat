@@ -142,7 +142,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	defer manager.Close()
 
 	for _, r := range manager.List() {
-		if r.WorktreePath == result.WorkspacePath && r.State == run.StateRunning {
+		if r.WorktreePath == result.WorkspacePath && r.GetState() == run.StateRunning {
 			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nAttach with 'moat attach %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
 		}
 	}
@@ -247,7 +247,7 @@ func runWorktreeList(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "BRANCH\tRUN NAME\tSTATUS\tWORKTREE")
 	for _, r := range wtRuns {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			r.WorktreeBranch, r.Name, r.State, intcli.ShortenPath(r.WorktreePath))
+			r.WorktreeBranch, r.Name, r.GetState(), intcli.ShortenPath(r.WorktreePath))
 	}
 	return w.Flush()
 }
@@ -282,7 +282,7 @@ func runWorktreeClean(cmd *cobra.Command, args []string) error {
 		wtPath := worktree.Path(repoID, branch)
 
 		for _, r := range manager.List() {
-			if r.WorktreePath == wtPath && r.State == run.StateRunning {
+			if r.WorktreePath == wtPath && r.GetState() == run.StateRunning {
 				return fmt.Errorf("cannot clean worktree for branch %q: run %s is still active. Stop it first with 'moat stop %s'", branch, r.Name, r.ID)
 			}
 		}
@@ -308,7 +308,7 @@ func runWorktreeClean(cmd *cobra.Command, args []string) error {
 	for _, entry := range entries {
 		active := false
 		for _, r := range manager.List() {
-			if r.WorktreePath == entry.Path && r.State == run.StateRunning {
+			if r.WorktreePath == entry.Path && r.GetState() == run.StateRunning {
 				active = true
 				break
 			}

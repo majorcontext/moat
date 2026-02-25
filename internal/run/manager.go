@@ -2149,7 +2149,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	})
 
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
-		r.SetStateWithError(StateFailed, err.Error())
+		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
 
@@ -2902,11 +2902,11 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		return fmt.Errorf("run %s not found", runID)
 	}
 
-	if r.State == StateRunning {
-		m.mu.Unlock()
+	m.mu.Unlock()
+
+	if r.GetState() == StateRunning {
 		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
 	}
-	m.mu.Unlock()
 
 	// Remove container
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {

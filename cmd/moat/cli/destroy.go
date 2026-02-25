@@ -41,7 +41,7 @@ func destroyRun(cmd *cobra.Command, args []string) error {
 		// Find the most recent stopped run
 		runs := manager.List()
 		for _, r := range runs {
-			if r.State == run.StateStopped {
+			if r.GetState() == run.StateStopped {
 				runIDs = []string{r.ID}
 				break
 			}
