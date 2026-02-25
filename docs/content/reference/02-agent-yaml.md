@@ -945,7 +945,7 @@ mcp:
 
 MCP servers running on the host machine (e.g., `http://localhost:3000`) are not accessible from inside the container. Moat's proxy relay bridges this gap -- the relay runs on the host and forwards container requests to the host-local server.
 
-**Note:** For local process-based MCP servers running inside the container, use `claude.mcp` instead.
+**Note:** For local process-based MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
