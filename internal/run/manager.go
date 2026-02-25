@@ -1495,6 +1495,15 @@ region = %s
 			for name, spec := range opts.Config.Codex.MCP {
 				env := spec.Env
 				if spec.Grant != "" {
+					v, ok := grantToEnvVar(spec.Grant)
+					if !ok {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("codex.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
+					}
+					if !hasGrant(opts.Config.Grants, spec.Grant) {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("codex.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
+					}
 					if env == nil {
 						env = make(map[string]string)
 					} else {
@@ -1505,9 +1514,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					if v, ok := grantToEnvVar(spec.Grant); ok {
-						env[v] = credential.ProxyInjectedPlaceholder
-					}
+					env[v] = credential.ProxyInjectedPlaceholder
 				}
 				codexLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -1570,6 +1577,15 @@ region = %s
 			for name, spec := range opts.Config.Gemini.MCP {
 				env := spec.Env
 				if spec.Grant != "" {
+					v, ok := grantToEnvVar(spec.Grant)
+					if !ok {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("gemini.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
+					}
+					if !hasGrant(opts.Config.Grants, spec.Grant) {
+						cleanupProxy(proxyServer)
+						return nil, fmt.Errorf("gemini.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
+					}
 					if env == nil {
 						env = make(map[string]string)
 					} else {
@@ -1579,9 +1595,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					if v, ok := grantToEnvVar(spec.Grant); ok {
-						env[v] = credential.ProxyInjectedPlaceholder
-					}
+					env[v] = credential.ProxyInjectedPlaceholder
 				}
 				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -3384,4 +3398,14 @@ func grantToEnvVar(grant string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// hasGrant checks whether a grant name appears in the grants list.
+func hasGrant(grants []string, name string) bool {
+	for _, g := range grants {
+		if g == name {
+			return true
+		}
+	}
+	return false
 }

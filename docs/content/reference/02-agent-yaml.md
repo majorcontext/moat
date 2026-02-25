@@ -897,16 +897,9 @@ claude:
 | `command` | `string` | Server executable path (required) |
 | `args` | `array[string]` | Command arguments |
 | `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
-| `grant` | `string` | Credential to inject as an environment variable |
 | `cwd` | `string` | Working directory for the server process |
 
-When `grant` is specified, the corresponding environment variable is set automatically:
-
-| Grant | Environment variable |
-|-------|---------------------|
-| `github` | `GITHUB_TOKEN` |
-| `anthropic` | `ANTHROPIC_API_KEY` |
-| `openai` | `OPENAI_API_KEY` |
+**Note:** The `grant` field is not supported for `claude.mcp` servers. Use `env` with `${secrets.NAME}` for credential injection, or use `codex.mcp` / `gemini.mcp` which support `grant`.
 
 **Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
 

@@ -245,7 +245,7 @@ claude:
 | `command` | `string` | Server executable path (required) |
 | `args` | `array[string]` | Command arguments |
 | `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
-| `grant` | `string` | Credential to inject as an environment variable |
+| `grant` | `string` | Credential to inject as an environment variable (Codex and Gemini only) |
 | `cwd` | `string` | Working directory for the server process |
 
 ## Observability

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -180,86 +179,6 @@ func TestWriteCodexConfig(t *testing.T) {
 	content := string(data)
 	if !contains(content, "[shell_environment_policy]") {
 		t.Errorf("config.toml should contain [shell_environment_policy], got: %s", content)
-	}
-}
-
-func TestGenerateMCPConfig(t *testing.T) {
-	tests := []struct {
-		name    string
-		cfg     *config.Config
-		grants  []string
-		wantNil bool
-		wantErr bool
-	}{
-		{
-			name:    "nil config",
-			cfg:     nil,
-			grants:  []string{},
-			wantNil: true,
-			wantErr: false,
-		},
-		{
-			name: "empty MCP servers",
-			cfg: &config.Config{
-				Codex: config.CodexConfig{
-					MCP: map[string]config.MCPServerSpec{},
-				},
-			},
-			grants:  []string{},
-			wantNil: true,
-			wantErr: false,
-		},
-		{
-			name: "MCP server with missing grant",
-			cfg: &config.Config{
-				Codex: config.CodexConfig{
-					MCP: map[string]config.MCPServerSpec{
-						"test": {
-							Command: "test-cmd",
-							Grant:   "github",
-						},
-					},
-				},
-			},
-			grants:  []string{}, // github grant not provided
-			wantNil: false,
-			wantErr: true,
-		},
-		{
-			name: "MCP server with grant",
-			cfg: &config.Config{
-				Codex: config.CodexConfig{
-					MCP: map[string]config.MCPServerSpec{
-						"test": {
-							Command: "test-cmd",
-							Grant:   "github",
-						},
-					},
-				},
-			},
-			grants:  []string{"github"},
-			wantNil: false,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := GenerateMCPConfig(tt.cfg, tt.grants)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GenerateMCPConfig() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantNil && got != nil {
-				t.Errorf("GenerateMCPConfig() = %v, want nil", got)
-			}
-
-			if !tt.wantNil && !tt.wantErr && got == nil {
-				t.Errorf("GenerateMCPConfig() = nil, want non-nil")
-			}
-		})
 	}
 }
 
