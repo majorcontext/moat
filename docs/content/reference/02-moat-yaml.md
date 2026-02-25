@@ -105,7 +105,6 @@ claude:
       args: ["--flag"]
       env:
         VAR: value
-      grant: github
       cwd: /workspace
 
 # Codex
@@ -1044,7 +1043,6 @@ claude:
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
       env:
         API_KEY: ${secrets.MY_KEY}
-      grant: github
       cwd: /workspace
 ```
 
@@ -1219,6 +1217,7 @@ When `grant` is specified, the corresponding environment variable is set automat
 | `github` | `GITHUB_TOKEN` |
 | `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
 
 **Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
 
@@ -1252,7 +1251,7 @@ gemini:
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
       env:
         API_KEY: my-key
-      grant: github
+      grant: gemini
       cwd: /workspace
 ```
 
@@ -1274,8 +1273,9 @@ When `grant` is specified, the corresponding environment variable is set automat
 | Grant | Environment variable |
 |-------|---------------------|
 | `github` | `GITHUB_TOKEN` |
-| `gemini` | `GEMINI_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
 
 **Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
 
