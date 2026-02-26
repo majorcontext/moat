@@ -83,6 +83,9 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		actualPort = parsed
 	}
 
+	// Update API server with actual proxy port (may differ from requested if port was 0).
+	apiServer.SetProxyPort(actualPort)
+
 	// Start API server.
 	if startErr := apiServer.Start(); startErr != nil {
 		_ = proxyServer.Stop(context.Background())

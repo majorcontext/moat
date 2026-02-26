@@ -98,13 +98,28 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		"--proxy-port", fmt.Sprintf("%d", proxyPort),
 	}
 
+	// Open /dev/null for stdin so the daemon doesn't inherit a pipe or
+	// terminal that may close when the parent exits.
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		return nil, fmt.Errorf("opening /dev/null: %w", err)
+	}
+	defer devNull.Close()
+
+	// Send daemon stderr to a log file for debugging startup failures.
+	logPath := filepath.Join(dir, "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		logFile = nil // non-fatal; discard output
+	}
+
 	attr := &os.ProcAttr{
 		Dir: "/",
 		Env: os.Environ(),
 		Files: []*os.File{
-			os.Stdin,
-			nil,
-			nil,
+			devNull,
+			logFile, // stdout
+			logFile, // stderr
 		},
 		Sys: &syscall.SysProcAttr{
 			Setsid: true,
@@ -112,6 +127,9 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 
 	proc, err := os.StartProcess(exe, args, attr)
+	if logFile != nil {
+		logFile.Close() // daemon inherited the fd; parent can close its copy
+	}
 	if err != nil {
 		return nil, fmt.Errorf("starting daemon: %w", err)
 	}

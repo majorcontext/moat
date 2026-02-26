@@ -50,6 +50,10 @@ func NewServer(sockPath string, proxyPort int) *Server {
 	return s
 }
 
+// SetProxyPort updates the proxy port reported in API responses.
+// Call after the credential proxy starts to set the actual port.
+func (s *Server) SetProxyPort(port int) { s.proxyPort = port }
+
 // Registry returns the server's run registry.
 func (s *Server) Registry() *Registry { return s.registry }
 
