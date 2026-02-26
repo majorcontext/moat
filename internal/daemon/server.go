@@ -92,6 +92,13 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	rc := req.ToRunContext()
 	token := s.registry.Register(rc)
 
+	// Start token refresh if grants are present
+	if len(req.Grants) > 0 {
+		refreshCtx, cancel := context.WithCancel(context.Background())
+		rc.refreshCancel = cancel
+		StartTokenRefresh(refreshCtx, rc, req.Grants)
+	}
+
 	resp := RegisterResponse{
 		AuthToken: token,
 		ProxyPort: s.proxyPort,
@@ -143,9 +150,15 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := s.registry.Lookup(token); !ok {
+	rc, ok := s.registry.Lookup(token)
+	if !ok {
 		http.Error(w, `{"error":"run not found"}`, http.StatusNotFound)
 		return
+	}
+
+	// Cancel token refresh before unregistering
+	if rc.refreshCancel != nil {
+		rc.refreshCancel()
 	}
 
 	s.registry.Unregister(token)

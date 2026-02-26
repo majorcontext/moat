@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"context"
 	"net"
 	"sync"
 	"time"
@@ -59,7 +60,8 @@ type RunContext struct {
 
 	RegisteredAt time.Time `json:"registered_at"`
 
-	mu sync.RWMutex
+	refreshCancel context.CancelFunc `json:"-"` // cancels token refresh goroutine
+	mu            sync.RWMutex
 }
 
 // NewRunContext creates a new RunContext for a run.
