@@ -133,6 +133,45 @@ func (c *Client) ListRuns(ctx context.Context) ([]RunInfo, error) {
 	return runs, nil
 }
 
+// RegisterRoutes registers service routes for an agent.
+func (c *Client) RegisterRoutes(ctx context.Context, agent string, services map[string]string) error {
+	body, err := json.Marshal(RouteRegistration{Services: services})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/v1/routes/"+agent, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("connecting to daemon: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("daemon returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// UnregisterRoutes removes service routes for an agent.
+func (c *Client) UnregisterRoutes(ctx context.Context, agent string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, "http://daemon/v1/routes/"+agent, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("connecting to daemon: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("daemon returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Shutdown requests the daemon to shut down gracefully.
 func (c *Client) Shutdown(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/v1/shutdown", nil)

@@ -313,6 +313,11 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 			if err := m.routes.Remove(r.Name); err != nil {
 				log.Debug("removing stale route", "name", r.Name, "error", err)
 			}
+			if m.daemonClient != nil {
+				if err := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); err != nil {
+					log.Debug("failed to unregister routes via daemon", "error", err)
+				}
+			}
 		}
 	}
 
@@ -2229,6 +2234,11 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 				if err := m.routes.Add(r.Name, services); err != nil {
 					ui.Warnf("Registering routes: %v", err)
 				}
+				if m.daemonClient != nil {
+					if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
+						log.Debug("failed to register routes via daemon", "error", err)
+					}
+				}
 			}
 		}
 	}
@@ -2372,6 +2382,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 			if len(services) > 0 {
 				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
 					ui.Warnf("Registering routes: %v", routeErr)
+				}
+				if m.daemonClient != nil {
+					if routeErr := m.daemonClient.RegisterRoutes(ctx, r.Name, services); routeErr != nil {
+						log.Debug("failed to register routes via daemon", "error", routeErr)
+					}
 				}
 			}
 		}
@@ -2536,6 +2551,11 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Unregister routes for this agent
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
+		}
 	}
 
 	r.SetStateWithTime(StateStopped, time.Now())
@@ -2645,6 +2665,11 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		// Unregister routes for this agent
 		if r.Name != "" {
 			_ = m.routes.Remove(r.Name)
+			if m.daemonClient != nil {
+				if stopErr := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); stopErr != nil {
+					log.Debug("failed to unregister routes via daemon", "error", stopErr)
+				}
+			}
 		}
 
 		// NOTE: We don't update r.State, r.StoppedAt, or r.Error here because
@@ -2946,6 +2971,11 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Unregister routes
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
+		}
 	}
 }
 
@@ -3027,6 +3057,11 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	if r.Name != "" {
 		if err := m.routes.Remove(r.Name); err != nil {
 			ui.Warnf("Removing routes: %v", err)
+		}
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
 		}
 	}
 

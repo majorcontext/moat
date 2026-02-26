@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
+	"github.com/majorcontext/moat/internal/routing"
 	"github.com/spf13/cobra"
 )
 
@@ -86,6 +87,31 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	if err := apiServer.Start(); err != nil {
 		_ = proxyServer.Stop(context.Background())
 		return err
+	}
+
+	// Set up routing proxy.
+	routeTable, err := routing.NewRouteTable(daemonDir)
+	if err != nil {
+		log.Warn("failed to create route table", "error", err)
+	} else {
+		apiServer.SetRoutes(routeTable)
+
+		routingProxy := routing.NewProxyServer(routeTable)
+
+		// Enable TLS for routing proxy using same CA.
+		if err := routingProxy.EnableTLS(ca); err != nil {
+			log.Warn("failed to enable TLS for routing proxy", "error", err)
+		}
+
+		// Start routing proxy on a random available port.
+		if err := routingProxy.Start(0); err != nil {
+			log.Warn("failed to start routing proxy", "error", err)
+		} else {
+			log.Info("routing proxy started", "port", routingProxy.Port())
+			defer func() {
+				_ = routingProxy.Stop(context.Background())
+			}()
+		}
 	}
 
 	// Write lock file.

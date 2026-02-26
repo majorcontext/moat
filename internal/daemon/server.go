@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/majorcontext/moat/internal/routing"
 )
 
 // Server is the daemon's HTTP API server over a Unix socket.
@@ -15,6 +17,7 @@ type Server struct {
 	sockPath  string
 	proxyPort int
 	registry  *Registry
+	routes    *routing.RouteTable
 	server    *http.Server
 	listener  net.Listener
 	startedAt time.Time
@@ -36,6 +39,8 @@ func NewServer(sockPath string, proxyPort int) *Server {
 	mux.HandleFunc("GET /v1/runs", s.handleListRuns)
 	mux.HandleFunc("PATCH /v1/runs/", s.handleUpdateRun)
 	mux.HandleFunc("DELETE /v1/runs/", s.handleUnregisterRun)
+	mux.HandleFunc("POST /v1/routes/", s.handleRegisterRoutes)
+	mux.HandleFunc("DELETE /v1/routes/", s.handleUnregisterRoutes)
 	mux.HandleFunc("POST /v1/shutdown", s.handleShutdown)
 
 	s.server = &http.Server{
@@ -50,6 +55,9 @@ func (s *Server) Registry() *Registry { return s.registry }
 
 // SetOnEmpty sets a callback that is invoked when the last run is unregistered.
 func (s *Server) SetOnEmpty(fn func()) { s.onEmpty = fn }
+
+// SetRoutes sets the route table used for route registration handlers.
+func (s *Server) SetRoutes(rt *routing.RouteTable) { s.routes = rt }
 
 // Start begins listening on the Unix socket. Any stale socket file is removed first.
 func (s *Server) Start() error {
@@ -167,6 +175,42 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 	if s.onEmpty != nil && s.registry.Count() == 0 {
 		s.onEmpty()
 	}
+}
+
+// handleRegisterRoutes registers service routes for an agent.
+func (s *Server) handleRegisterRoutes(w http.ResponseWriter, r *http.Request) {
+	agent := extractToken(r.URL.Path, "/v1/routes/")
+	if agent == "" {
+		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+	var reg RouteRegistration
+	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+	if s.routes == nil {
+		http.Error(w, `{"error":"routing not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.routes.Add(agent, reg.Services); err != nil {
+		http.Error(w, `{"error":"failed to register routes"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUnregisterRoutes removes service routes for an agent.
+func (s *Server) handleUnregisterRoutes(w http.ResponseWriter, r *http.Request) {
+	agent := extractToken(r.URL.Path, "/v1/routes/")
+	if agent == "" {
+		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+	if s.routes != nil {
+		_ = s.routes.Remove(agent)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleShutdown initiates a graceful server shutdown.
