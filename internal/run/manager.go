@@ -2296,7 +2296,12 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 
 	// Start background monitor to capture logs when container exits.
 	// This is critical for detached runs where Wait() is never called.
-	go m.monitorContainerExit(context.Background(), r)
+	// Use m.ctx so the goroutine is canceled when the Manager closes.
+	monitorCtx := m.ctx
+	if monitorCtx == nil {
+		monitorCtx = context.Background()
+	}
+	go m.monitorContainerExit(monitorCtx, r)
 
 	return nil
 }
@@ -2868,6 +2873,13 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Wait for container to exit (no timeout - let it run as long as needed)
 	// This is the ONLY place that calls WaitContainer to avoid race conditions
 	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
+
+	// If the context was canceled (e.g. Manager.Close()), bail out without
+	// touching run state. The container is likely still running and a future
+	// Manager instance will pick it up via loadPersistedRuns.
+	if ctx.Err() != nil {
+		return
+	}
 
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
