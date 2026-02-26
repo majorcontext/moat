@@ -835,6 +835,47 @@ func TestApplyTokenSubstitution_URLPathAndBody(t *testing.T) {
 	}
 }
 
+// TestProxy_ContextResolver verifies that a context resolver can look up per-run data by token.
+func TestProxy_ContextResolver(t *testing.T) {
+	p := NewProxy()
+
+	contexts := map[string]*RunContextData{
+		"token_a": {
+			Credentials: map[string]credentialHeader{
+				"api.github.com": {Name: "Authorization", Value: "token aaa"},
+			},
+		},
+	}
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		rc, ok := contexts[token]
+		return rc, ok
+	})
+
+	rc, ok := p.ResolveContext("token_a")
+	if !ok {
+		t.Fatal("expected to resolve token_a")
+	}
+	if rc.Credentials["api.github.com"].Value != "token aaa" {
+		t.Error("wrong credential value")
+	}
+
+	_, ok = p.ResolveContext("invalid")
+	if ok {
+		t.Error("expected invalid token to fail")
+	}
+}
+
+// TestProxy_ContextResolverNilFallback verifies that ResolveContext returns false
+// when no resolver is set.
+func TestProxy_ContextResolverNilFallback(t *testing.T) {
+	p := NewProxy()
+	// No resolver set
+	_, ok := p.ResolveContext("any")
+	if ok {
+		t.Error("expected nil resolver to return false")
+	}
+}
+
 // TestApplyTokenSubstitution_NoMatch verifies no modification when placeholder is absent.
 func TestApplyTokenSubstitution_NoMatch(t *testing.T) {
 	p := NewProxy()

@@ -189,6 +189,42 @@ type tokenSubstitution struct {
 	realToken   string
 }
 
+// CredentialHeader is the exported version of credentialHeader for daemon use.
+type CredentialHeader = credentialHeader
+
+// ExtraHeader is the exported version of extraHeader for daemon use.
+type ExtraHeader = extraHeader
+
+// TokenSubstitution is the exported version of tokenSubstitution for daemon use.
+type TokenSubstitution = tokenSubstitution
+
+// HostPattern is the exported version of hostPattern.
+type HostPattern = hostPattern
+
+// ParseHostPattern is the exported wrapper for parseHostPattern.
+func ParseHostPattern(pattern string) HostPattern {
+	return parseHostPattern(pattern)
+}
+
+// RunContextData holds per-run credential data resolved by ContextResolver.
+type RunContextData struct {
+	RunID                string
+	Credentials          map[string]credentialHeader
+	ExtraHeaders         map[string][]extraHeader
+	RemoveHeaders        map[string][]string
+	TokenSubstitutions   map[string]*tokenSubstitution
+	ResponseTransformers map[string][]credential.ResponseTransformer
+	MCPServers           []config.MCPServerConfig
+	Policy               string
+	AllowedHosts         []hostPattern
+	AWSHandler           http.Handler
+	CredStore            credential.Store
+	Relays               map[string]string
+}
+
+// ContextResolver resolves a proxy auth token to per-run context data.
+type ContextResolver func(token string) (*RunContextData, bool)
+
 // Proxy is an HTTP proxy that injects credentials into outgoing requests.
 //
 // # Security Model
@@ -225,6 +261,7 @@ type Proxy struct {
 	removeHeaders        map[string][]string           // host -> []headerName
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
 	relays               map[string]string             // name -> target URL for relay endpoints
+	contextResolver      ContextResolver               // optional per-run credential resolver
 }
 
 // NewProxy creates a new auth proxy.
@@ -267,6 +304,21 @@ func (p *Proxy) SetMCPServers(servers []config.MCPServerConfig) {
 // SetCredentialStore sets the credential store for MCP credential retrieval.
 func (p *Proxy) SetCredentialStore(store credential.Store) {
 	p.credStore = store
+}
+
+// SetContextResolver sets the per-run context resolver for multi-tenant proxy use.
+// When set, the proxy can resolve auth tokens to per-run credential data.
+func (p *Proxy) SetContextResolver(resolver ContextResolver) {
+	p.contextResolver = resolver
+}
+
+// ResolveContext looks up per-run context data by auth token.
+// Returns nil, false when no resolver is set or the token is not found.
+func (p *Proxy) ResolveContext(token string) (*RunContextData, bool) {
+	if p.contextResolver == nil {
+		return nil, false
+	}
+	return p.contextResolver(token)
 }
 
 // SetCredential sets the credential for a host using the Authorization header.
