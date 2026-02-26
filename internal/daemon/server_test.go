@@ -11,6 +11,19 @@ import (
 	"testing"
 )
 
+// testSockDir creates a short temp directory for Unix sockets.
+// t.TempDir() paths can exceed the 104-byte macOS Unix socket limit
+// when combined with long test names.
+func testSockDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "dsock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 // testClient returns an HTTP client that dials the given Unix socket.
 func testClient(sockPath string) *http.Client {
 	return &http.Client{
@@ -23,7 +36,7 @@ func testClient(sockPath string) *http.Client {
 }
 
 func TestServer_HealthEndpoint(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -61,7 +74,7 @@ func TestServer_HealthEndpoint(t *testing.T) {
 }
 
 func TestServer_RegisterAndListRuns(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -136,7 +149,7 @@ func TestServer_RegisterAndListRuns(t *testing.T) {
 }
 
 func TestServer_UnregisterRun(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -185,7 +198,7 @@ func TestServer_UnregisterRun(t *testing.T) {
 }
 
 func TestServer_UpdateRun(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -248,7 +261,7 @@ func TestServer_UpdateRun(t *testing.T) {
 }
 
 func TestServer_SocketCleanup(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -271,7 +284,7 @@ func TestServer_SocketCleanup(t *testing.T) {
 }
 
 func TestServer_OnEmptyCallback(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 
 	called := false
@@ -310,7 +323,7 @@ func TestServer_OnEmptyCallback(t *testing.T) {
 }
 
 func TestServer_UnregisterNotFound(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -332,7 +345,7 @@ func TestServer_UnregisterNotFound(t *testing.T) {
 }
 
 func TestServer_UpdateNotFound(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -356,7 +369,7 @@ func TestServer_UpdateNotFound(t *testing.T) {
 }
 
 func TestServer_ShutdownEndpoint(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "daemon.sock")
+	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Start: %v", err)

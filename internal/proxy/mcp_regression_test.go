@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,12 +13,13 @@ import (
 )
 
 // TestMCPRelay_NilCredentialStore tests that handleMCPRelay fails gracefully
-// when credStore is nil. This is a regression test for the critical bug where
-// the credential store wasn't wired to the proxy.
+// when credStore is nil and no RunContextData is present.
 func TestMCPRelay_NilCredentialStore(t *testing.T) {
-	// Create proxy without credential store (nil)
+	// Create proxy without credential store (nil) and no context resolver.
+	// This simulates a misconfigured proxy where neither daemon-mode
+	// RunContextData nor a legacy credStore provides credentials.
 	p := &Proxy{
-		credStore: nil, // BUG: credStore not initialized
+		credStore: nil,
 		mcpServers: []config.MCPServerConfig{
 			{
 				Name: "context7",
@@ -43,8 +45,64 @@ func TestMCPRelay_NilCredentialStore(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Credential store not initialized") {
-		t.Errorf("error message should mention credential store not initialized, got: %s", body)
+	if !strings.Contains(body, "Failed to load credential") {
+		t.Errorf("error message should mention failed credential load, got: %s", body)
+	}
+}
+
+// TestMCPRelay_DaemonModeCredentials tests that handleMCPRelay resolves
+// credentials from RunContextData when credStore is nil (daemon mode).
+func TestMCPRelay_DaemonModeCredentials(t *testing.T) {
+	// Mock backend that records the received header.
+	var receivedKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedKey = r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	p := &Proxy{
+		credStore: nil, // No store — daemon mode
+		mcpServers: []config.MCPServerConfig{
+			{
+				Name: "test-server",
+				URL:  backend.URL,
+				Auth: &config.MCPAuthConfig{
+					Grant:  "mcp-test",
+					Header: "X-Api-Key",
+				},
+			},
+		},
+	}
+
+	// Build request with RunContextData carrying the credential and MCP config.
+	req := httptest.NewRequest("GET", "/mcp/test-server", nil)
+	rc := &RunContextData{
+		Credentials: map[string]credentialHeader{
+			"example.com": {Name: "X-Api-Key", Value: "real-secret", Grant: "mcp-test"},
+		},
+		MCPServers: []config.MCPServerConfig{
+			{
+				Name: "test-server",
+				URL:  backend.URL,
+				Auth: &config.MCPAuthConfig{
+					Grant:  "mcp-test",
+					Header: "X-Api-Key",
+				},
+			},
+		},
+	}
+	ctx := context.WithValue(req.Context(), runContextKey, rc)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if receivedKey != "real-secret" {
+		t.Errorf("backend received X-Api-Key = %q, want %q", receivedKey, "real-secret")
 	}
 }
 

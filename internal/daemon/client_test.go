@@ -7,8 +7,8 @@ import (
 )
 
 func TestClient_Health(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -35,8 +35,8 @@ func TestClient_Health(t *testing.T) {
 }
 
 func TestClient_RegisterAndUnregister(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -90,8 +90,8 @@ func TestClient_RegisterAndUnregister(t *testing.T) {
 }
 
 func TestClient_UpdateRunNotFound(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -109,8 +109,8 @@ func TestClient_UpdateRunNotFound(t *testing.T) {
 }
 
 func TestClient_UnregisterRunNotFound(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -125,8 +125,8 @@ func TestClient_UnregisterRunNotFound(t *testing.T) {
 }
 
 func TestClient_Shutdown(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
@@ -166,8 +166,8 @@ func TestClient_ConnectionRefused(t *testing.T) {
 }
 
 func TestClient_MultipleRuns(t *testing.T) {
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "daemon.sock")
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
 	srv := NewServer(sockPath, 9100)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)

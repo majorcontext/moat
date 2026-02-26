@@ -39,6 +39,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/credential/keyring"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/run"
@@ -71,25 +73,69 @@ func TestMain(m *testing.M) {
 	// Build the moat binary so the daemon can self-exec.
 	// Test binaries don't have the _daemon cobra command, so
 	// EnsureRunning needs a real moat binary (via MOAT_EXECUTABLE).
+	var tmpBinDir string
 	if os.Getenv("MOAT_EXECUTABLE") == "" {
-		tmpDir, err := os.MkdirTemp("", "moat-e2e-bin-*")
+		var err error
+		tmpBinDir, err = os.MkdirTemp("", "moat-e2e-bin-*")
 		if err != nil {
 			os.Stderr.WriteString("Failed to create temp dir for moat binary: " + err.Error() + "\n")
 			os.Exit(1)
 		}
-		moatBin := filepath.Join(tmpDir, "moat")
+		moatBin := filepath.Join(tmpBinDir, "moat")
 		build := exec.Command("go", "build", "-o", moatBin, "github.com/majorcontext/moat/cmd/moat")
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {
 			os.Stderr.WriteString("Failed to build moat binary for E2E tests: " + err.Error() + "\n")
-			os.RemoveAll(tmpDir)
+			os.RemoveAll(tmpBinDir)
 			os.Exit(1)
 		}
 		os.Setenv("MOAT_EXECUTABLE", moatBin)
-		defer os.RemoveAll(tmpDir)
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+
+	// Kill any daemon process spawned during the test run.
+	// Without this, daemons with Setsid: true survive test exit and become orphans.
+	killTestDaemon()
+
+	if tmpBinDir != "" {
+		os.RemoveAll(tmpBinDir)
+	}
+
+	os.Exit(code)
+}
+
+// killTestDaemon attempts graceful shutdown of any daemon spawned during tests,
+// falling back to SIGKILL if the daemon doesn't respond.
+func killTestDaemon() {
+	daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	lock, err := daemon.ReadLockFile(daemonDir)
+	if err != nil || lock == nil {
+		return
+	}
+	if !lock.IsAlive() {
+		daemon.RemoveLockFile(daemonDir)
+		return
+	}
+
+	// Try graceful shutdown via the daemon API.
+	client := daemon.NewClient(lock.SockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = client.Shutdown(ctx)
+	cancel()
+
+	// Wait briefly for the process to exit.
+	for i := 0; i < 10; i++ {
+		if !lock.IsAlive() {
+			daemon.RemoveLockFile(daemonDir)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Force kill if still alive.
+	_ = syscall.Kill(lock.PID, syscall.SIGKILL)
+	daemon.RemoveLockFile(daemonDir)
 }
 
 // skipIfNoAppleContainer skips the test if Apple container is not available.

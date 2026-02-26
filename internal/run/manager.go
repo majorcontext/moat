@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -561,7 +562,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
 				prov := provider.Get(grantName)
 				if prov == nil {
-					log.Debug("grant has no registered provider (e.g. MCP grant), skipping proxy config", "grant", grantName)
+					// Store MCP credential on RunContext so the daemon proxy can
+					// resolve it by grant name during MCP relay requests.
+					if opts.Config != nil {
+						for _, mcp := range opts.Config.MCP {
+							if mcp.Auth != nil && mcp.Auth.Grant == grantName {
+								serverHost := mcp.URL // use full URL as key to avoid conflicts
+								if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+									serverHost = u.Host
+								}
+								runCtx.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grantName)
+							}
+						}
+					}
 					continue
 				}
 				// Configure the RunContext (which implements ProxyConfigurer)
@@ -2623,20 +2636,10 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		}
 		r.stateMu.Unlock()
 
-		// Cancel token refresh and unregister run from proxy daemon
-		if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
-			ui.Warnf("Stopping proxy: %v", stopErr)
-		}
-		if r.ProxyAuthToken != "" && m.daemonClient != nil {
-			if stopErr := m.daemonClient.UnregisterRun(context.Background(), r.ProxyAuthToken); stopErr != nil {
-				ui.Warnf("Unregistering from proxy daemon: %v", stopErr)
-			}
-		}
-
-		// Stop the SSH agent server if one was created
-		if stopErr := r.stopSSHAgentServer(); stopErr != nil {
-			ui.Warnf("Stopping SSH agent proxy: %v", stopErr)
-		}
+		// NOTE: stopProxyServer, UnregisterRun, and stopSSHAgentServer are
+		// handled by monitorContainerExit (which runs for ALL runs, including
+		// detached). We don't repeat them here to avoid duplicate 404 warnings
+		// and races when monitorContainerExit's cleanup has already completed.
 
 		// Unregister routes for this agent
 		if r.Name != "" {
@@ -2658,10 +2661,12 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		providerCleanupPaths := r.ProviderCleanupPaths
 		m.mu.RUnlock()
 
-		// Auto-remove container unless --keep was specified
+		// Auto-remove container unless --keep was specified.
+		// Use log.Debug for the error — Destroy() may also try to remove
+		// the same container, and Docker can report "removal already in progress".
 		if !keepContainer {
 			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
-				ui.Warnf("Removing container: %v", rmErr)
+				log.Debug("removing container after wait", "container_id", containerID, "error", rmErr)
 			}
 		}
 
@@ -2982,22 +2987,22 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
 	}
 
-	// Remove container
+	// Remove container (may already be removed by Wait or monitorContainerExit)
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
-		ui.Warnf("%v", err)
+		log.Debug("removing container in destroy", "container_id", r.ContainerID, "error", err)
 	}
 
 	// Remove service containers
 	for svcName, svcContainerID := range r.ServiceContainers {
 		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
-			ui.Warnf("Removing %s service container: %v", svcName, err)
+			log.Debug("removing service container in destroy", "service", svcName, "error", err)
 		}
 	}
 
 	// Remove BuildKit sidecar container if present
 	if r.BuildkitContainerID != "" {
 		if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
-			ui.Warnf("Removing BuildKit sidecar: %v", err)
+			log.Debug("removing buildkit sidecar in destroy", "error", err)
 		}
 	}
 
@@ -3014,19 +3019,21 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Cancel token refresh and unregister run from proxy daemon
+	// Cancel token refresh and unregister run from proxy daemon.
+	// These may already have been handled by monitorContainerExit — that's fine,
+	// Destroy is a best-effort cleanup for anything that was missed.
 	if err := r.stopProxyServer(ctx); err != nil {
-		ui.Warnf("Stopping proxy: %v", err)
+		log.Debug("stopping proxy in destroy", "error", err)
 	}
 	if r.ProxyAuthToken != "" && m.daemonClient != nil {
 		if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
-			ui.Warnf("Unregistering from proxy daemon: %v", err)
+			log.Debug("unregistering from daemon in destroy", "error", err)
 		}
 	}
 
 	// Stop the SSH agent server if one was created and still running
 	if err := r.stopSSHAgentServer(); err != nil {
-		ui.Warnf("Stopping SSH agent proxy: %v", err)
+		log.Debug("stopping SSH agent in destroy", "error", err)
 	}
 
 	// Unregister routes for this agent

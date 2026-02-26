@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
 
 const lockFileName = "daemon.lock"
+
+// spawnLockFileName is the advisory lock file used to serialize daemon spawning.
+// This prevents a race where concurrent callers all see "no daemon" and each
+// spawn a new process.
+const spawnLockFileName = "daemon.spawn.lock"
 
 // LockInfo holds information about a running daemon.
 type LockInfo struct {
@@ -67,10 +73,27 @@ func RemoveLockFile(dir string) {
 
 // EnsureRunning checks if the daemon is already running and returns a client.
 // If not running, it starts the daemon via self-exec and waits for it to be ready.
+//
+// An advisory file lock serializes the check-and-spawn sequence so concurrent
+// callers don't each spawn a separate daemon process.
 func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	sockPath := filepath.Join(dir, "daemon.sock")
 
-	// Check existing daemon.
+	// Ensure the directory exists before taking the spawn lock.
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating daemon directory: %w", err)
+	}
+
+	// Acquire an advisory lock to serialize the read-check-spawn sequence.
+	// Without this, concurrent callers can all see "no daemon" and each
+	// spawn a new process (the root cause of the 2,854 orphaned daemons).
+	unlock, err := acquireSpawnLock(dir)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring daemon spawn lock: %w", err)
+	}
+	defer unlock()
+
+	// Check existing daemon (under the lock).
 	lock, err := ReadLockFile(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading daemon lock: %w", err)
@@ -87,16 +110,10 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		os.Remove(lock.SockPath)
 	}
 
-	// Start new daemon via self-exec. Allow overriding the executable path
-	// via MOAT_EXECUTABLE for environments where os.Executable() doesn't
-	// return a moat binary (e.g., test binaries during E2E tests).
-	exe := os.Getenv("MOAT_EXECUTABLE")
-	if exe == "" {
-		var exeErr error
-		exe, exeErr = os.Executable()
-		if exeErr != nil {
-			return nil, fmt.Errorf("finding executable: %w", exeErr)
-		}
+	// Resolve the daemon executable.
+	exe, err := resolveDaemonExecutable()
+	if err != nil {
+		return nil, err
 	}
 
 	args := []string{exe, "_daemon",
@@ -111,11 +128,6 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		return nil, fmt.Errorf("opening /dev/null: %w", err)
 	}
 	defer devNull.Close()
-
-	// Ensure the daemon directory exists before opening the log file.
-	if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
-		return nil, fmt.Errorf("creating daemon directory: %w", mkErr)
-	}
 
 	// Send daemon stderr to a log file for debugging startup failures.
 	logPath := filepath.Join(dir, "daemon.log")
@@ -159,4 +171,50 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 
 	return nil, fmt.Errorf("daemon did not start within 5 seconds")
+}
+
+// acquireSpawnLock takes an advisory file lock (flock) to serialize daemon
+// spawning. Returns an unlock function that must be called (typically deferred).
+func acquireSpawnLock(dir string) (unlock func(), err error) {
+	lockPath := filepath.Join(dir, spawnLockFileName)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
+// resolveDaemonExecutable determines the path to the moat binary for spawning
+// the daemon process. Uses MOAT_EXECUTABLE if set, otherwise os.Executable().
+// Returns an error if the resolved binary appears to be a test binary, which
+// would not have the _daemon command and would produce stuck processes.
+func resolveDaemonExecutable() (string, error) {
+	if exe := os.Getenv("MOAT_EXECUTABLE"); exe != "" {
+		return exe, nil
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("finding executable: %w", err)
+	}
+
+	// Detect test binaries: they end in .test or have a *.test suffix
+	// (e.g., "e2e.test", "daemon.test"). These don't have the _daemon
+	// Cobra command and would produce stuck processes that can't parse args.
+	base := filepath.Base(exe)
+	if strings.HasSuffix(base, ".test") {
+		return "", fmt.Errorf(
+			"daemon cannot be started from test binary %q; set MOAT_EXECUTABLE to the moat binary path", exe)
+	}
+
+	return exe, nil
 }

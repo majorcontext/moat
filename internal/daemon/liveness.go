@@ -41,7 +41,12 @@ func (lc *LivenessChecker) CheckOnce(ctx context.Context) {
 		if rc.ContainerID == "" {
 			continue
 		}
-		if !lc.checker.IsContainerRunning(ctx, rc.ContainerID) {
+		// Per-check timeout prevents a hung container runtime from blocking
+		// all liveness checks (and by extension the idle shutdown timer).
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		alive := lc.checker.IsContainerRunning(checkCtx, rc.ContainerID)
+		cancel()
+		if !alive {
 			log.Info("container no longer running, cleaning up",
 				"run_id", rc.RunID,
 				"container_id", rc.ContainerID)

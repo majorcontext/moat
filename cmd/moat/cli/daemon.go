@@ -191,8 +191,11 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 
 	log.Info("daemon shutting down")
 	idleShutdown.Cancel()
-	_ = apiServer.Stop(context.Background())
-	_ = proxyServer.Stop(context.Background())
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	_ = apiServer.Stop(shutdownCtx)
+	_ = proxyServer.Stop(shutdownCtx)
 	daemon.RemoveLockFile(daemonDir)
 
 	return nil

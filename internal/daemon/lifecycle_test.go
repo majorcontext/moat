@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -167,5 +168,70 @@ func TestLockFile_CorruptedData(t *testing.T) {
 	_, err := ReadLockFile(dir)
 	if err == nil {
 		t.Error("expected error for corrupted lock file")
+	}
+}
+
+func TestAcquireSpawnLock_Serializes(t *testing.T) {
+	dir := t.TempDir()
+
+	// First lock should succeed.
+	unlock1, err := acquireSpawnLock(dir)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+
+	// Second lock in a goroutine should block until the first is released.
+	done := make(chan struct{})
+	go func() {
+		unlock2, err := acquireSpawnLock(dir)
+		if err != nil {
+			t.Errorf("second lock: %v", err)
+		} else {
+			unlock2()
+		}
+		close(done)
+	}()
+
+	// Give the goroutine time to block on flock.
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("second lock should have blocked")
+	default:
+	}
+
+	// Release first lock, second should proceed.
+	unlock1()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second lock did not complete after first was released")
+	}
+}
+
+func TestResolveDaemonExecutable_RejectsTestBinary(t *testing.T) {
+	// Unset MOAT_EXECUTABLE so os.Executable() is used.
+	t.Setenv("MOAT_EXECUTABLE", "")
+
+	// os.Executable() in a test binary returns a path ending in .test.
+	_, err := resolveDaemonExecutable()
+	if err == nil {
+		t.Fatal("expected error for test binary")
+	}
+	if !strings.Contains(err.Error(), "test binary") {
+		t.Errorf("error should mention test binary, got: %v", err)
+	}
+}
+
+func TestResolveDaemonExecutable_UsesEnvOverride(t *testing.T) {
+	t.Setenv("MOAT_EXECUTABLE", "/usr/local/bin/moat")
+
+	exe, err := resolveDaemonExecutable()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exe != "/usr/local/bin/moat" {
+		t.Errorf("expected /usr/local/bin/moat, got %s", exe)
 	}
 }

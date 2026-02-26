@@ -104,22 +104,36 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 		return
 	}
 
-	// Load real credential
-	cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
-	if err != nil {
+	// Load real credential. In daemon mode, credentials are pre-resolved in
+	// RunContextData.Credentials (keyed by host, with Grant field).
+	var credValue string
+	if rc := getRunContext(ctxReq); rc != nil {
+		for _, c := range rc.Credentials {
+			if c.Grant == matchedServer.Auth.Grant {
+				credValue = c.Value
+				break
+			}
+		}
+	}
+	if credValue == "" && credStore != nil {
+		cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
+		if err == nil {
+			credValue = cred.Token
+		}
+	}
+	if credValue == "" {
 		log.Error("MCP credential load failed",
 			"subsystem", "proxy",
 			"action", "inject-error",
 			"server", matchedServer.Name,
 			"grant", matchedServer.Auth.Grant,
-			"error", err,
 			"fix", "Run: moat grant mcp "+strings.TrimPrefix(matchedServer.Auth.Grant, "mcp-"))
 		// Leave stub in place - request will fail with stub credential
 		return
 	}
 
 	// Replace stub with real credential
-	targetReq.Header.Set(matchedServer.Auth.Header, cred.Token)
+	targetReq.Header.Set(matchedServer.Auth.Header, credValue)
 
 	log.Debug("credential injected",
 		"subsystem", "proxy",
@@ -196,15 +210,31 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Inject credentials
+	// Inject credentials.
+	// In daemon mode, credentials are pre-resolved in RunContextData.Credentials
+	// (keyed by host, with Grant field). Try that first, then fall back to credStore.
 	if mcpServer.Auth != nil {
-		if credStore == nil {
-			http.Error(w, "MOAT: Credential store not initialized", http.StatusInternalServerError)
-			return
+		var credValue string
+
+		// Try RunContextData credentials (daemon mode).
+		if rc := getRunContext(r); rc != nil {
+			for _, cred := range rc.Credentials {
+				if cred.Grant == mcpServer.Auth.Grant {
+					credValue = cred.Value
+					break
+				}
+			}
 		}
 
-		cred, credErr := credStore.Get(credential.Provider(mcpServer.Auth.Grant))
-		if credErr != nil {
+		// Fall back to credential store (legacy single-run mode).
+		if credValue == "" && credStore != nil {
+			cred, credErr := credStore.Get(credential.Provider(mcpServer.Auth.Grant))
+			if credErr == nil {
+				credValue = cred.Token
+			}
+		}
+
+		if credValue == "" {
 			http.Error(w, fmt.Sprintf("MOAT: Failed to load credential for '%s'. Grant: %s. Run: moat grant mcp %s",
 				serverName, mcpServer.Auth.Grant, strings.TrimPrefix(mcpServer.Auth.Grant, "mcp-")),
 				http.StatusInternalServerError)
@@ -212,7 +242,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Inject the real credential
-		proxyReq.Header.Set(mcpServer.Auth.Header, cred.Token)
+		proxyReq.Header.Set(mcpServer.Auth.Header, credValue)
 	}
 
 	// Send request to actual MCP server using the reused client
