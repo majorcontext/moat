@@ -69,24 +69,24 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	if daemonProxyPort > 0 {
 		proxyServer.SetPort(daemonProxyPort)
 	}
-	if err := proxyServer.Start(); err != nil {
-		return err
+	if startErr := proxyServer.Start(); startErr != nil {
+		return startErr
 	}
 
 	// Determine the actual port the proxy is listening on.
 	actualPort := daemonProxyPort
 	if actualPort == 0 {
-		p, err := strconv.Atoi(proxyServer.Port())
-		if err != nil {
-			log.Warn("failed to parse proxy port", "port", proxyServer.Port(), "error", err)
+		parsed, parseErr := strconv.Atoi(proxyServer.Port())
+		if parseErr != nil {
+			log.Warn("failed to parse proxy port", "port", proxyServer.Port(), "error", parseErr)
 		}
-		actualPort = p
+		actualPort = parsed
 	}
 
 	// Start API server.
-	if err := apiServer.Start(); err != nil {
+	if startErr := apiServer.Start(); startErr != nil {
 		_ = proxyServer.Stop(context.Background())
-		return err
+		return startErr
 	}
 
 	// Set up routing proxy.
