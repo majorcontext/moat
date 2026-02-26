@@ -83,6 +83,11 @@ type Manager struct {
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
 	mu             sync.RWMutex
+
+	// ctx/cancel control background goroutines (e.g. monitorContainerExit).
+	// Canceled in Close() so lingering WaitContainer calls don't leak.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // ManagerOptions configures the run manager.
@@ -118,15 +123,21 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		runtime:        rt,
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
-	// Load existing runs from disk and reconcile with container state
-	if err := m.loadPersistedRuns(context.Background()); err != nil {
+	// Load existing runs from disk and reconcile with container state.
+	// Use a 30-second timeout so stale runs can't block CLI startup.
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer loadCancel()
+	if err := m.loadPersistedRuns(loadCtx); err != nil {
 		log.Debug("loading persisted runs", "error", err)
 		// Non-fatal - continue with empty runs map
 	}
@@ -139,7 +150,16 @@ func NewManager() (*Manager, error) {
 	return NewManagerWithOptions(ManagerOptions{})
 }
 
+// persistedRunInfo holds a loaded run's metadata and store, ready for container state reconciliation.
+type persistedRunInfo struct {
+	runID string
+	store *storage.RunStore
+	meta  storage.Metadata
+}
+
 // loadPersistedRuns loads run metadata from disk and reconciles with actual container state.
+// Runs whose persisted state is already "stopped" or "failed" skip live container checks.
+// Remaining runs are checked in parallel with bounded concurrency.
 func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 	baseDir := storage.DefaultBaseDir()
 	runIDs, err := storage.ListRunDirs(baseDir)
@@ -147,6 +167,8 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		return err
 	}
 
+	// Phase 1: Load metadata from disk and classify runs.
+	var needCheck []persistedRunInfo
 	for _, runID := range runIDs {
 		store, err := storage.NewRunStore(baseDir, runID)
 		if err != nil {
@@ -165,97 +187,156 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			continue
 		}
 
-		// Check if the container actually exists and get its current state
-		var runState State
-		containerState, err := m.runtime.ContainerState(ctx, meta.ContainerID)
-		if err != nil {
-			// Container doesn't exist - mark run as stopped but still load it
-			// so it can be cleaned up (storage removal via destroy)
-			log.Debug("container not found", "id", runID, "container", meta.ContainerID)
-			runState = StateStopped
-		} else {
-			// Map container state to run state
-			// Note: Docker uses "exited"/"dead" for stopped containers,
-			// while Apple containers use "stopped"
-			switch containerState {
-			case "running":
-				runState = StateRunning
-			case "exited", "dead", "stopped":
-				runState = StateStopped
-			case "created", "restarting":
-				runState = StateCreated
-			default:
-				runState = State(meta.State)
-			}
+		// Runs already in a terminal state don't need a live container check.
+		if meta.State == string(StateStopped) || meta.State == string(StateFailed) {
+			m.registerPersistedRun(State(meta.State), meta, store, runID, nil)
+			continue
 		}
 
-		// Create run object from metadata
-		// Filter service containers to only those that still exist
-		serviceContainers := make(map[string]string, len(meta.ServiceContainers))
-		for name, id := range meta.ServiceContainers {
-			if _, scErr := m.runtime.ContainerState(ctx, id); scErr == nil {
-				serviceContainers[name] = id
-			}
+		needCheck = append(needCheck, persistedRunInfo{runID: runID, store: store, meta: meta})
+	}
+
+	// Phase 2: Check container states in parallel with bounded concurrency.
+	if len(needCheck) > 0 {
+		const maxWorkers = 10
+		type checkedRun struct {
+			info              persistedRunInfo
+			runState          State
+			serviceContainers map[string]string
 		}
 
-		r := &Run{
-			ID:                runID,
-			Name:              meta.Name,
-			Workspace:         meta.Workspace,
-			Grants:            meta.Grants,
-			Agent:             meta.Agent,
-			Image:             meta.Image,
-			Ports:             meta.Ports,
-			State:             runState,
-			ContainerID:       meta.ContainerID,
-			Store:             store,
-			Interactive:       meta.Interactive,
-			CreatedAt:         meta.CreatedAt,
-			StartedAt:         meta.StartedAt,
-			StoppedAt:         meta.StoppedAt,
-			Error:             meta.Error,
-			ProviderMeta:      meta.ProviderMeta,
-			exitCh:            make(chan struct{}),
-			ServiceContainers: serviceContainers,
-			NetworkID:         meta.NetworkID,
-			WorktreeBranch:    meta.WorktreeBranch,
-			WorktreePath:      meta.WorktreePath,
-			WorktreeRepoID:    meta.WorktreeRepoID,
-		}
+		results := make([]checkedRun, len(needCheck))
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
 
-		// If container is already stopped, close exitCh immediately
-		// so any Wait() calls don't hang, and clean up stale routes
-		// so the name can be reused without requiring "moat clean".
-		// Note: StateFailed is reachable via the default branch when
-		// meta.State is "failed" and the container is in an unknown state.
-		if runState == StateStopped || runState == StateFailed {
-			close(r.exitCh)
-			if r.Name != "" {
-				if err := m.routes.Remove(r.Name); err != nil {
-					log.Debug("removing stale route", "name", r.Name, "error", err)
+		for i, info := range needCheck {
+			wg.Add(1)
+			go func(idx int, info persistedRunInfo) {
+				defer wg.Done()
+
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					results[idx] = checkedRun{info: info, runState: StateStopped}
+					return
 				}
-			}
+				defer func() { <-sem }()
+
+				// 5-second timeout per container check.
+				callCtx, callCancel := context.WithTimeout(ctx, 5*time.Second)
+				defer callCancel()
+
+				var runState State
+				containerState, csErr := m.runtime.ContainerState(callCtx, info.meta.ContainerID)
+				if csErr != nil {
+					log.Debug("container state check failed, assuming stopped", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
+					runState = StateStopped
+				} else {
+					switch containerState {
+					case "running":
+						runState = StateRunning
+					case "exited", "dead", "stopped":
+						runState = StateStopped
+					case "created", "restarting":
+						runState = StateCreated
+					default:
+						runState = State(info.meta.State)
+					}
+				}
+
+				// Filter service containers to only those that still exist.
+				serviceContainers := make(map[string]string, len(info.meta.ServiceContainers))
+				for svcName, id := range info.meta.ServiceContainers {
+					svcCtx, svcCancel := context.WithTimeout(ctx, 5*time.Second)
+					if _, scErr := m.runtime.ContainerState(svcCtx, id); scErr == nil {
+						serviceContainers[svcName] = id
+					}
+					svcCancel()
+				}
+
+				results[idx] = checkedRun{
+					info:              info,
+					runState:          runState,
+					serviceContainers: serviceContainers,
+				}
+			}(i, info)
 		}
 
-		// Update metadata if state changed
-		if string(runState) != meta.State {
-			_ = r.SaveMetadata()
+		wg.Wait()
+
+		for _, cr := range results {
+			m.registerPersistedRun(cr.runState, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
 		}
-
-		m.mu.Lock()
-		m.runs[runID] = r
-		m.mu.Unlock()
-
-		// For running containers, start background monitor to capture logs when they exit.
-		// This handles the case where moat restarts while containers are running.
-		if runState == StateRunning {
-			go m.monitorContainerExit(context.Background(), r)
-		}
-
-		log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
 	}
 
 	return nil
+}
+
+// registerPersistedRun creates and registers a Run from persisted metadata.
+// If serviceContainers is nil, it is loaded directly from metadata (for terminal-state runs
+// that skip live container checks).
+func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
+	if serviceContainers == nil {
+		serviceContainers = meta.ServiceContainers
+	}
+
+	r := &Run{
+		ID:                runID,
+		Name:              meta.Name,
+		Workspace:         meta.Workspace,
+		Grants:            meta.Grants,
+		Agent:             meta.Agent,
+		Image:             meta.Image,
+		Ports:             meta.Ports,
+		State:             runState,
+		ContainerID:       meta.ContainerID,
+		Store:             store,
+		Interactive:       meta.Interactive,
+		CreatedAt:         meta.CreatedAt,
+		StartedAt:         meta.StartedAt,
+		StoppedAt:         meta.StoppedAt,
+		Error:             meta.Error,
+		ProviderMeta:      meta.ProviderMeta,
+		exitCh:            make(chan struct{}),
+		ServiceContainers: serviceContainers,
+		NetworkID:         meta.NetworkID,
+		WorktreeBranch:    meta.WorktreeBranch,
+		WorktreePath:      meta.WorktreePath,
+		WorktreeRepoID:    meta.WorktreeRepoID,
+	}
+
+	// If container is already stopped, close exitCh immediately
+	// so any Wait() calls don't hang, and clean up stale routes
+	// so the name can be reused without requiring "moat clean".
+	if runState == StateStopped || runState == StateFailed {
+		close(r.exitCh)
+		if r.Name != "" {
+			if err := m.routes.Remove(r.Name); err != nil {
+				log.Debug("removing stale route", "name", r.Name, "error", err)
+			}
+		}
+	}
+
+	// Update metadata if state changed
+	if string(runState) != meta.State {
+		_ = r.SaveMetadata()
+	}
+
+	m.mu.Lock()
+	m.runs[runID] = r
+	m.mu.Unlock()
+
+	// For running containers, start background monitor to capture logs when they exit.
+	// Use m.ctx so these goroutines are canceled when the Manager closes.
+	if runState == StateRunning {
+		monitorCtx := m.ctx
+		if monitorCtx == nil {
+			monitorCtx = context.Background()
+		}
+		go m.monitorContainerExit(monitorCtx, r)
+	}
+
+	log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
 }
 
 // Create initializes a new run without starting it.
@@ -2220,7 +2301,12 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 
 	// Start background monitor to capture logs when container exits.
 	// This is critical for detached runs where Wait() is never called.
-	go m.monitorContainerExit(context.Background(), r)
+	// Use m.ctx so the goroutine is canceled when the Manager closes.
+	monitorCtx := m.ctx
+	if monitorCtx == nil {
+		monitorCtx = context.Background()
+	}
+	go m.monitorContainerExit(monitorCtx, r)
 
 	return nil
 }
@@ -2716,8 +2802,10 @@ func (m *Manager) captureLogs(r *Run) {
 	}
 
 	// Fetch all logs from the container.
-	// Use a background context since the container may already be stopped.
-	allLogs, logErr := m.runtime.ContainerLogsAll(context.Background(), r.ContainerID)
+	// Use a background context with timeout since the container may already be stopped.
+	logCtx, logCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer logCancel()
+	allLogs, logErr := m.runtime.ContainerLogsAll(logCtx, r.ContainerID)
 	if logErr != nil {
 		log.Warn("failed to fetch container logs - creating empty logs.jsonl for audit", "runID", r.ID, "error", logErr)
 		// Still create empty logs.jsonl for audit completeness
@@ -2791,6 +2879,15 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// This is the ONLY place that calls WaitContainer to avoid race conditions
 	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
 
+	// If WaitContainer failed due to context cancellation (e.g. Manager.Close()),
+	// bail out without touching run state. The container is likely still running
+	// and a future Manager instance will pick it up via loadPersistedRuns.
+	// We check err (not ctx.Err()) so that a natural container exit that races
+	// with context cancellation still gets its logs captured and state updated.
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return
+	}
+
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
 	// We must get the logs while the container is still in "exited" state.
@@ -2822,8 +2919,13 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Save updated state
 	_ = r.SaveMetadata()
 
+	// Use a single 30-second timeout for all cleanup operations so a hung
+	// container operation can't block this goroutine indefinitely.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cleanupCancel()
+
 	// Stop the proxy server if one was created
-	if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
+	if stopErr := r.stopProxyServer(cleanupCtx); stopErr != nil {
 		log.Debug("stopping proxy after container exit", "error", stopErr)
 	}
 
@@ -2838,7 +2940,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		if svcMgr != nil {
 			for svcName, svcContainerID := range r.ServiceContainers {
 				log.Debug("stopping service after container exit", "service", svcName, "container_id", svcContainerID)
-				if stopErr := svcMgr.StopService(context.Background(), container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
+				if stopErr := svcMgr.StopService(cleanupCtx, container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
 					log.Debug("failed to stop service", "service", svcName, "error", stopErr)
 				}
 			}
@@ -2849,15 +2951,15 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// with connected containers, causing network leaks (#131).
 	if r.BuildkitContainerID != "" {
 		log.Debug("removing buildkit sidecar after container exit", "container_id", r.BuildkitContainerID)
-		if stopErr := m.runtime.StopContainer(context.Background(), r.BuildkitContainerID); stopErr != nil {
+		if stopErr := m.runtime.StopContainer(cleanupCtx, r.BuildkitContainerID); stopErr != nil {
 			log.Debug("failed to stop buildkit sidecar", "error", stopErr)
 		}
-		if rmErr := m.runtime.RemoveContainer(context.Background(), r.BuildkitContainerID); rmErr != nil {
+		if rmErr := m.runtime.RemoveContainer(cleanupCtx, r.BuildkitContainerID); rmErr != nil {
 			log.Debug("failed to remove buildkit sidecar", "error", rmErr)
 		}
 	}
 	if !r.KeepContainer {
-		if rmErr := m.runtime.RemoveContainer(context.Background(), r.ContainerID); rmErr != nil {
+		if rmErr := m.runtime.RemoveContainer(cleanupCtx, r.ContainerID); rmErr != nil {
 			log.Debug("failed to remove main container after exit", "error", rmErr)
 		}
 	}
@@ -2866,9 +2968,9 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	if r.NetworkID != "" {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
-			if removeErr := netMgr.RemoveNetwork(context.Background(), r.NetworkID); removeErr != nil {
+			if removeErr := netMgr.RemoveNetwork(cleanupCtx, r.NetworkID); removeErr != nil {
 				log.Debug("network removal failed, trying force removal", "network", r.NetworkID, "error", removeErr)
-				if forceErr := netMgr.ForceRemoveNetwork(context.Background(), r.NetworkID); forceErr != nil {
+				if forceErr := netMgr.ForceRemoveNetwork(cleanupCtx, r.NetworkID); forceErr != nil {
 					log.Debug("force network removal also failed", "network", r.NetworkID, "error", forceErr)
 				}
 			}
@@ -3125,10 +3227,19 @@ func (m *Manager) RuntimeType() string {
 
 // Close releases manager resources.
 func (m *Manager) Close() error {
-	// Stop all proxy servers
+	// Cancel background goroutines (monitorContainerExit) so lingering
+	// WaitContainer calls don't keep connections to Docker open.
+	if m.cancel != nil {
+		m.cancel()
+	}
+
+	// Stop all proxy/SSH servers with a 10-second overall timeout.
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer closeCancel()
+
 	m.mu.RLock()
 	for _, r := range m.runs {
-		if err := r.stopProxyServer(context.Background()); err != nil {
+		if err := r.stopProxyServer(closeCtx); err != nil {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}
 		if err := r.stopSSHAgentServer(); err != nil {
