@@ -25,6 +25,7 @@ internal/
   config/            agent.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)
+  daemon/            Proxy daemon lifecycle, Unix socket API, and run registration
   image/             Runtime-based image selection (node/python/go → base image)
   log/               Structured logging (slog wrapper)
   provider/          Provider registry and interfaces (CredentialProvider, AgentProvider)
@@ -33,7 +34,7 @@ internal/
     claude/            Claude Code CLI, grants, and config generation
     codex/             Codex CLI, grants, and config generation
     github/            GitHub token management and refresh
-  proxy/             TLS-intercepting proxy for credential injection and MCP relay
+  proxy/             TLS-intercepting proxy for credential injection, MCP relay, and routing
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
   ui/                TTY-aware colored output and formatting helpers
@@ -41,7 +42,7 @@ internal/
 
 ### Key Flows
 
-**Credential Injection:** `moat grant github` → token from gh CLI, env var, or PAT prompt → token stored encrypted → `moat run --grant github` → proxy started → container traffic routed through proxy → Authorization headers injected for matching hosts
+**Credential Injection:** `moat grant github` → token from gh CLI, env var, or PAT prompt → token stored encrypted → `moat run --grant github` → run registered with proxy daemon → container traffic routed through proxy → proxy resolves run by auth token → Authorization headers injected for matching hosts
 
 **Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X-slim / python:X-slim / golang:X / debian:bookworm-slim
 
@@ -53,14 +54,17 @@ internal/
 
 **MCP Integration:** `agent.yaml` defines remote MCP servers → `.claude.json` generated with relay URLs → Claude Code connects to proxy relay → proxy injects credentials → request forwarded to real MCP server with SSE streaming support
 
-### Proxy Security Model
+### Proxy Daemon
 
-The credential-injecting proxy has different security configurations per runtime:
+The credential-injecting proxy runs as a shared daemon process that outlives the CLI. A single daemon serves all active runs.
 
-- **Docker:** Proxy binds to `127.0.0.1` (localhost only). Containers reach it via `host.docker.internal` or host network mode.
-- **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://moat:token@host:port` URL format.
+- **Lifecycle:** Started automatically by `moat run` or manually via `moat proxy start`. Auto-shuts down after 5 minutes idle (no active runs).
+- **Management API:** Unix socket at `~/.moat/proxy/daemon.sock`. The CLI registers/unregisters runs via this socket.
+- **Per-run credential scoping:** Each run gets a cryptographic auth token (32 bytes from `crypto/rand`). The proxy looks up run-specific credentials, headers, network policy, and MCP config by token. Both Docker and Apple containers use token-based proxy auth (`HTTP_PROXY=http://moat:token@host:port`).
+- **Responsibilities:** Credential injection, token refresh, MCP relay, hostname routing, and network request logging.
+- **Lock file:** `~/.moat/proxy/daemon.lock` records PID and ports.
 
-See `internal/proxy/proxy.go` for the security model documentation.
+See `internal/proxy/proxy.go` and `internal/daemon/` for implementation.
 
 ### MCP (Model Context Protocol) Support
 
