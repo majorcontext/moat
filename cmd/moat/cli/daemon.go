@@ -75,7 +75,11 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// Determine the actual port the proxy is listening on.
 	actualPort := daemonProxyPort
 	if actualPort == 0 {
-		actualPort, _ = strconv.Atoi(proxyServer.Port())
+		p, err := strconv.Atoi(proxyServer.Port())
+		if err != nil {
+			log.Warn("failed to parse proxy port", "port", proxyServer.Port(), "error", err)
+		}
+		actualPort = p
 	}
 
 	// Start API server.
@@ -97,18 +101,16 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 
 	log.Info("daemon started", "pid", os.Getpid(), "proxy_port", actualPort, "sock", sockPath)
 
-	// Set up idle auto-shutdown (5 min).
-	idleShutdown := daemon.NewIdleTimer(5*time.Minute, func() {
-		log.Info("daemon idle timeout, shutting down")
-		_ = apiServer.Stop(context.Background())
-		_ = proxyServer.Stop(context.Background())
-		daemon.RemoveLockFile(daemonDir)
-	})
-	apiServer.SetOnEmpty(idleShutdown.Reset)
-
-	// Wait for signal.
+	// Wait for signal or idle timeout.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Set up idle auto-shutdown (5 min). On timeout, send SIGTERM to self.
+	idleShutdown := daemon.NewIdleTimer(5*time.Minute, func() {
+		log.Info("daemon idle timeout, shutting down")
+		sigCh <- syscall.SIGTERM
+	})
+	apiServer.SetOnEmpty(idleShutdown.Reset)
 	<-sigCh
 
 	log.Info("daemon shutting down")
