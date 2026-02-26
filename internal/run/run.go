@@ -48,10 +48,8 @@ type Run struct {
 	HostPorts         map[string]int    // endpoint name -> host port (after binding)
 	State             State
 	ContainerID       string
-	ProxyServer       *proxy.Server     // Auth proxy for credential injection
 	SSHAgentServer    *sshagent.Server  // SSH agent proxy for SSH key access
 	Store             *storage.RunStore // Run data storage
-	storeRef          *atomic.Value     // Atomic reference for concurrent logger access
 	logsCaptured      atomic.Bool       // Track if logs have been captured (for idempotency)
 	providerHooksDone atomic.Bool       // Track if provider stopped hooks have run (for idempotency)
 	exitCh            chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
@@ -65,7 +63,6 @@ type Run struct {
 	Error             string
 
 	// Shutdown coordination to prevent race conditions
-	proxyStopOnce    sync.Once // Ensures ProxyServer.Stop() called only once
 	sshAgentStopOnce sync.Once // Ensures SSHAgentServer.Stop() called only once
 
 	// State protection - guards State, Error, StartedAt, StoppedAt fields
@@ -177,22 +174,17 @@ func (r *Run) SaveMetadata() error {
 	})
 }
 
-// stopProxyServer safely stops the proxy server exactly once.
-// This method is safe to call concurrently from multiple goroutines.
-// It cancels the background token refresh loop before stopping the proxy.
-func (r *Run) stopProxyServer(ctx context.Context) error {
-	// Cancel token refresh loop before stopping proxy
+// stopProxyServer cancels the background token refresh loop.
+// The proxy itself is managed by the daemon process and does not need
+// to be stopped here. Daemon run unregistration is handled separately
+// by the Manager.
+//
+//nolint:unparam // error return kept for interface consistency with callers
+func (r *Run) stopProxyServer(_ context.Context) error {
 	if r.tokenRefreshCancel != nil {
 		r.tokenRefreshCancel()
 	}
-	var stopErr error
-	r.proxyStopOnce.Do(func() {
-		if r.ProxyServer != nil {
-			stopErr = r.ProxyServer.Stop(ctx)
-			r.ProxyServer = nil
-		}
-	})
-	return stopErr
+	return nil
 }
 
 // stopSSHAgentServer safely stops the SSH agent server exactly once.
