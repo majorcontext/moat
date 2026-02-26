@@ -38,7 +38,10 @@ func NewServer(sockPath string, proxyPort int) *Server {
 	mux.HandleFunc("DELETE /v1/runs/", s.handleUnregisterRun)
 	mux.HandleFunc("POST /v1/shutdown", s.handleShutdown)
 
-	s.server = &http.Server{Handler: mux}
+	s.server = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	return s
 }
 
@@ -56,7 +59,7 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.listener = listener
-	go s.server.Serve(listener)
+	go func() { _ = s.server.Serve(listener) }()
 	return nil
 }
 
@@ -160,7 +163,7 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.Stop(ctx)
+		_ = s.Stop(ctx)
 	}()
 }
 
@@ -176,5 +179,5 @@ func extractToken(path, prefix string) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
