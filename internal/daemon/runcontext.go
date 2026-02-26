@@ -8,6 +8,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/proxy"
 )
 
 // CredentialEntry holds a credential header for proxy injection.
@@ -189,4 +190,58 @@ func (rc *RunContext) GetResponseTransformers(host string) []credential.Response
 		return rc.ResponseTransformers[h]
 	}
 	return nil
+}
+
+// ToProxyContextData converts this RunContext into a proxy.RunContextData
+// for use in per-request credential resolution.
+func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	d := &proxy.RunContextData{
+		RunID:  rc.RunID,
+		Policy: rc.NetworkPolicy,
+	}
+
+	// Convert credentials.
+	d.Credentials = make(map[string]proxy.CredentialHeader, len(rc.Credentials))
+	for host, c := range rc.Credentials {
+		d.Credentials[host] = proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant}
+	}
+
+	// Convert extra headers.
+	d.ExtraHeaders = make(map[string][]proxy.ExtraHeader, len(rc.ExtraHeaders))
+	for host, headers := range rc.ExtraHeaders {
+		for _, h := range headers {
+			d.ExtraHeaders[host] = append(d.ExtraHeaders[host], proxy.ExtraHeader{Name: h.Name, Value: h.Value})
+		}
+	}
+
+	// Convert remove headers.
+	d.RemoveHeaders = make(map[string][]string, len(rc.RemoveHeaders))
+	for host, headers := range rc.RemoveHeaders {
+		d.RemoveHeaders[host] = append(d.RemoveHeaders[host], headers...)
+	}
+
+	// Convert token substitutions.
+	d.TokenSubstitutions = make(map[string]*proxy.TokenSubstitution, len(rc.TokenSubstitutions))
+	for host, ts := range rc.TokenSubstitutions {
+		d.TokenSubstitutions[host] = proxy.NewTokenSubstitution(ts.Placeholder, ts.RealToken)
+	}
+
+	// Convert response transformers.
+	d.ResponseTransformers = make(map[string][]credential.ResponseTransformer, len(rc.ResponseTransformers))
+	for host, transformers := range rc.ResponseTransformers {
+		d.ResponseTransformers[host] = append(d.ResponseTransformers[host], transformers...)
+	}
+
+	// Convert MCP servers.
+	d.MCPServers = rc.MCPServers
+
+	// Convert allowed hosts.
+	for _, host := range rc.NetworkAllow {
+		d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(host))
+	}
+
+	return d
 }

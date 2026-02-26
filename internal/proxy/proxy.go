@@ -204,6 +204,11 @@ type ExtraHeader = extraHeader
 // TokenSubstitution is the exported version of tokenSubstitution for daemon use.
 type TokenSubstitution = tokenSubstitution
 
+// NewTokenSubstitution creates a TokenSubstitution with the given placeholder and real token.
+func NewTokenSubstitution(placeholder, realToken string) *TokenSubstitution {
+	return &TokenSubstitution{placeholder: placeholder, realToken: realToken}
+}
+
 // HostPattern is the exported version of hostPattern.
 type HostPattern = hostPattern
 
