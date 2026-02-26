@@ -31,6 +31,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
@@ -45,6 +46,11 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 )
+
+// contextKey is the type for request-scoped context values.
+type contextKey int
+
+const runContextKey contextKey = iota
 
 // MaxBodySize is the maximum size of request/response bodies to capture (8KB).
 // Only this much is buffered for logging; the full body is always forwarded.
@@ -574,6 +580,136 @@ func (p *Proxy) getResponseTransformers(host string) []credential.ResponseTransf
 	return nil
 }
 
+// getRunContext extracts per-run context data from the request context.
+// Returns nil when no RunContextData is present (legacy mode).
+func getRunContext(r *http.Request) *RunContextData {
+	if rc, ok := r.Context().Value(runContextKey).(*RunContextData); ok {
+		return rc
+	}
+	return nil
+}
+
+// getCredentialForRequest returns the credential for a host, checking
+// RunContextData first, then falling back to the proxy's own map.
+func (p *Proxy) getCredentialForRequest(r *http.Request, host string) (credentialHeader, bool) {
+	if rc := getRunContext(r); rc != nil {
+		if cred, ok := rc.Credentials[host]; ok {
+			return cred, true
+		}
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			if cred, ok := rc.Credentials[h]; ok {
+				return cred, true
+			}
+		}
+		return credentialHeader{}, false
+	}
+	return p.getCredential(host)
+}
+
+// getExtraHeadersForRequest returns extra headers for a host, checking
+// RunContextData first, then falling back to the proxy's own map.
+func (p *Proxy) getExtraHeadersForRequest(r *http.Request, host string) []extraHeader {
+	if rc := getRunContext(r); rc != nil {
+		if headers, ok := rc.ExtraHeaders[host]; ok {
+			return headers
+		}
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			return rc.ExtraHeaders[h]
+		}
+		return nil
+	}
+	return p.getExtraHeaders(host)
+}
+
+// getRemoveHeadersForRequest returns headers to remove for a host, checking
+// RunContextData first, then falling back to the proxy's own map.
+func (p *Proxy) getRemoveHeadersForRequest(r *http.Request, host string) []string {
+	if rc := getRunContext(r); rc != nil {
+		if headers, ok := rc.RemoveHeaders[host]; ok {
+			return headers
+		}
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			return rc.RemoveHeaders[h]
+		}
+		return nil
+	}
+	return p.getRemoveHeaders(host)
+}
+
+// getTokenSubstitutionForRequest returns the token substitution for a host,
+// checking RunContextData first, then falling back to the proxy's own map.
+func (p *Proxy) getTokenSubstitutionForRequest(r *http.Request, host string) *tokenSubstitution {
+	if rc := getRunContext(r); rc != nil {
+		if sub, ok := rc.TokenSubstitutions[host]; ok {
+			return sub
+		}
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			return rc.TokenSubstitutions[h]
+		}
+		return nil
+	}
+	return p.getTokenSubstitution(host)
+}
+
+// getResponseTransformersForRequest returns response transformers for a host,
+// checking RunContextData first, then falling back to the proxy's own map.
+func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) []credential.ResponseTransformer {
+	if rc := getRunContext(r); rc != nil {
+		if transformers, ok := rc.ResponseTransformers[host]; ok {
+			return transformers
+		}
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			return rc.ResponseTransformers[h]
+		}
+		return nil
+	}
+	return p.getResponseTransformers(host)
+}
+
+// checkNetworkPolicyForRequest checks network policy using RunContextData first,
+// then falling back to the proxy's own policy.
+func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port int) bool {
+	if rc := getRunContext(r); rc != nil {
+		if rc.Policy != "strict" {
+			return true
+		}
+		return matchHost(rc.AllowedHosts, host, port)
+	}
+	return p.checkNetworkPolicy(host, port)
+}
+
+// getMCPServersForRequest returns MCP servers from RunContextData or falls
+// back to the proxy's own list.
+func (p *Proxy) getMCPServersForRequest(r *http.Request) []config.MCPServerConfig {
+	if rc := getRunContext(r); rc != nil {
+		return rc.MCPServers
+	}
+	return p.mcpServers
+}
+
+// getCredStoreForRequest returns the credential store from RunContextData
+// or falls back to the proxy's own store.
+func (p *Proxy) getCredStoreForRequest(r *http.Request) credential.Store {
+	if rc := getRunContext(r); rc != nil && rc.CredStore != nil {
+		return rc.CredStore
+	}
+	return p.credStore
+}
+
+// getAWSHandlerForRequest returns the AWS handler from RunContextData
+// or falls back to the proxy's own handler.
+func (p *Proxy) getAWSHandlerForRequest(r *http.Request) http.Handler {
+	if rc := getRunContext(r); rc != nil && rc.AWSHandler != nil {
+		return rc.AWSHandler
+	}
+	return p.awsHandler
+}
+
 // ServeHTTP handles proxy requests.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Relay endpoints are accessed directly (via NO_PROXY bypass), not through
@@ -588,14 +724,31 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.authToken != "" && !p.checkAuth(r) {
+	// Authentication and context resolution.
+	// When a contextResolver is set (daemon mode), extract the proxy auth token,
+	// resolve it to per-run context data, and store it in the request context.
+	// When no contextResolver is set (legacy single-run mode), use p.authToken check.
+	if p.contextResolver != nil {
+		token, ok := extractProxyToken(r)
+		if !ok {
+			http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
+			return
+		}
+		rc, found := p.contextResolver(token)
+		if !found {
+			http.Error(w, "Invalid proxy token", http.StatusProxyAuthRequired)
+			return
+		}
+		ctx := context.WithValue(r.Context(), runContextKey, rc)
+		r = r.WithContext(ctx)
+	} else if p.authToken != "" && !p.checkAuth(r) {
 		http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 		return
 	}
 
 	// Handle AWS credential endpoint
-	if p.awsHandler != nil && strings.HasPrefix(r.URL.Path, "/_aws/credentials") {
-		p.awsHandler.ServeHTTP(w, r)
+	if awsH := p.getAWSHandlerForRequest(r); awsH != nil && strings.HasPrefix(r.URL.Path, "/_aws/credentials") {
+		awsH.ServeHTTP(w, r)
 		return
 	}
 
@@ -630,32 +783,43 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.handleHTTP(w, r)
 }
 
-// checkAuth validates the Proxy-Authorization header against the required token.
-// Accepts both Basic auth (from HTTP_PROXY=http://moat:token@host) and Bearer format.
-// Uses constant-time comparison to prevent timing attacks.
-func (p *Proxy) checkAuth(r *http.Request) bool {
+// extractProxyToken extracts the token from a Proxy-Authorization header.
+// Supports both Basic auth (from HTTP_PROXY=http://moat:token@host) and Bearer format.
+// Returns the extracted token and true, or empty string and false if no valid token found.
+func extractProxyToken(r *http.Request) (string, bool) {
 	auth := r.Header.Get("Proxy-Authorization")
 	if auth == "" {
-		return false
+		return "", false
 	}
 
 	if strings.HasPrefix(auth, "Bearer ") {
-		return subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(p.authToken)) == 1
+		return auth[7:], true
 	}
 
 	if strings.HasPrefix(auth, "Basic ") {
 		decoded, err := base64.StdEncoding.DecodeString(auth[6:])
 		if err != nil {
-			return false
+			return "", false
 		}
 		parts := strings.SplitN(string(decoded), ":", 2)
 		if len(parts) != 2 {
-			return false
+			return "", false
 		}
-		return subtle.ConstantTimeCompare([]byte(parts[1]), []byte(p.authToken)) == 1
+		return parts[1], true
 	}
 
-	return false
+	return "", false
+}
+
+// checkAuth validates the Proxy-Authorization header against the required token.
+// Accepts both Basic auth (from HTTP_PROXY=http://moat:token@host) and Bearer format.
+// Uses constant-time comparison to prevent timing attacks.
+func (p *Proxy) checkAuth(r *http.Request) bool {
+	token, ok := extractProxyToken(r)
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(p.authToken)) == 1
 }
 
 // checkNetworkPolicy checks if the host:port is allowed by the network policy.
@@ -687,7 +851,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract host and infer port from scheme
 	host := r.URL.Hostname()
-	cred, authInjected := p.getCredential(host)
+	cred, authInjected := p.getCredentialForRequest(r, host)
 
 	// Capture request body and headers before forwarding
 	var reqBody []byte
@@ -708,7 +872,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check network policy
-	if !p.checkNetworkPolicy(host, port) {
+	if !p.checkNetworkPolicyForRequest(r, host, port) {
 		duration := time.Since(start)
 		// Log blocked request
 		p.logRequest(r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
@@ -744,19 +908,19 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inject any additional headers configured for this host.
 	// Merges with existing values (comma-separated) to preserve client
 	// headers like anthropic-beta that support multiple flags.
-	mergeExtraHeaders(outReq, host, p.getExtraHeaders(host))
+	mergeExtraHeaders(outReq, host, p.getExtraHeadersForRequest(r, host))
 
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 
 	// Remove headers that should be stripped
-	for _, headerName := range p.getRemoveHeaders(host) {
+	for _, headerName := range p.getRemoveHeadersForRequest(r, host) {
 		outReq.Header.Del(headerName)
 	}
 	// Apply token substitution if configured.
 	// Substitution targets outReq (not r), so r.URL.String() used for logging
 	// below still contains the placeholder, not the real token.
-	if sub := p.getTokenSubstitution(host); sub != nil {
+	if sub := p.getTokenSubstitutionForRequest(r, host); sub != nil {
 		p.applyTokenSubstitution(outReq, sub)
 	}
 
@@ -811,7 +975,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check network policy before establishing tunnel
-	if !p.checkNetworkPolicy(host, port) {
+	if !p.checkNetworkPolicyForRequest(r, host, port) {
 		// Log blocked request
 		if p.logger != nil {
 			p.logRequest(r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
@@ -878,7 +1042,7 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Request, host string) {
-	cred, authInjected := p.getCredential(host)
+	cred, authInjected := p.getCredentialForRequest(r, host)
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -935,8 +1099,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.URL.Host = r.Host
 		req.RequestURI = ""
 
-		// Inject MCP credentials if this is an MCP request
-		p.injectMCPCredentials(req)
+		// Inject MCP credentials if this is an MCP request.
+		// Use the CONNECT request r for context lookups since inner
+		// requests from the TLS stream don't carry the request context.
+		p.injectMCPCredentialsWithContext(r, req)
 
 		if authInjected {
 			req.Header.Set(cred.Name, cred.Value)
@@ -952,18 +1118,18 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// Inject any additional headers configured for this host.
 		// Merges with existing values (comma-separated) to preserve client
 		// headers like anthropic-beta that support multiple flags.
-		mergeExtraHeaders(req, r.Host, p.getExtraHeaders(r.Host))
+		mergeExtraHeaders(req, r.Host, p.getExtraHeadersForRequest(r, r.Host))
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")
 
 		// Remove headers that should be stripped for this host
-		for _, headerName := range p.getRemoveHeaders(host) {
+		for _, headerName := range p.getRemoveHeadersForRequest(r, host) {
 			req.Header.Del(headerName)
 		}
 		// Apply token substitution if configured for this host.
 		// Capture the URL before substitution so logs don't contain real tokens.
 		logURL := req.URL.String()
-		if sub := p.getTokenSubstitution(host); sub != nil {
+		if sub := p.getTokenSubstitutionForRequest(r, host); sub != nil {
 			p.applyTokenSubstitution(req, sub)
 		}
 
@@ -982,7 +1148,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			// Apply response transformers BEFORE capturing body
 			// so transformer can read the original response body.
 			// Only the first transformer that returns true is applied (transformers are not chained).
-			if transformers := p.getResponseTransformers(host); len(transformers) > 0 {
+			if transformers := p.getResponseTransformersForRequest(r, host); len(transformers) > 0 {
 				for _, transformer := range transformers {
 					if newRespInterface, transformed := transformer(req, resp); transformed {
 						if newResp, ok := newRespInterface.(*http.Response); ok {

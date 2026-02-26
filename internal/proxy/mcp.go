@@ -21,22 +21,34 @@ var mcpRelayClient = &http.Client{
 }
 
 // injectMCPCredentials checks if the request is to an MCP server and injects
-// the real credential if a stub is detected.
+// the real credential if a stub is detected. Uses the request's own context
+// for RunContextData lookup.
 func (p *Proxy) injectMCPCredentials(req *http.Request) {
-	if len(p.mcpServers) == 0 {
+	p.injectMCPCredentialsWithContext(req, req)
+}
+
+// injectMCPCredentialsWithContext checks if the target request is to an MCP
+// server and injects the real credential if a stub is detected.
+// The ctxReq parameter provides the RunContextData (from CONNECT request context),
+// while targetReq is the actual request being modified.
+func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request) {
+	mcpServers := p.getMCPServersForRequest(ctxReq)
+	if len(mcpServers) == 0 {
 		return
 	}
 
+	credStore := p.getCredStoreForRequest(ctxReq)
+
 	// Parse request URL to get host
-	reqHost := req.URL.Host
+	reqHost := targetReq.URL.Host
 	if reqHost == "" {
-		reqHost = req.Host
+		reqHost = targetReq.Host
 	}
 
 	// Find matching MCP server by host
 	var matchedServer *config.MCPServerConfig
-	for i := range p.mcpServers {
-		server := &p.mcpServers[i]
+	for i := range mcpServers {
+		server := &mcpServers[i]
 		if server.Auth == nil {
 			continue // No auth required
 		}
@@ -63,7 +75,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	}
 
 	// Check if the specified header exists
-	headerValue := req.Header.Get(matchedServer.Auth.Header)
+	headerValue := targetReq.Header.Get(matchedServer.Auth.Header)
 
 	if headerValue == "" {
 		log.Debug("MCP: header not present in request",
@@ -93,7 +105,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	}
 
 	// Load real credential
-	cred, err := p.credStore.Get(credential.Provider(matchedServer.Auth.Grant))
+	cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
 	if err != nil {
 		log.Error("MCP credential load failed",
 			"subsystem", "proxy",
@@ -107,7 +119,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 	}
 
 	// Replace stub with real credential
-	req.Header.Set(matchedServer.Auth.Header, cred.Token)
+	targetReq.Header.Set(matchedServer.Auth.Header, cred.Token)
 
 	log.Debug("credential injected",
 		"subsystem", "proxy",
@@ -116,7 +128,7 @@ func (p *Proxy) injectMCPCredentials(req *http.Request) {
 		"host", reqHost,
 		"header", matchedServer.Auth.Header,
 		"server", matchedServer.Name,
-		"path", req.URL.Path)
+		"path", targetReq.URL.Path)
 }
 
 // handleMCPRelay proxies MCP requests directly through the proxy with credential injection.
@@ -129,11 +141,14 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		serverName = serverName[:idx]
 	}
 
+	mcpServers := p.getMCPServersForRequest(r)
+	credStore := p.getCredStoreForRequest(r)
+
 	// Find the MCP server config
 	var mcpServer *config.MCPServerConfig
-	for i := range p.mcpServers {
-		if p.mcpServers[i].Name == serverName {
-			mcpServer = &p.mcpServers[i]
+	for i := range mcpServers {
+		if mcpServers[i].Name == serverName {
+			mcpServer = &mcpServers[i]
 			break
 		}
 	}
@@ -141,7 +156,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 	if mcpServer == nil {
 		// Include diagnostic info in error that will show up in Claude Code
 		http.Error(w, fmt.Sprintf("MOAT: MCP server '%s' not configured. Available servers: %d. Check agent.yaml.",
-			serverName, len(p.mcpServers)), http.StatusNotFound)
+			serverName, len(mcpServers)), http.StatusNotFound)
 		return
 	}
 
@@ -183,12 +198,12 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 	// Inject credentials
 	if mcpServer.Auth != nil {
-		if p.credStore == nil {
+		if credStore == nil {
 			http.Error(w, "MOAT: Credential store not initialized", http.StatusInternalServerError)
 			return
 		}
 
-		cred, credErr := p.credStore.Get(credential.Provider(mcpServer.Auth.Grant))
+		cred, credErr := credStore.Get(credential.Provider(mcpServer.Auth.Grant))
 		if credErr != nil {
 			http.Error(w, fmt.Sprintf("MOAT: Failed to load credential for '%s'. Grant: %s. Run: moat grant mcp %s",
 				serverName, mcpServer.Auth.Grant, strings.TrimPrefix(mcpServer.Auth.Grant, "mcp-")),

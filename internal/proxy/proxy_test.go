@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -898,5 +899,469 @@ func TestApplyTokenSubstitution_NoMatch(t *testing.T) {
 
 	if req.URL.Path != "/v1/something-else/action" {
 		t.Errorf("URL.Path should be unchanged, got %q", req.URL.Path)
+	}
+}
+
+// TestProxy_PerContextHTTPRequest verifies that per-run context data is used
+// to inject credentials when a ContextResolver is set.
+func TestProxy_PerContextHTTPRequest(t *testing.T) {
+	// Start a target HTTP server that echoes the Authorization header
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer target.Close()
+
+	p := NewProxy()
+
+	targetURL := mustParseURL(target.URL)
+	h := targetURL.Hostname()
+
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_token" {
+			return &RunContextData{
+				Credentials: map[string]credentialHeader{
+					h: {Name: "Authorization", Value: "Bearer injected"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", target.URL+"/test", nil)
+	req.Header.Set("Proxy-Authorization", "Bearer test_token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "Bearer injected" {
+		t.Errorf("expected 'Bearer injected', got %q", string(body))
+	}
+}
+
+// TestProxy_PerContextRejectsInvalidToken verifies that an invalid proxy token
+// is rejected with 407 when a ContextResolver is set.
+func TestProxy_PerContextRejectsInvalidToken(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+	req.Header.Set("Proxy-Authorization", "Bearer bad_token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_PerContextRejectsMissingToken verifies that a request without a
+// Proxy-Authorization header is rejected when a ContextResolver is set.
+func TestProxy_PerContextRejectsMissingToken(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		return &RunContextData{Policy: "permissive"}, true
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	// No Proxy-Authorization header set
+	resp, err := client.Get("http://example.com/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_PerContextNetworkPolicy verifies that per-run network policy
+// from RunContextData is applied correctly.
+func TestProxy_PerContextNetworkPolicy(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "strict_run" {
+			return &RunContextData{
+				Policy:       "strict",
+				AllowedHosts: []hostPattern{}, // allow nothing
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer strict_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// Should be blocked since the host is not in the allow list
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (blocked by policy), got %d", resp.StatusCode)
+	}
+
+	// Verify the blocked header
+	if resp.Header.Get("X-Moat-Blocked") != "network-policy" {
+		t.Errorf("expected X-Moat-Blocked header, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+
+	// Now test with a permissive context
+	p2 := NewProxy()
+	p2.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "permissive_run" {
+			return &RunContextData{
+				Credentials: map[string]credentialHeader{
+					backendURL.Hostname(): {Name: "Authorization", Value: "Bearer ctx-token"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer2 := httptest.NewServer(p2)
+	defer proxyServer2.Close()
+
+	proxyURL2 := mustParseURL(proxyServer2.URL)
+	client2 := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL2)}}
+
+	req2, _ := http.NewRequest("GET", backend.URL, nil)
+	req2.Header.Set("Proxy-Authorization", "Bearer permissive_run")
+	resp2, err := client2.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp2.StatusCode)
+	}
+}
+
+// TestProxy_PerContextExtraHeaders verifies that extra headers from
+// RunContextData are injected.
+func TestProxy_PerContextExtraHeaders(t *testing.T) {
+	var receivedBeta string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("anthropic-beta")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "extra_run" {
+			return &RunContextData{
+				ExtraHeaders: map[string][]extraHeader{
+					h: {{Name: "anthropic-beta", Value: "oauth-2025-04-20"}},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer extra_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if receivedBeta != "oauth-2025-04-20" {
+		t.Errorf("anthropic-beta = %q, want %q", receivedBeta, "oauth-2025-04-20")
+	}
+}
+
+// TestProxy_PerContextRemoveHeaders verifies that remove headers from
+// RunContextData are applied.
+func TestProxy_PerContextRemoveHeaders(t *testing.T) {
+	var receivedKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedKey = r.Header.Get("x-api-key")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "remove_run" {
+			return &RunContextData{
+				RemoveHeaders: map[string][]string{
+					h: {"x-api-key"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer remove_run")
+	req.Header.Set("x-api-key", "should-be-removed")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if receivedKey != "" {
+		t.Errorf("x-api-key should be removed, got %q", receivedKey)
+	}
+}
+
+// TestProxy_PerContextTokenSubstitution verifies that token substitution from
+// RunContextData is applied.
+func TestProxy_PerContextTokenSubstitution(t *testing.T) {
+	var receivedAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "sub_run" {
+			return &RunContextData{
+				TokenSubstitutions: map[string]*tokenSubstitution{
+					h: {placeholder: "PLACEHOLDER", realToken: "real-secret"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer sub_run")
+	req.Header.Set("Authorization", "Bearer PLACEHOLDER")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if receivedAuth != "Bearer real-secret" {
+		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer real-secret")
+	}
+}
+
+// TestProxy_PerContextBasicAuth verifies that Basic auth format works with
+// context resolver (e.g., from HTTP_PROXY=http://moat:token@host).
+func TestProxy_PerContextBasicAuth(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "basic_token" {
+			return &RunContextData{
+				Credentials: map[string]credentialHeader{
+					h: {Name: "Authorization", Value: "Bearer injected-via-basic"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	proxyURL.User = url.UserPassword("moat", "basic_token")
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "Bearer injected-via-basic" {
+		t.Errorf("expected 'Bearer injected-via-basic', got %q", string(body))
+	}
+}
+
+// TestProxy_PerContextIsolation verifies that different tokens get different
+// credentials injected - requests are isolated per-run.
+func TestProxy_PerContextIsolation(t *testing.T) {
+	var mu sync.Mutex
+	received := make(map[string]string)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received[r.URL.Path] = r.Header.Get("Authorization")
+		mu.Unlock()
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		switch token {
+		case "run_a":
+			return &RunContextData{
+				Credentials: map[string]credentialHeader{
+					h: {Name: "Authorization", Value: "Bearer token-A"},
+				},
+				Policy: "permissive",
+			}, true
+		case "run_b":
+			return &RunContextData{
+				Credentials: map[string]credentialHeader{
+					h: {Name: "Authorization", Value: "Bearer token-B"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	// Request with token A
+	reqA, _ := http.NewRequest("GET", backend.URL+"/path-a", nil)
+	reqA.Header.Set("Proxy-Authorization", "Bearer run_a")
+	respA, err := client.Do(reqA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respA.Body.Close()
+
+	// Request with token B
+	reqB, _ := http.NewRequest("GET", backend.URL+"/path-b", nil)
+	reqB.Header.Set("Proxy-Authorization", "Bearer run_b")
+	respB, err := client.Do(reqB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respB.Body.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if received["/path-a"] != "Bearer token-A" {
+		t.Errorf("path-a got %q, want %q", received["/path-a"], "Bearer token-A")
+	}
+	if received["/path-b"] != "Bearer token-B" {
+		t.Errorf("path-b got %q, want %q", received["/path-b"], "Bearer token-B")
+	}
+}
+
+// TestProxy_LegacyModeUnchanged verifies that when no ContextResolver is set,
+// the proxy works exactly as before.
+func TestProxy_LegacyModeUnchanged(t *testing.T) {
+	var receivedAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetCredential("127.0.0.1", "Bearer legacy-token")
+	// No ContextResolver set - should work exactly as before
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if receivedAuth != "Bearer legacy-token" {
+		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer legacy-token")
 	}
 }
