@@ -214,7 +214,12 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			go func(idx int, info persistedRunInfo) {
 				defer wg.Done()
 
-				sem <- struct{}{}
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					results[idx] = checkedRun{info: info, runState: StateStopped}
+					return
+				}
 				defer func() { <-sem }()
 
 				// 5-second timeout per container check.
@@ -224,7 +229,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				var runState State
 				containerState, csErr := m.runtime.ContainerState(callCtx, info.meta.ContainerID)
 				if csErr != nil {
-					log.Debug("container not found", "id", info.runID, "container", info.meta.ContainerID)
+					log.Debug("container state check failed, assuming stopped", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
 					runState = StateStopped
 				} else {
 					switch containerState {
@@ -2874,10 +2879,12 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// This is the ONLY place that calls WaitContainer to avoid race conditions
 	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
 
-	// If the context was canceled (e.g. Manager.Close()), bail out without
-	// touching run state. The container is likely still running and a future
-	// Manager instance will pick it up via loadPersistedRuns.
-	if ctx.Err() != nil {
+	// If WaitContainer failed due to context cancellation (e.g. Manager.Close()),
+	// bail out without touching run state. The container is likely still running
+	// and a future Manager instance will pick it up via loadPersistedRuns.
+	// We check err (not ctx.Err()) so that a natural container exit that races
+	// with context cancellation still gets its logs captured and state updated.
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return
 	}
 
