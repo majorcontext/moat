@@ -69,6 +69,7 @@ type RequestLogData struct {
 	ResponseBody       []byte
 	AuthInjected       bool   // True if credential header was injected for this host
 	InjectedHeaderName string // Name of the injected header (for filtering)
+	RunID              string // Run ID from per-run context (daemon mode)
 }
 
 // RequestLogger is called for each proxied request.
@@ -157,9 +158,17 @@ func FilterHeaders(headers http.Header, authInjected bool, injectedHeaderName st
 }
 
 // logRequest is a helper that logs request data if a logger is configured.
-func (p *Proxy) logRequest(method, url string, statusCode int, duration time.Duration, err error, reqHeaders, respHeaders http.Header, reqBody, respBody []byte, authInjected bool, injectedHeaderName string) {
+// The ctxReq parameter provides the RunContextData (from CONNECT or HTTP request context)
+// for extracting the RunID; it may be nil when context is unavailable.
+func (p *Proxy) logRequest(ctxReq *http.Request, method, url string, statusCode int, duration time.Duration, err error, reqHeaders, respHeaders http.Header, reqBody, respBody []byte, authInjected bool, injectedHeaderName string) {
 	if p.logger == nil {
 		return
+	}
+	var runID string
+	if ctxReq != nil {
+		if rc := getRunContext(ctxReq); rc != nil {
+			runID = rc.RunID
+		}
 	}
 	p.logger(RequestLogData{
 		Method:             method,
@@ -173,6 +182,7 @@ func (p *Proxy) logRequest(method, url string, statusCode int, duration time.Dur
 		ResponseBody:       respBody,
 		AuthInjected:       authInjected,
 		InjectedHeaderName: injectedHeaderName,
+		RunID:              runID,
 	})
 }
 
@@ -880,7 +890,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if !p.checkNetworkPolicyForRequest(r, host, port) {
 		duration := time.Since(start)
 		// Log blocked request
-		p.logRequest(r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
+		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
 		return
@@ -947,7 +957,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if authInjected {
 		logCredHeaderName = cred.Name
 	}
-	p.logRequest(r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
+	p.logRequest(r, r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -983,7 +993,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if !p.checkNetworkPolicyForRequest(r, host, port) {
 		// Log blocked request
 		if p.logger != nil {
-			p.logRequest(r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
 		}
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
@@ -1174,7 +1184,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if authInjected {
 			logCredHeaderName = cred.Name
 		}
-		p.logRequest(req.Method, logURL, statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
+		p.logRequest(r, req.Method, logURL, statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
 
 		if err != nil {
 			errResp := &http.Response{

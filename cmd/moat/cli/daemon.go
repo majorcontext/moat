@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +63,51 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 			return nil, false
 		}
 		return rc.ToProxyContextData(), true
+	})
+
+	// Wire network request logging. The proxy is shared across runs, so
+	// the logger routes to per-run storage using the RunID from request context.
+	var storeMu sync.Mutex
+	stores := make(map[string]*storage.RunStore)
+	baseDir := storage.DefaultBaseDir()
+
+	p.SetLogger(func(data proxy.RequestLogData) {
+		if data.RunID == "" {
+			return
+		}
+
+		storeMu.Lock()
+		store, ok := stores[data.RunID]
+		if !ok {
+			var storeErr error
+			store, storeErr = storage.NewRunStore(baseDir, data.RunID)
+			if storeErr != nil {
+				storeMu.Unlock()
+				log.Warn("failed to open run store for network log",
+					"run_id", data.RunID, "error", storeErr)
+				return
+			}
+			stores[data.RunID] = store
+		}
+		storeMu.Unlock()
+
+		var errStr string
+		if data.Err != nil {
+			errStr = data.Err.Error()
+		}
+		_ = store.WriteNetworkRequest(storage.NetworkRequest{
+			Timestamp:       time.Now().UTC(),
+			Method:          data.Method,
+			URL:             data.URL,
+			StatusCode:      data.StatusCode,
+			Duration:        data.Duration.Milliseconds(),
+			Error:           errStr,
+			RequestHeaders:  proxy.FilterHeaders(data.RequestHeaders, data.AuthInjected, data.InjectedHeaderName),
+			ResponseHeaders: proxy.FilterHeaders(data.ResponseHeaders, false, ""),
+			RequestBody:     string(data.RequestBody),
+			ResponseBody:    string(data.ResponseBody),
+			BodyTruncated:   len(data.RequestBody) > proxy.MaxBodySize || len(data.ResponseBody) > proxy.MaxBodySize,
+		})
 	})
 
 	// Start credential proxy.

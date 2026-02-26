@@ -87,10 +87,16 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		os.Remove(lock.SockPath)
 	}
 
-	// Start new daemon via self-exec.
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("finding executable: %w", err)
+	// Start new daemon via self-exec. Allow overriding the executable path
+	// via MOAT_EXECUTABLE for environments where os.Executable() doesn't
+	// return a moat binary (e.g., test binaries during E2E tests).
+	exe := os.Getenv("MOAT_EXECUTABLE")
+	if exe == "" {
+		var exeErr error
+		exe, exeErr = os.Executable()
+		if exeErr != nil {
+			return nil, fmt.Errorf("finding executable: %w", exeErr)
+		}
 	}
 
 	args := []string{exe, "_daemon",
@@ -106,11 +112,16 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 	defer devNull.Close()
 
+	// Ensure the daemon directory exists before opening the log file.
+	if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+		return nil, fmt.Errorf("creating daemon directory: %w", mkErr)
+	}
+
 	// Send daemon stderr to a log file for debugging startup failures.
 	logPath := filepath.Join(dir, "daemon.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		logFile = nil // non-fatal; discard output
+		logFile = devNull // non-fatal; discard output rather than passing nil fds
 	}
 
 	attr := &os.ProcAttr{
