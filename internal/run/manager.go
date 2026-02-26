@@ -83,6 +83,11 @@ type Manager struct {
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
 	mu             sync.RWMutex
+
+	// ctx/cancel control background goroutines (e.g. monitorContainerExit).
+	// Canceled in Close() so lingering WaitContainer calls don't leak.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // ManagerOptions configures the run manager.
@@ -118,11 +123,14 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		runtime:        rt,
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	// Load existing runs from disk and reconcile with container state.
@@ -314,8 +322,13 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 	m.mu.Unlock()
 
 	// For running containers, start background monitor to capture logs when they exit.
+	// Use m.ctx so these goroutines are canceled when the Manager closes.
 	if runState == StateRunning {
-		go m.monitorContainerExit(context.Background(), r)
+		monitorCtx := m.ctx
+		if monitorCtx == nil {
+			monitorCtx = context.Background()
+		}
+		go m.monitorContainerExit(monitorCtx, r)
 	}
 
 	log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
@@ -3195,6 +3208,12 @@ func (m *Manager) RuntimeType() string {
 
 // Close releases manager resources.
 func (m *Manager) Close() error {
+	// Cancel background goroutines (monitorContainerExit) so lingering
+	// WaitContainer calls don't keep connections to Docker open.
+	if m.cancel != nil {
+		m.cancel()
+	}
+
 	// Stop all proxy/SSH servers with a 10-second overall timeout.
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer closeCancel()
