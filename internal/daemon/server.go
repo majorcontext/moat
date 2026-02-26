@@ -1,0 +1,180 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// Server is the daemon's HTTP API server over a Unix socket.
+type Server struct {
+	sockPath  string
+	proxyPort int
+	registry  *Registry
+	server    *http.Server
+	listener  net.Listener
+	startedAt time.Time
+	onEmpty   func() // called when last run is unregistered
+}
+
+// NewServer creates a daemon API server that will listen on the given Unix socket path.
+func NewServer(sockPath string, proxyPort int) *Server {
+	s := &Server{
+		sockPath:  sockPath,
+		proxyPort: proxyPort,
+		registry:  NewRegistry(),
+		startedAt: time.Now(),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	mux.HandleFunc("POST /v1/runs", s.handleRegisterRun)
+	mux.HandleFunc("GET /v1/runs", s.handleListRuns)
+	mux.HandleFunc("PATCH /v1/runs/", s.handleUpdateRun)
+	mux.HandleFunc("DELETE /v1/runs/", s.handleUnregisterRun)
+	mux.HandleFunc("POST /v1/shutdown", s.handleShutdown)
+
+	s.server = &http.Server{Handler: mux}
+	return s
+}
+
+// Registry returns the server's run registry.
+func (s *Server) Registry() *Registry { return s.registry }
+
+// SetOnEmpty sets a callback that is invoked when the last run is unregistered.
+func (s *Server) SetOnEmpty(fn func()) { s.onEmpty = fn }
+
+// Start begins listening on the Unix socket. Any stale socket file is removed first.
+func (s *Server) Start() error {
+	os.Remove(s.sockPath) // remove stale socket
+	listener, err := net.Listen("unix", s.sockPath)
+	if err != nil {
+		return err
+	}
+	s.listener = listener
+	go s.server.Serve(listener)
+	return nil
+}
+
+// Stop gracefully shuts down the server and removes the socket file.
+func (s *Server) Stop(ctx context.Context) error {
+	err := s.server.Shutdown(ctx)
+	os.Remove(s.sockPath)
+	return err
+}
+
+// handleHealth responds with daemon health information.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	resp := HealthResponse{
+		PID:       os.Getpid(),
+		ProxyPort: s.proxyPort,
+		RunCount:  s.registry.Count(),
+		StartedAt: s.startedAt.Format(time.RFC3339),
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleRegisterRun registers a new run and returns the auth token.
+func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	rc := req.ToRunContext()
+	token := s.registry.Register(rc)
+
+	resp := RegisterResponse{
+		AuthToken: token,
+		ProxyPort: s.proxyPort,
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// handleListRuns returns all registered runs.
+func (s *Server) handleListRuns(w http.ResponseWriter, _ *http.Request) {
+	runs := s.registry.List()
+	infos := make([]RunInfo, len(runs))
+	for i, rc := range runs {
+		infos[i] = RunInfo{
+			RunID:        rc.RunID,
+			ContainerID:  rc.ContainerID,
+			RegisteredAt: rc.RegisteredAt.Format(time.RFC3339),
+		}
+	}
+	writeJSON(w, http.StatusOK, infos)
+}
+
+// handleUpdateRun updates a run's container ID.
+func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r.URL.Path, "/v1/runs/")
+	if token == "" {
+		http.Error(w, `{"error":"missing token"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !s.registry.UpdateContainerID(token, req.ContainerID) {
+		http.Error(w, `{"error":"run not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUnregisterRun removes a run from the registry.
+func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r.URL.Path, "/v1/runs/")
+	if token == "" {
+		http.Error(w, `{"error":"missing token"}`, http.StatusBadRequest)
+		return
+	}
+
+	if _, ok := s.registry.Lookup(token); !ok {
+		http.Error(w, `{"error":"run not found"}`, http.StatusNotFound)
+		return
+	}
+
+	s.registry.Unregister(token)
+	w.WriteHeader(http.StatusNoContent)
+
+	if s.onEmpty != nil && s.registry.Count() == 0 {
+		s.onEmpty()
+	}
+}
+
+// handleShutdown initiates a graceful server shutdown.
+func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.Stop(ctx)
+	}()
+}
+
+// extractToken extracts the token from a URL path by stripping the prefix.
+func extractToken(path, prefix string) string {
+	token := strings.TrimPrefix(path, prefix)
+	// Remove any trailing slash.
+	token = strings.TrimSuffix(token, "/")
+	return token
+}
+
+// writeJSON marshals v as JSON and writes it to w with the given status code.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
