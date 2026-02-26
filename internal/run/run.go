@@ -86,9 +86,6 @@ type Run struct {
 	// AWS credential provider (set when using aws grant)
 	AWSCredentialProvider *proxy.AWSCredentialProvider
 
-	// tokenRefreshCancel cancels the background token refresh goroutine.
-	tokenRefreshCancel context.CancelFunc
-
 	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
 	awsTempDir string
 
@@ -174,16 +171,12 @@ func (r *Run) SaveMetadata() error {
 	})
 }
 
-// stopProxyServer cancels the background token refresh loop.
-// The proxy itself is managed by the daemon process and does not need
-// to be stopped here. Daemon run unregistration is handled separately
-// by the Manager.
+// stopProxyServer is a no-op. The proxy is managed by the daemon process
+// and token refresh is handled by the daemon. Daemon run unregistration
+// is handled separately by the Manager.
 //
 //nolint:unparam // error return kept for interface consistency with callers
 func (r *Run) stopProxyServer(_ context.Context) error {
-	if r.tokenRefreshCancel != nil {
-		r.tokenRefreshCancel()
-	}
 	return nil
 }
 

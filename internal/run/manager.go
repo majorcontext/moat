@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -533,9 +532,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			key,
 		)
 
-		// Collect refreshable targets during grant loop
-		var refreshTargets []refreshTarget
-
 		// Track Anthropic/Claude credential for base URL proxy setup
 		var anthropicCred *provider.Credential
 
@@ -577,16 +573,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Capture Anthropic/Claude credential for base URL proxy setup
 				if credName == credential.ProviderClaude || credName == credential.ProviderAnthropic {
 					anthropicCred = provCred
-				}
-
-				// Check if this provider supports token refresh
-				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
-					refreshTargets = append(refreshTargets, refreshTarget{
-						providerName: credName,
-						refresher:    rp,
-						cred:         cred,
-						store:        store,
-					})
 				}
 
 				// Handle AWS endpoint provider
@@ -646,16 +632,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Store proxy details for firewall setup (applied after container starts)
 		if needsProxyForFirewall {
 			r.FirewallEnabled = true
-		}
-
-		// Start background token refresh loop for refreshable grants.
-		// The RunContext implements ProxyConfigurer, so the refresh loop
-		// updates credentials on the RunContext. Note: updates are local
-		// until Task 13 wires daemon credential updates.
-		if len(refreshTargets) > 0 {
-			refreshCtx, refreshCancel := context.WithCancel(context.Background())
-			r.tokenRefreshCancel = refreshCancel
-			go m.runTokenRefreshLoop(refreshCtx, r, runCtx, refreshTargets)
 		}
 
 		// Determine proxy URL based on runtime's host address
@@ -3375,144 +3351,6 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	}
 
 	return nil
-}
-
-// refreshTarget holds the state for a single refreshable credential.
-type refreshTarget struct {
-	providerName credential.Provider
-	refresher    provider.RefreshableProvider
-	cred         *credential.Credential
-	store        credential.Store
-
-	// Retry state for exponential backoff
-	nextRetryAfter time.Time
-	retryDelay     time.Duration
-	revoked        bool
-}
-
-const (
-	refreshRetryMin = 30 * time.Second
-	refreshRetryMax = 5 * time.Minute
-)
-
-// runTokenRefreshLoop periodically re-acquires tokens from their original source.
-// It performs an immediate refresh at startup, then refreshes on the shortest
-// provider interval. Exits when ctx is canceled or the run's exitCh closes.
-func (m *Manager) runTokenRefreshLoop(ctx context.Context, r *Run, p credential.ProxyConfigurer, targets []refreshTarget) {
-	// Immediate refresh at startup — get a fresh token before the session begins
-	for i := range targets {
-		m.refreshToken(ctx, r, p, &targets[i])
-	}
-
-	interval := minRefreshInterval(targets)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-r.exitCh:
-			return
-		case <-ticker.C:
-			for i := range targets {
-				m.refreshToken(ctx, r, p, &targets[i])
-			}
-		}
-	}
-}
-
-// refreshToken attempts to refresh a single credential target.
-// On failure, it applies exponential backoff. On revocation, it stops retrying.
-func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyConfigurer, target *refreshTarget) {
-	if target.revoked {
-		return
-	}
-	if !target.nextRetryAfter.IsZero() && time.Now().Before(target.nextRetryAfter) {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	provCred := provider.FromLegacy(target.cred)
-	newCred, err := target.refresher.Refresh(ctx, p, provCred)
-
-	if err != nil {
-		if errors.Is(err, provider.ErrTokenRevoked) {
-			target.revoked = true
-			ui.Warnf("Token for %s has been revoked. Run 'moat grant %s' to re-authenticate.", target.providerName, target.providerName)
-			log.Warn("refresh token revoked, stopping refresh",
-				"provider", target.providerName, "error", err)
-			return
-		}
-
-		// Exponential backoff
-		if target.retryDelay == 0 {
-			target.retryDelay = refreshRetryMin
-		} else {
-			target.retryDelay *= 2
-			if target.retryDelay > refreshRetryMax {
-				target.retryDelay = refreshRetryMax
-			}
-		}
-		target.nextRetryAfter = time.Now().Add(target.retryDelay)
-
-		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.providerName)
-		log.Debug("token refresh failed, keeping existing token",
-			"provider", target.providerName, "error", err, "retry_in", target.retryDelay)
-		return
-	}
-
-	// Reset backoff on success
-	target.retryDelay = 0
-	target.nextRetryAfter = time.Time{}
-
-	// Convert back to credential.Credential
-	var updated *credential.Credential
-	if newCred != nil {
-		updated = &credential.Credential{
-			Provider:  target.providerName,
-			Token:     newCred.Token,
-			Scopes:    newCred.Scopes,
-			ExpiresAt: newCred.ExpiresAt,
-			CreatedAt: newCred.CreatedAt,
-			Metadata:  newCred.Metadata,
-		}
-	}
-
-	// Token unchanged — no-op
-	if updated == nil || updated.Token == target.cred.Token {
-		return
-	}
-
-	// Update in-memory credential for next cycle
-	target.cred = updated
-
-	// Persist to store so crash recovery uses the latest token
-	if target.store != nil {
-		if err := target.store.Save(*updated); err != nil {
-			log.Warn("failed to persist refreshed token",
-				"provider", target.providerName, "error", err)
-		}
-	}
-
-	log.Debug("token refreshed", "provider", target.providerName, "run_id", r.ID)
-}
-
-// minRefreshInterval returns the shortest refresh interval across all targets.
-func minRefreshInterval(targets []refreshTarget) time.Duration {
-	var min time.Duration
-	for i, t := range targets {
-		d := t.refresher.RefreshInterval()
-		if i == 0 || (d > 0 && d < min) {
-			min = d
-		}
-	}
-	if min == 0 {
-		min = 30 * time.Minute // Default fallback
-	}
-	return min
 }
 
 // buildRegisterRequest converts a daemon.RunContext into a daemon.RegisterRequest
