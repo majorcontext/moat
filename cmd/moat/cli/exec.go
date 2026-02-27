@@ -312,7 +312,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
 	}
 
-	// Wrap stdin with escape proxy to detect detach/stop sequences
+	// Wrap stdin with escape proxy to detect stop sequences
 	escapeProxy := term.NewEscapeProxy(os.Stdin)
 
 	// Set up callback to update footer when escape sequence is in progress
@@ -402,25 +402,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			// SIGINT is forwarded to container via attached stdin/tty
 
 		case action := <-escapeCh:
-			// Handle escape sequence
-			switch action {
-			case term.EscapeDetach:
-				attachCancel()
-				// Wait for attach goroutine to complete before checking state
-				select {
-				case <-attachDone:
-				case <-time.After(500 * time.Millisecond):
-				}
-				currentRun, _ := manager.Get(r.ID)
-				if currentRun != nil && currentRun.State == run.StateRunning {
-					fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
-					fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
-				} else {
-					fmt.Printf("\r\nRun %s stopped\r\n", r.ID)
-				}
-				return nil
-
-			case term.EscapeStop:
+			if action == term.EscapeStop {
 				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
 				attachCancel()
 				if err := manager.Stop(context.Background(), r.ID); err != nil {
