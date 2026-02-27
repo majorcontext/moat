@@ -110,6 +110,9 @@ func TestGenerateDockerfileMergedAptPackages(t *testing.T) {
 	if !strings.Contains(result.Dockerfile, "ca-certificates") {
 		t.Error("Dockerfile should include base package ca-certificates")
 	}
+	if !strings.Contains(result.Dockerfile, "tmux") {
+		t.Error("Dockerfile should include base package tmux")
+	}
 	if !strings.Contains(result.Dockerfile, "git") {
 		t.Error("Dockerfile should include user package git")
 	}

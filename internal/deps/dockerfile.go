@@ -342,7 +342,7 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 
 // baseAptPackages are always installed regardless of user configuration.
 // iptables is NOT included here; it is added conditionally via NeedsFirewall.
-var baseAptPackages = []string{"ca-certificates", "curl", "gnupg", "gosu", "unzip"}
+var baseAptPackages = []string{"ca-certificates", "curl", "gnupg", "gosu", "tmux", "unzip"}
 
 // writeAllAptPackages writes a single apt-get install layer combining base and user packages.
 // Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.
