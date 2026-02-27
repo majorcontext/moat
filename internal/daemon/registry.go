@@ -54,7 +54,9 @@ func (r *Registry) UpdateContainerID(token, containerID string) bool {
 	if !ok {
 		return false
 	}
+	rc.mu.Lock()
 	rc.ContainerID = containerID
+	rc.mu.Unlock()
 	return true
 }
 

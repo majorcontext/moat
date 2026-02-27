@@ -18,6 +18,7 @@ type LivenessChecker struct {
 	checker   ContainerChecker
 	interval  time.Duration
 	onCleanup func(token string)
+	onEmpty   func() // called when registry becomes empty after cleanup
 }
 
 // NewLivenessChecker creates a new liveness checker with 30-second default interval.
@@ -34,25 +35,36 @@ func (lc *LivenessChecker) SetOnCleanup(fn func(token string)) {
 	lc.onCleanup = fn
 }
 
+// SetOnEmpty sets a callback invoked when the registry becomes empty after cleanup.
+func (lc *LivenessChecker) SetOnEmpty(fn func()) {
+	lc.onEmpty = fn
+}
+
 // CheckOnce performs a single liveness check for all registered runs.
 func (lc *LivenessChecker) CheckOnce(ctx context.Context) {
 	for _, rc := range lc.registry.List() {
 		// Skip runs that haven't completed phase 2 registration
-		if rc.ContainerID == "" {
+		containerID := rc.GetContainerID()
+		if containerID == "" {
 			continue
 		}
 		// Per-check timeout prevents a hung container runtime from blocking
 		// all liveness checks (and by extension the idle shutdown timer).
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		alive := lc.checker.IsContainerRunning(checkCtx, rc.ContainerID)
+		alive := lc.checker.IsContainerRunning(checkCtx, containerID)
 		cancel()
 		if !alive {
 			log.Info("container no longer running, cleaning up",
 				"run_id", rc.RunID,
-				"container_id", rc.ContainerID)
+				"container_id", containerID)
+			// Cancel refresh goroutine before unregistering to prevent leaks
+			rc.CancelRefresh()
 			lc.registry.Unregister(rc.AuthToken)
 			if lc.onCleanup != nil {
 				lc.onCleanup(rc.AuthToken)
+			}
+			if lc.onEmpty != nil && lc.registry.Count() == 0 {
+				lc.onEmpty()
 			}
 		}
 	}

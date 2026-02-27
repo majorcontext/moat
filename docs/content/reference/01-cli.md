@@ -1165,7 +1165,7 @@ moat proxy start [flags]
 
 | Flag | Description |
 |------|-------------|
-| `-p`, `--port N` | Proxy listen port (default: auto-assigned) |
+| `-p`, `--port N` | Proxy listen port (default: 8080) |
 
 ### Examples
 
@@ -1189,8 +1189,6 @@ Show daemon status: PID, proxy port, uptime, active run count, and registered ro
 ```
 moat proxy status
 ```
-
----
 
 ---
 

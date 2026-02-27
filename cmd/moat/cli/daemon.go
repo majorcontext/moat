@@ -186,7 +186,24 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		log.Info("daemon idle timeout, shutting down")
 		sigCh <- syscall.SIGTERM
 	})
+	apiServer.SetOnRegister(idleShutdown.Cancel)
 	apiServer.SetOnEmpty(idleShutdown.Reset)
+
+	// Clean up per-run stores when runs are unregistered.
+	apiServer.SetOnUnregister(func(runID string) {
+		storeMu.Lock()
+		delete(stores, runID)
+		storeMu.Unlock()
+	})
+
+	// Wire API shutdown handler to signal the main loop.
+	apiServer.SetOnShutdown(func() {
+		sigCh <- syscall.SIGTERM
+	})
+
+	// Arm the idle timer immediately so the daemon shuts down if no runs
+	// register within the idle timeout period.
+	idleShutdown.Reset()
 	<-sigCh
 
 	log.Info("daemon shutting down")

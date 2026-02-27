@@ -101,7 +101,12 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 
 	if lock != nil && lock.IsAlive() {
 		client := NewClient(lock.SockPath)
-		return client, nil
+		// Verify the daemon is actually responsive (process may be alive
+		// but socket deleted during partial shutdown).
+		if _, healthErr := client.Health(context.Background()); healthErr == nil {
+			return client, nil
+		}
+		// Daemon is unresponsive — fall through to respawn.
 	}
 
 	// Clean up stale state.
@@ -132,7 +137,8 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	// Send daemon stderr to a log file for debugging startup failures.
 	logPath := filepath.Join(dir, "daemon.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
+	logFileOwned := err == nil // track whether we opened a separate file
+	if !logFileOwned {
 		logFile = devNull // non-fatal; discard output rather than passing nil fds
 	}
 
@@ -150,7 +156,7 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 
 	proc, err := os.StartProcess(exe, args, attr)
-	if logFile != nil {
+	if logFileOwned {
 		logFile.Close() // daemon inherited the fd; parent can close its copy
 	}
 	if err != nil {

@@ -14,14 +14,17 @@ import (
 
 // Server is the daemon's HTTP API server over a Unix socket.
 type Server struct {
-	sockPath  string
-	proxyPort int
-	registry  *Registry
-	routes    *routing.RouteTable
-	server    *http.Server
-	listener  net.Listener
-	startedAt time.Time
-	onEmpty   func() // called when last run is unregistered
+	sockPath     string
+	proxyPort    int
+	registry     *Registry
+	routes       *routing.RouteTable
+	server       *http.Server
+	listener     net.Listener
+	startedAt    time.Time
+	onRegister   func()             // called when a new run is registered
+	onEmpty      func()             // called when last run is unregistered
+	onUnregister func(runID string) // called when a run is unregistered (for resource cleanup)
+	onShutdown   func()             // called when shutdown is requested via API
 }
 
 // NewServer creates a daemon API server that will listen on the given Unix socket path.
@@ -57,8 +60,19 @@ func (s *Server) SetProxyPort(port int) { s.proxyPort = port }
 // Registry returns the server's run registry.
 func (s *Server) Registry() *Registry { return s.registry }
 
+// SetOnRegister sets a callback invoked when a new run is registered.
+func (s *Server) SetOnRegister(fn func()) { s.onRegister = fn }
+
 // SetOnEmpty sets a callback that is invoked when the last run is unregistered.
 func (s *Server) SetOnEmpty(fn func()) { s.onEmpty = fn }
+
+// SetOnUnregister sets a callback that is invoked when a run is unregistered.
+// The callback receives the run ID for per-run resource cleanup.
+func (s *Server) SetOnUnregister(fn func(runID string)) { s.onUnregister = fn }
+
+// SetOnShutdown sets a callback that is invoked when shutdown is requested via the API.
+// This should signal the main daemon loop to exit (e.g., by sending SIGTERM to self).
+func (s *Server) SetOnShutdown(fn func()) { s.onShutdown = fn }
 
 // SetRoutes sets the route table used for route registration handlers.
 func (s *Server) SetRoutes(rt *routing.RouteTable) { s.routes = rt }
@@ -102,13 +116,19 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rc := req.ToRunContext()
-	token := s.registry.Register(rc)
 
-	// Start token refresh if grants are present
+	// Set up token refresh BEFORE registering so the cancel function is
+	// visible to concurrent readers (e.g., handleUnregisterRun) immediately.
 	if len(req.Grants) > 0 {
 		refreshCtx, cancel := context.WithCancel(context.Background())
-		rc.refreshCancel = cancel
+		rc.SetRefreshCancel(cancel)
 		StartTokenRefresh(refreshCtx, rc, req.Grants)
+	}
+
+	token := s.registry.Register(rc)
+
+	if s.onRegister != nil {
+		s.onRegister()
 	}
 
 	resp := RegisterResponse{
@@ -169,13 +189,14 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cancel token refresh before unregistering
-	if rc.refreshCancel != nil {
-		rc.refreshCancel()
-	}
+	rc.CancelRefresh()
 
 	s.registry.Unregister(token)
 	w.WriteHeader(http.StatusNoContent)
 
+	if s.onUnregister != nil {
+		s.onUnregister(rc.RunID)
+	}
 	if s.onEmpty != nil && s.registry.Count() == 0 {
 		s.onEmpty()
 	}
@@ -221,11 +242,9 @@ func (s *Server) handleUnregisterRoutes(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = s.Stop(ctx)
-	}()
+	if s.onShutdown != nil {
+		go s.onShutdown()
+	}
 }
 
 // extractToken extracts the token from a URL path by stripping the prefix.

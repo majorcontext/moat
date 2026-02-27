@@ -77,6 +77,32 @@ func NewRunContext(runID string) *RunContext {
 	}
 }
 
+// CancelRefresh cancels the token refresh goroutine, if any.
+// Safe to call concurrently and multiple times.
+func (rc *RunContext) CancelRefresh() {
+	rc.mu.Lock()
+	cancel := rc.refreshCancel
+	rc.refreshCancel = nil
+	rc.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// SetRefreshCancel stores the cancel function for the token refresh goroutine.
+func (rc *RunContext) SetRefreshCancel(cancel context.CancelFunc) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.refreshCancel = cancel
+}
+
+// GetContainerID returns the container ID safely.
+func (rc *RunContext) GetContainerID() string {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	return rc.ContainerID
+}
+
 // SetCredential implements credential.ProxyConfigurer.
 func (rc *RunContext) SetCredential(host, value string) {
 	rc.SetCredentialHeader(host, "Authorization", value)

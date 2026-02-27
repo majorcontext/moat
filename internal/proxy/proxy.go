@@ -240,7 +240,6 @@ type RunContextData struct {
 	AllowedHosts         []hostPattern
 	AWSHandler           http.Handler
 	CredStore            credential.Store
-	Relays               map[string]string
 }
 
 // ContextResolver resolves a proxy auth token to per-run context data.

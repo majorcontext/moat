@@ -23,7 +23,7 @@ The routing proxy enables accessing agent services via hostnames like:
   https://web.my-agent.localhost:8080
 
 Run with sudo to bind to privileged ports like 80:
-  sudo agent proxy start --port=80
+  sudo moat proxy start --port=80
 
 When called without a subcommand, shows the current proxy status.`,
 	RunE: statusProxy,
@@ -40,7 +40,7 @@ The proxy routes requests based on hostname and supports both HTTP and HTTPS:
 
 Use --port to specify a custom port (default: 8080).
 Run with sudo for ports below 1024:
-  sudo agent proxy start --port=80`,
+  sudo moat proxy start --port=80`,
 	RunE: startProxy,
 }
 

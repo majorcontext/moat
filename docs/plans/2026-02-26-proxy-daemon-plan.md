@@ -1,7 +1,5 @@
 # Proxy Daemon Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Merge the per-run credential proxy and shared routing proxy into a single long-lived daemon process with a Unix socket API.
 
 **Architecture:** A new `internal/daemon/` package contains the daemon server (HTTP over Unix socket), run context registry (per-run credentials keyed by auth token), and client. The `proxy.Proxy` is refactored to resolve credentials from a `RunContext` instead of its own maps. `manager.Create()` calls the daemon client instead of starting a per-run proxy.
