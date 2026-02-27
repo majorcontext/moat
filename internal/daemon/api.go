@@ -32,18 +32,27 @@ type RemoveHeaderSpec struct {
 	HeaderName string `json:"header_name"`
 }
 
+// TransformerSpec describes a response transformer to apply for a host.
+// Since transformers are Go functions (not serializable), this spec allows
+// the daemon to reconstruct them from well-known kinds.
+type TransformerSpec struct {
+	Host string `json:"host"`
+	Kind string `json:"kind"` // "oauth-endpoint-workaround" or "response-scrub"
+}
+
 // RegisterRequest is sent to POST /v1/runs.
 type RegisterRequest struct {
-	RunID              string                   `json:"run_id"`
-	Credentials        []CredentialSpec         `json:"credentials,omitempty"`
-	ExtraHeaders       []ExtraHeaderSpec        `json:"extra_headers,omitempty"`
-	RemoveHeaders      []RemoveHeaderSpec       `json:"remove_headers,omitempty"`
-	TokenSubstitutions []TokenSubstitutionSpec  `json:"token_substitutions,omitempty"`
-	MCPServers         []config.MCPServerConfig `json:"mcp_servers,omitempty"`
-	NetworkPolicy      string                   `json:"network_policy,omitempty"`
-	NetworkAllow       []string                 `json:"network_allow,omitempty"`
-	Grants             []string                 `json:"grants,omitempty"`
-	AWSConfig          *AWSConfig               `json:"aws_config,omitempty"`
+	RunID                string                   `json:"run_id"`
+	Credentials          []CredentialSpec         `json:"credentials,omitempty"`
+	ExtraHeaders         []ExtraHeaderSpec        `json:"extra_headers,omitempty"`
+	RemoveHeaders        []RemoveHeaderSpec       `json:"remove_headers,omitempty"`
+	TokenSubstitutions   []TokenSubstitutionSpec  `json:"token_substitutions,omitempty"`
+	MCPServers           []config.MCPServerConfig `json:"mcp_servers,omitempty"`
+	NetworkPolicy        string                   `json:"network_policy,omitempty"`
+	NetworkAllow         []string                 `json:"network_allow,omitempty"`
+	Grants               []string                 `json:"grants,omitempty"`
+	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
+	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
 }
 
 // RegisterResponse is returned from POST /v1/runs.
@@ -96,5 +105,6 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkPolicy = req.NetworkPolicy
 	rc.NetworkAllow = req.NetworkAllow
 	rc.AWSConfig = req.AWSConfig
+	rc.TransformerSpecs = req.ResponseTransformers
 	return rc
 }

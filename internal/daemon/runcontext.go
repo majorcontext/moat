@@ -57,7 +57,8 @@ type RunContext struct {
 	NetworkPolicy string                   `json:"network_policy,omitempty"`
 	NetworkAllow  []string                 `json:"network_allow,omitempty"`
 
-	AWSConfig *AWSConfig `json:"aws_config,omitempty"`
+	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
+	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 
 	RegisteredAt time.Time `json:"registered_at"`
 
@@ -266,10 +267,27 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		d.TokenSubstitutions[host] = proxy.NewTokenSubstitution(ts.Placeholder, ts.RealToken)
 	}
 
-	// Convert response transformers.
-	d.ResponseTransformers = make(map[string][]credential.ResponseTransformer, len(rc.ResponseTransformers))
+	// Reconstruct response transformers from serializable specs.
+	// In daemon mode, providers can't pass Go functions across the process boundary,
+	// so they register TransformerSpecs (kind + host) that the daemon reconstructs.
+	// The function-based ResponseTransformers map is also copied for non-daemon use.
+	d.ResponseTransformers = make(map[string][]credential.ResponseTransformer, len(rc.ResponseTransformers)+len(rc.TransformerSpecs))
 	for host, transformers := range rc.ResponseTransformers {
 		d.ResponseTransformers[host] = append(d.ResponseTransformers[host], transformers...)
+	}
+	for _, spec := range rc.TransformerSpecs {
+		var tf credential.ResponseTransformer
+		switch spec.Kind {
+		case "oauth-endpoint-workaround":
+			tf = newOAuthEndpointTransformer()
+		case "response-scrub":
+			if ts, ok := rc.TokenSubstitutions[spec.Host]; ok {
+				tf = newResponseScrubber(ts.RealToken, ts.Placeholder)
+			}
+		}
+		if tf != nil {
+			d.ResponseTransformers[spec.Host] = append(d.ResponseTransformers[spec.Host], tf)
+		}
 	}
 
 	// Copy MCP servers (consistent with other fields being deep-copied).

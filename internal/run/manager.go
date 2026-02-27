@@ -2955,7 +2955,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
 		if m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); err != nil {
+			if err := m.daemonClient.UnregisterRoutes(cleanupCtx, r.Name); err != nil {
 				log.Debug("failed to unregister routes via daemon", "error", err)
 			}
 		}
@@ -3235,7 +3235,7 @@ func (m *Manager) Close() error {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}
 		if r.ProxyAuthToken != "" && m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRun(context.Background(), r.ProxyAuthToken); err != nil {
+			if err := m.daemonClient.UnregisterRun(closeCtx, r.ProxyAuthToken); err != nil {
 				log.Debug("failed to unregister run from daemon during manager close", "run", r.ID, "error", err)
 			}
 		}
@@ -3407,6 +3407,22 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 			Host:        host,
 			Placeholder: ts.Placeholder,
 			RealToken:   ts.RealToken,
+		})
+	}
+
+	// Derive transformer specs from response transformers.
+	// Response transformers are Go functions (not serializable), so we convert
+	// them to well-known specs that the daemon can reconstruct.
+	// - Hosts with token substitutions use "response-scrub" (token redaction)
+	// - Hosts without use "oauth-endpoint-workaround" (403 graceful degradation)
+	for host := range rc.ResponseTransformers {
+		kind := "oauth-endpoint-workaround"
+		if _, hasTS := rc.TokenSubstitutions[host]; hasTS {
+			kind = "response-scrub"
+		}
+		req.ResponseTransformers = append(req.ResponseTransformers, daemon.TransformerSpec{
+			Host: host,
+			Kind: kind,
 		})
 	}
 
