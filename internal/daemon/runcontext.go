@@ -4,6 +4,7 @@ package daemon
 import (
 	"context"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -61,6 +62,7 @@ type RunContext struct {
 	RegisteredAt time.Time `json:"registered_at"`
 
 	refreshCancel context.CancelFunc `json:"-"` // cancels token refresh goroutine
+	awsHandler    http.Handler       `json:"-"` // AWS credential endpoint handler
 	mu            sync.RWMutex
 }
 
@@ -101,6 +103,13 @@ func (rc *RunContext) GetContainerID() string {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
 	return rc.ContainerID
+}
+
+// SetAWSHandler stores the AWS credential endpoint handler for this run.
+func (rc *RunContext) SetAWSHandler(h http.Handler) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.awsHandler = h
 }
 
 // SetCredential implements credential.ProxyConfigurer.
@@ -270,6 +279,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	for _, host := range rc.NetworkAllow {
 		d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(host))
 	}
+
+	// Include AWS handler if configured.
+	d.AWSHandler = rc.awsHandler
 
 	return d
 }

@@ -103,7 +103,10 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		client := NewClient(lock.SockPath)
 		// Verify the daemon is actually responsive (process may be alive
 		// but socket deleted during partial shutdown).
-		if _, healthErr := client.Health(context.Background()); healthErr == nil {
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, healthErr := client.Health(healthCtx)
+		healthCancel()
+		if healthErr == nil {
 			return client, nil
 		}
 		// Daemon is unresponsive — fall through to respawn.

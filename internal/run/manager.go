@@ -1485,7 +1485,7 @@ region = %s
 					if mcp.Auth == nil {
 						continue // Skip servers without auth
 					}
-					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
+					relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
 					mcpServers[mcp.Name] = provider.MCPServerConfig{
 						URL: relayURL,
 						Headers: map[string]string{
@@ -2898,7 +2898,7 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		log.Debug("stopping proxy after container exit", "error", stopErr)
 	}
 	if r.ProxyAuthToken != "" && m.daemonClient != nil {
-		if stopErr := m.daemonClient.UnregisterRun(context.Background(), r.ProxyAuthToken); stopErr != nil {
+		if stopErr := m.daemonClient.UnregisterRun(cleanupCtx, r.ProxyAuthToken); stopErr != nil {
 			log.Debug("unregistering from proxy daemon after container exit", "error", stopErr)
 		}
 	}

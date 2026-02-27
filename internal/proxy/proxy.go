@@ -724,6 +724,63 @@ func (p *Proxy) getAWSHandlerForRequest(r *http.Request) http.Handler {
 	return p.awsHandler
 }
 
+// handleDirectMCPRelay handles MCP relay requests that arrive directly (not through proxy).
+// URL format: /mcp/{token}/{server-name}[/path]
+// Extracts the auth token from the URL, resolves run context, rewrites the path
+// to strip the token, and dispatches to handleMCPRelay.
+func (p *Proxy) handleDirectMCPRelay(w http.ResponseWriter, r *http.Request) {
+	// Parse: /mcp/{token}/{name}[/subpath]
+	rest := strings.TrimPrefix(r.URL.Path, "/mcp/")
+	idx := strings.IndexByte(rest, '/')
+	if idx < 0 {
+		// No server name after token — malformed URL
+		http.Error(w, "invalid MCP relay URL", http.StatusBadRequest)
+		return
+	}
+	token := rest[:idx]
+	remainder := rest[idx:] // starts with /, e.g. /server-name or /server-name/subpath
+
+	rc, found := p.contextResolver(token)
+	if !found {
+		http.Error(w, "Invalid proxy token", http.StatusProxyAuthRequired)
+		return
+	}
+
+	// Rewrite path to strip token: /mcp/{name}[/subpath]
+	r.URL.Path = "/mcp" + remainder
+	ctx := context.WithValue(r.Context(), runContextKey, rc)
+	r = r.WithContext(ctx)
+	p.handleMCPRelay(w, r)
+}
+
+// handleDirectAWSCredentials handles AWS credential endpoint requests that arrive
+// directly from containers. The credential helper sends Authorization: Bearer {token}
+// where token is the run's proxy auth token. We extract it to resolve run context,
+// then dispatch to the per-run AWS handler.
+func (p *Proxy) handleDirectAWSCredentials(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		http.Error(w, "Authorization required", http.StatusUnauthorized)
+		return
+	}
+	token := auth[7:]
+
+	rc, found := p.contextResolver(token)
+	if !found {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	if rc.AWSHandler == nil {
+		http.Error(w, "AWS credentials not configured for this run", http.StatusNotFound)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), runContextKey, rc)
+	r = r.WithContext(ctx)
+	rc.AWSHandler.ServeHTTP(w, r)
+}
+
 // ServeHTTP handles proxy requests.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Relay endpoints are accessed directly (via NO_PROXY bypass), not through
@@ -735,6 +792,24 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Safety: relays only forward to pre-configured URLs, not arbitrary hosts.
 	if len(p.relays) > 0 && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/relay/") {
 		p.handleRelay(w, r)
+		return
+	}
+
+	// Direct MCP relay requests from containers (via NO_PROXY bypass).
+	// URL format: /mcp/{token}/{server-name}[/path]
+	// The auth token is embedded in the URL because direct requests don't carry
+	// Proxy-Authorization. We resolve run context from the token, strip it from
+	// the path, and dispatch to handleMCPRelay.
+	if p.contextResolver != nil && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/mcp/") {
+		p.handleDirectMCPRelay(w, r)
+		return
+	}
+
+	// Direct AWS credential endpoint requests from containers.
+	// The credential helper sends Authorization: Bearer {token} (not Proxy-Authorization).
+	// We extract the run's auth token from that header to resolve context.
+	if p.contextResolver != nil && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/_aws/") {
+		p.handleDirectAWSCredentials(w, r)
 		return
 	}
 

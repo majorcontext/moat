@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 )
 
@@ -126,6 +128,26 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := s.registry.Register(rc)
+
+	// Create AWS credential provider if configured. Must happen after Register()
+	// because the auth token is needed for endpoint authentication.
+	if req.AWSConfig != nil {
+		awsProvider, awsErr := proxy.NewAWSCredentialProvider(
+			r.Context(),
+			req.AWSConfig.RoleARN,
+			req.AWSConfig.Region,
+			req.AWSConfig.SessionDuration,
+			req.AWSConfig.ExternalID,
+			"moat-"+rc.RunID,
+		)
+		if awsErr != nil {
+			log.Warn("failed to create AWS credential provider for run",
+				"run_id", rc.RunID, "error", awsErr)
+		} else {
+			awsProvider.SetAuthToken(token)
+			rc.SetAWSHandler(awsProvider.Handler())
+		}
+	}
 
 	if s.onRegister != nil {
 		s.onRegister()
