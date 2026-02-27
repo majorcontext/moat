@@ -6,83 +6,21 @@ import (
 	"net/http"
 
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/providers/claude"
 )
 
 // maxScrubBodySize is the maximum response body size to scrub for tokens.
 // Larger responses are passed through unscrubbed to avoid memory issues.
 const maxScrubBodySize = 512 * 1024
 
-// oauthEndpointWorkarounds lists OAuth API endpoints that require response
-// transformation to work around scope limitations in long-lived tokens.
-var oauthEndpointWorkarounds = []string{
-	"/api/oauth/profile",
-	"/api/oauth/usage",
-}
-
 // newOAuthEndpointTransformer creates a response transformer that handles 403 errors
 // on OAuth endpoints by returning empty success responses. This prevents Claude Code
 // from crashing when using long-lived tokens that lack the user:profile scope.
 //
-// Mirrors the logic in providers/claude/oauth_workarounds.go.
+// Delegates to providers/claude.CreateOAuthEndpointTransformer to avoid duplicating
+// the endpoint list and response logic.
 func newOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, bool) {
-	return func(reqInterface, respInterface interface{}) (interface{}, bool) {
-		req, ok := reqInterface.(*http.Request)
-		if !ok {
-			return respInterface, false
-		}
-
-		resp, ok := respInterface.(*http.Response)
-		if !ok {
-			return respInterface, false
-		}
-
-		if resp.StatusCode != http.StatusForbidden {
-			return resp, false
-		}
-
-		var matchedEndpoint string
-		for _, endpoint := range oauthEndpointWorkarounds {
-			if req.URL.Path == endpoint {
-				matchedEndpoint = endpoint
-				break
-			}
-		}
-		if matchedEndpoint == "" {
-			return resp, false
-		}
-
-		resp.Body.Close()
-
-		log.Debug("response transformed",
-			"subsystem", "proxy",
-			"action", "transform",
-			"reason", "oauth-scope-workaround",
-			"endpoint", matchedEndpoint,
-			"original_status", http.StatusForbidden)
-
-		var body []byte
-		switch matchedEndpoint {
-		case "/api/oauth/profile":
-			body = []byte(`{"id":"","email":"","name":""}`)
-		case "/api/oauth/usage":
-			body = []byte(`{"usage":{}}`)
-		default:
-			body = []byte(`{}`)
-		}
-
-		//nolint:bodyclose // Response body will be closed by the HTTP handler
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header: http.Header{
-				"Content-Type":       []string{"application/json"},
-				"X-Moat-Transformed": []string{"oauth-scope-workaround"},
-			},
-			Body:          io.NopCloser(bytes.NewReader(body)),
-			ContentLength: int64(len(body)),
-			ProtoMajor:    1,
-			ProtoMinor:    1,
-		}, true
-	}
+	return claude.CreateOAuthEndpointTransformer()
 }
 
 // newResponseScrubber creates a response transformer that replaces real tokens

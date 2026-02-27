@@ -612,6 +612,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					}
 					// Store provider for later AWS credential_process setup
 					r.AWSCredentialProvider = awsProvider
+
+					// Store config for daemon registration so the daemon can
+					// create its own AWSCredentialProvider.
+					runCtx.AWSConfig = &daemon.AWSConfig{
+						RoleARN:         awsCfg.RoleARN,
+						Region:          awsCfg.Region,
+						SessionDuration: awsCfg.SessionDuration,
+						ExternalID:      awsCfg.ExternalID,
+					}
 				}
 			}
 		}
