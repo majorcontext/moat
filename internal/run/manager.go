@@ -3159,7 +3159,7 @@ func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) err
 }
 
 // RecentLogs returns the last n lines of container logs.
-// Used to show context when re-attaching to a running container.
+// Used to show recent output context for a running container.
 func (m *Manager) RecentLogs(runID string, lines int) (string, error) {
 	m.mu.RLock()
 	r, ok := m.runs[runID]

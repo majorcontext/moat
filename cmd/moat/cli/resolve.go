@@ -36,7 +36,7 @@ func resolveRunArg(manager *run.Manager, arg string, action string) ([]string, e
 // resolveRunArgSingle resolves a user-provided argument to exactly one run ID.
 // If multiple runs match, it prints them and returns an error telling the user
 // to specify a run ID. This is used by commands that only operate on a single
-// run (e.g., logs, trace, audit, attach).
+// run (e.g., logs, trace, audit).
 func resolveRunArgSingle(manager *run.Manager, arg string) (string, error) {
 	matches, err := manager.Resolve(arg)
 	if err != nil {

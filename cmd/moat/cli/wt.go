@@ -25,7 +25,7 @@ var wtCmd = &cobra.Command{
 
 If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
 exist, it's created. If a run is already active in the worktree, returns an
-error with instructions to attach or stop it.
+error with instructions to view logs or stop it.
 
 Configuration is read from agent.yaml in the repository root.
 
@@ -140,7 +140,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	for _, r := range manager.List() {
 		if r.WorktreePath == result.WorkspacePath && r.GetState() == run.StateRunning {
-			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nAttach with 'moat attach %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
+			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nView logs with 'moat logs %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
 		}
 	}
 

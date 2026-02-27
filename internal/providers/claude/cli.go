@@ -416,9 +416,9 @@ func resolveResumeSessionInDir(arg, baseDir string) (string, error) {
 	}
 
 	// If the run is still active, the session ID hasn't been captured yet.
-	// Tell the user to attach instead of starting a new container.
+	// Tell the user to view logs or stop instead of starting a new container.
 	if match.State == "running" || match.State == "starting" {
-		return "", fmt.Errorf("run %s (%s) is still running\n\nUse 'moat attach %s' to reconnect.", matchID, match.Name, arg)
+		return "", fmt.Errorf("run %s (%s) is still running\n\nUse 'moat logs %s' to view output or 'moat stop %s' to stop.", matchID, match.Name, matchID, matchID)
 	}
 
 	sessionID := match.ProviderMeta["claude_session_id"]

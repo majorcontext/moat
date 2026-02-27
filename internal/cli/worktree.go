@@ -64,7 +64,7 @@ func ResolveWorktreeWorkspace(wtBranch, workspace string, flags *ExecFlags, cfg 
 	// Check for active run in this worktree (only possible if reused)
 	if result.Reused && CheckWorktreeActive != nil {
 		if name, id := CheckWorktreeActive(result.WorkspacePath); name != "" {
-			return nil, fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nStop it first with 'moat stop %s' or attach with 'moat attach %s'", wtBranch, name, id, id, id)
+			return nil, fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nStop it first with 'moat stop %s' or view logs with 'moat logs %s'", wtBranch, name, id, id, id)
 		}
 	}
 
