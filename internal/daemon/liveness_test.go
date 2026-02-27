@@ -70,7 +70,7 @@ func TestLivenessChecker_CallsOnCleanup(t *testing.T) {
 
 	var cleanedUp string
 	lc := NewLivenessChecker(reg, checker)
-	lc.SetOnCleanup(func(t string) { cleanedUp = t })
+	lc.SetOnCleanup(func(t, _ string) { cleanedUp = t })
 
 	lc.CheckOnce(context.Background())
 

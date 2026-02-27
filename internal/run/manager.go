@@ -517,7 +517,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if daemonErr != nil {
 			return nil, fmt.Errorf("starting proxy daemon: %w", daemonErr)
 		}
+		m.mu.Lock()
 		m.daemonClient = daemonCl
+		m.mu.Unlock()
 
 		// Create a RunContext that implements credential.ProxyConfigurer.
 		// Providers will configure their credentials on this context.

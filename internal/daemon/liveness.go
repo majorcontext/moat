@@ -17,7 +17,7 @@ type LivenessChecker struct {
 	registry  *Registry
 	checker   ContainerChecker
 	interval  time.Duration
-	onCleanup func(token string)
+	onCleanup func(token, runID string)
 	onEmpty   func() // called when registry becomes empty after cleanup
 }
 
@@ -31,7 +31,8 @@ func NewLivenessChecker(registry *Registry, checker ContainerChecker) *LivenessC
 }
 
 // SetOnCleanup sets a callback invoked when a run is cleaned up.
-func (lc *LivenessChecker) SetOnCleanup(fn func(token string)) {
+// The callback receives both the auth token and run ID.
+func (lc *LivenessChecker) SetOnCleanup(fn func(token, runID string)) {
 	lc.onCleanup = fn
 }
 
@@ -61,7 +62,7 @@ func (lc *LivenessChecker) CheckOnce(ctx context.Context) {
 			rc.CancelRefresh()
 			lc.registry.Unregister(rc.AuthToken)
 			if lc.onCleanup != nil {
-				lc.onCleanup(rc.AuthToken)
+				lc.onCleanup(rc.AuthToken, rc.RunID)
 			}
 			if lc.onEmpty != nil && lc.registry.Count() == 0 {
 				lc.onEmpty()

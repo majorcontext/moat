@@ -133,8 +133,22 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// Update API server with actual proxy port (may differ from requested if port was 0).
 	apiServer.SetProxyPort(actualPort)
 
+	// Write lock file BEFORE starting the API server. The parent's
+	// EnsureRunning polls the socket for health — if the lock file isn't
+	// written yet, a concurrent caller could acquire the spawn lock, see
+	// no lock file, and spawn a second daemon.
+	if lockErr := daemon.WriteLockFile(daemonDir, daemon.LockInfo{
+		PID:       os.Getpid(),
+		ProxyPort: actualPort,
+		SockPath:  sockPath,
+	}); lockErr != nil {
+		_ = proxyServer.Stop(context.Background())
+		return lockErr
+	}
+
 	// Start API server.
 	if startErr := apiServer.Start(); startErr != nil {
+		daemon.RemoveLockFile(daemonDir)
 		_ = proxyServer.Stop(context.Background())
 		return startErr
 	}
@@ -164,17 +178,6 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Write lock file.
-	if err := daemon.WriteLockFile(daemonDir, daemon.LockInfo{
-		PID:       os.Getpid(),
-		ProxyPort: actualPort,
-		SockPath:  sockPath,
-	}); err != nil {
-		_ = apiServer.Stop(context.Background())
-		_ = proxyServer.Stop(context.Background())
-		return err
-	}
-
 	log.Info("daemon started", "pid", os.Getpid(), "proxy_port", actualPort, "sock", sockPath)
 
 	// Wait for signal or idle timeout.
@@ -188,6 +191,18 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	})
 	apiServer.SetOnRegister(idleShutdown.Cancel)
 	apiServer.SetOnEmpty(idleShutdown.Reset)
+
+	// Start container liveness checker to clean up dead runs.
+	livenessCtx, livenessCancel := context.WithCancel(context.Background())
+	defer livenessCancel()
+	lc := daemon.NewLivenessChecker(apiServer.Registry(), daemon.NewCommandContainerChecker())
+	lc.SetOnCleanup(func(_, runID string) {
+		storeMu.Lock()
+		delete(stores, runID)
+		storeMu.Unlock()
+	})
+	lc.SetOnEmpty(idleShutdown.Reset)
+	go lc.Run(livenessCtx)
 
 	// Clean up per-run stores when runs are unregistered.
 	apiServer.SetOnUnregister(func(runID string) {
