@@ -2326,6 +2326,23 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin io
 		user = "moatuser"
 	}
 
+	// Wrap command with tmux for interactive sessions.
+	execCmd := cmd
+	if useTTY {
+		if m.hasTmuxSession(ctx, containerID) {
+			execCmd = []string{"tmux", "attach-session", "-t", "moat"}
+		} else {
+			var w, h uint
+			if term.IsTerminal(os.Stdout) {
+				tw, th := term.GetSize(os.Stdout)
+				if tw > 0 && th > 0 {
+					w, h = uint(tw), uint(th) // #nosec G115 -- tw/th validated positive above
+				}
+			}
+			execCmd = buildTmuxNewSession(cmd, w, h)
+		}
+	}
+
 	// Tee output to capture logs for audit/observability.
 	var logBuffer bytes.Buffer
 	var teeStdout, teeStderr io.Writer
@@ -2341,7 +2358,7 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin io
 	}
 
 	execOpts := container.ExecOptions{
-		Cmd:    cmd,
+		Cmd:    execCmd,
 		Stdin:  stdin,
 		Stdout: teeStdout,
 		Stderr: teeStderr,
@@ -2374,6 +2391,44 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin io
 	}
 
 	return exitCode, execErr
+}
+
+// hasTmuxSession checks whether a tmux session named "moat" exists in the
+// given container. It returns false on any error or non-zero exit code.
+func (m *Manager) hasTmuxSession(ctx context.Context, containerID string) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	exitCode, err := m.runtime.Exec(checkCtx, containerID, container.ExecOptions{
+		Cmd: []string{"tmux", "has-session", "-t", "moat"},
+	})
+	return err == nil && exitCode == 0
+}
+
+// HasTmuxSession reports whether a tmux session named "moat" is active in the
+// container for the given run. It is safe to call from the CLI layer.
+func (m *Manager) HasTmuxSession(ctx context.Context, runID string) bool {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return false
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+	return m.hasTmuxSession(ctx, containerID)
+}
+
+// buildTmuxNewSession constructs the command to create a new tmux session named
+// "moat" running the specified command. If width and height are non-zero the
+// session is given an explicit initial size.
+func buildTmuxNewSession(cmd []string, width, height uint) []string {
+	args := []string{"tmux", "-f", "/tmp/.moat-tmux.conf", "new-session", "-s", "moat"}
+	if width > 0 && height > 0 {
+		args = append(args, "-x", strconv.FormatUint(uint64(width), 10), "-y", strconv.FormatUint(uint64(height), 10))
+	}
+	args = append(args, "--")
+	args = append(args, cmd...)
+	return args
 }
 
 // ResizeExec resizes the PTY of the most recent Exec call for a run.
