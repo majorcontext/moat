@@ -20,6 +20,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Timing constants for attached execution behavior
+const (
+	// doublePressWindow is how quickly Ctrl+C must be pressed twice to stop a run
+	doublePressWindow = 500 * time.Millisecond
+	// containerExitCheckDelay is how long to wait for container exit detection
+	containerExitCheckDelay = 200 * time.Millisecond
+	// ttyStartupDelay is how long to wait before resizing TTY after container starts.
+	// This allows the container process to initialize before we resize.
+	ttyStartupDelay = 200 * time.Millisecond
+)
+
 // Re-export types from internal/cli for backward compatibility
 // with code in cmd/moat/cli that uses these types.
 type ExecFlags = intcli.ExecFlags
