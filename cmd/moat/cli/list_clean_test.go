@@ -81,14 +81,11 @@ func (s *listCleanStubRuntime) ContainerState(ctx context.Context, id string) (s
 func (s *listCleanStubRuntime) RemoveImage(ctx context.Context, id string) error {
 	panic("unexpected call to RemoveImage")
 }
-func (s *listCleanStubRuntime) Attach(ctx context.Context, id string, opts container.AttachOptions) error {
-	panic("unexpected call to Attach")
+func (s *listCleanStubRuntime) Exec(ctx context.Context, id string, opts container.ExecOptions) (int, error) {
+	panic("unexpected call to Exec")
 }
-func (s *listCleanStubRuntime) StartAttached(ctx context.Context, id string, opts container.AttachOptions) error {
-	panic("unexpected call to StartAttached")
-}
-func (s *listCleanStubRuntime) ResizeTTY(ctx context.Context, id string, height, width uint) error {
-	panic("unexpected call to ResizeTTY")
+func (s *listCleanStubRuntime) ResizeExec(ctx context.Context, id string, height, width uint) error {
+	panic("unexpected call to ResizeExec")
 }
 
 // --- isImageInUse tests ---

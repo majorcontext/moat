@@ -180,8 +180,8 @@ func (r *AppleRuntime) Ping(ctx context.Context) error {
 }
 
 // CreateContainer creates a new Apple container without starting it.
-// The container can later be started with StartContainer (non-interactive)
-// or StartAttached (interactive with TTY).
+// The container is started with StartContainer, then interactive commands
+// run via Exec.
 func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Ensure image is available
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
@@ -1137,41 +1137,159 @@ func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (
 	return info[0].Status, nil
 }
 
-// Attach connects stdin/stdout/stderr to a running container.
-func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Build attach command arguments
-	args := []string{"attach"}
-	if opts.Stdin != nil {
-		args = append(args, "--stdin")
+// Exec runs a command inside a running container and returns the exit code.
+// For TTY mode, uses a PTY to give the Apple container CLI real file descriptors.
+// On context cancellation, the exec process is killed but the container survives
+// (since the container's init is sleep infinity, not the exec'd command).
+func (r *AppleRuntime) Exec(ctx context.Context, containerID string, opts ExecOptions) (int, error) {
+	if opts.TTY {
+		return r.execWithPTY(ctx, containerID, opts)
+	}
+	return r.execWithPipes(ctx, containerID, opts)
+}
+
+// execWithPTY runs a command via `container exec` with a PTY for TTY mode.
+func (r *AppleRuntime) execWithPTY(ctx context.Context, containerID string, opts ExecOptions) (int, error) {
+	args := []string{"exec", "-i", "-t"}
+	if opts.User != "" {
+		args = append(args, "--user", opts.User)
 	}
 	args = append(args, containerID)
+	args = append(args, opts.Cmd...)
+
+	// Child context so stdin errors (escape sequences) can kill the exec process
+	// without canceling the parent context.
+	execCtx, execCancel := context.WithCancel(ctx)
+	defer execCancel()
+
+	cmd := exec.CommandContext(execCtx, r.containerBin, args...)
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return -1, fmt.Errorf("starting exec with pty: %w", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	// Track PTY for ResizeExec.
+	r.ptyMu.Lock()
+	if r.activePTY == nil {
+		r.activePTY = make(map[string]*os.File)
+	}
+	r.activePTY[containerID] = ptmx
+	r.ptyMu.Unlock()
+	defer func() {
+		r.ptyMu.Lock()
+		delete(r.activePTY, containerID)
+		r.ptyMu.Unlock()
+	}()
+
+	// Set initial PTY size.
+	if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		// #nosec G115 -- width/height are validated positive by callers
+		_ = pty.Setsize(ptmx, &pty.Winsize{
+			Rows: uint16(opts.InitialHeight), // #nosec G115
+			Cols: uint16(opts.InitialWidth),  // #nosec G115
+		})
+	}
+
+	// Copy stdin → PTY. Capture error so escape sequences propagate.
+	stdinErr := make(chan error, 1)
+	if opts.Stdin != nil {
+		go func() {
+			_, copyErr := io.Copy(ptmx, opts.Stdin)
+			stdinErr <- copyErr
+			// Kill exec process so cmd.Wait() unblocks (container survives).
+			execCancel()
+		}()
+	}
+
+	// Copy PTY → stdout
+	outputDone := make(chan struct{})
+	go func() {
+		defer close(outputDone)
+		stdout := opts.Stdout
+		if stdout == nil {
+			stdout = os.Stdout
+		}
+		_, _ = io.Copy(stdout, ptmx)
+	}()
+
+	// Wait for exec command to finish.
+	cmdErr := cmd.Wait()
+
+	// Wait for output to drain (with timeout).
+	select {
+	case <-outputDone:
+	case <-time.After(2 * time.Second):
+		_ = ptmx.Close()
+		<-outputDone
+	}
+
+	// If stdin returned an escape error, propagate it instead of the cmd error.
+	select {
+	case sErr := <-stdinErr:
+		if sErr != nil {
+			return -1, sErr
+		}
+	default:
+	}
+
+	if cmdErr != nil {
+		if ctx.Err() != nil {
+			return -1, ctx.Err()
+		}
+		// Try to extract exit code from the exec.ExitError.
+		var exitErr *exec.ExitError
+		if errors.As(cmdErr, &exitErr) {
+			return exitErr.ExitCode(), nil
+		}
+		return -1, fmt.Errorf("exec failed: %w", cmdErr)
+	}
+	return 0, nil
+}
+
+// execWithPipes runs a command via `container exec` with regular pipes (non-TTY).
+func (r *AppleRuntime) execWithPipes(ctx context.Context, containerID string, opts ExecOptions) (int, error) {
+	args := []string{"exec"}
+	if opts.Stdin != nil {
+		args = append(args, "-i")
+	}
+	if opts.User != "" {
+		args = append(args, "--user", opts.User)
+	}
+	args = append(args, containerID)
+	args = append(args, opts.Cmd...)
 
 	cmd := exec.CommandContext(ctx, r.containerBin, args...)
-
-	// Connect stdin/stdout/stderr
 	if opts.Stdin != nil {
 		cmd.Stdin = opts.Stdin
 	}
-	if opts.Stdout != nil {
-		cmd.Stdout = opts.Stdout
+	stdout := opts.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
 	}
-	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
-	// Run the attach command
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return -1, ctx.Err()
 		}
-		return fmt.Errorf("attaching to container: %w", err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode(), nil
+		}
+		return -1, fmt.Errorf("exec failed: %w", err)
 	}
-	return nil
+	return 0, nil
 }
 
-// ResizeTTY resizes the container's TTY to the given dimensions.
-// For Apple containers, this resizes the PTY master created during StartAttached.
-func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
+// ResizeExec resizes the PTY of the most recent Exec call for this container.
+func (r *AppleRuntime) ResizeExec(ctx context.Context, containerID string, height, width uint) error {
 	r.ptyMu.Lock()
 	ptmx := r.activePTY[containerID]
 	r.ptyMu.Unlock()
@@ -1185,194 +1303,4 @@ func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height
 		Rows: uint16(height), // #nosec G115
 		Cols: uint16(width),  // #nosec G115
 	})
-}
-
-// StartAttached starts a container with stdin/stdout/stderr already attached.
-// This is required for TUI applications that need the terminal connected
-// before the process starts.
-//
-// Uses `container start --attach` which starts the container and attaches
-// to its primary process. The ENTRYPOINT handles any initialization (SSH agent
-// bridge setup, config file copying, privilege dropping via gosu).
-//
-// The Apple container CLI requires real PTY file descriptors for stdout/stderr.
-// To allow callers to intercept output (e.g., for a status bar), we create a
-// PTY pair and copy data from the PTY master to the provided writers.
-func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Build start command arguments
-	args := []string{"start", "--attach"}
-	if opts.Stdin != nil {
-		args = append(args, "-i")
-	}
-	args = append(args, containerID)
-
-	cmd := exec.CommandContext(ctx, r.containerBin, args...)
-
-	// For TTY mode, use a PTY. For non-TTY mode, use regular pipes.
-	// This matches how the container was created (with -t flag for TTY, without for non-TTY).
-	if opts.TTY {
-		return r.startAttachedWithPTY(ctx, cmd, containerID, opts)
-	}
-	return r.startAttachedWithPipes(ctx, cmd, opts)
-}
-
-// startAttachedWithPTY handles TTY mode using a PTY
-func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
-	// Create a PTY for the command. This gives the Apple container CLI
-	// real PTY file descriptors while allowing us to intercept output.
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("starting container with pty: %w", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	// Track the PTY so ResizeTTY can propagate SIGWINCH.
-	r.ptyMu.Lock()
-	if r.activePTY == nil {
-		r.activePTY = make(map[string]*os.File)
-	}
-	r.activePTY[containerID] = ptmx
-	r.ptyMu.Unlock()
-	defer func() {
-		r.ptyMu.Lock()
-		delete(r.activePTY, containerID)
-		r.ptyMu.Unlock()
-	}()
-
-	// Set PTY size. Prefer explicit initial size from opts, fall back to querying terminal.
-	if opts.TTY {
-		var width, height uint
-		if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
-			width, height = opts.InitialWidth, opts.InitialHeight
-		} else if term.IsTerminal(os.Stdout) {
-			w, h := term.GetSize(os.Stdout)
-			if w > 0 && h > 0 {
-				// #nosec G115 -- width/height are validated positive above
-				width, height = uint(w), uint(h)
-			}
-		}
-		if width > 0 && height > 0 {
-			// #nosec G115 -- width/height are validated positive above and come from terminal
-			_ = pty.Setsize(ptmx, &pty.Winsize{
-				Rows: uint16(height), // #nosec G115
-				Cols: uint16(width),  // #nosec G115
-			})
-		}
-	}
-
-	// Create a cancellable context for the copy goroutines
-	copyCtx, cancelCopy := context.WithCancel(ctx)
-	defer cancelCopy()
-
-	// Channel to capture errors from stdin copy (e.g., escape sequences)
-	stdinErr := make(chan error, 1)
-
-	// Copy stdin to PTY master
-	if opts.Stdin != nil {
-		go func() {
-			_, err := io.Copy(ptmx, opts.Stdin)
-			select {
-			case stdinErr <- err:
-			case <-copyCtx.Done():
-			}
-		}()
-	}
-
-	// Copy PTY master to stdout (through the provided writer)
-	outputDone := make(chan struct{})
-	go func() {
-		defer close(outputDone)
-		if opts.Stdout != nil {
-			_, _ = io.Copy(opts.Stdout, ptmx)
-		} else {
-			_, _ = io.Copy(os.Stdout, ptmx)
-		}
-	}()
-
-	// Wait for command to finish
-	cmdDone := make(chan error, 1)
-	go func() {
-		cmdDone <- cmd.Wait()
-	}()
-
-	// Wait for either command completion, stdin error, or context cancellation
-	var result error
-	select {
-	case err := <-stdinErr:
-		// Stdin copy finished (possibly with escape error)
-		// Close PTY and kill CLI - this detaches from the container without stopping it
-		_ = ptmx.Close()
-		cancelCopy()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		<-cmdDone
-		if err != nil {
-			result = err
-		}
-	case err := <-cmdDone:
-		// Command finished normally
-		// Don't close PTY yet - wait for output to finish copying
-		if err != nil && ctx.Err() == nil {
-			result = fmt.Errorf("starting container attached: %w", err)
-		}
-	case <-ctx.Done():
-		// Context canceled
-		_ = ptmx.Close()
-		cancelCopy()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		<-cmdDone
-		result = ctx.Err()
-	}
-
-	// Wait for output copy to finish before closing PTY
-	// This ensures all output is captured even if the container exits quickly.
-	// Use a timeout to prevent hanging if the copy goroutine gets stuck.
-	select {
-	case <-outputDone:
-		// Output copy finished normally
-	case <-time.After(2 * time.Second):
-		// Timeout - forcibly close PTY to unblock the copy goroutine
-		_ = ptmx.Close()
-		<-outputDone
-	}
-	cancelCopy()
-
-	return result
-}
-
-// startAttachedWithPipes handles non-TTY mode using regular pipes
-func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
-	// For non-TTY mode, use regular pipes to capture stdout/stderr
-	stdout := opts.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stderr := opts.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
-
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if opts.Stdin != nil {
-		cmd.Stdin = opts.Stdin
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting container: %w", err)
-	}
-
-	// Wait for command to complete
-	err := cmd.Wait()
-	if err != nil && ctx.Err() == nil {
-		return fmt.Errorf("container attach: %w", err)
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	return nil
 }

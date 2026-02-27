@@ -305,6 +305,15 @@ run_pre_run_hook() {
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
 run_pre_run_hook
+
+# Interactive exec mode: the user's command will be run via "container exec"
+# after the container starts. Signal readiness and enter a keepalive loop.
+# This allows detach/reattach without killing the container.
+if [ "$MOAT_EXEC_MODE" = "1" ]; then
+  touch /tmp/.moat-ready
+  exec sleep infinity
+fi
+
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)
   exec "$@"

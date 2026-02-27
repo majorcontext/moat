@@ -61,6 +61,11 @@ type DockerRuntime struct {
 	gvisorOnce  sync.Once
 	gvisorAvail bool
 
+	// activeExec tracks the Docker exec ID for each container so ResizeExec
+	// can resize the correct exec process. Protected by activeExecMu.
+	activeExecMu sync.Mutex
+	activeExec   map[string]string // container ID → exec ID
+
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
 	buildMgr   *dockerBuildManager
@@ -618,166 +623,124 @@ func (r *DockerRuntime) ContainerState(ctx context.Context, containerID string) 
 	return inspect.State.Status, nil
 }
 
-// Attach connects stdin/stdout/stderr to a running container.
-func (r *DockerRuntime) Attach(ctx context.Context, containerID string, opts AttachOptions) error {
-	resp, err := r.cli.ContainerAttach(ctx, containerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  opts.Stdin != nil,
-		Stdout: opts.Stdout != nil,
-		Stderr: opts.Stderr != nil,
-	})
-	if err != nil {
-		return fmt.Errorf("attaching to container: %w", err)
+// Exec runs a command inside a running container and returns the exit code.
+// Uses Docker's exec API: create → attach → bidirectional copy → inspect for exit code.
+func (r *DockerRuntime) Exec(ctx context.Context, containerID string, opts ExecOptions) (int, error) {
+	execCfg := container.ExecOptions{
+		Cmd:          opts.Cmd,
+		AttachStdin:  opts.Stdin != nil,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          opts.TTY,
 	}
-	defer resp.Close()
+	if opts.User != "" {
+		execCfg.User = opts.User
+	}
 
-	// Set up bidirectional copy
-	outputDone := make(chan error, 1)
-	stdinDone := make(chan error, 1)
+	execResp, err := r.cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return -1, fmt.Errorf("creating exec: %w", err)
+	}
+	execID := execResp.ID
 
-	// Copy container output to stdout/stderr.
-	// Since containers are always created with Tty: true (see CreateContainer),
-	// output is always raw (not multiplexed). Use io.Copy unconditionally.
-	go func() {
-		_, err := io.Copy(opts.Stdout, resp.Reader)
-		outputDone <- err
+	// Track exec ID for ResizeExec.
+	r.activeExecMu.Lock()
+	if r.activeExec == nil {
+		r.activeExec = make(map[string]string)
+	}
+	r.activeExec[containerID] = execID
+	r.activeExecMu.Unlock()
+	defer func() {
+		r.activeExecMu.Lock()
+		delete(r.activeExec, containerID)
+		r.activeExecMu.Unlock()
 	}()
 
-	// Copy stdin to container (if provided)
+	hjResp, err := r.cli.ContainerExecAttach(ctx, execID, container.ExecAttachOptions{
+		Tty: opts.TTY,
+	})
+	if err != nil {
+		return -1, fmt.Errorf("attaching to exec: %w", err)
+	}
+	defer hjResp.Close()
+
+	// Resize immediately if initial size was provided.
+	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		_ = r.cli.ContainerExecResize(ctx, execID, container.ResizeOptions{
+			Height: opts.InitialHeight,
+			Width:  opts.InitialWidth,
+		})
+	}
+
+	// Bidirectional copy.
+	outputDone := make(chan error, 1)
+	go func() {
+		stdout := opts.Stdout
+		if stdout == nil {
+			stdout = os.Stdout
+		}
+		if opts.TTY {
+			_, copyErr := io.Copy(stdout, hjResp.Reader)
+			outputDone <- copyErr
+		} else {
+			stderr := opts.Stderr
+			if stderr == nil {
+				stderr = os.Stderr
+			}
+			_, copyErr := stdcopy.StdCopy(stdout, stderr, hjResp.Reader)
+			outputDone <- copyErr
+		}
+	}()
+
+	// Copy stdin → exec. Capture error so escape sequences propagate.
+	stdinErr := make(chan error, 1)
 	if opts.Stdin != nil {
 		go func() {
-			_, err := io.Copy(resp.Conn, opts.Stdin)
-			// Close write side when stdin ends
-			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
-				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
-					err = closeErr
-				}
-			}
-			stdinDone <- err
+			_, copyErr := io.Copy(hjResp.Conn, opts.Stdin)
+			stdinErr <- copyErr
+			// Close connection to unblock output copy (container survives).
+			hjResp.Close()
 		}()
 	}
 
-	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-stdinDone:
-			// Stdin error - could be escape sequence or EOF
-			if err != nil && err != io.EOF {
-				return err
-			}
-			// Normal stdin EOF - continue waiting for output
-		case err := <-outputDone:
-			if err != nil && err != io.EOF {
-				return err
-			}
-			return nil
-		}
+	// Wait for output to finish (exec exited) or context cancellation.
+	select {
+	case <-outputDone:
+	case <-ctx.Done():
+		return -1, ctx.Err()
 	}
+
+	// If stdin returned an escape error, propagate it instead of inspecting.
+	select {
+	case sErr := <-stdinErr:
+		if sErr != nil {
+			return -1, sErr
+		}
+	default:
+	}
+
+	// Inspect to get exit code.
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID)
+	if err != nil {
+		return -1, fmt.Errorf("inspecting exec: %w", err)
+	}
+	return inspect.ExitCode, nil
 }
 
-// ResizeTTY resizes the container's TTY to the given dimensions.
-func (r *DockerRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {
-	return r.cli.ContainerResize(ctx, containerID, container.ResizeOptions{
+// ResizeExec resizes the PTY of the most recent Exec call for this container.
+func (r *DockerRuntime) ResizeExec(ctx context.Context, containerID string, height, width uint) error {
+	r.activeExecMu.Lock()
+	execID := r.activeExec[containerID]
+	r.activeExecMu.Unlock()
+
+	if execID == "" {
+		return nil
+	}
+
+	return r.cli.ContainerExecResize(ctx, execID, container.ResizeOptions{
 		Height: height,
 		Width:  width,
 	})
-}
-
-// StartAttached starts a container with stdin/stdout/stderr already attached.
-// This is required for TUI applications that need the terminal connected
-// before the process starts. The attach happens first, then start, ensuring
-// the I/O streams are ready when the container's process begins.
-func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Attach first (before starting) - this is the key difference from Attach()
-	resp, err := r.cli.ContainerAttach(ctx, containerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  opts.Stdin != nil,
-		Stdout: opts.Stdout != nil,
-		Stderr: opts.Stderr != nil,
-	})
-	if err != nil {
-		return fmt.Errorf("attaching to container: %w", err)
-	}
-	defer resp.Close()
-
-	// Set connection deadline from context to ensure I/O doesn't hang.
-	// This is particularly important for non-TTY mode where reads can stall.
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := resp.Conn.SetDeadline(deadline); err != nil {
-			return fmt.Errorf("setting connection deadline: %w", err)
-		}
-	}
-
-	// Set up bidirectional copy BEFORE starting the container.
-	// This ensures the goroutines are ready to receive output as soon as
-	// the container starts, avoiding race conditions with fast-exiting containers.
-	outputDone := make(chan error, 1)
-	stdinDone := make(chan error, 1)
-
-	// Copy container output to stdout/stderr
-	go func() {
-		if opts.TTY {
-			// In TTY mode, output is raw (single stream)
-			_, err := io.Copy(opts.Stdout, resp.Reader)
-			outputDone <- err
-		} else {
-			// In non-TTY mode, Docker multiplexes stdout/stderr with headers.
-			// Use stdcopy.StdCopy to demux the stream.
-			_, err := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
-			outputDone <- err
-		}
-	}()
-
-	// Copy stdin to container (if provided)
-	if opts.Stdin != nil {
-		go func() {
-			_, err := io.Copy(resp.Conn, opts.Stdin)
-			// Close write side when stdin ends
-			if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
-				if closeErr := closeWriter.CloseWrite(); closeErr != nil && err == nil {
-					err = closeErr
-				}
-			}
-			stdinDone <- err
-		}()
-	}
-
-	// Start the container now that I/O streams are ready
-	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("starting container: %w", err)
-	}
-
-	// Resize TTY immediately if initial size was provided.
-	// This ensures the container process sees the correct terminal dimensions
-	// from the very start, before it has a chance to query and cache the size.
-	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
-		if err := r.ResizeTTY(ctx, containerID, opts.InitialHeight, opts.InitialWidth); err != nil {
-			// Log but don't fail - the container has started successfully
-			// and a later resize from SIGWINCH will fix it
-			_ = err // Intentionally ignored; resize is best-effort
-		}
-	}
-
-	// Wait for context cancellation, stdin error (e.g., escape sequence), or output completion
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-stdinDone:
-			// Stdin error - could be escape sequence or EOF
-			if err != nil && err != io.EOF {
-				return err
-			}
-			// Normal stdin EOF - continue waiting for output
-		case err := <-outputDone:
-			if err != nil && err != io.EOF {
-				return err
-			}
-			return nil
-		}
-	}
 }
 
 // dockerNetworkManager methods

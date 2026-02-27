@@ -118,13 +118,10 @@ func (f *flexibleRuntime) ListContainers(context.Context) ([]container.Info, err
 	return nil, nil
 }
 func (f *flexibleRuntime) RemoveImage(context.Context, string) error { return nil }
-func (f *flexibleRuntime) Attach(context.Context, string, container.AttachOptions) error {
-	return nil
+func (f *flexibleRuntime) Exec(context.Context, string, container.ExecOptions) (int, error) {
+	return 0, nil
 }
-func (f *flexibleRuntime) StartAttached(context.Context, string, container.AttachOptions) error {
-	return nil
-}
-func (f *flexibleRuntime) ResizeTTY(context.Context, string, uint, uint) error { return nil }
+func (f *flexibleRuntime) ResizeExec(context.Context, string, uint, uint) error { return nil }
 
 // newEdgeCaseManager creates a Manager with the given runtime and a temporary
 // routes directory. The returned cleanup function should be deferred.

@@ -181,17 +181,17 @@ func TestAppleRuntime_SupportsHostNetwork(t *testing.T) {
 	}
 }
 
-func TestAppleRuntime_ResizeTTY_NoActivePTY(t *testing.T) {
+func TestAppleRuntime_ResizeExec_NoActivePTY(t *testing.T) {
 	r := &AppleRuntime{}
 
-	// ResizeTTY should return nil when no PTY is tracked
-	err := r.ResizeTTY(t.Context(), "nonexistent-container", 24, 80)
+	// ResizeExec should return nil when no PTY is tracked
+	err := r.ResizeExec(t.Context(), "nonexistent-container", 24, 80)
 	if err != nil {
-		t.Errorf("ResizeTTY() with no active PTY = %v, want nil", err)
+		t.Errorf("ResizeExec() with no active PTY = %v, want nil", err)
 	}
 }
 
-func TestAppleRuntime_ResizeTTY_WithActivePTY(t *testing.T) {
+func TestAppleRuntime_ResizeExec_WithActivePTY(t *testing.T) {
 	// Create a real PTY pair to test resizing
 	ptmx, pts, err := pty.Open()
 	if err != nil {
@@ -206,10 +206,10 @@ func TestAppleRuntime_ResizeTTY_WithActivePTY(t *testing.T) {
 		},
 	}
 
-	// ResizeTTY should succeed and actually resize the PTY
-	err = r.ResizeTTY(t.Context(), "test-container", 50, 120)
+	// ResizeExec should succeed and actually resize the PTY
+	err = r.ResizeExec(t.Context(), "test-container", 50, 120)
 	if err != nil {
-		t.Fatalf("ResizeTTY() = %v, want nil", err)
+		t.Fatalf("ResizeExec() = %v, want nil", err)
 	}
 
 	// Verify the PTY was actually resized by reading the size back

@@ -109,18 +109,14 @@ type Runtime interface {
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
 
-	// Attach connects stdin/stdout/stderr to a running container.
-	// Returns when the attachment ends (container exits or context canceled).
-	Attach(ctx context.Context, id string, opts AttachOptions) error
+	// Exec runs a command inside a running container and returns the exit code.
+	// For interactive sessions, this replaces Attach/StartAttached: the container
+	// runs a keepalive init (sleep infinity) and the user's command runs via exec.
+	// Killing the exec leaves the container alive for reattach.
+	Exec(ctx context.Context, id string, opts ExecOptions) (int, error)
 
-	// StartAttached starts a container with stdin/stdout/stderr already attached.
-	// This is required for TUI applications that need the terminal connected
-	// before the process starts (e.g., to read cursor position).
-	// The attachment runs until the container exits or context is canceled.
-	StartAttached(ctx context.Context, id string, opts AttachOptions) error
-
-	// ResizeTTY resizes the container's TTY to the given dimensions.
-	ResizeTTY(ctx context.Context, id string, height, width uint) error
+	// ResizeExec resizes the PTY of the most recent Exec call for this container.
+	ResizeExec(ctx context.Context, id string, height, width uint) error
 }
 
 // NetworkManager handles Docker network operations.
@@ -223,16 +219,18 @@ type BuildManager interface {
 	GetImageHomeDir(ctx context.Context, imageName string) string
 }
 
-// AttachOptions configures container attachment.
-type AttachOptions struct {
-	Stdin  io.Reader // If non-nil, forward input to container
-	Stdout io.Writer // If non-nil, receive stdout from container
-	Stderr io.Writer // If non-nil, receive stderr from container (may be same as Stdout)
-	TTY    bool      // If true, use TTY mode (raw terminal)
+// ExecOptions configures a command execution inside a running container.
+type ExecOptions struct {
+	Cmd    []string  // Command to run
+	Stdin  io.Reader // If non-nil, forward input to the exec process
+	Stdout io.Writer // If non-nil, receive stdout from the exec process
+	Stderr io.Writer // If non-nil, receive stderr (may be same as Stdout)
+	TTY    bool      // If true, allocate a PTY for the exec
 
-	// InitialWidth and InitialHeight set the initial terminal size for TTY mode.
-	// If both are > 0, the TTY is resized immediately after the container starts,
-	// before the process has a chance to query terminal dimensions.
+	User string // User to run as ("" = container default)
+
+	// InitialWidth and InitialHeight set the initial PTY size.
+	// If both are > 0, the PTY is sized before the command starts.
 	InitialWidth  uint
 	InitialHeight uint
 }

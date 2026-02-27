@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,8 +10,6 @@ import (
 
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
-	"github.com/majorcontext/moat/internal/term"
-	"github.com/majorcontext/moat/internal/trace"
 	"github.com/spf13/cobra"
 )
 
@@ -118,7 +115,7 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	if interactive {
-		return attachInteractiveMode(ctx, manager, r, attachTTYTrace)
+		return RunInteractive(ctx, manager, r, r.ExecCmd, attachTTYTrace)
 	}
 
 	return attachOutputMode(ctx, manager, r)
@@ -196,175 +193,6 @@ func attachOutputMode(ctx context.Context, manager *run.Manager, r *run.Run) err
 
 		case err := <-waitDone:
 			logsCancel()
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Run %s completed\n", r.ID)
-			return nil
-		}
-	}
-}
-
-// attachInteractiveMode attaches with stdin connected.
-func attachInteractiveMode(ctx context.Context, manager *run.Manager, r *run.Run, tracePath string) error {
-	// Set up TTY tracing if requested
-	// Note: We don't have the original command for attach, use a placeholder
-	command := []string{"(attach to " + r.Name + ")"}
-	tracer := setupTTYTracer(tracePath, r, command)
-	defer tracer.save()
-
-	// Show recent logs before attaching so user has context
-	if logs, err := manager.RecentLogs(r.ID, 50); err == nil && len(logs) > 0 {
-		fmt.Print(logs)
-		// Add a newline if logs don't end with one
-		if len(logs) > 0 && logs[len(logs)-1] != '\n' {
-			fmt.Println()
-		}
-	}
-
-	// Put terminal in raw mode to capture escape sequences without echo
-	if term.IsTerminal(os.Stdin) {
-		rawState, err := term.EnableRawMode(os.Stdin)
-		if err != nil {
-			log.Debug("failed to enable raw mode", "error", err)
-			// Continue without raw mode - escapes may echo
-		} else {
-			defer func() {
-				if err := term.RestoreTerminal(rawState); err != nil {
-					log.Debug("failed to restore terminal", "error", err)
-				}
-			}()
-		}
-	}
-
-	// Set up status bar for interactive session
-	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
-	defer statusCleanup()
-
-	// Wrap stdout with tracer if tracing is enabled
-	if tracer != nil {
-		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
-	}
-
-	// Wrap stdin with escape proxy to detect detach/stop sequences
-	escapeProxy := term.NewEscapeProxy(os.Stdin)
-
-	// Set up callback to update footer when escape sequence is in progress
-	if statusWriter != nil {
-		statusWriter.SetupEscapeHints(escapeProxy)
-	}
-
-	// Wrap stdin with tracer if tracing is enabled
-	stdin := io.Reader(escapeProxy)
-	if tracer != nil {
-		stdin = trace.NewRecordingReader(escapeProxy, tracer.recorder, trace.EventStdin)
-	}
-
-	// Set up signal handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
-	defer signal.Stop(sigCh)
-
-	// Channel to receive escape actions from the attach goroutine
-	escapeCh := make(chan term.EscapeAction, 1)
-
-	attachCtx, attachCancel := context.WithCancel(ctx)
-	defer attachCancel()
-
-	attachDone := make(chan error, 1)
-	go func() {
-		err := manager.Attach(attachCtx, r.ID, stdin, stdout, os.Stderr)
-		// Check if the error is an escape sequence
-		if term.IsEscapeError(err) {
-			escapeCh <- term.GetEscapeAction(err)
-			attachDone <- nil
-		} else {
-			attachDone <- err
-		}
-	}()
-
-	waitDone := make(chan error, 1)
-	go func() {
-		waitDone <- manager.Wait(ctx, r.ID)
-	}()
-
-	for {
-		select {
-		case sig := <-sigCh:
-			if sig == syscall.SIGWINCH {
-				// Handle terminal resize
-				if statusWriter != nil && term.IsTerminal(os.Stdout) {
-					width, height := term.GetSize(os.Stdout)
-					if width > 0 && height > 0 {
-						// Record resize event for tracing
-						if tracer != nil {
-							tracer.recorder.AddResize(width, height)
-						}
-						_ = statusWriter.Resize(width, height)
-						// Also resize container TTY
-						// #nosec G115 -- width/height are validated positive above
-						_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
-					}
-				}
-				continue // Don't break out of loop
-			}
-			if sig == syscall.SIGTERM {
-				fmt.Printf("\nStopping run %s...\n", r.ID)
-				attachCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
-				}
-				return nil
-			}
-			// SIGINT is forwarded to container via stdin/tty
-
-		case action := <-escapeCh:
-			// Handle escape sequence
-			switch action {
-			case term.EscapeDetach:
-				attachCancel()
-				fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
-				fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
-				return nil
-
-			case term.EscapeStop:
-				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
-				attachCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
-				}
-				fmt.Printf("Run %s stopped\r\n", r.ID)
-				return nil
-			}
-
-		case err := <-attachDone:
-			// Attach ended - wait a moment for container exit to be detected
-			if err != nil && ctx.Err() == nil && !term.IsEscapeError(err) {
-				log.Error("attach failed", "id", r.ID, "error", err)
-			}
-			// Give the wait goroutine time to detect container exit
-			select {
-			case waitErr := <-waitDone:
-				if waitErr != nil {
-					return waitErr
-				}
-				fmt.Printf("Run %s completed\n", r.ID)
-				return nil
-			case <-time.After(containerExitCheckDelay):
-				// Container didn't exit quickly - check run state
-				currentRun, getErr := manager.Get(r.ID)
-				if getErr != nil || currentRun.State != run.StateRunning {
-					// Run ended or was cleaned up
-					fmt.Printf("Run %s completed\n", r.ID)
-					return nil
-				}
-				// Container still running, we just got disconnected
-				fmt.Printf("\nDetached from run %s\n", r.ID)
-				return nil
-			}
-
-		case err := <-waitDone:
-			attachCancel()
 			if err != nil {
 				return err
 			}

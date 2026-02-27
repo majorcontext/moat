@@ -46,16 +46,6 @@ import (
 	"github.com/majorcontext/moat/internal/worktree"
 )
 
-// Timing constants for run lifecycle operations.
-const (
-	// containerStartDelay is how long to wait after StartAttached begins before
-	// updating run state to "running". This delay ensures the container process
-	// has started and the TTY is attached before we report it as running.
-	// The value is chosen to be long enough for the attach to establish but
-	// short enough to not noticeably delay state updates.
-	containerStartDelay = 100 * time.Millisecond
-)
-
 // getWorkspaceOwner returns the UID and GID of the workspace directory owner.
 // This is used on Linux to run containers as the workspace owner, ensuring
 // file permissions work correctly even when moat is run with sudo.
@@ -291,6 +281,7 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 		ContainerID:       meta.ContainerID,
 		Store:             store,
 		Interactive:       meta.Interactive,
+		ExecCmd:           meta.ExecCmd,
 		CreatedAt:         meta.CreatedAt,
 		StartedAt:         meta.StartedAt,
 		StoppedAt:         meta.StoppedAt,
@@ -1966,6 +1957,24 @@ region = %s
 		dns = opts.Config.Container.DNS
 	}
 
+	// Interactive exec mode: the container runs a keepalive init (sleep infinity)
+	// and the user's command is executed via Exec() after the container starts.
+	// This enables detach/reattach without killing the container.
+	containerInteractive := opts.Interactive
+	if opts.Interactive {
+		proxyEnv = append(proxyEnv, "MOAT_EXEC_MODE=1")
+		r.ExecCmd = cmd
+		// Override the container command with a keepalive. When the image has
+		// moat-init as entrypoint, it sees MOAT_EXEC_MODE=1 and does its own
+		// sleep infinity (ignoring $@). When the image has no entrypoint
+		// (simple images without grants/SSH), this command runs directly.
+		// Both paths create the readiness sentinel for waitForReady().
+		cmd = []string{"sh", "-c", "touch /tmp/.moat-ready && exec sleep infinity"}
+		// Container doesn't need -i/-t since PID 1 is sleep infinity.
+		// The exec call handles TTY allocation.
+		containerInteractive = false
+	}
+
 	// Create container
 	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -1981,7 +1990,7 @@ region = %s
 		CapAdd:       capAdd,
 		GroupAdd:     groupAdd,
 		Privileged:   privileged,
-		Interactive:  opts.Interactive,
+		Interactive:  containerInteractive,
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 		MemoryMB:     memoryMB,
 		CPUs:         cpus,
@@ -2243,6 +2252,27 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
+	// For interactive exec mode, wait for the init script to signal readiness
+	// before returning. The container's PID 1 is sleep infinity; the user's
+	// command will run via Exec().
+	if r.Interactive {
+		if err := m.waitForReady(ctx, r.ContainerID); err != nil {
+			// Try to capture container logs to help diagnose init failures.
+			if logs, logErr := m.runtime.ContainerLogs(ctx, r.ContainerID); logErr == nil {
+				logBytes, _ := io.ReadAll(io.LimitReader(logs, 4096))
+				logs.Close()
+				if len(logBytes) > 0 {
+					ui.Errorf("Container init failed. Logs:\n%s", string(logBytes))
+				}
+			}
+			r.SetStateFailedAt(fmt.Sprintf("container readiness check failed: %v", err), time.Now())
+			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+				log.Debug("failed to stop container after readiness failure", "error", stopErr)
+			}
+			return fmt.Errorf("waiting for container readiness: %w", err)
+		}
+	}
+
 	r.SetStateWithTime(StateRunning, time.Now())
 
 	// Save state to disk
@@ -2272,180 +2302,142 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	return nil
 }
 
-// StartAttached starts a run with stdin/stdout/stderr attached from the beginning.
-// This is required for TUI applications (like Codex CLI) that need the terminal
-// connected before the process starts to properly detect terminal capabilities.
-// Unlike Start + Attach, this ensures the TTY is ready when the container command begins.
-func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
-	m.mu.Lock()
+// Exec runs a command inside a running container and returns the exit code.
+// The container must already be started (via Start). For interactive sessions,
+// the container runs a keepalive init and the user's command runs via this method.
+// On detach, the exec is killed but the container survives for reattach.
+func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	m.mu.RLock()
 	r, ok := m.runs[runID]
 	if !ok {
-		m.mu.Unlock()
-		return fmt.Errorf("run %s not found", runID)
+		m.mu.RUnlock()
+		return -1, fmt.Errorf("run %s not found", runID)
 	}
 	containerID := r.ContainerID
-	m.mu.Unlock()
-	r.SetState(StateStarting)
+	hasMoatUser := r.ExecCmd != nil // proxy for needsCustomImage — if we stored ExecCmd, the image has moatuser
+	m.mu.RUnlock()
 
-	// Set run context in logger for correlation
-	log.SetRunContext(log.RunContext{
-		RunID:     runID,
-		RunName:   r.Name,
-		Agent:     r.Agent,
-		Workspace: filepath.Base(r.Workspace),
-		Image:     r.Image,
-		Grants:    r.Grants,
-	})
-
-	// Start with attachment - this ensures TTY is connected before process starts.
-	// TTY mode must match how the container was created (see CreateContainer in
-	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
-	// real terminal, so we use the same check here.
 	useTTY := term.IsTerminal(os.Stdin)
 
-	// For interactive mode, tee output to a buffer so we can capture logs.
-	// This is necessary because:
-	// 1. TTY mode: output goes through PTY, not container logs
-	// 2. Non-TTY interactive: we may still want to capture for tests/programmatic use
+	// Determine user for exec. Moat-built images have moatuser; use it to
+	// drop privileges (same as moat-init.sh would do for non-exec-mode).
+	user := ""
+	if hasMoatUser {
+		user = "moatuser"
+	}
+
+	// Tee output to capture logs for audit/observability.
 	var logBuffer bytes.Buffer
 	var teeStdout, teeStderr io.Writer
 	teeStdout = stdout
 	teeStderr = stderr
-
-	if r.Interactive && r.Store != nil {
-		// Tee stdout and stderr to capture for logs.jsonl
+	if r.Store != nil {
 		teeStdout = io.MultiWriter(stdout, &logBuffer)
 		if stderr != stdout {
 			teeStderr = io.MultiWriter(stderr, &logBuffer)
 		} else {
-			// stdout and stderr are the same writer - don't duplicate
 			teeStderr = teeStdout
 		}
 	}
 
-	attachOpts := container.AttachOptions{
+	execOpts := container.ExecOptions{
+		Cmd:    cmd,
 		Stdin:  stdin,
 		Stdout: teeStdout,
 		Stderr: teeStderr,
 		TTY:    useTTY,
+		User:   user,
 	}
 
-	// Pass initial terminal size so the container can be resized immediately
-	// after starting, before the process queries terminal dimensions.
+	// Pass initial terminal size.
 	if useTTY && term.IsTerminal(os.Stdout) {
 		width, height := term.GetSize(os.Stdout)
 		if width > 0 && height > 0 {
 			// #nosec G115 -- width/height are validated positive above
-			attachOpts.InitialWidth = uint(width)
-			attachOpts.InitialHeight = uint(height)
+			execOpts.InitialWidth = uint(width)
+			execOpts.InitialHeight = uint(height)
 		}
 	}
 
-	// Channel to receive the attach result
-	attachDone := make(chan error, 1)
+	exitCode, execErr := m.runtime.Exec(ctx, containerID, execOpts)
 
-	go func() {
-		attachDone <- m.runtime.StartAttached(ctx, containerID, attachOpts)
-	}()
-
-	// Give the container a moment to start before checking state.
-	// See containerStartDelay for rationale.
-	time.Sleep(containerStartDelay)
-
-	// Update state to running (the container has started)
-	if r.GetState() == StateStarting {
-		r.SetStateWithTime(StateRunning, time.Now())
-	}
-
-	// Get actual port bindings after container starts
-	if len(r.Ports) > 0 {
-		var bindings map[int]int
-		var bindErr error
-		for i := 0; i < 5; i++ {
-			bindings, bindErr = m.runtime.GetPortBindings(ctx, r.ContainerID)
-			if bindErr != nil || len(bindings) >= len(r.Ports) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if bindErr != nil {
-			ui.Warnf("Getting port bindings: %v", bindErr)
-		} else {
-			r.HostPorts = make(map[string]int)
-			services := make(map[string]string)
-			for serviceName, containerPort := range r.Ports {
-				if hostPort, ok := bindings[containerPort]; ok {
-					r.HostPorts[serviceName] = hostPort
-					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-				}
-			}
-			if len(services) > 0 {
-				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
-					ui.Warnf("Registering routes: %v", routeErr)
-				}
-				if m.daemonClient != nil {
-					if routeErr := m.daemonClient.RegisterRoutes(ctx, r.Name, services); routeErr != nil {
-						log.Debug("failed to register routes via daemon", "error", routeErr)
-					}
-				}
-			}
-		}
-	}
-
-	// Save state to disk
-	_ = r.SaveMetadata()
-
-	// Set up firewall if enabled (do this after container starts)
-	if r.FirewallEnabled && r.ProxyPort > 0 {
-		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Firewall setup failed - this is fatal for strict policy
-			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
-			}
-			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
-		}
-	}
-
-	// Wait for the attachment to complete (container exits or context canceled)
-	attachErr := <-attachDone
-
-	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
-	// (Apple TTY output doesn't go through container runtime logs)
-	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
-	// Always create the file for audit completeness, even if empty.
-	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
-		// Use CompareAndSwap to ensure single write
+	// Write captured output to logs.jsonl (Apple TTY output bypasses container logs).
+	if r.Store != nil && logBuffer.Len() > 0 {
 		if r.logsCaptured.CompareAndSwap(false, true) {
-			if lw, err := r.Store.LogWriter(); err == nil {
-				if logBuffer.Len() > 0 {
-					_, _ = lw.Write(logBuffer.Bytes())
-				}
+			if lw, lwErr := r.Store.LogWriter(); lwErr == nil {
+				_, _ = lw.Write(logBuffer.Bytes())
 				lw.Close()
 			} else {
-				// Failed to create file - reset flag so captureLogs can try
 				r.logsCaptured.Store(false)
 			}
 		}
 	}
 
-	// Capture logs after container exits (critical for audit/observability)
-	// For non-interactive mode, this fetches from container runtime logs
-	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
-	m.captureLogs(r)
+	return exitCode, execErr
+}
 
-	// Run provider stopped hooks (e.g., Claude session ID extraction).
-	// Must happen after the container has exited so session files are flushed.
-	runProviderStoppedHooks(r)
-	_ = r.SaveMetadata()
+// ResizeExec resizes the PTY of the most recent Exec call for a run.
+func (m *Manager) ResizeExec(ctx context.Context, runID string, height, width uint) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
 
-	return attachErr
+	return m.runtime.ResizeExec(ctx, containerID, height, width)
+}
+
+// waitForReady polls for the readiness sentinel file created by moat-init.sh
+// in exec mode. This ensures the init script has finished setting up the
+// container environment before we exec the user's command.
+func (m *Manager) waitForReady(ctx context.Context, containerID string) error {
+	const timeout = 60 * time.Second
+	const pollInterval = 100 * time.Millisecond
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("container did not become ready within %s", timeout)
+		default:
+		}
+
+		exitCode, err := m.runtime.Exec(ctx, containerID, container.ExecOptions{
+			Cmd:    []string{"test", "-f", "/tmp/.moat-ready"},
+			Stderr: io.Discard, // Suppress CLI error output during polling
+		})
+		if err == nil && exitCode == 0 {
+			return nil
+		}
+
+		// Check if container is still running before retrying.
+		// Note: execWithPipes returns (exitCode, nil) for command failures,
+		// so we can't rely on err != nil to detect a dead container.
+		state, stateErr := m.runtime.ContainerState(ctx, containerID)
+		if stateErr != nil || state != "running" {
+			if err != nil {
+				return fmt.Errorf("container exited during init (state: %s): %w", state, err)
+			}
+			return fmt.Errorf("container exited during init (state: %s)", state)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // streamLogs streams container logs to stdout for real-time feedback.
 // Note: Final log capture to storage is handled by captureLogs() which is called
-// from all container exit paths (Wait, StartAttached, Stop) to ensure complete
-// logs are captured even for fast-exiting containers.
+// from all container exit paths (Wait, Stop) to ensure complete logs are captured
+// even for fast-exiting containers.
 func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
 	if err != nil {
@@ -2752,7 +2744,7 @@ func (m *Manager) captureLogs(r *Run) {
 
 	// For interactive mode, logs are captured differently by runtime:
 	// - Docker: Container runtime logs work even in TTY mode, so use ContainerLogsAll
-	// - Apple: TTY output doesn't go to container logs, so StartAttached uses tee
+	// - Apple: TTY output doesn't go to container logs, so Exec uses tee
 	// Only skip container logs for Apple containers in interactive mode.
 	if r.Interactive && m.runtime.Type() == container.RuntimeApple {
 		return
@@ -3122,39 +3114,6 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	return nil
 }
 
-// Attach connects stdin/stdout/stderr to a running container.
-func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
-	m.mu.RLock()
-	r, ok := m.runs[runID]
-	if !ok {
-		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
-	}
-	containerID := r.ContainerID
-	m.mu.RUnlock()
-
-	return m.runtime.Attach(ctx, containerID, container.AttachOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		TTY:    true, // Default to TTY mode for now
-	})
-}
-
-// ResizeTTY resizes the container's TTY to the given dimensions.
-func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uint) error {
-	m.mu.RLock()
-	r, ok := m.runs[runID]
-	if !ok {
-		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
-	}
-	containerID := r.ContainerID
-	m.mu.RUnlock()
-
-	return m.runtime.ResizeTTY(ctx, containerID, height, width)
-}
-
 // FollowLogs streams container logs to the provided writer.
 // This is more reliable than Attach for output-only mode on already-running containers.
 func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) error {
@@ -3240,6 +3199,16 @@ func (m *Manager) Close() error {
 
 	m.mu.RLock()
 	for _, r := range m.runs {
+		state := r.GetState()
+		// Don't unregister or stop services for still-running containers (e.g.,
+		// after detach). The daemon proxy must keep serving credentials for the
+		// container's network requests. A future Manager instance (via moat
+		// attach/stop/list) will handle cleanup when the container actually exits.
+		if state == StateRunning || state == StateStarting {
+			log.Debug("Manager.Close: skipping cleanup for running container",
+				"runID", r.ID, "state", state)
+			continue
+		}
 		if err := r.stopProxyServer(closeCtx); err != nil {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}

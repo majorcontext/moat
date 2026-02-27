@@ -881,13 +881,10 @@ func (s *stubRuntime) ListContainers(context.Context) ([]container.Info, error) 
 	panic("not implemented")
 }
 func (s *stubRuntime) RemoveImage(context.Context, string) error { panic("not implemented") }
-func (s *stubRuntime) Attach(context.Context, string, container.AttachOptions) error {
+func (s *stubRuntime) Exec(context.Context, string, container.ExecOptions) (int, error) {
 	panic("not implemented")
 }
-func (s *stubRuntime) StartAttached(context.Context, string, container.AttachOptions) error {
-	panic("not implemented")
-}
-func (s *stubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
+func (s *stubRuntime) ResizeExec(context.Context, string, uint, uint) error {
 	panic("not implemented")
 }
 

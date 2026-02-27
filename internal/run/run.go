@@ -57,6 +57,7 @@ type Run struct {
 	SnapEngine        *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer     bool              // If true, don't auto-remove container after run
 	Interactive       bool              // If true, run was started in interactive mode
+	ExecCmd           []string          // Command for exec mode (stored for reattach)
 	CreatedAt         time.Time
 	StartedAt         time.Time
 	StoppedAt         time.Time
@@ -157,6 +158,7 @@ func (r *Run) SaveMetadata() error {
 		ContainerID:         r.ContainerID,
 		State:               string(state),
 		Interactive:         r.Interactive,
+		ExecCmd:             r.ExecCmd,
 		CreatedAt:           r.CreatedAt,
 		StartedAt:           startedAt,
 		StoppedAt:           stoppedAt,

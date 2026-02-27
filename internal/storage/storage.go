@@ -24,6 +24,7 @@ type Metadata struct {
 	ContainerID string         `json:"container_id,omitempty"`
 	State       string         `json:"state,omitempty"`
 	Interactive bool           `json:"interactive,omitempty"`
+	ExecCmd     []string       `json:"exec_cmd,omitempty"`
 	CreatedAt   time.Time      `json:"created_at,omitempty"`
 	StartedAt   time.Time      `json:"started_at,omitempty"`
 	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
