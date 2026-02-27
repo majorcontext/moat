@@ -3122,25 +3122,6 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	return nil
 }
 
-// Attach connects stdin/stdout/stderr to a running container.
-func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
-	m.mu.RLock()
-	r, ok := m.runs[runID]
-	if !ok {
-		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
-	}
-	containerID := r.ContainerID
-	m.mu.RUnlock()
-
-	return m.runtime.Attach(ctx, containerID, container.AttachOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		TTY:    true, // Default to TTY mode for now
-	})
-}
-
 // ResizeTTY resizes the container's TTY to the given dimensions.
 func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uint) error {
 	m.mu.RLock()
