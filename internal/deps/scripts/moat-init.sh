@@ -310,6 +310,17 @@ run_pre_run_hook
 # after the container starts. Signal readiness and enter a keepalive loop.
 # This allows detach/reattach without killing the container.
 if [ "$MOAT_EXEC_MODE" = "1" ]; then
+  # Write tmux config for interactive sessions.
+  # status off: moat has its own status bar
+  # escape-time 0: no delay on Escape key (vim users)
+  # history-limit: generous scrollback for reattach
+  # mouse on: scroll support
+  cat > /tmp/.moat-tmux.conf << 'TMUXEOF'
+set -g history-limit 100000
+set -g status off
+set -g escape-time 0
+set -g mouse on
+TMUXEOF
   touch /tmp/.moat-ready
   exec sleep infinity
 fi
