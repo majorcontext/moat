@@ -466,16 +466,25 @@ func RunInteractive(ctx context.Context, manager *run.Manager, r *run.Run, comma
 			}
 
 		case err := <-execDone:
-			// Exec ended (user typed exit or command completed).
-			// Stop the keepalive container.
 			if err != nil && ctx.Err() == nil && !term.IsEscapeError(err) {
 				log.Error("exec failed", "id", r.ID, "error", err)
 				return fmt.Errorf("run failed: %w", err)
 			}
+
+			// Check if tmux session is still running. This distinguishes:
+			// - tmux detach (Ctrl-b d): session alive → "Detached"
+			// - user exited (typed exit): session gone → "Completed"
+			if manager.HasTmuxSession(ctx, r.ID) {
+				fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
+				fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
+				return nil
+			}
+
+			// Process exited — stop the keepalive container.
 			if stopErr := manager.Stop(context.Background(), r.ID); stopErr != nil {
 				log.Debug("failed to stop container after exec", "error", stopErr)
 			}
-			fmt.Printf("Run %s completed\n", r.ID)
+			fmt.Printf("Run %s completed\r\n", r.ID)
 			return nil
 		}
 	}

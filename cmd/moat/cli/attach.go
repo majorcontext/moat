@@ -115,6 +115,21 @@ func attachToRun(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	if interactive {
+		// Check if the process finished while we were detached.
+		if r.ExecCmd != nil && !manager.HasTmuxSession(ctx, r.ID) {
+			fmt.Printf("Run finished while detached.\n")
+			if logs, err := manager.RecentLogs(r.ID, 20); err == nil && len(logs) > 0 {
+				fmt.Printf("\nLast output:\n%s", logs)
+				if logs[len(logs)-1] != '\n' {
+					fmt.Println()
+				}
+			}
+			fmt.Printf("\nStopping container...\n")
+			if stopErr := manager.Stop(ctx, r.ID); stopErr != nil {
+				log.Debug("failed to stop container", "error", stopErr)
+			}
+			return nil
+		}
 		return RunInteractive(ctx, manager, r, r.ExecCmd, attachTTYTrace)
 	}
 
