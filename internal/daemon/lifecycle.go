@@ -172,7 +172,10 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	for time.Now().Before(deadline) {
 		if _, statErr := os.Stat(sockPath); statErr == nil {
 			client := NewClient(sockPath)
-			if _, healthErr := client.Health(context.Background()); healthErr == nil {
+			pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_, healthErr := client.Health(pollCtx)
+			pollCancel()
+			if healthErr == nil {
 				return client, nil
 			}
 		}

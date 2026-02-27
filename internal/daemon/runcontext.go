@@ -272,8 +272,11 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		d.ResponseTransformers[host] = append(d.ResponseTransformers[host], transformers...)
 	}
 
-	// Convert MCP servers.
-	d.MCPServers = rc.MCPServers
+	// Copy MCP servers (consistent with other fields being deep-copied).
+	if len(rc.MCPServers) > 0 {
+		d.MCPServers = make([]config.MCPServerConfig, len(rc.MCPServers))
+		copy(d.MCPServers, rc.MCPServers)
+	}
 
 	// Convert allowed hosts.
 	for _, host := range rc.NetworkAllow {

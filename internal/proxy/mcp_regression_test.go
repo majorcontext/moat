@@ -535,3 +535,117 @@ func TestMCPRelay_NoAuth(t *testing.T) {
 		t.Errorf("auth header should be empty, got: %q", receivedAuthHeader)
 	}
 }
+
+// TestServeHTTP_DirectMCPRelay tests that ServeHTTP routes direct /mcp/{token}/{name}
+// requests through handleDirectMCPRelay, bypassing proxy auth.
+func TestServeHTTP_DirectMCPRelay(t *testing.T) {
+	var receivedKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedKey = r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	token := "test-run-token-abc"
+
+	// Set up context resolver (daemon mode) that recognizes our token.
+	p.SetContextResolver(func(t string) (*RunContextData, bool) {
+		if t != token {
+			return nil, false
+		}
+		return &RunContextData{
+			RunID: "run-1",
+			Credentials: map[string]credentialHeader{
+				backend.Listener.Addr().String(): {Name: "X-Api-Key", Value: "real-secret", Grant: "mcp-test"},
+			},
+			MCPServers: []config.MCPServerConfig{
+				{
+					Name: "my-server",
+					URL:  backend.URL,
+					Auth: &config.MCPAuthConfig{Grant: "mcp-test", Header: "X-Api-Key"},
+				},
+			},
+		}, true
+	})
+
+	// Direct request (r.URL.Host empty) with token in URL path.
+	req := httptest.NewRequest("POST", "/mcp/"+token+"/my-server", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if receivedKey != "real-secret" {
+		t.Errorf("backend received X-Api-Key = %q, want %q", receivedKey, "real-secret")
+	}
+}
+
+// TestServeHTTP_DirectMCPRelay_InvalidToken tests that an invalid token returns 407.
+func TestServeHTTP_DirectMCPRelay_InvalidToken(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(string) (*RunContextData, bool) {
+		return nil, false
+	})
+
+	req := httptest.NewRequest("POST", "/mcp/bad-token/my-server", nil)
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusProxyAuthRequired {
+		t.Errorf("status = %d, want 407", rec.Code)
+	}
+}
+
+// TestServeHTTP_DirectAWSCredentials tests that ServeHTTP routes direct /_aws/credentials
+// requests through handleDirectAWSCredentials, extracting the token from Authorization.
+func TestServeHTTP_DirectAWSCredentials(t *testing.T) {
+	p := NewProxy()
+	token := "aws-run-token-xyz"
+
+	// Create a mock AWS handler that returns a fixed credential response.
+	mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"Version":1,"AccessKeyId":"AKIA..."}`))
+	})
+
+	p.SetContextResolver(func(t string) (*RunContextData, bool) {
+		if t != token {
+			return nil, false
+		}
+		return &RunContextData{
+			RunID:      "run-aws",
+			AWSHandler: mockHandler,
+		}, true
+	})
+
+	// Direct request with Authorization: Bearer {token}.
+	req := httptest.NewRequest("GET", "/_aws/credentials", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "AKIA") {
+		t.Errorf("expected AWS credential response, got: %s", rec.Body.String())
+	}
+}
+
+// TestServeHTTP_DirectAWSCredentials_NoAuth tests that missing auth returns 401.
+func TestServeHTTP_DirectAWSCredentials_NoAuth(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(string) (*RunContextData, bool) {
+		return nil, false
+	})
+
+	req := httptest.NewRequest("GET", "/_aws/credentials", nil)
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}

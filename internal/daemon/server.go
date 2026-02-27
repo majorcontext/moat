@@ -167,7 +167,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, _ *http.Request) {
 	for i, rc := range runs {
 		infos[i] = RunInfo{
 			RunID:        rc.RunID,
-			ContainerID:  rc.ContainerID,
+			ContainerID:  rc.GetContainerID(),
 			RegisteredAt: rc.RegisteredAt.Format(time.RFC3339),
 		}
 	}
