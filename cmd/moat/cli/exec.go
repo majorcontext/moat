@@ -20,12 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Timing constants for attached execution behavior
+// Timing constants for interactive execution behavior
 const (
-	// doublePressWindow is how quickly Ctrl+C must be pressed twice to stop a run
-	doublePressWindow = 500 * time.Millisecond
-	// containerExitCheckDelay is how long to wait for container exit detection
-	containerExitCheckDelay = 200 * time.Millisecond
 	// ttyStartupDelay is how long to wait before resizing TTY after container starts.
 	// This allows the container process to initialize before we resize.
 	ttyStartupDelay = 200 * time.Millisecond
@@ -242,15 +238,15 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		})
 	}
 
-	// Interactive mode: use StartAttached to ensure TTY is connected before process starts
+	// Interactive mode: use StartAttached to ensure TTY is connected before process starts.
 	// This is required for TUI applications like Codex CLI that need to detect terminal
 	// capabilities immediately on startup.
-	if opts.Interactive && !opts.Flags.Detach {
+	if opts.Interactive {
 		return r, RunInteractiveAttached(ctx, manager, r, opts.Command, opts.Flags.TTYTrace)
 	}
 
-	// Start run (non-interactive or detached)
-	startOpts := run.StartOptions{StreamLogs: !opts.Interactive}
+	// Non-interactive: start in background
+	startOpts := run.StartOptions{StreamLogs: false}
 	if err := manager.Start(ctx, r.ID, startOpts); err != nil {
 		log.Error("failed to start run", "id", r.ID, "error", err)
 		return r, fmt.Errorf("starting run: %w", err)
@@ -270,218 +266,10 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
-	// If detached, return immediately
-	if opts.Flags.Detach {
-		fmt.Printf("\nRun %s started in background\n", r.ID)
-		fmt.Printf("Use 'moat logs %s' to view output\n", r.ID)
-		fmt.Printf("Use 'moat attach %s' to attach\n", r.ID)
-		fmt.Printf("Use 'moat stop %s' to stop\n", r.ID)
-		return r, nil
-	}
-
-	// Non-interactive attached mode: stream output, Ctrl+C detaches
-	return r, RunAttached(ctx, manager, r)
-}
-
-// RunAttached runs in attached mode where output is streamed but stdin is not connected.
-// Ctrl+C detaches (leaves run active), double Ctrl+C stops the run.
-func RunAttached(ctx context.Context, manager *run.Manager, r *run.Run) error {
-	// Set up signal handling for detach behavior
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	// Track Ctrl+C timing for double-press detection
-	lastSigTime := time.Time{}
-
-	// Create a cancellable context for the wait
-	waitCtx, waitCancel := context.WithCancel(ctx)
-	defer waitCancel()
-
-	// Channel to receive wait result
-	waitDone := make(chan error, 1)
-	go func() {
-		waitDone <- manager.Wait(waitCtx, r.ID)
-	}()
-
-	for {
-		select {
-		case sig := <-sigCh:
-			now := time.Now()
-			if now.Sub(lastSigTime) < doublePressWindow {
-				// Double Ctrl+C - stop the run
-				fmt.Printf("\nStopping run %s...\n", r.ID)
-				waitCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
-				}
-				fmt.Printf("Run %s stopped\n", r.ID)
-				return nil
-			}
-			// First Ctrl+C - detach (double-press detection happens before this point)
-			log.Debug("received signal, detaching", "signal", sig)
-			fmt.Printf("\nDetaching from run %s (still running)\n", r.ID)
-			fmt.Printf("Press Ctrl+C again within 500ms to stop, or use 'moat stop %s'\n", r.ID)
-			fmt.Printf("Use 'moat attach %s' to reattach\n", r.ID)
-			// Don't cancel - let the run continue
-			return nil
-
-		case err := <-waitDone:
-			if err != nil {
-				log.Error("run failed", "id", r.ID, "error", err)
-				return err
-			}
-			log.Info("run completed", "id", r.ID)
-			fmt.Printf("Run %s completed\n", r.ID)
-			return nil
-		}
-	}
-}
-
-// RunInteractive runs in interactive mode with stdin connected and TTY allocated.
-func RunInteractive(ctx context.Context, manager *run.Manager, r *run.Run) error {
-	fmt.Printf("%s\n\n", term.EscapeHelpText())
-
-	// Resize container TTY to match terminal size
-	if term.IsTerminal(os.Stdout) {
-		width, height := term.GetSize(os.Stdout)
-		if width > 0 && height > 0 {
-			// #nosec G115 -- width/height are validated positive above
-			if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
-				log.Debug("failed to resize TTY", "error", err)
-			}
-		}
-	}
-
-	// Put terminal in raw mode to capture escape sequences without echo
-	if term.IsTerminal(os.Stdin) {
-		rawState, err := term.EnableRawMode(os.Stdin)
-		if err != nil {
-			log.Debug("failed to enable raw mode", "error", err)
-			// Continue without raw mode - escapes may echo
-		} else {
-			defer func() {
-				if err := term.RestoreTerminal(rawState); err != nil {
-					log.Debug("failed to restore terminal", "error", err)
-				}
-			}()
-		}
-	}
-
-	// Set up signal handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	// Wrap stdin with escape proxy to detect detach/stop sequences
-	escapeProxy := term.NewEscapeProxy(os.Stdin)
-
-	// Channel to receive escape actions from the attach goroutine
-	escapeCh := make(chan term.EscapeAction, 1)
-
-	// Attach to container with escape-proxied stdin
-	attachCtx, attachCancel := context.WithCancel(ctx)
-	defer attachCancel()
-
-	attachDone := make(chan error, 1)
-	go func() {
-		err := manager.Attach(attachCtx, r.ID, escapeProxy, os.Stdout, os.Stderr)
-		// Check if the error is an escape sequence
-		if term.IsEscapeError(err) {
-			escapeCh <- term.GetEscapeAction(err)
-			attachDone <- nil
-		} else {
-			attachDone <- err
-		}
-	}()
-
-	// Also wait for container to exit
-	waitDone := make(chan error, 1)
-	go func() {
-		waitDone <- manager.Wait(ctx, r.ID)
-	}()
-
-	for {
-		select {
-		case sig := <-sigCh:
-			// In interactive mode, forward SIGINT to container (it will handle it)
-			// Only SIGTERM causes us to stop
-			if sig == syscall.SIGTERM {
-				fmt.Printf("\nStopping run %s...\n", r.ID)
-				attachCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
-				}
-				return nil
-			}
-			// SIGINT is forwarded to container via attached stdin/tty
-
-		case action := <-escapeCh:
-			// Handle escape sequence
-			switch action {
-			case term.EscapeDetach:
-				attachCancel()
-				// Wait for attach goroutine to complete before checking state
-				select {
-				case <-attachDone:
-				case <-time.After(500 * time.Millisecond):
-				}
-				currentRun, _ := manager.Get(r.ID)
-				if currentRun != nil && currentRun.State == run.StateRunning {
-					fmt.Printf("\r\nDetached from run %s (still running)\r\n", r.ID)
-					fmt.Printf("Use 'moat attach %s' to reattach\r\n", r.ID)
-				} else {
-					fmt.Printf("\r\nRun %s stopped\r\n", r.ID)
-				}
-				return nil
-
-			case term.EscapeStop:
-				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
-				attachCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
-				}
-				fmt.Printf("Run %s stopped\r\n", r.ID)
-				return nil
-			}
-
-		case err := <-attachDone:
-			// Attach ended - wait a moment for container exit to be detected
-			if err != nil && ctx.Err() == nil && !term.IsEscapeError(err) {
-				log.Error("attach failed", "id", r.ID, "error", err)
-			}
-			// Give the wait goroutine time to detect container exit
-			select {
-			case waitErr := <-waitDone:
-				if waitErr != nil {
-					return waitErr
-				}
-				fmt.Printf("Run %s completed\n", r.ID)
-				return nil
-			case <-time.After(containerExitCheckDelay):
-				// Container didn't exit quickly - check run state
-				currentRun, getErr := manager.Get(r.ID)
-				if getErr != nil || currentRun.State != run.StateRunning {
-					// Run ended or was cleaned up
-					fmt.Printf("Run %s completed\n", r.ID)
-					return nil
-				}
-				// Container still running, we just got disconnected
-				fmt.Printf("\nDetached from run %s\n", r.ID)
-				return nil
-			}
-
-		case err := <-waitDone:
-			// Container exited
-			attachCancel() // Stop the attach goroutine
-			if err != nil {
-				log.Error("run failed", "id", r.ID, "error", err)
-				return err
-			}
-			fmt.Printf("Run %s completed\n", r.ID)
-			return nil
-		}
-	}
+	fmt.Printf("\nRun %s started in background\n", r.ID)
+	fmt.Printf("Use 'moat logs %s -f' to follow output\n", r.ID)
+	fmt.Printf("Use 'moat stop %s' to stop\n", r.ID)
+	return r, nil
 }
 
 // RunInteractiveAttached runs in interactive mode using StartAttached to ensure

@@ -61,9 +61,6 @@ Examples:
   # Name the session for easy reference
   moat claude --name my-feature
 
-  # Run in background
-  moat claude -d
-
   # Force rebuild of container image
   moat claude --rebuild
 
@@ -275,7 +272,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if result != nil && !claudeFlags.Detach {
+	if result != nil {
 		fmt.Printf("Starting Claude Code in %s\n", absPath)
 		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
 	}

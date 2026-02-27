@@ -67,9 +67,6 @@ Examples:
   # Name the session for easy reference
   moat gemini --name my-feature
 
-  # Run in background
-  moat gemini -d
-
   # Force rebuild of container image
   moat gemini --rebuild
 
@@ -235,7 +232,7 @@ func runGemini(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if result != nil && !geminiFlags.Detach {
+	if result != nil {
 		fmt.Printf("Starting Gemini in %s\n", absPath)
 		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
 	}

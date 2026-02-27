@@ -80,9 +80,6 @@ Examples:
   # Name the session for easy reference
   moat codex --name my-feature
 
-  # Run in background
-  moat codex -d
-
   # Force rebuild of container image
   moat codex --rebuild
 
@@ -272,7 +269,7 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if result != nil && !codexFlags.Detach {
+	if result != nil {
 		fmt.Printf("Starting Codex CLI in %s\n", absPath)
 		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
 	}

@@ -20,7 +20,7 @@ var runCmd = &cobra.Command{
 	Long: `Run an agent in an isolated container with workspace mounting,
 credential injection, and full observability.
 
-The agent runs in a Docker container with your workspace mounted at /workspace.
+The agent runs in a container with your workspace mounted at /workspace.
 If an agent.yaml exists in the workspace, its settings are used as defaults.
 
 Arguments:
@@ -28,11 +28,10 @@ Arguments:
   [-- cmd]     Optional command to run instead of agent's default
 
 Non-interactive mode (default):
-  Ctrl+C            Detach (run continues)
-  Ctrl+C Ctrl+C     Stop the run (within 500ms)
+  Run starts in background. Monitor with 'moat logs' and 'moat trace'.
+  Stop with 'moat stop'.
 
 Interactive mode (-i):
-  Ctrl-/ d          Detach (run continues)
   Ctrl-/ k          Stop the run
   Ctrl+C            Sent to container process
 
@@ -57,9 +56,6 @@ Examples:
 
   # Run multiple commands
   moat run -- sh -c "npm install && npm test"
-
-  # Run detached (in background)
-  moat run -d ./my-project
 
   # Run interactive shell
   moat run -i -- bash`,
@@ -159,7 +155,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		"workspace", absPath,
 		"grants", runFlags.Grants,
 		"cmd", containerCmd,
-		"detach", runFlags.Detach,
 		"interactive", interactive,
 	)
 
@@ -187,8 +182,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Print started message if not already printed by Execute
-	if !runFlags.Detach && r != nil {
+	if r != nil {
 		fmt.Printf("Started agent %q (run %s)\n", r.Name, r.ID)
 	}
 

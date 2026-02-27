@@ -36,9 +36,6 @@ Examples:
   # Start a run on a new feature branch
   moat wt dark-mode
 
-  # Run in background
-  moat wt dark-mode -d
-
   # Run a specific command in the worktree
   moat wt dark-mode -- make test
 
@@ -165,11 +162,8 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine interactive mode: CLI flags > config > default
-	interactive := !wtFlags.Detach
-	if !interactive && cfg != nil && cfg.Interactive {
-		interactive = true
-	}
+	// Determine interactive mode from config
+	interactive := cfg != nil && cfg.Interactive
 
 	log.Debug("starting worktree run",
 		"branch", branch,
