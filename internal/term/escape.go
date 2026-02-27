@@ -12,8 +12,6 @@ type EscapeAction int
 const (
 	// EscapeNone means no escape action was triggered.
 	EscapeNone EscapeAction = iota
-	// EscapeDetach means the user wants to detach from the session.
-	EscapeDetach
 	// EscapeStop means the user wants to stop the run.
 	EscapeStop
 )
@@ -25,8 +23,6 @@ type EscapeError struct {
 
 func (e EscapeError) Error() string {
 	switch e.Action {
-	case EscapeDetach:
-		return "escape: detach"
 	case EscapeStop:
 		return "escape: stop"
 	default:
@@ -54,14 +50,12 @@ const (
 	EscapePrefix byte = 0x1f
 
 	// Command keys (after the prefix)
-	escapeKeyDetach byte = 'd'
-	escapeKeyStop   byte = 'k'
+	escapeKeyStop byte = 'k'
 )
 
 // EscapeProxy wraps a reader and watches for escape sequences.
 //
 // Escape sequences are: Ctrl-/ followed by:
-//   - d: detach from session (run continues)
 //   - k: stop the run
 //
 // When an escape sequence is detected, Read returns an EscapeError.
@@ -87,7 +81,7 @@ func NewEscapeProxy(r io.Reader) *EscapeProxy {
 }
 
 // OnPrefixChange sets a callback that fires when the escape prefix state changes.
-// The callback receives true when Ctrl-/ is pressed (waiting for d/k), and false
+// The callback receives true when Ctrl-/ is pressed (waiting for command key), and false
 // when the sequence completes or is canceled. This can be used to update UI state,
 // such as showing escape key hints in a status bar.
 //
@@ -151,18 +145,6 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 			// Check for escape commands
 			switch b {
-			case escapeKeyDetach:
-				// Buffer any remaining bytes for next Read
-				if i+1 < n {
-					e.buf = append(e.buf, buf[i+1:n]...)
-				}
-				// If we have output to return first, defer the escape
-				if len(out) > 0 {
-					pendingEscape = &EscapeError{Action: EscapeDetach}
-					break
-				}
-				return 0, EscapeError{Action: EscapeDetach}
-
 			case escapeKeyStop:
 				if i+1 < n {
 					e.buf = append(e.buf, buf[i+1:n]...)
@@ -237,8 +219,6 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 		b := oneByte[0]
 		e.setPrefixState(false)
 		switch b {
-		case escapeKeyDetach:
-			return 0, EscapeError{Action: EscapeDetach}
 		case escapeKeyStop:
 			return 0, EscapeError{Action: EscapeStop}
 		case EscapePrefix:
@@ -279,5 +259,5 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 // EscapeHelpText returns help text explaining the escape sequences.
 func EscapeHelpText() string {
-	return "Escape sequences: Ctrl-/ d (detach), Ctrl-/ k (stop)"
+	return "Escape: Ctrl-/ k (stop)"
 }
