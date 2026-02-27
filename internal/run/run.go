@@ -48,10 +48,8 @@ type Run struct {
 	HostPorts         map[string]int    // endpoint name -> host port (after binding)
 	State             State
 	ContainerID       string
-	ProxyServer       *proxy.Server     // Auth proxy for credential injection
 	SSHAgentServer    *sshagent.Server  // SSH agent proxy for SSH key access
 	Store             *storage.RunStore // Run data storage
-	storeRef          *atomic.Value     // Atomic reference for concurrent logger access
 	logsCaptured      atomic.Bool       // Track if logs have been captured (for idempotency)
 	providerHooksDone atomic.Bool       // Track if provider stopped hooks have run (for idempotency)
 	exitCh            chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
@@ -65,7 +63,6 @@ type Run struct {
 	Error             string
 
 	// Shutdown coordination to prevent race conditions
-	proxyStopOnce    sync.Once // Ensures ProxyServer.Stop() called only once
 	sshAgentStopOnce sync.Once // Ensures SSHAgentServer.Stop() called only once
 
 	// State protection - guards State, Error, StartedAt, StoppedAt fields
@@ -77,7 +74,7 @@ type Run struct {
 	FirewallEnabled bool
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
-	ProxyAuthToken  string // Auth token for proxy (Apple containers only, empty for Docker)
+	ProxyAuthToken  string // Auth token for proxy daemon (set when run is registered with daemon)
 
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
@@ -88,9 +85,6 @@ type Run struct {
 
 	// AWS credential provider (set when using aws grant)
 	AWSCredentialProvider *proxy.AWSCredentialProvider
-
-	// tokenRefreshCancel cancels the background token refresh goroutine.
-	tokenRefreshCancel context.CancelFunc
 
 	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
 	awsTempDir string
@@ -177,22 +171,13 @@ func (r *Run) SaveMetadata() error {
 	})
 }
 
-// stopProxyServer safely stops the proxy server exactly once.
-// This method is safe to call concurrently from multiple goroutines.
-// It cancels the background token refresh loop before stopping the proxy.
-func (r *Run) stopProxyServer(ctx context.Context) error {
-	// Cancel token refresh loop before stopping proxy
-	if r.tokenRefreshCancel != nil {
-		r.tokenRefreshCancel()
-	}
-	var stopErr error
-	r.proxyStopOnce.Do(func() {
-		if r.ProxyServer != nil {
-			stopErr = r.ProxyServer.Stop(ctx)
-			r.ProxyServer = nil
-		}
-	})
-	return stopErr
+// stopProxyServer is a no-op. The proxy is managed by the daemon process
+// and token refresh is handled by the daemon. Daemon run unregistration
+// is handled separately by the Manager.
+//
+//nolint:unparam // error return kept for interface consistency with callers
+func (r *Run) stopProxyServer(_ context.Context) error {
+	return nil
 }
 
 // stopSSHAgentServer safely stops the SSH agent server exactly once.

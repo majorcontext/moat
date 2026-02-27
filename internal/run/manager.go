@@ -3,9 +3,7 @@ package run
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +25,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/image"
 	"github.com/majorcontext/moat/internal/langserver"
@@ -82,6 +80,7 @@ type Manager struct {
 	runs           map[string]*Run
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
+	daemonClient   *daemon.Client
 	mu             sync.RWMutex
 
 	// ctx/cancel control background goroutines (e.g. monitorContainerExit).
@@ -314,6 +313,11 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 			if err := m.routes.Remove(r.Name); err != nil {
 				log.Debug("removing stale route", "name", r.Name, "error", err)
 			}
+			if m.daemonClient != nil {
+				if err := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); err != nil {
+					log.Debug("failed to unregister routes via daemon", "error", err)
+				}
+			}
 		}
 	}
 
@@ -408,8 +412,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		cmd = []string{"/bin/bash"}
 	}
 
-	// Start proxy server for this run if grants are specified
-	var proxyServer *proxy.Server
+	// Proxy environment and mount configuration
 	var proxyEnv []string
 	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
 	var mounts []container.MountConfig
@@ -478,13 +481,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 
-	// cleanupProxy is a helper to stop the proxy server and log any errors.
+	// cleanupDaemonRun is a helper to unregister the run from the proxy daemon.
 	// Used in error paths during run creation.
-	cleanupProxy := func(ps *proxy.Server) {
-		if ps != nil {
-			if err := ps.Stop(context.Background()); err != nil {
-				log.Debug("failed to stop proxy during cleanup", "error", err)
+	cleanupDaemonRun := func() {
+		if r.ProxyAuthToken != "" && m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRun(context.Background(), r.ProxyAuthToken); err != nil {
+				log.Debug("failed to unregister run from daemon", "error", err)
 			}
+			r.ProxyAuthToken = ""
 		}
 	}
 
@@ -505,15 +509,21 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	}
 
 	if needsProxyForGrants || needsProxyForFirewall {
-		p := proxy.NewProxy()
+		// Daemon directory for proxy state (CA certs, lock file, socket)
+		daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
 
-		// Create CA for TLS interception
-		caDir := filepath.Join(credential.DefaultStoreDir(), "ca")
-		ca, err := proxy.NewCA(caDir)
-		if err != nil {
-			return nil, fmt.Errorf("creating CA: %w", err)
+		// Ensure daemon is running and get a client
+		daemonCl, daemonErr := daemon.EnsureRunning(daemonDir, 0)
+		if daemonErr != nil {
+			return nil, fmt.Errorf("starting proxy daemon: %w", daemonErr)
 		}
-		p.SetCA(ca)
+		m.mu.Lock()
+		m.daemonClient = daemonCl
+		m.mu.Unlock()
+
+		// Create a RunContext that implements credential.ProxyConfigurer.
+		// Providers will configure their credentials on this context.
+		runCtx := daemon.NewRunContext(r.ID)
 
 		// Load credentials for granted providers
 		key, keyErr := credential.DefaultEncryptionKey()
@@ -524,9 +534,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			credential.DefaultStoreDir(),
 			key,
 		)
-
-		// Collect refreshable targets during grant loop
-		var refreshTargets []refreshTarget
 
 		// Track Anthropic/Claude credential for base URL proxy setup
 		var anthropicCred *provider.Credential
@@ -546,7 +553,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				cred, getErr := store.Get(credName)
 				if getErr != nil {
 					// Should not happen: validateGrants checks before resource allocation.
-					cleanupProxy(proxyServer)
+					cleanupDaemonRun()
 					return nil, fmt.Errorf("grant %q: credential not found: %w", grantName, getErr)
 				}
 				// Convert credential for new provider interface
@@ -557,10 +564,23 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
 				prov := provider.Get(grantName)
 				if prov == nil {
-					log.Debug("grant has no registered provider (e.g. MCP grant), skipping proxy config", "grant", grantName)
+					// Store MCP credential on RunContext so the daemon proxy can
+					// resolve it by grant name during MCP relay requests.
+					if opts.Config != nil {
+						for _, mcp := range opts.Config.MCP {
+							if mcp.Auth != nil && mcp.Auth.Grant == grantName {
+								serverHost := mcp.URL // use full URL as key to avoid conflicts
+								if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+									serverHost = u.Host
+								}
+								runCtx.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grantName)
+							}
+						}
+					}
 					continue
 				}
-				prov.ConfigureProxy(p, provCred)
+				// Configure the RunContext (which implements ProxyConfigurer)
+				prov.ConfigureProxy(runCtx, provCred)
 				envVars := prov.ContainerEnv(provCred)
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				providerEnv = append(providerEnv, envVars...)
@@ -568,16 +588,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Capture Anthropic/Claude credential for base URL proxy setup
 				if credName == credential.ProviderClaude || credName == credential.ProviderAnthropic {
 					anthropicCred = provCred
-				}
-
-				// Check if this provider supports token refresh
-				if rp, ok := prov.(provider.RefreshableProvider); ok && rp.CanRefresh(provCred) {
-					refreshTargets = append(refreshTargets, refreshTarget{
-						providerName: credName,
-						refresher:    rp,
-						cred:         cred,
-						store:        store,
-					})
 				}
 
 				// Handle AWS endpoint provider
@@ -600,116 +610,61 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					if err != nil {
 						return nil, fmt.Errorf("creating AWS credential provider: %w", err)
 					}
-					// Store provider; handler will be set later after auth token is generated
+					// Store provider for later AWS credential_process setup
 					r.AWSCredentialProvider = awsProvider
+
+					// Store config for daemon registration so the daemon can
+					// create its own AWSCredentialProvider.
+					runCtx.AWSConfig = &daemon.AWSConfig{
+						RoleARN:         awsCfg.RoleARN,
+						Region:          awsCfg.Region,
+						SessionDuration: awsCfg.SessionDuration,
+						ExternalID:      awsCfg.ExternalID,
+					}
 				}
 			}
 		}
 
-		proxyServer = proxy.NewServer(p)
-
-		// Apple containers access the host via gateway IP, so the proxy must
-		// bind to all interfaces. Docker can use localhost since it has
-		// host.docker.internal or host network mode.
-		// When binding to all interfaces, we require authentication to prevent
-		// unauthorized network access to credentials.
-		var proxyAuthToken string
-		if m.runtime.Type() == container.RuntimeApple {
-			proxyServer.SetBindAddr("0.0.0.0")
-
-			// Generate a secure random token for proxy authentication
-			tokenBytes := make([]byte, 32)
-			if _, err := rand.Read(tokenBytes); err != nil {
-				return nil, fmt.Errorf("generating proxy auth token: %w", err)
-			}
-			proxyAuthToken = hex.EncodeToString(tokenBytes)
-			p.SetAuthToken(proxyAuthToken)
-		}
-
-		// Set up AWS credential handler if AWS grant is active
-		if r.AWSCredentialProvider != nil {
-			// Use same auth token as the main proxy (if set)
-			r.AWSCredentialProvider.SetAuthToken(proxyAuthToken)
-			p.SetAWSHandler(r.AWSCredentialProvider.Handler())
-		}
-
-		// Set up request logging with atomic store reference for safe concurrent access.
-		// The store is created later, so we use atomic.Value to avoid data races.
-		var storeRef atomic.Value // holds *storage.RunStore
-		p.SetLogger(func(data proxy.RequestLogData) {
-			store, _ := storeRef.Load().(*storage.RunStore)
-			if store == nil {
-				// Store not yet initialized - early request during container startup.
-				// This is expected and non-fatal; the request won't be logged.
-				log.Debug("skipping network log: store not yet initialized",
-					"method", data.Method,
-					"url", data.URL)
-				return
-			}
-			var errStr string
-			if data.Err != nil {
-				errStr = data.Err.Error()
-			}
-			// Best-effort logging; errors are non-fatal
-			_ = store.WriteNetworkRequest(storage.NetworkRequest{
-				Timestamp:       time.Now().UTC(),
-				Method:          data.Method,
-				URL:             data.URL,
-				StatusCode:      data.StatusCode,
-				Duration:        data.Duration.Milliseconds(),
-				Error:           errStr,
-				RequestHeaders:  proxy.FilterHeaders(data.RequestHeaders, data.AuthInjected, data.InjectedHeaderName),
-				ResponseHeaders: proxy.FilterHeaders(data.ResponseHeaders, false, ""),
-				RequestBody:     string(data.RequestBody),
-				ResponseBody:    string(data.ResponseBody),
-				BodyTruncated:   len(data.RequestBody) > proxy.MaxBodySize || len(data.ResponseBody) > proxy.MaxBodySize,
-			})
-		})
-		r.storeRef = &storeRef // Save reference to update later
-
-		// Configure network policy from agent.yaml
+		// Configure network policy on the RunContext
 		if opts.Config != nil {
-			p.SetNetworkPolicy(opts.Config.Network.Policy, opts.Config.Network.Allow, opts.Grants)
+			runCtx.NetworkPolicy = opts.Config.Network.Policy
+			runCtx.NetworkAllow = opts.Config.Network.Allow
 		}
 
-		// Configure MCP servers for credential injection
+		// Configure MCP servers on the RunContext
 		if opts.Config != nil && len(opts.Config.MCP) > 0 {
-			proxyServer.Proxy().SetMCPServers(opts.Config.MCP)
-			proxyServer.Proxy().SetCredentialStore(store)
+			runCtx.MCPServers = opts.Config.MCP
 		}
 
-		if err := proxyServer.Start(); err != nil {
-			return nil, fmt.Errorf("starting proxy: %w", err)
+		// Build RegisterRequest from the RunContext
+		regReq := buildRegisterRequest(runCtx, opts.Grants)
+
+		// Register with daemon — returns auth token and proxy port
+		regResp, regErr := m.daemonClient.RegisterRun(ctx, regReq)
+		if regErr != nil {
+			return nil, fmt.Errorf("registering run with proxy daemon: %w", regErr)
 		}
 
 		// Get proxy host address (needed for both proxy URL and firewall setup)
 		hostAddr := m.runtime.GetHostAddress()
 
+		// Store proxy details from daemon response
+		r.ProxyAuthToken = regResp.AuthToken
+		r.ProxyPort = regResp.ProxyPort
+		r.ProxyHost = hostAddr
+
 		// Store proxy details for firewall setup (applied after container starts)
 		if needsProxyForFirewall {
 			r.FirewallEnabled = true
-			r.ProxyHost = hostAddr
-			proxyPortInt, _ := strconv.Atoi(proxyServer.Port())
-			r.ProxyPort = proxyPortInt
-		}
-
-		// Store proxy auth token (for tests and debugging)
-		r.ProxyAuthToken = proxyAuthToken
-
-		// Start background token refresh loop for refreshable grants
-		if len(refreshTargets) > 0 {
-			refreshCtx, refreshCancel := context.WithCancel(context.Background())
-			r.tokenRefreshCancel = refreshCancel
-			go m.runTokenRefreshLoop(refreshCtx, r, p, refreshTargets)
 		}
 
 		// Determine proxy URL based on runtime's host address
-		// Include authentication credentials in URL when token is set (Apple containers)
-		proxyHost := hostAddr + ":" + proxyServer.Port()
+		proxyPortStr := strconv.Itoa(regResp.ProxyPort)
+		proxyHost := hostAddr + ":" + proxyPortStr
 		var proxyURL string
-		if proxyAuthToken != "" {
+		if regResp.AuthToken != "" {
 			// Include auth credentials in URL: http://moat:token@host:port
-			proxyURL = "http://moat:" + proxyAuthToken + "@" + proxyHost
+			proxyURL = "http://moat:" + regResp.AuthToken + "@" + proxyHost
 		} else {
 			proxyURL = "http://" + proxyHost
 		}
@@ -734,8 +689,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// We mount a directory (not just the file) because Apple container
 		// only supports directory mounts, not individual file mounts.
 		// The private key stays on the host - only the proxy needs it for signing.
+		// The daemon's CA is stored under the daemon directory.
+		caDir := filepath.Join(daemonDir, "ca")
 		caCertOnlyDir := filepath.Join(caDir, "public")
 		if err := ensureCACertOnlyDir(caDir, caCertOnlyDir); err != nil {
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("creating CA cert-only directory: %w", err)
 		}
 		mounts = append(mounts, container.MountConfig{
@@ -772,28 +730,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				log.Warn("invalid claude.base_url, skipping relay setup",
 					"url", opts.Config.Claude.BaseURL, "error", parseErr)
 			} else {
-				// Register credential injection for the base URL host so the
-				// relay handler can inject credentials before forwarding.
-				claude.ConfigureBaseURLProxy(p, anthropicCred, baseURL.Host)
+				// Register credential injection for the base URL host on the RunContext
+				claude.ConfigureBaseURLProxy(runCtx, anthropicCred, baseURL.Host)
 
-				// Register a relay endpoint on the proxy. The proxy runs on
-				// the host, so the original URL (e.g., http://localhost:8787)
-				// correctly reaches the host-side LLM proxy without rewriting.
-				if err := p.AddRelay("anthropic", opts.Config.Claude.BaseURL); err != nil {
-					log.Warn("failed to register base URL relay",
-						"url", opts.Config.Claude.BaseURL, "error", err)
-				} else {
-					// Set ANTHROPIC_BASE_URL to the relay endpoint on the Moat proxy.
-					// Since proxyHost is in NO_PROXY, Claude Code connects directly
-					// to the proxy's HTTP handler (not through the CONNECT tunnel),
-					// which routes /relay/anthropic/ to the relay handler.
-					relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
-					proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
+				// The relay endpoint runs on the daemon's proxy.
+				// Set ANTHROPIC_BASE_URL to the relay endpoint.
+				// Since proxyHost is in NO_PROXY, Claude Code connects directly
+				// to the proxy's HTTP handler (not through the CONNECT tunnel),
+				// which routes /relay/anthropic/ to the relay handler.
+				relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
+				proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
 
-					log.Debug("configured base URL relay for Claude Code",
-						"baseURL", opts.Config.Claude.BaseURL,
-						"relayURL", relayURL)
-				}
+				log.Debug("configured base URL relay for Claude Code",
+					"baseURL", opts.Config.Claude.BaseURL,
+					"relayURL", relayURL)
 			}
 		}
 
@@ -804,6 +754,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			// Create temp directory for credential helper and config
 			awsDir, err := os.MkdirTemp("", "agentops-aws-*")
 			if err != nil {
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("creating AWS credential helper directory: %w", err)
 			}
 			r.awsTempDir = awsDir // Track for cleanup
@@ -812,6 +763,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			// Use 0700 permissions since the script contains the credential endpoint URL
 			helperPath := filepath.Join(awsDir, "credentials")
 			if err := os.WriteFile(helperPath, awsprov.GetCredentialHelper(), 0700); err != nil {
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
 			}
 
@@ -822,6 +774,7 @@ region = %s
 `, r.AWSCredentialProvider.Region())
 			configPath := filepath.Join(awsDir, "config")
 			if err := os.WriteFile(configPath, []byte(awsConfig), 0644); err != nil {
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("writing AWS config: %w", err)
 			}
 
@@ -848,8 +801,8 @@ region = %s
 			)
 
 			// Include auth token if proxy requires it
-			if proxyAuthToken != "" {
-				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+proxyAuthToken)
+			if regResp.AuthToken != "" {
+				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+regResp.AuthToken)
 			}
 
 			fmt.Printf("AWS credential_process configured (role: %s)\n",
@@ -865,7 +818,7 @@ region = %s
 		upstreamSocket := os.Getenv("SSH_AUTH_SOCK")
 		if upstreamSocket == "" {
 			// Clean up HTTP proxy if it was started
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("SSH grants require SSH_AUTH_SOCK to be set\n\n" +
 				"Start your SSH agent with: eval \"$(ssh-agent -s)\" && ssh-add")
 		}
@@ -873,22 +826,22 @@ region = %s
 		// Load SSH mappings for granted hosts
 		key, keyErr := credential.DefaultEncryptionKey()
 		if keyErr != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
 		}
 		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("opening credential store: %w", err)
 		}
 
 		sshMappings, err := store.GetSSHMappingsForHosts(sshGrants)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("loading SSH mappings: %w", err)
 		}
 		if len(sshMappings) == 0 {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("no SSH keys configured for hosts: %v\n\n"+
 				"Grant SSH access first:\n"+
 				"  moat grant ssh --host %s", sshGrants, sshGrants[0])
@@ -897,7 +850,7 @@ region = %s
 		// Connect to upstream SSH agent
 		upstreamAgent, err := sshagent.ConnectAgent(upstreamSocket)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("connecting to SSH agent: %w", err)
 		}
 
@@ -924,7 +877,7 @@ region = %s
 			sshServer = sshagent.NewTCPServer(sshProxy, "0.0.0.0:0") // :0 picks random port
 			if err := sshServer.Start(); err != nil {
 				upstreamAgent.Close()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("starting SSH agent proxy (TCP): %w", err)
 			}
 
@@ -938,7 +891,7 @@ region = %s
 			if err != nil {
 				cleanupSSH(sshServer)
 				upstreamAgent.Close()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("parsing SSH proxy address %q: %w", tcpAddr, err)
 			}
 			containerTCPAddr := hostAddr + ":" + tcpPort
@@ -961,7 +914,7 @@ region = %s
 			sshSocketDir = filepath.Join(homeDir, ".moat", "sockets", r.ID)
 			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
 				upstreamAgent.Close()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("creating SSH socket directory: %w", err)
 			}
 			socketPath := filepath.Join(sshSocketDir, "agent.sock")
@@ -970,7 +923,7 @@ region = %s
 			if err := sshServer.Start(); err != nil {
 				upstreamAgent.Close()
 				os.RemoveAll(sshSocketDir)
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("starting SSH agent proxy: %w", err)
 			}
 
@@ -1001,7 +954,7 @@ region = %s
 	var networkMode string
 	var extraHosts []string
 	needsPorts := len(ports) > 0
-	needsProxy := proxyServer != nil
+	needsProxy := r.ProxyAuthToken != ""
 
 	if needsProxy || needsPorts {
 		if m.runtime.SupportsHostNetwork() && !needsPorts {
@@ -1034,7 +987,7 @@ region = %s
 	if opts.Config != nil && len(opts.Config.Secrets) > 0 {
 		resolved, err := secrets.ResolveAll(ctx, opts.Config.Secrets)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, err
 		}
 		for k, v := range resolved {
@@ -1107,18 +1060,18 @@ region = %s
 		var err error
 		depList, err = deps.ParseAll(allDeps)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("parsing dependencies: %w", err)
 		}
 		if err = deps.Validate(depList); err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("validating dependencies: %w", err)
 		}
 		// Resolve partial runtime versions (e.g., "go@1.22" -> "go@1.22.12")
 		// Uses cached API results to avoid repeated network calls
 		depList, err = deps.ResolveVersions(ctx, depList)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("resolving versions: %w", err)
 		}
 	}
@@ -1136,7 +1089,7 @@ region = %s
 	// and returns the appropriate config for the mode (socket mount for host, privileged for dind).
 	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.runtime.Type())
 	if dockerErr != nil {
-		cleanupProxy(proxyServer)
+		cleanupDaemonRun()
 		cleanupSSH(sshServer)
 		return nil, dockerErr
 	}
@@ -1171,7 +1124,7 @@ region = %s
 		var loadErr error
 		claudeSettings, loadErr = claude.LoadAllSettings(opts.Workspace, opts.Config)
 		if loadErr != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("loading Claude settings: %w", loadErr)
 		}
 	}
@@ -1414,14 +1367,14 @@ region = %s
 			Hooks:              hooks,
 		})
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("generating Dockerfile: %w", err)
 		}
 		generatedDockerfile = result.Dockerfile
 
 		exists, err := m.runtime.BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			return nil, fmt.Errorf("checking image: %w", err)
 		}
 
@@ -1441,13 +1394,13 @@ region = %s
 
 			buildMgr := m.runtime.BuildManager()
 			if buildMgr == nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtime.Type())
 			}
 
 			buildOpts.ContextFiles = result.ContextFiles
 			if err := buildMgr.BuildImage(ctx, result.Dockerfile, containerImage, buildOpts); err != nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("building image with dependencies [%s]: %w",
 					strings.Join(depNames, ", "), err)
 			}
@@ -1527,7 +1480,7 @@ region = %s
 		if needsClaudeInit || hasPlugins || isClaudeCode {
 			claudeProvider := provider.GetAgent("claude")
 			if claudeProvider == nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("claude provider not registered")
 			}
 
@@ -1536,12 +1489,12 @@ region = %s
 			// Claude Code's MCP client not respecting HTTP_PROXY environment variables.
 			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
-				proxyAddr := fmt.Sprintf("%s:%s", m.runtime.GetHostAddress(), proxyServer.Port())
+				proxyAddr := fmt.Sprintf("%s:%d", m.runtime.GetHostAddress(), r.ProxyPort)
 				for _, mcp := range opts.Config.MCP {
 					if mcp.Auth == nil {
 						continue // Skip servers without auth
 					}
-					relayURL := fmt.Sprintf("http://%s/mcp/%s", proxyAddr, mcp.Name)
+					relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
 					mcpServers[mcp.Name] = provider.MCPServerConfig{
 						URL: relayURL,
 						Headers: map[string]string{
@@ -1580,7 +1533,7 @@ region = %s
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				return nil, fmt.Errorf("preparing Claude container config: %w", prepErr)
 			}
 
@@ -1604,7 +1557,7 @@ region = %s
 	if needsCodexInit || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			return nil, fmt.Errorf("codex provider not registered")
 		}
@@ -1630,7 +1583,7 @@ region = %s
 			ContainerHome: containerHome,
 		})
 		if prepErr != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)
 		}
@@ -1646,7 +1599,7 @@ region = %s
 	if needsGeminiInit || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
 		geminiProvider := provider.GetAgent("gemini")
 		if geminiProvider == nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("gemini provider not registered")
@@ -1673,7 +1626,7 @@ region = %s
 			ContainerHome: containerHome,
 		})
 		if prepErr != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("preparing Gemini container config: %w", prepErr)
@@ -1742,7 +1695,7 @@ region = %s
 		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
 		netMgr := m.runtime.NetworkManager()
 		if netMgr == nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1750,7 +1703,7 @@ region = %s
 		}
 		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
 		if netErr != nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1793,7 +1746,7 @@ region = %s
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1806,7 +1759,7 @@ region = %s
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1830,7 +1783,7 @@ region = %s
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1849,7 +1802,7 @@ region = %s
 	if len(serviceDeps) > 0 {
 		svcMgr := m.runtime.ServiceManager()
 		if svcMgr == nil {
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -1864,7 +1817,7 @@ region = %s
 				serviceNames[i] = d.Name
 			}
 			if err := opts.Config.ValidateServices(serviceNames); err != nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -1877,7 +1830,7 @@ region = %s
 		if networkID == "" {
 			netMgr := m.runtime.NetworkManager()
 			if netMgr == nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -1888,7 +1841,7 @@ region = %s
 			var netErr error
 			networkID, netErr = netMgr.CreateNetwork(ctx, networkName)
 			if netErr != nil {
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -1922,7 +1875,7 @@ region = %s
 			svcCfg, err := buildServiceConfig(dep, r.ID, userSpec)
 			if err != nil {
 				cleanupServices()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -1933,7 +1886,7 @@ region = %s
 			info, err := svcMgr.StartService(ctx, svcCfg)
 			if err != nil {
 				cleanupServices()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -1961,7 +1914,7 @@ region = %s
 			log.Debug("waiting for service to be ready", "service", dep.Name)
 			if err := waitForServiceReady(ctx, svcMgr, info); err != nil {
 				cleanupServices()
-				cleanupProxy(proxyServer)
+				cleanupDaemonRun()
 				cleanupSSH(sshServer)
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
@@ -2045,7 +1998,7 @@ region = %s
 			}
 		}
 		// Clean up proxy servers if container creation fails
-		cleanupProxy(proxyServer)
+		cleanupDaemonRun()
 		cleanupSSH(sshServer)
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
@@ -2054,8 +2007,15 @@ region = %s
 	}
 
 	r.ContainerID = containerID
-	r.ProxyServer = proxyServer
 	r.SSHAgentServer = sshServer
+
+	// Update daemon with the container ID (phase 2 of registration)
+	if r.ProxyAuthToken != "" && m.daemonClient != nil {
+		if updErr := m.daemonClient.UpdateRun(ctx, r.ProxyAuthToken, containerID); updErr != nil {
+			log.Debug("failed to update daemon with container ID", "error", updErr)
+		}
+	}
+
 	if claudeConfig != nil {
 		r.ClaudeConfigTempDir = claudeConfig.StagingDir
 	}
@@ -2074,7 +2034,7 @@ region = %s
 			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("enabling TLS on routing proxy: %w", tlsErr)
@@ -2084,7 +2044,7 @@ region = %s
 			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
-			cleanupProxy(proxyServer)
+			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
@@ -2098,17 +2058,13 @@ region = %s
 		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		cleanupProxy(proxyServer)
+		cleanupDaemonRun()
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
 		cleanupAgentConfig(geminiConfig)
 		return nil, fmt.Errorf("creating run storage: %w", err)
 	}
 	r.Store = store
-	// Update atomic reference for concurrent logger access
-	if r.storeRef != nil {
-		r.storeRef.Store(store)
-	}
 
 	// Save the generated Dockerfile to the run directory for debugging/inspection
 	if generatedDockerfile != "" {
@@ -2124,7 +2080,7 @@ region = %s
 		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		cleanupProxy(proxyServer)
+		cleanupDaemonRun()
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
 		cleanupAgentConfig(geminiConfig)
@@ -2278,6 +2234,11 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 				if err := m.routes.Add(r.Name, services); err != nil {
 					ui.Warnf("Registering routes: %v", err)
 				}
+				if m.daemonClient != nil {
+					if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
+						log.Debug("failed to register routes via daemon", "error", err)
+					}
+				}
 			}
 		}
 	}
@@ -2421,6 +2382,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 			if len(services) > 0 {
 				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
 					ui.Warnf("Registering routes: %v", routeErr)
+				}
+				if m.daemonClient != nil {
+					if routeErr := m.daemonClient.RegisterRoutes(ctx, r.Name, services); routeErr != nil {
+						log.Debug("failed to register routes via daemon", "error", routeErr)
+					}
 				}
 			}
 		}
@@ -2567,9 +2533,14 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Run provider stopped hooks before saving metadata.
 	runProviderStoppedHooks(r)
 
-	// Stop the proxy server if one was created
+	// Cancel token refresh and unregister run from proxy daemon
 	if err := r.stopProxyServer(ctx); err != nil {
 		ui.Warnf("Stopping proxy: %v", err)
+	}
+	if r.ProxyAuthToken != "" && m.daemonClient != nil {
+		if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
+			ui.Warnf("Unregistering from proxy daemon: %v", err)
+		}
 	}
 
 	// Stop the SSH agent server if one was created
@@ -2580,6 +2551,11 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	// Unregister routes for this agent
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
+		}
 	}
 
 	r.SetStateWithTime(StateStopped, time.Now())
@@ -2671,19 +2647,19 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		}
 		r.stateMu.Unlock()
 
-		// Stop the proxy server if one was created
-		if stopErr := r.stopProxyServer(context.Background()); stopErr != nil {
-			ui.Warnf("Stopping proxy: %v", stopErr)
-		}
-
-		// Stop the SSH agent server if one was created
-		if stopErr := r.stopSSHAgentServer(); stopErr != nil {
-			ui.Warnf("Stopping SSH agent proxy: %v", stopErr)
-		}
+		// NOTE: stopProxyServer, UnregisterRun, and stopSSHAgentServer are
+		// handled by monitorContainerExit (which runs for ALL runs, including
+		// detached). We don't repeat them here to avoid duplicate 404 warnings
+		// and races when monitorContainerExit's cleanup has already completed.
 
 		// Unregister routes for this agent
 		if r.Name != "" {
 			_ = m.routes.Remove(r.Name)
+			if m.daemonClient != nil {
+				if stopErr := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); stopErr != nil {
+					log.Debug("failed to unregister routes via daemon", "error", stopErr)
+				}
+			}
 		}
 
 		// NOTE: We don't update r.State, r.StoppedAt, or r.Error here because
@@ -2696,10 +2672,12 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		providerCleanupPaths := r.ProviderCleanupPaths
 		m.mu.RUnlock()
 
-		// Auto-remove container unless --keep was specified
+		// Auto-remove container unless --keep was specified.
+		// Use log.Debug for the error — Destroy() may also try to remove
+		// the same container, and Docker can report "removal already in progress".
 		if !keepContainer {
 			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
-				ui.Warnf("Removing container: %v", rmErr)
+				log.Debug("removing container after wait", "container_id", containerID, "error", rmErr)
 			}
 		}
 
@@ -2924,9 +2902,14 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cleanupCancel()
 
-	// Stop the proxy server if one was created
+	// Cancel token refresh and unregister run from proxy daemon
 	if stopErr := r.stopProxyServer(cleanupCtx); stopErr != nil {
 		log.Debug("stopping proxy after container exit", "error", stopErr)
+	}
+	if r.ProxyAuthToken != "" && m.daemonClient != nil {
+		if stopErr := m.daemonClient.UnregisterRun(cleanupCtx, r.ProxyAuthToken); stopErr != nil {
+			log.Debug("unregistering from proxy daemon after container exit", "error", stopErr)
+		}
 	}
 
 	// Stop the SSH agent server if one was created
@@ -2980,6 +2963,11 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Unregister routes
 	if r.Name != "" {
 		_ = m.routes.Remove(r.Name)
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(cleanupCtx, r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
+		}
 	}
 }
 
@@ -3010,22 +2998,22 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
 	}
 
-	// Remove container
+	// Remove container (may already be removed by Wait or monitorContainerExit)
 	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
-		ui.Warnf("%v", err)
+		log.Debug("removing container in destroy", "container_id", r.ContainerID, "error", err)
 	}
 
 	// Remove service containers
 	for svcName, svcContainerID := range r.ServiceContainers {
 		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
-			ui.Warnf("Removing %s service container: %v", svcName, err)
+			log.Debug("removing service container in destroy", "service", svcName, "error", err)
 		}
 	}
 
 	// Remove BuildKit sidecar container if present
 	if r.BuildkitContainerID != "" {
 		if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
-			ui.Warnf("Removing BuildKit sidecar: %v", err)
+			log.Debug("removing buildkit sidecar in destroy", "error", err)
 		}
 	}
 
@@ -3042,20 +3030,32 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Stop the proxy server if one was created and still running
+	// Cancel token refresh and unregister run from proxy daemon.
+	// These may already have been handled by monitorContainerExit — that's fine,
+	// Destroy is a best-effort cleanup for anything that was missed.
 	if err := r.stopProxyServer(ctx); err != nil {
-		ui.Warnf("Stopping proxy: %v", err)
+		log.Debug("stopping proxy in destroy", "error", err)
+	}
+	if r.ProxyAuthToken != "" && m.daemonClient != nil {
+		if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
+			log.Debug("unregistering from daemon in destroy", "error", err)
+		}
 	}
 
 	// Stop the SSH agent server if one was created and still running
 	if err := r.stopSSHAgentServer(); err != nil {
-		ui.Warnf("Stopping SSH agent proxy: %v", err)
+		log.Debug("stopping SSH agent in destroy", "error", err)
 	}
 
 	// Unregister routes for this agent
 	if r.Name != "" {
 		if err := m.routes.Remove(r.Name); err != nil {
 			ui.Warnf("Removing routes: %v", err)
+		}
+		if m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
+				log.Debug("failed to unregister routes via daemon", "error", err)
+			}
 		}
 	}
 
@@ -3233,7 +3233,8 @@ func (m *Manager) Close() error {
 		m.cancel()
 	}
 
-	// Stop all proxy/SSH servers with a 10-second overall timeout.
+	// Stop all proxy/SSH servers and unregister runs from daemon,
+	// with a 10-second overall timeout.
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer closeCancel()
 
@@ -3241,6 +3242,11 @@ func (m *Manager) Close() error {
 	for _, r := range m.runs {
 		if err := r.stopProxyServer(closeCtx); err != nil {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
+		}
+		if r.ProxyAuthToken != "" && m.daemonClient != nil {
+			if err := m.daemonClient.UnregisterRun(closeCtx, r.ProxyAuthToken); err != nil {
+				log.Debug("failed to unregister run from daemon during manager close", "run", r.ID, "error", err)
+			}
 		}
 		if err := r.stopSSHAgentServer(); err != nil {
 			log.Debug("failed to stop SSH agent during manager close", "run", r.ID, "error", err)
@@ -3365,140 +3371,69 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	return nil
 }
 
-// refreshTarget holds the state for a single refreshable credential.
-type refreshTarget struct {
-	providerName credential.Provider
-	refresher    provider.RefreshableProvider
-	cred         *credential.Credential
-	store        credential.Store
-
-	// Retry state for exponential backoff
-	nextRetryAfter time.Time
-	retryDelay     time.Duration
-	revoked        bool
-}
-
-const (
-	refreshRetryMin = 30 * time.Second
-	refreshRetryMax = 5 * time.Minute
-)
-
-// runTokenRefreshLoop periodically re-acquires tokens from their original source.
-// It performs an immediate refresh at startup, then refreshes on the shortest
-// provider interval. Exits when ctx is canceled or the run's exitCh closes.
-func (m *Manager) runTokenRefreshLoop(ctx context.Context, r *Run, p credential.ProxyConfigurer, targets []refreshTarget) {
-	// Immediate refresh at startup — get a fresh token before the session begins
-	for i := range targets {
-		m.refreshToken(ctx, r, p, &targets[i])
+// buildRegisterRequest converts a daemon.RunContext into a daemon.RegisterRequest
+// suitable for sending to the daemon API.
+func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.RegisterRequest {
+	req := daemon.RegisterRequest{
+		RunID:         rc.RunID,
+		NetworkPolicy: rc.NetworkPolicy,
+		NetworkAllow:  rc.NetworkAllow,
+		MCPServers:    rc.MCPServers,
+		Grants:        grants,
+		AWSConfig:     rc.AWSConfig,
 	}
 
-	interval := minRefreshInterval(targets)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-r.exitCh:
-			return
-		case <-ticker.C:
-			for i := range targets {
-				m.refreshToken(ctx, r, p, &targets[i])
-			}
-		}
-	}
-}
-
-// refreshToken attempts to refresh a single credential target.
-// On failure, it applies exponential backoff. On revocation, it stops retrying.
-func (m *Manager) refreshToken(ctx context.Context, r *Run, p credential.ProxyConfigurer, target *refreshTarget) {
-	if target.revoked {
-		return
-	}
-	if !target.nextRetryAfter.IsZero() && time.Now().Before(target.nextRetryAfter) {
-		return
+	for host, cred := range rc.Credentials {
+		req.Credentials = append(req.Credentials, daemon.CredentialSpec{
+			Host:   host,
+			Header: cred.Name,
+			Value:  cred.Value,
+			Grant:  cred.Grant,
+		})
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	provCred := provider.FromLegacy(target.cred)
-	newCred, err := target.refresher.Refresh(ctx, p, provCred)
-
-	if err != nil {
-		if errors.Is(err, provider.ErrTokenRevoked) {
-			target.revoked = true
-			ui.Warnf("Token for %s has been revoked. Run 'moat grant %s' to re-authenticate.", target.providerName, target.providerName)
-			log.Warn("refresh token revoked, stopping refresh",
-				"provider", target.providerName, "error", err)
-			return
-		}
-
-		// Exponential backoff
-		if target.retryDelay == 0 {
-			target.retryDelay = refreshRetryMin
-		} else {
-			target.retryDelay *= 2
-			if target.retryDelay > refreshRetryMax {
-				target.retryDelay = refreshRetryMax
-			}
-		}
-		target.nextRetryAfter = time.Now().Add(target.retryDelay)
-
-		ui.Warnf("Token refresh failed for %s. The existing token will continue to be used.", target.providerName)
-		log.Debug("token refresh failed, keeping existing token",
-			"provider", target.providerName, "error", err, "retry_in", target.retryDelay)
-		return
-	}
-
-	// Reset backoff on success
-	target.retryDelay = 0
-	target.nextRetryAfter = time.Time{}
-
-	// Convert back to credential.Credential
-	var updated *credential.Credential
-	if newCred != nil {
-		updated = &credential.Credential{
-			Provider:  target.providerName,
-			Token:     newCred.Token,
-			Scopes:    newCred.Scopes,
-			ExpiresAt: newCred.ExpiresAt,
-			CreatedAt: newCred.CreatedAt,
-			Metadata:  newCred.Metadata,
+	for host, headers := range rc.ExtraHeaders {
+		for _, h := range headers {
+			req.ExtraHeaders = append(req.ExtraHeaders, daemon.ExtraHeaderSpec{
+				Host:       host,
+				HeaderName: h.Name,
+				Value:      h.Value,
+			})
 		}
 	}
 
-	// Token unchanged — no-op
-	if updated == nil || updated.Token == target.cred.Token {
-		return
-	}
-
-	// Update in-memory credential for next cycle
-	target.cred = updated
-
-	// Persist to store so crash recovery uses the latest token
-	if target.store != nil {
-		if err := target.store.Save(*updated); err != nil {
-			log.Warn("failed to persist refreshed token",
-				"provider", target.providerName, "error", err)
+	for host, headers := range rc.RemoveHeaders {
+		for _, headerName := range headers {
+			req.RemoveHeaders = append(req.RemoveHeaders, daemon.RemoveHeaderSpec{
+				Host:       host,
+				HeaderName: headerName,
+			})
 		}
 	}
 
-	log.Debug("token refreshed", "provider", target.providerName, "run_id", r.ID)
-}
+	for host, ts := range rc.TokenSubstitutions {
+		req.TokenSubstitutions = append(req.TokenSubstitutions, daemon.TokenSubstitutionSpec{
+			Host:        host,
+			Placeholder: ts.Placeholder,
+			RealToken:   ts.RealToken,
+		})
+	}
 
-// minRefreshInterval returns the shortest refresh interval across all targets.
-func minRefreshInterval(targets []refreshTarget) time.Duration {
-	var min time.Duration
-	for i, t := range targets {
-		d := t.refresher.RefreshInterval()
-		if i == 0 || (d > 0 && d < min) {
-			min = d
+	// Derive transformer specs from response transformers.
+	// Response transformers are Go functions (not serializable), so we convert
+	// them to well-known specs that the daemon can reconstruct.
+	// - Hosts with token substitutions use "response-scrub" (token redaction)
+	// - Hosts without use "oauth-endpoint-workaround" (403 graceful degradation)
+	for host := range rc.ResponseTransformers {
+		kind := "oauth-endpoint-workaround"
+		if _, hasTS := rc.TokenSubstitutions[host]; hasTS {
+			kind = "response-scrub"
 		}
+		req.ResponseTransformers = append(req.ResponseTransformers, daemon.TransformerSpec{
+			Host: host,
+			Kind: kind,
+		})
 	}
-	if min == 0 {
-		min = 30 * time.Minute // Default fallback
-	}
-	return min
+
+	return req
 }

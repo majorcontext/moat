@@ -1147,11 +1147,15 @@ moat snapshot restore run_a1b2c3d4e5f6 --to /tmp/recovery
 
 ## moat proxy
 
-Manage the hostname routing proxy. When called without a subcommand, shows the current proxy status.
+Manage the proxy daemon. The proxy daemon is a long-lived process that handles credential injection, MCP relay, and hostname routing for all runs. It starts automatically when you run `moat run` and shuts down after 5 minutes idle (no active runs).
+
+When called without a subcommand, shows the current proxy status.
 
 ### moat proxy start
 
-Start the routing proxy.
+Start the proxy daemon in the foreground. The daemon serves both the credential-injecting proxy and the routing reverse proxy on a single port.
+
+This is primarily useful for debugging. In normal use, the daemon auto-starts on `moat run`.
 
 ```
 moat proxy start [flags]
@@ -1161,7 +1165,7 @@ moat proxy start [flags]
 
 | Flag | Description |
 |------|-------------|
-| `-p`, `--port N` | Listen port (default: 8080) |
+| `-p`, `--port N` | Proxy listen port (default: 8080) |
 
 ### Examples
 
@@ -1172,7 +1176,7 @@ moat proxy start --port 9000
 
 ### moat proxy stop
 
-Stop the routing proxy.
+Send a shutdown request to the proxy daemon via its Unix socket (`~/.moat/proxy/daemon.sock`). The daemon drains active connections before exiting.
 
 ```
 moat proxy stop
@@ -1180,13 +1184,11 @@ moat proxy stop
 
 ### moat proxy status
 
-Show proxy status and registered agents.
+Show daemon status: PID, proxy port, uptime, active run count, and registered routes.
 
 ```
 moat proxy status
 ```
-
----
 
 ---
 

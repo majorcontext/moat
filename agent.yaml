@@ -6,8 +6,8 @@ env:
   CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: 1
 
 container:
-  memory: 8192
-  cpus: 8
+  memory: 12192
+  cpus: 16
 
 dependencies:
   - go@1.25.6

@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/routing"
-	"github.com/majorcontext/moat/internal/ui"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +23,7 @@ The routing proxy enables accessing agent services via hostnames like:
   https://web.my-agent.localhost:8080
 
 Run with sudo to bind to privileged ports like 80:
-  sudo agent proxy start --port=80
+  sudo moat proxy start --port=80
 
 When called without a subcommand, shows the current proxy status.`,
 	RunE: statusProxy,
@@ -44,7 +40,7 @@ The proxy routes requests based on hostname and supports both HTTP and HTTPS:
 
 Use --port to specify a custom port (default: 8080).
 Run with sudo for ports below 1024:
-  sudo agent proxy start --port=80`,
+  sudo moat proxy start --port=80`,
 	RunE: startProxy,
 }
 
@@ -72,137 +68,65 @@ func init() {
 }
 
 func startProxy(cmd *cobra.Command, args []string) error {
+	// Set daemon defaults from proxy flags.
+	if daemonProxyPort == 0 {
+		daemonProxyPort = proxyPort
+	}
+	return runDaemon(cmd, args)
+}
+
+func stopProxy(_ *cobra.Command, _ []string) error {
 	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	sockPath := filepath.Join(proxyDir, "daemon.sock")
 
-	// Check if already running
-	lock, err := routing.LoadProxyLock(proxyDir)
-	if err != nil {
-		return fmt.Errorf("checking proxy status: %w", err)
-	}
-	if lock != nil && lock.IsAlive() {
-		return fmt.Errorf("proxy already running on port %d (pid %d)", lock.Port, lock.PID)
-	}
-
-	// Clean up stale lock
-	if lock != nil {
-		_ = routing.RemoveProxyLock(proxyDir)
-	}
-
-	// Create lifecycle manager
-	lc, err := routing.NewLifecycle(proxyDir, proxyPort)
-	if err != nil {
-		return fmt.Errorf("creating lifecycle: %w", err)
-	}
-
-	// Enable TLS
-	newCA, err := lc.EnableTLS()
-	if err != nil {
-		return fmt.Errorf("enabling TLS: %w", err)
-	}
-
-	// Start proxy
-	if err := lc.EnsureRunning(); err != nil {
-		return fmt.Errorf("starting proxy: %w", err)
-	}
-
-	log.Info("proxy started", "port", lc.Port(), "pid", os.Getpid())
-	fmt.Printf("Proxy listening on port %d (HTTP and HTTPS)\n", lc.Port())
-	fmt.Printf("Access services at:\n")
-	fmt.Printf("  http://<service>.<agent>.localhost:%d\n", lc.Port())
-	fmt.Printf("  https://<service>.<agent>.localhost:%d\n", lc.Port())
-
-	// Print trust instructions if new CA was created
-	if newCA {
-		caPath := filepath.Join(proxyDir, "ca", "ca.crt")
-		fmt.Printf("\nGenerated CA certificate at %s\n", caPath)
-		fmt.Println("To avoid browser warnings, trust the CA:")
-		switch runtime.GOOS {
-		case "darwin":
-			fmt.Printf("  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %s\n", caPath)
-		case "linux":
-			fmt.Printf("  sudo cp %s /usr/local/share/ca-certificates/moat.crt && sudo update-ca-certificates\n", caPath)
-		default:
-			fmt.Printf("  Add %s to your system's trusted certificates\n", caPath)
+	client := daemon.NewClient(sockPath)
+	if err := client.Shutdown(context.Background()); err != nil {
+		// Try SIGTERM as fallback.
+		lock, _ := daemon.ReadLockFile(proxyDir)
+		if lock != nil && lock.IsAlive() {
+			process, _ := os.FindProcess(lock.PID)
+			_ = process.Signal(syscall.SIGTERM)
+			fmt.Printf("Stopped daemon (pid %d)\n", lock.PID)
+			return nil
 		}
+		fmt.Println("Daemon is not running")
+		return nil
 	}
 
-	// Wait for interrupt
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	fmt.Println("\nShutting down proxy...")
-	if err := lc.Stop(context.Background()); err != nil {
-		ui.Warnf("Stopping proxy: %v", err)
-	}
-
+	fmt.Println("Daemon shutdown requested")
 	return nil
 }
 
-func stopProxy(cmd *cobra.Command, args []string) error {
+func statusProxy(_ *cobra.Command, _ []string) error {
 	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	sockPath := filepath.Join(proxyDir, "daemon.sock")
 
-	lock, err := routing.LoadProxyLock(proxyDir)
+	client := daemon.NewClient(sockPath)
+	health, err := client.Health(context.Background())
 	if err != nil {
-		return fmt.Errorf("checking proxy status: %w", err)
-	}
-
-	if lock == nil {
-		fmt.Println("Proxy is not running")
+		fmt.Println("Daemon is not running")
 		return nil
 	}
 
-	if !lock.IsAlive() {
-		// Clean up stale lock
-		_ = routing.RemoveProxyLock(proxyDir)
-		fmt.Println("Proxy is not running (cleaned up stale lock)")
-		return nil
-	}
+	fmt.Printf("Daemon running (pid %d)\n", health.PID)
+	fmt.Printf("  Proxy port: %d\n", health.ProxyPort)
+	fmt.Printf("  Active runs: %d\n", health.RunCount)
+	fmt.Printf("  Started: %s\n", health.StartedAt)
 
-	// Send SIGTERM to the proxy process
-	process, err := os.FindProcess(lock.PID)
-	if err != nil {
-		return fmt.Errorf("finding proxy process: %w", err)
-	}
-
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("stopping proxy: %w", err)
-	}
-
-	fmt.Printf("Stopped proxy (pid %d)\n", lock.PID)
-	return nil
-}
-
-func statusProxy(cmd *cobra.Command, args []string) error {
-	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
-
-	lock, err := routing.LoadProxyLock(proxyDir)
-	if err != nil {
-		return fmt.Errorf("checking proxy status: %w", err)
-	}
-
-	if lock == nil {
-		fmt.Println("Proxy is not running")
-		return nil
-	}
-
-	if !lock.IsAlive() {
-		fmt.Println("Proxy is not running (stale lock file exists)")
-		return nil
-	}
-
-	fmt.Printf("Proxy running on port %d (pid %d)\n", lock.Port, lock.PID)
-	fmt.Printf("Supports HTTP and HTTPS on the same port\n")
-
-	// Show registered routes
-	routes, err := routing.NewRouteTable(proxyDir)
-	if err == nil {
-		agents := routes.Agents()
-		if len(agents) > 0 {
-			fmt.Println("\nRegistered agents:")
-			for _, agent := range agents {
-				fmt.Printf("  - https://%s.localhost:%d\n", agent, lock.Port)
+	// List runs.
+	runs, err := client.ListRuns(context.Background())
+	if err == nil && len(runs) > 0 {
+		fmt.Println("\nRegistered runs:")
+		for _, r := range runs {
+			fmt.Printf("  - %s", r.RunID)
+			if r.ContainerID != "" {
+				short := r.ContainerID
+				if len(short) > 12 {
+					short = short[:12]
+				}
+				fmt.Printf(" (container: %s)", short)
 			}
+			fmt.Println()
 		}
 	}
 

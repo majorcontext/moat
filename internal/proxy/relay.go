@@ -96,11 +96,12 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Inject credentials and extra headers for the target host.
-	// Use the helper methods (getCredential, getExtraHeaders, getRemoveHeaders)
-	// which handle host:port fallback — credentials are registered by hostname
+	// Use the helper methods (getCredentialForRequest, etc.) which check
+	// RunContextData first, then fall back to proxy's own maps. They also
+	// handle host:port fallback — credentials are registered by hostname
 	// only (isValidHost rejects colons), but targetURL.Host may include a port.
 	host := targetURL.Host
-	if cred, ok := p.getCredential(host); ok {
+	if cred, ok := p.getCredentialForRequest(r, host); ok {
 		proxyReq.Header.Set(cred.Name, cred.Value)
 		log.Debug("credential injected",
 			"subsystem", "proxy",
@@ -111,8 +112,8 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 			"method", r.Method,
 			"path", rest)
 	}
-	mergeExtraHeaders(proxyReq, host, p.getExtraHeaders(host))
-	for _, headerName := range p.getRemoveHeaders(host) {
+	mergeExtraHeaders(proxyReq, host, p.getExtraHeadersForRequest(r, host))
+	for _, headerName := range p.getRemoveHeadersForRequest(r, host) {
 		proxyReq.Header.Del(headerName)
 	}
 

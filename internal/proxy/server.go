@@ -15,6 +15,7 @@ type Server struct {
 	listener net.Listener
 	addr     string
 	bindAddr string // Address to bind to (default: 127.0.0.1)
+	port     int    // Port to bind to (0 = OS-assigned)
 }
 
 // NewServer creates a new proxy server.
@@ -32,12 +33,18 @@ func (s *Server) SetBindAddr(addr string) {
 	s.bindAddr = addr
 }
 
+// SetPort sets the port to bind to. Use 0 (default) for an OS-assigned port.
+// Must be called before Start().
+func (s *Server) SetPort(port int) {
+	s.port = port
+}
+
 // Start starts the proxy server on an available port.
 // By default binds to localhost only to prevent credential exposure to other
 // hosts on the network. Use SetBindAddr("0.0.0.0") before Start() to bind to
 // all interfaces (needed for Apple containers).
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.bindAddr+":0")
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.bindAddr, s.port))
 	if err != nil {
 		return fmt.Errorf("creating listener: %w", err)
 	}

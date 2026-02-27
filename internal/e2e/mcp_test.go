@@ -109,14 +109,14 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	// Verify proxy was started (required for credential injection)
-	if r.ProxyServer == nil {
-		t.Fatal("ProxyServer is nil, expected proxy to be running with grants")
+	// Verify daemon proxy is configured (required for credential injection)
+	if r.ProxyPort == 0 {
+		t.Fatal("ProxyPort is 0, expected daemon proxy to be running with grants")
 	}
 
-	// Build the relay URL that the proxy exposes
-	proxyAddr := r.ProxyServer.Addr()
-	relayURL := fmt.Sprintf("http://%s/mcp/test-server", proxyAddr)
+	// Build the relay URL that the daemon proxy exposes
+	proxyAddr := fmt.Sprintf("127.0.0.1:%d", r.ProxyPort)
+	relayURL := fmt.Sprintf("http://%s/mcp/%s/test-server", proxyAddr, r.ProxyAuthToken)
 
 	// Test the MCP relay endpoint by making a direct HTTP request with stub credential
 	// The proxy should replace the stub with the real credential
@@ -298,10 +298,13 @@ mcp:
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	// Build relay URLs
-	proxyAddr := r.ProxyServer.Addr()
-	relay1URL := fmt.Sprintf("http://%s/mcp/server1", proxyAddr)
-	relay2URL := fmt.Sprintf("http://%s/mcp/server2", proxyAddr)
+	// Build relay URLs using daemon proxy
+	if r.ProxyPort == 0 {
+		t.Fatal("ProxyPort is 0, expected daemon proxy to be running with grants")
+	}
+	proxyAddr := fmt.Sprintf("127.0.0.1:%d", r.ProxyPort)
+	relay1URL := fmt.Sprintf("http://%s/mcp/%s/server1", proxyAddr, r.ProxyAuthToken)
+	relay2URL := fmt.Sprintf("http://%s/mcp/%s/server2", proxyAddr, r.ProxyAuthToken)
 
 	// Test server 1 via relay
 	req1, _ := http.NewRequest("GET", relay1URL, nil)

@@ -54,18 +54,58 @@ func NewAppleRuntime() (*AppleRuntime, error) {
 		return nil, fmt.Errorf("container CLI not found: %w", err)
 	}
 
+	hostAddr := probeDefaultGateway(binPath)
+
 	r := &AppleRuntime{
 		containerBin: binPath,
-		hostAddress:  "192.168.64.1", // Default gateway for Apple containers
+		hostAddress:  hostAddr,
 	}
 	r.buildMgr = &appleBuildManager{
 		containerBin: binPath,
-		hostAddress:  "192.168.64.1",
+		hostAddress:  hostAddr,
 	}
 	r.networkMgr = &appleNetworkManager{containerBin: binPath}
 	r.serviceMgr = &appleServiceManager{containerBin: binPath}
 
 	return r, nil
+}
+
+// probeDefaultGateway queries the Apple container CLI for the default network's
+// IPv4 gateway. The gateway address varies across systems (e.g. 192.168.64.1
+// vs 192.168.65.1) so we probe it dynamically rather than hardcoding it.
+func probeDefaultGateway(containerBin string) string {
+	const fallback = "192.168.64.1"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, containerBin, "network", "inspect", "default")
+	out, err := cmd.Output()
+	if err != nil {
+		log.Debug("failed to inspect default network, using fallback gateway",
+			"error", err, "fallback", fallback)
+		return fallback
+	}
+
+	var networks []struct {
+		Status struct {
+			IPv4Gateway string `json:"ipv4Gateway"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(out, &networks); err != nil || len(networks) == 0 {
+		log.Debug("failed to parse network inspect output, using fallback gateway",
+			"error", err, "fallback", fallback)
+		return fallback
+	}
+
+	gw := networks[0].Status.IPv4Gateway
+	if gw == "" {
+		log.Debug("default network has no ipv4Gateway, using fallback", "fallback", fallback)
+		return fallback
+	}
+
+	log.Debug("detected Apple container gateway", "gateway", gw)
+	return gw
 }
 
 // NetworkManager returns the Apple network manager.
