@@ -155,7 +155,7 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 //
 // This test mirrors real usage: Interactive=true with TTY=true (as moat run -i would do).
 // Docker: Uses container runtime logs (works even in TTY mode).
-// Apple: TTY output is captured via tee (see StartAttached) since container runtime doesn't preserve TTY logs.
+// Apple: TTY output is captured via tee (see Exec) since container runtime doesn't preserve TTY logs.
 func TestLogsCapturedInInteractiveMode(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -171,7 +171,7 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 
 		// Create an interactive run (mirrors real usage: moat run -i)
 		// Note: We only set Interactive=true. TTY allocation is determined by
-		// StartAttached based on whether stdin is a real terminal.
+		// Exec based on whether stdin is a real terminal.
 		r, err := mgr.Create(ctx, run.Options{
 			Name:        "test-logs-interactive",
 			Workspace:   workspace,
@@ -183,22 +183,32 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		// StartAttached simulates interactive mode
+		// Start the container (runs sleep infinity keepalive)
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		// Exec simulates interactive mode
 		// We can't truly test interactive mode in automated tests, but we can
-		// verify that StartAttached captures logs when the container exits
-		doneCh := make(chan error, 1)
+		// verify that Exec captures logs when the command exits
+		type execResult struct {
+			exitCode int
+			err      error
+		}
+		doneCh := make(chan execResult, 1)
 		go func() {
-			doneCh <- mgr.StartAttached(ctx, r.ID, os.Stdin, os.Stdout, os.Stderr)
+			code, err := mgr.Exec(ctx, r.ID, r.ExecCmd, os.Stdin, os.Stdout, os.Stderr)
+			doneCh <- execResult{code, err}
 		}()
 
 		// Wait for completion
 		select {
-		case err := <-doneCh:
-			if err != nil && ctx.Err() == nil {
-				t.Fatalf("StartAttached failed: %v", err)
+		case result := <-doneCh:
+			if result.err != nil && ctx.Err() == nil {
+				t.Fatalf("Exec failed: %v", result.err)
 			}
 		case <-time.After(10 * time.Second):
-			t.Fatal("StartAttached timed out")
+			t.Fatal("Exec timed out")
 		}
 
 		// Verify logs.jsonl exists and contains the logs

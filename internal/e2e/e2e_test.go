@@ -1712,7 +1712,7 @@ func TestDependencyMetaBundle(t *testing.T) {
 // =============================================================================
 
 // TestInteractiveContainer is Apple-only: Docker's non-TTY attach mode has issues with fast-exiting containers.
-// This tests the Interactive=true option and StartAttached functionality.
+// This tests the Interactive=true option and Exec functionality.
 func TestInteractiveContainer(t *testing.T) {
 	requireApple(t)
 
@@ -1752,11 +1752,19 @@ func TestInteractiveContainer(t *testing.T) {
 	// Use bytes.Buffer to capture stdout
 	var stdoutBuf bytes.Buffer
 
-	// Run StartAttached - this should send input to cat and get it echoed back
+	// Start the container (runs sleep infinity keepalive)
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Exec the command - this should send input to cat and get it echoed back
 	// Note: cat exits when stdin reaches EOF, so this will complete
-	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf)
+	exitCode, err := mgr.Exec(ctx, r.ID, r.ExecCmd, stdinReader, &stdoutBuf, &stdoutBuf)
 	if err != nil {
-		t.Fatalf("StartAttached: %v", err)
+		t.Fatalf("Exec: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", exitCode)
 	}
 
 	// Verify the input was echoed back

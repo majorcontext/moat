@@ -68,10 +68,15 @@ func TestAppleTUIWriterPassthrough(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	// Route container output through the tui.Writer
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	// Start the container (runs sleep infinity keepalive)
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Route container output through the tui.Writer via Exec
+	_, err = mgr.Exec(ctx, r.ID, r.ExecCmd, strings.NewReader(""), writer, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("StartAttached: %v", err)
+		t.Fatalf("Exec: %v", err)
 	}
 
 	// All output lines should pass through the tui.Writer, even during
@@ -127,9 +132,14 @@ func TestAppleTUIWriterAltScreenDuringInit(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	// Start the container (runs sleep infinity keepalive)
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, err = mgr.Exec(ctx, r.ID, r.ExecCmd, strings.NewReader(""), writer, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("StartAttached: %v", err)
+		t.Fatalf("Exec: %v", err)
 	}
 
 	output := outputBuf.String()
@@ -189,9 +199,14 @@ func TestAppleTUIWriterMultipleWrites(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	// Start the container (runs sleep infinity keepalive)
+	if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, err = mgr.Exec(ctx, r.ID, r.ExecCmd, strings.NewReader(""), writer, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("StartAttached: %v", err)
+		t.Fatalf("Exec: %v", err)
 	}
 
 	output := outputBuf.String()
