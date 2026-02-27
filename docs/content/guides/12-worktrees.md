@@ -114,7 +114,7 @@ If a run is already active in a worktree, `moat wt` returns an error:
 
 ```text
 Error: a run is already active in worktree for branch "dark-mode": my-agent-dark-mode (run_a1b2c3d4e5f6)
-Attach with 'moat attach run_a1b2c3d4e5f6' or stop with 'moat stop run_a1b2c3d4e5f6'
+Follow with 'moat logs -f run_a1b2c3d4e5f6' or stop with 'moat stop run_a1b2c3d4e5f6'
 ```
 
 The `--worktree` flag on agent commands behaves the same way.
@@ -182,15 +182,15 @@ Branch-specific configuration works as follows:
 
 2. Start runs on multiple branches:
    ```bash
-   moat wt feature/auth -d
-   moat wt feature/dark-mode -d
+   moat wt feature/auth
+   moat wt feature/dark-mode
    ```
 
 3. Monitor progress:
    ```bash
    moat wt list
    moat logs run_a1b2c3d4e5f6
-   moat attach run_a1b2c3d4e5f6
+   moat logs -f run_a1b2c3d4e5f6
    ```
 
 4. When finished, clean up worktree directories:
@@ -216,10 +216,10 @@ Run `moat wt` from within a git repository. Worktrees are a git feature and requ
 
 ### "a run is already active in worktree"
 
-Another run is already active on that branch. Either attach to it or stop it first:
+Another run is already active on that branch. Follow its logs or stop it first:
 
 ```bash
-moat attach <run-id>
+moat logs -f <run-id>
 moat stop <run-id>
 ```
 

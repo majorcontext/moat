@@ -23,7 +23,7 @@ These flags apply to all commands:
 
 ## Run identification
 
-Commands that operate on a run (`stop`, `destroy`, `attach`, `logs`, `trace`, `audit`, `snapshot`) accept a run ID or a run name:
+Commands that operate on a run (`stop`, `destroy`, `logs`, `trace`, `audit`, `snapshot`) accept a run ID or a run name:
 
 ```bash
 moat stop run_a1b2c3d4e5f6   # by full ID
@@ -33,7 +33,7 @@ moat stop my-agent                # by name
 
 Resolution priority: exact ID > ID prefix > exact name.
 
-If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for confirmation while single-target commands (`logs`, `attach`) list the matches and ask you to specify a run ID.
+If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for confirmation while single-target commands (`logs`) list the matches and ask you to specify a run ID.
 
 ## Common agent flags
 
@@ -44,7 +44,6 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
 | `-n`, `--name NAME` | Run name (default: from `agent.yaml` or random) |
-| `-d`, `--detach` | Run in background |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
@@ -52,9 +51,9 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
-Each agent command also accepts `-p`/`--prompt` for non-interactive mode, plus command-specific flags documented in their own sections.
+Agent commands run interactively by default, owning the terminal with stdin/stdout/stderr connected. Use `-p`/`--prompt` for non-interactive mode (runs in background, exits when done). Each agent command also accepts command-specific flags documented in their own sections.
 
-All agent commands support passing an initial prompt after `--`. Unlike `-p`, which runs non-interactively and exits when done, arguments after `--` start an interactive session with the prompt pre-filled:
+All agent commands support passing an initial prompt after `--`. Unlike `-p`, which runs non-interactively in the background and exits when done, arguments after `--` start an interactive session with the prompt pre-filled:
 
 ```bash
 moat claude -- "is this thing on?"
@@ -85,7 +84,6 @@ moat run [flags] [path] [-- command]
 | `--name NAME` | Set run name (used for hostname routing) |
 | `--grant PROVIDER` | Inject credential (repeatable) |
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
-| `-d`, `--detach` | Run in background |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |
@@ -94,10 +92,25 @@ moat run [flags] [path] [-- command]
 | `--no-snapshots` | Disable snapshots for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
 
+### Execution modes
+
+**Non-interactive (default):** The run starts in the background. Use `moat logs <id> -f` to follow output and `moat stop <id>` to stop.
+
+```bash
+moat run ./my-project
+moat logs -f
+```
+
+**Interactive (`-i`):** The run owns the terminal with stdin/stdout/stderr connected and a TTY allocated. Press `Ctrl-/ k` to stop the run. `Ctrl+C` is forwarded to the container process.
+
+```bash
+moat run -i -- bash
+```
+
 ### Examples
 
 ```bash
-# Run in current directory
+# Run in current directory (non-interactive, background)
 moat run
 
 # Run in specific directory
@@ -114,9 +127,6 @@ moat run -- sh -c "npm install && npm test"
 
 # Interactive shell
 moat run -i -- bash
-
-# Background run
-moat run -d ./my-project
 
 # Multiple credentials
 moat run --grant github --grant anthropic ./my-project
@@ -206,11 +216,8 @@ moat claude --grant github
 # Named run
 moat claude --name feature-auth ./my-project
 
-# Run in a git worktree
-moat claude --worktree=dark-mode --prompt "implement dark mode" --detach
-
-# Background run
-moat claude -d ./my-project
+# Run in a git worktree (non-interactive with prompt)
+moat claude --worktree=dark-mode --prompt "implement dark mode"
 
 # Require manual approval for each tool use
 moat claude --noyolo
@@ -273,11 +280,8 @@ moat codex --grant github
 # Named run
 moat codex --name my-feature
 
-# Run in a git worktree
-moat codex --worktree=dark-mode --prompt "implement dark mode" --detach
-
-# Run in background
-moat codex -d
+# Run in a git worktree (non-interactive with prompt)
+moat codex --worktree=dark-mode --prompt "implement dark mode"
 
 # Force rebuild
 moat codex --rebuild
@@ -331,11 +335,8 @@ moat gemini --grant github
 # Named run
 moat gemini --name my-feature
 
-# Run in a git worktree
-moat gemini --worktree=dark-mode --prompt "implement dark mode" --detach
-
-# Run in background
-moat gemini -d
+# Run in a git worktree (non-interactive with prompt)
+moat gemini --worktree=dark-mode --prompt "implement dark mode"
 
 # Force rebuild
 moat gemini --rebuild
@@ -353,7 +354,7 @@ moat wt <branch> [-- command]
 
 The branch is created from HEAD if it doesn't exist. The worktree is created at `~/.moat/worktrees/<repo-id>/<branch>`.
 
-Configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to attach or stop it.
+Configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to stop it.
 
 ### Arguments
 
@@ -366,7 +367,6 @@ Configuration is read from `agent.yaml` in the repository root. If a run is alre
 
 | Flag | Description |
 |------|-------------|
-| `-d`, `--detach` | Run in background |
 | `-n`, `--name NAME` | Override auto-generated run name |
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable) |
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
@@ -389,9 +389,6 @@ Override the default worktree base path (`~/.moat/worktrees/`) with the `MOAT_WO
 ```bash
 # Start a run in a worktree for the dark-mode branch
 moat wt dark-mode
-
-# Run in background
-moat wt dark-mode -d
 
 # Run a specific command in the worktree
 moat wt dark-mode -- make test
@@ -435,59 +432,6 @@ moat wt clean
 # Clean a specific worktree
 moat wt clean dark-mode
 ```
-
----
-
-## moat attach
-
-Attach to a running container.
-
-```
-moat attach [flags] <run>
-```
-
-### Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `run` | Run ID or name |
-
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `-i`, `--interactive` | Force interactive mode |
-| `-i=false` | Force output-only mode |
-
-By default, uses the run's original mode (interactive or not).
-
-On attach, Moat sends a TTY resize signal to the container to force a screen repaint. This ensures the terminal displays the current state immediately, rather than waiting for new output.
-
-### Examples
-
-```bash
-# Attach by name
-moat attach my-agent
-
-# Attach by ID
-moat attach run_a1b2c3d4e5f6
-
-# Force interactive
-moat attach -i run_a1b2c3d4e5f6
-
-# Force output-only
-moat attach -i=false run_a1b2c3d4e5f6
-```
-
-### Detach sequences
-
-**Non-interactive mode:**
-- `Ctrl+C` -- Detach (run continues)
-- `Ctrl+C Ctrl+C` (within 500ms) -- Stop the run
-
-**Interactive mode:**
-- `Ctrl-/ d` -- Detach (run continues)
-- `Ctrl-/ k` -- Stop the run
 
 ---
 

@@ -138,22 +138,22 @@ moat gemini --name feature-auth ./my-project
 
 The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background runs
+### Non-interactive runs
 
-Run Gemini in the background:
+Run Gemini non-interactively with a prompt:
 
 ```bash
-moat gemini -d ./my-project
+moat gemini -p "fix the failing tests" ./my-project
 ```
 
-Reattach later:
+Monitor progress:
 
 ```bash
 $ moat list
 NAME          RUN ID              STATE    AGE
 feature-auth  run_a1b2c3d4e5f6   running  5m
 
-$ moat attach run_a1b2c3d4e5f6
+$ moat logs -f run_a1b2c3d4e5f6
 ```
 
 ## Adding GitHub access
