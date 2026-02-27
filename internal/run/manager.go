@@ -2505,7 +2505,7 @@ func (m *Manager) streamLogs(ctx context.Context, r *Run) {
 	// Storage is handled by Wait() after container exits
 	//
 	// Note: streamLogs is only called for non-interactive runs (see exec.go).
-	// Interactive runs use StartAttached which handles I/O directly.
+	// Interactive runs use Exec which handles I/O directly.
 	// Non-interactive Docker containers use multiplexed streams (no TTY),
 	// so we must demultiplex to avoid 8-byte headers leaking into output.
 	if m.runtime.Type() == container.RuntimeDocker {
@@ -2789,7 +2789,7 @@ func (m *Manager) Get(runID string) (*Run, error) {
 //
 // This should be called whenever a container exits, regardless of how:
 // - Normal exit (Wait)
-// - Interactive exit (StartAttached)
+// - Interactive exit (Exec)
 // - Explicit stop (Stop)
 // - Detached completion (background monitor)
 func (m *Manager) captureLogs(r *Run) {
@@ -2862,7 +2862,7 @@ func (m *Manager) captureLogs(r *Run) {
 // metadata is merged into r.ProviderMeta.
 func runProviderStoppedHooks(r *Run) {
 	// Ensure hooks run exactly once — multiple call sites race
-	// (monitorContainerExit goroutine vs StartAttached/Stop on main goroutine).
+	// (monitorContainerExit goroutine vs Exec/Stop on main goroutine).
 	if !r.providerHooksDone.CompareAndSwap(false, true) {
 		return
 	}

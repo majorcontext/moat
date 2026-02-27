@@ -34,7 +34,7 @@ type AppleRuntime struct {
 	networkMgr *appleNetworkManager
 	serviceMgr *appleServiceManager
 
-	// activePTY tracks PTY masters for attached containers so ResizeTTY
+	// activePTY tracks PTY masters for exec'd containers so ResizeExec
 	// can propagate terminal size changes. Protected by ptyMu.
 	ptyMu     sync.Mutex
 	activePTY map[string]*os.File
