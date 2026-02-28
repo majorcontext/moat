@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -96,187 +95,52 @@ Use 'moat list' to see running and recent runs.`,
 }
 
 func runClaudeCode(cmd *cobra.Command, args []string) error {
-	// If subcommand is being run, don't execute this
-	if cmd.CalledAs() != "claude" {
-		return nil
-	}
-
-	// Separate workspace arg from initial prompt args.
-	// Everything after "--" is passed as an initial prompt to Claude.
-	//   moat claude -- "is this thing on?"          → workspace=".", prompt="is this thing on?"
-	//   moat claude ./project -- "explain this"     → workspace="./project", prompt="explain this"
-	//   moat claude ./project                       → workspace="./project", no prompt
-	var initialPrompt string
-	workspace := "."
-	dashIdx := cmd.ArgsLenAtDash()
-	if dashIdx >= 0 {
-		// Args before "--" are moat args (workspace), after are passthrough
-		if dashIdx > 0 {
-			workspace = args[0]
-		}
-		passthroughArgs := args[dashIdx:]
-		if len(passthroughArgs) > 0 {
-			initialPrompt = strings.Join(passthroughArgs, " ")
-		}
-	} else if len(args) > 0 {
-		workspace = args[0]
-	}
-
-	absPath, err := cli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return err
-	}
-
-	// Load agent.yaml if present, otherwise use defaults
-	cfg, err := config.Load(absPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	// Handle --wt flag
-	wtOut, err := cli.ResolveWorktreeWorkspace(claudeWtFlag, absPath, &claudeFlags, cfg)
-	if err != nil {
-		return err
-	}
-	absPath = wtOut.Workspace
-	cfg = wtOut.Config
-
-	// Build grants list using a set for deduplication
-	grantSet := make(map[string]bool)
-	var grants []string
-	addGrant := func(g string) {
-		if !grantSet[g] {
-			grantSet[g] = true
-			grants = append(grants, g)
-		}
-	}
-
-	if credName := getClaudeCredentialName(); credName != "" {
-		addGrant(credName) // Use the actual name the credential is stored under
-	}
-	if cfg != nil {
-		for _, g := range cfg.Grants {
-			addGrant(g)
-		}
-	}
-	for _, g := range claudeFlags.Grants {
-		addGrant(g)
-	}
-	claudeFlags.Grants = grants
-
-	// Determine interactive mode
-	interactive := claudePromptFlag == ""
-
-	// Validate mutually exclusive flags
+	// Validate mutually exclusive flags before delegating to shared runner
 	if claudeContinue && claudeResume != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
 	}
 
-	// Build container command
-	containerCmd := []string{"claude"}
+	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
+		Name:                  "claude",
+		Flags:                 &claudeFlags,
+		PromptFlag:            claudePromptFlag,
+		AllowedHosts:          claudeAllowedHosts,
+		WtFlag:                claudeWtFlag,
+		GetCredentialGrant:    getClaudeCredentialName,
+		Dependencies:          []string{"node@20", "git", "claude-code"},
+		NetworkHosts:          []string{"claude.ai", "*.claude.ai"},
+		SupportsInitialPrompt: true,
+		DryRunNote:            "Note: No API key configured. Claude will prompt for login.",
+		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
+			containerCmd := []string{"claude"}
 
-	// By default, skip permission prompts since Moat provides isolation.
-	if !claudeNoYolo {
-		containerCmd = append(containerCmd, "--dangerously-skip-permissions")
-	}
-
-	if claudeContinue {
-		containerCmd = append(containerCmd, "--continue")
-	}
-
-	if claudeResume != "" {
-		sessionID, resolveErr := resolveResumeSession(claudeResume)
-		if resolveErr != nil {
-			return resolveErr
-		}
-		containerCmd = append(containerCmd, "--resume", sessionID)
-	}
-
-	if claudePromptFlag != "" {
-		containerCmd = append(containerCmd, "-p", claudePromptFlag)
-	}
-
-	if initialPrompt != "" {
-		containerCmd = append(containerCmd, initialPrompt)
-	}
-
-	// Use name from flag, or config, or let manager generate one
-	if claudeFlags.Name == "" && cfg != nil && cfg.Name != "" {
-		claudeFlags.Name = cfg.Name
-	}
-
-	// Ensure dependencies for Claude Code
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	if !cli.HasDependency(cfg.Dependencies, "node") {
-		cfg.Dependencies = append(cfg.Dependencies, "node@20")
-	}
-	if !cli.HasDependency(cfg.Dependencies, "git") {
-		cfg.Dependencies = append(cfg.Dependencies, "git")
-	}
-	if !cli.HasDependency(cfg.Dependencies, "claude-code") {
-		cfg.Dependencies = append(cfg.Dependencies, "claude-code")
-	}
-
-	// Always sync Claude logs
-	syncLogs := true
-	cfg.Claude.SyncLogs = &syncLogs
-
-	// Allow network access to claude.ai for OAuth login
-	cfg.Network.Allow = append(cfg.Network.Allow, "claude.ai", "*.claude.ai")
-
-	// Add allowed hosts if specified
-	cfg.Network.Allow = append(cfg.Network.Allow, claudeAllowedHosts...)
-
-	// Add environment variables from flags
-	if envErr := cli.ParseEnvFlags(claudeFlags.Env, cfg); envErr != nil {
-		return envErr
-	}
-
-	log.Debug("starting claude code",
-		"workspace", absPath,
-		"grants", grants,
-		"interactive", interactive,
-		"prompt", claudePromptFlag,
-		"rebuild", claudeFlags.Rebuild,
-	)
-
-	if cli.DryRun {
-		fmt.Println("Dry run - would start Claude Code")
-		fmt.Printf("Workspace: %s\n", absPath)
-		fmt.Printf("Grants: %v\n", grants)
-		fmt.Printf("Interactive: %v\n", interactive)
-		fmt.Printf("Rebuild: %v\n", claudeFlags.Rebuild)
-		if len(grants) == 0 {
-			fmt.Println("Note: No API key configured. Claude will prompt for login.")
-		}
-		return nil
-	}
-
-	ctx := context.Background()
-
-	opts := cli.ExecOptions{
-		Flags:       claudeFlags,
-		Workspace:   absPath,
-		Command:     containerCmd,
-		Config:      cfg,
-		Interactive: interactive,
-	}
-
-	cli.SetWorktreeFields(&opts, wtOut.Result)
-
-	result, err := cli.ExecuteRun(ctx, opts)
-	if err != nil {
-		return err
-	}
-
-	if result != nil {
-		fmt.Printf("Starting Claude Code in %s\n", absPath)
-		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
-	}
-
-	return nil
+			// By default, skip permission prompts since Moat provides isolation.
+			if !claudeNoYolo {
+				containerCmd = append(containerCmd, "--dangerously-skip-permissions")
+			}
+			if claudeContinue {
+				containerCmd = append(containerCmd, "--continue")
+			}
+			if claudeResume != "" {
+				sessionID, err := resolveResumeSession(claudeResume)
+				if err != nil {
+					return nil, err
+				}
+				containerCmd = append(containerCmd, "--resume", sessionID)
+			}
+			if promptFlag != "" {
+				containerCmd = append(containerCmd, "-p", promptFlag)
+			}
+			if initialPrompt != "" {
+				containerCmd = append(containerCmd, initialPrompt)
+			}
+			return containerCmd, nil
+		},
+		ConfigureAgent: func(cfg *config.Config) {
+			syncLogs := true
+			cfg.Claude.SyncLogs = &syncLogs
+		},
+	})
 }
 
 // getClaudeCredentialName returns the grant name to use for moat claude.

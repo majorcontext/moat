@@ -1,16 +1,11 @@
 package codex
 
 import (
-	"context"
-	"fmt"
-	"strings"
-
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
-	"github.com/majorcontext/moat/internal/log"
 )
 
 var (
@@ -106,174 +101,40 @@ Use 'moat list' to see running and recent runs.`,
 }
 
 func runCodex(cmd *cobra.Command, args []string) error {
-	// If subcommand is being run, don't execute this
-	if cmd.CalledAs() != "codex" {
-		return nil
-	}
-
-	// Separate workspace arg from initial prompt args.
-	// Everything after "--" is passed as an initial prompt to Codex.
-	//   moat codex -- "testing"                     → workspace=".", prompt="testing"
-	//   moat codex ./project -- "explain this"      → workspace="./project", prompt="explain this"
-	//   moat codex ./project                        → workspace="./project", no prompt
-	var initialPrompt string
-	workspace := "."
-	dashIdx := cmd.ArgsLenAtDash()
-	if dashIdx >= 0 {
-		// Args before "--" are moat args (workspace), after are passthrough
-		if dashIdx > 0 {
-			workspace = args[0]
-		}
-		passthroughArgs := args[dashIdx:]
-		if len(passthroughArgs) > 0 {
-			initialPrompt = strings.Join(passthroughArgs, " ")
-		}
-	} else if len(args) > 0 {
-		workspace = args[0]
-	}
-
-	absPath, err := cli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return err
-	}
-
-	// Load agent.yaml if present, otherwise use defaults
-	cfg, err := config.Load(absPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	// Handle --wt flag
-	wtOut, err := cli.ResolveWorktreeWorkspace(codexWtFlag, absPath, &codexFlags, cfg)
-	if err != nil {
-		return err
-	}
-	absPath = wtOut.Workspace
-	cfg = wtOut.Config
-
-	// Build grants list using a set for deduplication
-	grantSet := make(map[string]bool)
-	var grants []string
-	addGrant := func(g string) {
-		if !grantSet[g] {
-			grantSet[g] = true
-			grants = append(grants, g)
-		}
-	}
-
-	if credName := getCodexCredentialName(); credName != "" {
-		addGrant(credName) // Use the actual name the credential is stored under
-	}
-	if cfg != nil {
-		for _, g := range cfg.Grants {
-			addGrant(g)
-		}
-	}
-	for _, g := range codexFlags.Grants {
-		addGrant(g)
-	}
-	codexFlags.Grants = grants
-
-	// Determine interactive mode
-	interactive := codexPromptFlag == ""
-
-	// Build container command
-	// codex is installed globally via the dependency system
-	var containerCmd []string
-
-	if codexPromptFlag != "" {
-		// Non-interactive mode: use `codex exec` with the prompt
-		// --full-auto allows edits during execution (safe since we're in a container)
-		containerCmd = []string{"codex", "exec"}
-		if codexFullAuto {
-			containerCmd = append(containerCmd, "--full-auto")
-		}
-		containerCmd = append(containerCmd, codexPromptFlag)
-	} else {
-		// Interactive mode: just run `codex` for the TUI
-		containerCmd = []string{"codex"}
-		if initialPrompt != "" {
-			containerCmd = append(containerCmd, initialPrompt)
-		}
-	}
-
-	// Use name from flag, or config, or let manager generate one
-	if codexFlags.Name == "" && cfg != nil && cfg.Name != "" {
-		codexFlags.Name = cfg.Name
-	}
-
-	// Ensure dependencies for Codex CLI
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	if !cli.HasDependency(cfg.Dependencies, "node") {
-		cfg.Dependencies = append(cfg.Dependencies, "node@20")
-	}
-	if !cli.HasDependency(cfg.Dependencies, "git") {
-		cfg.Dependencies = append(cfg.Dependencies, "git")
-	}
-	if !cli.HasDependency(cfg.Dependencies, "codex-cli") {
-		cfg.Dependencies = append(cfg.Dependencies, "codex-cli")
-	}
-
-	// Allow network access to OpenAI
-	cfg.Network.Allow = append(cfg.Network.Allow, NetworkHosts()...)
-
-	// Add allowed hosts if specified
-	cfg.Network.Allow = append(cfg.Network.Allow, codexAllowedHosts...)
-
-	// Always sync Codex logs
-	syncLogs := true
-	cfg.Codex.SyncLogs = &syncLogs
-
-	// Add environment variables from flags
-	if envErr := cli.ParseEnvFlags(codexFlags.Env, cfg); envErr != nil {
-		return envErr
-	}
-
-	log.Debug("starting codex cli",
-		"workspace", absPath,
-		"grants", grants,
-		"interactive", interactive,
-		"prompt", codexPromptFlag,
-		"rebuild", codexFlags.Rebuild,
-	)
-
-	if cli.DryRun {
-		fmt.Println("Dry run - would start Codex CLI")
-		fmt.Printf("Workspace: %s\n", absPath)
-		fmt.Printf("Grants: %v\n", grants)
-		fmt.Printf("Interactive: %v\n", interactive)
-		fmt.Printf("Rebuild: %v\n", codexFlags.Rebuild)
-		if len(grants) == 0 {
-			fmt.Println("Note: No API key configured. Codex will prompt for login.")
-		}
-		return nil
-	}
-
-	ctx := context.Background()
-
-	opts := cli.ExecOptions{
-		Flags:       codexFlags,
-		Workspace:   absPath,
-		Command:     containerCmd,
-		Config:      cfg,
-		Interactive: interactive,
-	}
-
-	cli.SetWorktreeFields(&opts, wtOut.Result)
-
-	result, err := cli.ExecuteRun(ctx, opts)
-	if err != nil {
-		return err
-	}
-
-	if result != nil {
-		fmt.Printf("Starting Codex CLI in %s\n", absPath)
-		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
-	}
-
-	return nil
+	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
+		Name:                  "codex",
+		Flags:                 &codexFlags,
+		PromptFlag:            codexPromptFlag,
+		AllowedHosts:          codexAllowedHosts,
+		WtFlag:                codexWtFlag,
+		GetCredentialGrant:    getCodexCredentialName,
+		Dependencies:          DefaultDependencies(),
+		NetworkHosts:          NetworkHosts(),
+		SupportsInitialPrompt: true,
+		DryRunNote:            "Note: No API key configured. Codex will prompt for login.",
+		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
+			if promptFlag != "" {
+				// Non-interactive: use `codex exec` with the prompt.
+				// --full-auto allows edits during execution (safe in a container).
+				containerCmd := []string{"codex", "exec"}
+				if codexFullAuto {
+					containerCmd = append(containerCmd, "--full-auto")
+				}
+				containerCmd = append(containerCmd, promptFlag)
+				return containerCmd, nil
+			}
+			// Interactive: run `codex` for the TUI
+			containerCmd := []string{"codex"}
+			if initialPrompt != "" {
+				containerCmd = append(containerCmd, initialPrompt)
+			}
+			return containerCmd, nil
+		},
+		ConfigureAgent: func(cfg *config.Config) {
+			syncLogs := true
+			cfg.Codex.SyncLogs = &syncLogs
+		},
+	})
 }
 
 // getCodexCredentialName returns the name under which the Codex credential is stored.
