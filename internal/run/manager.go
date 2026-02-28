@@ -2382,10 +2382,10 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 
 	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
-	// (Apple TTY output doesn't go through container runtime logs)
-	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
-	// Always create the file for audit completeness, even if empty.
-	if !callerWillStop && r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
+	// (Apple TTY output doesn't go through container runtime logs — captureLogs() returns
+	// early for Apple interactive runs, so this is the only path that writes logs.)
+	// Runs unconditionally: even on escape-stop the buffer holds all output up to that point.
+	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
@@ -2486,7 +2486,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 
 		return err
 	case <-ctx.Done():
-		// Context canceled - caller chose to detach, don't stop the run
+		// Context canceled — caller is responsible for stopping the run
 		return ctx.Err()
 	}
 }
@@ -2627,13 +2627,20 @@ func runProviderStoppedHooks(r *Run) {
 //   - run provider stopped hooks (has its own idempotency guard)
 //   - close audit store or remove storage (Destroy-only)
 func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
+	// Snapshot daemonClient under lock to avoid racing with Create() which
+	// sets it under m.mu.Lock(). cleanupResources is called from
+	// monitorContainerExit goroutines that run concurrently with Create().
+	m.mu.RLock()
+	dc := m.daemonClient
+	m.mu.RUnlock()
+
 	r.cleanupOnce.Do(func() {
 		// Cancel token refresh and unregister run from proxy daemon
 		if err := r.stopProxyServer(ctx); err != nil {
 			log.Debug("cleanup: stopping proxy", "error", err)
 		}
-		if r.ProxyAuthToken != "" && m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
+		if r.ProxyAuthToken != "" && dc != nil {
+			if err := dc.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
 				log.Debug("cleanup: unregistering from proxy daemon", "error", err)
 			}
 		}
