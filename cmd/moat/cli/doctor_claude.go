@@ -945,7 +945,7 @@ func testContainerAuth(ctx context.Context, diag *claudeDiagnostic) error {
 	diag.ContainerTest = result
 
 	// Start container (don't stream logs to avoid cluttering output)
-	if startErr := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); startErr != nil {
+	if startErr := mgr.Start(ctx, r.ID, run.StartOptions{}); startErr != nil {
 		return fmt.Errorf("starting container: %w", startErr)
 	}
 

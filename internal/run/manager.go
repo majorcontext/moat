@@ -20,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
@@ -2158,11 +2157,7 @@ region = %s
 }
 
 // StartOptions configures how a run is started.
-type StartOptions struct {
-	// StreamLogs controls whether container logs are streamed to stdout.
-	// Set to false for interactive mode where attach handles I/O.
-	StreamLogs bool
-}
+type StartOptions struct{}
 
 // Start begins execution of a run.
 func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) error {
@@ -2255,13 +2250,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
-	// Stream logs to stdout (unless disabled for interactive mode)
-	if opts.StreamLogs {
-		go m.streamLogs(context.Background(), r)
-	}
-
 	// Start background monitor to capture logs when container exits.
-	// This is critical for detached runs where Wait() is never called.
 	// Use m.ctx so the goroutine is canceled when the Manager closes.
 	monitorCtx := m.ctx
 	if monitorCtx == nil {
@@ -2440,34 +2429,6 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	_ = r.SaveMetadata()
 
 	return attachErr
-}
-
-// streamLogs streams container logs to stdout for real-time feedback.
-// Note: Final log capture to storage is handled by captureLogs() which is called
-// from all container exit paths (Wait, StartAttached, Stop) to ensure complete
-// logs are captured even for fast-exiting containers.
-func (m *Manager) streamLogs(ctx context.Context, r *Run) {
-	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
-	if err != nil {
-		ui.Errorf("Getting logs: %v", err)
-		return
-	}
-	defer logs.Close()
-
-	// Stream to stdout only for real-time feedback
-	// Storage is handled by Wait() after container exits
-	//
-	// Note: streamLogs is only called for non-interactive runs (see exec.go).
-	// Interactive runs use StartAttached which handles I/O directly.
-	// Non-interactive Docker containers use multiplexed streams (no TTY),
-	// so we must demultiplex to avoid 8-byte headers leaking into output.
-	if m.runtime.Type() == container.RuntimeDocker {
-		// Docker non-interactive container: demultiplex the stream
-		_, _ = stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
-	} else {
-		// Apple container: output is already raw
-		_, _ = io.Copy(os.Stdout, logs)
-	}
 }
 
 // Stop terminates a running run.

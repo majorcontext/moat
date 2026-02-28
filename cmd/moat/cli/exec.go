@@ -245,8 +245,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 
 	// Non-interactive: start in background
-	startOpts := run.StartOptions{StreamLogs: false}
-	if err := manager.Start(ctx, r.ID, startOpts); err != nil {
+	if err := manager.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		log.Error("failed to start run", "id", r.ID, "error", err)
 		return r, fmt.Errorf("starting run: %w", err)
 	}
