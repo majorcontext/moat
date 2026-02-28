@@ -215,15 +215,11 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	SetWorktreeFields(&opts, wtOut.Result)
 
-	result, err := ExecuteRun(ctx, opts)
-	if err != nil {
-		return err
+	// Print run info after creation but before blocking on execution
+	opts.OnRunCreated = func(info RunInfo) {
+		fmt.Printf("Started %s in %s (run %s)\n", rc.Name, absPath, info.ID)
 	}
 
-	if result != nil {
-		fmt.Printf("Starting %s in %s\n", rc.Name, absPath)
-		fmt.Printf("Run: %s (%s)\n", result.Name, result.ID)
-	}
-
-	return nil
+	_, err = ExecuteRun(ctx, opts)
+	return err
 }

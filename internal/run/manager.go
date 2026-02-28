@@ -2366,10 +2366,14 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
-	// Update run state based on how the attachment ended.
-	// Skip if context was canceled (e.g. escape-stop or SIGTERM) — the caller's
-	// Stop() call handles that state transition.
-	if ctx.Err() == nil {
+	// Determine whether the caller will stop the container (escape-stop or context
+	// cancellation). In those cases, skip state updates and log capture here — the
+	// caller's Stop() and monitorContainerExit handle them after the container
+	// actually exits.
+	callerWillStop := ctx.Err() != nil || term.IsEscapeError(attachErr)
+
+	if !callerWillStop {
+		// Container exited on its own — update state now.
 		if attachErr != nil {
 			r.SetStateFailedAt(attachErr.Error(), time.Now())
 		} else {
@@ -2381,7 +2385,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// (Apple TTY output doesn't go through container runtime logs)
 	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
 	// Always create the file for audit completeness, even if empty.
-	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
+	if !callerWillStop && r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
@@ -2396,14 +2400,18 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		}
 	}
 
-	// Capture logs after container exits (critical for audit/observability)
-	// For non-interactive mode, this fetches from container runtime logs
-	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
-	m.captureLogs(r)
+	// Capture logs after container exits (critical for audit/observability).
+	// Skip when caller will stop the container — it's still running and
+	// monitorContainerExit will capture complete logs after it actually exits.
+	if !callerWillStop {
+		m.captureLogs(r)
+	}
 
 	// Run provider stopped hooks (e.g., Claude session ID extraction).
 	// Must happen after the container has exited so session files are flushed.
-	runProviderStoppedHooks(r)
+	if !callerWillStop {
+		runProviderStoppedHooks(r)
+	}
 	_ = r.SaveMetadata()
 
 	return attachErr
