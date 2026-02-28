@@ -343,6 +343,18 @@ func (r *DockerRuntime) ContainerLogs(ctx context.Context, containerID string) (
 // ContainerLogsAll returns all logs from a container (does not follow).
 // The logs are demultiplexed from Docker's format (removes 8-byte headers).
 func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string) ([]byte, error) {
+	// Wait for the container to stop so Docker's log driver has flushed.
+	// For already-stopped containers this returns immediately. For fast-exiting
+	// containers it prevents reading logs before they're written.
+	waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer waitCancel()
+	statusCh, errCh := r.cli.ContainerWait(waitCtx, containerID, container.WaitConditionNotRunning)
+	select {
+	case <-errCh:
+		// Ignore errors — container may already be removed
+	case <-statusCh:
+	}
+
 	reader, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,

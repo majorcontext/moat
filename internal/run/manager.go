@@ -2366,6 +2366,17 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
+	// Update run state based on how the attachment ended.
+	// Skip if context was canceled (e.g. escape-stop or SIGTERM) — the caller's
+	// Stop() call handles that state transition.
+	if ctx.Err() == nil {
+		if attachErr != nil {
+			r.SetStateFailedAt(attachErr.Error(), time.Now())
+		} else {
+			r.SetStateWithTime(StateStopped, time.Now())
+		}
+	}
+
 	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
 	// (Apple TTY output doesn't go through container runtime logs)
 	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).

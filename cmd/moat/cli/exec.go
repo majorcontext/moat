@@ -244,7 +244,9 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		return r, RunInteractiveAttached(ctx, manager, r, opts.Command, opts.Flags.TTYTrace)
 	}
 
-	// Non-interactive: start in background
+	// Non-interactive: start and block until the container exits.
+	// We must wait so that monitorContainerExit has time to capture logs and
+	// update state before manager.Close() cancels its context.
 	if err := manager.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		log.Error("failed to start run", "id", r.ID, "error", err)
 		return r, fmt.Errorf("starting run: %w", err)
@@ -264,10 +266,34 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
-	fmt.Printf("\nRun %s started in background\n", r.ID)
-	fmt.Printf("Use 'moat logs %s -f' to follow output\n", r.ID)
-	fmt.Printf("Use 'moat stop %s' to stop\n", r.ID)
-	return r, nil
+	fmt.Printf("Run %s started. Stop with Ctrl+C.\n", r.ID)
+
+	// Wait for container exit or signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- manager.Wait(ctx, r.ID)
+	}()
+
+	select {
+	case sig := <-sigCh:
+		log.Info("received signal, stopping run", "signal", sig, "id", r.ID)
+		fmt.Printf("\nStopping run %s...\n", r.ID)
+		if err := manager.Stop(ctx, r.ID); err != nil {
+			log.Error("failed to stop run", "id", r.ID, "error", err)
+		}
+		// Wait for monitorContainerExit to finish cleanup
+		<-waitDone
+		return r, nil
+	case err := <-waitDone:
+		if err != nil {
+			return r, fmt.Errorf("run failed: %w", err)
+		}
+		return r, nil
+	}
 }
 
 // RunInteractiveAttached runs in interactive mode using StartAttached to ensure

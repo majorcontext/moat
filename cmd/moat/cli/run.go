@@ -28,8 +28,7 @@ Arguments:
   [-- cmd]     Optional command to run instead of agent's default
 
 Non-interactive mode (default):
-  Run starts in background. Monitor with 'moat logs' and 'moat trace'.
-  Stop with 'moat stop'.
+  Run blocks until the command completes. Stop with Ctrl+C.
 
 Interactive mode (-i):
   Ctrl-/ k          Stop the run
