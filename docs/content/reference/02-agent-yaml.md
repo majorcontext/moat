@@ -589,7 +589,7 @@ interactive: true
 
 When `true`, allocates a TTY and connects stdin. The session owns the terminal. Press `Ctrl-/ k` to stop the run; `Ctrl+C` is forwarded to the container process.
 
-When `false` (default), the run starts in the background. Use `moat logs <id> -f` to follow output and `moat stop <id>` to stop.
+When `false` (default), the CLI blocks until the command completes. Press `Ctrl+C` to stop. Use `moat logs <id>` to review output after the run.
 
 Required for shells, REPLs, and interactive tools.
 

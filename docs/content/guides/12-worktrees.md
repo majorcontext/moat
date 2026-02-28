@@ -46,9 +46,6 @@ If the branch and worktree already exist, they are reused.
 # Start the command defined in agent.yaml on the dark-mode branch
 moat wt dark-mode
 
-# Run in background
-moat wt dark-mode -d
-
 # Run a specific command instead of the agent.yaml default
 moat wt dark-mode -- make test
 ```
@@ -64,7 +61,7 @@ The `--worktree` flag works on `moat claude`, `moat codex`, and `moat gemini`:
 moat claude --worktree dark-mode
 
 # Start Codex on a feature branch with a prompt
-moat codex --worktree feature/auth -p "implement OAuth login" -d
+moat codex --worktree feature/auth -p "implement OAuth login"
 
 # Start Gemini on a refactor branch
 moat gemini --worktree cleanup
@@ -90,9 +87,9 @@ moat wt dark-mode --name my-custom-name
 Start runs on multiple branches simultaneously:
 
 ```bash
-moat wt feature/auth -d
-moat wt feature/dark-mode -d
-moat wt fix/login-bug -d
+moat wt feature/auth &
+moat wt feature/dark-mode &
+moat wt fix/login-bug &
 ```
 
 Each run gets its own worktree, its own container, and its own branch. Branch names with slashes (like `feature/auth`) are supported.

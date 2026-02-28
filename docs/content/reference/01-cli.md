@@ -51,9 +51,9 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
-Agent commands run interactively by default, owning the terminal with stdin/stdout/stderr connected. Use `-p`/`--prompt` for non-interactive mode (runs in background, exits when done). Each agent command also accepts command-specific flags documented in their own sections.
+Agent commands run interactively by default, owning the terminal with stdin/stdout/stderr connected. Use `-p`/`--prompt` for non-interactive mode (blocks until the agent finishes). Each agent command also accepts command-specific flags documented in their own sections.
 
-All agent commands support passing an initial prompt after `--`. Unlike `-p`, which runs non-interactively in the background and exits when done, arguments after `--` start an interactive session with the prompt pre-filled:
+All agent commands support passing an initial prompt after `--`. Unlike `-p`, which runs non-interactively and exits when done, arguments after `--` start an interactive session with the prompt pre-filled:
 
 ```bash
 moat claude -- "is this thing on?"
@@ -94,11 +94,10 @@ moat run [flags] [path] [-- command]
 
 ### Execution modes
 
-**Non-interactive (default):** The run starts in the background. Use `moat logs <id> -f` to follow output and `moat stop <id>` to stop.
+**Non-interactive (default):** The CLI blocks until the command completes. Press `Ctrl+C` to stop.
 
 ```bash
 moat run ./my-project
-moat logs -f
 ```
 
 **Interactive (`-i`):** The run owns the terminal with stdin/stdout/stderr connected and a TTY allocated. Press `Ctrl-/ k` to stop the run. `Ctrl+C` is forwarded to the container process.
@@ -110,7 +109,7 @@ moat run -i -- bash
 ### Examples
 
 ```bash
-# Run in current directory (non-interactive, background)
+# Run in current directory
 moat run
 
 # Run in specific directory
