@@ -1,7 +1,7 @@
 # Interactive and Attach Model for Moat
 
 **Date:** 2026-01-19
-**Status:** Implemented
+**Status:** Superseded by [Interactive-Only Simplification](2026-02-27-interactive-only-simplification.md)
 
 ## Problem Statement
 

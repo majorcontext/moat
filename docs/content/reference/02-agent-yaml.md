@@ -577,7 +577,7 @@ command: ["sh", "-c", "npm install && npm start"]
 
 ### interactive
 
-Enable interactive mode (stdin + TTY).
+Enable interactive mode.
 
 ```yaml
 interactive: true
@@ -586,6 +586,10 @@ interactive: true
 - Type: `boolean`
 - Default: `false`
 - CLI override: `-i`
+
+When `true`, allocates a TTY and connects stdin. The session owns the terminal. Press `Ctrl-/ k` to stop the run; `Ctrl+C` is forwarded to the container process.
+
+When `false` (default), the CLI blocks until the command completes. Press `Ctrl+C` to stop. Use `moat logs <id>` to review output after the run.
 
 Required for shells, REPLs, and interactive tools.
 

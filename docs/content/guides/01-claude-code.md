@@ -171,22 +171,22 @@ moat claude --name feature-auth ./my-project
 
 The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background runs
+### Non-interactive runs
 
-Run Claude Code in the background:
+Run Claude Code non-interactively with a prompt:
 
 ```bash
-moat claude -d ./my-project
+moat claude -p "fix the failing tests" ./my-project
 ```
 
-Reattach later:
+Monitor progress:
 
 ```bash
 $ moat list
 NAME          RUN ID              STATE    AGE
 feature-auth  run_a1b2c3d4e5f6   running  5m
 
-$ moat attach run_a1b2c3d4e5f6
+$ moat logs -f run_a1b2c3d4e5f6
 ```
 
 ## Adding GitHub access

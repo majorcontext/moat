@@ -16,7 +16,7 @@ import (
 
 // TestLogsCapturedInAttachedMode verifies that logs are captured to logs.jsonl
 // when a run completes in attached (non-interactive) mode.
-// This is the standard flow: moat run (without -d)
+// This is the standard flow: moat run
 func TestLogsCapturedInAttachedMode(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -42,7 +42,7 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start and wait for completion (simulating attached mode)
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: true}); err != nil {
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -89,7 +89,7 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 
 // TestLogsCapturedInDetachedMode verifies that logs are captured to logs.jsonl
 // when a run is started in detached mode and later completes.
-// This is the critical bug: moat run -d doesn't capture logs.
+// This verifies logs are captured when a container runs without attached I/O.
 func TestLogsCapturedInDetachedMode(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -115,7 +115,7 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start without waiting (detached mode)
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -252,7 +252,7 @@ func TestLogsCapturedAfterStop(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start the run
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -327,7 +327,7 @@ func TestLogsAlwaysExistForAudit(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{StreamLogs: false}); err != nil {
+		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 

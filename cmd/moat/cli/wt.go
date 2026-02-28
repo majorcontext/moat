@@ -25,7 +25,7 @@ var wtCmd = &cobra.Command{
 
 If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
 exist, it's created. If a run is already active in the worktree, returns an
-error with instructions to attach or stop it.
+error with instructions to view logs or stop it.
 
 Configuration is read from agent.yaml in the repository root.
 
@@ -35,9 +35,6 @@ Override with MOAT_WORKTREE_BASE environment variable.
 Examples:
   # Start a run on a new feature branch
   moat wt dark-mode
-
-  # Run in background
-  moat wt dark-mode -d
 
   # Run a specific command in the worktree
   moat wt dark-mode -- make test
@@ -143,7 +140,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	for _, r := range manager.List() {
 		if r.WorktreePath == result.WorkspacePath && r.GetState() == run.StateRunning {
-			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nAttach with 'moat attach %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
+			return fmt.Errorf("a run is already active in worktree for branch %q: %s (%s)\nView logs with 'moat logs %s' or stop with 'moat stop %s'", branch, r.Name, r.ID, r.ID, r.ID)
 		}
 	}
 
@@ -165,11 +162,8 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine interactive mode: CLI flags > config > default
-	interactive := !wtFlags.Detach
-	if !interactive && cfg != nil && cfg.Interactive {
-		interactive = true
-	}
+	// Determine interactive mode from config
+	interactive := cfg != nil && cfg.Interactive
 
 	log.Debug("starting worktree run",
 		"branch", branch,
@@ -195,7 +189,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		Command:     containerCmd,
 		Config:      cfg,
 		Interactive: interactive,
-		TTY:         interactive,
 	}
 	intcli.SetWorktreeFields(&opts, result)
 

@@ -42,7 +42,11 @@ Show the last N lines:
 $ moat logs -n 50
 ```
 
-> **Note:** The `--follow` flag for `moat logs` is not yet implemented. Use `moat attach` to see live output from a running container.
+Follow logs in real time with `--follow`:
+
+```bash
+$ moat logs -f my-agent
+```
 
 See [CLI reference](../reference/01-cli.md) for the complete list of `moat logs` flags.
 
@@ -265,10 +269,10 @@ $ jq 'select(.status == 401)' ~/.moat/runs/run_*/network.jsonl
 
 ### No output from `moat logs`
 
-The run may not have produced any output. Verify the run exists with `moat list`. If the run is still active, use `moat attach` to see live output:
+The run may not have produced any output. Verify the run exists with `moat list`. If the run is still active, use `moat logs -f` to follow live output:
 
 ```bash
-$ moat attach run_a1b2c3d4e5f6
+$ moat logs -f run_a1b2c3d4e5f6
 ```
 
 ### No network traces

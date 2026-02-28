@@ -46,9 +46,6 @@ If the branch and worktree already exist, they are reused.
 # Start the command defined in agent.yaml on the dark-mode branch
 moat wt dark-mode
 
-# Run in background
-moat wt dark-mode -d
-
 # Run a specific command instead of the agent.yaml default
 moat wt dark-mode -- make test
 ```
@@ -64,7 +61,7 @@ The `--worktree` flag works on `moat claude`, `moat codex`, and `moat gemini`:
 moat claude --worktree dark-mode
 
 # Start Codex on a feature branch with a prompt
-moat codex --worktree feature/auth -p "implement OAuth login" -d
+moat codex --worktree feature/auth -p "implement OAuth login"
 
 # Start Gemini on a refactor branch
 moat gemini --worktree cleanup
@@ -87,12 +84,17 @@ moat wt dark-mode --name my-custom-name
 
 ## Parallel branches
 
-Start runs on multiple branches simultaneously:
+Start runs on multiple branches simultaneously, each in its own terminal:
 
 ```bash
-moat wt feature/auth -d
-moat wt feature/dark-mode -d
-moat wt fix/login-bug -d
+# Terminal 1
+moat wt feature/auth
+
+# Terminal 2
+moat wt feature/dark-mode
+
+# Terminal 3
+moat wt fix/login-bug
 ```
 
 Each run gets its own worktree, its own container, and its own branch. Branch names with slashes (like `feature/auth`) are supported.
@@ -114,7 +116,7 @@ If a run is already active in a worktree, `moat wt` returns an error:
 
 ```text
 Error: a run is already active in worktree for branch "dark-mode": my-agent-dark-mode (run_a1b2c3d4e5f6)
-Attach with 'moat attach run_a1b2c3d4e5f6' or stop with 'moat stop run_a1b2c3d4e5f6'
+Follow with 'moat logs -f run_a1b2c3d4e5f6' or stop with 'moat stop run_a1b2c3d4e5f6'
 ```
 
 The `--worktree` flag on agent commands behaves the same way.
@@ -182,15 +184,15 @@ Branch-specific configuration works as follows:
 
 2. Start runs on multiple branches:
    ```bash
-   moat wt feature/auth -d
-   moat wt feature/dark-mode -d
+   moat wt feature/auth
+   moat wt feature/dark-mode
    ```
 
 3. Monitor progress:
    ```bash
    moat wt list
    moat logs run_a1b2c3d4e5f6
-   moat attach run_a1b2c3d4e5f6
+   moat logs -f run_a1b2c3d4e5f6
    ```
 
 4. When finished, clean up worktree directories:
@@ -216,10 +218,10 @@ Run `moat wt` from within a git repository. Worktrees are a git feature and requ
 
 ### "a run is already active in worktree"
 
-Another run is already active on that branch. Either attach to it or stop it first:
+Another run is already active on that branch. Follow its logs or stop it first:
 
 ```bash
-moat attach <run-id>
+moat logs -f <run-id>
 moat stop <run-id>
 ```
 

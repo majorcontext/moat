@@ -64,6 +64,7 @@ type Run struct {
 
 	// Shutdown coordination to prevent race conditions
 	sshAgentStopOnce sync.Once // Ensures SSHAgentServer.Stop() called only once
+	cleanupOnce      sync.Once // Ensures resource cleanup runs only once
 
 	// State protection - guards State, Error, StartedAt, StoppedAt fields
 	// Use this lock when reading or modifying these fields to prevent races
@@ -123,7 +124,6 @@ type Options struct {
 	Rebuild       bool           // Force rebuild of container image (ignores cache)
 	KeepContainer bool           // If true, don't auto-remove container after run
 	Interactive   bool           // Keep stdin open for interactive input
-	TTY           bool           // Allocate a pseudo-TTY
 }
 
 // generateID creates a unique run identifier.

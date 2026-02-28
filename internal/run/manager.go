@@ -20,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
@@ -2158,10 +2157,84 @@ region = %s
 }
 
 // StartOptions configures how a run is started.
-type StartOptions struct {
-	// StreamLogs controls whether container logs are streamed to stdout.
-	// Set to false for interactive mode where attach handles I/O.
-	StreamLogs bool
+type StartOptions struct{}
+
+// setLogContext configures the structured logger with run-specific fields
+// so all subsequent log entries in this goroutine are correlated to the run.
+func setLogContext(r *Run) {
+	log.SetRunContext(log.RunContext{
+		RunID:     r.ID,
+		RunName:   r.Name,
+		Agent:     r.Agent,
+		Workspace: filepath.Base(r.Workspace),
+		Image:     r.Image,
+		Grants:    r.Grants,
+	})
+}
+
+// setupPortBindings retrieves the host-side port mappings for a container's
+// exposed ports and registers them as routes with both the local route table
+// and the proxy daemon. Port binding lookup is retried because the container
+// runtime may not have mappings ready immediately after start.
+func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
+	if len(r.Ports) == 0 {
+		return
+	}
+
+	var bindings map[int]int
+	var err error
+	for i := 0; i < 5; i++ {
+		bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
+		if err != nil || len(bindings) >= len(r.Ports) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		ui.Warnf("Getting port bindings: %v", err)
+		return
+	}
+
+	r.HostPorts = make(map[string]int)
+	services := make(map[string]string)
+	for serviceName, containerPort := range r.Ports {
+		if hostPort, ok := bindings[containerPort]; ok {
+			r.HostPorts[serviceName] = hostPort
+			services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
+		}
+	}
+	if len(services) > 0 {
+		if err := m.routes.Add(r.Name, services); err != nil {
+			ui.Warnf("Registering routes: %v", err)
+		}
+		// Snapshot daemonClient under lock to avoid racing with Create()
+		m.mu.RLock()
+		dc := m.daemonClient
+		m.mu.RUnlock()
+		if dc != nil {
+			if err := dc.RegisterRoutes(ctx, r.Name, services); err != nil {
+				log.Debug("failed to register routes via daemon", "error", err)
+			}
+		}
+	}
+}
+
+// setupFirewall configures iptables-based network isolation inside the
+// container so that only traffic through the credential-injecting proxy is
+// allowed. Returns an error if firewall setup fails, since a strict network
+// policy without a working firewall would leave the container unprotected.
+func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
+	if !r.FirewallEnabled || r.ProxyPort <= 0 {
+		return nil
+	}
+	if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
+		if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
+		}
+		return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
+	}
+	return nil
 }
 
 // Start begins execution of a run.
@@ -2174,74 +2247,18 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 	m.mu.Unlock()
 	r.SetState(StateStarting)
-
-	// Set run context in logger for correlation
-	log.SetRunContext(log.RunContext{
-		RunID:     runID,
-		RunName:   r.Name,
-		Agent:     r.Agent,
-		Workspace: filepath.Base(r.Workspace),
-		Image:     r.Image,
-		Grants:    r.Grants,
-	})
+	setLogContext(r)
 
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
 		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
 
-	// Set up firewall if enabled (strict network policy)
-	// This blocks all outbound traffic except to the proxy
-	if r.FirewallEnabled && r.ProxyPort > 0 {
-		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Firewall setup failed - this is fatal for strict policy since the user
-			// explicitly requested network isolation. Without iptables, only proxy-level
-			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
-			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
-			}
-			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
-		}
+	if err := m.setupFirewall(ctx, r); err != nil {
+		return err
 	}
 
-	// Get actual port bindings after container starts
-	if len(r.Ports) > 0 {
-		// Retry a few times - Docker may need a moment to set up port bindings
-		var bindings map[int]int
-		var err error
-		for i := 0; i < 5; i++ {
-			bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
-			if err != nil || len(bindings) >= len(r.Ports) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if err != nil {
-			// Log but don't fail - container is running
-			ui.Warnf("Getting port bindings: %v", err)
-		} else {
-			r.HostPorts = make(map[string]int)
-			services := make(map[string]string)
-			for serviceName, containerPort := range r.Ports {
-				if hostPort, ok := bindings[containerPort]; ok {
-					r.HostPorts[serviceName] = hostPort
-					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-				}
-			}
-			// Register routes
-			if len(services) > 0 {
-				if err := m.routes.Add(r.Name, services); err != nil {
-					ui.Warnf("Registering routes: %v", err)
-				}
-				if m.daemonClient != nil {
-					if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
-						log.Debug("failed to register routes via daemon", "error", err)
-					}
-				}
-			}
-		}
-	}
+	m.setupPortBindings(ctx, r)
 
 	r.SetStateWithTime(StateRunning, time.Now())
 
@@ -2255,13 +2272,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		}
 	}
 
-	// Stream logs to stdout (unless disabled for interactive mode)
-	if opts.StreamLogs {
-		go m.streamLogs(context.Background(), r)
-	}
-
 	// Start background monitor to capture logs when container exits.
-	// This is critical for detached runs where Wait() is never called.
 	// Use m.ctx so the goroutine is canceled when the Manager closes.
 	monitorCtx := m.ctx
 	if monitorCtx == nil {
@@ -2286,16 +2297,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	m.mu.Unlock()
 	r.SetState(StateStarting)
-
-	// Set run context in logger for correlation
-	log.SetRunContext(log.RunContext{
-		RunID:     runID,
-		RunName:   r.Name,
-		Agent:     r.Agent,
-		Workspace: filepath.Base(r.Workspace),
-		Image:     r.Image,
-		Grants:    r.Grants,
-	})
+	setLogContext(r)
 
 	// Start with attachment - this ensures TTY is connected before process starts.
 	// TTY mode must match how the container was created (see CreateContainer in
@@ -2357,63 +2359,36 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		r.SetStateWithTime(StateRunning, time.Now())
 	}
 
-	// Get actual port bindings after container starts
-	if len(r.Ports) > 0 {
-		var bindings map[int]int
-		var bindErr error
-		for i := 0; i < 5; i++ {
-			bindings, bindErr = m.runtime.GetPortBindings(ctx, r.ContainerID)
-			if bindErr != nil || len(bindings) >= len(r.Ports) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if bindErr != nil {
-			ui.Warnf("Getting port bindings: %v", bindErr)
-		} else {
-			r.HostPorts = make(map[string]int)
-			services := make(map[string]string)
-			for serviceName, containerPort := range r.Ports {
-				if hostPort, ok := bindings[containerPort]; ok {
-					r.HostPorts[serviceName] = hostPort
-					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-				}
-			}
-			if len(services) > 0 {
-				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
-					ui.Warnf("Registering routes: %v", routeErr)
-				}
-				if m.daemonClient != nil {
-					if routeErr := m.daemonClient.RegisterRoutes(ctx, r.Name, services); routeErr != nil {
-						log.Debug("failed to register routes via daemon", "error", routeErr)
-					}
-				}
-			}
-		}
+	if err := m.setupFirewall(ctx, r); err != nil {
+		return err
 	}
 
-	// Save state to disk
+	m.setupPortBindings(ctx, r)
+
 	_ = r.SaveMetadata()
-
-	// Set up firewall if enabled (do this after container starts)
-	if r.FirewallEnabled && r.ProxyPort > 0 {
-		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Firewall setup failed - this is fatal for strict policy
-			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
-			}
-			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
-		}
-	}
 
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
 
+	// Determine whether the caller will stop the container (escape-stop or context
+	// cancellation). In those cases, skip state updates and log capture here — the
+	// caller's Stop() and monitorContainerExit handle them after the container
+	// actually exits.
+	callerWillStop := ctx.Err() != nil || term.IsEscapeError(attachErr)
+
+	if !callerWillStop {
+		// Container exited on its own — update state now.
+		if attachErr != nil {
+			r.SetStateFailedAt(attachErr.Error(), time.Now())
+		} else {
+			r.SetStateWithTime(StateStopped, time.Now())
+		}
+	}
+
 	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
-	// (Apple TTY output doesn't go through container runtime logs)
-	// For Docker, captureLogs will handle it via ContainerLogsAll (works even in TTY mode).
-	// Always create the file for audit completeness, even if empty.
+	// (Apple TTY output doesn't go through container runtime logs — captureLogs() returns
+	// early for Apple interactive runs, so this is the only path that writes logs.)
+	// Runs unconditionally: even on escape-stop the buffer holds all output up to that point.
 	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
@@ -2429,45 +2404,21 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		}
 	}
 
-	// Capture logs after container exits (critical for audit/observability)
-	// For non-interactive mode, this fetches from container runtime logs
-	// For interactive mode with tee, this is a no-op (logsCaptured flag is already set)
-	m.captureLogs(r)
+	// Capture logs after container exits (critical for audit/observability).
+	// Skip when caller will stop the container — it's still running and
+	// monitorContainerExit will capture complete logs after it actually exits.
+	if !callerWillStop {
+		m.captureLogs(r)
+	}
 
 	// Run provider stopped hooks (e.g., Claude session ID extraction).
 	// Must happen after the container has exited so session files are flushed.
-	runProviderStoppedHooks(r)
+	if !callerWillStop {
+		runProviderStoppedHooks(r)
+	}
 	_ = r.SaveMetadata()
 
 	return attachErr
-}
-
-// streamLogs streams container logs to stdout for real-time feedback.
-// Note: Final log capture to storage is handled by captureLogs() which is called
-// from all container exit paths (Wait, StartAttached, Stop) to ensure complete
-// logs are captured even for fast-exiting containers.
-func (m *Manager) streamLogs(ctx context.Context, r *Run) {
-	logs, err := m.runtime.ContainerLogs(ctx, r.ContainerID)
-	if err != nil {
-		ui.Errorf("Getting logs: %v", err)
-		return
-	}
-	defer logs.Close()
-
-	// Stream to stdout only for real-time feedback
-	// Storage is handled by Wait() after container exits
-	//
-	// Note: streamLogs is only called for non-interactive runs (see exec.go).
-	// Interactive runs use StartAttached which handles I/O directly.
-	// Non-interactive Docker containers use multiplexed streams (no TTY),
-	// so we must demultiplex to avoid 8-byte headers leaking into output.
-	if m.runtime.Type() == container.RuntimeDocker {
-		// Docker non-interactive container: demultiplex the stream
-		_, _ = stdcopy.StdCopy(os.Stdout, os.Stderr, logs)
-	} else {
-		// Apple container: output is already raw
-		_, _ = io.Copy(os.Stdout, logs)
-	}
 }
 
 // Stop terminates a running run.
@@ -2487,134 +2438,23 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	}
 
 	r.SetState(StateStopping)
-	buildkitContainerID := r.BuildkitContainerID
-	networkID := r.NetworkID
-	serviceContainers := r.ServiceContainers
 	m.mu.Unlock()
 
-	// Stop service containers
-	if len(serviceContainers) > 0 {
-		svcMgr := m.runtime.ServiceManager()
-		if svcMgr != nil {
-			for svcName, containerID := range serviceContainers {
-				log.Debug("stopping service", "service", svcName, "container_id", containerID)
-				if err := svcMgr.StopService(ctx, container.ServiceInfo{ID: containerID}); err != nil {
-					log.Debug("failed to stop service", "service", svcName, "error", err)
-				}
-			}
-		}
-	}
-
-	// Stop and remove BuildKit sidecar if present (before main container).
-	// Must remove before network cleanup — Docker refuses to remove networks
-	// with connected containers (#131).
-	if buildkitContainerID != "" {
-		log.Debug("stopping buildkit sidecar", "container_id", buildkitContainerID)
-		if err := m.runtime.StopContainer(ctx, buildkitContainerID); err != nil {
-			log.Debug("failed to stop buildkit sidecar", "error", err)
-		}
-		if err := m.runtime.RemoveContainer(ctx, buildkitContainerID); err != nil {
-			log.Debug("failed to remove buildkit sidecar", "error", err)
-		}
-	}
-
+	// Stop the main container
 	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
-		// Log but don't fail - container might already be stopped
 		ui.Warnf("%v", err)
 		log.Debug("failed to stop container", "container_id", r.ContainerID, "error", err)
 	}
 
-	// Capture logs after container stops (defense-in-depth).
-	// monitorContainerExit should also capture these when exitCh is signaled,
-	// but capturing here provides a safety net if moat crashes before that.
-	// captureLogs is idempotent so multiple calls are safe.
+	// Capture logs and run provider hooks (both idempotent)
 	m.captureLogs(r)
-
-	// Run provider stopped hooks before saving metadata.
 	runProviderStoppedHooks(r)
 
-	// Cancel token refresh and unregister run from proxy daemon
-	if err := r.stopProxyServer(ctx); err != nil {
-		ui.Warnf("Stopping proxy: %v", err)
-	}
-	if r.ProxyAuthToken != "" && m.daemonClient != nil {
-		if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
-			ui.Warnf("Unregistering from proxy daemon: %v", err)
-		}
-	}
-
-	// Stop the SSH agent server if one was created
-	if err := r.stopSSHAgentServer(); err != nil {
-		ui.Warnf("Stopping SSH agent proxy: %v", err)
-	}
-
-	// Unregister routes for this agent
-	if r.Name != "" {
-		_ = m.routes.Remove(r.Name)
-		if m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
-				log.Debug("failed to unregister routes via daemon", "error", err)
-			}
-		}
-	}
-
 	r.SetStateWithTime(StateStopped, time.Now())
-	m.mu.Lock()
-	keepContainer := r.KeepContainer
-	containerID := r.ContainerID
-	providerCleanupPaths := r.ProviderCleanupPaths
-	m.mu.Unlock()
-
-	// Save state to disk
 	_ = r.SaveMetadata()
 
-	// Auto-remove container unless --keep was specified
-	if !keepContainer {
-		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
-			ui.Warnf("Removing container: %v", rmErr)
-		}
-	}
-
-	// Clean up provider resources
-	for providerName, cleanupPath := range providerCleanupPaths {
-		if prov := provider.Get(providerName); prov != nil {
-			prov.Cleanup(cleanupPath)
-		}
-	}
-
-	// Clean up Claude config temp directory
-	m.mu.RLock()
-	claudeConfigTempDir := r.ClaudeConfigTempDir
-	m.mu.RUnlock()
-	if claudeConfigTempDir != "" {
-		if err := os.RemoveAll(claudeConfigTempDir); err != nil {
-			log.Debug("failed to remove Claude config temp dir", "path", claudeConfigTempDir, "error", err)
-		}
-	}
-
-	// Clean up Gemini config temp directory
-	m.mu.RLock()
-	geminiConfigTempDir := r.GeminiConfigTempDir
-	m.mu.RUnlock()
-	if geminiConfigTempDir != "" {
-		if err := os.RemoveAll(geminiConfigTempDir); err != nil {
-			log.Debug("failed to remove Gemini config temp dir", "path", geminiConfigTempDir, "error", err)
-		}
-	}
-
-	// Remove network if present (with force-disconnect fallback)
-	if networkID != "" {
-		log.Debug("removing docker network", "network_id", networkID)
-		netMgr := m.runtime.NetworkManager()
-		if netMgr != nil {
-			if err := netMgr.RemoveNetwork(ctx, networkID); err != nil {
-				log.Debug("network removal failed, trying force removal", "network_id", networkID, "error", err)
-				if forceErr := netMgr.ForceRemoveNetwork(ctx, networkID); forceErr != nil {
-					log.Debug("force network removal also failed", "network_id", networkID, "error", forceErr)
-				}
-			}
-		}
-	}
+	// Clean up all resources
+	m.cleanupResources(ctx, r)
 
 	return nil
 }
@@ -2627,16 +2467,14 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		m.mu.RUnlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	// Wait for container to exit (signaled by monitorContainerExit) or context cancellation
-	// NOTE: We don't call WaitContainer here to avoid race condition - monitorContainerExit
+	// Wait for container to exit (signaled by monitorContainerExit) or context cancellation.
+	// We don't call WaitContainer here to avoid race conditions — monitorContainerExit
 	// is the only goroutine that waits on the container and will close exitCh when done.
 	select {
 	case <-r.exitCh:
 		// Container has exited (monitorContainerExit already captured logs and updated state)
-		// Capture logs again here (idempotent) for defense-in-depth
 		m.captureLogs(r)
 
 		// Get final error (thread-safe read)
@@ -2647,78 +2485,12 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 		}
 		r.stateMu.Unlock()
 
-		// NOTE: stopProxyServer, UnregisterRun, and stopSSHAgentServer are
-		// handled by monitorContainerExit (which runs for ALL runs, including
-		// detached). We don't repeat them here to avoid duplicate 404 warnings
-		// and races when monitorContainerExit's cleanup has already completed.
-
-		// Unregister routes for this agent
-		if r.Name != "" {
-			_ = m.routes.Remove(r.Name)
-			if m.daemonClient != nil {
-				if stopErr := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); stopErr != nil {
-					log.Debug("failed to unregister routes via daemon", "error", stopErr)
-				}
-			}
-		}
-
-		// NOTE: We don't update r.State, r.StoppedAt, or r.Error here because
-		// monitorContainerExit already set them when the container exited.
-		// Overwriting would lose StateFailed state and error details.
-
-		// Get values needed for cleanup
-		m.mu.RLock()
-		keepContainer := r.KeepContainer
-		providerCleanupPaths := r.ProviderCleanupPaths
-		m.mu.RUnlock()
-
-		// Auto-remove container unless --keep was specified.
-		// Use log.Debug for the error — Destroy() may also try to remove
-		// the same container, and Docker can report "removal already in progress".
-		if !keepContainer {
-			if rmErr := m.runtime.RemoveContainer(context.Background(), containerID); rmErr != nil {
-				log.Debug("removing container after wait", "container_id", containerID, "error", rmErr)
-			}
-		}
-
-		// Clean up provider resources
-		for providerName, cleanupPath := range providerCleanupPaths {
-			if prov := provider.Get(providerName); prov != nil {
-				prov.Cleanup(cleanupPath)
-			}
-		}
-
-		// Clean up AWS temp directory
-		if r.awsTempDir != "" {
-			if rmErr := os.RemoveAll(r.awsTempDir); rmErr != nil {
-				ui.Warnf("Removing AWS temp dir: %v", rmErr)
-			}
-		}
-
-		// Clean up Claude config temp directory
-		if r.ClaudeConfigTempDir != "" {
-			if rmErr := os.RemoveAll(r.ClaudeConfigTempDir); rmErr != nil {
-				log.Debug("failed to remove Claude config temp dir", "path", r.ClaudeConfigTempDir, "error", rmErr)
-			}
-		}
-
-		// Clean up Codex config temp directory
-		if r.CodexConfigTempDir != "" {
-			if rmErr := os.RemoveAll(r.CodexConfigTempDir); rmErr != nil {
-				log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", rmErr)
-			}
-		}
-
-		// Clean up Gemini config temp directory
-		if r.GeminiConfigTempDir != "" {
-			if rmErr := os.RemoveAll(r.GeminiConfigTempDir); rmErr != nil {
-				log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", rmErr)
-			}
-		}
+		// Clean up resources (usually no-op because monitorContainerExit already did it)
+		m.cleanupResources(context.Background(), r)
 
 		return err
 	case <-ctx.Done():
-		// Context canceled - caller chose to detach, don't stop the run
+		// Context canceled — caller is responsible for stopping the run
 		return ctx.Err()
 	}
 }
@@ -2744,7 +2516,7 @@ func (m *Manager) Get(runID string) (*Run, error) {
 // - Normal exit (Wait)
 // - Interactive exit (StartAttached)
 // - Explicit stop (Stop)
-// - Detached completion (background monitor)
+// - Background monitor (monitorContainerExit)
 func (m *Manager) captureLogs(r *Run) {
 	if r.Store == nil {
 		return
@@ -2848,9 +2620,117 @@ func runProviderStoppedHooks(r *Run) {
 	}
 }
 
+// cleanupResources tears down all resources associated with a run. It is
+// idempotent — only the first call does work, subsequent calls are no-ops.
+// This is safe to call from Stop, Wait, monitorContainerExit, or Destroy.
+//
+// It does NOT:
+//   - stop the main container (caller handles that)
+//   - update run state (path-specific)
+//   - capture logs (has its own idempotency guard)
+//   - run provider stopped hooks (has its own idempotency guard)
+//   - close audit store or remove storage (Destroy-only)
+func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
+	// Snapshot daemonClient under lock to avoid racing with Create() which
+	// sets it under m.mu.Lock(). cleanupResources is called from
+	// monitorContainerExit goroutines that run concurrently with Create().
+	m.mu.RLock()
+	dc := m.daemonClient
+	m.mu.RUnlock()
+
+	r.cleanupOnce.Do(func() {
+		// Cancel token refresh and unregister run from proxy daemon
+		if err := r.stopProxyServer(ctx); err != nil {
+			log.Debug("cleanup: stopping proxy", "error", err)
+		}
+		if r.ProxyAuthToken != "" && dc != nil {
+			if err := dc.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
+				log.Debug("cleanup: unregistering from proxy daemon", "error", err)
+			}
+		}
+
+		// Stop the SSH agent server
+		if err := r.stopSSHAgentServer(); err != nil {
+			log.Debug("cleanup: stopping SSH agent", "error", err)
+		}
+
+		// Stop service containers
+		if len(r.ServiceContainers) > 0 {
+			svcMgr := m.runtime.ServiceManager()
+			if svcMgr != nil {
+				for svcName, svcContainerID := range r.ServiceContainers {
+					log.Debug("cleanup: stopping service", "service", svcName, "container_id", svcContainerID)
+					if err := svcMgr.StopService(ctx, container.ServiceInfo{ID: svcContainerID}); err != nil {
+						log.Debug("cleanup: failed to stop service", "service", svcName, "error", err)
+					}
+				}
+			}
+		}
+
+		// Remove BuildKit sidecar before network (Docker requires containers
+		// disconnected before network removal, see #131).
+		if r.BuildkitContainerID != "" {
+			log.Debug("cleanup: removing buildkit sidecar", "container_id", r.BuildkitContainerID)
+			if err := m.runtime.StopContainer(ctx, r.BuildkitContainerID); err != nil {
+				log.Debug("cleanup: failed to stop buildkit sidecar", "error", err)
+			}
+			if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
+				log.Debug("cleanup: failed to remove buildkit sidecar", "error", err)
+			}
+		}
+
+		// Remove main container unless --keep was specified
+		if !r.KeepContainer {
+			if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
+				log.Debug("cleanup: failed to remove container", "error", err)
+			}
+		}
+
+		// Remove network (with force-disconnect fallback)
+		if r.NetworkID != "" {
+			netMgr := m.runtime.NetworkManager()
+			if netMgr != nil {
+				if err := netMgr.RemoveNetwork(ctx, r.NetworkID); err != nil {
+					log.Debug("cleanup: network removal failed, trying force", "network", r.NetworkID, "error", err)
+					if forceErr := netMgr.ForceRemoveNetwork(ctx, r.NetworkID); forceErr != nil {
+						log.Debug("cleanup: force network removal failed", "network", r.NetworkID, "error", forceErr)
+					}
+				}
+			}
+		}
+
+		// Unregister routes
+		if r.Name != "" {
+			_ = m.routes.Remove(r.Name)
+			if dc != nil {
+				if err := dc.UnregisterRoutes(ctx, r.Name); err != nil {
+					log.Debug("cleanup: failed to unregister routes", "error", err)
+				}
+			}
+		}
+
+		// Clean up provider resources
+		for providerName, cleanupPath := range r.ProviderCleanupPaths {
+			if prov := provider.Get(providerName); prov != nil {
+				prov.Cleanup(cleanupPath)
+			}
+		}
+
+		// Clean up temp directories
+		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir} {
+			if dir != "" {
+				if err := os.RemoveAll(dir); err != nil {
+					log.Debug("cleanup: failed to remove temp dir", "path", dir, "error", err)
+				}
+			}
+		}
+	})
+}
+
 // monitorContainerExit watches for container exit and captures logs.
-// This runs in the background for ALL runs to ensure logs are captured
-// even in detached mode where Wait() is never called.
+// This runs in the background for ALL runs to ensure logs are captured,
+// exitCh is closed, and resources are cleaned up regardless of which path
+// (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
 func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Wait for container to exit (no timeout - let it run as long as needed)
@@ -2875,10 +2755,8 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Must happen after captureLogs and before SaveMetadata.
 	runProviderStoppedHooks(r)
 
-	// Now signal that container has exited (and logs are captured)
-	close(r.exitCh)
-
-	// Update run state (use state lock to prevent races with concurrent access)
+	// Update run state BEFORE signaling exitCh so that Wait() reads
+	// the final state (including r.Error) when it unblocks.
 	currentState := r.GetState()
 	if currentState == StateRunning || currentState == StateStarting {
 		if err != nil || exitCode != 0 {
@@ -2894,81 +2772,15 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		}
 	}
 
-	// Save updated state
 	_ = r.SaveMetadata()
 
-	// Use a single 30-second timeout for all cleanup operations so a hung
-	// container operation can't block this goroutine indefinitely.
+	// Signal that container has exited (logs captured, state updated)
+	close(r.exitCh)
+
+	// Clean up all resources (30-second timeout for cleanup operations)
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cleanupCancel()
-
-	// Cancel token refresh and unregister run from proxy daemon
-	if stopErr := r.stopProxyServer(cleanupCtx); stopErr != nil {
-		log.Debug("stopping proxy after container exit", "error", stopErr)
-	}
-	if r.ProxyAuthToken != "" && m.daemonClient != nil {
-		if stopErr := m.daemonClient.UnregisterRun(cleanupCtx, r.ProxyAuthToken); stopErr != nil {
-			log.Debug("unregistering from proxy daemon after container exit", "error", stopErr)
-		}
-	}
-
-	// Stop the SSH agent server if one was created
-	if stopErr := r.stopSSHAgentServer(); stopErr != nil {
-		log.Debug("stopping SSH agent proxy after container exit", "error", stopErr)
-	}
-
-	// Stop service containers
-	if len(r.ServiceContainers) > 0 {
-		svcMgr := m.runtime.ServiceManager()
-		if svcMgr != nil {
-			for svcName, svcContainerID := range r.ServiceContainers {
-				log.Debug("stopping service after container exit", "service", svcName, "container_id", svcContainerID)
-				if stopErr := svcMgr.StopService(cleanupCtx, container.ServiceInfo{ID: svcContainerID}); stopErr != nil {
-					log.Debug("failed to stop service", "service", svcName, "error", stopErr)
-				}
-			}
-		}
-	}
-
-	// Remove containers before network — Docker refuses to remove networks
-	// with connected containers, causing network leaks (#131).
-	if r.BuildkitContainerID != "" {
-		log.Debug("removing buildkit sidecar after container exit", "container_id", r.BuildkitContainerID)
-		if stopErr := m.runtime.StopContainer(cleanupCtx, r.BuildkitContainerID); stopErr != nil {
-			log.Debug("failed to stop buildkit sidecar", "error", stopErr)
-		}
-		if rmErr := m.runtime.RemoveContainer(cleanupCtx, r.BuildkitContainerID); rmErr != nil {
-			log.Debug("failed to remove buildkit sidecar", "error", rmErr)
-		}
-	}
-	if !r.KeepContainer {
-		if rmErr := m.runtime.RemoveContainer(cleanupCtx, r.ContainerID); rmErr != nil {
-			log.Debug("failed to remove main container after exit", "error", rmErr)
-		}
-	}
-
-	// Remove network (with force-disconnect fallback)
-	if r.NetworkID != "" {
-		netMgr := m.runtime.NetworkManager()
-		if netMgr != nil {
-			if removeErr := netMgr.RemoveNetwork(cleanupCtx, r.NetworkID); removeErr != nil {
-				log.Debug("network removal failed, trying force removal", "network", r.NetworkID, "error", removeErr)
-				if forceErr := netMgr.ForceRemoveNetwork(cleanupCtx, r.NetworkID); forceErr != nil {
-					log.Debug("force network removal also failed", "network", r.NetworkID, "error", forceErr)
-				}
-			}
-		}
-	}
-
-	// Unregister routes
-	if r.Name != "" {
-		_ = m.routes.Remove(r.Name)
-		if m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRoutes(cleanupCtx, r.Name); err != nil {
-				log.Debug("failed to unregister routes via daemon", "error", err)
-			}
-		}
-	}
+	m.cleanupResources(cleanupCtx, r)
 }
 
 // List returns all runs.
@@ -2991,73 +2803,14 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("run %s not found", runID)
 	}
-
 	m.mu.Unlock()
 
 	if r.GetState() == StateRunning {
 		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
 	}
 
-	// Remove container (may already be removed by Wait or monitorContainerExit)
-	if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
-		log.Debug("removing container in destroy", "container_id", r.ContainerID, "error", err)
-	}
-
-	// Remove service containers
-	for svcName, svcContainerID := range r.ServiceContainers {
-		if err := m.runtime.RemoveContainer(ctx, svcContainerID); err != nil {
-			log.Debug("removing service container in destroy", "service", svcName, "error", err)
-		}
-	}
-
-	// Remove BuildKit sidecar container if present
-	if r.BuildkitContainerID != "" {
-		if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
-			log.Debug("removing buildkit sidecar in destroy", "error", err)
-		}
-	}
-
-	// Remove network if present (with force-disconnect fallback)
-	if r.NetworkID != "" {
-		netMgr := m.runtime.NetworkManager()
-		if netMgr != nil {
-			if err := netMgr.RemoveNetwork(ctx, r.NetworkID); err != nil {
-				log.Debug("network removal failed, trying force removal", "network", r.NetworkID, "error", err)
-				if forceErr := netMgr.ForceRemoveNetwork(ctx, r.NetworkID); forceErr != nil {
-					log.Debug("force network removal also failed", "network", r.NetworkID, "error", forceErr)
-				}
-			}
-		}
-	}
-
-	// Cancel token refresh and unregister run from proxy daemon.
-	// These may already have been handled by monitorContainerExit — that's fine,
-	// Destroy is a best-effort cleanup for anything that was missed.
-	if err := r.stopProxyServer(ctx); err != nil {
-		log.Debug("stopping proxy in destroy", "error", err)
-	}
-	if r.ProxyAuthToken != "" && m.daemonClient != nil {
-		if err := m.daemonClient.UnregisterRun(ctx, r.ProxyAuthToken); err != nil {
-			log.Debug("unregistering from daemon in destroy", "error", err)
-		}
-	}
-
-	// Stop the SSH agent server if one was created and still running
-	if err := r.stopSSHAgentServer(); err != nil {
-		log.Debug("stopping SSH agent in destroy", "error", err)
-	}
-
-	// Unregister routes for this agent
-	if r.Name != "" {
-		if err := m.routes.Remove(r.Name); err != nil {
-			ui.Warnf("Removing routes: %v", err)
-		}
-		if m.daemonClient != nil {
-			if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
-				log.Debug("failed to unregister routes via daemon", "error", err)
-			}
-		}
-	}
+	// Clean up all run resources (idempotent - may already be done by Stop/monitorContainerExit)
+	m.cleanupResources(ctx, r)
 
 	// Check if we should stop the routing proxy (no more agents with ports)
 	if m.proxyLifecycle.ShouldStop() {
@@ -3073,41 +2826,6 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 		}
 	}
 
-	// Clean up provider resources
-	for providerName, cleanupPath := range r.ProviderCleanupPaths {
-		if prov := provider.Get(providerName); prov != nil {
-			prov.Cleanup(cleanupPath)
-		}
-	}
-
-	// Clean up AWS temp directory
-	if r.awsTempDir != "" {
-		if err := os.RemoveAll(r.awsTempDir); err != nil {
-			ui.Warnf("Removing AWS temp dir: %v", err)
-		}
-	}
-
-	// Clean up Claude config temp directory
-	if r.ClaudeConfigTempDir != "" {
-		if err := os.RemoveAll(r.ClaudeConfigTempDir); err != nil {
-			log.Debug("failed to remove Claude config temp dir", "path", r.ClaudeConfigTempDir, "error", err)
-		}
-	}
-
-	// Clean up Codex config temp directory
-	if r.CodexConfigTempDir != "" {
-		if err := os.RemoveAll(r.CodexConfigTempDir); err != nil {
-			log.Debug("failed to remove Codex config temp dir", "path", r.CodexConfigTempDir, "error", err)
-		}
-	}
-
-	// Clean up Gemini config temp directory
-	if r.GeminiConfigTempDir != "" {
-		if err := os.RemoveAll(r.GeminiConfigTempDir); err != nil {
-			log.Debug("failed to remove Gemini config temp dir", "path", r.GeminiConfigTempDir, "error", err)
-		}
-	}
-
 	// Remove run storage directory (logs, traces, metadata)
 	if r.Store != nil {
 		if err := r.Store.Remove(); err != nil {
@@ -3120,25 +2838,6 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	m.mu.Unlock()
 
 	return nil
-}
-
-// Attach connects stdin/stdout/stderr to a running container.
-func (m *Manager) Attach(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
-	m.mu.RLock()
-	r, ok := m.runs[runID]
-	if !ok {
-		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
-	}
-	containerID := r.ContainerID
-	m.mu.RUnlock()
-
-	return m.runtime.Attach(ctx, containerID, container.AttachOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		TTY:    true, // Default to TTY mode for now
-	})
 }
 
 // ResizeTTY resizes the container's TTY to the given dimensions.
@@ -3178,7 +2877,7 @@ func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) err
 }
 
 // RecentLogs returns the last n lines of container logs.
-// Used to show context when re-attaching to a running container.
+// Used to show recent output context for a running container.
 func (m *Manager) RecentLogs(runID string, lines int) (string, error) {
 	m.mu.RLock()
 	r, ok := m.runs[runID]

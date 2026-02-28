@@ -102,22 +102,22 @@ moat codex --name feature-auth ./my-project
 
 The name appears in `moat list` and makes it easier to manage multiple runs.
 
-### Background runs
+### Non-interactive runs
 
-Run Codex in the background:
+Run Codex non-interactively with a prompt:
 
 ```bash
-moat codex -d ./my-project
+moat codex -p "fix the failing tests" ./my-project
 ```
 
-Reattach later:
+Monitor progress:
 
 ```bash
 $ moat list
 NAME          RUN ID              STATE    AGE
 feature-auth  run_a1b2c3d4e5f6   running  5m
 
-$ moat attach run_a1b2c3d4e5f6
+$ moat logs -f run_a1b2c3d4e5f6
 ```
 
 ## Adding GitHub access

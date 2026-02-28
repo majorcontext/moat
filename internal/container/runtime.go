@@ -109,10 +109,6 @@ type Runtime interface {
 	// RemoveImage removes an image by ID or tag.
 	RemoveImage(ctx context.Context, id string) error
 
-	// Attach connects stdin/stdout/stderr to a running container.
-	// Returns when the attachment ends (container exits or context canceled).
-	Attach(ctx context.Context, id string, opts AttachOptions) error
-
 	// StartAttached starts a container with stdin/stdout/stderr already attached.
 	// This is required for TUI applications that need the terminal connected
 	// before the process starts (e.g., to read cursor position).

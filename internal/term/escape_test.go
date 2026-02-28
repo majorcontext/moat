@@ -20,31 +20,19 @@ func TestEscapeProxy_PassThrough(t *testing.T) {
 	}
 }
 
-func TestEscapeProxy_Detach(t *testing.T) {
-	// Ctrl-/ d should trigger detach
+func TestEscapeProxy_DPassesThrough(t *testing.T) {
+	// Ctrl-/ d is not an escape sequence; both bytes should pass through
 	input := []byte{EscapePrefix, 'd', 'x', 'y', 'z'}
 	r := NewEscapeProxy(bytes.NewReader(input))
 
-	buf := make([]byte, 10)
-	n, err := r.Read(buf)
-
-	if !IsEscapeError(err) {
-		t.Fatalf("expected EscapeError, got: %v", err)
-	}
-	if GetEscapeAction(err) != EscapeDetach {
-		t.Errorf("expected EscapeDetach, got: %v", GetEscapeAction(err))
-	}
-	if n != 0 {
-		t.Errorf("expected 0 bytes, got %d", n)
-	}
-
-	// Remaining bytes should be available
-	n, err = r.Read(buf)
+	out, err := io.ReadAll(r)
 	if err != nil {
-		t.Fatalf("unexpected error reading remaining: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(buf[:n]) != "xyz" {
-		t.Errorf("remaining bytes: got %q, want %q", buf[:n], "xyz")
+
+	expected := []byte{EscapePrefix, 'd', 'x', 'y', 'z'}
+	if !bytes.Equal(out, expected) {
+		t.Errorf("got %v, want %v", out, expected)
 	}
 }
 
@@ -97,26 +85,18 @@ func TestEscapeProxy_UnrecognizedEscape(t *testing.T) {
 }
 
 func TestEscapeProxy_MixedContent(t *testing.T) {
-	// Normal content with escape in the middle
+	// Normal content with unrecognized escape in the middle - both bytes pass through
 	input := []byte{'a', 'b', EscapePrefix, 'd', 'c'}
 	r := NewEscapeProxy(bytes.NewReader(input))
 
-	buf := make([]byte, 10)
-	n, err := r.Read(buf)
-
-	// First read should return "ab" then the escape
-	// Behavior depends on read size - may get "ab" then escape on next read
-	// or escape immediately
-
-	if IsEscapeError(err) {
-		// Escape detected - "ab" should be buffered or returned
-		if n > 0 {
-			if string(buf[:n]) != "ab" {
-				t.Errorf("before escape: got %q, want %q", buf[:n], "ab")
-			}
-		}
-	} else if err != nil {
+	out, err := io.ReadAll(r)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := []byte{'a', 'b', EscapePrefix, 'd', 'c'}
+	if !bytes.Equal(out, expected) {
+		t.Errorf("got %v, want %v", out, expected)
 	}
 }
 
@@ -138,8 +118,8 @@ func TestEscapeProxy_EscapeAtEnd(t *testing.T) {
 }
 
 func TestEscapeProxy_SmallReads(t *testing.T) {
-	// Read one byte at a time
-	input := []byte{'a', EscapePrefix, 'd', 'b'}
+	// Read one byte at a time with a stop escape
+	input := []byte{'a', EscapePrefix, 'k', 'b'}
 	r := NewEscapeProxy(bytes.NewReader(input))
 
 	buf := make([]byte, 1)
@@ -158,8 +138,8 @@ func TestEscapeProxy_SmallReads(t *testing.T) {
 	if !IsEscapeError(err) {
 		t.Fatalf("read 2: expected EscapeError, got: %v", err)
 	}
-	if GetEscapeAction(err) != EscapeDetach {
-		t.Errorf("read 2: expected EscapeDetach, got: %v", GetEscapeAction(err))
+	if GetEscapeAction(err) != EscapeStop {
+		t.Errorf("read 2: expected EscapeStop, got: %v", GetEscapeAction(err))
 	}
 
 	// Read 'b'
@@ -177,7 +157,6 @@ func TestEscapeError_Error(t *testing.T) {
 		action EscapeAction
 		want   string
 	}{
-		{EscapeDetach, "escape: detach"},
 		{EscapeStop, "escape: stop"},
 		{EscapeNone, "escape: unknown"},
 	}
@@ -205,7 +184,7 @@ func TestEscapeProxy_OnPrefixChange(t *testing.T) {
 		wantFinalState bool
 	}{
 		{
-			name:           "prefix detected then completed with detach",
+			name:           "prefix detected then canceled with unrecognized d",
 			input:          []byte{EscapePrefix, 'd'},
 			wantCallbacks:  []bool{true, false},
 			wantFinalState: false,

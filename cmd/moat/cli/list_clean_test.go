@@ -81,9 +81,6 @@ func (s *listCleanStubRuntime) ContainerState(ctx context.Context, id string) (s
 func (s *listCleanStubRuntime) RemoveImage(ctx context.Context, id string) error {
 	panic("unexpected call to RemoveImage")
 }
-func (s *listCleanStubRuntime) Attach(ctx context.Context, id string, opts container.AttachOptions) error {
-	panic("unexpected call to Attach")
-}
 func (s *listCleanStubRuntime) StartAttached(ctx context.Context, id string, opts container.AttachOptions) error {
 	panic("unexpected call to StartAttached")
 }

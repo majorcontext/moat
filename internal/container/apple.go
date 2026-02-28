@@ -1137,38 +1137,6 @@ func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (
 	return info[0].Status, nil
 }
 
-// Attach connects stdin/stdout/stderr to a running container.
-func (r *AppleRuntime) Attach(ctx context.Context, containerID string, opts AttachOptions) error {
-	// Build attach command arguments
-	args := []string{"attach"}
-	if opts.Stdin != nil {
-		args = append(args, "--stdin")
-	}
-	args = append(args, containerID)
-
-	cmd := exec.CommandContext(ctx, r.containerBin, args...)
-
-	// Connect stdin/stdout/stderr
-	if opts.Stdin != nil {
-		cmd.Stdin = opts.Stdin
-	}
-	if opts.Stdout != nil {
-		cmd.Stdout = opts.Stdout
-	}
-	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
-	}
-
-	// Run the attach command
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("attaching to container: %w", err)
-	}
-	return nil
-}
-
 // ResizeTTY resizes the container's TTY to the given dimensions.
 // For Apple containers, this resizes the PTY master created during StartAttached.
 func (r *AppleRuntime) ResizeTTY(ctx context.Context, containerID string, height, width uint) error {

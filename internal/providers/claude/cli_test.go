@@ -353,8 +353,8 @@ func TestResolveResumeSession_StillRunning(t *testing.T) {
 	if !strings.Contains(err.Error(), "still running") {
 		t.Errorf("error = %q, want mention of 'still running'", err)
 	}
-	if !strings.Contains(err.Error(), "moat attach") {
-		t.Errorf("error = %q, want mention of 'moat attach'", err)
+	if !strings.Contains(err.Error(), "moat logs") {
+		t.Errorf("error = %q, want mention of 'moat logs'", err)
 	}
 }
 
