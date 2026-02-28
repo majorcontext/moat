@@ -2355,13 +2355,13 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		r.SetStateWithTime(StateRunning, time.Now())
 	}
 
-	m.setupPortBindings(ctx, r)
-
-	_ = r.SaveMetadata()
-
 	if err := m.setupFirewall(ctx, r); err != nil {
 		return err
 	}
+
+	m.setupPortBindings(ctx, r)
+
+	_ = r.SaveMetadata()
 
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
@@ -2512,7 +2512,7 @@ func (m *Manager) Get(runID string) (*Run, error) {
 // - Normal exit (Wait)
 // - Interactive exit (StartAttached)
 // - Explicit stop (Stop)
-// - Detached completion (background monitor)
+// - Background monitor (monitorContainerExit)
 func (m *Manager) captureLogs(r *Run) {
 	if r.Store == nil {
 		return
@@ -2751,10 +2751,8 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Must happen after captureLogs and before SaveMetadata.
 	runProviderStoppedHooks(r)
 
-	// Now signal that container has exited (and logs are captured)
-	close(r.exitCh)
-
-	// Update run state (use state lock to prevent races with concurrent access)
+	// Update run state BEFORE signaling exitCh so that Wait() reads
+	// the final state (including r.Error) when it unblocks.
 	currentState := r.GetState()
 	if currentState == StateRunning || currentState == StateStarting {
 		if err != nil || exitCode != 0 {
@@ -2770,8 +2768,10 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 		}
 	}
 
-	// Save updated state
 	_ = r.SaveMetadata()
+
+	// Signal that container has exited (logs captured, state updated)
+	close(r.exitCh)
 
 	// Clean up all resources (30-second timeout for cleanup operations)
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
