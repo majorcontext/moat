@@ -2698,8 +2698,8 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 		// Unregister routes
 		if r.Name != "" {
 			_ = m.routes.Remove(r.Name)
-			if m.daemonClient != nil {
-				if err := m.daemonClient.UnregisterRoutes(ctx, r.Name); err != nil {
+			if dc != nil {
+				if err := dc.UnregisterRoutes(ctx, r.Name); err != nil {
 					log.Debug("cleanup: failed to unregister routes", "error", err)
 				}
 			}
@@ -2724,8 +2724,9 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 }
 
 // monitorContainerExit watches for container exit and captures logs.
-// This runs in the background for ALL runs to ensure logs are captured
-// even in detached mode where Wait() is never called.
+// This runs in the background for ALL runs to ensure logs are captured,
+// exitCh is closed, and resources are cleaned up regardless of which path
+// (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
 func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Wait for container to exit (no timeout - let it run as long as needed)
