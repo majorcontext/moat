@@ -2159,6 +2159,80 @@ region = %s
 // StartOptions configures how a run is started.
 type StartOptions struct{}
 
+// setLogContext configures the structured logger with run-specific fields
+// so all subsequent log entries in this goroutine are correlated to the run.
+func setLogContext(r *Run) {
+	log.SetRunContext(log.RunContext{
+		RunID:     r.ID,
+		RunName:   r.Name,
+		Agent:     r.Agent,
+		Workspace: filepath.Base(r.Workspace),
+		Image:     r.Image,
+		Grants:    r.Grants,
+	})
+}
+
+// setupPortBindings retrieves the host-side port mappings for a container's
+// exposed ports and registers them as routes with both the local route table
+// and the proxy daemon. Port binding lookup is retried because the container
+// runtime may not have mappings ready immediately after start.
+func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
+	if len(r.Ports) == 0 {
+		return
+	}
+
+	var bindings map[int]int
+	var err error
+	for i := 0; i < 5; i++ {
+		bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
+		if err != nil || len(bindings) >= len(r.Ports) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		ui.Warnf("Getting port bindings: %v", err)
+		return
+	}
+
+	r.HostPorts = make(map[string]int)
+	services := make(map[string]string)
+	for serviceName, containerPort := range r.Ports {
+		if hostPort, ok := bindings[containerPort]; ok {
+			r.HostPorts[serviceName] = hostPort
+			services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
+		}
+	}
+	if len(services) > 0 {
+		if err := m.routes.Add(r.Name, services); err != nil {
+			ui.Warnf("Registering routes: %v", err)
+		}
+		if m.daemonClient != nil {
+			if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
+				log.Debug("failed to register routes via daemon", "error", err)
+			}
+		}
+	}
+}
+
+// setupFirewall configures iptables-based network isolation inside the
+// container so that only traffic through the credential-injecting proxy is
+// allowed. Returns an error if firewall setup fails, since a strict network
+// policy without a working firewall would leave the container unprotected.
+func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
+	if !r.FirewallEnabled || r.ProxyPort <= 0 {
+		return nil
+	}
+	if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
+		if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
+		}
+		return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
+	}
+	return nil
+}
+
 // Start begins execution of a run.
 func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) error {
 	m.mu.Lock()
@@ -2169,74 +2243,18 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 	m.mu.Unlock()
 	r.SetState(StateStarting)
-
-	// Set run context in logger for correlation
-	log.SetRunContext(log.RunContext{
-		RunID:     runID,
-		RunName:   r.Name,
-		Agent:     r.Agent,
-		Workspace: filepath.Base(r.Workspace),
-		Image:     r.Image,
-		Grants:    r.Grants,
-	})
+	setLogContext(r)
 
 	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
 		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
 
-	// Set up firewall if enabled (strict network policy)
-	// This blocks all outbound traffic except to the proxy
-	if r.FirewallEnabled && r.ProxyPort > 0 {
-		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Firewall setup failed - this is fatal for strict policy since the user
-			// explicitly requested network isolation. Without iptables, only proxy-level
-			// filtering applies, which can be bypassed by tools that ignore HTTP_PROXY.
-			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
-			}
-			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
-		}
+	if err := m.setupFirewall(ctx, r); err != nil {
+		return err
 	}
 
-	// Get actual port bindings after container starts
-	if len(r.Ports) > 0 {
-		// Retry a few times - Docker may need a moment to set up port bindings
-		var bindings map[int]int
-		var err error
-		for i := 0; i < 5; i++ {
-			bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
-			if err != nil || len(bindings) >= len(r.Ports) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if err != nil {
-			// Log but don't fail - container is running
-			ui.Warnf("Getting port bindings: %v", err)
-		} else {
-			r.HostPorts = make(map[string]int)
-			services := make(map[string]string)
-			for serviceName, containerPort := range r.Ports {
-				if hostPort, ok := bindings[containerPort]; ok {
-					r.HostPorts[serviceName] = hostPort
-					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-				}
-			}
-			// Register routes
-			if len(services) > 0 {
-				if err := m.routes.Add(r.Name, services); err != nil {
-					ui.Warnf("Registering routes: %v", err)
-				}
-				if m.daemonClient != nil {
-					if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
-						log.Debug("failed to register routes via daemon", "error", err)
-					}
-				}
-			}
-		}
-	}
+	m.setupPortBindings(ctx, r)
 
 	r.SetStateWithTime(StateRunning, time.Now())
 
@@ -2275,16 +2293,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	m.mu.Unlock()
 	r.SetState(StateStarting)
-
-	// Set run context in logger for correlation
-	log.SetRunContext(log.RunContext{
-		RunID:     runID,
-		RunName:   r.Name,
-		Agent:     r.Agent,
-		Workspace: filepath.Base(r.Workspace),
-		Image:     r.Image,
-		Grants:    r.Grants,
-	})
+	setLogContext(r)
 
 	// Start with attachment - this ensures TTY is connected before process starts.
 	// TTY mode must match how the container was created (see CreateContainer in
@@ -2346,54 +2355,12 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 		r.SetStateWithTime(StateRunning, time.Now())
 	}
 
-	// Get actual port bindings after container starts
-	if len(r.Ports) > 0 {
-		var bindings map[int]int
-		var bindErr error
-		for i := 0; i < 5; i++ {
-			bindings, bindErr = m.runtime.GetPortBindings(ctx, r.ContainerID)
-			if bindErr != nil || len(bindings) >= len(r.Ports) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if bindErr != nil {
-			ui.Warnf("Getting port bindings: %v", bindErr)
-		} else {
-			r.HostPorts = make(map[string]int)
-			services := make(map[string]string)
-			for serviceName, containerPort := range r.Ports {
-				if hostPort, ok := bindings[containerPort]; ok {
-					r.HostPorts[serviceName] = hostPort
-					services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-				}
-			}
-			if len(services) > 0 {
-				if routeErr := m.routes.Add(r.Name, services); routeErr != nil {
-					ui.Warnf("Registering routes: %v", routeErr)
-				}
-				if m.daemonClient != nil {
-					if routeErr := m.daemonClient.RegisterRoutes(ctx, r.Name, services); routeErr != nil {
-						log.Debug("failed to register routes via daemon", "error", routeErr)
-					}
-				}
-			}
-		}
-	}
+	m.setupPortBindings(ctx, r)
 
-	// Save state to disk
 	_ = r.SaveMetadata()
 
-	// Set up firewall if enabled (do this after container starts)
-	if r.FirewallEnabled && r.ProxyPort > 0 {
-		if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
-			// Firewall setup failed - this is fatal for strict policy
-			r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-			if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
-				ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
-			}
-			return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
-		}
+	if err := m.setupFirewall(ctx, r); err != nil {
+		return err
 	}
 
 	// Wait for the attachment to complete (container exits or context canceled)
