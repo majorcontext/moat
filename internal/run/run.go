@@ -123,7 +123,6 @@ type Options struct {
 	Rebuild       bool           // Force rebuild of container image (ignores cache)
 	KeepContainer bool           // If true, don't auto-remove container after run
 	Interactive   bool           // Keep stdin open for interactive input
-	TTY           bool           // Allocate a pseudo-TTY
 }
 
 // generateID creates a unique run identifier.

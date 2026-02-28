@@ -189,7 +189,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		Command:     containerCmd,
 		Config:      cfg,
 		Interactive: interactive,
-		TTY:         interactive,
 	}
 	intcli.SetWorktreeFields(&opts, result)
 

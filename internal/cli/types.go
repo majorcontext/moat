@@ -48,7 +48,6 @@ type ExecOptions struct {
 	Command     []string
 	Config      *config.Config
 	Interactive bool // Can be set by flags or command logic
-	TTY         bool
 
 	// Worktree tracking (set by moat wt or --wt flag)
 	WorktreeBranch string

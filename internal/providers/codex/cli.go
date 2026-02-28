@@ -259,7 +259,6 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		Command:     containerCmd,
 		Config:      cfg,
 		Interactive: interactive,
-		TTY:         interactive,
 	}
 
 	cli.SetWorktreeFields(&opts, wtOut.Result)

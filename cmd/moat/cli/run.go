@@ -174,7 +174,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Command:     containerCmd,
 		Config:      cfg,
 		Interactive: interactive,
-		TTY:         interactive,
 	}
 
 	r, err := ExecuteRun(ctx, opts)
