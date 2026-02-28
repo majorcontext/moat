@@ -2207,8 +2207,12 @@ func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 		if err := m.routes.Add(r.Name, services); err != nil {
 			ui.Warnf("Registering routes: %v", err)
 		}
-		if m.daemonClient != nil {
-			if err := m.daemonClient.RegisterRoutes(ctx, r.Name, services); err != nil {
+		// Snapshot daemonClient under lock to avoid racing with Create()
+		m.mu.RLock()
+		dc := m.daemonClient
+		m.mu.RUnlock()
+		if dc != nil {
+			if err := dc.RegisterRoutes(ctx, r.Name, services); err != nil {
 				log.Debug("failed to register routes via daemon", "error", err)
 			}
 		}
