@@ -84,12 +84,17 @@ moat wt dark-mode --name my-custom-name
 
 ## Parallel branches
 
-Start runs on multiple branches simultaneously:
+Start runs on multiple branches simultaneously, each in its own terminal:
 
 ```bash
-moat wt feature/auth &
-moat wt feature/dark-mode &
-moat wt fix/login-bug &
+# Terminal 1
+moat wt feature/auth
+
+# Terminal 2
+moat wt feature/dark-mode
+
+# Terminal 3
+moat wt fix/login-bug
 ```
 
 Each run gets its own worktree, its own container, and its own branch. Branch names with slashes (like `feature/auth`) are supported.
