@@ -329,9 +329,6 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 	defer signal.Stop(sigCh)
 
-	// Channel to receive escape actions from the attach goroutine
-	escapeCh := make(chan term.EscapeAction, 1)
-
 	// Create cancellable context for the attach
 	attachCtx, attachCancel := context.WithCancel(ctx)
 	defer attachCancel()
@@ -339,14 +336,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	// Start with attachment - this ensures TTY is connected before process starts
 	attachDone := make(chan error, 1)
 	go func() {
-		err := manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr)
-		// Check if the error is an escape sequence
-		if term.IsEscapeError(err) {
-			escapeCh <- term.GetEscapeAction(err)
-			attachDone <- nil
-		} else {
-			attachDone <- err
-		}
+		attachDone <- manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr)
 	}()
 
 	// Give container a moment to start, then resize TTY to match terminal.
@@ -399,20 +389,16 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			}
 			// SIGINT is forwarded to container via attached stdin/tty
 
-		case action := <-escapeCh:
-			if action == term.EscapeStop {
+		case err := <-attachDone:
+			if term.IsEscapeError(err) {
 				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
-				attachCancel()
-				if err := manager.Stop(context.Background(), r.ID); err != nil {
-					log.Error("failed to stop run", "id", r.ID, "error", err)
+				if stopErr := manager.Stop(context.Background(), r.ID); stopErr != nil {
+					log.Error("failed to stop run", "id", r.ID, "error", stopErr)
 				}
 				fmt.Printf("Run %s stopped\r\n", r.ID)
 				return nil
 			}
-
-		case err := <-attachDone:
-			// Attachment ended (container exited or error)
-			if err != nil && ctx.Err() == nil && !term.IsEscapeError(err) {
+			if err != nil && ctx.Err() == nil {
 				log.Error("run failed", "id", r.ID, "error", err)
 				return fmt.Errorf("run failed: %w", err)
 			}
