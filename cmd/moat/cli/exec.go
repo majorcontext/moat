@@ -442,7 +442,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			// SIGINT is forwarded to container via attached stdin/tty
 
 		case err := <-attachDone:
-			if term.IsEscapeError(err) {
+			if term.GetEscapeAction(err) == term.EscapeStop {
 				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
 				if stopErr := manager.Stop(context.Background(), r.ID); stopErr != nil {
 					log.Error("failed to stop run", "id", r.ID, "error", stopErr)
@@ -460,15 +460,22 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}
 }
 
+// snapshotFlashTimer tracks the pending status bar clear timer so rapid
+// snapshots cancel the previous timer instead of clearing each other's message.
+var snapshotFlashTimer *time.Timer
+
 // takeSnapshot creates a manual snapshot and shows the result in the status bar.
 func takeSnapshot(r *run.Run, statusWriter *tui.Writer) {
 	flash := func(msg string) {
 		if statusWriter == nil {
 			return
 		}
+		if snapshotFlashTimer != nil {
+			snapshotFlashTimer.Stop()
+		}
 		statusWriter.SetMessage(msg)
 		_ = statusWriter.UpdateStatus()
-		time.AfterFunc(2*time.Second, func() {
+		snapshotFlashTimer = time.AfterFunc(2*time.Second, func() {
 			statusWriter.ClearMessage()
 			_ = statusWriter.UpdateStatus()
 		})

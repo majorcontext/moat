@@ -61,9 +61,9 @@ const (
 // EscapeProxy wraps a reader and watches for escape sequences.
 //
 // Escape sequences are: Ctrl-/ followed by:
-//   - k: stop the run
+//   - k: stop the run (returns EscapeError to unwind Read)
+//   - s: take a snapshot (invokes onAction callback, continues reading)
 //
-// When an escape sequence is detected, Read returns an EscapeError.
 // If Ctrl-/ is followed by an unrecognized key, both bytes are passed through.
 // If Ctrl-/ is followed by another Ctrl-/, a single Ctrl-/ is passed through
 // (allowing the user to send a literal Ctrl-/).
@@ -291,5 +291,5 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 // EscapeHelpText returns help text explaining the escape sequences.
 func EscapeHelpText() string {
-	return "Escape: Ctrl-/ k (stop) · s (snapshot)"
+	return "Escape: Ctrl-/ s (snapshot) · k (stop)"
 }
