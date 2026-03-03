@@ -332,12 +332,33 @@ func (r *DockerRuntime) RemoveContainer(ctx context.Context, containerID string)
 }
 
 // ContainerLogs returns the logs from a container (follows output).
+// For non-TTY containers, the Docker multiplexed format is demuxed
+// so the returned reader produces clean text.
 func (r *DockerRuntime) ContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
-	return r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+	raw, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if container was created with TTY
+	inspect, inspectErr := r.cli.ContainerInspect(ctx, containerID)
+	if inspectErr != nil || inspect.Config.Tty {
+		// TTY mode or inspect failed: logs are plain text
+		return raw, nil
+	}
+
+	// Non-TTY: demux Docker's multiplexed stdout/stderr format
+	pr, pw := io.Pipe()
+	go func() {
+		_, copyErr := stdcopy.StdCopy(pw, pw, raw)
+		raw.Close()
+		pw.CloseWithError(copyErr)
+	}()
+	return pr, nil
 }
 
 // ContainerLogsAll returns all logs from a container (does not follow).

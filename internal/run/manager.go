@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -82,10 +81,14 @@ type Manager struct {
 	daemonClient   *daemon.Client
 	mu             sync.RWMutex
 
-	// ctx/cancel control background goroutines (e.g. monitorContainerExit).
-	// Canceled in Close() so lingering WaitContainer calls don't leak.
+	// ctx/cancel for general manager lifecycle.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// monitorWg tracks active monitorContainerExit goroutines.
+	// Close() waits on this before closing the runtime so that
+	// monitors can finish capturing logs and updating state.
+	monitorWg sync.WaitGroup
 }
 
 // ManagerOptions configures the run manager.
@@ -330,13 +333,11 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 	m.mu.Unlock()
 
 	// For running containers, start background monitor to capture logs when they exit.
-	// Use m.ctx so these goroutines are canceled when the Manager closes.
+	// These inherited monitors are NOT tracked by monitorWg — they may block
+	// indefinitely on long-running containers from previous CLI invocations.
+	// Only monitors started via Start() are tracked so Close() doesn't hang.
 	if runState == StateRunning {
-		monitorCtx := m.ctx
-		if monitorCtx == nil {
-			monitorCtx = context.Background()
-		}
-		go m.monitorContainerExit(monitorCtx, r)
+		go m.monitorContainerExit(r)
 	}
 
 	log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
@@ -2273,12 +2274,12 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 
 	// Start background monitor to capture logs when container exits.
-	// Use m.ctx so the goroutine is canceled when the Manager closes.
-	monitorCtx := m.ctx
-	if monitorCtx == nil {
-		monitorCtx = context.Background()
-	}
-	go m.monitorContainerExit(monitorCtx, r)
+	// Tracked by monitorWg so Close() waits for completion.
+	m.monitorWg.Add(1)
+	go func() {
+		defer m.monitorWg.Done()
+		m.monitorContainerExit(r)
+	}()
 
 	return nil
 }
@@ -2732,19 +2733,12 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 // exitCh is closed, and resources are cleaned up regardless of which path
 // (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
-func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
-	// Wait for container to exit (no timeout - let it run as long as needed)
-	// This is the ONLY place that calls WaitContainer to avoid race conditions
-	exitCode, err := m.runtime.WaitContainer(ctx, r.ContainerID)
-
-	// If WaitContainer failed due to context cancellation (e.g. Manager.Close()),
-	// bail out without touching run state. The container is likely still running
-	// and a future Manager instance will pick it up via loadPersistedRuns.
-	// We check err (not ctx.Err()) so that a natural container exit that races
-	// with context cancellation still gets its logs captured and state updated.
-	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-		return
-	}
+func (m *Manager) monitorContainerExit(r *Run) {
+	// Wait for container to exit (no timeout - let it run as long as needed).
+	// This is the ONLY place that calls WaitContainer to avoid race conditions.
+	// Uses context.Background() so this goroutine is not canceled by Close().
+	// Close() waits on monitorWg before closing the runtime.
+	exitCode, err := m.runtime.WaitContainer(context.Background(), r.ContainerID)
 
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
@@ -2925,12 +2919,19 @@ func (m *Manager) RuntimeType() string {
 }
 
 // Close releases manager resources.
+// It waits for active monitorContainerExit goroutines to finish so that
+// logs are captured and state is updated before the runtime is closed.
 func (m *Manager) Close() error {
-	// Cancel background goroutines (monitorContainerExit) so lingering
-	// WaitContainer calls don't keep connections to Docker open.
+	// Cancel the manager context.
 	if m.cancel != nil {
 		m.cancel()
 	}
+
+	// Wait for all monitor goroutines to finish. This ensures log capture
+	// and state updates complete before we close the runtime connection.
+	// monitorContainerExit uses context.Background() so it is not
+	// affected by the cancel above.
+	m.monitorWg.Wait()
 
 	// Stop all proxy/SSH servers and unregister runs from daemon,
 	// with a 10-second overall timeout.

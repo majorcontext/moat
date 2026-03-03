@@ -917,7 +917,7 @@ func TestMonitorContainerExitSetsStateFailed(t *testing.T) {
 	// Run monitor in goroutine and wait for it to complete
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(context.Background(), r)
+		m.monitorContainerExit(r)
 		close(done)
 	}()
 
@@ -976,7 +976,7 @@ func TestMonitorContainerExitSetsStateStopped(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(context.Background(), r)
+		m.monitorContainerExit(r)
 		close(done)
 	}()
 
@@ -1056,7 +1056,7 @@ func TestMonitorContainerExitWaitError(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(context.Background(), r)
+		m.monitorContainerExit(r)
 		close(done)
 	}()
 
@@ -1223,7 +1223,7 @@ func TestMonitorContainerExitAlreadyStopped(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(context.Background(), r)
+		m.monitorContainerExit(r)
 		close(done)
 	}()
 

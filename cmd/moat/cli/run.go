@@ -28,7 +28,7 @@ Arguments:
   [-- cmd]     Optional command to run instead of agent's default
 
 Non-interactive mode (default):
-  Run blocks until the command completes. Stop with Ctrl+C.
+  Output streams to the terminal. Press Ctrl+C to stop.
 
 Interactive mode (-i):
   Ctrl-/ k          Stop the run

@@ -244,9 +244,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		return r, RunInteractiveAttached(ctx, manager, r, opts.Command, opts.Flags.TTYTrace)
 	}
 
-	// Non-interactive: start and block until the container exits.
-	// We must wait so that monitorContainerExit has time to capture logs and
-	// update state before manager.Close() cancels its context.
+	// Non-interactive: start the container, stream its output, and wait for exit.
 	if err := manager.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		log.Error("failed to start run", "id", r.ID, "error", err)
 		return r, fmt.Errorf("starting run: %w", err)
@@ -270,6 +268,18 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	if opts.OnRunCreated == nil {
 		fmt.Printf("Started %s (%s)\n", r.Name, r.ID)
 	}
+	fmt.Println(ui.Dim("Press Ctrl+C to stop"))
+	fmt.Println()
+
+	// Stream container logs to stdout in a goroutine.
+	// FollowLogs blocks until the container exits or context is canceled.
+	logCtx, logCancel := context.WithCancel(ctx)
+	defer logCancel()
+	go func() {
+		if err := manager.FollowLogs(logCtx, r.ID, os.Stdout); err != nil && logCtx.Err() == nil {
+			log.Debug("log streaming ended", "error", err)
+		}
+	}()
 
 	// Wait for container exit or signal
 	sigCh := make(chan os.Signal, 1)
@@ -284,18 +294,23 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	select {
 	case sig := <-sigCh:
 		log.Info("received signal, stopping run", "signal", sig, "id", r.ID)
+		logCancel()
 		fmt.Printf("\nStopping run %s...\n", r.ID)
 		if err := manager.Stop(ctx, r.ID); err != nil {
 			log.Error("failed to stop run", "id", r.ID, "error", err)
 		}
 		// Wait for monitorContainerExit to finish cleanup
 		<-waitDone
+		fmt.Println()
+		fmt.Println(ui.Dim(fmt.Sprintf("View output: moat logs %s", r.ID)))
 		return r, nil
 	case err := <-waitDone:
+		logCancel()
 		if err != nil {
 			return r, fmt.Errorf("run failed: %w", err)
 		}
-		fmt.Printf("Use 'moat logs %s' to view output\n", r.ID)
+		fmt.Println()
+		fmt.Println(ui.Dim(fmt.Sprintf("View output: moat logs %s", r.ID)))
 		return r, nil
 	}
 }
