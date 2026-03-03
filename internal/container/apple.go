@@ -372,26 +372,37 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 		// Check container status
 		// Apple's container inspect outputs JSON directly (no --format flag)
 		cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID)
-		var stdout bytes.Buffer
+		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
 		if err := cmd.Run(); err != nil {
-			// Container no longer exists (removed externally) — treat as exited
-			return 0, nil
-		}
+			stderrStr := stderr.String()
+			if strings.Contains(stderrStr, "notFound") || strings.Contains(stderrStr, "not found") {
+				// Container no longer exists (removed externally) — treat as exited
+				return 0, nil
+			}
+			// Transient error (XPC timeout, etc.) — log and keep polling
+			log.Debug("transient inspect error, retrying", "error", err, "stderr", stderrStr)
+		} else {
+			// Apple's inspect returns an array of container info objects
+			var info []struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+				return -1, fmt.Errorf("parsing container info: %w", err)
+			}
 
-		// Apple's inspect returns an array of container info objects
-		var info []struct {
-			Status string `json:"status"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
-			return -1, fmt.Errorf("parsing container info: %w", err)
-		}
+			if len(info) == 0 {
+				// Empty result — container no longer exists (removed externally)
+				return 0, nil
+			}
 
-		if len(info) > 0 && (info[0].Status == "exited" || info[0].Status == "stopped") {
-			// Apple's container CLI doesn't provide exit code in inspect output
-			// Return 0 for stopped containers (best we can do)
-			return 0, nil
+			if info[0].Status == "exited" || info[0].Status == "stopped" {
+				// Apple's container CLI doesn't provide exit code in inspect output
+				// Return 0 for stopped containers (best we can do)
+				return 0, nil
+			}
 		}
 
 		// Sleep before next poll to avoid hammering the CLI
