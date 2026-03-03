@@ -1,13 +1,13 @@
 ---
 title: "Lifecycle hooks"
 navTitle: "Hooks"
-description: "Run commands at build time, before the agent starts, and after it completes using agent.yaml lifecycle hooks."
-keywords: ["moat", "hooks", "lifecycle", "post_build", "pre_run", "post_run", "agent.yaml"]
+description: "Run commands at build time and before the agent starts using agent.yaml lifecycle hooks."
+keywords: ["moat", "hooks", "lifecycle", "post_build", "post_build_root", "pre_run", "agent.yaml"]
 ---
 
 # Lifecycle hooks
 
-Hooks let you run commands at specific points in the container lifecycle: after the image is built, before the main command runs, and after it completes. This guide covers each hook type, what it has access to, and practical patterns for common setups.
+Hooks let you run commands at specific points in the container lifecycle: after the image is built and before the main command runs. This guide covers each hook type, what it has access to, and practical patterns for common setups.
 
 ## Prerequisites
 

@@ -20,10 +20,10 @@ Store a GitHub credential that Moat can inject into runs:
 ```bash
 $ moat grant github
 Found gh CLI authentication
-Use token from gh CLI? [Y/n]: y
+Use token from gh CLI? [y/N]: y
 Validating token...
 Authenticated as: your-username
-GitHub credential saved to ~/.moat/credentials/github.enc
+Credential saved to ~/.moat/credentials/github.enc
 ```
 
 If you don't have `gh` CLI configured, you'll be prompted to enter a Personal Access Token. The credential is encrypted and stored in `~/.moat/credentials/`.
@@ -104,7 +104,7 @@ Container stdout and stderr are captured with timestamps:
 ```bash
 $ moat logs
 
-[2025-01-21T10:23:44.512Z] {"login": "your-username", ...}
+[10:23:44.512] {"login": "your-username", ...}
 ```
 
 ## Step 6: Create an agent.yaml
@@ -165,7 +165,7 @@ $ moat run -- node check-repos.js
 ```
 
 Moat:
-1. Read `agent.yaml` and determined the base image (`node:20` from `node@20`)
+1. Read `agent.yaml` and determined the base image (`node:20-slim` from `node@20`)
 2. Injected the GitHub credential (from `grants: [github]`)
 3. Set the environment variable `NODE_ENV=development`
 4. Ran `node check-repos.js`
@@ -177,10 +177,10 @@ List all runs:
 ```bash
 $ moat list
 
-NAME       RUN ID              STATE    SERVICES
-my-agent   run_a1b2c3d4e5f6   stopped
-my-agent   run_f6e5d4c3b2a1   stopped
-(none)     run_1a2b3c4d5e6f   stopped
+NAME       RUN ID              STATE    AGE       ENDPOINTS
+my-agent   run_a1b2c3d4e5f6   stopped  2m ago
+my-agent   run_f6e5d4c3b2a1   stopped  5m ago
+my-agent   run_1a2b3c4d5e6f   stopped  8m ago
 ```
 
 View system status including disk usage:
@@ -188,17 +188,22 @@ View system status including disk usage:
 ```bash
 $ moat status
 
-Runs:
-  Active: 0
-  Stopped: 3
+Runtime: docker
 
-Images:
-  node:20 (245 MB)
-  ubuntu:22.04 (78 MB)
+Active Runs: 0
 
-Disk Usage:
-  Runs: 12 MB
-  Images: 323 MB
+Summary
+  Stopped runs:  3  12 MB
+  Images:        2  323 MB
+  Total disk:       335 MB
+
+Health
+  [WARN] 3 stopped runs (12 MB)
+
+For details:
+  moat list                List all runs
+  moat system images       List all images
+  moat system containers   List all containers
 ```
 
 Clean up stopped runs:
@@ -206,13 +211,22 @@ Clean up stopped runs:
 ```bash
 $ moat clean
 
-This will remove:
-  - 3 stopped runs
-  - 0 unused images
+Scanning for resources to clean...
 
-Proceed? [y/N]: y
+Stopped runs (3):
+  my-agent   run_a1b2c3d4e5f6   stopped  2m ago
+  my-agent   run_f6e5d4c3b2a1   stopped  5m ago
+  my-agent   run_1a2b3c4d5e6f   stopped  8m ago
 
-Removed 3 runs
+Total: 3 resources, 12 MB
+
+Remove these resources? [y/N]: y
+
+Removing run my-agent (run_a1b2c3d4e5f6)... done
+Removing run my-agent (run_f6e5d4c3b2a1)... done
+Removing run my-agent (run_1a2b3c4d5e6f)... done
+
+Cleaned 3 resources, freed 0 MB
 ```
 
 ## Next steps

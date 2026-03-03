@@ -59,7 +59,7 @@ Hosts from granted credentials are automatically allowed. If you grant `github`,
 When a request is blocked, the proxy returns an error response:
 
 ```
-HTTP/1.1 403 Forbidden
+HTTP/1.1 407 Proxy Authentication Required
 
 Moat: request blocked by network policy.
 Host "blocked.example.com" is not in the allow list.

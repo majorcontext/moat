@@ -25,9 +25,9 @@ View logs for the most recent run:
 ```bash
 $ moat logs
 
-[2025-01-21T10:23:44.512Z] Starting server on port 3000
-[2025-01-21T10:23:44.789Z] Connected to database
-[2025-01-21T10:23:45.123Z] Ready to accept requests
+[10:23:44.512] Starting server on port 3000
+[10:23:44.789] Connected to database
+[10:23:45.123] Ready to accept requests
 ```
 
 View logs for a specific run:
@@ -99,18 +99,16 @@ Injected credentials are redacted -- the actual token is replaced with `[REDACTE
 ```bash
 $ moat trace
 
-TRACE 4a7b2c...
-├─ run/start (0ms)
-├─ proxy/start (12ms)
-├─ container/create (234ms)
-├─ container/start (45ms)
-├─ container/wait (5.2s)
-│  ├─ network/request GET api.github.com/user (89ms)
-│  └─ network/request POST api.anthropic.com/v1/messages (1.2s)
-└─ container/stop (123ms)
+1. run/start (0s)
+2. proxy/start (12ms)
+3. container/create (234ms)
+4. container/start (45ms)
+5. container/wait (5.2s)
+   Parent: run/start
+6. container/stop (123ms)
 ```
 
-Use this to identify which phase of a run took the longest. For example, a slow `container/create` span indicates image build or pull time, while a slow `container/wait` span reflects the agent's own execution.
+Each span shows a sequence number, name, and duration. Spans with a parent are indented. Use this to identify which phase of a run took the longest. For example, a slow `container/create` span indicates image build or pull time, while a slow `container/wait` span reflects the agent's own execution.
 
 View spans for a specific run:
 
@@ -141,29 +139,7 @@ VERDICT: [ok] INTACT - No tampering detected
 
 The verification checks hash chain integrity (each entry links to the previous), sequence continuity (no gaps), and Ed25519 signature validity.
 
-### Viewing audit entries
-
-List individual entries in a run's audit log:
-
-```bash
-$ moat audit run_a1b2c3d4e5f6 --list
-
-SEQ  TIME                  TYPE        SUMMARY
-1    2025-01-21T10:23:44Z  Credential  github granted
-2    2025-01-21T10:23:45Z  Network     GET api.github.com/user 200
-3    2025-01-21T10:23:45Z  Console     {"login": "your-username"...
-...
-```
-
-Filter entries by event type:
-
-```bash
-# Show only credential events
-$ moat audit run_a1b2c3d4e5f6 --list --type=credential
-
-# Show only network events
-$ moat audit run_a1b2c3d4e5f6 --list --type=network
-```
+The audit log entries are stored in `audit.db` (SQLite). To inspect individual events, query the database directly or export a proof bundle with `--export` and examine the JSON.
 
 For details on the hash chain structure and trust model, see [Observability](../concepts/03-observability.md).
 
@@ -203,7 +179,7 @@ All observability data is stored per-run under `~/.moat/runs/<run-id>/`:
 | `logs.jsonl` | Container stdout/stderr |
 | `network.jsonl` | HTTP requests through proxy |
 | `traces.jsonl` | Execution spans |
-| `logs.db` | Tamper-proof audit log (SQLite) |
+| `audit.db` | Tamper-proof audit log (SQLite) |
 
 When a container exits, Moat removes the container but retains these artifacts.
 
@@ -279,10 +255,10 @@ $ moat logs -f run_a1b2c3d4e5f6
 
 Network traces are only recorded for requests that pass through the proxy. If the agent makes requests that bypass the proxy (for example, to `localhost` inside the container), those requests are not captured.
 
-Verify the run used grants (which activate the proxy):
+Verify the run used grants (which activate the proxy) by checking the audit log:
 
 ```bash
-$ moat audit run_a1b2c3d4e5f6 --list --type=credential
+$ moat audit run_a1b2c3d4e5f6
 ```
 
 ### Audit verification fails

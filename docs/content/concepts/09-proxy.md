@@ -108,7 +108,7 @@ The proxy starts before the container and stops after the container exits. The s
 6. The container exits
 7. Moat stops the proxy
 
-When multiple agents run simultaneously with port routing configured, they share the same routing proxy instance. The credential injection proxy runs per-session. The routing proxy port defaults to `8080` and can be changed with `MOAT_PROXY_PORT`.
+When multiple agents run simultaneously, they share the same proxy daemon. The credential injection proxy runs as a shared daemon process that outlives individual CLI invocations, with per-run credential scoping so each run's tokens are isolated. The routing proxy port defaults to `8080` and can be changed with `MOAT_PROXY_PORT`.
 
 ## Network policy enforcement
 
@@ -120,7 +120,7 @@ The proxy enforces network policies for HTTP and HTTPS traffic. Two modes are av
 In strict mode, the proxy checks every request against the allow list before forwarding:
 
 - Allowed requests proceed normally
-- Blocked requests receive a `403 Forbidden` response with a message explaining which host was blocked and how to allow it
+- Blocked requests receive a `407 Proxy Authentication Required` response with a message explaining which host was blocked and how to allow it
 
 The allow list supports exact hostnames and wildcard patterns (e.g., `*.amazonaws.com`). Hosts from granted credentials are automatically added to the allow list. For example, `--grant github` allows `api.github.com` and `github.com` even if they are not listed in `network.allow`.
 

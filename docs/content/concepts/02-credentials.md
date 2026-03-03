@@ -29,10 +29,13 @@ A **grant** is a credential made available to a run. Each grant type targets spe
 
 | Grant | Injection target | Mechanism |
 |-------|-----------------|-----------|
-| `github` | `api.github.com`, `github.com` | `Authorization` header |
-| `anthropic` | `api.anthropic.com` | `Authorization` header (OAuth) or `x-api-key` header |
-| `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization` header |
-| `npm` | Per-registry (e.g., `registry.npmjs.org`) | `Authorization` header |
+| `github` | `api.github.com`, `github.com` | `Authorization: Bearer` header |
+| `claude` | `api.anthropic.com` | `Authorization: Bearer` header (OAuth token) |
+| `anthropic` | `api.anthropic.com` | `x-api-key` header (API key) |
+| `codex` | `api.openai.com` | `Authorization: Bearer` header |
+| `openai` | `api.openai.com` | Alias for `codex` |
+| `gemini` | `cloudcode-pa.googleapis.com` (OAuth) or `generativelanguage.googleapis.com` (API key) | `Bearer` token or `x-goog-api-key` header |
+| `npm` | Per-registry (e.g., `registry.npmjs.org`) | `Authorization: Bearer` header |
 | `aws` | `*.amazonaws.com` | `credential_process` via AWS SDK |
 | `ssh:<host>` | The specified host only | SSH agent proxy |
 | `mcp-<name>` | Host from MCP server `url` field | Custom header injection |

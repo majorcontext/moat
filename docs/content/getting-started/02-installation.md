@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "Install Moat on macOS, Linux, or Windows with Docker or Apple containers."
+description: "Install Moat on macOS or Linux with Docker or Apple containers."
 keywords: ["moat", "installation", "docker", "apple containers", "setup", "homebrew"]
 ---
 
@@ -32,7 +32,7 @@ mv moat /usr/local/bin/
 
 ### Using `go install`
 
-Requires Go 1.21 or later.
+Requires Go 1.25.5 or later.
 
 ```bash
 go install github.com/majorcontext/moat/cmd/moat@latest
@@ -86,7 +86,7 @@ sudo installer -pkg container-*.pkg -target /
 Start the container system:
 
 ```bash
-sudo container system start
+container system start
 ```
 
 Verify Apple containers are available:
@@ -177,7 +177,8 @@ Moat stores data in `~/.moat/`:
 ~/.moat/
   credentials/     # Encrypted credentials
   runs/            # Per-run artifacts (logs, traces, audit)
-  proxy/           # Routing proxy CA certificate
+  proxy/           # Proxy daemon state (CA, logs, lock files)
+  debug/           # Debug logs (visible with --verbose)
   config.yaml      # Global configuration (optional)
 ```
 
