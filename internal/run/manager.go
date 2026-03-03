@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -2391,7 +2392,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	if r.ProxyRegReq != nil {
 		var proxyCtx context.Context
 		proxyCtx, proxyHealthCancel = context.WithCancel(context.Background())
-		go m.monitorProxyHealth(proxyCtx, r)
+		m.monitorWg.Add(1)
+		go func() {
+			defer m.monitorWg.Done()
+			m.monitorProxyHealth(proxyCtx, r)
+		}()
 	}
 
 	// Wait for the attachment to complete (container exits or context canceled)
@@ -2866,7 +2871,7 @@ func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 		updateErr := dc.UpdateRun(updateCtx, r.ProxyAuthToken, r.ContainerID)
 		updateCancel()
 
-		if updateErr != nil && strings.Contains(updateErr.Error(), "not found") {
+		if errors.Is(updateErr, daemon.ErrRunNotFound) {
 			// Run is not registered — re-register with the same token.
 			log.Info("run not found in proxy daemon, re-registering",
 				"run_id", r.ID)

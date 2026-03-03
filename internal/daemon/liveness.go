@@ -25,8 +25,8 @@ type LivenessChecker struct {
 	checker     ContainerChecker
 	interval    time.Duration
 	onCleanup   func(token, runID string)
-	onEmpty     func() // called when registry becomes empty after cleanup
-	failCounts  map[string]int
+	onEmpty     func()         // called when registry becomes empty after cleanup
+	failCounts  map[string]int // keyed by containerID (not token or runID)
 	maxFailures int
 }
 

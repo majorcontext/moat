@@ -397,7 +397,9 @@ func TestServer_ReRegisterRun(t *testing.T) {
 	}
 
 	var regResp RegisterResponse
-	json.NewDecoder(resp.Body).Decode(&regResp)
+	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
 	originalToken := regResp.AuthToken
 	if originalToken == "" {
 		t.Fatal("expected non-empty auth_token")
@@ -423,7 +425,9 @@ func TestServer_ReRegisterRun(t *testing.T) {
 	}
 
 	var reregResp RegisterResponse
-	json.NewDecoder(resp2.Body).Decode(&reregResp)
+	if err := json.NewDecoder(resp2.Body).Decode(&reregResp); err != nil {
+		t.Fatalf("decode re-register response: %v", err)
+	}
 
 	// Token should be the same as the original.
 	if reregResp.AuthToken != originalToken {

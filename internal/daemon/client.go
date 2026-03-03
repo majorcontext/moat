@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 )
+
+// ErrRunNotFound is returned when a run is not registered with the daemon.
+var ErrRunNotFound = errors.New("run not found")
 
 // Client communicates with the daemon over a Unix socket.
 type Client struct {
@@ -90,7 +94,7 @@ func (c *Client) UpdateRun(ctx context.Context, token, containerID string) error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("run not found")
+		return ErrRunNotFound
 	}
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("daemon returned %d", resp.StatusCode)

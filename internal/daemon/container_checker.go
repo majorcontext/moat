@@ -35,22 +35,24 @@ func (c *CommandContainerChecker) IsContainerRunning(ctx context.Context, id str
 		c.runtime = "docker"
 		return true, nil
 	}
+	if err == nil {
+		// Docker confirmed container is not running (found it, State.Running=false).
+		return false, nil
+	}
 
-	// Try Apple containers.
+	// Docker failed with an error — try Apple containers.
 	alive, appleErr := c.checkApple(ctx, id)
 	if alive {
 		c.runtime = "apple"
 		return true, nil
 	}
+	if appleErr == nil {
+		// Apple confirmed container is not running.
+		return false, nil
+	}
 
-	// Neither confirmed alive. Return the last error if any.
-	if appleErr != nil {
-		return false, appleErr
-	}
-	if err != nil {
-		return false, err
-	}
-	return false, nil
+	// Both checks failed; prefer the Docker error as primary.
+	return false, err
 }
 
 // checkDocker checks if a Docker container is running.

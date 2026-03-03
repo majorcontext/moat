@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
@@ -73,7 +74,9 @@ func startProxy(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	health, err := client.Health(context.Background())
+	healthCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	health, err := client.Health(healthCtx)
 	if err != nil {
 		return err
 	}
