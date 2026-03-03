@@ -66,6 +66,69 @@ func TestResolveVersions(t *testing.T) {
 	}
 }
 
+func TestResolveVersionsSetsOriginalVersion(t *testing.T) {
+	// Pre-seed cache with known resolutions to avoid network calls
+	cache := versions.NewCache(24*time.Hour, "")
+	cache.Set("go@1.22", "1.22.12")
+	cache.Set("node@20", "20.18.3")
+	cache.Set("python@3.11", "3.11.15")
+	SetVersionCache(cache)
+
+	ctx := context.Background()
+	deps := []Dependency{
+		{Name: "go", Version: "1.22"},
+		{Name: "node", Version: "20"},
+		{Name: "python", Version: "3.11"},
+	}
+
+	result, err := ResolveVersions(ctx, deps)
+	if err != nil {
+		t.Fatalf("ResolveVersions() unexpected error: %v", err)
+	}
+
+	// Each resolved dependency should preserve the original version
+	tests := []struct {
+		name         string
+		wantOriginal string
+		wantResolved string
+	}{
+		{"go", "1.22", "1.22.12"},
+		{"node", "20", "20.18.3"},
+		{"python", "3.11", "3.11.15"},
+	}
+	for i, tt := range tests {
+		if result[i].OriginalVersion != tt.wantOriginal {
+			t.Errorf("%s: OriginalVersion = %q, want %q", tt.name, result[i].OriginalVersion, tt.wantOriginal)
+		}
+		if result[i].Version != tt.wantResolved {
+			t.Errorf("%s: Version = %q, want %q", tt.name, result[i].Version, tt.wantResolved)
+		}
+	}
+}
+
+func TestResolveVersionsOriginalVersionEmptyWhenUnchanged(t *testing.T) {
+	// OriginalVersion should remain empty when no resolution happens
+	SetVersionCache(versions.NewCache(24*time.Hour, ""))
+
+	ctx := context.Background()
+	deps := []Dependency{
+		{Name: "node"},                    // No version specified
+		{Name: "jq"},                      // Non-runtime dependency
+		{Name: "protoc", Version: "25.1"}, // Non-runtime with version
+	}
+
+	result, err := ResolveVersions(ctx, deps)
+	if err != nil {
+		t.Fatalf("ResolveVersions() unexpected error: %v", err)
+	}
+
+	for i, dep := range result {
+		if dep.OriginalVersion != "" {
+			t.Errorf("deps[%d] (%s): OriginalVersion = %q, want empty", i, dep.Name, dep.OriginalVersion)
+		}
+	}
+}
+
 func TestResolveVersionsPreservesOriginalOnError(t *testing.T) {
 	// Use a fresh in-memory cache for testing
 	SetVersionCache(versions.NewCache(24*time.Hour, ""))

@@ -1026,6 +1026,12 @@ func TestSelectBaseImage(t *testing.T) {
 		{"python only", []Dependency{{Name: "python", Version: "3.11"}}, "python:3.11-slim", true},
 		{"go only", []Dependency{{Name: "go", Version: "1.22"}}, "golang:1.22", true},
 		{"unknown runtime", []Dependency{{Name: "rust"}}, "debian:bookworm-slim", false},
+		// Resolved patch versions should use the original (floating) version for Docker tags
+		{"python resolved patch", []Dependency{{Name: "python", Version: "3.11.15", OriginalVersion: "3.11"}}, "python:3.11-slim", true},
+		{"node resolved patch", []Dependency{{Name: "node", Version: "20.18.3", OriginalVersion: "20"}}, "node:20-slim", true},
+		{"go resolved patch", []Dependency{{Name: "go", Version: "1.22.12", OriginalVersion: "1.22"}}, "golang:1.22", true},
+		// When OriginalVersion is empty, Version is used directly (no resolution happened)
+		{"python no resolution", []Dependency{{Name: "python", Version: "3.11.5"}}, "python:3.11.5-slim", true},
 	}
 
 	for _, tt := range tests {

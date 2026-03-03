@@ -58,6 +58,7 @@ func ResolveVersions(ctx context.Context, deps []Dependency) ([]Dependency, erro
 			continue
 		}
 
+		result[i].OriginalVersion = dep.Version
 		result[i].Version = resolved
 	}
 

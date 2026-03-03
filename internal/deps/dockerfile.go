@@ -334,7 +334,16 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 	if version == "" {
 		version = spec.Default
 	}
-	if img := runtimeBaseImage(rt.Name, version); img != "" {
+	// Use the original (pre-resolution) version for Docker image tags.
+	// Docker Hub maintains floating tags (e.g., python:3.11-slim) that always
+	// point to the latest built images. Using resolved patch versions
+	// (e.g., python:3.11.15-slim) can fail when a new patch is released
+	// upstream but Docker Hub hasn't built the image yet.
+	imageVersion := rt.OriginalVersion
+	if imageVersion == "" {
+		imageVersion = version
+	}
+	if img := runtimeBaseImage(rt.Name, imageVersion); img != "" {
 		return img, &rt
 	}
 	return defaultBaseImage, nil

@@ -113,11 +113,12 @@ type ServiceDef struct {
 
 // Dependency represents a parsed dependency from agent.yaml.
 type Dependency struct {
-	Name       string      // e.g., "node", "eslint"
-	Version    string      // e.g., "20" or "" for default
-	Type       InstallType // Set for dynamic deps (npm:, pip:, etc.)
-	Package    string      // For dynamic deps: the package name/path
-	DockerMode DockerMode  // For docker deps: "host" or "dind"
+	Name            string      // e.g., "node", "eslint"
+	Version         string      // e.g., "20" or "" for default
+	OriginalVersion string      // Pre-resolution version (e.g., "3.11" before resolving to "3.11.15")
+	Type            InstallType // Set for dynamic deps (npm:, pip:, etc.)
+	Package         string      // For dynamic deps: the package name/path
+	DockerMode      DockerMode  // For docker deps: "host" or "dind"
 }
 
 // IsDynamic returns true if this dependency was parsed from a prefixed spec.
