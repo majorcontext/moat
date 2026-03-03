@@ -158,6 +158,7 @@ func TestEscapeError_Error(t *testing.T) {
 		want   string
 	}{
 		{EscapeStop, "escape: stop"},
+		{EscapeSnapshot, "escape: snapshot"},
 		{EscapeNone, "escape: unknown"},
 	}
 
