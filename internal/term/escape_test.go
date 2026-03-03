@@ -176,6 +176,77 @@ func TestGetEscapeAction_NonEscapeError(t *testing.T) {
 	}
 }
 
+func TestEscapeProxy_Snapshot(t *testing.T) {
+	// Ctrl-/ s should fire onAction callback with EscapeSnapshot
+	input := []byte{EscapePrefix, 's'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var gotAction EscapeAction
+	r.OnAction(func(action EscapeAction) {
+		gotAction = action
+	})
+
+	buf := make([]byte, 10)
+	_, err := r.Read(buf)
+	// Should NOT return an EscapeError — snapshot is non-disruptive
+	if IsEscapeError(err) {
+		t.Fatalf("snapshot should not return EscapeError, got: %v", err)
+	}
+
+	if gotAction != EscapeSnapshot {
+		t.Errorf("expected EscapeSnapshot callback, got: %v", gotAction)
+	}
+}
+
+func TestEscapeProxy_SnapshotContinuesReading(t *testing.T) {
+	// After Ctrl-/ s, data should continue flowing (no unwinding)
+	input := []byte{'a', EscapePrefix, 's', 'b', 'c'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var actionCount int
+	r.OnAction(func(action EscapeAction) {
+		actionCount++
+	})
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get "abc" — the escape sequence is consumed, surrounding data flows
+	expected := []byte{'a', 'b', 'c'}
+	if !bytes.Equal(out, expected) {
+		t.Errorf("got %q, want %q", out, expected)
+	}
+	if actionCount != 1 {
+		t.Errorf("expected 1 action callback, got %d", actionCount)
+	}
+}
+
+func TestEscapeProxy_SnapshotPrefixChangeCallbacks(t *testing.T) {
+	// Ctrl-/ s should fire onPrefixChange true then false
+	input := []byte{EscapePrefix, 's', 'x'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var callbacks []bool
+	r.OnPrefixChange(func(active bool) {
+		callbacks = append(callbacks, active)
+	})
+	r.OnAction(func(action EscapeAction) {})
+
+	buf := make([]byte, 100)
+	for {
+		_, err := r.Read(buf)
+		if err != nil {
+			break
+		}
+	}
+
+	if len(callbacks) != 2 || callbacks[0] != true || callbacks[1] != false {
+		t.Errorf("expected callbacks [true, false], got %v", callbacks)
+	}
+}
+
 func TestEscapeProxy_OnPrefixChange(t *testing.T) {
 	tests := []struct {
 		name           string

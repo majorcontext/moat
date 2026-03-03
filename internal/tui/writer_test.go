@@ -232,7 +232,7 @@ func TestWriter_Apple_ShowsSpinnerThenClears(t *testing.T) {
 	buf.Reset()
 
 	// Write the ready marker - should trigger content area clear
-	_, err = w.Write([]byte("\nEscape sequences: Ctrl-/ d (detach)\n"))
+	_, err = w.Write([]byte("\nEscape sequences: Ctrl-/ k (stop)\n"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
