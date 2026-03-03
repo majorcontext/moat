@@ -14,6 +14,8 @@ const (
 	EscapeNone EscapeAction = iota
 	// EscapeStop means the user wants to stop the run.
 	EscapeStop
+	// EscapeSnapshot means the user wants to take a manual snapshot.
+	EscapeSnapshot
 )
 
 // EscapeError is returned when an escape sequence is detected.
@@ -25,6 +27,8 @@ func (e EscapeError) Error() string {
 	switch e.Action {
 	case EscapeStop:
 		return "escape: stop"
+	case EscapeSnapshot:
+		return "escape: snapshot"
 	default:
 		return "escape: unknown"
 	}
@@ -50,15 +54,16 @@ const (
 	EscapePrefix byte = 0x1f
 
 	// Command keys (after the prefix)
-	escapeKeyStop byte = 'k'
+	escapeKeyStop     byte = 'k'
+	escapeKeySnapshot byte = 's'
 )
 
 // EscapeProxy wraps a reader and watches for escape sequences.
 //
 // Escape sequences are: Ctrl-/ followed by:
-//   - k: stop the run
+//   - k: stop the run (returns EscapeError to unwind Read)
+//   - s: take a snapshot (invokes onAction callback, continues reading)
 //
-// When an escape sequence is detected, Read returns an EscapeError.
 // If Ctrl-/ is followed by an unrecognized key, both bytes are passed through.
 // If Ctrl-/ is followed by another Ctrl-/, a single Ctrl-/ is passed through
 // (allowing the user to send a literal Ctrl-/).
@@ -73,6 +78,11 @@ type EscapeProxy struct {
 	// The callback receives true when Ctrl-/ is pressed (waiting for next key),
 	// and false when the sequence completes or is canceled.
 	onPrefixChange func(active bool)
+
+	// onAction is called for non-disruptive escape actions (like snapshot)
+	// that should not unwind Read() with an error. The callback receives the
+	// action, and Read() continues normally after invoking it.
+	onAction func(EscapeAction)
 }
 
 // NewEscapeProxy creates an EscapeProxy that wraps the given reader.
@@ -90,6 +100,16 @@ func NewEscapeProxy(r io.Reader) *EscapeProxy {
 // the callback must be thread-safe.
 func (e *EscapeProxy) OnPrefixChange(fn func(active bool)) {
 	e.onPrefixChange = fn
+}
+
+// OnAction sets a callback for non-disruptive escape actions. Unlike EscapeStop
+// which returns an EscapeError to unwind Read(), actions handled via OnAction
+// (such as EscapeSnapshot) invoke the callback and continue reading.
+//
+// The callback is invoked synchronously during Read() calls. It should be
+// non-blocking; long-running work should be dispatched to a goroutine.
+func (e *EscapeProxy) OnAction(fn func(EscapeAction)) {
+	e.onAction = fn
 }
 
 // setPrefixState updates the sawPrefix flag and notifies the callback if it changed.
@@ -154,6 +174,12 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 					break
 				}
 				return 0, EscapeError{Action: EscapeStop}
+
+			case escapeKeySnapshot:
+				// Non-disruptive action: call callback and continue reading
+				if e.onAction != nil {
+					e.onAction(EscapeSnapshot)
+				}
 
 			case EscapePrefix:
 				// Ctrl-/ Ctrl-/ sends a single Ctrl-/
@@ -221,6 +247,12 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 		switch b {
 		case escapeKeyStop:
 			return 0, EscapeError{Action: EscapeStop}
+		case escapeKeySnapshot:
+			// Non-disruptive action: call callback and continue
+			if e.onAction != nil {
+				e.onAction(EscapeSnapshot)
+			}
+			return 0, nil
 		case EscapePrefix:
 			// Send single prefix
 			p[0] = EscapePrefix
@@ -259,5 +291,5 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 // EscapeHelpText returns help text explaining the escape sequences.
 func EscapeHelpText() string {
-	return "Escape: Ctrl-/ k (stop)"
+	return "Escape: Ctrl-/ s (snapshot) · k (stop)"
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/trace"
 	"github.com/majorcontext/moat/internal/tui"
@@ -362,6 +364,15 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		statusWriter.SetupEscapeHints(escapeProxy)
 	}
 
+	// Set up callback for non-disruptive escape actions (snapshot)
+	var flashMu sync.Mutex
+	var flashTimer *time.Timer
+	escapeProxy.OnAction(func(action term.EscapeAction) {
+		if action == term.EscapeSnapshot {
+			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
+		}
+	})
+
 	// Wrap stdin with tracer if tracing is enabled
 	stdin := io.Reader(escapeProxy)
 	if tracer != nil {
@@ -434,7 +445,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			// SIGINT is forwarded to container via attached stdin/tty
 
 		case err := <-attachDone:
-			if term.IsEscapeError(err) {
+			if term.GetEscapeAction(err) == term.EscapeStop {
 				fmt.Printf("\r\nStopping run %s...\r\n", r.ID)
 				if stopErr := manager.Stop(context.Background(), r.ID); stopErr != nil {
 					log.Error("failed to stop run", "id", r.ID, "error", stopErr)
@@ -450,4 +461,40 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			return nil
 		}
 	}
+}
+
+// takeSnapshot creates a manual snapshot and shows the result in the status bar.
+// The flashMu/flashTimer pair are shared across calls to prevent rapid snapshots
+// from clearing each other's flash message.
+func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) {
+		if statusWriter == nil {
+			return
+		}
+		flashMu.Lock()
+		defer flashMu.Unlock()
+		if *flashTimer != nil {
+			(*flashTimer).Stop()
+		}
+		statusWriter.SetMessage(msg)
+		_ = statusWriter.UpdateStatus()
+		*flashTimer = time.AfterFunc(2*time.Second, func() {
+			statusWriter.ClearMessage()
+			_ = statusWriter.UpdateStatus()
+		})
+	}
+
+	if r.SnapEngine == nil {
+		flash("Snapshots not configured")
+		return
+	}
+
+	snap, err := r.SnapEngine.Create(snapshot.TypeManual, "")
+	if err != nil {
+		log.Error("manual snapshot failed", "error", err)
+		flash("Snapshot failed: " + err.Error())
+		return
+	}
+
+	flash("Snapshot saved: " + snap.ID)
 }

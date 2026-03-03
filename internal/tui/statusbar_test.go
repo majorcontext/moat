@@ -213,15 +213,15 @@ func TestStatusBar_MessageOverlay(t *testing.T) {
 	}
 
 	// Set message overlay
-	bar.SetMessage("Escape: d (detach) · k (stop)")
+	bar.SetMessage("Escape: s (snapshot) · k (stop) · Ctrl-/ (cancel)")
 	message := bar.Content()
 
 	// Should show message, not normal content
 	if !strings.Contains(message, "Escape") {
 		t.Errorf("expected message text in overlay, got %q", message)
 	}
-	if !strings.Contains(message, "detach") {
-		t.Errorf("expected 'detach' in message, got %q", message)
+	if !strings.Contains(message, "stop") {
+		t.Errorf("expected 'stop' in message, got %q", message)
 	}
 	if strings.Contains(message, "run_abc123") {
 		t.Errorf("expected run ID hidden when message is set, got %q", message)
@@ -248,7 +248,7 @@ func TestStatusBar_MessageOverlay_Width(t *testing.T) {
 	bar.SetDimensions(40, 24)
 
 	// Set a message
-	bar.SetMessage("Press d to detach or k to stop")
+	bar.SetMessage("Escape: s (snapshot) · k (stop) · Ctrl-/ (cancel)")
 	content := bar.Content()
 
 	// Message should be centered and fit width
