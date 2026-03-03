@@ -217,7 +217,7 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	// Print run info after creation but before blocking on execution
 	opts.OnRunCreated = func(info RunInfo) {
-		fmt.Printf("Started %s in %s (run %s)\n", rc.Name, absPath, info.ID)
+		fmt.Printf("Started agent %q (%s)\n", info.Name, info.ID)
 	}
 
 	_, err = ExecuteRun(ctx, opts)

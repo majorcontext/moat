@@ -266,7 +266,10 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
-	fmt.Printf("Run %s started. Stop with Ctrl+C.\n", r.ID)
+	// If no callback printed a started message, print one here (moat run path)
+	if opts.OnRunCreated == nil {
+		fmt.Printf("Started %s (%s)\n", r.Name, r.ID)
+	}
 
 	// Wait for container exit or signal
 	sigCh := make(chan os.Signal, 1)
@@ -292,6 +295,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		if err != nil {
 			return r, fmt.Errorf("run failed: %w", err)
 		}
+		fmt.Printf("Use 'moat logs %s' to view output\n", r.ID)
 		return r, nil
 	}
 }

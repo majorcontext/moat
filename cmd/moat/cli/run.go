@@ -175,14 +175,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Interactive: interactive,
 	}
 
-	r, err := ExecuteRun(ctx, opts)
-	if err != nil {
-		return err
-	}
-
-	if r != nil {
-		fmt.Printf("Started agent %q (run %s)\n", r.Name, r.ID)
-	}
-
-	return nil
+	_, err = ExecuteRun(ctx, opts)
+	return err
 }
