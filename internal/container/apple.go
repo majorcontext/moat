@@ -353,26 +353,11 @@ func (r *AppleRuntime) StopContainer(ctx context.Context, containerID string) er
 
 // WaitContainer blocks until the container exits and returns the exit code.
 func (r *AppleRuntime) WaitContainer(ctx context.Context, containerID string) (int64, error) {
-	// Apple's container CLI may have a "wait" command, or we poll with inspect
-	// Try "container wait" first
-	cmd := exec.CommandContext(ctx, r.containerBin, "wait", containerID)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		// If wait is not available, fall back to polling
-		return r.waitByPolling(ctx, containerID)
-	}
-
-	// Parse exit code from output
-	exitStr := strings.TrimSpace(stdout.String())
-	exitCode, err := strconv.ParseInt(exitStr, 10, 64)
-	if err != nil {
-		return -1, fmt.Errorf("parsing exit code %q: %w", exitStr, err)
-	}
-
-	return exitCode, nil
+	// Always poll with inspect rather than using "container wait".
+	// Apple's "container wait" hangs indefinitely when a container is
+	// stopped or removed externally (e.g., via "moat stop" from another
+	// process), which blocks monitorContainerExit forever.
+	return r.waitByPolling(ctx, containerID)
 }
 
 // waitByPolling polls the container status until it exits.
@@ -391,7 +376,8 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 		cmd.Stdout = &stdout
 
 		if err := cmd.Run(); err != nil {
-			return -1, fmt.Errorf("inspecting container: %w", err)
+			// Container no longer exists (removed externally) — treat as exited
+			return 0, nil
 		}
 
 		// Apple's inspect returns an array of container info objects
