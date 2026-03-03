@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -364,9 +365,11 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}
 
 	// Set up callback for non-disruptive escape actions (snapshot)
+	var flashMu sync.Mutex
+	var flashTimer *time.Timer
 	escapeProxy.OnAction(func(action term.EscapeAction) {
 		if action == term.EscapeSnapshot {
-			go takeSnapshot(r, statusWriter)
+			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
 		}
 	})
 
@@ -460,22 +463,22 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}
 }
 
-// snapshotFlashTimer tracks the pending status bar clear timer so rapid
-// snapshots cancel the previous timer instead of clearing each other's message.
-var snapshotFlashTimer *time.Timer
-
 // takeSnapshot creates a manual snapshot and shows the result in the status bar.
-func takeSnapshot(r *run.Run, statusWriter *tui.Writer) {
+// The flashMu/flashTimer pair are shared across calls to prevent rapid snapshots
+// from clearing each other's flash message.
+func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
 	flash := func(msg string) {
 		if statusWriter == nil {
 			return
 		}
-		if snapshotFlashTimer != nil {
-			snapshotFlashTimer.Stop()
+		flashMu.Lock()
+		defer flashMu.Unlock()
+		if *flashTimer != nil {
+			(*flashTimer).Stop()
 		}
 		statusWriter.SetMessage(msg)
 		_ = statusWriter.UpdateStatus()
-		snapshotFlashTimer = time.AfterFunc(2*time.Second, func() {
+		*flashTimer = time.AfterFunc(2*time.Second, func() {
 			statusWriter.ClearMessage()
 			_ = statusWriter.UpdateStatus()
 		})
