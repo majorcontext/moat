@@ -132,14 +132,13 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	}
 
 	// Determine the actual port the proxy is listening on.
-	actualPort := daemonProxyPort
-	if actualPort == 0 {
-		parsed, parseErr := strconv.Atoi(proxyServer.Port())
-		if parseErr != nil {
-			log.Warn("failed to parse proxy port", "port", proxyServer.Port(), "error", parseErr)
-		}
-		actualPort = parsed
+	// Always read from proxyServer.Port() since the actual port may differ
+	// from daemonProxyPort after a fallback to an OS-assigned port.
+	parsed, parseErr := strconv.Atoi(proxyServer.Port())
+	if parseErr != nil {
+		log.Warn("failed to parse proxy port", "port", proxyServer.Port(), "error", parseErr)
 	}
+	actualPort := parsed
 
 	// Update API server with actual proxy port (may differ from requested if port was 0).
 	apiServer.SetProxyPort(actualPort)
