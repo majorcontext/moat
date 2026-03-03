@@ -229,12 +229,15 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
-	// Call the OnRunCreated callback if provided
+	// Call the OnRunCreated callback if provided (provider commands set this).
+	// For moat run, print the run info here so it appears before the session starts.
 	if opts.OnRunCreated != nil {
 		opts.OnRunCreated(intcli.RunInfo{
 			ID:   r.ID,
 			Name: r.Name,
 		})
+	} else {
+		fmt.Printf("Started %s (%s)\n", r.Name, r.ID)
 	}
 
 	// Interactive mode: use StartAttached to ensure TTY is connected before process starts.
@@ -264,10 +267,6 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
-	// If no callback printed a started message, print one here (moat run path)
-	if opts.OnRunCreated == nil {
-		fmt.Printf("Started %s (%s)\n", r.Name, r.ID)
-	}
 	fmt.Println(ui.Dim("Press Ctrl+C to stop"))
 	fmt.Println()
 

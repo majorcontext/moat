@@ -2419,6 +2419,15 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 	_ = r.SaveMetadata()
 
+	// Clean up resources (network, sidecars, temp dirs) on natural exit.
+	// monitorContainerExit is not running for interactive runs, so this is
+	// the only cleanup path. Idempotent via cleanupOnce.
+	if !callerWillStop {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		m.cleanupResources(cleanupCtx, r)
+	}
+
 	return attachErr
 }
 

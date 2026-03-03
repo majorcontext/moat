@@ -346,8 +346,12 @@ func (r *DockerRuntime) ContainerLogs(ctx context.Context, containerID string) (
 
 	// Check if container was created with TTY
 	inspect, inspectErr := r.cli.ContainerInspect(ctx, containerID)
-	if inspectErr != nil || inspect.Config.Tty {
-		// TTY mode or inspect failed: logs are plain text
+	if inspectErr != nil {
+		raw.Close()
+		return nil, fmt.Errorf("inspecting container for log format: %w", inspectErr)
+	}
+	if inspect.Config.Tty {
+		// TTY mode: logs are plain text
 		return raw, nil
 	}
 
