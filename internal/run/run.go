@@ -11,6 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/proxy"
@@ -76,6 +77,11 @@ type Run struct {
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
 	ProxyAuthToken  string // Auth token for proxy daemon (set when run is registered with daemon)
+
+	// ProxyRegReq is the registration request saved for re-registration
+	// after a proxy daemon restart. The health monitor uses it to restore
+	// the run's credentials and configuration in the new daemon instance.
+	ProxyRegReq *daemon.RegisterRequest
 
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.

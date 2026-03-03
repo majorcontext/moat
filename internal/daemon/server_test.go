@@ -368,6 +368,135 @@ func TestServer_UpdateNotFound(t *testing.T) {
 	}
 }
 
+func TestServer_ReRegisterRun(t *testing.T) {
+	sock := filepath.Join(testSockDir(t), "d.sock")
+	srv := NewServer(sock, 9119)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	client := testClient(sock)
+
+	// Register a run normally (no auth_token).
+	reqBody := RegisterRequest{
+		RunID: "run-rereg",
+		Credentials: []CredentialSpec{
+			{Host: "api.github.com", Header: "Authorization", Value: "Bearer ghp_old", Grant: "github"},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	resp, err := client.Post("http://localhost/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/runs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var regResp RegisterResponse
+	json.NewDecoder(resp.Body).Decode(&regResp)
+	originalToken := regResp.AuthToken
+	if originalToken == "" {
+		t.Fatal("expected non-empty auth_token")
+	}
+
+	// Re-register with the same token but updated credentials.
+	reregBody := RegisterRequest{
+		RunID:     "run-rereg",
+		AuthToken: originalToken,
+		Credentials: []CredentialSpec{
+			{Host: "api.github.com", Header: "Authorization", Value: "Bearer ghp_new", Grant: "github"},
+		},
+	}
+	body2, _ := json.Marshal(reregBody)
+	resp2, err := client.Post("http://localhost/v1/runs", "application/json", bytes.NewReader(body2))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (re-register): %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp2.StatusCode)
+	}
+
+	var reregResp RegisterResponse
+	json.NewDecoder(resp2.Body).Decode(&reregResp)
+
+	// Token should be the same as the original.
+	if reregResp.AuthToken != originalToken {
+		t.Errorf("expected same token %s, got %s", originalToken, reregResp.AuthToken)
+	}
+
+	// Only one run should be registered (re-registration replaces, not adds).
+	if srv.Registry().Count() != 1 {
+		t.Errorf("expected 1 run after re-registration, got %d", srv.Registry().Count())
+	}
+
+	// Verify the credential was updated.
+	rc, ok := srv.Registry().Lookup(originalToken)
+	if !ok {
+		t.Fatal("RunContext not found by original token")
+	}
+	cred, ok := rc.GetCredential("api.github.com")
+	if !ok {
+		t.Fatal("credential not found for api.github.com after re-registration")
+	}
+	if cred.Value != "Bearer ghp_new" {
+		t.Errorf("expected credential value 'Bearer ghp_new', got %q", cred.Value)
+	}
+}
+
+func TestRegistry_RegisterWithToken(t *testing.T) {
+	reg := NewRegistry()
+
+	// Register normally first.
+	rc1 := NewRunContext("run-1")
+	token1 := reg.Register(rc1)
+	if token1 == "" {
+		t.Fatal("expected non-empty token")
+	}
+
+	// Register with a specific token.
+	rc2 := NewRunContext("run-2")
+	specificToken := "my-specific-token-abc123"
+	reg.RegisterWithToken(rc2, specificToken)
+
+	// Both should be in the registry.
+	if reg.Count() != 2 {
+		t.Errorf("expected 2 runs, got %d", reg.Count())
+	}
+
+	// Lookup by specific token should return rc2.
+	found, ok := reg.Lookup(specificToken)
+	if !ok {
+		t.Fatal("expected to find run by specific token")
+	}
+	if found.RunID != "run-2" {
+		t.Errorf("expected run-2, got %s", found.RunID)
+	}
+	if found.AuthToken != specificToken {
+		t.Errorf("expected auth token %s, got %s", specificToken, found.AuthToken)
+	}
+
+	// Re-register with same token should replace.
+	rc3 := NewRunContext("run-3")
+	reg.RegisterWithToken(rc3, specificToken)
+
+	if reg.Count() != 2 {
+		t.Errorf("expected 2 runs after re-register, got %d", reg.Count())
+	}
+	found2, ok := reg.Lookup(specificToken)
+	if !ok {
+		t.Fatal("expected to find run by specific token after re-register")
+	}
+	if found2.RunID != "run-3" {
+		t.Errorf("expected run-3 after re-register, got %s", found2.RunID)
+	}
+}
+
 func TestServer_ShutdownEndpoint(t *testing.T) {
 	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)

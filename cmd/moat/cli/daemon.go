@@ -117,7 +117,18 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		proxyServer.SetPort(daemonProxyPort)
 	}
 	if startErr := proxyServer.Start(); startErr != nil {
-		return startErr
+		// If a specific port was requested (e.g. preserved from a stale daemon)
+		// and it's now occupied, fall back to an OS-assigned port.
+		if daemonProxyPort > 0 {
+			log.Warn("proxy port unavailable, falling back to OS-assigned port",
+				"requested_port", daemonProxyPort, "error", startErr)
+			proxyServer.SetPort(0)
+			if retryErr := proxyServer.Start(); retryErr != nil {
+				return retryErr
+			}
+		} else {
+			return startErr
+		}
 	}
 
 	// Determine the actual port the proxy is listening on.

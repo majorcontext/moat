@@ -30,6 +30,20 @@ func (r *Registry) Register(rc *RunContext) string {
 	return token
 }
 
+// RegisterWithToken adds a RunContext with a specific auth token.
+// This is used for re-registration after a daemon restart so the container
+// can keep using the same proxy auth token it was configured with.
+func (r *Registry) RegisterWithToken(rc *RunContext, token string) {
+	rc.AuthToken = token
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Cancel refresh on any existing run with this token to prevent leaks.
+	if old, ok := r.runs[token]; ok {
+		old.CancelRefresh()
+	}
+	r.runs[token] = rc
+}
+
 // Lookup finds a RunContext by auth token.
 func (r *Registry) Lookup(token string) (*RunContext, bool) {
 	r.mu.RLock()

@@ -43,6 +43,7 @@ type TransformerSpec struct {
 // RegisterRequest is sent to POST /v1/runs.
 type RegisterRequest struct {
 	RunID                string                   `json:"run_id"`
+	AuthToken            string                   `json:"auth_token,omitempty"` // Re-registration: use existing token
 	Credentials          []CredentialSpec         `json:"credentials,omitempty"`
 	ExtraHeaders         []ExtraHeaderSpec        `json:"extra_headers,omitempty"`
 	RemoveHeaders        []RemoveHeaderSpec       `json:"remove_headers,omitempty"`

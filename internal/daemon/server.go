@@ -127,7 +127,15 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 		StartTokenRefresh(refreshCtx, rc, req.Grants)
 	}
 
-	token := s.registry.Register(rc)
+	// If an auth token was provided, re-register with that token so the
+	// container keeps using the same proxy credentials after a daemon restart.
+	var token string
+	if req.AuthToken != "" {
+		s.registry.RegisterWithToken(rc, req.AuthToken)
+		token = req.AuthToken
+	} else {
+		token = s.registry.Register(rc)
+	}
 
 	// Create AWS credential provider if configured. Must happen after Register()
 	// because the auth token is needed for endpoint authentication.

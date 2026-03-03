@@ -639,6 +639,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
 
+		// Save registration request for re-registration after proxy restart
+		r.ProxyRegReq = &regReq
+
 		// Register with daemon — returns auth token and proxy port
 		regResp, regErr := m.daemonClient.RegisterRun(ctx, regReq)
 		if regErr != nil {
@@ -2281,6 +2284,21 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 		m.monitorContainerExit(r)
 	}()
 
+	// Start proxy health monitor to re-register the run if the daemon restarts.
+	if r.ProxyRegReq != nil {
+		m.monitorWg.Add(1)
+		go func() {
+			defer m.monitorWg.Done()
+			// Cancel when the container exits.
+			proxyCtx, proxyCancel := context.WithCancel(context.Background())
+			go func() {
+				<-r.exitCh
+				proxyCancel()
+			}()
+			m.monitorProxyHealth(proxyCtx, r)
+		}()
+	}
+
 	return nil
 }
 
@@ -2368,8 +2386,21 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	_ = r.SaveMetadata()
 
+	// Start proxy health monitor for the duration of the attached session.
+	var proxyHealthCancel context.CancelFunc
+	if r.ProxyRegReq != nil {
+		var proxyCtx context.Context
+		proxyCtx, proxyHealthCancel = context.WithCancel(context.Background())
+		go m.monitorProxyHealth(proxyCtx, r)
+	}
+
 	// Wait for the attachment to complete (container exits or context canceled)
 	attachErr := <-attachDone
+
+	// Stop proxy health monitor.
+	if proxyHealthCancel != nil {
+		proxyHealthCancel()
+	}
 
 	// Determine whether the caller will stop the container (escape-stop or context
 	// cancellation). In those cases, skip state updates and log capture here — the
@@ -2784,6 +2815,81 @@ func (m *Manager) monitorContainerExit(r *Run) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cleanupCancel()
 	m.cleanupResources(cleanupCtx, r)
+}
+
+// monitorProxyHealth periodically checks the proxy daemon's health and
+// re-registers the run if the daemon restarted. This prevents containers from
+// getting HTTP 407 errors when the daemon's in-memory registry is lost.
+func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		// Snapshot daemonClient under lock.
+		m.mu.RLock()
+		dc := m.daemonClient
+		m.mu.RUnlock()
+		if dc == nil || r.ProxyAuthToken == "" || r.ProxyRegReq == nil {
+			continue
+		}
+
+		// Check daemon health.
+		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, healthErr := dc.Health(healthCtx)
+		healthCancel()
+
+		if healthErr != nil {
+			// Daemon unreachable — try to restart it.
+			log.Warn("proxy daemon unreachable, attempting restart",
+				"run_id", r.ID, "error", healthErr)
+			proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+			newClient, ensureErr := daemon.EnsureRunning(proxyDir, 0)
+			if ensureErr != nil {
+				log.Warn("failed to restart proxy daemon",
+					"run_id", r.ID, "error", ensureErr)
+				continue
+			}
+			m.mu.Lock()
+			m.daemonClient = newClient
+			dc = newClient
+			m.mu.Unlock()
+		}
+
+		// Verify our run is still registered by trying to update it.
+		updateCtx, updateCancel := context.WithTimeout(ctx, 5*time.Second)
+		updateErr := dc.UpdateRun(updateCtx, r.ProxyAuthToken, r.ContainerID)
+		updateCancel()
+
+		if updateErr != nil && strings.Contains(updateErr.Error(), "not found") {
+			// Run is not registered — re-register with the same token.
+			log.Info("run not found in proxy daemon, re-registering",
+				"run_id", r.ID)
+			regReq := *r.ProxyRegReq
+			regReq.AuthToken = r.ProxyAuthToken
+			regCtx, regCancel := context.WithTimeout(ctx, 5*time.Second)
+			_, regErr := dc.RegisterRun(regCtx, regReq)
+			regCancel()
+			if regErr != nil {
+				log.Warn("failed to re-register run with proxy daemon",
+					"run_id", r.ID, "error", regErr)
+				continue
+			}
+			// Update with container ID after re-registration.
+			if r.ContainerID != "" {
+				updCtx, updCancel := context.WithTimeout(ctx, 5*time.Second)
+				_ = dc.UpdateRun(updCtx, r.ProxyAuthToken, r.ContainerID)
+				updCancel()
+			}
+			log.Info("run re-registered with proxy daemon",
+				"run_id", r.ID)
+		}
+	}
 }
 
 // List returns all runs.

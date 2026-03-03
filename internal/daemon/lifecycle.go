@@ -112,6 +112,13 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		// Daemon is unresponsive — fall through to respawn.
 	}
 
+	// Preserve proxy port from stale daemon for container continuity.
+	// Existing containers have HTTP_PROXY set to this port, so reusing
+	// it avoids breaking their network after the daemon restarts.
+	if proxyPort == 0 && lock != nil && lock.ProxyPort > 0 {
+		proxyPort = lock.ProxyPort
+	}
+
 	// Clean up stale state.
 	if lock != nil {
 		RemoveLockFile(dir)

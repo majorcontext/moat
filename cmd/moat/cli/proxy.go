@@ -32,7 +32,7 @@ When called without a subcommand, shows the current proxy status.`,
 var proxyStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the routing proxy",
-	Long: `Start the routing proxy in the foreground.
+	Long: `Start the routing proxy in the background.
 
 The proxy routes requests based on hostname and supports both HTTP and HTTPS:
   http://<service>.<agent>.localhost:<port> -> container service
@@ -67,12 +67,18 @@ func init() {
 	rootCmd.AddCommand(proxyCmd)
 }
 
-func startProxy(cmd *cobra.Command, args []string) error {
-	// Set daemon defaults from proxy flags.
-	if daemonProxyPort == 0 {
-		daemonProxyPort = proxyPort
+func startProxy(_ *cobra.Command, _ []string) error {
+	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	client, err := daemon.EnsureRunning(proxyDir, proxyPort)
+	if err != nil {
+		return err
 	}
-	return runDaemon(cmd, args)
+	health, err := client.Health(context.Background())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Proxy started on port %d\n", health.ProxyPort)
+	return nil
 }
 
 func stopProxy(_ *cobra.Command, _ []string) error {
