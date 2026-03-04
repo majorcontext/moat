@@ -198,7 +198,7 @@ Summary
   Total disk:       335 MB
 
 Health
-  [WARN] 3 stopped runs (12 MB)
+  ⚠ 3 stopped runs (12 MB)
 
 For details:
   moat list                List all runs
@@ -218,7 +218,7 @@ Stopped runs (3):
   my-agent   run_f6e5d4c3b2a1   stopped  5m ago
   my-agent   run_1a2b3c4d5e6f   stopped  8m ago
 
-Total: 3 resources, 12 MB
+Total: 3 resources, 0 MB
 
 Remove these resources? [y/N]: y
 

@@ -84,8 +84,8 @@ https://web.checkout.localhost:8080   → checkout container:3000
 $ moat list
 
 NAME        RUN ID              STATE    AGE  ENDPOINTS
-dark-mode   run_a1b2c3d4e5f6   running  2m   web
-checkout    run_d4e5f6a1b2c3   running  1m   web
+dark-mode   run_a1b2c3d4e5f6   running  2m ago   web
+checkout    run_d4e5f6a1b2c3   running  1m ago   web
 ```
 
 ### Stop agents
