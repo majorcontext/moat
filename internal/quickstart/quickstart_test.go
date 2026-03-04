@@ -62,6 +62,49 @@ func TestGenerateSchemaReference(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt(t *testing.T) {
+	prompt := BuildPrompt()
+
+	// Must contain the schema reference section.
+	if !strings.Contains(prompt, "moat.yaml Schema Reference") {
+		t.Error("expected prompt to contain schema reference header")
+	}
+
+	// Must contain the deps reference sections.
+	if !strings.Contains(prompt, "Available Dependencies") {
+		t.Error("expected prompt to contain available dependencies header")
+	}
+	if !strings.Contains(prompt, "Dynamic Dependencies") {
+		t.Error("expected prompt to contain dynamic dependencies header")
+	}
+
+	// Must contain task instruction.
+	if !strings.Contains(prompt, "analyze the project") {
+		t.Error("expected prompt to contain task instruction about analyzing the project")
+	}
+
+	// Must contain output instruction.
+	if !strings.Contains(prompt, "Output only valid YAML") {
+		t.Error("expected prompt to contain output instruction")
+	}
+
+	// Must contain examples.
+	if !strings.Contains(prompt, "Example 1: Node.js web app") {
+		t.Error("expected prompt to contain example 1")
+	}
+	if !strings.Contains(prompt, "Example 2: Python ML project") {
+		t.Error("expected prompt to contain example 2")
+	}
+	if !strings.Contains(prompt, "Example 3: Go service with Redis") {
+		t.Error("expected prompt to contain example 3")
+	}
+
+	// Size should be reasonable (under 20KB).
+	if len(prompt) > 20*1024 {
+		t.Errorf("prompt is too large: %d bytes (max 20KB)", len(prompt))
+	}
+}
+
 func TestGenerateDepsReference(t *testing.T) {
 	ref := GenerateDepsReference()
 
