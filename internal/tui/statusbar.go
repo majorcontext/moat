@@ -127,7 +127,8 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning boo
 	totalPlain := runeLen(leftPlain) + runeLen(runtimePlain) + runeLen(grantsPlain) + runeLen(warningPlain) + runeLen(rightPlain)
 
 	if totalPlain > s.width {
-		// Truncation cascade: drop hint, then grants, then name, then warning
+		// Truncation cascade: drop hint first, then grants, then name.
+		// Warning is kept as long as possible (dropped last) since it's diagnostic.
 		if showHint {
 			return s.buildContent(showGrants, showName, false, showWarning)
 		}

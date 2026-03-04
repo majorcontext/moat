@@ -122,7 +122,7 @@ func statusProxy(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  Active runs: %d\n", health.RunCount)
 	fmt.Printf("  Started: %s\n", health.StartedAt)
 	if health.Commit != "" {
-		fmt.Printf("  Commit: %s\n", health.Commit)
+		fmt.Printf("  Commit: %s (cli: %s)\n", health.Commit, commit)
 	}
 
 	// List runs.
