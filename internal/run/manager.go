@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1550,12 +1551,20 @@ region = %s
 			mounts = append(mounts, claudeConfig.Mounts...)
 			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
-			// Note: Plugins are now installed during image build (via Dockerfile RUN commands),
-			// not at runtime. The hasPlugins flag is used only for logging.
+			// Write merged settings.json so Claude Code has full marketplace/plugin config at runtime.
+			// moat-init.sh copies $MOAT_CLAUDE_INIT/settings.json to ~/.claude/settings.json.
 			if hasPlugins {
-				log.Debug("plugins baked into image",
-					"plugins", len(claudeSettings.EnabledPlugins),
-					"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
+				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
+				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
+				if jsonErr != nil {
+					log.Warn("failed to marshal settings.json", "error", jsonErr)
+				} else if writeErr := os.WriteFile(settingsPath, settingsJSON, 0644); writeErr != nil {
+					log.Warn("failed to write settings.json to staging dir", "error", writeErr)
+				} else {
+					log.Debug("wrote settings.json to staging dir",
+						"plugins", len(claudeSettings.EnabledPlugins),
+						"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
+				}
 			}
 		}
 	}

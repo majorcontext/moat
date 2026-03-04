@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,6 +55,78 @@ func TestLoadSettings(t *testing.T) {
 	}
 	if acme.Source.URL != "git@github.com:acme/plugins.git" {
 		t.Errorf("acme.Source.URL = %q, want %q", acme.Source.URL, "git@github.com:acme/plugins.git")
+	}
+}
+
+func TestLoadSettingsGitHubRepoFormat(t *testing.T) {
+	// Claude Code's native settings.json uses "repo" for GitHub marketplaces,
+	// not "url". LoadSettings must handle this format.
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true,
+    "dev-skills@gp-claude-skills": true,
+    "compound-engineering@compound-engineering-plugin": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    },
+    "gp-claude-skills": {
+      "source": {
+        "source": "github",
+        "repo": "thegpvc/gp-claude-skills"
+      }
+    },
+    "compound-engineering-plugin": {
+      "source": {
+        "source": "github",
+        "repo": "EveryInc/compound-engineering-plugin"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	// All three marketplaces should be loaded
+	if len(settings.ExtraKnownMarketplaces) != 3 {
+		t.Fatalf("ExtraKnownMarketplaces = %d, want 3", len(settings.ExtraKnownMarketplaces))
+	}
+
+	// GitHub "repo" format should be normalized to git URL
+	superpowers := settings.ExtraKnownMarketplaces["superpowers-marketplace"]
+	if superpowers.Source.Source != "git" {
+		t.Errorf("superpowers.Source.Source = %q, want %q", superpowers.Source.Source, "git")
+	}
+	if superpowers.Source.URL != "https://github.com/obra/superpowers-marketplace.git" {
+		t.Errorf("superpowers.Source.URL = %q, want %q", superpowers.Source.URL, "https://github.com/obra/superpowers-marketplace.git")
+	}
+
+	gpSkills := settings.ExtraKnownMarketplaces["gp-claude-skills"]
+	if gpSkills.Source.URL != "https://github.com/thegpvc/gp-claude-skills.git" {
+		t.Errorf("gp-claude-skills.Source.URL = %q, want %q", gpSkills.Source.URL, "https://github.com/thegpvc/gp-claude-skills.git")
+	}
+
+	compound := settings.ExtraKnownMarketplaces["compound-engineering-plugin"]
+	if compound.Source.URL != "https://github.com/EveryInc/compound-engineering-plugin.git" {
+		t.Errorf("compound.Source.URL = %q, want %q", compound.Source.URL, "https://github.com/EveryInc/compound-engineering-plugin.git")
+	}
+
+	// All plugins should be loaded
+	if len(settings.EnabledPlugins) != 3 {
+		t.Errorf("EnabledPlugins = %d, want 3", len(settings.EnabledPlugins))
 	}
 }
 
@@ -578,5 +651,74 @@ func TestLoadKnownMarketplacesEmptyURL(t *testing.T) {
 	// Both entries should be skipped (empty URLs)
 	if len(result) != 0 {
 		t.Errorf("got %d marketplaces, want 0 (empty URLs skipped)", len(result))
+	}
+}
+
+func TestSettingsJSONRoundTrip(t *testing.T) {
+	// Verify that Settings serializes to valid Claude Code settings.json format
+	// and can be loaded back via LoadSettings.
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{
+			"superpowers@superpowers-marketplace": true,
+			"dev-skills@gp-claude-skills":         true,
+		},
+		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
+			"superpowers-marketplace": {
+				Source: MarketplaceSource{
+					Source: "git",
+					URL:    "https://github.com/obra/superpowers-marketplace.git",
+				},
+			},
+			"gp-claude-skills": {
+				Source: MarketplaceSource{
+					Source: "git",
+					URL:    "https://github.com/thegpvc/gp-claude-skills.git",
+				},
+			},
+		},
+		// Source tracking fields should not be serialized
+		PluginSources:      map[string]SettingSource{"superpowers@superpowers-marketplace": SourceClaudeUser},
+		MarketplaceSources: map[string]SettingSource{"superpowers-marketplace": SourceClaudeUser},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent: %v", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load back and verify
+	loaded, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	if len(loaded.EnabledPlugins) != 2 {
+		t.Errorf("EnabledPlugins = %d, want 2", len(loaded.EnabledPlugins))
+	}
+	if !loaded.EnabledPlugins["superpowers@superpowers-marketplace"] {
+		t.Error("superpowers plugin should be enabled")
+	}
+
+	if len(loaded.ExtraKnownMarketplaces) != 2 {
+		t.Errorf("ExtraKnownMarketplaces = %d, want 2", len(loaded.ExtraKnownMarketplaces))
+	}
+	sp := loaded.ExtraKnownMarketplaces["superpowers-marketplace"]
+	if sp.Source.Source != "git" || sp.Source.URL != "https://github.com/obra/superpowers-marketplace.git" {
+		t.Errorf("superpowers-marketplace source = %+v, unexpected", sp.Source)
+	}
+
+	// Source tracking should not survive serialization
+	if loaded.PluginSources != nil {
+		t.Error("PluginSources should not be serialized (json:\"-\")")
+	}
+	if loaded.MarketplaceSources != nil {
+		t.Error("MarketplaceSources should not be serialized (json:\"-\")")
 	}
 }

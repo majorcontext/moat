@@ -76,9 +76,9 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/settings.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/settings.json" "$TARGET_HOME/.claude/"
 
-  # Note: Plugins are now installed during image build via `claude plugin install`
-  # commands in the Dockerfile. The claude CLI creates and manages installed_plugins.json
-  # itself during installation. Runtime plugin staging (the old approach) is no longer used.
+  # Note: Plugins are installed during image build via `claude plugin install`
+  # commands in the Dockerfile. Private marketplace repos that can't be cloned
+  # at build time are not currently supported.
 
   # Copy credentials if present (ensure restricted permissions for security)
   if [ -f "$MOAT_CLAUDE_INIT/.credentials.json" ]; then
