@@ -63,7 +63,8 @@ type Config struct {
 type ContainerConfig struct {
 	// Memory specifies the memory limit in megabytes.
 	// Applies to both Docker and Apple containers.
-	// If not set, Apple containers default to 4096 MB (4 GB).
+	// If not set, Apple containers default to 8192 MB (8 GB) for AI agent
+	// runs (claude/codex/gemini), or 4096 MB (4 GB) otherwise.
 	// Docker containers have no default limit.
 	//
 	// Example:

@@ -1979,7 +1979,7 @@ region = %s
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
 	// Extract container resource limits from config (applies to both Docker and Apple).
-	// Priority: explicit agent.yaml > agent provider suggestion > runtime default.
+	// Priority: explicit agent.yaml > agent provider default > runtime fallback.
 	var memoryMB, cpus int
 	var dns []string
 	if opts.Config != nil {
@@ -1988,15 +1988,14 @@ region = %s
 		dns = opts.Config.Container.DNS
 	}
 
-	// If agent.yaml didn't set memory, use the agent provider's suggestion.
-	// This lets providers like claude/codex/gemini request more memory than
-	// the runtime default (e.g. 8 GB for AI coding agents).
-	if memoryMB == 0 {
-		for _, cfg := range []*provider.ContainerConfig{claudeConfig, codexConfig, geminiConfig} {
-			if cfg != nil && cfg.MemoryMB > 0 {
-				memoryMB = cfg.MemoryMB
-				break
-			}
+	// On Apple containers, if agent.yaml didn't set memory and we're running an
+	// AI agent, use the agent default (8 GB). Apple's system default of 1 GB is
+	// too low for Claude Code, Codex, and Gemini CLI.
+	// Docker containers are left unlimited unless explicitly configured.
+	if memoryMB == 0 && m.runtime.Type() == container.RuntimeApple {
+		if claudeConfig != nil || codexConfig != nil || geminiConfig != nil {
+			memoryMB = provider.DefaultAgentMemoryMB
+			log.Debug("using default agent memory for Apple container", "memoryMB", memoryMB)
 		}
 	}
 

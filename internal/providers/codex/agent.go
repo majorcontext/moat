@@ -58,7 +58,6 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		Mounts:     mounts,
 		StagingDir: tmpDir,
 		Cleanup:    cleanupFn,
-		MemoryMB:   8192, // Codex needs at least 8 GB
 	}, nil
 }
 

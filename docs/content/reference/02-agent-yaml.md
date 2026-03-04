@@ -700,7 +700,7 @@ container:
 - Type: `integer`
 - Default: `8192` MB (8 GB) for `moat claude`, `moat codex`, and `moat gemini` on Apple containers; `4096` MB (4 GB) for other Apple container workloads; no limit for Docker
 
-Apple containers have a system default of 1024 MB which is insufficient for AI coding agents. Agent providers override this with 8 GB. Setting `container.memory` explicitly always takes precedence.
+Apple containers have a system default of 1024 MB which is insufficient for AI coding agents. Moat defaults to 8 GB for agent runs on Apple containers. Docker containers have no default memory limit regardless of the agent. Setting `container.memory` explicitly always takes precedence.
 
 ### container.cpus
 

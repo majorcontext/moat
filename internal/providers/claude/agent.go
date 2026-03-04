@@ -95,7 +95,6 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		Cleanup: func() {
 			os.RemoveAll(tmpDir)
 		},
-		MemoryMB: 8192, // Claude Code needs at least 8 GB
 	}, nil
 }
 
