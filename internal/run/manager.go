@@ -1978,13 +1978,26 @@ region = %s
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
-	// Extract container resource limits from config (applies to both Docker and Apple)
+	// Extract container resource limits from config (applies to both Docker and Apple).
+	// Priority: explicit agent.yaml > agent provider suggestion > runtime default.
 	var memoryMB, cpus int
 	var dns []string
 	if opts.Config != nil {
 		memoryMB = opts.Config.Container.Memory
 		cpus = opts.Config.Container.CPUs
 		dns = opts.Config.Container.DNS
+	}
+
+	// If agent.yaml didn't set memory, use the agent provider's suggestion.
+	// This lets providers like claude/codex/gemini request more memory than
+	// the runtime default (e.g. 8 GB for AI coding agents).
+	if memoryMB == 0 {
+		for _, cfg := range []*provider.ContainerConfig{claudeConfig, codexConfig, geminiConfig} {
+			if cfg != nil && cfg.MemoryMB > 0 {
+				memoryMB = cfg.MemoryMB
+				break
+			}
+		}
 	}
 
 	// Create container

@@ -84,7 +84,7 @@ hooks:
 
 # Container resources (applies to both Docker and Apple)
 container:
-  memory: 8192                    # 8 GB (default: 4096 for Apple, no limit for Docker)
+  memory: 8192                    # 8 GB (default: 8192 for AI agents on Apple, 4096 otherwise)
   cpus: 8                         # CPU count (default: 4 for Apple, no limit for Docker)
   dns: ["8.8.8.8", "8.8.4.4"]    # DNS servers (default: Google DNS)
 
@@ -698,9 +698,9 @@ container:
 ```
 
 - Type: `integer`
-- Default: `4096` MB for Apple containers, no limit for Docker
+- Default: `8192` MB (8 GB) for `moat claude`, `moat codex`, and `moat gemini` on Apple containers; `4096` MB (4 GB) for other Apple container workloads; no limit for Docker
 
-Apple containers have a system default of 1024 MB which is often insufficient for AI coding environments like Claude Code. Moat defaults to 4096 MB.
+Apple containers have a system default of 1024 MB which is insufficient for AI coding agents. Agent providers override this with 8 GB. Setting `container.memory` explicitly always takes precedence.
 
 ### container.cpus
 

@@ -42,6 +42,7 @@ type ContainerConfig struct {
 	Mounts     []MountConfig
 	StagingDir string // Temporary directory containing config files (for later cleanup tracking)
 	Cleanup    func()
+	MemoryMB   int // Suggested memory limit in MB; used only when agent.yaml doesn't set container.memory
 }
 
 // LegacyCredential is an interface for converting from credential.Credential.
