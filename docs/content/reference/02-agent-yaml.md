@@ -1104,7 +1104,7 @@ snapshots:
 
 - Type: `boolean`
 - Default: `false`
-- CLI override: `--no-snapshots`
+- CLI override: none (config-only)
 
 ### snapshots.triggers
 

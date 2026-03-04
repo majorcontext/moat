@@ -42,13 +42,14 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | Flag | Description |
 |------|-------------|
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
-| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `-e`, `--env KEY=VALUE` | Set environment variable (repeatable) |
 | `-n`, `--name NAME` | Run name (default: from `agent.yaml` or random) |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
 | `--keep` | Keep container after run completes |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
 Agent commands run interactively by default, owning the terminal with stdin/stdout/stderr connected. Use `-p`/`--prompt` for non-interactive mode (output streams to the terminal). Each agent command also accepts command-specific flags documented in their own sections.
@@ -81,16 +82,15 @@ moat run [flags] [path] [-- command]
 
 | Flag | Description |
 |------|-------------|
-| `--name NAME` | Set run name (used for hostname routing) |
-| `--grant PROVIDER` | Inject credential (repeatable) |
-| `-e KEY=VALUE` | Set environment variable (repeatable) |
+| `-n`, `--name NAME` | Set run name (used for hostname routing) |
+| `-g`, `--grant PROVIDER` | Inject credential (repeatable) |
+| `-e`, `--env KEY=VALUE` | Set environment variable (repeatable) |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |
 | `--keep` | Keep container after run completes |
-| `--mount SRC:DST:MODE` | Additional mount (repeatable). Format: `SRC:DST[:MODE]` where `SRC` is the host path, `DST` is the container path, and `MODE` is `ro` (read-only) or `rw` (read-write, default). See [Mount syntax](./05-mounts.md) for full details. |
-| `--no-snapshots` | Disable snapshots for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
+| `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
 ### Execution modes
 
@@ -135,9 +135,6 @@ moat run -e DEBUG=true ./my-project
 
 # Named run for hostname routing
 moat run --name my-feature ./my-project
-
-# Mount a host directory read-only
-moat run --mount /host/data:/data:ro ./my-project
 
 # Disable gVisor sandbox (when needed for compatibility)
 moat run --no-sandbox ./my-project
@@ -220,14 +217,6 @@ moat claude --worktree=dark-mode --prompt "implement dark mode"
 
 # Require manual approval for each tool use
 moat claude --noyolo
-```
-
-#### moat claude plugins list
-
-List configured plugins for a workspace.
-
-```bash
-moat claude plugins list [path]
 ```
 
 ---
@@ -582,7 +571,7 @@ moat grant aws --role=<ARN> [flags]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--role ARN` | IAM role ARN to assume (required) | -- |
-| `--region REGION` | AWS region for API calls | From AWS config |
+| `--region REGION` | AWS region for API calls | `us-east-1` |
 | `--session-duration DURATION` | Session duration (e.g., `1h`, `30m`, `15m`) | `15m` |
 | `--external-id ID` | External ID for cross-account role assumption | -- |
 
@@ -859,12 +848,6 @@ moat stop [run]
 
 If a name matches multiple runs, you'll be prompted to confirm stopping all of them.
 
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--all` | Stop all running containers |
-
 ### Examples
 
 ```bash
@@ -876,9 +859,6 @@ moat stop my-agent
 
 # Stop by ID
 moat stop run_a1b2c3d4e5f6
-
-# Stop all
-moat stop --all
 ```
 
 ---
@@ -1217,7 +1197,6 @@ This command scans for and removes temporary directories matching these patterns
 - `moat-claude-staging-*` - Claude configuration staging directories
 - `moat-codex-staging-*` - Codex configuration staging directories
 - `moat-npm-*` - npm credential configuration directories
-- `moat-gemini-staging-*` - Gemini configuration staging directories
 
 Only directories older than `--min-age` are removed.
 
@@ -1323,4 +1302,52 @@ moat doctor claude --test-container
 
 # Combine flags
 moat doctor claude --test-container --verbose
+```
+
+---
+
+## moat version
+
+Print the version of moat.
+
+```
+moat version
+```
+
+---
+
+## moat tty-trace
+
+Capture and analyze terminal I/O for debugging TUI rendering issues.
+
+Use the `--tty-trace` flag with `moat claude`, `moat run -i`, or `moat wt` to capture traces, then analyze them with `moat tty-trace analyze`.
+
+### moat tty-trace analyze
+
+Analyze a terminal I/O trace file.
+
+```
+moat tty-trace analyze <trace-file> [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--decode` | Decode and display all control sequences |
+| `--find-clears` | Find screen clear operations |
+| `--find-resize-issues` | Find potential resize timing issues |
+| `--resize-window N` | Time window in ms for resize issue detection (default: 100) |
+
+#### Examples
+
+```bash
+# Capture a trace during a Claude session
+moat claude --tty-trace=session.json
+
+# Decode all control sequences
+moat tty-trace analyze session.json --decode
+
+# Find resize timing issues
+moat tty-trace analyze session.json --find-resize-issues
 ```

@@ -14,80 +14,83 @@ This guide covers running Claude Code in a Moat container.
 - Moat installed
 - Claude Code installed on your host machine with an active subscription (Claude Pro or Max), OR an Anthropic API key
 
-## Granting Anthropic credentials
+## Granting credentials
 
-Run `moat grant anthropic` to configure authentication. You'll see a menu with available options:
+Moat uses two separate credential providers for Claude Code:
+
+- `moat grant claude` -- OAuth tokens for Claude Pro/Max subscribers
+- `moat grant anthropic` -- API keys from console.anthropic.com
+
+### Claude subscription (OAuth)
+
+Run `moat grant claude` to authenticate with a Claude subscription. If the Claude CLI is installed, you see a menu:
 
 ```bash
-$ moat grant anthropic
+$ moat grant claude
 
 Choose authentication method:
 
-  1. Claude subscription (recommended)
-     Uses 'claude setup-token' to get a long-lived OAuth token.
-     Requires a Claude Pro/Max subscription.
+  1. Claude subscription (OAuth token)
+     Runs 'claude setup-token' to get a long-lived token.
 
-  2. Anthropic API key
-     Use an API key from console.anthropic.com
-     Billed per token to your API account.
+  2. Existing OAuth token
+     Paste a token from a previous 'claude setup-token' run.
 
   3. Import existing Claude Code credentials
-     Use OAuth tokens from your local Claude Code installation.
+     Import OAuth tokens from your local Claude Code installation.
 
-Enter choice [1, 2, or 3]:
+Enter choice [1-3]:
 ```
 
-### Option 1: Claude subscription (recommended)
+Option 3 only appears if Claude Code credentials are found on your machine. Option 1 only appears if the Claude CLI is installed.
 
-If you have a Claude Pro or Max subscription and the Claude CLI installed, choose option 1. This runs `claude setup-token` to obtain a long-lived OAuth token:
+**Option 1** runs `claude setup-token`, which may open a browser:
 
 ```bash
-Enter choice [1, 2, or 3]: 1
-
 Running 'claude setup-token' to obtain authentication token...
 This may open a browser for authentication.
 
-Anthropic credential saved to ~/.moat/credentials/anthropic.enc
+Validating OAuth token...
+OAuth token is valid.
 
+Claude credential acquired via setup-token.
 You can now run 'moat claude' to start Claude Code.
 ```
 
-### Option 2: API key
+**Option 2** prompts you to paste an OAuth token you already obtained.
 
-If you have an Anthropic API key (from console.anthropic.com):
+**Option 3** imports credentials from your local Claude Code installation:
 
 ```bash
-Enter choice [1, 2, or 3]: 2
+Found Claude Code credentials.
+  Subscription: claude_pro
+  Expires: 2026-02-15T10:30:00Z
+
+Validating OAuth token...
+OAuth token is valid.
+
+Claude Code credentials imported.
+```
+
+Note: Imported tokens do not auto-refresh. When the token expires, run a Claude Code session on your host machine to refresh it, then run `moat grant claude` again to import the new token.
+
+### Anthropic API key
+
+Run `moat grant anthropic` to use an API key. This goes straight to the API key prompt:
+
+```bash
+$ moat grant anthropic
 
 Enter your Anthropic API key.
 You can find or create one at: https://console.anthropic.com/settings/keys
 
 API Key: sk-ant-api...
 
-Validate API key with a test request? This makes a small API call. [Y/n]: y
-
 Validating API key...
 API key is valid.
-Anthropic API key saved to ~/.moat/credentials/anthropic.enc
 ```
 
 You can also set `ANTHROPIC_API_KEY` in your environment before running the command.
-
-### Option 3: Import existing credentials
-
-If you already have Claude Code installed and logged in locally, you can import your existing OAuth credentials:
-
-```bash
-Enter choice [1, 2, or 3]: 3
-
-Found Claude Code credentials.
-  Subscription: claude_pro
-  Expires: 2026-02-15T10:30:00Z
-
-Claude Code credentials imported to ~/.moat/credentials/anthropic.enc
-```
-
-Note: Imported tokens do not auto-refresh. When the token expires, run a Claude Code session on your host machine to refresh it, then run `moat grant anthropic` again to import the new token.
 
 ### How credentials are injected
 
@@ -184,7 +187,7 @@ Monitor progress:
 ```bash
 $ moat list
 NAME          RUN ID              STATE    AGE
-feature-auth  run_a1b2c3d4e5f6   running  5m
+feature-auth  run_a1b2c3d4e5f6   running  5m ago
 
 $ moat logs -f run_a1b2c3d4e5f6
 ```
@@ -312,16 +315,6 @@ claude:
 
 Marketplaces are cloned during image build. Use `--rebuild` to update after changing marketplace configuration.
 
-### List plugins
-
-View which plugins are configured:
-
-```bash
-moat claude plugins list ./my-project
-```
-
-This shows plugins from all sources: host settings, project settings, and `agent.yaml`.
-
 ## Language servers
 
 Moat includes prepackaged language server configurations that give Claude Code access to code intelligence features like go-to-definition, find-references, and diagnostics. Language servers are installed as Claude Code plugins during image build.
@@ -421,7 +414,7 @@ Claude Code is not installed or not logged in on your host machine. Either:
 OAuth credentials have an expiration time. Re-grant:
 
 ```bash
-moat grant anthropic
+moat grant claude
 ```
 
 ### Claude Code hangs on startup

@@ -83,11 +83,10 @@ The container runs as a non-root user with filesystem access limited to the moun
 
 **Restoring manual approval:**
 
-If you prefer Codex's default confirmation behavior, use the `--full-auto=false` flag (or `--noyolo` alias):
+If you prefer Codex's default confirmation behavior, use the `--full-auto=false` flag:
 
 ```bash
 moat codex -p "refactor the API layer" --full-auto=false
-moat codex -p "refactor the API layer" --noyolo
 ```
 
 With manual approval enabled, Codex prompts for confirmation before each potentially destructive operation.

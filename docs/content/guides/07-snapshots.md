@@ -175,7 +175,7 @@ When `max_count` is exceeded, the oldest snapshots are deleted (except pre-run i
 Manually prune old snapshots:
 
 ```bash
-$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 5
+$ moat snapshot prune run_a1b2c3d4e5f6 --keep 5
 
 Pruning snapshots for run_a1b2c3d4e5f6
 Keeping 5 most recent snapshots
@@ -193,7 +193,7 @@ Deleted 2 snapshots
 Preview what would be deleted:
 
 ```bash
-$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 5 --dry-run
+$ moat snapshot prune run_a1b2c3d4e5f6 --keep 5 --dry-run
 ```
 
 ## Excluding files
@@ -236,11 +236,14 @@ Snapshots can consume significant disk space. Check usage:
 ```bash
 $ moat status
 
-Disk Usage:
-  Runs: 156 MB
-    run_a1b2c3d4e5f6: 89 MB (5 snapshots)
-    run_d4e5f6a1b2c3: 67 MB (3 snapshots)
-  Images: 1.2 GB
+Runtime: docker
+
+Active Runs: 0
+
+Summary
+  Stopped runs:  2  156 MB
+  Images:        3  1200 MB
+  Total disk:       1356 MB
 ```
 
 Reduce snapshot size by:
@@ -257,12 +260,6 @@ Disable snapshots entirely:
 ```yaml
 snapshots:
   disabled: true
-```
-
-Or disable via CLI:
-
-```bash
-$ moat run --no-snapshots ./my-project
 ```
 
 ## Example: Safe experimentation
@@ -332,7 +329,7 @@ snapshots:
 Prune old snapshots:
 
 ```bash
-$ moat snapshot list prune run_a1b2c3d4e5f6 --keep 3
+$ moat snapshot prune run_a1b2c3d4e5f6 --keep 3
 ```
 
 Or clean up old runs:

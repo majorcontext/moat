@@ -220,12 +220,11 @@ secrets:
 
   # From AWS SSM
   DATABASE_URL: ssm:///production/database/url
-
-  # Plain value (not recommended for sensitive data)
-  LOG_LEVEL: debug
 ```
 
-**Note:** For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), use `grants:` instead of `secrets:`. Grants provide better security by injecting credentials at the network layer.
+All secret values must use a URI scheme (e.g., `op://` or `ssm://`). Plain values like `LOG_LEVEL: debug` are not supported -- use the `env:` field for non-secret environment variables instead.
+
+For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), use `grants:` instead of `secrets:`. Grants provide better security by injecting credentials at the network layer.
 
 ## Security considerations
 

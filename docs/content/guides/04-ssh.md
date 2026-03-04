@@ -158,11 +158,13 @@ $ moat run -i --grant ssh:myserver.com -- ssh user@myserver.com
 
 ## Revoking SSH access
 
-Remove SSH access for a host:
+SSH credentials are stored separately from other grants. To remove SSH access for a host, re-grant it to overwrite, or delete the SSH mapping file directly:
 
 ```bash
-$ moat revoke ssh:github.com
+$ rm ~/.moat/credentials/ssh.json
 ```
+
+This removes all SSH host mappings. To remove a single host, edit the file and delete the corresponding entry.
 
 ## Troubleshooting
 

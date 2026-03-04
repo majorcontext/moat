@@ -43,11 +43,11 @@ Grant GitHub access (one time):
 ```bash
 $ moat grant github
 
-To authorize, visit: https://github.com/login/device
-Enter code: ABCD-1234
-
-Waiting for authorization...
-GitHub credential saved successfully
+Found gh CLI authentication
+Use token from gh CLI? [y/N]: y
+Validating token...
+Authenticated as: your-username
+Credential saved to ~/.moat/credentials/github.enc
 ```
 
 Run a command with the credential injected:
@@ -93,7 +93,7 @@ Then run without flags:
 moat run ./my-project
 ```
 
-The `dependencies` field determines the base image (`node@20` → `node:20`). The `grants` field specifies which credentials to inject. See [agent.yaml reference](../reference/02-agent-yaml.md) for all options.
+The `dependencies` field determines the base image (`node@20` → `node:20-slim`). The `grants` field specifies which credentials to inject. See [agent.yaml reference](../reference/02-agent-yaml.md) for all options.
 
 ## Container runtimes
 
