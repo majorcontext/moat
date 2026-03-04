@@ -129,6 +129,7 @@ linters:
           - revive
         text: "var-naming: avoid meaningless package names"
 
+
     paths:
       - vendor
 
