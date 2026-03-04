@@ -100,6 +100,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Check if moat.yaml already exists.
 	if _, err := os.Stat(filepath.Join(absPath, "moat.yaml")); err == nil {
 		return fmt.Errorf("moat.yaml already exists in %s\n\nTo regenerate, remove the existing file first.", absPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking for existing moat.yaml: %w", err)
 	}
 
 	// Auto-detect which agent has credentials.
