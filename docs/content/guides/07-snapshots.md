@@ -236,11 +236,14 @@ Snapshots can consume significant disk space. Check usage:
 ```bash
 $ moat status
 
-Disk Usage:
-  Runs: 156 MB
-    run_a1b2c3d4e5f6: 89 MB (5 snapshots)
-    run_d4e5f6a1b2c3: 67 MB (3 snapshots)
-  Images: 1.2 GB
+Runtime: docker
+
+Active Runs: 0
+
+Summary
+  Stopped runs:  2  156 MB
+  Images:        3  1200 MB
+  Total disk:       1356 MB
 ```
 
 Reduce snapshot size by:

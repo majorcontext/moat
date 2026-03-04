@@ -187,7 +187,7 @@ Monitor progress:
 ```bash
 $ moat list
 NAME          RUN ID              STATE    AGE
-feature-auth  run_a1b2c3d4e5f6   running  5m
+feature-auth  run_a1b2c3d4e5f6   running  5m ago
 
 $ moat logs -f run_a1b2c3d4e5f6
 ```

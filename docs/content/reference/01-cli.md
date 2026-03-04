@@ -219,14 +219,6 @@ moat claude --worktree=dark-mode --prompt "implement dark mode"
 moat claude --noyolo
 ```
 
-#### moat claude plugins list
-
-List configured plugins for a workspace.
-
-```bash
-moat claude plugins list [path]
-```
-
 ---
 
 ## moat codex

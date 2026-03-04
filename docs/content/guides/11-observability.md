@@ -201,9 +201,14 @@ Check disk usage with `moat status`:
 ```bash
 $ moat status
 
-Disk Usage:
-  Runs: 156 MB
-  Images: 1.2 GB
+Runtime: docker
+
+Active Runs: 0
+
+Summary
+  Stopped runs:  3  156 MB
+  Images:        2  1200 MB
+  Total disk:       1356 MB
 ```
 
 ## Querying raw data
@@ -278,6 +283,5 @@ Remove or set this to `false` to re-enable execution tracing. Network request lo
 
 ## Related pages
 
-- [Observability](../concepts/03-observability.md) -- Architecture and data flow for logs, traces, and network captures
-- [Observability](../concepts/03-observability.md) -- Hash chain structure, trust model, and attestation details
+- [Observability](../concepts/03-observability.md) -- Architecture, data flow, hash chain structure, trust model, and attestation details
 - [CLI reference](../reference/01-cli.md) -- Complete flag listings for `moat logs`, `moat trace`, and `moat audit`
