@@ -40,6 +40,10 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		daemonDir = filepath.Join(config.GlobalConfigDir(), "proxy")
 	}
 
+	// Expose build version to daemon package so the health endpoint can
+	// report it. This allows detecting version skew between daemon and CLI.
+	daemon.BuildCommit = commit
+
 	sockPath := filepath.Join(daemonDir, "daemon.sock")
 
 	// Create API server.
@@ -151,6 +155,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		PID:       os.Getpid(),
 		ProxyPort: actualPort,
 		SockPath:  sockPath,
+		Commit:    commit,
 	}); lockErr != nil {
 		_ = proxyServer.Stop(context.Background())
 		return lockErr

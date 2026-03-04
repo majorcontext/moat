@@ -62,7 +62,8 @@ The credential-injecting proxy runs as a shared daemon process that outlives the
 - **Management API:** Unix socket at `~/.moat/proxy/daemon.sock`. The CLI registers/unregisters runs via this socket.
 - **Per-run credential scoping:** Each run gets a cryptographic auth token (32 bytes from `crypto/rand`). The proxy looks up run-specific credentials, headers, network policy, and MCP config by token. Both Docker and Apple containers use token-based proxy auth (`HTTP_PROXY=http://moat:token@host:port`).
 - **Responsibilities:** Credential injection, token refresh, MCP relay, hostname routing, and network request logging.
-- **Lock file:** `~/.moat/proxy/daemon.lock` records PID and ports.
+- **Lock file:** `~/.moat/proxy/daemon.lock` records PID, ports, and build commit.
+- **Backwards compatibility:** The daemon API (`internal/daemon/api.go`) **must remain backwards-compatible across binary versions**. The daemon process outlives the CLI that spawned it, so older daemons serve newer CLIs and vice versa. Rules: additive-only fields, no removed/renamed fields, new endpoints must handle 404 gracefully. See the package doc in `api.go`.
 
 See `internal/proxy/proxy.go` and `internal/daemon/` for implementation.
 

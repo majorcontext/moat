@@ -24,6 +24,7 @@ type LockInfo struct {
 	ProxyPort int       `json:"proxy_port"`
 	SockPath  string    `json:"sock_path"`
 	StartedAt time.Time `json:"started_at"`
+	Commit    string    `json:"commit,omitempty"` // Git commit hash of the daemon binary
 }
 
 // IsAlive checks if the daemon process is still running.

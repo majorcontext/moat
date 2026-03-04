@@ -121,6 +121,9 @@ func statusProxy(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  Proxy port: %d\n", health.ProxyPort)
 	fmt.Printf("  Active runs: %d\n", health.RunCount)
 	fmt.Printf("  Started: %s\n", health.StartedAt)
+	if health.Commit != "" {
+		fmt.Printf("  Commit: %s\n", health.Commit)
+	}
 
 	// List runs.
 	runs, err := client.ListRuns(context.Background())

@@ -14,6 +14,11 @@ import (
 	"github.com/majorcontext/moat/internal/routing"
 )
 
+// BuildCommit is the git commit hash of the running binary. Set by the CLI
+// at startup so the health endpoint can report the daemon's version. This
+// allows diagnosing version skew between daemon and CLI.
+var BuildCommit string
+
 // Server is the daemon's HTTP API server over a Unix socket.
 type Server struct {
 	sockPath     string
@@ -38,6 +43,12 @@ func NewServer(sockPath string, proxyPort int) *Server {
 		startedAt: time.Now(),
 	}
 
+	// Route registration for the daemon management API.
+	//
+	// IMPORTANT: This API must remain backwards-compatible across binary
+	// versions. The daemon process may outlive the CLI that spawned it,
+	// so older daemons must handle requests from newer CLIs and vice versa.
+	// See the package doc comment in api.go for the compatibility rules.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
 	mux.HandleFunc("POST /v1/runs", s.handleRegisterRun)
@@ -105,6 +116,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		ProxyPort: s.proxyPort,
 		RunCount:  s.registry.Count(),
 		StartedAt: s.startedAt.Format(time.RFC3339),
+		Commit:    BuildCommit,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

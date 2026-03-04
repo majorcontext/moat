@@ -1,3 +1,22 @@
+// Package daemon implements the proxy daemon's management API.
+//
+// # Backwards Compatibility
+//
+// The daemon is a long-lived process that may run a different binary version
+// than the CLI or the moat-run process. This happens during development
+// (rebuilding moat while runs are active) and during upgrades.
+//
+// To keep old and new versions interoperable, the daemon API follows these
+// rules:
+//
+//   - Additive only: new fields in request/response structs are fine
+//     (encoding/json ignores unknown fields). Never remove or rename fields.
+//   - New endpoints are fine: old clients won't call them. New clients must
+//     handle 404 gracefully when talking to an older daemon.
+//   - Never change the semantics of existing fields.
+//
+// When adding new API surface, consider: "will a CLI built today still work
+// if the daemon is an older binary?" and vice versa.
 package daemon
 
 import (
@@ -73,6 +92,7 @@ type HealthResponse struct {
 	ProxyPort int    `json:"proxy_port"`
 	RunCount  int    `json:"run_count"`
 	StartedAt string `json:"started_at"`
+	Commit    string `json:"commit,omitempty"` // Git commit hash of the daemon binary
 }
 
 // RunInfo is an element of the list returned by GET /v1/runs.
