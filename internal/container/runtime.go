@@ -26,6 +26,12 @@ const (
 	RuntimeApple  RuntimeType = "apple"
 )
 
+// DefaultAgentMemoryMB is the default memory limit for AI agent containers
+// (Claude Code, Codex, Gemini CLI) on Apple containers. Apple's system default
+// of 1024 MB is too low for AI coding agents. Applied only when agent.yaml
+// does not set container.memory. Docker containers remain unlimited.
+const DefaultAgentMemoryMB = 8192
+
 // Runtime is the interface for container runtime operations.
 type Runtime interface {
 	// Type returns the runtime type (Docker or Apple).

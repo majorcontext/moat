@@ -36,11 +36,6 @@ type MCPServerConfig struct {
 	Headers map[string]string
 }
 
-// DefaultAgentMemoryMB is the default memory limit for AI agent containers
-// (Claude Code, Codex, Gemini CLI). Applied only on Apple containers when
-// agent.yaml does not set container.memory.
-const DefaultAgentMemoryMB = 8192
-
 // ContainerConfig is returned by AgentProvider.PrepareContainer.
 type ContainerConfig struct {
 	Env        []string

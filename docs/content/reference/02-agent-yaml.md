@@ -84,7 +84,7 @@ hooks:
 
 # Container resources (applies to both Docker and Apple)
 container:
-  memory: 8192                    # 8 GB (default: 8192 for AI agents on Apple, 4096 otherwise)
+  memory: 16384                   # 16 GB (default: 8192 for AI agents on Apple, 4096 otherwise)
   cpus: 8                         # CPU count (default: 4 for Apple, no limit for Docker)
   dns: ["8.8.8.8", "8.8.4.4"]    # DNS servers (default: Google DNS)
 
