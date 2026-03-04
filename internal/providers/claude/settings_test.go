@@ -124,9 +124,61 @@ func TestLoadSettingsGitHubRepoFormat(t *testing.T) {
 		t.Errorf("compound.Source.URL = %q, want %q", compound.Source.URL, "https://github.com/EveryInc/compound-engineering-plugin.git")
 	}
 
+	// Repo field should be cleared after normalization
+	if superpowers.Source.Repo != "" {
+		t.Errorf("Repo should be cleared after normalization, got %q", superpowers.Source.Repo)
+	}
+
 	// All plugins should be loaded
 	if len(settings.EnabledPlugins) != 3 {
 		t.Errorf("EnabledPlugins = %d, want 3", len(settings.EnabledPlugins))
+	}
+}
+
+func TestLoadSettingsInvalidRepoFormat(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "extraKnownMarketplaces": {
+    "malicious": {
+      "source": {
+        "source": "github",
+        "repo": "owner/repo; rm -rf /"
+      }
+    },
+    "valid": {
+      "source": {
+        "source": "github",
+        "repo": "owner/valid-repo"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	// Malicious entry should be skipped (not normalized), valid one should be normalized
+	malicious := settings.ExtraKnownMarketplaces["malicious"]
+	if malicious.Source.Source != "github" {
+		t.Errorf("malicious should remain unnormalized, got source %q", malicious.Source.Source)
+	}
+	if malicious.Source.URL != "" {
+		t.Errorf("malicious should have no URL, got %q", malicious.Source.URL)
+	}
+
+	valid := settings.ExtraKnownMarketplaces["valid"]
+	if valid.Source.Source != "git" {
+		t.Errorf("valid.Source.Source = %q, want %q", valid.Source.Source, "git")
+	}
+	if valid.Source.URL != "https://github.com/owner/valid-repo.git" {
+		t.Errorf("valid.Source.URL = %q, want %q", valid.Source.URL, "https://github.com/owner/valid-repo.git")
 	}
 }
 

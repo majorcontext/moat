@@ -1557,6 +1557,8 @@ region = %s
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
 				if jsonErr != nil {
+					// MarshalIndent cannot fail for Settings (no channels, funcs, or cycles);
+					// log.Warn for defense-in-depth only.
 					log.Warn("failed to marshal settings.json", "error", jsonErr)
 				} else if writeErr := os.WriteFile(settingsPath, settingsJSON, 0644); writeErr != nil {
 					ui.Warnf("Failed to write Claude settings to container: %v", writeErr)
