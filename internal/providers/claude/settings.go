@@ -92,8 +92,9 @@ func LoadSettings(path string) (*Settings, error) {
 				entry.Source.Repo = ""
 				settings.ExtraKnownMarketplaces[name] = entry
 			} else {
-				log.Debug("skipping marketplace with invalid repo format in settings",
+				log.Debug("removing marketplace with invalid repo format from settings",
 					"name", name, "repo", entry.Source.Repo)
+				delete(settings.ExtraKnownMarketplaces, name)
 			}
 		}
 	}

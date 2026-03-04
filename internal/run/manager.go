@@ -1551,7 +1551,8 @@ region = %s
 			mounts = append(mounts, claudeConfig.Mounts...)
 			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
-			// Write merged settings.json so Claude Code has full marketplace/plugin config at runtime.
+			// Write merged settings.json when there are plugins or marketplaces to configure.
+			// Other Claude settings are handled separately and don't require staging.
 			// moat-init.sh copies $MOAT_CLAUDE_INIT/settings.json to ~/.claude/settings.json.
 			if hasPlugins {
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")

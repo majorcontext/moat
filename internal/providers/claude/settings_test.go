@@ -164,13 +164,13 @@ func TestLoadSettingsInvalidRepoFormat(t *testing.T) {
 		t.Fatalf("LoadSettings: %v", err)
 	}
 
-	// Malicious entry should be skipped (not normalized), valid one should be normalized
-	malicious := settings.ExtraKnownMarketplaces["malicious"]
-	if malicious.Source.Source != "github" {
-		t.Errorf("malicious should remain unnormalized, got source %q", malicious.Source.Source)
+	// Malicious entry should be removed, valid one should be normalized
+	if _, ok := settings.ExtraKnownMarketplaces["malicious"]; ok {
+		t.Error("malicious marketplace should have been removed")
 	}
-	if malicious.Source.URL != "" {
-		t.Errorf("malicious should have no URL, got %q", malicious.Source.URL)
+
+	if len(settings.ExtraKnownMarketplaces) != 1 {
+		t.Errorf("ExtraKnownMarketplaces = %d, want 1", len(settings.ExtraKnownMarketplaces))
 	}
 
 	valid := settings.ExtraKnownMarketplaces["valid"]
