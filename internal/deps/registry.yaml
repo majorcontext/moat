@@ -42,13 +42,15 @@ uv:
   type: github-binary
   repo: astral-sh/uv
   asset: "uv-{target}.tar.gz"
-  bin: uv
+  bin: "uv-{target}/uv"
   default: "0.5.14"
   tag-prefix: none
   requires: [python]
   targets:
     amd64: x86_64-unknown-linux-gnu
     arm64: aarch64-unknown-linux-gnu
+  env:
+    UV_TOOL_BIN_DIR: /usr/local/bin
 
 # npm packages
 typescript:

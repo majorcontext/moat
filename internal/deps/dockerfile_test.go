@@ -512,6 +512,11 @@ func TestGenerateDockerfileUvToolPackages(t *testing.T) {
 	if !strings.Contains(result.Dockerfile, "uv tool install black") {
 		t.Error("Dockerfile should install black via uv tool")
 	}
+
+	// uv's registry env should set UV_TOOL_BIN_DIR so tools land in /usr/local/bin
+	if !strings.Contains(result.Dockerfile, `ENV UV_TOOL_BIN_DIR="/usr/local/bin"`) {
+		t.Error("Dockerfile should set UV_TOOL_BIN_DIR from uv registry env")
+	}
 }
 
 func TestGenerateDockerfileGoInstallPackages(t *testing.T) {

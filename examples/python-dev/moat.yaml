@@ -1,0 +1,28 @@
+# Example: Python development environment
+#
+# This example demonstrates a complete Python development environment with
+# modern tooling pre-installed via the python-dev meta dependency and
+# a dynamic dependency (pip:) for installing packages.
+#
+# Run with:
+#   moat run examples/python-dev
+#
+# Available tools:
+#   - python: Python interpreter
+#   - uv: Fast package manager
+#   - ruff: Fast linter and formatter
+#   - black: Code formatter
+#   - mypy: Static type checker
+#   - pytest: Test runner
+#   - git: Version control
+#
+# The demo script shows version info for all installed tools.
+
+name: python-dev
+
+dependencies:
+  - python@3.12       # Python runtime (selects python:3.12-slim base image)
+  - python-dev        # Meta: uv, ruff, black, mypy, pytest
+  - git               # Version control
+
+command: ["sh", "/workspace/demo.sh"]

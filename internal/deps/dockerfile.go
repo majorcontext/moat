@@ -454,6 +454,9 @@ func writeGithubBinaries(b *strings.Builder, deps []Dependency) {
 		}
 		b.WriteString(fmt.Sprintf("# %s\n", dep.Name))
 		b.WriteString(getGithubBinaryCommands(dep.Name, version, spec).FormatForDockerfile())
+		for k, v := range spec.Env {
+			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
+		}
 		b.WriteString("\n")
 	}
 }
