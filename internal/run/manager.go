@@ -1559,7 +1559,7 @@ region = %s
 				if jsonErr != nil {
 					log.Warn("failed to marshal settings.json", "error", jsonErr)
 				} else if writeErr := os.WriteFile(settingsPath, settingsJSON, 0644); writeErr != nil {
-					log.Warn("failed to write settings.json to staging dir", "error", writeErr)
+					ui.Warnf("Failed to write Claude settings to container: %v", writeErr)
 				} else {
 					log.Debug("wrote settings.json to staging dir",
 						"plugins", len(claudeSettings.EnabledPlugins),

@@ -83,6 +83,7 @@ func LoadSettings(path string) (*Settings, error) {
 	// Normalize GitHub "repo" format to git URLs.
 	// Claude Code's native settings.json uses {"source": "github", "repo": "owner/repo"}
 	// but the rest of moat expects {"source": "git", "url": "https://..."}.
+	// Claude Code accepts both formats, so the normalized output is safe to write back.
 	for name, entry := range settings.ExtraKnownMarketplaces {
 		if entry.Source.Source == "github" && entry.Source.Repo != "" && entry.Source.URL == "" {
 			if validRepoFormat.MatchString(entry.Source.Repo) {
