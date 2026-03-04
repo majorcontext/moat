@@ -43,6 +43,16 @@ moat grant openai
 
 The actual credential is never in the container environment. Moat's proxy intercepts requests to OpenAI's API and injects the real token at the network layer. See [Credential management](../concepts/02-credentials.md) for details.
 
+## Generating moat.yaml
+
+Use `moat init` to auto-generate a `moat.yaml` for your project:
+
+```bash
+moat init ./my-project
+```
+
+This scans the project, detects its dependencies and tools, and generates a configuration file using AI. Requires at least one credential granted (e.g., `moat grant codex`).
+
 ## Running Codex
 
 ### Interactive mode

@@ -63,7 +63,7 @@ func TestGenerateSchemaReference(t *testing.T) {
 }
 
 func TestBuildPrompt(t *testing.T) {
-	prompt := BuildPrompt()
+	prompt := BuildPrompt(t.TempDir())
 
 	// Must contain the schema reference section.
 	if !strings.Contains(prompt, "moat.yaml Schema Reference") {

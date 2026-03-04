@@ -90,11 +90,12 @@ func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
 		}
 	}
 
-	// MCP servers.
+	// MCP servers. Use relay description rather than raw URL to avoid
+	// exposing URLs that may contain embedded credentials or internal endpoints.
 	for _, mcp := range cfg.MCP {
 		rc.MCPServers = append(rc.MCPServers, MCPServer{
 			Name:        mcp.Name,
-			Description: mcp.URL,
+			Description: fmt.Sprintf("Available via MCP relay at /mcp/%s", mcp.Name),
 		})
 	}
 

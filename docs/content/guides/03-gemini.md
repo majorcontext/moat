@@ -90,6 +90,16 @@ Both methods are fully supported. The proxy injects credentials at the network l
 
 The actual credential is never in the container environment. Moat's proxy intercepts requests to Google's API endpoints and injects the real token at the network layer, for both API key and OAuth modes. See [Credential management](../concepts/02-credentials.md) for details.
 
+## Generating moat.yaml
+
+Use `moat init` to auto-generate a `moat.yaml` for your project:
+
+```bash
+moat init ./my-project
+```
+
+This scans the project, detects its dependencies and tools, and generates a configuration file using AI. Requires at least one credential granted (e.g., `moat grant gemini`).
+
 ## Running Gemini
 
 ### Interactive mode

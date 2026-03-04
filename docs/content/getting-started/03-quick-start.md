@@ -109,6 +109,14 @@ $ moat logs
 
 ## Step 6: Create a moat.yaml
 
+You can auto-generate a configuration file using `moat init`:
+
+```bash
+moat init ./my-agent
+```
+
+This scans the project and uses AI to generate an appropriate `moat.yaml`. Alternatively, create one manually.
+
 For repeated runs, create a configuration file. Make a new directory:
 
 ```bash

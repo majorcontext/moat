@@ -1,20 +1,11 @@
 package gemini
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/ui"
 )
-
-// QuickstartPromptBuilder builds the quickstart analysis prompt.
-// Set by cmd/moat to break the import cycle (providers/gemini -> quickstart -> deps -> providers/gemini).
-var QuickstartPromptBuilder func() string
 
 var (
 	geminiFlags        cli.ExecFlags
@@ -90,25 +81,6 @@ Use 'moat list' to see running and recent runs.`,
 	geminiCmd.Flags().StringVar(&geminiWtFlag, "wt", "", "alias for --worktree")
 	_ = geminiCmd.Flags().MarkHidden("wt")
 
-	quickstartCmd := &cobra.Command{
-		Use:   "quickstart [workspace]",
-		Short: "Auto-generate moat.yaml for an existing project",
-		Long: `Analyze the project and generate a moat.yaml configuration file.
-
-Runs Gemini CLI in a bootstrap container to analyze your project's
-manifest files, source code, and README, then generates an appropriate
-moat.yaml configuration.
-
-Requires a Google credential (run 'moat grant gemini' first).
-
-Examples:
-  moat gemini quickstart
-  moat gemini quickstart /path/to/project`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runGeminiQuickstart,
-	}
-	geminiCmd.AddCommand(quickstartCmd)
-
 	root.AddCommand(geminiCmd)
 }
 
@@ -138,56 +110,6 @@ func runGemini(cmd *cobra.Command, args []string) error {
 		ConfigureAgent: func(cfg *config.Config) {
 			syncLogs := true
 			cfg.Gemini.SyncLogs = &syncLogs
-		},
-	})
-}
-
-func runGeminiQuickstart(cmd *cobra.Command, args []string) error {
-	workspace := "."
-	if len(args) > 0 {
-		workspace = args[0]
-	}
-
-	absPath, err := cli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return err
-	}
-
-	// Check if moat.yaml already exists
-	if _, err := os.Stat(filepath.Join(absPath, "moat.yaml")); err == nil {
-		return fmt.Errorf("moat.yaml already exists in %s\n\nTo regenerate, remove the existing file first.", absPath)
-	}
-
-	if QuickstartPromptBuilder == nil {
-		return fmt.Errorf("quickstart is not available (prompt builder not registered)")
-	}
-	prompt := QuickstartPromptBuilder() + "\nWrite the generated YAML directly to /workspace/moat.yaml.\n"
-
-	ui.Info("Analyzing project to generate moat.yaml...")
-	ui.Infof("Workspace: %s", absPath)
-
-	// Use a fresh ExecFlags for quickstart (don't inherit from parent gemini command)
-	var qsFlags cli.ExecFlags
-
-	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
-		Name:       "quickstart",
-		Flags:      &qsFlags,
-		PromptFlag: prompt,
-		GetCredentialGrant: func() string {
-			if HasCredential() {
-				return "gemini"
-			}
-			return ""
-		},
-		Dependencies: DefaultDependencies(),
-		NetworkHosts: NetworkHosts(),
-		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
-			return []string{"gemini", "-p", promptFlag}, nil
-		},
-		ConfigureAgent: func(cfg *config.Config) {
-			// Ensure agent is "gemini" for proper image selection,
-			// since Name is "quickstart" for the CalledAs() guard.
-			cfg.Agent = "gemini"
 		},
 	})
 }

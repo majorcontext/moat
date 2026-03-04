@@ -2,8 +2,6 @@ package claude
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,12 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/storage"
-	"github.com/majorcontext/moat/internal/ui"
 )
-
-// QuickstartPromptBuilder builds the quickstart analysis prompt.
-// Set by cmd/moat to break the import cycle (providers/claude → quickstart → deps → providers/claude).
-var QuickstartPromptBuilder func() string
 
 var (
 	claudeFlags        cli.ExecFlags
@@ -98,25 +91,6 @@ Use 'moat list' to see running and recent runs.`,
 	claudeCmd.Flags().StringVar(&claudeWtFlag, "wt", "", "alias for --worktree")
 	_ = claudeCmd.Flags().MarkHidden("wt")
 
-	quickstartCmd := &cobra.Command{
-		Use:   "quickstart [workspace]",
-		Short: "Auto-generate moat.yaml for an existing project",
-		Long: `Analyze the project and generate a moat.yaml configuration file.
-
-Runs Claude Code in a bootstrap container to analyze your project's
-manifest files, source code, and README, then generates an appropriate
-moat.yaml configuration.
-
-Requires an Anthropic credential (run 'moat grant anthropic' first).
-
-Examples:
-  moat claude quickstart
-  moat claude quickstart /path/to/project`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runClaudeQuickstart,
-	}
-	claudeCmd.AddCommand(quickstartCmd)
-
 	root.AddCommand(claudeCmd)
 }
 
@@ -132,9 +106,9 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		PromptFlag:            claudePromptFlag,
 		AllowedHosts:          claudeAllowedHosts,
 		WtFlag:                claudeWtFlag,
-		GetCredentialGrant:    getClaudeCredentialName,
-		Dependencies:          []string{"node@20", "git", "claude-code"},
-		NetworkHosts:          []string{"claude.ai", "*.claude.ai"},
+		GetCredentialGrant:    GetCredentialName,
+		Dependencies:          DefaultDependencies(),
+		NetworkHosts:          NetworkHosts(),
 		SupportsInitialPrompt: true,
 		DryRunNote:            "Note: No API key configured. Claude will prompt for login.",
 		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
@@ -169,56 +143,24 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 	})
 }
 
-func runClaudeQuickstart(cmd *cobra.Command, args []string) error {
-	workspace := "."
-	if len(args) > 0 {
-		workspace = args[0]
+// DefaultDependencies returns the default dependencies for running Claude Code.
+func DefaultDependencies() []string {
+	return []string{
+		"node@20",
+		"git",
+		"claude-code",
 	}
-
-	absPath, err := cli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return err
-	}
-
-	// Check if moat.yaml already exists
-	if _, err := os.Stat(filepath.Join(absPath, "moat.yaml")); err == nil {
-		return fmt.Errorf("moat.yaml already exists in %s\n\nTo regenerate, remove the existing file first.", absPath)
-	}
-
-	if QuickstartPromptBuilder == nil {
-		return fmt.Errorf("quickstart is not available (prompt builder not registered)")
-	}
-	prompt := QuickstartPromptBuilder() + "\nWrite the generated YAML directly to /workspace/moat.yaml.\n"
-
-	ui.Info("Analyzing project to generate moat.yaml...")
-	ui.Infof("Workspace: %s", absPath)
-
-	// Use a fresh ExecFlags for quickstart (don't inherit from parent claude command)
-	var qsFlags cli.ExecFlags
-
-	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
-		Name:               "quickstart",
-		Flags:              &qsFlags,
-		PromptFlag:         prompt,
-		GetCredentialGrant: getClaudeCredentialName,
-		Dependencies:       []string{"node@20", "git", "claude-code"},
-		NetworkHosts:       []string{"claude.ai", "*.claude.ai"},
-		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
-			return []string{
-				"claude",
-				"--dangerously-skip-permissions",
-				"-p", promptFlag,
-			}, nil
-		},
-		ConfigureAgent: func(cfg *config.Config) {
-			// Ensure agent is "claude" for proper image selection,
-			// since Name is "quickstart" for the CalledAs() guard.
-			cfg.Agent = "claude"
-		},
-	})
 }
 
-// getClaudeCredentialName returns the grant name to use for moat claude.
+// NetworkHosts returns the list of hosts that Claude Code needs network access to.
+func NetworkHosts() []string {
+	return []string{
+		"claude.ai",
+		"*.claude.ai",
+	}
+}
+
+// GetCredentialName returns the grant name to use for moat claude.
 //
 // Preference order:
 //  1. claude (OAuth token) — preferred for Claude Code
@@ -229,7 +171,7 @@ func runClaudeQuickstart(cmd *cobra.Command, args []string) error {
 //   - anthropic.enc with OAuth token → claude.enc
 //
 // Returns empty string if no credential exists.
-func getClaudeCredentialName() string {
+func GetCredentialName() string {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return ""

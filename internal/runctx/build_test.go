@@ -156,13 +156,13 @@ func TestBuildFromConfig(t *testing.T) {
 		switch m.Name {
 		case "github":
 			foundGithubMCP = true
-			if m.Description != "https://mcp.github.com" {
-				t.Errorf("github MCP description = %q, want URL", m.Description)
+			if m.Description != "Available via MCP relay at /mcp/github" {
+				t.Errorf("github MCP description = %q", m.Description)
 			}
 		case "linear":
 			foundLinearMCP = true
-			if m.Description != "https://mcp.linear.app" {
-				t.Errorf("linear MCP description = %q, want URL", m.Description)
+			if m.Description != "Available via MCP relay at /mcp/linear" {
+				t.Errorf("linear MCP description = %q", m.Description)
 			}
 		}
 	}

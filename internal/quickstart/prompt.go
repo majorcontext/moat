@@ -2,10 +2,11 @@ package quickstart
 
 import "strings"
 
-// BuildPrompt assembles the full quickstart prompt from schema, deps, examples,
-// and instructions. The returned string is suitable for use as a system prompt
-// when asking an AI agent to generate a moat.yaml for a project.
-func BuildPrompt() string {
+// BuildPrompt assembles the full quickstart prompt from a workspace scan,
+// schema reference, deps catalog, examples, and instructions. The returned
+// string is suitable for use as a system prompt when asking an AI agent to
+// generate a moat.yaml for a project.
+func BuildPrompt(workspace string) string {
 	var b strings.Builder
 
 	// Role setting.
@@ -13,6 +14,9 @@ func BuildPrompt() string {
 
 	// Task.
 	b.WriteString("Your task: analyze the project at /workspace and generate a moat.yaml configuration file.\n\n")
+
+	// Workspace scan results (deterministic, pre-computed).
+	b.WriteString(ScanWorkspace(workspace))
 
 	// Schema reference.
 	b.WriteString(GenerateSchemaReference())

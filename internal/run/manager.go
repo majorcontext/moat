@@ -1046,21 +1046,6 @@ region = %s
 		}
 	}
 
-	// Build MOAT_* environment variables for run metadata
-	if opts.Config != nil {
-		proxyEnv = append(proxyEnv, "MOAT_RUN_ID="+r.ID)
-		if opts.Config.Agent != "" {
-			proxyEnv = append(proxyEnv, "MOAT_AGENT="+opts.Config.Agent)
-		}
-		if len(opts.Config.Grants) > 0 {
-			proxyEnv = append(proxyEnv, "MOAT_GRANTS="+strings.Join(opts.Config.Grants, ","))
-		}
-		if opts.Config.Network.Policy != "" {
-			proxyEnv = append(proxyEnv, "MOAT_NETWORK_POLICY="+opts.Config.Network.Policy)
-		}
-		proxyEnv = append(proxyEnv, "MOAT_WORKSPACE=/workspace")
-	}
-
 	// Parse and validate dependencies
 	var depList []deps.Dependency
 	var allDeps []string

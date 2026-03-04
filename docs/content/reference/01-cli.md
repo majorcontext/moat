@@ -63,6 +63,40 @@ moat codex -- "explain this codebase"
 
 ---
 
+## moat init
+
+Auto-generate a `moat.yaml` configuration file for an existing project.
+
+```
+moat init [workspace]
+```
+
+Scans the project workspace to detect file types, manifest files, and CI configurations, then runs an AI agent in a bootstrap container to generate an appropriate `moat.yaml`.
+
+### Auto-detection
+
+`moat init` automatically detects which agent credentials are available, in order: Claude, Codex, Gemini. It uses the first agent with valid credentials.
+
+If no credentials are found, the command prints instructions for granting credentials.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Project directory to analyze (default: current directory) |
+
+### Examples
+
+```bash
+# Generate moat.yaml for the current directory
+moat init
+
+# Generate moat.yaml for a specific project
+moat init /path/to/project
+```
+
+---
+
 ## moat run
 
 Run an agent in a container.
