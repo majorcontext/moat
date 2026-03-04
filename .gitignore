@@ -54,3 +54,4 @@ internal/run/helpers/aws-credential-helper-*
 # Git worktrees for isolated development
 .worktrees/
 .private-journal/
+.worktrees/
