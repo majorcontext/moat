@@ -3111,15 +3111,9 @@ func isAIAgent(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
-	switch {
-	case strings.HasPrefix(cfg.Agent, "claude"):
-		return true
-	case strings.HasPrefix(cfg.Agent, "codex"):
-		return true
-	case strings.HasPrefix(cfg.Agent, "gemini"):
-		return true
-	}
-	return false
+	return strings.HasPrefix(cfg.Agent, "claude") ||
+		strings.HasPrefix(cfg.Agent, "codex") ||
+		strings.HasPrefix(cfg.Agent, "gemini")
 }
 
 // resolveContainerHome returns the home directory to use for container mounts.

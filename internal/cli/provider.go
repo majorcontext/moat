@@ -205,6 +205,13 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	ctx := context.Background()
 
+	// Ensure the agent name is set so the manager can apply agent-specific
+	// defaults (e.g., memory limits). When there's no agent.yaml, cfg.Agent
+	// is empty — fill it from the provider name (e.g., "claude", "codex").
+	if cfg.Agent == "" {
+		cfg.Agent = rc.Name
+	}
+
 	opts := ExecOptions{
 		Flags:       *rc.Flags,
 		Workspace:   absPath,
