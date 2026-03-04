@@ -42,5 +42,12 @@ func GenerateDepsReference() string {
 	b.WriteString("\nFor system packages not available through any prefix, use lifecycle hooks:\n")
 	b.WriteString("```yaml\nhooks:\n  post_build_root: \"apt-get update && apt-get install -y <package>\"\n```\n")
 
+	b.WriteString("\n## Docker Dependency\n\n")
+	b.WriteString("Docker requires an explicit mode — bare `docker` is not allowed:\n")
+	b.WriteString("- `docker:host` — Docker CLI only, uses host Docker socket (for running docker commands)\n")
+	b.WriteString("- `docker:dind` — Full Docker-in-Docker (for building/running containers inside the sandbox)\n\n")
+	b.WriteString("IMPORTANT: Docker dependencies require `runtime: docker` in the config.\n")
+	b.WriteString("```yaml\nruntime: docker\ndependencies: [docker:dind]\n```\n")
+
 	return b.String()
 }

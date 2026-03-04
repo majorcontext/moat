@@ -154,4 +154,15 @@ func TestGenerateDepsReference(t *testing.T) {
 	if !strings.Contains(ref, "post_build_root") {
 		t.Error("expected lifecycle hooks section with post_build_root")
 	}
+
+	// Verify Docker dependency section.
+	if !strings.Contains(ref, "docker:host") {
+		t.Error("expected docker:host in Docker dependency section")
+	}
+	if !strings.Contains(ref, "docker:dind") {
+		t.Error("expected docker:dind in Docker dependency section")
+	}
+	if !strings.Contains(ref, "runtime: docker") {
+		t.Error("expected runtime: docker requirement for Docker deps")
+	}
 }

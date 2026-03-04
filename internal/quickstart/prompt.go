@@ -61,11 +61,13 @@ func BuildPrompt() string {
 	b.WriteString("3. Check .env.example, .env.sample, or README for environment variable and credential hints.\n")
 	b.WriteString("4. Detect which runtime and version the project needs.\n")
 	b.WriteString("5. Detect database or cache dependencies (postgres, mysql, redis).\n")
-	b.WriteString("6. Only include grants if there is evidence the project uses that service.\n")
-	b.WriteString("7. Keep the config minimal — only include what the project actually needs.\n")
-	b.WriteString("8. Use pre_run hooks for dependency installation (npm install, pip install, etc.).\n")
-	b.WriteString("9. Use post_build_root hooks only for system packages not available as dependencies.\n")
-	b.WriteString("10. Output only valid YAML, nothing else. No markdown fences, no explanation.\n")
+	b.WriteString("6. Read Makefile, Taskfile, CI configs (.github/workflows/), and test scripts to detect ALL tools used (test runners, linters, secondary runtimes like python or bats).\n")
+	b.WriteString("7. If the project uses Docker (Dockerfile, docker-compose, Docker SDK, or docker CLI commands), add `docker:host` or `docker:dind` and set `runtime: docker`.\n")
+	b.WriteString("8. Only include grants if there is evidence the project uses that service.\n")
+	b.WriteString("9. Keep the config minimal — only include what the project actually needs, but don't miss dependencies used by tests or build scripts.\n")
+	b.WriteString("10. Use pre_run hooks for dependency installation (npm install, pip install, etc.).\n")
+	b.WriteString("11. Use post_build_root hooks only for system packages not available as dependencies.\n")
+	b.WriteString("12. Output only valid YAML, nothing else. No markdown fences, no explanation.\n")
 
 	return b.String()
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // QuickstartPromptBuilder builds the quickstart analysis prompt.
@@ -188,6 +189,9 @@ func runClaudeQuickstart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("quickstart is not available (prompt builder not registered)")
 	}
 	prompt := QuickstartPromptBuilder() + "\nWrite the generated YAML directly to /workspace/moat.yaml.\n"
+
+	ui.Info("Analyzing project to generate moat.yaml...")
+	ui.Infof("Workspace: %s", absPath)
 
 	// Use a fresh ExecFlags for quickstart (don't inherit from parent claude command)
 	var qsFlags cli.ExecFlags
