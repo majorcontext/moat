@@ -411,7 +411,7 @@ func checkContainerConfig(diag *claudeDiagnostic) error {
 	for _, field := range claudeprov.HostConfigAllowlist {
 		if _, exists := hostConfig[field]; !exists {
 			// Skip fields that are optional or set by moat:
-			// - mcpServers: configured via agent.yaml, not copied from host
+			// - mcpServers: configured via moat.yaml, not copied from host
 			// - cachedGrowthBookFeatures: optional optimization, may not exist on fresh installs
 			if field == "mcpServers" || field == "cachedGrowthBookFeatures" {
 				continue

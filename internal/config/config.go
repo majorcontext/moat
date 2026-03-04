@@ -1,4 +1,4 @@
-// Package config handles agent.yaml manifest parsing.
+// Package config handles moat.yaml manifest parsing.
 package config
 
 import (
@@ -17,7 +17,7 @@ import (
 // Must start with a letter or digit.
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// Config represents an agent.yaml manifest.
+// Config represents a moat.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
 	Agent        string            `yaml:"agent"`
@@ -103,7 +103,7 @@ type VolumeConfig struct {
 }
 
 // MCPServerConfig defines a remote MCP server configuration for top-level
-// MCP servers in agent.yaml. It specifies the server name, URL endpoint,
+// MCP servers in moat.yaml. It specifies the server name, URL endpoint,
 // and optional authentication settings for credential injection.
 type MCPServerConfig struct {
 	Name string         `yaml:"name"`
@@ -350,21 +350,36 @@ type deprecatedRuntime struct {
 	Go     string `yaml:"go,omitempty"`
 }
 
-// Load reads agent.yaml from the given directory.
-// Returns nil, nil if the file doesn't exist.
+// ConfigFilename is the preferred config file name.
+const ConfigFilename = "moat.yaml"
+
+// LegacyConfigFilename is the legacy config file name, supported as a fallback.
+const LegacyConfigFilename = "agent.yaml"
+
+// Load reads moat.yaml (or agent.yaml as fallback) from the given directory.
+// Returns nil, nil if neither file exists.
 func Load(dir string) (*Config, error) {
-	path := filepath.Join(dir, "agent.yaml")
+	// Try moat.yaml first, fall back to agent.yaml
+	path := filepath.Join(dir, ConfigFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading %s: %w", ConfigFilename, err)
 		}
-		return nil, fmt.Errorf("reading agent.yaml: %w", err)
+		// Try legacy agent.yaml
+		path = filepath.Join(dir, LegacyConfigFilename)
+		data, err = os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("reading %s: %w", LegacyConfigFilename, err)
+		}
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing agent.yaml: %w", err)
+		return nil, fmt.Errorf("parsing %s: %w", filepath.Base(path), err)
 	}
 
 	// Validate runtime field (only "docker" or "apple" allowed)

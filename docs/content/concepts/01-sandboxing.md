@@ -36,7 +36,7 @@ Additional host directories can be mounted into the container. See [Mount syntax
 
 ## Image selection
 
-Moat selects a container base image from the `dependencies` field in `agent.yaml`. The first recognized runtime dependency (Node.js, Python, or Go) determines the base image. When no recognized runtime is declared, Moat falls back to a minimal Debian image. Additional dependencies are installed into the selected base image during the build step.
+Moat selects a container base image from the `dependencies` field in `moat.yaml`. The first recognized runtime dependency (Node.js, Python, or Go) determines the base image. When no recognized runtime is declared, Moat falls back to a minimal Debian image. Additional dependencies are installed into the selected base image during the build step.
 
 This means you declare what the agent needs, not which Docker image to use. See [Dependencies](../reference/06-dependencies.md) for the full resolution model and supported dependency types.
 

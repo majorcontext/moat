@@ -91,7 +91,7 @@ Moat distinguishes between two mechanisms for providing sensitive values to agen
 |---|----------------------|---------|
 | **Delivery** | Network-layer injection by the proxy | Environment variables in the container |
 | **Visibility** | Not visible to processes in the container | Visible to all processes in the container |
-| **Configuration** | `grants:` in `agent.yaml` | `secrets:` in `agent.yaml` |
+| **Configuration** | `grants:` in `moat.yaml` | `secrets:` in `moat.yaml` |
 | **Resolution** | At request time by the proxy | At container start on the host |
 | **Risk** | Lower -- agent never sees raw token | Higher -- any process can read the env var |
 

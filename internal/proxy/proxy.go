@@ -932,7 +932,7 @@ func (p *Proxy) writeBlockedResponse(w http.ResponseWriter, host string) {
 	w.Header().Set("Proxy-Authenticate", "Moat-Policy")
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusProxyAuthRequired)
-	_, _ = w.Write([]byte("Moat: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.allow in agent.yaml or use policy: permissive.\n"))
+	_, _ = w.Write([]byte("Moat: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.allow in moat.yaml or use policy: permissive.\n"))
 }
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {

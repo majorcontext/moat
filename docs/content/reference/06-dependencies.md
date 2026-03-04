@@ -11,7 +11,7 @@ Declares runtime dependencies, services, and packages for container image builds
 
 ## Declaration
 
-Add dependencies to the `dependencies` list in `agent.yaml`:
+Add dependencies to the `dependencies` list in `moat.yaml`:
 
 ```yaml
 dependencies:
@@ -22,13 +22,13 @@ dependencies:
   - postgres@17
 ```
 
-The `--dep` CLI flag adds dependencies for a single run without modifying `agent.yaml`:
+The `--dep` CLI flag adds dependencies for a single run without modifying `moat.yaml`:
 
 ```bash
 moat run --dep node@20 --dep git ./my-project
 ```
 
-See the [agent.yaml reference](./02-agent-yaml.md) for the complete `dependencies` field specification.
+See the [moat.yaml reference](./02-moat-yaml.md) for the complete `dependencies` field specification.
 
 ## Dependency types
 
@@ -180,7 +180,7 @@ dependencies:
   - docker:host  # or docker:dind
 ```
 
-Both modes require Docker runtime. Apple containers do not support Docker socket mounting or privileged mode. See the [agent.yaml reference](./02-agent-yaml.md#docker) for detailed configuration.
+Both modes require Docker runtime. Apple containers do not support Docker socket mounting or privileged mode. See the [moat.yaml reference](./02-moat-yaml.md#docker) for detailed configuration.
 
 ## Available services
 
@@ -194,7 +194,7 @@ Service dependencies require Docker or Apple container runtime. See the [service
 
 ## Hooks
 
-Hook commands run after dependency installation completes. See the [agent.yaml hooks reference](./02-agent-yaml.md#hooks) for field specifications and the [lifecycle hooks guide](../guides/10-hooks.md) for all hook types.
+Hook commands run after dependency installation completes. See the [moat.yaml hooks reference](./02-moat-yaml.md#hooks) for field specifications and the [lifecycle hooks guide](../guides/10-hooks.md) for all hook types.
 
 ## CLI commands
 
@@ -227,7 +227,7 @@ $ moat deps info go-extras
 
 ## Related pages
 
-- [agent.yaml reference](./02-agent-yaml.md) -- `dependencies` field specification
+- [moat.yaml reference](./02-moat-yaml.md) -- `dependencies` field specification
 - [Service dependencies guide](../guides/08-services.md) -- service configuration, environment variables, and networking
 - [Lifecycle hooks guide](../guides/10-hooks.md) -- `post_build` hooks for setup after dependency installation
 - [CLI reference](./01-cli.md) -- full `moat deps` command reference

@@ -22,8 +22,8 @@ Examples:
   # Grant Context7 MCP access
   moat grant mcp context7
 
-  # Configure in agent.yaml
-  cat > agent.yaml <<YAML
+  # Configure in moat.yaml
+  cat > moat.yaml <<YAML
   mcp:
     - name: context7
       url: https://mcp.context7.com/mcp
@@ -84,7 +84,7 @@ func runGrantMCP(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nMCP credential 'mcp-%s' saved to %s\n", name, credPath)
-	fmt.Printf("\nConfigure in agent.yaml:\n\n")
+	fmt.Printf("\nConfigure in moat.yaml:\n\n")
 	fmt.Printf(`mcp:
   - name: %s
     url: https://mcp.example.com/mcp

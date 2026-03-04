@@ -87,7 +87,7 @@ The Moat firewall proxies HTTP/HTTPS and filters by hostname, not IP address. Th
 
 func runCodex(cmd *cobra.Command, args []string) error {
     // 1. Resolve workspace
-    // 2. Load agent.yaml if present
+    // 2. Load moat.yaml if present
     // 3. Build grants (auto-add openai if credential exists)
     // 4. Ensure dependencies: node@20, git, codex-cli
     // 5. Build command: codex --full-auto (unless --noyolo)
@@ -204,7 +204,7 @@ This means the `codex-cli` dependency should resolve to the npm package.
    - ChatGPT subscription via `codex login` device flow
    - Import existing credentials from `~/.codex/auth.json`
 
-2. **MCP Servers**: YES - Use same `codex.mcp` config structure in agent.yaml for consistency with Claude
+2. **MCP Servers**: YES - Use same `codex.mcp` config structure in moat.yaml for consistency with Claude
 
 3. **Network Filtering**: Not an issue - Moat's firewall filters by hostname, not IP, so Cloudflare CDN IPs don't need special handling
 

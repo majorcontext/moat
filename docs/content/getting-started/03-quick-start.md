@@ -107,7 +107,7 @@ $ moat logs
 [10:23:44.512] {"login": "your-username", ...}
 ```
 
-## Step 6: Create an agent.yaml
+## Step 6: Create a moat.yaml
 
 For repeated runs, create a configuration file. Make a new directory:
 
@@ -116,7 +116,7 @@ mkdir my-agent
 cd my-agent
 ```
 
-Create `agent.yaml`:
+Create `moat.yaml`:
 
 ```yaml
 name: my-agent
@@ -165,7 +165,7 @@ $ moat run -- node check-repos.js
 ```
 
 Moat:
-1. Read `agent.yaml` and determined the base image (`node:20-slim` from `node@20`)
+1. Read `moat.yaml` and determined the base image (`node:20-slim` from `node@20`)
 2. Injected the GitHub credential (from `grants: [github]`)
 3. Set the environment variable `NODE_ENV=development`
 4. Ran `node check-repos.js`

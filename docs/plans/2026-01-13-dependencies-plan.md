@@ -95,7 +95,7 @@ type DepSpec struct {
 	// Package field is reused
 }
 
-// Dependency represents a parsed dependency from agent.yaml.
+// Dependency represents a parsed dependency from moat.yaml.
 type Dependency struct {
 	Name    string // e.g., "node"
 	Version string // e.g., "20" or "" for default
@@ -630,7 +630,7 @@ git commit -m "feat(deps): add dependency validation with suggestions"
 
 func TestLoadConfigWithDependencies(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -657,7 +657,7 @@ dependencies:
 
 func TestLoadConfigRejectsRuntime(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -696,7 +696,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents an agent.yaml manifest.
+// Config represents a moat.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
 	Agent        string            `yaml:"agent"`
@@ -718,21 +718,21 @@ type deprecatedRuntime struct {
 	Go     string `yaml:"go,omitempty"`
 }
 
-// Load reads agent.yaml from the given directory.
+// Load reads moat.yaml from the given directory.
 // Returns nil, nil if the file doesn't exist.
 func Load(dir string) (*Config, error) {
-	path := filepath.Join(dir, "agent.yaml")
+	path := filepath.Join(dir, "moat.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("reading agent.yaml: %w", err)
+		return nil, fmt.Errorf("reading moat.yaml: %w", err)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing agent.yaml: %w", err)
+		return nil, fmt.Errorf("parsing moat.yaml: %w", err)
 	}
 
 	// Reject deprecated runtime field
@@ -1588,7 +1588,7 @@ var depsCmd = &cobra.Command{
 var depsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available dependencies",
-	Long: `List all dependencies that can be used in agent.yaml.
+	Long: `List all dependencies that can be used in moat.yaml.
 
 Examples:
   agent deps list
@@ -1675,7 +1675,7 @@ func runDepsInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Usage in agent.yaml:")
+	fmt.Println("Usage in moat.yaml:")
 	if spec.Default != "" {
 		fmt.Printf("  dependencies:\n    - %s        # uses default version %s\n", name, spec.Default)
 		fmt.Printf("    - %s@%s    # explicit version\n", name, spec.Default)
@@ -1738,15 +1738,15 @@ git commit -m "refactor: remove deprecated runtime field and flag"
 
 ---
 
-## Task 13: Update Example agent.yaml
+## Task 13: Update Example moat.yaml
 
 **Files:**
-- Modify: `examples/multi-service/agent.yaml`
+- Modify: `examples/multi-service/moat.yaml`
 
 **Step 1: Update the example**
 
 ```yaml
-# examples/multi-service/agent.yaml
+# examples/multi-service/moat.yaml
 # Example: Multi-service agent with hostname routing
 #
 # This example runs two simple Python HTTP servers and exposes them
@@ -1875,7 +1875,7 @@ go build ./cmd/agent
 
 **Step 4: Test with example**
 
-Create a test agent.yaml:
+Create a test moat.yaml:
 ```yaml
 name: test
 dependencies:

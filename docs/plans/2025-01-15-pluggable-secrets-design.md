@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a `secrets:` block to `agent.yaml` that declares environment variables whose values are resolved from external secret managers at runtime. Secrets are resolved on the host before the container starts, and injected as plain environment variables - the agent never sees the secret references.
+Add a `secrets:` block to `moat.yaml` that declares environment variables whose values are resolved from external secret managers at runtime. Secrets are resolved on the host before the container starts, and injected as plain environment variables - the agent never sees the secret references.
 
 ## Motivation
 
@@ -25,7 +25,7 @@ secrets:
 
 ## Behavior
 
-1. Parse `secrets:` block from `agent.yaml`
+1. Parse `secrets:` block from `moat.yaml`
 2. For each entry, dispatch to appropriate resolver based on URI scheme
 3. Resolve all secrets on the host (fail fast if any fail)
 4. Merge resolved values into container environment alongside `env:`

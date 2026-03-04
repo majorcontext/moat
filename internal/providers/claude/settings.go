@@ -23,7 +23,7 @@ const (
 	SourceClaudeUser SettingSource = "~/.claude/settings.json"
 	SourceMoatUser   SettingSource = "~/.moat/claude/settings.json"
 	SourceProject    SettingSource = ".claude/settings.json"
-	SourceAgentYAML  SettingSource = "agent.yaml"
+	SourceMoatYAML   SettingSource = "moat.yaml"
 	SourceUnknown    SettingSource = "unknown"
 )
 
@@ -267,7 +267,7 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 // 2. ~/.claude/settings.json (Claude's native user settings)
 // 3. ~/.moat/claude/settings.json (user defaults for moat runs)
 // 4. <workspace>/.claude/settings.json (project defaults)
-// 5. agent.yaml claude.* fields (run overrides)
+// 5. moat.yaml claude.* fields (run overrides)
 func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error) {
 	var result *Settings
 
@@ -311,10 +311,10 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 	}
 	result = MergeSettings(result, projectSettings, SourceProject)
 
-	// 5. Apply agent.yaml overrides
+	// 5. Apply moat.yaml overrides
 	if cfg != nil {
 		agentOverrides := ConfigToSettings(cfg)
-		result = MergeSettings(result, agentOverrides, SourceAgentYAML)
+		result = MergeSettings(result, agentOverrides, SourceMoatYAML)
 	}
 
 	// Ensure we always return a non-nil result
@@ -325,7 +325,7 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 	return result, nil
 }
 
-// ConfigToSettings converts agent.yaml claude config to Settings format.
+// ConfigToSettings converts moat.yaml claude config to Settings format.
 func ConfigToSettings(cfg *config.Config) *Settings {
 	if cfg == nil {
 		return nil

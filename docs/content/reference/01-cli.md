@@ -43,7 +43,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 |------|-------------|
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
 | `-e`, `--env KEY=VALUE` | Set environment variable (repeatable) |
-| `-n`, `--name NAME` | Run name (default: from `agent.yaml` or random) |
+| `-n`, `--name NAME` | Run name (default: from `moat.yaml` or random) |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
@@ -76,7 +76,7 @@ moat run [flags] [path] [-- command]
 | Argument | Description |
 |----------|-------------|
 | `path` | Workspace directory (default: current directory) |
-| `command` | Command to run (overrides agent.yaml) |
+| `command` | Command to run (overrides moat.yaml) |
 
 ### Flags
 
@@ -342,14 +342,14 @@ moat wt <branch> [-- command]
 
 The branch is created from HEAD if it doesn't exist. The worktree is created at `~/.moat/worktrees/<repo-id>/<branch>`.
 
-Configuration is read from `agent.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to stop it.
+Configuration is read from `moat.yaml` in the repository root. If a run is already active in the worktree, returns an error with instructions to stop it.
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
 | `branch` | Branch name to create or reuse a worktree for |
-| `command` | Command to run (overrides agent.yaml) |
+| `command` | Command to run (overrides moat.yaml) |
 
 ### Flags
 
@@ -366,7 +366,7 @@ Configuration is read from `agent.yaml` in the repository root. If a run is alre
 
 ### Run naming
 
-The run name is `{name}-{branch}` when `agent.yaml` has a `name` field, otherwise just `{branch}`.
+The run name is `{name}-{branch}` when `moat.yaml` has a `name` field, otherwise just `{branch}`.
 
 ### Worktree base path
 
@@ -529,7 +529,7 @@ Store a credential for an MCP server.
 moat grant mcp context7
 ```
 
-The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in agent.yaml.
+The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in moat.yaml.
 
 **Interactive prompts:**
 - Credential (hidden input)
@@ -929,7 +929,7 @@ To clean a single branch's worktree, use `moat wt clean <branch>`.
 
 Manage persistent volumes.
 
-Volumes store data at `~/.moat/volumes/<agent-name>/<volume-name>/` and persist across runs for the same agent name. They are created automatically when `agent.yaml` specifies a `volumes:` section.
+Volumes store data at `~/.moat/volumes/<agent-name>/<volume-name>/` and persist across runs for the same agent name. They are created automatically when `moat.yaml` specifies a `volumes:` section.
 
 ### moat volumes ls
 

@@ -1298,7 +1298,7 @@ git commit -m "feat(snapshot): add snapshot engine with backend detection"
 
 ## Phase 3: Configuration
 
-### Task 3.1: Add Snapshot Config to agent.yaml
+### Task 3.1: Add Snapshot Config to moat.yaml
 
 **Files:**
 - Modify: `internal/config/config.go`
@@ -2190,7 +2190,7 @@ This implementation plan covers:
 
 1. **Phase 1:** Foundation types (snapshot metadata, exec events)
 2. **Phase 2:** Snapshot backends (archive, APFS, engine)
-3. **Phase 3:** Configuration (agent.yaml schema)
+3. **Phase 3:** Configuration (moat.yaml schema)
 4. **Phase 4:** Storage integration (exec event persistence)
 5. **Phase 5:** CLI commands (snapshots, snapshot, rollback)
 6. **Phase 6:** Run lifecycle integration

@@ -27,7 +27,7 @@ For prepackaged language servers (Go, TypeScript, Python), see [Language servers
 
 ## Remote MCP servers
 
-Remote MCP servers are external HTTPS services declared at the top level of `agent.yaml`. Moat injects credentials at the network layer -- the agent never sees raw tokens.
+Remote MCP servers are external HTTPS services declared at the top level of `moat.yaml`. Moat injects credentials at the network layer -- the agent never sees raw tokens.
 
 ### 1. Grant credentials
 
@@ -43,9 +43,9 @@ The credential is encrypted and stored locally. The grant name follows the patte
 
 For public MCP servers that do not require authentication, skip this step.
 
-### 2. Configure in agent.yaml
+### 2. Configure in moat.yaml
 
-Declare the MCP server at the top level of `agent.yaml` (not under `claude:`, `codex:`, or `gemini:`):
+Declare the MCP server at the top level of `moat.yaml` (not under `claude:`, `codex:`, or `gemini:`):
 
 ```yaml
 mcp:
@@ -84,11 +84,11 @@ mcp:
 moat claude ./my-project
 ```
 
-No additional flags are needed. Moat reads the `mcp:` section from `agent.yaml` and configures the proxy relay automatically.
+No additional flags are needed. Moat reads the `mcp:` section from `moat.yaml` and configures the proxy relay automatically.
 
 ### Multiple remote servers
 
-Configure multiple MCP servers in a single `agent.yaml`:
+Configure multiple MCP servers in a single `moat.yaml`:
 
 ```yaml
 mcp:
@@ -120,7 +120,7 @@ See [Proxy architecture](../concepts/09-proxy.md) for details on how the relay w
 
 ## Local MCP servers
 
-Local MCP servers run as child processes inside the container. The agent starts them directly -- no proxy is involved. Configure them under the agent-specific section of `agent.yaml`.
+Local MCP servers run as child processes inside the container. The agent starts them directly -- no proxy is involved. Configure them under the agent-specific section of `moat.yaml`.
 
 ### 1. Install the MCP server
 
@@ -133,7 +133,7 @@ hooks:
 
 Alternatively, include the server in your project's dependencies so it is installed alongside your code.
 
-### 2. Configure in agent.yaml
+### 2. Configure in moat.yaml
 
 Declare the MCP server under the agent section (`claude:`, `codex:`, or `gemini:`):
 
@@ -264,7 +264,7 @@ moat logs
 
 ### MCP server not appearing in agent
 
-- Verify the MCP server is declared in `agent.yaml` (remote servers at the top level, local servers under the agent section)
+- Verify the MCP server is declared in `moat.yaml` (remote servers at the top level, local servers under the agent section)
 - For remote servers, check that the grant exists: `moat grant list` should show `mcp-{name}`
 - Check container logs for configuration errors: `moat logs`
 
@@ -272,14 +272,14 @@ moat logs
 
 - Verify the grant exists and the credential is correct
 - Revoke and re-grant: `moat revoke mcp-{name}` then `moat grant mcp {name}`
-- Verify the `url` in `agent.yaml` matches the actual MCP server endpoint
+- Verify the `url` in `moat.yaml` matches the actual MCP server endpoint
 - Verify the `header` name matches what the MCP server expects
 
 ### Stub credential in error messages
 
 If you see `moat-stub-{grant}` in error output, the proxy did not replace the stub with a real credential. Check:
 
-- The `url` in `agent.yaml` matches the host the agent is connecting to
+- The `url` in `moat.yaml` matches the host the agent is connecting to
 - The `header` name matches what the agent sends
 - The grant name in `auth.grant` matches the stored credential (`mcp-{name}`)
 
@@ -311,17 +311,17 @@ Remote MCP servers and local MCP servers are configured in the generated `.claud
 
 ### Codex
 
-Local MCP servers are configured under `codex.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Codex](./02-codex.md) for Codex-specific configuration.
+Local MCP servers are configured under `codex.mcp:` in `moat.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Codex](./02-codex.md) for Codex-specific configuration.
 
 ### Gemini
 
-Local MCP servers are configured under `gemini.mcp:` in `agent.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Gemini](./03-gemini.md) for Gemini-specific configuration.
+Local MCP servers are configured under `gemini.mcp:` in `moat.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Gemini](./03-gemini.md) for Gemini-specific configuration.
 
 ## Related guides
 
 - [Credential management](../concepts/02-credentials.md) -- How credential injection works
 - [Observability](../concepts/03-observability.md) -- Network traces and audit logs
-- [agent.yaml reference](../reference/02-agent-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, and `gemini.mcp:`
+- [moat.yaml reference](../reference/02-moat-yaml.md) -- Full field reference for `mcp:`, `claude.mcp:`, and `gemini.mcp:`
 - [CLI reference](../reference/01-cli.md) -- `moat grant mcp` command details
 - [Running Claude Code](./01-claude-code.md) -- Claude Code agent guide
 - [Running Codex](./02-codex.md) -- Codex agent guide

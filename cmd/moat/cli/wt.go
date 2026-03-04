@@ -27,7 +27,7 @@ If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
 exist, it's created. If a run is already active in the worktree, returns an
 error with instructions to view logs or stop it.
 
-Configuration is read from agent.yaml in the repository root.
+Configuration is read from moat.yaml in the repository root.
 
 Worktrees are stored at ~/.moat/worktrees/<repo-id>/<branch>.
 Override with MOAT_WORKTREE_BASE environment variable.
@@ -98,13 +98,13 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not inside a git repository: %w", err)
 	}
 
-	// Load agent.yaml from repo root
+	// Load moat.yaml from repo root
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 	if cfg == nil {
-		return fmt.Errorf("agent.yaml not found in %s\n\nmoat wt requires an agent.yaml to determine which agent to run.\nSee https://majorcontext.com/moat/reference/agent-yaml", repoRoot)
+		return fmt.Errorf("moat.yaml not found in %s\n\nmoat wt requires a moat.yaml to determine which agent to run.\nSee https://majorcontext.com/moat/reference/moat-yaml", repoRoot)
 	}
 
 	// Resolve repo ID
@@ -126,7 +126,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		ui.Infof("Created worktree at %s", result.WorkspacePath)
 	}
 
-	// Reload config from worktree if it has its own agent.yaml
+	// Reload config from worktree if it has its own moat.yaml
 	if wtCfg, loadErr := config.Load(result.WorkspacePath); loadErr == nil && wtCfg != nil {
 		cfg = wtCfg
 	}

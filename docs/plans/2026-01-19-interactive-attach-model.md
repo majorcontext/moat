@@ -210,4 +210,4 @@ Beyond the original plan:
 - **Output-only attach uses logs**: `moat attach` (without `-it`) uses container logs with follow mode for more reliable streaming.
 - **Double Ctrl+C window**: 500ms window for double-press detection is tuned for usability.
 - **Container exit detection delay**: 200ms delay before checking run state allows container exit to be detected reliably.
-- **Interactive mode in agent.yaml**: Can set `interactive: true` in config to default to interactive mode.
+- **Interactive mode in moat.yaml**: Can set `interactive: true` in config to default to interactive mode.

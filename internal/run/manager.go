@@ -1128,7 +1128,7 @@ region = %s
 	// - ~/.claude/settings.json (enabled plugins)
 	// - ~/.moat/claude/settings.json (moat user defaults)
 	// - <workspace>/.claude/settings.json (project settings)
-	// - agent.yaml claude.* fields (run overrides)
+	// - moat.yaml claude.* fields (run overrides)
 	var claudeSettings *claude.Settings
 	if opts.Config != nil {
 		var loadErr error
@@ -1140,7 +1140,7 @@ region = %s
 	}
 
 	// Extract plugins and marketplaces for image building.
-	// We use the merged settings which includes both agent.yaml config and host settings.
+	// We use the merged settings which includes both moat.yaml config and host settings.
 	// This allows plugins configured on the host to work in containers.
 	var claudeMarketplaces []claude.MarketplaceConfig
 	var claudePlugins []string
@@ -1185,11 +1185,11 @@ region = %s
 				if _, hasRepo := marketplaceRepos[marketplace]; hasRepo {
 					claudePlugins = append(claudePlugins, pluginKey)
 				} else {
-					// Use warning for agent.yaml plugins, debug for auto-discovered host settings
+					// Use warning for moat.yaml plugins, debug for auto-discovered host settings
 					if claudeSettings.PluginSources != nil &&
-						claudeSettings.PluginSources[pluginKey] == claude.SourceAgentYAML {
-						ui.Warnf("Skipping plugin %q: marketplace %q is not configured. Add it to agent.yaml under claude.marketplaces.", pluginKey, marketplace)
-						log.Debug("skipping plugin from agent.yaml with unknown marketplace",
+						claudeSettings.PluginSources[pluginKey] == claude.SourceMoatYAML {
+						ui.Warnf("Skipping plugin %q: marketplace %q is not configured. Add it to moat.yaml under claude.marketplaces.", pluginKey, marketplace)
+						log.Debug("skipping plugin from moat.yaml with unknown marketplace",
 							"plugin", pluginKey,
 							"marketplace", marketplace)
 					} else {
@@ -1979,7 +1979,7 @@ region = %s
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
 	// Extract container resource limits from config (applies to both Docker and Apple).
-	// Priority: explicit agent.yaml > agent provider default > runtime fallback.
+	// Priority: explicit moat.yaml > agent provider default > runtime fallback.
 	var memoryMB, cpus int
 	var dns []string
 	if opts.Config != nil {
@@ -1988,7 +1988,7 @@ region = %s
 		dns = opts.Config.Container.DNS
 	}
 
-	// On Apple containers, if agent.yaml didn't set memory and we're running an
+	// On Apple containers, if moat.yaml didn't set memory and we're running an
 	// AI agent, use the agent default (8 GB). Apple's system default of 1 GB is
 	// too low for Claude Code, Codex, and Gemini CLI.
 	// Docker containers are left unlimited unless explicitly configured.
@@ -3123,7 +3123,7 @@ func isAIAgent(cfg *config.Config) bool {
 // USER moatuser in the Dockerfile — the init script drops privileges at runtime,
 // so GetImageHomeDir incorrectly returns "/root".
 //
-// The only case where needsCustomImage is false is a minimal agent.yaml with no
+// The only case where needsCustomImage is false is a minimal moat.yaml with no
 // dependencies, grants, or plugins — the base image is used as-is with no
 // Dockerfile generated, so we fall back to the image's detected home.
 func resolveContainerHome(needsCustomImage bool, imageHome string) string {

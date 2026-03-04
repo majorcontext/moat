@@ -12,7 +12,7 @@ This guide covers running commands in git worktrees — separate checkouts of yo
 ## Prerequisites
 
 - Moat installed
-- A git repository (`moat wt` also requires an `agent.yaml` at the repository root)
+- A git repository (`moat wt` also requires a `moat.yaml` at the repository root)
 
 ## Quick start
 
@@ -22,7 +22,7 @@ Start a run on a new branch:
 moat wt dark-mode
 ```
 
-This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a worktree at `~/.moat/worktrees/<repo-id>/dark-mode`, and starts the command defined in `agent.yaml`.
+This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a worktree at `~/.moat/worktrees/<repo-id>/dark-mode`, and starts the command defined in `moat.yaml`.
 
 ## How it works
 
@@ -30,7 +30,7 @@ This creates the `dark-mode` branch from HEAD (if it doesn't exist), creates a w
 
 1. **Creates the branch** from HEAD if it doesn't already exist
 2. **Creates a git worktree** — a separate checkout of the branch at `~/.moat/worktrees/<repo-id>/<branch>`
-3. **Starts a run** using the command from `agent.yaml` with the worktree as its workspace
+3. **Starts a run** using the command from `moat.yaml` with the worktree as its workspace
 
 The repository is identified by its remote URL (or local path if no remote is configured). Each branch gets its own directory under that repo ID.
 
@@ -40,17 +40,17 @@ If the branch and worktree already exist, they are reused.
 
 ### The `moat wt` command
 
-`moat wt` reads `agent.yaml` from the repository root and starts a run in the worktree:
+`moat wt` reads `moat.yaml` from the repository root and starts a run in the worktree:
 
 ```bash
-# Start the command defined in agent.yaml on the dark-mode branch
+# Start the command defined in moat.yaml on the dark-mode branch
 moat wt dark-mode
 
-# Run a specific command instead of the agent.yaml default
+# Run a specific command instead of the moat.yaml default
 moat wt dark-mode -- make test
 ```
 
-This requires an `agent.yaml` in the repository root.
+This requires a `moat.yaml` in the repository root.
 
 ### The `--worktree` flag
 
@@ -67,13 +67,13 @@ moat codex --worktree feature/auth -p "implement OAuth login"
 moat gemini --worktree cleanup
 ```
 
-The `--worktree` flag creates the branch and worktree the same way as `moat wt`, but starts the specified agent instead of reading `agent.yaml`. `--wt` is accepted as a shorthand alias.
+The `--worktree` flag creates the branch and worktree the same way as `moat wt`, but starts the specified agent instead of reading `moat.yaml`. `--wt` is accepted as a shorthand alias.
 
 ## Run naming
 
 Run names are generated automatically:
 
-- If `agent.yaml` has a `name` field (or `--name` is passed), the run name is `{name}-{branch}`
+- If `moat.yaml` has a `name` field (or `--name` is passed), the run name is `{name}-{branch}`
 - Otherwise, the run name is `{branch}`
 
 Override with `--name`:
@@ -158,17 +158,17 @@ moat wt dark-mode
 
 ## Configuration
 
-`moat wt` reads `agent.yaml` from the repository root. If the worktree directory also contains an `agent.yaml`, the worktree's copy takes precedence.
+`moat wt` reads `moat.yaml` from the repository root. If the worktree directory also contains a `moat.yaml`, the worktree's copy takes precedence.
 
 Branch-specific configuration works as follows:
 
-1. Start with `agent.yaml` in your main branch
+1. Start with `moat.yaml` in your main branch
 2. The worktree inherits it when the branch is created
-3. Modify the worktree's `agent.yaml` for branch-specific settings (extra grants, different dependencies)
+3. Modify the worktree's `moat.yaml` for branch-specific settings (extra grants, different dependencies)
 
 ## Example: parallel feature development
 
-1. Configure `agent.yaml`:
+1. Configure `moat.yaml`:
    ```yaml
    name: my-agent
 
@@ -208,9 +208,9 @@ Branch-specific configuration works as follows:
 
 ## Troubleshooting
 
-### "agent.yaml not found"
+### "moat.yaml not found"
 
-`moat wt` requires an `agent.yaml` in the repository root. Create one, or use `moat claude --worktree` / `moat codex --worktree` / `moat gemini --worktree` which work without `agent.yaml`.
+`moat wt` requires a `moat.yaml` in the repository root. Create one, or use `moat claude --worktree` / `moat codex --worktree` / `moat gemini --worktree` which work without `moat.yaml`.
 
 ### "not inside a git repository"
 

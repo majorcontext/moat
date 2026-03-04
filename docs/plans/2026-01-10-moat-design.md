@@ -12,7 +12,7 @@ Moat is local execution infrastructure for AI agents. The core abstraction is a 
 ### Mental Model
 
 - **Runs, not containers** — Users never think about Docker. They think about "I want to run claude-code on this repo with GitHub access."
-- **Zero-config start, progressive complexity** — `moat run claude-code .` works immediately. Add `agent.yaml` only when you need customization.
+- **Zero-config start, progressive complexity** — `moat run claude-code .` works immediately. Add `moat.yaml` only when you need customization.
 - **Credentials as capabilities** — Agents request scoped capabilities (`github:repo`, `aws:s3.read`). The broker mints short-lived, run-scoped tokens. No secrets copied into containers.
 - **Everything is observable** — Every run emits structured traces (OpenTelemetry). Logs, tool invocations, file changes, network calls — all captured, all replayable.
 
@@ -74,12 +74,12 @@ agent promote [run-id]          # Graduate workspace/artifacts to persistent sto
 --dry-run          # Show what would happen
 --verbose, -v      # More output
 --json             # Machine-readable output
---config, -c       # Explicit config file (default: agent.yaml)
+--config, -c       # Explicit config file (default: moat.yaml)
 ```
 
 ### Implicit Behavior
 
-- `moat run` with no agent specified looks for `agent.yaml`, falls back to interactive prompt
+- `moat run` with no agent specified looks for `moat.yaml`, falls back to interactive prompt
 - Running in a git repo auto-mounts the repo as the workspace
 - If credentials are needed but not granted, prompts interactively (no silent failures)
 
@@ -134,7 +134,7 @@ Credentials stored in `~/.moat/credentials/` — encrypted at rest, keyed by pro
 ### Resolution Strategy
 
 ```
-1. Check for agent.yaml → explicit runtime config
+1. Check for moat.yaml → explicit runtime config
 2. No manifest? → Use agent-specific defaults
 3. Detect project (package.json, pyproject.toml, go.mod)
 4. Select curated base image
@@ -154,11 +154,11 @@ Moat maintains a small set of base images optimized for common cases:
 
 ### System Packages
 
-When `agent.yaml` specifies system packages, these are installed at first run and cached. Cache key = `hash(base_image + sorted(packages))`.
+When `moat.yaml` specifies system packages, these are installed at first run and cached. Cache key = `hash(base_image + sorted(packages))`.
 
 ### Agent Binaries
 
-Agents like `claude-code` are fetched and cached in `~/.moat/agents/`. Version pinned in `agent.yaml` or defaults to latest stable.
+Agents like `claude-code` are fetched and cached in `~/.moat/agents/`. Version pinned in `moat.yaml` or defaults to latest stable.
 
 ---
 
@@ -236,7 +236,7 @@ agent trace --export=jaeger             # Push to Jaeger
 
 ## Configuration
 
-### The `agent.yaml` Manifest (Optional)
+### The `moat.yaml` Manifest (Optional)
 
 ```yaml
 agent: claude-code
@@ -301,7 +301,7 @@ ai:
 | Runtime resolution | Curated base images | Predictable, fast, controlled quality |
 | Port virtualization | Host reverse proxy | No DNS magic, single OAuth callback |
 | Observability | OpenTelemetry | Industry standard, future-proof |
-| Config approach | Zero-config default | `agent.yaml` only when needed |
+| Config approach | Zero-config default | `moat.yaml` only when needed |
 
 ---
 
@@ -359,4 +359,4 @@ ai:
 1. **Core loop** — `moat run` with Docker, basic workspace mounting
 2. **Credential broker** — GitHub and AWS, proxy injection
 3. **Observability** — OTLP capture, `moat logs` and `moat trace`
-4. **Polish** — `agent.yaml` parsing, curated images, cleanup
+4. **Polish** — `moat.yaml` parsing, curated images, cleanup

@@ -36,7 +36,7 @@ golangci-lint run
 cmd/moat/           CLI entry point (Cobra commands)
 internal/
   audit/             Tamper-proof audit logging with cryptographic verification
-  config/            agent.yaml parsing, mount string parsing
+  config/            moat.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)
   image/             Runtime-based image selection (node/python/go → base image)
@@ -54,7 +54,7 @@ internal/
 3. Proxy intercepts HTTPS, injects `Authorization` headers for matching hosts
 
 **Image Selection:**
-- `agent.yaml` `dependencies` field → `image.Resolve()` → `node:X` / `python:X` / `golang:X` / `ubuntu:22.04`
+- `moat.yaml` `dependencies` field → `image.Resolve()` → `node:X` / `python:X` / `golang:X` / `ubuntu:22.04`
 
 **Observability:**
 - Container stdout → `storage.LogWriter` → `~/.moat/runs/<id>/logs.jsonl`

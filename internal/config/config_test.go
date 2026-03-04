@@ -9,7 +9,7 @@ import (
 
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: claude-code
@@ -51,7 +51,7 @@ env:
 
 func TestLoadConfigWithSSHGrants(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: my-agent
@@ -86,13 +86,13 @@ func TestLoadConfigNotFound(t *testing.T) {
 		t.Fatalf("Load should not error for missing config: %v", err)
 	}
 	if cfg != nil {
-		t.Error("Expected nil config when agent.yaml doesn't exist")
+		t.Error("Expected nil config when moat.yaml doesn't exist")
 	}
 }
 
 func TestLoadConfigWithMounts(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -116,7 +116,7 @@ mounts:
 
 func TestLoadConfigWithName(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -147,7 +147,7 @@ ports:
 
 func TestLoadConfigWithDependencies(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -174,7 +174,7 @@ dependencies:
 
 func TestLoadConfigAcceptsRuntime(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -194,7 +194,7 @@ runtime: docker
 
 func TestLoadConfigRejectsInvalidRuntime(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -214,7 +214,7 @@ runtime: invalid
 
 func TestLoadConfigWithUnifiedContainer(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -260,7 +260,7 @@ dependencies:
 
 func TestLoadConfigRejectsNegativeMemory(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -280,7 +280,7 @@ container:
 
 func TestLoadConfigRejectsTooSmallMemory(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -300,7 +300,7 @@ container:
 
 func TestLoadConfigRejectsNegativeCPUs(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -320,7 +320,7 @@ container:
 
 func TestLoadConfigWithNetworkStrict(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -352,7 +352,7 @@ network:
 
 func TestLoadConfigWithNetworkPermissive(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -375,7 +375,7 @@ network:
 
 func TestLoadConfigNetworkDefaultsToPermissive(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -396,7 +396,7 @@ agent: test
 
 func TestLoadConfigWithNetworkAllowOnly(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -424,7 +424,7 @@ network:
 
 func TestLoadConfigRejectsInvalidNetworkPolicy(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -444,7 +444,7 @@ network:
 
 func TestLoadConfigRejectsInvalidSandbox(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	// Test invalid sandbox value
 	content := `
@@ -464,7 +464,7 @@ sandbox: disabled
 
 func TestLoadConfigAcceptsSandboxNone(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -505,7 +505,7 @@ secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
   DATABASE_URL: op://Prod/Database/url
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -534,7 +534,7 @@ env:
 secrets:
   API_KEY: op://Dev/Key/value
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -554,7 +554,7 @@ agent: claude
 secrets:
   API_KEY: not-a-valid-uri
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -569,7 +569,7 @@ secrets:
 
 func TestLoadConfigWithCommand(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -594,7 +594,7 @@ command: ["npm", "start"]
 
 func TestLoadConfigWithCommandShell(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -619,7 +619,7 @@ command: ["sh", "-c", "echo hello && npm test"]
 
 func TestLoadConfigWithEmptyCommand(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -693,7 +693,7 @@ func TestShouldSyncClaudeLogs(t *testing.T) {
 
 func TestLoadConfigWithClaudeSyncLogs(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -716,7 +716,7 @@ claude:
 
 func TestLoadConfigWithInteractive(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -736,7 +736,7 @@ interactive: true
 
 func TestLoadConfigInteractiveDefaultFalse(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -755,7 +755,7 @@ command: ["npm", "start"]
 
 func TestLoadConfigWithClaudePlugins(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -783,7 +783,7 @@ claude:
 
 func TestLoadConfigWithClaudeMarketplaces(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -916,7 +916,7 @@ claude:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			configPath := filepath.Join(dir, "agent.yaml")
+			configPath := filepath.Join(dir, "moat.yaml")
 			os.WriteFile(configPath, []byte(tt.content), 0644)
 
 			_, err := Load(dir)
@@ -932,7 +932,7 @@ claude:
 
 func TestLoadConfigWithClaudeMCP(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -990,7 +990,7 @@ claude:
 
 func TestLoadConfigMCPMissingCommand(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -1012,7 +1012,7 @@ claude:
 
 func TestSnapshotConfig(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test-agent
@@ -1094,7 +1094,7 @@ tracing:
 
 func TestSnapshotConfigDefaults(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test-agent
@@ -1167,7 +1167,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 
 func TestLoad_MCPServers(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "agent.yaml", `
+	writeFile(t, dir, "moat.yaml", `
 mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
@@ -1290,7 +1290,7 @@ mcp:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeFile(t, dir, "agent.yaml", tt.yaml)
+			writeFile(t, dir, "moat.yaml", tt.yaml)
 
 			_, err := Load(dir)
 			if err == nil {
@@ -1305,7 +1305,7 @@ mcp:
 
 func TestLoadConfigWithHooks(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -1325,7 +1325,7 @@ hooks:
 
 func TestLoadConfigWithHooksAll(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -1353,7 +1353,7 @@ hooks:
 
 func TestLoadConfigWithHooksEmpty(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -1456,7 +1456,7 @@ func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			content := "agent: claude-code\nclaude:\n  base_url: " + tt.baseURL + "\n"
-			os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644)
 
 			cfg, err := Load(dir)
 			if tt.wantErr != "" {
@@ -1481,7 +1481,7 @@ func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
 func TestLoadConfig_LanguageServers(t *testing.T) {
 	t.Run("valid language server", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 dependencies:
   - go
@@ -1503,7 +1503,7 @@ language_servers:
 
 	t.Run("unknown language server", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 language_servers:
   - unknown-lsp
@@ -1520,7 +1520,7 @@ language_servers:
 
 	t.Run("empty language servers", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 `), 0644)
 
@@ -1535,7 +1535,7 @@ agent: claude
 
 	t.Run("duplicate language servers rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 language_servers:
   - go
@@ -1553,7 +1553,7 @@ language_servers:
 
 	t.Run("language servers with other config", func(t *testing.T) {
 		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`
+		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 dependencies:
   - node@20
@@ -1579,4 +1579,52 @@ language_servers:
 			t.Errorf("Grants = %v, want 1 entry", cfg.Grants)
 		}
 	})
+}
+
+func TestLoadLegacyAgentYaml(t *testing.T) {
+	// When only agent.yaml exists (no moat.yaml), Load should still work
+	// using the legacy filename as a fallback.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, LegacyConfigFilename)
+
+	content := `
+agent: legacy-agent
+version: 1.0.0
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should succeed with legacy agent.yaml: %v", err)
+	}
+	if cfg.Agent != "legacy-agent" {
+		t.Errorf("Agent = %q, want %q", cfg.Agent, "legacy-agent")
+	}
+}
+
+func TestLoadMoatYamlPreferred(t *testing.T) {
+	// When both moat.yaml and agent.yaml exist, moat.yaml should be used.
+	dir := t.TempDir()
+
+	moatContent := `
+agent: moat-agent
+version: 2.0.0
+`
+	legacyContent := `
+agent: legacy-agent
+version: 1.0.0
+`
+	os.WriteFile(filepath.Join(dir, ConfigFilename), []byte(moatContent), 0644)
+	os.WriteFile(filepath.Join(dir, LegacyConfigFilename), []byte(legacyContent), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Agent != "moat-agent" {
+		t.Errorf("Agent = %q, want %q (moat.yaml should be preferred over agent.yaml)", cfg.Agent, "moat-agent")
+	}
+	if cfg.Version != "2.0.0" {
+		t.Errorf("Version = %q, want %q", cfg.Version, "2.0.0")
+	}
 }

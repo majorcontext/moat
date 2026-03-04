@@ -21,7 +21,7 @@ Flags for `moat wt <branch>`:
 - `--rebuild` — force image rebuild
 - `--keep` — keep container after completion
 
-Agent and provider determined from `agent.yaml`. Error with a clear message if no `agent.yaml` exists.
+Agent and provider determined from `moat.yaml`. Error with a clear message if no `moat.yaml` exists.
 
 ### `--wt` flag on provider commands
 
@@ -35,7 +35,7 @@ moat gemini --wt=dark-mode [other flags]
 
 ### Run naming
 
-Format: `{agent-name}-{branch}` when `agent.yaml` has a `name` field, otherwise just `{branch}`. The `--name` flag overrides.
+Format: `{agent-name}-{branch}` when `moat.yaml` has a `name` field, otherwise just `{branch}`. The `--name` flag overrides.
 
 ## Worktree Lifecycle
 
@@ -122,7 +122,7 @@ Base path `~/.moat/worktrees/` can be overridden via `MOAT_WORKTREE_BASE` enviro
 
 ```bash
 moat wt dark-mode
-# Creates branch, worktree, starts agent from agent.yaml
+# Creates branch, worktree, starts agent from moat.yaml
 ```
 
 ### Fire-and-forget with Claude

@@ -180,9 +180,9 @@ func (t *ttyTracer) save() {
 func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) {
 	fmt.Println("Initializing...")
 
-	// Set runtime based on CLI flag or agent.yaml, in priority order:
+	// Set runtime based on CLI flag or moat.yaml, in priority order:
 	// 1. --runtime CLI flag (if provided)
-	// 2. agent.yaml runtime field (if set)
+	// 2. moat.yaml runtime field (if set)
 	// Both override the MOAT_RUNTIME env var and auto-detection (handled in detect.go)
 	if opts.Flags.Runtime != "" {
 		os.Setenv("MOAT_RUNTIME", opts.Flags.Runtime)

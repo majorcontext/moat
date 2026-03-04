@@ -252,7 +252,7 @@ func TestServiceMultiple(t *testing.T) {
 }
 
 // TestServiceCustomConfig verifies that service configuration can be overridden
-// via the services: block in agent.yaml (e.g., custom database name).
+// via the services: block in moat.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)

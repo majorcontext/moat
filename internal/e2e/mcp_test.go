@@ -25,7 +25,7 @@ import (
 // TestMCPCredentialInjection_E2E verifies that MCP credential injection works end-to-end.
 // This tests the full flow:
 // 1. Create mock MCP server
-// 2. Configure agent.yaml with MCP server
+// 2. Configure moat.yaml with MCP server
 // 3. Store credential for MCP grant
 // 4. Run container with curl command using stub header
 // 5. Verify real credential was injected by proxy
@@ -49,7 +49,7 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	}))
 	defer mcpServer.Close()
 
-	// Set up workspace with agent.yaml
+	// Set up workspace with moat.yaml
 	workspace := createTestWorkspaceWithMCP(t, mcpServer.URL)
 
 	// Store credential for MCP grant
@@ -224,8 +224,8 @@ mcp:
       grant: mcp-server2
       header: X-Server2-Key
 `
-	if err := os.WriteFile(filepath.Join(workspace, "agent.yaml"), []byte(agentYAML), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(agentYAML), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	// Store credentials for both servers
@@ -422,7 +422,7 @@ func TestMCPMissingCredential(t *testing.T) {
 	}
 }
 
-// createTestWorkspaceWithMCP creates a temporary workspace with agent.yaml configured for MCP.
+// createTestWorkspaceWithMCP creates a temporary workspace with moat.yaml configured for MCP.
 func createTestWorkspaceWithMCP(t *testing.T, serverURL string) string {
 	t.Helper()
 
@@ -437,8 +437,8 @@ mcp:
       grant: mcp-test
       header: X-Test-Key
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(agentYAML), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(agentYAML), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	return dir

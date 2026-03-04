@@ -97,7 +97,7 @@ Ask Claude Code to fix it and verify the output.
 
 This example includes plugin configuration to demonstrate how to extend Claude Code with custom skills.
 
-The `agent.yaml` configures:
+The `moat.yaml` configures:
 
 - **SSH grant for GitHub** — Required to clone the Anthropic marketplace (uses `git@github.com:...` URLs)
 - **Custom marketplaces** — Additional plugin sources beyond the built-in Anthropic marketplace

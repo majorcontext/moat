@@ -11,7 +11,7 @@ Access web servers and services running inside agent containers from your browse
 
 ## Single agent
 
-### 1. Declare ports in agent.yaml
+### 1. Declare ports in moat.yaml
 
 ```yaml
 name: my-app
@@ -141,7 +141,7 @@ Agent names must be:
 - Valid DNS labels (no underscores, no leading/trailing hyphens)
 - Unique among running agents
 
-The name comes from `--name` on the CLI or `name` in `agent.yaml`.
+The name comes from `--name` on the CLI or `name` in `moat.yaml`.
 
 ## Proxy management
 
@@ -237,9 +237,9 @@ $ sudo security add-trusted-cert -d -r trustRoot \
    $ moat list
    ```
 
-3. Verify the endpoint name matches `agent.yaml`:
+3. Verify the endpoint name matches `moat.yaml`:
    ```bash
-   # URL uses "web" but agent.yaml has "frontend"
+   # URL uses "web" but moat.yaml has "frontend"
    # Fix: use https://frontend.my-app.localhost:8080
    ```
 

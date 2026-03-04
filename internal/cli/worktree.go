@@ -19,7 +19,7 @@ type WorktreeResult struct {
 	Workspace string
 
 	// Config is the config to use (reloaded from worktree if it has its own
-	// agent.yaml, or the original config if not).
+	// moat.yaml, or the original config if not).
 	Config *config.Config
 
 	// Result is the worktree resolution metadata (nil if --wt was not set).
@@ -75,7 +75,7 @@ func ResolveWorktreeWorkspace(wtBranch, workspace string, flags *ExecFlags, cfg 
 		ui.Infof("Created worktree at %s", result.WorkspacePath)
 	}
 
-	// Reload config from worktree path if it has its own agent.yaml
+	// Reload config from worktree path if it has its own moat.yaml
 	outCfg := cfg
 	if wtCfg, loadErr := config.Load(result.WorkspacePath); loadErr == nil && wtCfg != nil {
 		outCfg = wtCfg

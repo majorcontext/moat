@@ -21,7 +21,7 @@ var runCmd = &cobra.Command{
 credential injection, and full observability.
 
 The agent runs in a container with your workspace mounted at /workspace.
-If an agent.yaml exists in the workspace, its settings are used as defaults.
+If a moat.yaml exists in the workspace, its settings are used as defaults.
 
 Arguments:
   [path]       Path to workspace directory (default: current directory)
@@ -35,7 +35,7 @@ Interactive mode (-i):
   Ctrl+C            Sent to container process
 
 Examples:
-  # Run from current directory (uses agent.yaml config)
+  # Run from current directory (uses moat.yaml config)
   moat run
 
   # Run from a specific directory
@@ -104,7 +104,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("workspace path %q is not a directory", absPath)
 	}
 
-	// Load agent.yaml if present
+	// Load moat.yaml if present
 	cfg, err := config.Load(absPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)

@@ -21,12 +21,12 @@ var depsCmd = &cobra.Command{
 var depsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available dependencies",
-	Long: `List all dependencies that can be used in agent.yaml.
+	Long: `List all dependencies that can be used in moat.yaml.
 
 Examples:
-  agent deps list
-  agent deps list --type runtime
-  agent deps list --type npm`,
+  moat deps list
+  moat deps list --type runtime
+  moat deps list --type npm`,
 	RunE: runDepsList,
 }
 
@@ -36,8 +36,8 @@ var depsInfoCmd = &cobra.Command{
 	Long: `Show detailed information about a specific dependency.
 
 Examples:
-  agent deps info node
-  agent deps info playwright`,
+  moat deps info node
+  moat deps info playwright`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDepsInfo,
 }
@@ -109,7 +109,7 @@ func runDepsInfo(cmd *cobra.Command, args []string) error {
 			sort.Strings(suggestions)
 			msg += fmt.Sprintf("\n\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
 		}
-		msg += "\n\nRun 'agent deps list' to see all available dependencies."
+		msg += "\n\nRun 'moat deps list' to see all available dependencies."
 		return errors.New(msg)
 	}
 
@@ -129,7 +129,7 @@ func runDepsInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Usage in agent.yaml:")
+	fmt.Println("Usage in moat.yaml:")
 	if spec.Default != "" {
 		fmt.Printf("  dependencies:\n    - %s        # uses default version %s\n", name, spec.Default)
 		fmt.Printf("    - %s@%s    # explicit version\n", name, spec.Default)

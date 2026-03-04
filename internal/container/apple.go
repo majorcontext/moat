@@ -238,7 +238,7 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	}
 
 	// Resource limits (Apple containers only)
-	// Fallback to 4096 MB (4 GB) when neither agent.yaml nor the run manager
+	// Fallback to 4096 MB (4 GB) when neither moat.yaml nor the run manager
 	// set a memory value. AI agent runs (claude/codex/gemini) receive 8 GB
 	// from the manager; this fallback is for non-agent runs.
 	memoryMB := cfg.MemoryMB

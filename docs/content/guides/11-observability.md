@@ -272,7 +272,7 @@ If `moat audit` reports a broken hash chain, the audit log file may have been mo
 
 ### Missing `traces.jsonl`
 
-Execution tracing may be disabled in the run's `agent.yaml`:
+Execution tracing may be disabled in the run's `moat.yaml`:
 
 ```yaml
 tracing:

@@ -376,7 +376,7 @@ func TestVolumeIsolation(t *testing.T) {
 	t.Log("Volume isolation verified: agent 2 cannot see agent 1's data")
 }
 
-// createTestWorkspaceWithVolumes creates a test workspace with an agent.yaml
+// createTestWorkspaceWithVolumes creates a test workspace with a moat.yaml
 // that specifies volumes.
 func createTestWorkspaceWithVolumes(t *testing.T, agentName string, volumes []config.VolumeConfig) string {
 	t.Helper()
@@ -393,8 +393,8 @@ func createTestWorkspaceWithVolumes(t *testing.T, agentName string, volumes []co
 	}
 
 	yaml := "name: " + agentName + "\nagent: e2e-test\nversion: 1.0.0\nvolumes:\n" + volLines
-	if err := os.WriteFile(dir+"/agent.yaml", []byte(yaml), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(dir+"/moat.yaml", []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	return dir

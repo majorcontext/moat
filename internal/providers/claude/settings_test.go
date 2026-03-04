@@ -309,7 +309,7 @@ func TestLoadAllSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create agent.yaml config with overrides
+	// Create moat.yaml config with overrides
 	cfg := &config.Config{
 		Claude: config.ClaudeConfig{
 			Plugins: map[string]bool{
@@ -324,9 +324,9 @@ func TestLoadAllSettings(t *testing.T) {
 		t.Fatalf("LoadAllSettings: %v", err)
 	}
 
-	// project-plugin should be disabled (agent.yaml override)
+	// project-plugin should be disabled (moat.yaml override)
 	if result.EnabledPlugins["project-plugin@market"] {
-		t.Error("project-plugin@market should be disabled by agent.yaml override")
+		t.Error("project-plugin@market should be disabled by moat.yaml override")
 	}
 
 	// agent-plugin should be enabled

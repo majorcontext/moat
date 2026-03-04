@@ -153,7 +153,7 @@ Local addresses are excluded from proxying.
 Endpoint URLs for hostname routing. One variable per endpoint defined in `ports`.
 
 ```yaml
-# agent.yaml
+# moat.yaml
 ports:
   web: 3000
   api: 8080
@@ -192,10 +192,10 @@ echo $MOAT_RUN_NAME
 
 ### User-defined environment
 
-Variables from `env` in agent.yaml or `-e` CLI flag:
+Variables from `env` in moat.yaml or `-e` CLI flag:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 env:
   NODE_ENV: development
   DEBUG: "true"
@@ -212,10 +212,10 @@ echo $DEBUG
 
 ### Resolved secrets
 
-Variables from `secrets` in agent.yaml:
+Variables from `secrets` in moat.yaml:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
 ```
@@ -233,8 +233,8 @@ echo $OPENAI_API_KEY
 When the same variable is defined in multiple places:
 
 1. CLI `-e` flag (highest priority)
-2. `secrets` in agent.yaml
-3. `env` in agent.yaml
+2. `secrets` in moat.yaml
+3. `env` in moat.yaml
 4. Moat-injected variables (HTTP_PROXY, etc.)
 5. Base image defaults (lowest priority)
 

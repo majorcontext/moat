@@ -9,7 +9,7 @@ keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh",
 
 Grants provide credentials to container runs. Each grant type injects authentication for specific hosts. Credentials are stored encrypted on your host machine and injected at the network layer by Moat's TLS-intercepting proxy. The container process does not have direct access to raw tokens.
 
-Store a credential with `moat grant <provider>`, then use it in runs with `--grant <provider>` or in `agent.yaml`.
+Store a credential with `moat grant <provider>`, then use it in runs with `--grant <provider>` or in `moat.yaml`.
 
 ## Grant types
 
@@ -63,7 +63,7 @@ The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CL
 
 Tokens sourced from `gh auth token` or environment variables are refreshed every 30 minutes. PATs entered manually are static.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -147,7 +147,7 @@ You can grant both and use them together. This is useful when Claude Code needs 
 moat run --grant claude --grant anthropic ./my-project
 ```
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -217,7 +217,7 @@ The container receives `OPENAI_API_KEY` set to a format-valid placeholder so Ope
 
 API keys do not expire or refresh.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -268,7 +268,7 @@ OAuth tokens are automatically refreshed by the proxy. Google OAuth tokens expir
 
 API keys do not expire.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -335,7 +335,7 @@ npm tokens are static and do not refresh. If a token expires, revoke and re-gran
 
 Multiple `moat grant npm --host=<host>` calls merge into a single credential. Each call adds or replaces the entry for that host. All registries are injected together at runtime.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -401,14 +401,14 @@ AWS credentials use `credential_process` rather than HTTP header injection:
 
 The AWS SDK handles credential refresh automatically via `credential_process`. Each call to the process assumes a fresh role session with the configured duration.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
   - aws
 ```
 
-> **Note:** AWS-specific options (role, region, session duration, external ID) are configured at grant time with `moat grant aws`, not in `agent.yaml`. The `agent.yaml` grants field only specifies which grant types to use for a run.
+> **Note:** AWS-specific options (role, region, session duration, external ID) are configured at grant time with `moat grant aws`, not in `moat.yaml`. The `moat.yaml` grants field only specifies which grant types to use for a run.
 
 ### Example
 
@@ -458,7 +458,7 @@ SSH grants work differently from other grants. Instead of injecting HTTP headers
 
 SSH agent requests are forwarded in real time. No refresh mechanism is needed.
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 grants:
@@ -486,7 +486,7 @@ $ moat run --grant ssh:github.com -- git clone git@github.com:my-org/my-project.
 moat grant mcp <name>
 ```
 
-The `<name>` argument matches the MCP server name in `agent.yaml`. The credential is stored as `mcp-<name>`.
+The `<name>` argument matches the MCP server name in `moat.yaml`. The credential is stored as `mcp-<name>`.
 
 ### Credential source
 
@@ -500,7 +500,7 @@ The proxy injects the credential into the HTTP header specified by `auth.header`
 
 MCP credentials are static. Revoke and re-grant to update them.
 
-### agent.yaml
+### moat.yaml
 
 MCP grants are referenced in the top-level `mcp:` field, not in `grants:`:
 
@@ -535,7 +535,7 @@ moat run --grant github --grant anthropic ./my-project
 moat run --grant ssh:github.com ./my-project
 ```
 
-### Via agent.yaml
+### Via moat.yaml
 
 List grants in the `grants` field:
 
@@ -548,7 +548,7 @@ grants:
   - ssh:github.com
 ```
 
-Grants from CLI flags are merged with those in `agent.yaml`.
+Grants from CLI flags are merged with those in `moat.yaml`.
 
 ### Multiple grants
 
@@ -673,5 +673,5 @@ moat grant providers --json
 - [Credential management](../concepts/02-credentials.md) -- How credential injection works conceptually
 - [Security model](../concepts/08-security.md) -- Threat model and security properties
 - [CLI reference](./01-cli.md) -- Full CLI command reference, including `moat grant` subcommands
-- [agent.yaml reference](./02-agent-yaml.md) -- All `agent.yaml` fields, including `grants` and `mcp`
+- [moat.yaml reference](./02-moat-yaml.md) -- All `moat.yaml` fields, including `grants` and `mcp`
 - [Provider YAML reference](./provider-yaml) -- Schema for YAML-defined credential providers

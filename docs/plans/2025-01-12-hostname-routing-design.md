@@ -19,7 +19,7 @@ Examples with proxy on port 8080:
 
 **Precedence:**
 1. `--name myapp` CLI flag (highest priority)
-2. `name:` field in agent.yaml
+2. `name:` field in moat.yaml
 3. Random two-word phrase: `adjective-animal` (e.g., `fluffy-chicken`)
 
 **Collision Handling:**
@@ -31,7 +31,7 @@ Use --name to specify a different name, or stop the existing agent first.
 
 ## Configuration
 
-**agent.yaml:**
+**moat.yaml:**
 ```yaml
 name: myapp
 ports:

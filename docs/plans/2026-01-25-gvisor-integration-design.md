@@ -31,7 +31,7 @@ gVisor (runsc) intercepts syscalls and implements them in a userspace kernel (Se
 
 ## Configuration
 
-### agent.yaml
+### moat.yaml
 
 ```yaml
 # Optional - only needed to explicitly disable sandbox
@@ -153,7 +153,7 @@ gVisor supports:
 | `internal/container/docker.go` | Add `ociRuntime` field, pass to `HostConfig.Runtime` |
 | `internal/container/detect.go` | Add `GVisorAvailable()` function |
 | `cmd/moat/cli/run.go` | Add `--no-sandbox` flag |
-| `internal/config/agent.go` | Add `Sandbox` field to agent.yaml parsing |
+| `internal/config/agent.go` | Add `Sandbox` field to moat.yaml parsing |
 | `docs/content/reference/01-cli.md` | Document `--no-sandbox` |
 | `docs/content/concepts/sandboxing.md` | New page explaining gVisor vs Apple containers |
 

@@ -101,7 +101,7 @@ Both agents run in isolated containers with credentials injected at the network 
 
 ## Configuration
 
-Create `agent.yaml` when you need more control:
+Create `moat.yaml` when you need more control:
 
 ```yaml
 name: my-agent
@@ -129,7 +129,7 @@ Then run:
 moat run ./my-project
 ```
 
-See the [agent.yaml reference](docs/content/reference/02-agent-yaml.md) for all options.
+See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all options.
 
 ## Commands
 
@@ -196,7 +196,7 @@ sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt && sud
 - [Getting started](docs/content/getting-started/) — Installation, quick start, tool comparison
 - [Concepts](docs/content/concepts/) — Sandboxing, credentials, audit logs, networking, dependencies
 - [Guides](docs/content/guides/) — Claude Code, Codex, SSH, secrets, multi-agent, snapshots
-- [Reference](docs/content/reference/) — CLI, agent.yaml, environment variables
+- [Reference](docs/content/reference/) — CLI, moat.yaml, environment variables
 
 ## Contributing
 

@@ -400,7 +400,7 @@ valid := audit.VerifyProof(proof, run.MerkleRoot())
 ## Configuration
 
 ```yaml
-# agent.yaml
+# moat.yaml
 audit:
   attestation: sigstore           # sigstore | tsa | local-only
   batch_interval: 10s             # Console log batch interval

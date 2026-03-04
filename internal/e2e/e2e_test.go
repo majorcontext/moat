@@ -705,34 +705,34 @@ func TestConfigEnvironmentVariables(t *testing.T) {
 	})
 }
 
-// createTestWorkspace creates a temporary directory with an agent.yaml file.
+// createTestWorkspace creates a temporary directory with a moat.yaml file.
 func createTestWorkspace(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	// Create a minimal agent.yaml
+	// Create a minimal moat.yaml
 	yaml := `agent: e2e-test
 version: 1.0.0
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	return dir
 }
 
-// createTestWorkspaceWithRuntime creates a temporary directory with an agent.yaml
+// createTestWorkspaceWithRuntime creates a temporary directory with a moat.yaml
 // file that specifies a runtime.
 func createTestWorkspaceWithRuntime(t *testing.T, rt, version string) string {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	// Create agent.yaml with runtime
+	// Create moat.yaml with runtime
 	yaml := "agent: e2e-test\nversion: 1.0.0\nruntime:\n  " + rt + ": " + version + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	return dir
@@ -1826,9 +1826,9 @@ func TestClaudePluginBaking(t *testing.T) {
 	}
 }
 
-// TestClaudePluginBakingOnlyAgentYaml verifies that only plugins from agent.yaml
+// TestClaudePluginBakingOnlyMoatYaml verifies that only plugins from moat.yaml
 // are baked into the image, not plugins from host ~/.claude/settings.json.
-func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
+func TestClaudePluginBakingOnlyMoatYaml(t *testing.T) {
 	// Test Dockerfile generation directly - verify only specified plugins are included
 	marketplaces := []claude.MarketplaceConfig{
 		{Name: "agent-marketplace", Source: "github", Repo: "agent/marketplace"},
@@ -1871,7 +1871,7 @@ func TestClaudePluginBakingOnlyAgentYaml(t *testing.T) {
 	}
 }
 
-// createTestWorkspaceWithDeps creates a temporary directory with an agent.yaml
+// createTestWorkspaceWithDeps creates a temporary directory with a moat.yaml
 // that specifies dependencies.
 // TestClaudeLogSyncMountTarget is runtime-agnostic: tests Claude log sync mount paths.
 func TestClaudeLogSyncMountTarget(t *testing.T) {
@@ -1968,8 +1968,8 @@ version: 1.0.0
 claude:
   sync_logs: true
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 	return dir
 }
@@ -1979,15 +1979,15 @@ func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
 
 	dir := t.TempDir()
 
-	// Create agent.yaml with dependencies
+	// Create moat.yaml with dependencies
 	var depLines string
 	for _, d := range deps {
 		depLines += "  - " + d + "\n"
 	}
 
 	yaml := "agent: e2e-test\nversion: 1.0.0\ndependencies:\n" + depLines
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
-		t.Fatalf("WriteFile agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
 	return dir

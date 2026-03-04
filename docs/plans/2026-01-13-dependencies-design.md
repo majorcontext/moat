@@ -4,10 +4,10 @@
 
 Agents need runtimes and tools (Node, protoc, Playwright, etc.) but users shouldn't have to write Dockerfiles or manage installation scripts.
 
-**Solution:** A `dependencies` field in `agent.yaml` using human-readable names with smart defaults.
+**Solution:** A `dependencies` field in `moat.yaml` using human-readable names with smart defaults.
 
 ```yaml
-# agent.yaml
+# moat.yaml
 name: my-agent
 agent: ./src/index.ts
 

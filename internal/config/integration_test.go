@@ -9,7 +9,7 @@ import (
 func TestFullConfigWorkflow(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create agent.yaml
+	// Create moat.yaml
 	yaml := `
 agent: test-agent
 version: 1.0.0
@@ -27,7 +27,7 @@ env:
 mounts:
   - ./data:/data:ro
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
 	}
 

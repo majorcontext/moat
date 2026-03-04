@@ -22,7 +22,7 @@ Moat executes AI agents in containers. Each run includes:
 - **Container isolation** — Code runs in Docker or Apple containers, separate from your host system
 - **Credential injection** — OAuth tokens and API keys are injected at the network layer via a TLS-intercepting proxy; they never appear in the container's environment variables
 - **Observability** — Every run captures container logs, HTTP request traces, and a tamper-proof audit log
-- **Declarative configuration** — Define runtime, credentials, environment variables, and network policies in `agent.yaml`
+- **Declarative configuration** — Define runtime, credentials, environment variables, and network policies in `moat.yaml`
 
 ## Core concept: runs
 
@@ -70,7 +70,7 @@ $ moat run --grant github -- env | grep -i token
 
 ## Configuration
 
-For repeated use, create an `agent.yaml` file:
+For repeated use, create a `moat.yaml` file:
 
 ```yaml
 name: my-agent
@@ -93,7 +93,7 @@ Then run without flags:
 moat run ./my-project
 ```
 
-The `dependencies` field determines the base image (`node@20` → `node:20-slim`). The `grants` field specifies which credentials to inject. See [agent.yaml reference](../reference/02-agent-yaml.md) for all options.
+The `dependencies` field determines the base image (`node@20` → `node:20-slim`). The `grants` field specifies which credentials to inject. See [moat.yaml reference](../reference/02-moat-yaml.md) for all options.
 
 ## Container runtimes
 

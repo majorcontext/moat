@@ -1318,7 +1318,7 @@ grants:
   - ssh:github.com
   - ssh:gitlab.com
 `
-	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1409,13 +1409,13 @@ func TestSSHGitClone(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Create agent.yaml
+	// Create moat.yaml
 	agentYAML := `
 agent: ssh-test
 grants:
   - ssh:github.com
 `
-	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(agentYAML), 0644)
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(agentYAML), 0644)
 
 	// Run moat with git clone
 	cmd := exec.Command("moat", "run", "--", "git", "clone", "--depth=1", "git@github.com:golang/go.git", "/workspace/go")
@@ -1444,7 +1444,7 @@ agent: ssh-test
 grants:
   - ssh:github.com
 `
-	os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(agentYAML), 0644)
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(agentYAML), 0644)
 
 	// Try to clone from gitlab.com (not granted)
 	cmd := exec.Command("moat", "run", "--", "git", "clone", "git@gitlab.com:gitlab-org/gitlab.git", "/workspace/gitlab")
@@ -1506,7 +1506,7 @@ moat grants --provider ssh
 moat revoke ssh --host github.com
 ```
 
-Use SSH grants in `agent.yaml`:
+Use SSH grants in `moat.yaml`:
 
 ```yaml
 agent: my-agent

@@ -154,7 +154,7 @@ if cfg != nil && cfg.Interactive {
 }
 ```
 
-Note: `moat wt` doesn't have its own `-i` flag. If the agent.yaml says `interactive: true`, it'll be interactive. Otherwise non-interactive. This is the right default for worktree runs.
+Note: `moat wt` doesn't have its own `-i` flag. If the moat.yaml says `interactive: true`, it'll be interactive. Otherwise non-interactive. This is the right default for worktree runs.
 
 **Step 7: Update provider CLIs**
 
@@ -363,7 +363,7 @@ moat attach command."
 
 **Files:**
 - Modify: `docs/content/reference/01-cli.md` (if it exists)
-- Modify: `docs/content/reference/02-agent-yaml.md` (if `interactive` field docs need updating)
+- Modify: `docs/content/reference/02-moat-yaml.md` (if `interactive` field docs need updating)
 - Modify: `docs/plans/2026-01-19-interactive-attach-model.md` (mark as superseded)
 
 **Step 1: Update CLI reference docs**
@@ -377,7 +377,7 @@ Update documentation for:
 - `moat run` — describe the two modes (interactive and non-interactive)
 - Escape sequences — only Ctrl-/ k
 
-**Step 2: Update agent.yaml reference**
+**Step 2: Update moat.yaml reference**
 
 If the `interactive` field is documented, update to clarify its new meaning:
 - `interactive: true` — allocates TTY, connects stdin, session owns terminal

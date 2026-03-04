@@ -17,7 +17,7 @@ var volumesCmd = &cobra.Command{
 	Long: `Manage persistent volumes for moat runs.
 
 Volumes store data that persists across runs for the same agent name.
-They are created automatically when agent.yaml specifies a volumes: section.`,
+They are created automatically when moat.yaml specifies a volumes: section.`,
 }
 
 var volumesLsCmd = &cobra.Command{

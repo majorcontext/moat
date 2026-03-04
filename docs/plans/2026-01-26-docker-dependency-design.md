@@ -15,7 +15,7 @@ Enable processes inside moat containers to use Docker by adding a `docker` depen
 
 ## User Interface
 
-Single-line declaration in agent.yaml:
+Single-line declaration in moat.yaml:
 
 ```yaml
 dependencies:
@@ -155,7 +155,7 @@ This keeps docker-in-docker concerns separate from the main run manager.
 | `internal/deps/dockerfile_test.go` | Test docker CLI in Dockerfile output |
 | `internal/run/manager_test.go` | Test Apple container validation error |
 | `internal/e2e/docker_test.go` | New e2e test for docker dependency |
-| `docs/content/reference/02-agent-yaml.md` | Document `docker` dependency |
+| `docs/content/reference/02-moat-yaml.md` | Document `docker` dependency |
 
 ## Testing
 

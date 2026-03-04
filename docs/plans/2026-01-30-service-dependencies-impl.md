@@ -1237,7 +1237,7 @@ git commit -m "fix(run): use FilterInstallable for image selection, excluding se
 ### Task 10: Update documentation
 
 **Files:**
-- Modify: `docs/content/reference/02-agent-yaml.md`
+- Modify: `docs/content/reference/02-moat-yaml.md`
 
 **Step 1: Add `services:` field documentation**
 
@@ -1250,8 +1250,8 @@ Document that `postgres`, `mysql`, and `redis` are now valid dependency values.
 **Step 3: Commit**
 
 ```bash
-git add docs/content/reference/02-agent-yaml.md
-git commit -m "docs(reference): document service dependencies in agent.yaml"
+git add docs/content/reference/02-moat-yaml.md
+git commit -m "docs(reference): document service dependencies in moat.yaml"
 ```
 
 ---
@@ -1273,7 +1273,7 @@ import (
 )
 
 func TestServicePostgres(t *testing.T) {
-	// Create agent.yaml with postgres@17 dependency
+	// Create moat.yaml with postgres@17 dependency
 	// Run moat run
 	// Verify MOAT_POSTGRES_URL is set
 	// Verify postgres is reachable and accepts queries

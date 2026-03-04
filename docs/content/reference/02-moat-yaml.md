@@ -1,13 +1,15 @@
 ---
-title: "agent.yaml reference"
-navTitle: "agent.yaml"
-description: "Complete reference for agent.yaml configuration options."
-keywords: ["moat", "agent.yaml", "configuration", "reference", "yaml"]
+title: "moat.yaml reference"
+navTitle: "moat.yaml"
+description: "Complete reference for moat.yaml configuration options."
+keywords: ["moat", "moat.yaml", "configuration", "reference", "yaml"]
 ---
 
-# agent.yaml reference
+# moat.yaml reference
 
-The `agent.yaml` file configures how Moat runs your agent. Place it in your workspace root directory.
+The `moat.yaml` file configures how Moat runs your agent. Place it in your workspace root directory.
+
+> **Backwards compatibility:** `agent.yaml` is still supported as a fallback. If `moat.yaml` is not found, Moat looks for `agent.yaml` in the same directory. New projects should use `moat.yaml`.
 
 ## Complete example
 
@@ -852,7 +854,7 @@ Moat automatically discovers plugins you've installed on your host machine via C
 2. **Host plugins**: Plugin settings from `~/.claude/settings.json` are included
 3. **Moat defaults**: Settings from `~/.moat/claude/settings.json` (if present)
 4. **Project settings**: Settings from your workspace's `.claude/settings.json`
-5. **agent.yaml**: Explicit overrides in `claude.plugins` (highest priority)
+5. **moat.yaml**: Explicit overrides in `claude.plugins` (highest priority)
 
 This means plugins you've enabled on your host are automatically available in Moat containers without additional configuration.
 
@@ -1188,7 +1190,7 @@ Network request logging is separate and always enabled.
 When the same option is specified in multiple places:
 
 1. CLI flags (highest priority)
-2. `agent.yaml` values
+2. `moat.yaml` values
 3. Default values (lowest priority)
 
-For additive options (`--grant`, `-e`, `--mount`), CLI values are merged with `agent.yaml` values.
+For additive options (`--grant`, `-e`, `--mount`), CLI values are merged with `moat.yaml` values.

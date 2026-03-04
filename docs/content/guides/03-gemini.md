@@ -171,7 +171,7 @@ This injects GitHub credentials alongside Gemini credentials. Gemini can:
 - Create pull requests
 - Access private repositories
 
-Configure in `agent.yaml` for repeated use:
+Configure in `moat.yaml` for repeated use:
 
 ```yaml
 name: my-gemini-project
@@ -212,7 +212,7 @@ To allow access to additional hosts:
 moat gemini --allow-host example.com ./my-project
 ```
 
-Or configure in `agent.yaml`:
+Or configure in `moat.yaml`:
 
 ```yaml
 network:
@@ -221,9 +221,9 @@ network:
     - "*.internal.corp"
 ```
 
-## Configuration via agent.yaml
+## Configuration via moat.yaml
 
-For repeated use, configure Gemini in `agent.yaml`:
+For repeated use, configure Gemini in `moat.yaml`:
 
 ```yaml
 name: my-gemini-agent
@@ -242,7 +242,7 @@ gemini:
   sync_logs: true
 ```
 
-Gemini-specific fields are documented in the [agent.yaml reference](../reference/02-agent-yaml.md#gemini).
+Gemini-specific fields are documented in the [moat.yaml reference](../reference/02-moat-yaml.md#gemini).
 
 ### MCP servers
 
@@ -260,7 +260,7 @@ gemini:
       cwd: /workspace
 ```
 
-MCP configuration is written to `.mcp.json` in the workspace directory. See the [agent.yaml reference](../reference/02-agent-yaml.md#geminimcp) for all configuration options.
+MCP configuration is written to `.mcp.json` in the workspace directory. See the [moat.yaml reference](../reference/02-moat-yaml.md#geminimcp) for all configuration options.
 
 ## Workspace snapshots
 
@@ -274,7 +274,7 @@ Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./0
    moat grant github
    ```
 
-2. Create `agent.yaml`:
+2. Create `moat.yaml`:
    ```yaml
    name: code-review
 
@@ -317,7 +317,7 @@ moat grant gemini
 
 ### Gemini hangs on startup
 
-Check that you're not running in a directory without an `agent.yaml` that specifies a conflicting configuration. Try:
+Check that you're not running in a directory without a `moat.yaml` that specifies a conflicting configuration. Try:
 
 ```bash
 moat gemini --name test ~/empty-dir

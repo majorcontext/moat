@@ -29,7 +29,7 @@ var validPluginKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$`)
 // marketplace name or plugin key (which are user-visible identifiers) but NOT
 // the invalid repo/value itself. This prevents potentially malicious content
 // from appearing in the Dockerfile. Users can look up the name in their
-// agent.yaml to see and fix the actual invalid value.
+// moat.yaml to see and fix the actual invalid value.
 
 // PluginSnippetResult holds the Dockerfile snippet and optional script context file.
 type PluginSnippetResult struct {

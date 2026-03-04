@@ -7,9 +7,9 @@ keywords: ["moat", "mounts", "volumes", "filesystem", "mount syntax", "read-only
 
 # Mount syntax
 
-Mounts control which host directories are available inside the container. By default, Moat mounts the workspace directory at `/workspace`. Additional mounts are configured with the `--mount` CLI flag or the `mounts` field in `agent.yaml`.
+Mounts control which host directories are available inside the container. By default, Moat mounts the workspace directory at `/workspace`. Additional mounts are configured with the `--mount` CLI flag or the `mounts` field in `moat.yaml`.
 
-To persist data across runs, use [volumes](./02-agent-yaml.md#volumes) instead. Volumes are managed by moat and survive container destruction.
+To persist data across runs, use [volumes](./02-moat-yaml.md#volumes) instead. Volumes are managed by moat and survive container destruction.
 
 ## Mount string format
 
@@ -51,7 +51,7 @@ moat run --mount ./configs:/app/configs:ro --mount /tmp/output:/output:rw ./my-p
 moat run --grant github --mount ./data:/data:ro ./my-project
 ```
 
-## agent.yaml usage
+## moat.yaml usage
 
 The `mounts` field accepts a list of mount strings.
 
@@ -62,7 +62,7 @@ mounts:
   - ./cache:/cache
 ```
 
-CLI `--mount` flags are additive with `agent.yaml` `mounts`. Both sources are combined at runtime.
+CLI `--mount` flags are additive with `moat.yaml` `mounts`. Both sources are combined at runtime.
 
 ## Default workspace mount
 
@@ -73,7 +73,7 @@ $ moat run ./my-project -- pwd
 /workspace
 
 $ moat run ./my-project -- ls
-agent.yaml
+moat.yaml
 src/
 package.json
 ```
@@ -108,6 +108,6 @@ One difference: Apple containers only support directory mounts, not individual f
 ## Related pages
 
 - [CLI reference](./01-cli.md) -- `moat run` flags including `--mount`
-- [agent.yaml reference](./02-agent-yaml.md) -- `mounts` field, `volumes` field, and all configuration options
+- [moat.yaml reference](./02-moat-yaml.md) -- `mounts` field, `volumes` field, and all configuration options
 - [Sandboxing](../concepts/01-sandboxing.md) -- Workspace mounting and filesystem isolation
 - [Security model](../concepts/08-security.md) -- Trust boundaries and defense in depth

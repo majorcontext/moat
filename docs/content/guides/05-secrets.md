@@ -18,7 +18,7 @@ Moat distinguishes between **secrets** and **credentials**:
 | **Delivery** | Environment variables | Network-layer injection* |
 | **Visibility** | Visible to all processes in container | Not visible in environment |
 | **Use case** | Signing keys, database URLs, services without grant support | GitHub, Anthropic, OpenAI, AWS, SSH |
-| **Configuration** | `secrets:` in agent.yaml | `grants:` in agent.yaml |
+| **Configuration** | `secrets:` in moat.yaml | `grants:` in moat.yaml |
 
 *AWS uses `credential_process` instead of network-layer injection, making temporary credentials accessible in the container. See [AWS credentials](../concepts/02-credentials.md#aws) for details.
 

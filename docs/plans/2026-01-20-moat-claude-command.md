@@ -21,7 +21,7 @@ moat claude
 
 1. **Simple command**: `moat claude` runs Claude Code in the current directory
 2. **Session management**: List, resume, and manage Claude sessions
-3. **Auto-configuration**: Sensible defaults without requiring agent.yaml
+3. **Auto-configuration**: Sensible defaults without requiring moat.yaml
 4. **Integration**: Seamless handling of grants, plugins, and workspace mounting
 
 ## Command Design
@@ -83,7 +83,7 @@ When running `moat claude`, these grants are automatically included:
 
 Additional grants from:
 - `.claude/settings.json` `grants` field (if present)
-- `agent.yaml` `grants` field (if present)
+- `moat.yaml` `grants` field (if present)
 - `--grant` flags
 
 ### Session Persistence
@@ -133,14 +133,14 @@ Resume logic:
 
 `moat claude` automatically detects workspace configuration:
 
-1. Check for `agent.yaml` in current/specified directory
+1. Check for `moat.yaml` in current/specified directory
 2. Check for `.claude/settings.json` for plugin configuration
 3. Check for `.claude/` directory (indicates Claude Code project)
 4. Fall back to sensible defaults
 
 ### Default Container Image
 
-Without `agent.yaml`, use a pre-built Claude Code image:
+Without `moat.yaml`, use a pre-built Claude Code image:
 - Base: `node:20-slim` (Claude Code requires Node.js)
 - Pre-installed: `@anthropic-ai/claude-code`
 

@@ -43,7 +43,7 @@ moat run --grant github -- npm test
 Add configuration when complexity grows:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 dependencies:
   - node@20
 grants:
@@ -54,7 +54,7 @@ network:
     - "api.github.com"
 ```
 
-Each layer is optional. A run with no `agent.yaml` uses sensible defaults (ubuntu:22.04, permissive network). Configuration captures what you'd otherwise pass as flags.
+Each layer is optional. A run with no `moat.yaml` uses sensible defaults (ubuntu:22.04, permissive network). Configuration captures what you'd otherwise pass as flags.
 
 ## Non-Goals
 

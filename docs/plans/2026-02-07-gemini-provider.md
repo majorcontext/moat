@@ -166,7 +166,7 @@ git commit -m "feat(credential): add gemini provider type"
 
 ---
 
-### Task 3: Add GeminiConfig to agent.yaml config
+### Task 3: Add GeminiConfig to moat.yaml config
 
 **Files:**
 - Modify: `internal/config/config.go`
@@ -227,7 +227,7 @@ Run: `go test ./internal/config/ -v`
 
 ```bash
 git add internal/config/config.go
-git commit -m "feat(config): add gemini section to agent.yaml"
+git commit -m "feat(config): add gemini section to moat.yaml"
 ```
 
 ---
@@ -952,10 +952,10 @@ git commit -m "feat(run): integrate gemini provider into run lifecycle"
 ### Task 17: Add example and documentation
 
 **Files:**
-- Create: `examples/agent-gemini/agent.yaml`
+- Create: `examples/agent-gemini/moat.yaml`
 - Create: `docs/content/guides/08-running-gemini.md`
 - Modify: `docs/content/reference/01-cli.md` (add `moat gemini` command)
-- Modify: `docs/content/reference/02-agent-yaml.md` (add `gemini` section)
+- Modify: `docs/content/reference/02-moat-yaml.md` (add `gemini` section)
 
 **Step 1: Create example**
 
@@ -976,7 +976,7 @@ Port from old branch's `docs/content/guides/08-running-gemini.md`.
 
 **Step 3: Update reference docs**
 
-Add `moat gemini` to CLI reference. Add `gemini:` section to agent.yaml reference.
+Add `moat gemini` to CLI reference. Add `gemini:` section to moat.yaml reference.
 
 **Step 4: Commit**
 
@@ -1023,11 +1023,11 @@ gh pr create --title "feat(gemini): first-class Gemini CLI support" --body "$(ca
 ## Changes
 - New package `internal/providers/gemini/` implementing `AgentProvider` interface
 - Proxy: token substitution and header removal for Gemini OAuth flow
-- Config: `gemini:` section in agent.yaml
+- Config: `gemini:` section in moat.yaml
 - CLI: `moat gemini`, `moat gemini sessions`, `moat grant gemini`
 - Run manager: Gemini init detection and container preparation
 - Image/deps: `NeedsGeminiInit` support
-- Docs: guide, example, CLI and agent.yaml reference updates
+- Docs: guide, example, CLI and moat.yaml reference updates
 
 ## Test plan
 - [ ] `go test ./...` passes

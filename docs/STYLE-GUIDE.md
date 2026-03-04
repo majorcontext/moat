@@ -146,7 +146,7 @@ For commands without meaningful output, omit the output section.
 Use backticks for:
 - Commands: `moat run`
 - Flags: `--grant`
-- File names: `agent.yaml`
+- File names: `moat.yaml`
 - Environment variables: `MOAT_PROXY_PORT`
 - Values: `true`, `strict`, `node@20`
 
@@ -155,7 +155,7 @@ Don't use backticks for:
 - General concepts: credential injection, audit logging
 
 ### File Paths
-- Use relative paths when referring to project files: `./agent.yaml`
+- Use relative paths when referring to project files: `./moat.yaml`
 - Use `~/.moat/` for Moat's data directory
 - Use absolute paths only when necessary for system paths
 

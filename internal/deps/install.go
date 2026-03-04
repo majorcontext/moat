@@ -67,7 +67,7 @@ func getRuntimeCommands(name, version string) InstallCommands {
 		// - When installing on Ubuntu, we use the system python3 (3.10 on Ubuntu 22.04)
 		//
 		// For specific Python versions, prefer using the official Docker base image
-		// by specifying python as a dependency in agent.yaml. The dockerfile generator
+		// by specifying python as a dependency in moat.yaml. The dockerfile generator
 		// will select python:X.Y-slim as the base image.
 		//
 		// This fallback installs Ubuntu's system Python for cases where Python is

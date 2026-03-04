@@ -107,7 +107,7 @@ The SSH agent protocol doesn't include the target host in sign requests—only t
 
 ### Configuration
 
-**agent.yaml:**
+**moat.yaml:**
 
 ```yaml
 agent: my-agent

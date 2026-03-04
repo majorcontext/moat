@@ -8,9 +8,9 @@ Moat runs AI agents in isolated containers with credential injection and full ob
 
 - **Isolated Execution** - Each moat runs in its own container (Docker or Apple containers) with workspace mounting
 - **Credential Injection** - Transparent auth header injection via TLS-intercepting proxy (agent never sees raw tokens)
-- **Smart Image Selection** - Automatically selects container images based on `agent.yaml` runtime config
+- **Smart Image Selection** - Automatically selects container images based on `moat.yaml` runtime config
 - **Full Observability** - Captures logs, network requests, and traces for every run
-- **Declarative Config** - Configure agents via `agent.yaml` manifests
+- **Declarative Config** - Configure agents via `moat.yaml` manifests
 - **Multi-Runtime Support** - Automatically uses Apple containers (macOS 26+) or Docker
 
 ## Architecture
@@ -22,7 +22,7 @@ internal/
   claude/            Claude Code settings and Dockerfile generation
   cli/               Shared CLI helpers (environment parsing, mount helpers)
   codex/             Codex CLI settings and Dockerfile generation
-  config/            agent.yaml parsing, mount string parsing
+  config/            moat.yaml parsing, mount string parsing
   container/         Container runtime abstraction (Docker and Apple containers)
   credential/        Secure credential storage (GitHub, Anthropic, AWS)
   daemon/            Proxy daemon lifecycle, Unix socket API, and run registration
@@ -44,7 +44,7 @@ internal/
 
 **Credential Injection:** `moat grant github` → token from gh CLI, env var, or PAT prompt → token stored encrypted → `moat run --grant github` → run registered with proxy daemon → container traffic routed through proxy → proxy resolves run by auth token → Authorization headers injected for matching hosts
 
-**Image Selection:** `agent.yaml` `dependencies` field → `image.Resolve()` → node:X-slim / python:X-slim / golang:X / debian:bookworm-slim
+**Image Selection:** `moat.yaml` `dependencies` field → `image.Resolve()` → node:X-slim / python:X-slim / golang:X / debian:bookworm-slim
 
 **Observability:** Container stdout → `storage.LogWriter` → `~/.moat/runs/<id>/logs.jsonl`; Proxy requests → `storage.NetworkRequest` → `network.jsonl`
 
@@ -52,7 +52,7 @@ internal/
 
 **Audit Logging:** Console/network/credential events → `audit.Store.Append()` → hash-chained entries in SQLite → `moat audit <run-id>` displays chain with verification; `--export` creates portable proof bundle with attestations
 
-**MCP Integration:** `agent.yaml` defines remote MCP servers → `.claude.json` generated with relay URLs → Claude Code connects to proxy relay → proxy injects credentials → request forwarded to real MCP server with SSE streaming support
+**MCP Integration:** `moat.yaml` defines remote MCP servers → `.claude.json` generated with relay URLs → Claude Code connects to proxy relay → proxy injects credentials → request forwarded to real MCP server with SSE streaming support
 
 ### Proxy Daemon
 
@@ -71,7 +71,7 @@ See `internal/proxy/proxy.go` and `internal/daemon/` for implementation.
 
 Moat supports two types of MCP servers:
 
-1. **Remote HTTP MCP servers** (top-level `mcp:` in agent.yaml) - External MCP servers accessed via HTTPS with credential injection through a proxy relay pattern
+1. **Remote HTTP MCP servers** (top-level `mcp:` in moat.yaml) - External MCP servers accessed via HTTPS with credential injection through a proxy relay pattern
 2. **Local process MCP servers** (under `claude.mcp:` or `codex.mcp:`) - MCP servers running as child processes inside the container
 
 **Remote MCP Architecture:**
@@ -148,7 +148,7 @@ The documentation site is published at `majorcontext.com/moat`. Files in `docs/c
 
 - `docs/content/concepts/01-sandboxing.md` → `majorcontext.com/moat/concepts/sandboxing`
 - `docs/content/guides/04-ssh.md` → `majorcontext.com/moat/guides/ssh`
-- `docs/content/reference/02-agent-yaml.md` → `majorcontext.com/moat/reference/agent-yaml`
+- `docs/content/reference/02-moat-yaml.md` → `majorcontext.com/moat/reference/moat-yaml`
 
 When referencing documentation in error messages or code, use these URLs.
 
@@ -157,7 +157,7 @@ When referencing documentation in error messages or code, use these URLs.
 When you add or change functionality, update the relevant documentation:
 
 - **CLI commands/flags** — Update `docs/content/reference/01-cli.md`
-- **agent.yaml fields** — Update `docs/content/reference/02-agent-yaml.md`
+- **moat.yaml fields** — Update `docs/content/reference/02-moat-yaml.md`
 - **New features** — Add or update the relevant guide in `docs/content/guides/`
 - **Architectural changes** — Update concept pages in `docs/content/concepts/`
 - **Examples** — Keep `examples/` directories current with working code

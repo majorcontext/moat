@@ -142,7 +142,7 @@ Add to `internal/config/config_test.go`:
 ```go
 func TestLoadConfigWithName(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -185,7 +185,7 @@ Expected: FAIL with "cfg.Name undefined"
 Edit `internal/config/config.go`, add `Name` field to Config struct at line 15:
 
 ```go
-// Config represents an agent.yaml manifest.
+// Config represents a moat.yaml manifest.
 type Config struct {
 	Name    string            `yaml:"name,omitempty"`
 	Agent   string            `yaml:"agent"`
@@ -210,7 +210,7 @@ Expected: PASS
 
 ```bash
 git add internal/config/
-git commit -m "feat(config): add name field to agent.yaml"
+git commit -m "feat(config): add name field to moat.yaml"
 ```
 
 ---
@@ -1383,7 +1383,7 @@ type Options struct {
 	Workspace string
 	Grants    []string
 	Cmd       []string       // Command to run (default: /bin/bash)
-	Config    *config.Config // Optional agent.yaml config
+	Config    *config.Config // Optional moat.yaml config
 	Env       []string       // Additional environment variables (KEY=VALUE)
 }
 ```
@@ -1437,7 +1437,7 @@ var (
 Edit `init()` function, add:
 
 ```go
-runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from agent.yaml or random)")
+runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from moat.yaml or random)")
 ```
 
 **Step 2: Update runAgent function**
@@ -2333,7 +2333,7 @@ Expose container services with predictable hostnames:
 
 ### Configuration
 
-In `agent.yaml`:
+In `moat.yaml`:
 ```yaml
 name: myapp
 ports:
@@ -2415,9 +2415,9 @@ Expected: Success
 **Step 4: Manual smoke test**
 
 ```bash
-# Create test agent.yaml
+# Create test moat.yaml
 mkdir -p /tmp/test-agent
-cat > /tmp/test-agent/agent.yaml << 'EOF'
+cat > /tmp/test-agent/moat.yaml << 'EOF'
 name: testapp
 ports:
   web: 3000

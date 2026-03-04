@@ -1110,7 +1110,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().StringSliceVar(&grants, "grant", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	runCmd.Flags().StringArrayVarP(&runEnv, "env", "e", nil, "environment variables (KEY=VALUE)")
-	runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from agent.yaml or random)")
+	runCmd.Flags().StringVar(&nameFlag, "name", "", "name for this agent instance (default: from moat.yaml or random)")
 	runCmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "force rebuild of container image (ignores cache)")  // Add this
 }
 ```
@@ -1176,7 +1176,7 @@ Expected: PASS
 **Step 6: Test manually**
 
 Run: `./agent run --rebuild .`
-Expected: If there's an agent.yaml with dependencies, it should remove the cached image and rebuild
+Expected: If there's a moat.yaml with dependencies, it should remove the cached image and rebuild
 
 **Step 7: Commit**
 

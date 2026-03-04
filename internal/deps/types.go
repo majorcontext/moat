@@ -111,7 +111,7 @@ type ServiceDef struct {
 	URLFormat    string            `yaml:"url_format"`
 }
 
-// Dependency represents a parsed dependency from agent.yaml.
+// Dependency represents a parsed dependency from moat.yaml.
 type Dependency struct {
 	Name            string      // e.g., "node", "eslint"
 	Version         string      // e.g., "20" or "" for default

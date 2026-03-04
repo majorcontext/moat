@@ -406,7 +406,7 @@ Update optional dependencies:
 - **AWS CLI** - Required for AWS SSM secrets (`brew install awscli`)
 ```
 
-#### `examples/secrets-ssm/agent.yaml`
+#### `examples/secrets-ssm/moat.yaml`
 
 ```yaml
 # Example: Using AWS SSM Parameter Store for secrets
@@ -439,7 +439,7 @@ env:
 2. [ ] Create `internal/secrets/ssm_test.go` with unit tests
 3. [ ] Create `internal/secrets/integration_ssm_test.go` with integration test
 4. [ ] Update README.md with SSM documentation
-5. [ ] Create `examples/secrets-ssm/agent.yaml` example
+5. [ ] Create `examples/secrets-ssm/moat.yaml` example
 6. [ ] Run all tests
 7. [ ] Manual test with real AWS account
 

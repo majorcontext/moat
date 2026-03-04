@@ -1,8 +1,8 @@
 ---
 title: "Lifecycle hooks"
 navTitle: "Hooks"
-description: "Run commands at build time and before the agent starts using agent.yaml lifecycle hooks."
-keywords: ["moat", "hooks", "lifecycle", "post_build", "post_build_root", "pre_run", "agent.yaml"]
+description: "Run commands at build time and before the agent starts using moat.yaml lifecycle hooks."
+keywords: ["moat", "hooks", "lifecycle", "post_build", "post_build_root", "pre_run", "moat.yaml"]
 ---
 
 # Lifecycle hooks
@@ -12,7 +12,7 @@ Hooks let you run commands at specific points in the container lifecycle: after 
 ## Prerequisites
 
 - A working Moat installation with Docker or Apple container runtime
-- An `agent.yaml` file in your project directory
+- An `moat.yaml` file in your project directory
 
 ## Hook types
 
@@ -179,7 +179,7 @@ hooks:
 
 Build hooks (`post_build`, `post_build_root`) are Dockerfile `RUN` commands. The build system caches each layer, so they only re-run when:
 
-- The command string changes in `agent.yaml`
+- The command string changes in `moat.yaml`
 - You use `--rebuild` to force a fresh build
 - A preceding layer changes (new dependency, base image update, etc.)
 
@@ -259,6 +259,6 @@ Build hooks modify the image layer. If you install something in `post_build` but
 
 ## Related guides
 
-- [agent.yaml reference](../reference/02-agent-yaml.md#hooks) -- Complete hook field definitions
+- [moat.yaml reference](../reference/02-moat-yaml.md#hooks) -- Complete hook field definitions
 - [Dependencies](../reference/06-dependencies.md) -- Image selection and dependency installation
 - [Runtimes](../concepts/07-runtimes.md) -- Container runtime details

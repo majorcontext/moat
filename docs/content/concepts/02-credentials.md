@@ -40,7 +40,7 @@ A **grant** is a credential made available to a run. Each grant type targets spe
 | `ssh:<host>` | The specified host only | SSH agent proxy |
 | `mcp-<name>` | Host from MCP server `url` field | Custom header injection |
 
-Grants are configured via the `--grant` CLI flag or the `grants:` field in `agent.yaml`. Credentials from CLI flags are merged with those in `agent.yaml`. See the [Grants reference](../reference/04-grants.md) for syntax details and per-provider setup instructions.
+Grants are configured via the `--grant` CLI flag or the `grants:` field in `moat.yaml`. Credentials from CLI flags are merged with those in `moat.yaml`. See the [Grants reference](../reference/04-grants.md) for syntax details and per-provider setup instructions.
 
 ## Credential storage
 

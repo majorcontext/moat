@@ -975,13 +975,13 @@ func TestBuildKitSidecar(t *testing.T) {
 		t.Fatalf("failed to create workspace: %v", err)
 	}
 
-	// Create agent.yaml with docker:dind
+	// Create moat.yaml with docker:dind
 	agentYaml := `agent: test
 dependencies:
   - docker:dind
 `
-	if err := os.WriteFile(filepath.Join(workspace, "agent.yaml"), []byte(agentYaml), 0644); err != nil {
-		t.Fatalf("failed to create agent.yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(agentYaml), 0644); err != nil {
+		t.Fatalf("failed to create moat.yaml: %v", err)
 	}
 
 	// Create simple Dockerfile to test BuildKit
@@ -1103,12 +1103,12 @@ git commit -m "test(e2e): add buildkit sidecar integration test"
 ## Task 11: Update Documentation
 
 **Files:**
-- Modify: `docs/content/reference/02-agent-yaml.md`
+- Modify: `docs/content/reference/02-moat-yaml.md`
 - Modify: `docs/content/concepts/docker-access.md` (if exists)
 
-**Step 1: Update agent.yaml reference docs**
+**Step 1: Update moat.yaml reference docs**
 
-Add to `docs/content/reference/02-agent-yaml.md` under the `dependencies` section:
+Add to `docs/content/reference/02-moat-yaml.md` under the `dependencies` section:
 
 ```markdown
 #### docker:dind Mode
@@ -1160,7 +1160,7 @@ Expected: Success (compilation check)
 **Step 4: Commit**
 
 ```bash
-git add docs/content/reference/02-agent-yaml.md
+git add docs/content/reference/02-moat-yaml.md
 git commit -m "docs(reference): document buildkit sidecar for docker:dind"
 ```
 
@@ -1194,7 +1194,7 @@ Expected: Binary built successfully
 Create a test directory with:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 agent: test-buildkit
 dependencies:
   - docker:dind

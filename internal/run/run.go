@@ -129,7 +129,7 @@ type Options struct {
 	Workspace     string
 	Grants        []string
 	Cmd           []string       // Command to run (default: /bin/bash)
-	Config        *config.Config // Optional agent.yaml config
+	Config        *config.Config // Optional moat.yaml config
 	Env           []string       // Additional environment variables (KEY=VALUE)
 	Rebuild       bool           // Force rebuild of container image (ignores cache)
 	KeepContainer bool           // If true, don't auto-remove container after run

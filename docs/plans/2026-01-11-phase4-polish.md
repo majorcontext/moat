@@ -2,17 +2,17 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add agent.yaml configuration parsing, improve image selection, and polish the CLI experience.
+**Goal:** Add moat.yaml configuration parsing, improve image selection, and polish the CLI experience.
 
-**Architecture:** Parse agent.yaml from workspace directory to configure runs. Support curated base images based on runtime requirements. Add environment variable support and improve error messages.
+**Architecture:** Parse moat.yaml from workspace directory to configure runs. Support curated base images based on runtime requirements. Add environment variable support and improve error messages.
 
 **Tech Stack:** Go, YAML parsing (gopkg.in/yaml.v3), Cobra CLI
 
 ---
 
-## Task 1: Config Package - agent.yaml Parsing
+## Task 1: Config Package - moat.yaml Parsing
 
-Create a config package to parse agent.yaml manifests.
+Create a config package to parse moat.yaml manifests.
 
 **Files:**
 - Create: `internal/config/config.go`
@@ -32,7 +32,7 @@ import (
 
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: claude-code
@@ -79,13 +79,13 @@ func TestLoadConfigNotFound(t *testing.T) {
 		t.Fatalf("Load should not error for missing config: %v", err)
 	}
 	if cfg != nil {
-		t.Error("Expected nil config when agent.yaml doesn't exist")
+		t.Error("Expected nil config when moat.yaml doesn't exist")
 	}
 }
 
 func TestLoadConfigWithMounts(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -127,7 +127,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents an agent.yaml manifest.
+// Config represents a moat.yaml manifest.
 type Config struct {
 	Agent   string            `yaml:"agent"`
 	Version string            `yaml:"version,omitempty"`
@@ -146,21 +146,21 @@ type Runtime struct {
 	System []string `yaml:"system,omitempty"` // System packages to install
 }
 
-// Load reads agent.yaml from the given directory.
+// Load reads moat.yaml from the given directory.
 // Returns nil, nil if the file doesn't exist.
 func Load(dir string) (*Config, error) {
-	path := filepath.Join(dir, "agent.yaml")
+	path := filepath.Join(dir, "moat.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("reading agent.yaml: %w", err)
+		return nil, fmt.Errorf("reading moat.yaml: %w", err)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing agent.yaml: %w", err)
+		return nil, fmt.Errorf("parsing moat.yaml: %w", err)
 	}
 
 	return &cfg, nil
@@ -187,7 +187,7 @@ Expected: PASS
 
 ```bash
 git add internal/config/ go.mod go.sum
-git commit -m "feat(config): add agent.yaml parsing"
+git commit -m "feat(config): add moat.yaml parsing"
 ```
 
 ---
@@ -342,7 +342,7 @@ type Options struct {
 	Workspace string
 	Grants    []string
 	Cmd       []string
-	Config    *config.Config // Optional agent.yaml config
+	Config    *config.Config // Optional moat.yaml config
 	Env       []string       // Additional environment variables
 }
 ```
@@ -358,7 +358,7 @@ In Create():
 
 In runRun():
 ```go
-// Load agent.yaml if present
+// Load moat.yaml if present
 cfg, err := config.Load(workspace)
 if err != nil {
 	return err
@@ -458,7 +458,7 @@ git commit -m "feat(cli): add --env flag to run command"
 
 ## Task 5: Mount Parsing from Config
 
-Parse mount strings from agent.yaml and add to container.
+Parse mount strings from moat.yaml and add to container.
 
 **Files:**
 - Create: `internal/config/mount.go`
@@ -576,7 +576,7 @@ Expected: PASS
 
 ```bash
 git add internal/config/ internal/run/
-git commit -m "feat(config): add mount parsing from agent.yaml"
+git commit -m "feat(config): add mount parsing from moat.yaml"
 ```
 
 ---
@@ -598,7 +598,7 @@ var runCmd = &cobra.Command{
 	Long: `Run an agent in an isolated container with workspace mounting,
 credential injection, and full observability.
 
-If an agent.yaml exists in the workspace, its settings are used as defaults.
+If a moat.yaml exists in the workspace, its settings are used as defaults.
 
 Examples:
   # Run an agent on the current directory
@@ -712,7 +712,7 @@ import (
 func TestFullConfigWorkflow(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create agent.yaml
+	// Create moat.yaml
 	yaml := `
 agent: test-agent
 version: 1.0.0
@@ -730,7 +730,7 @@ env:
 mounts:
   - ./data:/data:ro
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
 	}
 

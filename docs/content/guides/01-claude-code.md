@@ -207,7 +207,7 @@ This injects GitHub credentials alongside Anthropic credentials. Claude Code can
 - Create pull requests
 - Access private repositories
 
-Configure in `agent.yaml` for repeated use:
+Configure in `moat.yaml` for repeated use:
 
 ```yaml
 name: my-claude-project
@@ -234,7 +234,7 @@ pip install "headroom-ai[all]"
 headroom proxy --port 8787
 ```
 
-Configure `claude.base_url` in `agent.yaml`:
+Configure `claude.base_url` in `moat.yaml`:
 
 ```yaml
 grants:
@@ -290,7 +290,7 @@ No additional configuration required. Use `--rebuild` to update the container im
 
 ### Explicit plugin configuration
 
-For reproducible builds or CI environments, configure plugins explicitly in `agent.yaml`:
+For reproducible builds or CI environments, configure plugins explicitly in `moat.yaml`:
 
 ```yaml
 claude:
@@ -298,7 +298,7 @@ claude:
     "plugin-name@marketplace": true
 ```
 
-Settings in `agent.yaml` override host settings, giving you control over exactly which plugins are available.
+Settings in `moat.yaml` override host settings, giving you control over exactly which plugins are available.
 
 ### Marketplaces
 
@@ -319,7 +319,7 @@ Marketplaces are cloned during image build. Use `--rebuild` to update after chan
 
 Moat includes prepackaged language server configurations that give Claude Code access to code intelligence features like go-to-definition, find-references, and diagnostics. Language servers are installed as Claude Code plugins during image build.
 
-Add `language_servers` to your `agent.yaml`:
+Add `language_servers` to your `moat.yaml`:
 
 ```yaml
 agent: claude
@@ -376,7 +376,7 @@ Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./0
    moat grant github
    ```
 
-2. Create `agent.yaml`:
+2. Create `moat.yaml`:
    ```yaml
    name: code-review
 
@@ -419,7 +419,7 @@ moat grant claude
 
 ### Claude Code hangs on startup
 
-Check that you're not running in a directory without an `agent.yaml` that specifies a conflicting configuration. Try:
+Check that you're not running in a directory without a `moat.yaml` that specifies a conflicting configuration. Try:
 
 ```bash
 moat claude --name test ~/empty-dir
@@ -433,7 +433,7 @@ Claude Code needs SSH access to GitHub to clone the official Anthropic plugin ma
 moat grant ssh --host github.com
 ```
 
-Then add the grant to your `agent.yaml`:
+Then add the grant to your `moat.yaml`:
 
 ```yaml
 grants:

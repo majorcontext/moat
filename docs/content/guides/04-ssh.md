@@ -68,7 +68,7 @@ $ moat grant ssh --host bitbucket.org
 $ moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
 ```
 
-### Via agent.yaml
+### Via moat.yaml
 
 ```yaml
 grants:
@@ -204,7 +204,7 @@ The SSH grant may be missing. Add it:
 $ moat run --grant ssh:github.com -- git clone git@github.com:org/repo.git
 ```
 
-Or in `agent.yaml`:
+Or in `moat.yaml`:
 
 ```yaml
 grants:
@@ -234,7 +234,7 @@ $ ssh-add ~/.ssh/id_ed25519_gitlab
 - The agent has full access to repositories it can clone
 - Commits are made with whatever git identity is configured
 
-Configure git identity in your `agent.yaml` if needed:
+Configure git identity in your `moat.yaml` if needed:
 
 ```yaml
 env:

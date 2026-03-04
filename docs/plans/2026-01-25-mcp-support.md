@@ -4,13 +4,13 @@
 
 **Goal:** Add support for remote MCP servers over HTTPS with credential injection and observability
 
-**Architecture:** Extends moat's existing credential injection infrastructure. MCP servers are declared in agent.yaml (top-level, not nested under claude/codex), credentials stored via `moat grant mcp <name>`, moat-init calls `claude mcp add` with stub credentials, and proxy replaces stubs with real credentials based on URL + header matching.
+**Architecture:** Extends moat's existing credential injection infrastructure. MCP servers are declared in moat.yaml (top-level, not nested under claude/codex), credentials stored via `moat grant mcp <name>`, moat-init calls `claude mcp add` with stub credentials, and proxy replaces stubs with real credentials based on URL + header matching.
 
 **Tech Stack:** Go 1.21+, YAML parsing (gopkg.in/yaml.v3), HTTP proxy (net/http), credential storage (AES-256-GCM encryption)
 
 ---
 
-### Task 1: Add MCP configuration to agent.yaml schema
+### Task 1: Add MCP configuration to moat.yaml schema
 
 **Files:**
 - Modify: `internal/config/config.go:14-35`
@@ -23,7 +23,7 @@ Add to `internal/config/config_test.go`:
 ```go
 func TestLoad_MCPServers(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "agent.yaml", `
+	writeFile(t, dir, "moat.yaml", `
 mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
@@ -187,7 +187,7 @@ mcp:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeFile(t, dir, "agent.yaml", tt.yaml)
+			writeFile(t, dir, "moat.yaml", tt.yaml)
 
 			_, err := config.Load(dir)
 			if err == nil {
@@ -266,7 +266,7 @@ Expected: PASS
 
 ```bash
 git add internal/config/config.go internal/config/config_test.go
-git commit -m "feat(config): add MCP server configuration to agent.yaml
+git commit -m "feat(config): add MCP server configuration to moat.yaml
 
 - Add MCPServerConfig and MCPAuthConfig types
 - Add validation for name, URL (HTTPS only), and auth fields
@@ -381,7 +381,7 @@ Store a credential for an MCP server. The credential will be saved as 'mcp-<name
 Example:
   moat grant mcp context7
 
-Then reference in agent.yaml:
+Then reference in moat.yaml:
   mcp:
     - name: context7
       url: https://mcp.context7.com/mcp
@@ -1209,7 +1209,7 @@ After proxy is created, add:
 
 **Step 3: Test manually**
 
-Create a test `agent.yaml` with MCP configuration:
+Create a test `moat.yaml` with MCP configuration:
 ```yaml
 mcp:
   - name: test
@@ -1242,7 +1242,7 @@ git commit -m "feat(run): integrate MCP configuration with proxy
 **Files:**
 - Create: `docs/content/guides/06-using-mcp-servers.md`
 - Modify: `docs/content/reference/01-cli.md`
-- Modify: `docs/content/reference/02-agent-yaml.md`
+- Modify: `docs/content/reference/02-moat-yaml.md`
 
 **Step 1: Write MCP usage guide**
 
@@ -1265,7 +1265,7 @@ Enter credential for MCP server 'context7': ***************
 MCP credential 'mcp-context7' saved to ~/.moat/credentials/mcp-context7.enc
 \`\`\`
 
-### 2. Configure in agent.yaml
+### 2. Configure in moat.yaml
 
 Declare which MCP servers your agent should access:
 
@@ -1310,7 +1310,7 @@ This ensures:
 
 ### Configuration
 
-MCP servers are declared at the top level of agent.yaml (not nested under \`claude:\` or \`codex:\`):
+MCP servers are declared at the top level of moat.yaml (not nested under \`claude:\` or \`codex:\`):
 
 \`\`\`yaml
 mcp:
@@ -1457,7 +1457,7 @@ The proxy only injects credentials when it detects the exact stub pattern (\`moa
 
 Check that:
 1. \`claude\` binary exists in the container (run \`moat run -- which claude\`)
-2. MCP server is declared in agent.yaml
+2. MCP server is declared in moat.yaml
 3. Container logs show "Injected MCP credential" (check with \`moat logs\`)
 
 ### Authentication failures (401)
@@ -1465,13 +1465,13 @@ Check that:
 Check that:
 1. Grant exists: \`moat grants list\` should show \`mcp-{name}\`
 2. Credential is correct: try \`moat revoke mcp-{name}\` then \`moat grant mcp {name}\` to re-enter
-3. Check MCP server URL is correct in agent.yaml
+3. Check MCP server URL is correct in moat.yaml
 
 ### Stub credential in logs
 
 If you see \`moat-stub-{grant}\` in network logs or MCP errors:
 - Proxy didn't recognize the request as MCP traffic
-- Check that URL in agent.yaml exactly matches the host being accessed
+- Check that URL in moat.yaml exactly matches the host being accessed
 - Check that header name matches what the agent is sending
 
 ## Future: V2+ Features
@@ -1499,7 +1499,7 @@ Store a credential for an MCP server.
 moat grant mcp context7
 \`\`\`
 
-The credential is stored as \`mcp-<name>\` (e.g., \`mcp-context7\`) and can be referenced in agent.yaml.
+The credential is stored as \`mcp-<name>\` (e.g., \`mcp-context7\`) and can be referenced in moat.yaml.
 
 **Interactive prompts:**
 - Credential (hidden input)
@@ -1508,9 +1508,9 @@ The credential is stored as \`mcp-<name>\` (e.g., \`mcp-context7\`) and can be r
 - \`~/.moat/credentials/mcp-<name>.enc\`
 \`\`\`
 
-**Step 3: Update agent.yaml reference**
+**Step 3: Update moat.yaml reference**
 
-In `docs/content/reference/02-agent-yaml.md`, add a new section:
+In `docs/content/reference/02-moat-yaml.md`, add a new section:
 
 ```markdown
 ## mcp
@@ -1559,12 +1559,12 @@ mcp:
 **Step 4: Commit**
 
 ```bash
-git add docs/content/guides/06-using-mcp-servers.md docs/content/reference/01-cli.md docs/content/reference/02-agent-yaml.md
+git add docs/content/guides/06-using-mcp-servers.md docs/content/reference/01-cli.md docs/content/reference/02-moat-yaml.md
 git commit -m "docs: add MCP support documentation
 
 - Add comprehensive MCP usage guide
 - Update CLI reference with 'moat grant mcp'
-- Update agent.yaml reference with mcp section
+- Update moat.yaml reference with mcp section
 - Document V0 limitations and future features
 - Add troubleshooting section"
 ```
@@ -1615,7 +1615,7 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	workspace := filepath.Join(tmpDir, "workspace")
 	os.MkdirAll(workspace, 0755)
 
-	// Create agent.yaml
+	// Create moat.yaml
 	agentYAML := `
 mcp:
   - name: test-server
@@ -1624,7 +1624,7 @@ mcp:
       grant: mcp-test
       header: X-Test-Key
 `
-	ioutil.WriteFile(filepath.Join(workspace, "agent.yaml"), []byte(agentYAML), 0644)
+	ioutil.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(agentYAML), 0644)
 
 	// Store credential
 	credDir := filepath.Join(tmpDir, "credentials")
@@ -1669,7 +1669,7 @@ git add internal/e2e/mcp_test.go
 git commit -m "test(e2e): add MCP credential injection E2E test
 
 - Create mock MCP server
-- Configure agent.yaml with MCP server
+- Configure moat.yaml with MCP server
 - Verify stub replacement in real container execution
 - Validate credential injection end-to-end"
 ```
@@ -1680,7 +1680,7 @@ git commit -m "test(e2e): add MCP credential injection E2E test
 
 All tasks have tests and follow TDD principles. The implementation:
 
-1. ✅ Parses MCP configuration from agent.yaml
+1. ✅ Parses MCP configuration from moat.yaml
 2. ✅ Stores MCP credentials via `moat grant mcp <name>`
 3. ✅ Validates grants at run startup
 4. ✅ Passes configuration to container via environment
@@ -1696,5 +1696,5 @@ All tasks have tests and follow TDD principles. The implementation:
 After implementation:
 1. Manual testing with real Context7 MCP server
 2. Update CHANGELOG.md with new features
-3. Consider adding example agent.yaml files to `examples/` directory
+3. Consider adding example moat.yaml files to `examples/` directory
 4. Update README.md to mention MCP support

@@ -36,7 +36,7 @@
 ### Reference
 
 - [CLI Reference](./content/reference/01-cli.md) — Complete command and flag reference
-- [agent.yaml Reference](./content/reference/02-agent-yaml.md) — Configuration file options
+- [moat.yaml Reference](./content/reference/02-moat-yaml.md) — Configuration file options
 - [Environment Variables](./content/reference/03-environment.md) — Moat and container environment variables
 - [Grants Reference](./content/reference/04-grants.md) — All grant types, credential sources, and injection details
 - [Mount Syntax](./content/reference/05-mounts.md) — Mount format, path resolution, and access modes

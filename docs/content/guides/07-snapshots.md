@@ -25,7 +25,7 @@ Snapshots do not include:
 
 ## Enabling snapshots
 
-Configure snapshots in `agent.yaml`:
+Configure snapshots in `moat.yaml`:
 
 ```yaml
 snapshots:
@@ -304,7 +304,7 @@ snapshots:
 
 ### "No snapshots found"
 
-Snapshots may be disabled. Check `agent.yaml`:
+Snapshots may be disabled. Check `moat.yaml`:
 
 ```yaml
 snapshots:

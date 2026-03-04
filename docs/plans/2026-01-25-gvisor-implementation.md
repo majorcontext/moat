@@ -389,7 +389,7 @@ Find `func AddExecFlags` and add:
 func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringSliceVarP(&flags.Grants, "grant", "g", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	cmd.Flags().StringArrayVarP(&flags.Env, "env", "e", nil, "environment variables (KEY=VALUE)")
-	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from agent.yaml or random)")
+	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from moat.yaml or random)")
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
 	cmd.Flags().BoolVarP(&flags.Detach, "detach", "d", false, "run in background and return immediately")
@@ -458,7 +458,7 @@ git commit -m "feat(run): wire NoSandbox through run manager"
 
 ---
 
-## Task 7: Add sandbox Field to agent.yaml
+## Task 7: Add sandbox Field to moat.yaml
 
 **Files:**
 - Modify: `internal/config/config.go`
@@ -489,12 +489,12 @@ Expected: Build succeeds
 
 ```bash
 git add internal/config/config.go
-git commit -m "feat(config): add sandbox field to agent.yaml"
+git commit -m "feat(config): add sandbox field to moat.yaml"
 ```
 
 ---
 
-## Task 8: Honor agent.yaml sandbox Setting in CLI
+## Task 8: Honor moat.yaml sandbox Setting in CLI
 
 **Files:**
 - Modify: `cmd/moat/cli/run.go`
@@ -524,7 +524,7 @@ Expected: Build succeeds
 
 ```bash
 git add cmd/moat/cli/run.go
-git commit -m "feat(cli): honor sandbox setting from agent.yaml"
+git commit -m "feat(cli): honor sandbox setting from moat.yaml"
 ```
 
 ---
@@ -533,7 +533,7 @@ git commit -m "feat(cli): honor sandbox setting from agent.yaml"
 
 **Files:**
 - Modify: `docs/content/reference/01-cli.md`
-- Modify: `docs/content/reference/02-agent-yaml.md`
+- Modify: `docs/content/reference/02-moat-yaml.md`
 
 **Step 1: Document --no-sandbox flag in CLI reference**
 
@@ -551,9 +551,9 @@ moat run --no-sandbox
 ```
 ```
 
-**Step 2: Document sandbox field in agent.yaml reference**
+**Step 2: Document sandbox field in moat.yaml reference**
 
-Add to the agent.yaml fields:
+Add to the moat.yaml fields:
 
 ```markdown
 ### sandbox
@@ -576,7 +576,7 @@ sandbox: none
 **Step 3: Commit**
 
 ```bash
-git add docs/content/reference/01-cli.md docs/content/reference/02-agent-yaml.md
+git add docs/content/reference/01-cli.md docs/content/reference/02-moat-yaml.md
 git commit -m "docs: document --no-sandbox flag and sandbox config"
 ```
 
@@ -616,8 +616,8 @@ After completing all tasks:
 2. **DockerRuntime**: Accepts `sandbox` bool, stores `ociRuntime` field
 3. **Container creation**: Passes `Runtime: "runsc"` or `"runc"` to HostConfig
 4. **CLI**: `--no-sandbox` flag available on all run commands
-5. **Config**: `sandbox: none` in agent.yaml disables gVisor
-6. **Docs**: CLI and agent.yaml reference updated
+5. **Config**: `sandbox: none` in moat.yaml disables gVisor
+6. **Docs**: CLI and moat.yaml reference updated
 
 Files modified:
 - `internal/container/detect.go` - RuntimeOptions, GVisorAvailable
@@ -628,4 +628,4 @@ Files modified:
 - `cmd/moat/cli/run.go` - Honor config sandbox setting
 - `internal/config/config.go` - Sandbox field
 - `docs/content/reference/01-cli.md` - Document --no-sandbox
-- `docs/content/reference/02-agent-yaml.md` - Document sandbox field
+- `docs/content/reference/02-moat-yaml.md` - Document sandbox field

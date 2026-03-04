@@ -169,7 +169,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 	if mcpServer == nil {
 		// Include diagnostic info in error that will show up in Claude Code
-		http.Error(w, fmt.Sprintf("MOAT: MCP server '%s' not configured. Available servers: %d. Check agent.yaml.",
+		http.Error(w, fmt.Sprintf("MOAT: MCP server '%s' not configured. Available servers: %d. Check moat.yaml.",
 			serverName, len(mcpServers)), http.StatusNotFound)
 		return
 	}

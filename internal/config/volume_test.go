@@ -34,7 +34,7 @@ func TestVolumeDir(t *testing.T) {
 
 func TestLoadConfigWithVolumes(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 name: myapp
@@ -74,7 +74,7 @@ volumes:
 
 func TestLoadConfigVolumesRequireName(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "agent.yaml")
+	configPath := filepath.Join(dir, "moat.yaml")
 
 	content := `
 agent: test
@@ -183,7 +183,7 @@ volumes:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			configPath := filepath.Join(dir, "agent.yaml")
+			configPath := filepath.Join(dir, "moat.yaml")
 			os.WriteFile(configPath, []byte(tt.content), 0644)
 
 			_, err := Load(dir)
@@ -202,7 +202,7 @@ func TestLoadConfigVolumesValidNames(t *testing.T) {
 	for _, name := range validNames {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			configPath := filepath.Join(dir, "agent.yaml")
+			configPath := filepath.Join(dir, "moat.yaml")
 			content := `
 name: myapp
 agent: test

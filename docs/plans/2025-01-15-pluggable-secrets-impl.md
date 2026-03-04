@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a `secrets:` block to `agent.yaml` that resolves secret references from 1Password at runtime and injects them as container env vars.
+**Goal:** Add a `secrets:` block to `moat.yaml` that resolves secret references from 1Password at runtime and injects them as container env vars.
 
 **Architecture:** Pluggable resolver interface with registry pattern. 1Password resolver shells out to `op read`. Secrets resolved on host before container start, merged into container env alongside `env:` block.
 
@@ -50,7 +50,7 @@ secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
   DATABASE_URL: op://Prod/Database/url
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +80,7 @@ Expected: PASS
 
 ```bash
 git add internal/config/config.go internal/config/config_test.go
-git commit -m "feat(config): add secrets field to agent.yaml schema"
+git commit -m "feat(config): add secrets field to moat.yaml schema"
 ```
 
 ---
@@ -678,7 +678,7 @@ Expected: PASS
 
 ```bash
 git add internal/run/manager.go
-git commit -m "feat(run): resolve secrets from agent.yaml before container start"
+git commit -m "feat(run): resolve secrets from moat.yaml before container start"
 ```
 
 ---
@@ -703,7 +703,7 @@ env:
 secrets:
   API_KEY: op://Dev/Key/value
 `
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -842,7 +842,7 @@ If any fixes needed, commit them.
 
 After completing all tasks, you will have:
 
-1. `secrets:` field in `agent.yaml` config
+1. `secrets:` field in `moat.yaml` config
 2. `internal/secrets/` package with:
    - Pluggable `Resolver` interface
    - Registry pattern for scheme dispatch
@@ -855,7 +855,7 @@ After completing all tasks, you will have:
 To test manually:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 agent: claude
 secrets:
   MY_SECRET: op://Private/TestItem/password

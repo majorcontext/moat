@@ -791,7 +791,7 @@ var wtCmd = &cobra.Command{
 If the branch doesn't exist, it's created from HEAD. If the worktree doesn't
 exist, it's created. If a run is already active in the worktree, attaches to it.
 
-Agent configuration is read from agent.yaml in the current directory.
+Agent configuration is read from moat.yaml in the current directory.
 
 Worktrees are stored at ~/.moat/worktrees/<repo-id>/<branch>.
 Override with MOAT_WORKTREE_BASE environment variable.
@@ -872,13 +872,13 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not inside a git repository: %w", err)
 	}
 
-	// Load agent.yaml from repo root
+	// Load moat.yaml from repo root
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 	if cfg == nil {
-		return fmt.Errorf("agent.yaml not found in %s\n\nmoat wt requires an agent.yaml to determine which agent to run.\nSee https://majorcontext.com/moat/reference/agent-yaml", repoRoot)
+		return fmt.Errorf("moat.yaml not found in %s\n\nmoat wt requires a moat.yaml to determine which agent to run.\nSee https://majorcontext.com/moat/reference/moat-yaml", repoRoot)
 	}
 
 	// Resolve repo ID
@@ -1203,7 +1203,7 @@ In each `runXxx` function, after resolving workspace and loading config but befo
 		} else {
 			fmt.Fprintf(os.Stderr, "Created worktree at %s\n", wtResult.WorkspacePath)
 		}
-		// Reload config from worktree path (it may have its own agent.yaml)
+		// Reload config from worktree path (it may have its own moat.yaml)
 		if wtCfg, loadErr := config.Load(absPath); loadErr == nil && wtCfg != nil {
 			cfg = wtCfg
 		}
@@ -1343,7 +1343,7 @@ style(worktree): fix lint issues
 
 **Files:**
 - Modify: `docs/content/reference/01-cli.md` — add `moat wt` command reference and `--wt` flag documentation
-- Modify: `docs/content/reference/02-agent-yaml.md` — mention worktree naming behavior with the `name` field
+- Modify: `docs/content/reference/02-moat-yaml.md` — mention worktree naming behavior with the `name` field
 - Modify: `docs/content/guides/06-ports.md` — update the existing worktree example to reference `moat wt`
 
 **Step 1: Add `moat wt` to CLI reference**

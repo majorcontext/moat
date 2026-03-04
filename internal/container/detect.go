@@ -44,8 +44,8 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 			log.Debug("using Docker runtime (MOAT_RUNTIME=docker)")
 			rt, err := newDockerRuntimeWithPing(opts.Sandbox)
 			if err != nil {
-				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from agent.yaml to use auto-detection."
-				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or agent.yaml) but not available: %w\n\n%s", err, hint)
+				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from moat.yaml to use auto-detection."
+				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or moat.yaml) but not available: %w\n\n%s", err, hint)
 			}
 			return rt, nil
 		case "apple":

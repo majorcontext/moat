@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/doctor"
@@ -425,18 +426,21 @@ func (s *claudeSection) Print(w io.Writer) error {
 		fmt.Fprintf(tw, "  4. Project settings:\t%s\n", projectSettingsPath)
 	}
 
-	// 5. agent.yaml overrides
-	agentYamlPath := filepath.Join(cwd, "agent.yaml")
-	if data, err := os.ReadFile(agentYamlPath); err == nil {
+	// 5. moat.yaml overrides (falls back to agent.yaml)
+	configPath := filepath.Join(cwd, config.ConfigFilename)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join(cwd, config.LegacyConfigFilename)
+	}
+	if data, err := os.ReadFile(configPath); err == nil {
 		// Check if it has Claude-related configuration
 		hasClaudeConfig := strings.Contains(string(data), "claude:")
 		if hasClaudeConfig {
-			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s %s (has claude config)\n", agentYamlPath, ui.OKTag())
+			fmt.Fprintf(tw, "  5. moat.yaml overrides:\t%s %s (has claude config)\n", configPath, ui.OKTag())
 		} else {
-			fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s %s\n", agentYamlPath, ui.OKTag())
+			fmt.Fprintf(tw, "  5. moat.yaml overrides:\t%s %s\n", configPath, ui.OKTag())
 		}
 	} else {
-		fmt.Fprintf(tw, "  5. agent.yaml overrides:\t%s\n", agentYamlPath)
+		fmt.Fprintf(tw, "  5. moat.yaml overrides:\t%s\n", filepath.Join(cwd, config.ConfigFilename))
 	}
 
 	return tw.Flush()

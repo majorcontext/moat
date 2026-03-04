@@ -134,7 +134,7 @@ This injects GitHub credentials alongside OpenAI credentials. Codex can:
 - Create pull requests
 - Access private repositories
 
-Configure in `agent.yaml` for repeated use:
+Configure in `moat.yaml` for repeated use:
 
 ```yaml
 name: my-codex-project
@@ -169,7 +169,7 @@ By default, Codex has network access to OpenAI endpoints (`api.openai.com`, `cha
 moat codex --allow-host example.com ./my-project
 ```
 
-Or configure in `agent.yaml`:
+Or configure in `moat.yaml`:
 
 ```yaml
 network:
@@ -190,7 +190,7 @@ Moat captures workspace snapshots for recovery and rollback. See [Snapshots](./0
    moat grant github
    ```
 
-2. Create `agent.yaml`:
+2. Create `moat.yaml`:
    ```yaml
    name: code-review
 
@@ -227,7 +227,7 @@ moat grant openai
 
 ### Codex hangs on startup
 
-Check that you're not running in a directory without an `agent.yaml` that specifies a conflicting configuration. Try:
+Check that you're not running in a directory without a `moat.yaml` that specifies a conflicting configuration. Try:
 
 ```bash
 moat codex --name test ~/empty-dir

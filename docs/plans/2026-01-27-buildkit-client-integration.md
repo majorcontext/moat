@@ -462,7 +462,7 @@ func prepareBuildContext(dockerfile string, contextFiles map[string][]byte) (str
 **Goal:** Document BuildKit client usage and troubleshooting
 
 **Files:**
-- Modify: `docs/content/reference/02-agent-yaml.md`
+- Modify: `docs/content/reference/02-moat-yaml.md`
 - Modify: `docs/content/concepts/docker-access.md` (if exists)
 - Create: `docs/content/guides/buildkit-troubleshooting.md` (optional)
 

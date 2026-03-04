@@ -16,7 +16,7 @@ Add outgoing firewall capability to AgentOps containers. When activated, only ex
 
 ## Configuration
 
-The `agent.yaml` gains a `network` section:
+The `moat.yaml` gains a `network` section:
 
 ```yaml
 name: my-agent
@@ -81,7 +81,7 @@ Content-Type: text/plain
 
 AgentOps: request blocked by network policy.
 Host "api.example.com" is not in the allow list.
-Add it to network.allow in agent.yaml or use policy: permissive.
+Add it to network.allow in moat.yaml or use policy: permissive.
 ```
 
 The `407` status code:

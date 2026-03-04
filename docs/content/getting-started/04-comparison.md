@@ -150,7 +150,7 @@ Moat's Apple container support on macOS 26+ provides native virtualization witho
 
 If you're using Dev Containers and want better credential security:
 
-1. Your existing `devcontainer.json` can inform your `agent.yaml` (similar concepts: features → dependencies, containerEnv → env)
+1. Your existing `devcontainer.json` can inform your `moat.yaml` (similar concepts: features → dependencies, containerEnv → env)
 2. Replace environment variable credentials with `moat grant` + `--grant` flags
 3. Network requests are automatically logged
 

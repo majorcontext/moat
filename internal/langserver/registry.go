@@ -1,5 +1,5 @@
 // Package langserver provides a registry of prepackaged language servers
-// that can be enabled with a single line in agent.yaml.
+// that can be enabled with a single line in moat.yaml.
 //
 // Language servers run inside the container via Claude Code plugins,
 // giving AI agents access to code intelligence features like
@@ -14,7 +14,7 @@ import (
 
 // ServerSpec defines a prepackaged language server.
 type ServerSpec struct {
-	// Name is the language server identifier used in agent.yaml.
+	// Name is the language server identifier used in moat.yaml.
 	Name string
 
 	// Description is a short human-readable description.

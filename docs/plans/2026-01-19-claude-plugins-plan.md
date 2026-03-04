@@ -31,7 +31,7 @@ This plan implements plugin and MCP server management for Claude Code running in
 
 ### Phase 1: Configuration Schema
 
-**Goal:** Extend `agent.yaml` to support plugin and MCP configuration.
+**Goal:** Extend `moat.yaml` to support plugin and MCP configuration.
 
 **Files:**
 - `internal/config/config.go` - Add `ClaudeConfig` fields
@@ -110,7 +110,7 @@ type MarketplaceSource struct {
 **Merge precedence (lowest to highest):**
 1. `~/.moat/claude/settings.json` (user defaults for moat runs)
 2. `<workspace>/.claude/settings.json` (project defaults)
-3. `agent.yaml` `claude.*` fields (run overrides)
+3. `moat.yaml` `claude.*` fields (run overrides)
 
 ---
 
@@ -156,7 +156,7 @@ When a marketplace URL is SSH-based:
    Private marketplaces need SSH authentication. Grant access with:
      moat grant ssh --host github.com
 
-   Then add to agent.yaml:
+   Then add to moat.yaml:
      grants:
        - ssh:github.com
    ```
@@ -256,7 +256,7 @@ When a marketplace URL is SSH-based:
 
 1. **Load and merge settings:**
    ```go
-   // After loading agent.yaml config
+   // After loading moat.yaml config
    claudeSettings, err := claude.LoadAllSettings(opts.Workspace, homeDir)
    if err != nil {
        return nil, fmt.Errorf("loading claude settings: %w", err)
@@ -273,7 +273,7 @@ When a marketplace URL is SSH-based:
                return nil, fmt.Errorf("marketplace %q requires SSH access to %s\n\n"+
                    "Private marketplaces need SSH authentication. Grant access with:\n"+
                    "  moat grant ssh --host %s\n\n"+
-                   "Then add to agent.yaml:\n"+
+                   "Then add to moat.yaml:\n"+
                    "  grants:\n"+
                    "    - ssh:%s", name, host, host, host)
            }
@@ -399,7 +399,7 @@ To fix this:
 1. Grant SSH access to GitHub:
    moat grant ssh --host github.com
 
-2. Add the grant to your agent.yaml:
+2. Add the grant to your moat.yaml:
    grants:
      - ssh:github.com
 
@@ -413,7 +413,7 @@ To fix this:
 
 ### Unit Tests
 
-1. **Config parsing:** Valid/invalid `agent.yaml` with claude config
+1. **Config parsing:** Valid/invalid `moat.yaml` with claude config
 2. **Settings merging:** Precedence rules work correctly
 3. **URL parsing:** SSH vs HTTPS detection
 4. **Lockfile:** Read/write/update operations

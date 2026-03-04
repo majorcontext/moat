@@ -15,7 +15,7 @@ For V0, moat supports **remote MCP servers over HTTP/HTTPS**. These are third-pa
 
 ### Key Components
 
-1. **agent.yaml MCP declarations** - Projects declare which MCP servers they want to use, with auth requirements
+1. **moat.yaml MCP declarations** - Projects declare which MCP servers they want to use, with auth requirements
 2. **Global MCP grants** - Users store MCP server credentials once via `moat grant mcp <name>`
 3. **moat-init setup** - Injects MCP configuration into agent tooling (Claude) using stub credentials
 4. **Proxy credential injection** - Replaces stub credentials with real values at network layer, based on URL + header matching
@@ -38,7 +38,7 @@ For V0, moat supports **remote MCP servers over HTTP/HTTPS**. These are third-pa
 
 ## Configuration Format
 
-### agent.yaml MCP Section
+### moat.yaml MCP Section
 
 ```yaml
 mcp:
@@ -133,7 +133,7 @@ mcp-github
 When container starts, moat-init:
 
 1. Checks if `claude` binary exists in PATH
-2. If yes, reads MCP servers from agent.yaml
+2. If yes, reads MCP servers from moat.yaml
 3. For each MCP server, calls `claude mcp add` with stub credential
 
 ### Example moat-init Logic
@@ -144,7 +144,7 @@ if ! command -v claude &> /dev/null; then
   exit 0  # Silent skip if Claude not present
 fi
 
-# For each MCP server in agent.yaml:
+# For each MCP server in moat.yaml:
 # mcp-context7 -> generates stub "moat-stub-mcp-context7"
 claude mcp add \
   --header "CONTEXT7_API_KEY: moat-stub-mcp-context7" \
@@ -164,12 +164,12 @@ claude mcp add \
 
 - If `claude mcp add` fails (wrong URL, Claude version incompatible), log warning but continue
 - If MCP server already configured (from previous run), `claude mcp add` overwrites it
-- moat-init runs on every container start, so config stays in sync with agent.yaml
+- moat-init runs on every container start, so config stays in sync with moat.yaml
 
 ### Configuration Lifecycle
 
 - MCP config lives only in the container
-- Recreated fresh on each `moat run` from agent.yaml
+- Recreated fresh on each `moat run` from moat.yaml
 - No persistent state to manage
 
 ## Proxy Credential Injection
@@ -177,7 +177,7 @@ claude mcp add \
 ### Proxy Responsibilities
 
 The proxy:
-1. Loads MCP server configuration from agent.yaml at startup
+1. Loads MCP server configuration from moat.yaml at startup
 2. Intercepts outbound requests
 3. Matches request (host + header name) against MCP server config
 4. Validates header value is a stub
@@ -189,7 +189,7 @@ The proxy:
 Request to: https://mcp.context7.com/mcp
 Header: CONTEXT7_API_KEY: moat-stub-mcp-context7
 
-Proxy checks agent.yaml:
+Proxy checks moat.yaml:
 - Does any MCP server have url matching host "mcp.context7.com"? → Yes, context7
 - Does that server's auth.header == "CONTEXT7_API_KEY"? → Yes
 - Extract grant name from config: "mcp-context7"
@@ -205,7 +205,7 @@ Inject:
 
 ### Security Properties
 
-- Grant selection is based on **configuration** (agent.yaml URL + header), not request content
+- Grant selection is based on **configuration** (moat.yaml URL + header), not request content
 - Stub validation prevents accidental forwarding of real credentials
 - Host matching prevents credential leakage to wrong servers
 - Header name matching ensures credential goes in correct header
@@ -314,7 +314,7 @@ $ moat trace --network
 [10:23:44.512] GET https://mcp.context7.com/mcp ERR (timeout)
 
 Error: Could not connect to MCP server 'context7'
-Check that the URL in agent.yaml is correct:
+Check that the URL in moat.yaml is correct:
   url: https://mcp.context7.com/mcp
 ```
 
@@ -346,8 +346,8 @@ $ moat grant mcp context7
 Enter CONTEXT7_API_KEY: ***************
 Context7 MCP credential saved
 
-# 2. User adds to agent.yaml (project-specific)
-# agent.yaml
+# 2. User adds to moat.yaml (project-specific)
+# moat.yaml
 mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
@@ -381,7 +381,7 @@ V0 focuses on authentication TO MCP servers. Future versions will explore grant 
 
 ### Files to Modify
 
-- `internal/config/config.go` - Add MCP server parsing to agent.yaml
+- `internal/config/config.go` - Add MCP server parsing to moat.yaml
 - `internal/credential/store.go` - Add MCP grant type
 - `cmd/moat/grant.go` - Add `moat grant mcp <name>` subcommand
 - `internal/proxy/server.go` - Add MCP credential injection logic
@@ -390,7 +390,7 @@ V0 focuses on authentication TO MCP servers. Future versions will explore grant 
 
 ### Testing Strategy
 
-- Unit tests for agent.yaml parsing
+- Unit tests for moat.yaml parsing
 - Integration tests for credential injection
 - E2E tests with mock MCP server
 - Manual testing with real Context7 service
@@ -399,5 +399,5 @@ V0 focuses on authentication TO MCP servers. Future versions will explore grant 
 
 - Add MCP guide: `docs/content/guides/XX-using-mcp-servers.md`
 - Update CLI reference with `moat grant mcp`
-- Update agent.yaml reference with MCP section
+- Update moat.yaml reference with MCP section
 - Add limitations section for V0 observability

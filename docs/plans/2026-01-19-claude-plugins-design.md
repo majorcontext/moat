@@ -15,7 +15,7 @@ Moat manages plugin fetching and caching on the host, mounts a read-only cache i
 ## Goals
 
 - Support Claude's native `.claude/settings.json` for project plugins
-- Support `agent.yaml` for run-specific overrides
+- Support `moat.yaml` for run-specific overrides
 - Fetch private marketplaces using Moat's credential broker (no raw credentials in containers)
 - Cache plugins on host for reuse across runs
 - Make plugin resolution deterministic via lockfile
@@ -44,18 +44,18 @@ Claude Code has two extension mechanisms:
 Moat merges plugin configuration from three sources:
 
 ```
-1. agent.yaml claude.*              (highest - run overrides)
+1. moat.yaml claude.*              (highest - run overrides)
 2. .claude/settings.json            (project defaults)
 3. ~/.moat/claude/settings.json     (user defaults for moat runs)
 ```
 
 | Source | Format | Purpose |
 |--------|--------|---------|
-| `agent.yaml` | Moat schema | Run-specific overrides, MCP with grants |
+| `moat.yaml` | Moat schema | Run-specific overrides, MCP with grants |
 | `.claude/settings.json` | Native Claude | Project defaults, version controlled |
 | `~/.moat/claude/settings.json` | Native Claude | Personal defaults for Moat runs |
 
-### agent.yaml Schema
+### moat.yaml Schema
 
 ```yaml
 claude:
@@ -110,7 +110,7 @@ claude:
 
 - `enabledPlugins`: Union all sources; later overrides earlier for same plugin
 - `extraKnownMarketplaces`: Union all sources; later overrides earlier for same name
-- `mcp` (agent.yaml only): Moat-specific, generates `.mcp.json`
+- `mcp` (moat.yaml only): Moat-specific, generates `.mcp.json`
 
 **Example merge:**
 
@@ -121,7 +121,7 @@ enabledPlugins: { "personal-tool@my-marketplace": true }
 # .claude/settings.json
 enabledPlugins: { "team-tool@acme": true, "debug-tool@acme": true }
 
-# agent.yaml
+# moat.yaml
 claude:
   plugins:
     debug-tool@acme: false
@@ -340,7 +340,7 @@ claude:
 
 ## Limitations
 
-- **MCP runtime requirements**: MCP servers may need Node/Python. Users must include appropriate dependencies in `agent.yaml`.
+- **MCP runtime requirements**: MCP servers may need Node/Python. Users must include appropriate dependencies in `moat.yaml`.
 - **Plugin auto-update**: Requires explicit `moat claude plugins update` for reproducibility.
 - **Conflicts**: When project and user configs conflict, last-write-wins per precedence. Warning logged.
 
@@ -367,7 +367,7 @@ claude:
 ```
 
 ```yaml
-# agent.yaml
+# moat.yaml
 grants:
   - github
   - anthropic
@@ -381,7 +381,7 @@ Result: Team plugins enabled, private marketplace fetched via github grant.
 ### Run with plugin override
 
 ```yaml
-# agent.yaml
+# moat.yaml
 claude:
   plugins:
     deployment-tools@acme-marketplace: false  # Disable for this run
@@ -397,7 +397,7 @@ claude:
 ### Run with MCP servers
 
 ```yaml
-# agent.yaml
+# moat.yaml
 grants:
   - github
 

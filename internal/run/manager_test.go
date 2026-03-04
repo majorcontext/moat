@@ -19,7 +19,7 @@ import (
 )
 
 // TestNetworkPolicyConfiguration verifies that network policy configuration
-// from agent.yaml is properly wired into the proxy.
+// from moat.yaml is properly wired into the proxy.
 // The proxy is started when either:
 // - Grants are provided (for credential injection)
 // - Strict network policy is configured (for firewall enforcement)

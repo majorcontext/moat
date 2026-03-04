@@ -20,7 +20,7 @@ Docker or Apple container runtime is required. Apple container networking requir
 Add a service to your dependencies and use the injected environment variables:
 
 ```yaml
-# agent.yaml
+# moat.yaml
 name: my-app
 
 dependencies:
@@ -268,5 +268,5 @@ command:
 ## Related guides
 
 - [Dependencies concept](../reference/06-dependencies.md) — Dependency types and registry
-- [agent.yaml reference](../reference/02-agent-yaml.md) — Full configuration options
+- [moat.yaml reference](../reference/02-moat-yaml.md) — Full configuration options
 - [Secrets management](05-secrets.md) — Using secret references in service config

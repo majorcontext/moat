@@ -42,7 +42,7 @@ On Linux, if gVisor is not installed, Moat returns an error with installation in
 
 ### Overriding sandbox mode
 
-The `--no-sandbox` flag (or `sandbox: false` in `agent.yaml`) disables the gVisor requirement on Linux, falling back to the standard `runc` runtime. This is useful in environments where gVisor is not installed, during development where gVisor overhead is undesirable, or when debugging runtime-specific issues.
+The `--no-sandbox` flag (or `sandbox: false` in `moat.yaml`) disables the gVisor requirement on Linux, falling back to the standard `runc` runtime. This is useful in environments where gVisor is not installed, during development where gVisor overhead is undesirable, or when debugging runtime-specific issues.
 
 On macOS and Windows, `--no-sandbox` has no effect since gVisor is unavailable in Docker Desktop and standard mode is already the default.
 
