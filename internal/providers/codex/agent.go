@@ -39,6 +39,14 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		return nil, fmt.Errorf("writing codex config: %w", err)
 	}
 
+	// Write runtime context file if provided
+	if opts.RuntimeContext != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(opts.RuntimeContext), 0644); err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing context file: %w", err)
+		}
+	}
+
 	// Build container environment
 	// Include credential env vars plus the init mount path for moat-init script
 	env := p.ContainerEnv(opts.Credential)

@@ -38,6 +38,14 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		}
 	}
 
+	// Write runtime context file if provided
+	if opts.RuntimeContext != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, "GEMINI.md"), []byte(opts.RuntimeContext), 0644); err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing context file: %w", err)
+		}
+	}
+
 	// Build container environment
 	env := p.ContainerEnv(opts.Credential)
 	env = append(env, "MOAT_GEMINI_INIT="+GeminiInitMountPath)

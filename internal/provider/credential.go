@@ -24,10 +24,11 @@ type MountConfig = container.MountConfig
 
 // PrepareOpts contains options for AgentProvider.PrepareContainer.
 type PrepareOpts struct {
-	Credential    *Credential
-	ContainerHome string
-	MCPServers    map[string]MCPServerConfig
-	HostConfig    map[string]interface{}
+	Credential     *Credential
+	ContainerHome  string
+	MCPServers     map[string]MCPServerConfig
+	HostConfig     map[string]interface{}
+	RuntimeContext string // Rendered markdown context for agent instruction file
 }
 
 // MCPServerConfig defines an MCP server configuration.

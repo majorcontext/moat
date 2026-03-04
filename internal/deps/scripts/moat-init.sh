@@ -94,6 +94,10 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/stats-cache.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/stats-cache.json" "$TARGET_HOME/.claude/"
 
+  # Copy CLAUDE.md if present (runtime context for agent awareness)
+  [ -f "$MOAT_CLAUDE_INIT/CLAUDE.md" ] && \
+    cp -p "$MOAT_CLAUDE_INIT/CLAUDE.md" "$TARGET_HOME/.claude/"
+
   # Copy .claude.json to home directory (onboarding state, preserve permissions)
   [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$TARGET_HOME/"
@@ -129,6 +133,10 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
     chmod 600 "$TARGET_HOME/.codex/auth.json"
   fi
 
+  # Copy AGENTS.md if present (runtime context for agent awareness)
+  [ -f "$MOAT_CODEX_INIT/AGENTS.md" ] && \
+    cp -p "$MOAT_CODEX_INIT/AGENTS.md" "$TARGET_HOME/.codex/"
+
   # Ensure moatuser owns all the files if we're running as root
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
     chown -R moatuser:moatuser "$TARGET_HOME/.codex" 2>/dev/null || true
@@ -158,6 +166,10 @@ if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
     cp -p "$MOAT_GEMINI_INIT/oauth_creds.json" "$TARGET_HOME/.gemini/"
     chmod 600 "$TARGET_HOME/.gemini/oauth_creds.json"
   fi
+
+  # Copy GEMINI.md if present (runtime context for agent awareness)
+  [ -f "$MOAT_GEMINI_INIT/GEMINI.md" ] && \
+    cp -p "$MOAT_GEMINI_INIT/GEMINI.md" "$TARGET_HOME/.gemini/"
 
   # Ensure moatuser owns all the files if we're running as root
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then

@@ -73,6 +73,13 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		return nil, fmt.Errorf("writing claude config: %w", err)
 	}
 
+	// Write runtime context file if provided
+	if opts.RuntimeContext != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte(opts.RuntimeContext), 0644); err != nil {
+			return nil, fmt.Errorf("writing context file: %w", err)
+		}
+	}
+
 	// Build mounts
 	mounts := []provider.MountConfig{
 		{
