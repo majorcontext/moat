@@ -522,6 +522,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		m.daemonClient = daemonCl
 		m.mu.Unlock()
 
+		// Capture daemon build commit for version skew detection.
+		if health, healthErr := daemonCl.Health(ctx); healthErr == nil {
+			r.DaemonCommit = health.Commit
+		}
+
 		// Create a RunContext that implements credential.ProxyConfigurer.
 		// Providers will configure their credentials on this context.
 		runCtx := daemon.NewRunContext(r.ID)

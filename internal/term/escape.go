@@ -291,5 +291,5 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 // EscapeHelpText returns help text explaining the escape sequences.
 func EscapeHelpText() string {
-	return "Escape: Ctrl-/ s (snapshot) · k (stop)"
+	return "ctrl+/ s (snapshot) · k (stop)"
 }

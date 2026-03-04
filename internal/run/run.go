@@ -83,6 +83,10 @@ type Run struct {
 	// the run's credentials and configuration in the new daemon instance.
 	ProxyRegReq *daemon.RegisterRequest
 
+	// DaemonCommit is the git commit of the proxy daemon binary at the time
+	// the run was registered. Used to detect version skew with the CLI.
+	DaemonCommit string
+
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
 	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
 	ProviderCleanupPaths map[string]string

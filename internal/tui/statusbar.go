@@ -12,6 +12,7 @@ type StatusBar struct {
 	name    string
 	runtime string
 	grants  []string
+	warning string // persistent warning shown between grants and right side
 	width   int
 	height  int
 	message string // optional message overlay that replaces normal content
@@ -30,6 +31,11 @@ func NewStatusBar(runID, name, runtime string) *StatusBar {
 // SetGrants sets the granted credentials to display.
 func (s *StatusBar) SetGrants(grants []string) {
 	s.grants = grants
+}
+
+// SetWarning sets a persistent warning shown in the status bar (e.g. "proxy stale").
+func (s *StatusBar) SetWarning(warning string) {
+	s.warning = warning
 }
 
 // SetDimensions sets terminal width and height.
@@ -61,6 +67,7 @@ const (
 	bgDarkGray = "\x1b[48;5;236m"
 	fgCyan     = "\x1b[36m"
 	fgMagenta  = "\x1b[35m"
+	fgYellow   = "\x1b[33m"
 	bold       = "\x1b[1m"
 	dim        = "\x1b[2m"
 	reset      = "\x1b[0m"
@@ -84,11 +91,11 @@ func (s *StatusBar) Content() string {
 	if s.message != "" {
 		return s.renderMessage()
 	}
-	return s.buildContent(true, true, true)
+	return s.buildContent(true, true, true, true)
 }
 
 // buildContent constructs the status bar with optional grants, name, and hint.
-func (s *StatusBar) buildContent(showGrants, showName, showHint bool) string {
+func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning bool) string {
 	// Build left segments (plain text for measurement)
 	leftPlain := " moat "
 	runtimePlain := ""
@@ -98,6 +105,10 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint bool) string {
 	grantsPlain := ""
 	if showGrants && len(s.grants) > 0 {
 		grantsPlain = " " + strings.Join(s.grants, " · ") + " "
+	}
+	warningPlain := ""
+	if showWarning && s.warning != "" {
+		warningPlain = " " + s.warning + " "
 	}
 
 	// Build right segment with optional hint
@@ -113,18 +124,21 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint bool) string {
 		rightPlain = fmt.Sprintf(" %s%s ", s.runID, hintPlain)
 	}
 
-	totalPlain := runeLen(leftPlain) + runeLen(runtimePlain) + runeLen(grantsPlain) + runeLen(rightPlain)
+	totalPlain := runeLen(leftPlain) + runeLen(runtimePlain) + runeLen(grantsPlain) + runeLen(warningPlain) + runeLen(rightPlain)
 
 	if totalPlain > s.width {
-		// Truncation cascade: drop hint, then grants, then name
+		// Truncation cascade: drop hint, then grants, then name, then warning
 		if showHint {
-			return s.buildContent(showGrants, showName, false)
+			return s.buildContent(showGrants, showName, false, showWarning)
 		}
 		if showGrants && len(s.grants) > 0 {
-			return s.buildContent(false, showName, false)
+			return s.buildContent(false, showName, false, showWarning)
 		}
 		if showName && s.name != "" {
-			return s.buildContent(false, false, false)
+			return s.buildContent(false, false, false, showWarning)
+		}
+		if showWarning && s.warning != "" {
+			return s.buildContent(false, false, false, false)
 		}
 		if runeLen(leftPlain)+runeLen(rightPlain) > s.width {
 			// Just spaces
@@ -160,6 +174,13 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint bool) string {
 	if grantsPlain != "" {
 		buf.WriteString(dim)
 		buf.WriteString(grantsPlain)
+		buf.WriteString(reset)
+		buf.WriteString(bgDarkGray)
+	}
+
+	if warningPlain != "" {
+		buf.WriteString(fgYellow)
+		buf.WriteString(warningPlain)
 		buf.WriteString(reset)
 		buf.WriteString(bgDarkGray)
 	}
