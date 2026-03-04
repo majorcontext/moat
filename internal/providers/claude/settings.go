@@ -85,8 +85,11 @@ func LoadSettings(path string) (*Settings, error) {
 	// but the rest of moat expects {"source": "git", "url": "https://..."}.
 	// Claude Code accepts both formats, so the normalized output is safe to write back.
 	for name, entry := range settings.ExtraKnownMarketplaces {
-		if entry.Source.Source == "github" && entry.Source.Repo != "" && entry.Source.URL == "" {
-			if validRepoFormat.MatchString(entry.Source.Repo) {
+		if entry.Source.Source == "github" && entry.Source.URL == "" {
+			if entry.Source.Repo == "" {
+				log.Debug("removing marketplace with empty repo and url from settings", "name", name)
+				delete(settings.ExtraKnownMarketplaces, name)
+			} else if validRepoFormat.MatchString(entry.Source.Repo) {
 				entry.Source.URL = "https://github.com/" + entry.Source.Repo + ".git"
 				entry.Source.Source = "git"
 				entry.Source.Repo = ""
