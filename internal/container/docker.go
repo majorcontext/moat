@@ -230,6 +230,15 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		cpuQuota = int64(cfg.CPUs) * cpuPeriod
 	}
 
+	var dockerUlimits []*container.Ulimit
+	for _, u := range cfg.Ulimits {
+		dockerUlimits = append(dockerUlimits, &container.Ulimit{
+			Name: u.Name,
+			Soft: u.Soft,
+			Hard: u.Hard,
+		})
+	}
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        cfg.Image,
@@ -255,6 +264,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 				Memory:    memoryBytes,
 				CPUQuota:  cpuQuota,
 				CPUPeriod: cpuPeriod,
+				Ulimits:   dockerUlimits,
 			},
 		},
 		nil, // network config
