@@ -284,6 +284,12 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 				return fmt.Errorf("archive exceeds maximum total extracted size (limit: %d bytes)", maxArchiveTotalSize)
 			}
 
+			// Check file size before attempting to copy
+			if header.Size > maxArchiveFileSize {
+				_ = f.Close()
+				return fmt.Errorf("file exceeds maximum file size (limit: %d bytes)", maxArchiveFileSize)
+			}
+
 			// Limit copy size to prevent decompression bombs
 			written, copyErr := io.Copy(f, io.LimitReader(tr, maxArchiveFileSize))
 			totalWritten += written
