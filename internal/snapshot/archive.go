@@ -279,7 +279,7 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 			}
 
 			// Check total size limit before writing
-			if totalWritten > maxArchiveTotalSize {
+			if totalWritten+header.Size > maxArchiveTotalSize {
 				_ = f.Close()
 				return fmt.Errorf("archive exceeds maximum total extracted size (limit: %d bytes)", maxArchiveTotalSize)
 			}
