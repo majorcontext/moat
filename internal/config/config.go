@@ -102,9 +102,14 @@ type VolumeConfig struct {
 	ReadOnly bool   `yaml:"readonly,omitempty"`
 }
 
-// MCPServerConfig defines a remote MCP server configuration for top-level
+// MCPServerConfig defines an MCP server configuration for top-level
 // MCP servers in moat.yaml. It specifies the server name, URL endpoint,
 // and optional authentication settings for credential injection.
+//
+// Supports both remote HTTPS servers and host-local HTTP servers.
+// Host-local servers (http://localhost, http://127.0.0.1, or http://[::1]) are reached
+// through the proxy relay, which runs on the host and can connect to
+// host-local services that the container cannot reach directly.
 type MCPServerConfig struct {
 	Name string         `yaml:"name"`
 	URL  string         `yaml:"url"`
@@ -574,6 +579,21 @@ func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 	return nil
 }
 
+// isHostLocalURL returns true if the URL points to a host-local address
+// (localhost, 127.0.0.1, or [::1]). These are MCP servers running on the
+// host machine that the container cannot reach directly.
+//
+// Comparison is case-sensitive: "LOCALHOST" is rejected intentionally;
+// users should use the canonical lowercase form.
+func isHostLocalURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // validateTopLevelMCPServerSpec validates a top-level MCP server specification.
 func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames map[string]bool) error {
 	prefix := fmt.Sprintf("mcp[%d]", index)
@@ -591,8 +611,12 @@ func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames ma
 		return fmt.Errorf("%s: 'url' is required", prefix)
 	}
 
+	// Allow http:// for host-local servers (localhost/127.0.0.1),
+	// require https:// for all other servers.
 	if !strings.HasPrefix(spec.URL, "https://") {
-		return fmt.Errorf("%s: 'url' must use HTTPS", prefix)
+		if !isHostLocalURL(spec.URL) {
+			return fmt.Errorf("%s: 'url' must use HTTPS (http:// is only allowed for localhost, 127.0.0.1, and [::1])", prefix)
+		}
 	}
 
 	if spec.Auth != nil {

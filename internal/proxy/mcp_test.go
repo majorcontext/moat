@@ -249,6 +249,117 @@ func TestMCPCredentialInjection_NoHeader(t *testing.T) {
 	}
 }
 
+func TestMCPRelay_HostLocal(t *testing.T) {
+	// Host-local MCP server (no auth) should relay requests directly
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tools":["read","write"]}`))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-tools",
+			URL:  backend.URL, // http://127.0.0.1:PORT
+			Auth: nil,         // No auth for host-local server
+		},
+	}
+
+	p := &Proxy{
+		mcpServers: mcpServers,
+	}
+
+	// Request to /mcp/local-tools should be relayed to backend
+	req := httptest.NewRequest("POST", "/mcp/local-tools", nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != `{"tools":["read","write"]}` {
+		t.Errorf("expected backend response, got %q", rec.Body.String())
+	}
+}
+
+func TestMCPRelay_HostLocalWithPath(t *testing.T) {
+	// Host-local MCP server should preserve path after server name
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("path:" + r.URL.Path))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-server",
+			URL:  backend.URL + "/mcp",
+			Auth: nil,
+		},
+	}
+
+	p := &Proxy{
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/local-server/v1/tools", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	expected := "path:/mcp/v1/tools"
+	if rec.Body.String() != expected {
+		t.Errorf("expected %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
+	// Host-local MCP server with auth should inject credentials
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"local-api-key": {
+				Provider: "local-api-key",
+				Token:    "secret-local-token",
+			},
+		},
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("X-API-Key")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "local-auth",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:  "local-api-key",
+				Header: "X-API-Key",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/local-auth", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "secret-local-token" {
+		t.Errorf("expected 'secret-local-token', got %q", rec.Body.String())
+	}
+}
+
 // mockCredentialStore for testing
 type mockCredentialStore struct {
 	creds map[credential.Provider]*credential.Credential
