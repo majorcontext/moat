@@ -294,7 +294,7 @@ claude:
 
 ## Observability
 
-All remote MCP traffic flows through the proxy, so it appears in network traces:
+All MCP traffic (both remote and host-local) flows through the proxy relay, so it appears in network traces:
 
 ```bash
 $ moat trace --network

@@ -10,6 +10,10 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 )
 
+// TestMCPCredentialInjection tests the injectMCPCredentials path in ServeHTTP,
+// which handles credential injection for proxied HTTPS MCP traffic. These tests
+// use httptest.NewServer (http://127.0.0.1) for convenience but exercise the
+// proxy-interception path, not the handleMCPRelay relay path.
 func TestMCPCredentialInjection(t *testing.T) {
 	// Mock credential store
 	mockStore := &mockCredentialStore{
