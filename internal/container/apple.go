@@ -488,46 +488,27 @@ func (r *AppleRuntime) GetPortBindings(ctx context.Context, containerID string) 
 		return nil, fmt.Errorf("inspecting container: %w", err)
 	}
 
-	// Parse the JSON output to find port mappings
-	// Apple container inspect format may vary - try common structures
+	// Parse the JSON output to find port mappings.
+	// Apple container inspect returns publishedPorts under configuration:
+	//   "configuration": { "publishedPorts": [{"hostPort":9999,"containerPort":8000,...}] }
 	var info []struct {
-		Ports []struct {
-			ContainerPort int `json:"container_port"`
-			HostPort      int `json:"host_port"`
-		} `json:"ports"`
-		PortBindings map[string][]struct {
-			HostPort string `json:"HostPort"`
-		} `json:"port_bindings"`
+		Configuration struct {
+			PublishedPorts []struct {
+				ContainerPort int `json:"containerPort"`
+				HostPort      int `json:"hostPort"`
+			} `json:"publishedPorts"`
+		} `json:"configuration"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
-		// If parsing fails, return empty map - container may not have port bindings
 		log.Debug("failed to parse container inspect output for port bindings: " + err.Error())
 		return make(map[int]int), nil
 	}
 
 	result := make(map[int]int)
 	if len(info) > 0 {
-		// Try "ports" format first
-		for _, p := range info[0].Ports {
+		for _, p := range info[0].Configuration.PublishedPorts {
 			if p.ContainerPort > 0 && p.HostPort > 0 {
 				result[p.ContainerPort] = p.HostPort
-			}
-		}
-		// Try "port_bindings" format if "ports" was empty
-		if len(result) == 0 && info[0].PortBindings != nil {
-			for portKey, bindings := range info[0].PortBindings {
-				if len(bindings) == 0 {
-					continue
-				}
-				// portKey format is "3000/tcp"
-				var containerPort int
-				_, _ = fmt.Sscanf(portKey, "%d", &containerPort)
-				if containerPort > 0 {
-					hostPort, _ := strconv.Atoi(bindings[0].HostPort)
-					if hostPort > 0 {
-						result[containerPort] = hostPort
-					}
-				}
 			}
 		}
 	}

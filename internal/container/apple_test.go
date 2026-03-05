@@ -1,6 +1,7 @@
 package container
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"testing"
@@ -222,5 +223,105 @@ func TestAppleRuntime_ResizeTTY_WithActivePTY(t *testing.T) {
 	}
 	if size.Cols != 120 {
 		t.Errorf("PTY cols = %d, want 120", size.Cols)
+	}
+}
+
+// TestParseAppleInspectPortBindings validates the JSON parsing logic used by
+// GetPortBindings to extract port mappings from Apple container inspect output.
+// This exercises the same struct tags and parsing flow without shelling out.
+func TestParseAppleInspectPortBindings(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		want    map[int]int
+		wantErr bool
+	}{
+		{
+			name: "single port binding",
+			json: `[{"configuration":{"publishedPorts":[{"containerPort":8000,"hostPort":9999}]}}]`,
+			want: map[int]int{8000: 9999},
+		},
+		{
+			name: "multiple port bindings",
+			json: `[{"configuration":{"publishedPorts":[
+				{"containerPort":8000,"hostPort":9999},
+				{"containerPort":443,"hostPort":8443}
+			]}}]`,
+			want: map[int]int{8000: 9999, 443: 8443},
+		},
+		{
+			name: "no published ports",
+			json: `[{"configuration":{}}]`,
+			want: map[int]int{},
+		},
+		{
+			name: "empty published ports array",
+			json: `[{"configuration":{"publishedPorts":[]}}]`,
+			want: map[int]int{},
+		},
+		{
+			name: "empty inspect array",
+			json: `[]`,
+			want: map[int]int{},
+		},
+		{
+			name: "zero container port skipped",
+			json: `[{"configuration":{"publishedPorts":[{"containerPort":0,"hostPort":9999}]}}]`,
+			want: map[int]int{},
+		},
+		{
+			name: "zero host port skipped",
+			json: `[{"configuration":{"publishedPorts":[{"containerPort":8000,"hostPort":0}]}}]`,
+			want: map[int]int{},
+		},
+		{
+			name: "extra fields ignored",
+			json: `[{"configuration":{"publishedPorts":[{"containerPort":8000,"hostPort":9999,"protocol":"tcp"}],"other":"value"},"state":"running"}]`,
+			want: map[int]int{8000: 9999},
+		},
+		{
+			name:    "invalid json",
+			json:    `not json`,
+			want:    map[int]int{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Mirror the parsing logic from GetPortBindings (apple.go).
+			// NOTE: This struct must match the anonymous struct in GetPortBindings.
+			// If the JSON field names change there, update here too.
+			var info []struct {
+				Configuration struct {
+					PublishedPorts []struct {
+						ContainerPort int `json:"containerPort"`
+						HostPort      int `json:"hostPort"`
+					} `json:"publishedPorts"`
+				} `json:"configuration"`
+			}
+
+			err := json.Unmarshal([]byte(tt.json), &info)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected unmarshal error, got nil")
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected unmarshal error: %v", err)
+			}
+
+			result := make(map[int]int)
+			if len(info) > 0 {
+				for _, p := range info[0].Configuration.PublishedPorts {
+					if p.ContainerPort > 0 && p.HostPort > 0 {
+						result[p.ContainerPort] = p.HostPort
+					}
+				}
+			}
+
+			if !reflect.DeepEqual(result, tt.want) {
+				t.Errorf("port bindings = %v, want %v", result, tt.want)
+			}
+		})
 	}
 }
