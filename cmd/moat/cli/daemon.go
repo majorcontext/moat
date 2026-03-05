@@ -211,29 +211,57 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	livenessCtx, livenessCancel := context.WithCancel(context.Background())
 	defer livenessCancel()
 	lc := daemon.NewLivenessChecker(apiServer.Registry(), daemon.NewCommandContainerChecker())
-	lc.SetOnCleanup(func(_, runID string) {
+	cleanupStore := func(runID string) {
 		storeMu.Lock()
 		delete(stores, runID)
 		storeMu.Unlock()
-	})
+	}
+	lc.SetOnCleanup(func(_, runID string) { cleanupStore(runID) })
 	lc.SetOnEmpty(idleShutdown.Reset)
-	go lc.Run(livenessCtx)
+
+	// Set up run persistence so the registry survives daemon restarts.
+	persistPath := filepath.Join(daemonDir, "runs.json")
+	persister := daemon.NewRunPersister(persistPath, apiServer.Registry())
+	apiServer.SetPersister(persister)
+	lc.SetPersister(persister)
+
+	// Restore previously persisted runs (re-resolves credentials from store).
+	if persisted, loadErr := persister.Load(); loadErr != nil {
+		log.Warn("failed to load persisted runs", "error", loadErr)
+	} else if len(persisted) > 0 {
+		restored := daemon.RestoreRuns(livenessCtx, apiServer.Registry(), persisted)
+		log.Info("restored runs from disk", "loaded", len(persisted), "restored", restored)
+		// Save immediately to reconcile (remove runs that failed to restore).
+		if err := persister.Save(); err != nil {
+			log.Warn("failed to save reconciled run registry", "error", err)
+		}
+	}
+
+	// Run an immediate liveness check to clean up dead containers from restore,
+	// then start the periodic loop. The check runs in the same goroutine to
+	// avoid a 30-second window where dead runs block the idle timer, but uses
+	// a tighter per-run timeout (via CheckOnce) to limit startup delay.
+	go func() {
+		lc.CheckOnce(livenessCtx)
+		lc.Run(livenessCtx)
+	}()
 
 	// Clean up per-run stores when runs are unregistered.
-	apiServer.SetOnUnregister(func(runID string) {
-		storeMu.Lock()
-		delete(stores, runID)
-		storeMu.Unlock()
-	})
+	apiServer.SetOnUnregister(cleanupStore)
 
 	// Wire API shutdown handler to signal the main loop.
 	apiServer.SetOnShutdown(func() {
 		sigCh <- syscall.SIGTERM
 	})
 
-	// Arm the idle timer immediately so the daemon shuts down if no runs
+	// Arm the idle timer. If runs were restored, cancel it since we have
+	// active runs; otherwise arm it so the daemon shuts down if no runs
 	// register within the idle timeout period.
-	idleShutdown.Reset()
+	if apiServer.Registry().Count() > 0 {
+		idleShutdown.Cancel()
+	} else {
+		idleShutdown.Reset()
+	}
 	<-sigCh
 
 	log.Info("daemon shutting down")
@@ -243,6 +271,16 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	defer shutdownCancel()
 	_ = apiServer.Stop(shutdownCtx)
 	_ = proxyServer.Stop(shutdownCtx)
+
+	// Stop liveness goroutine before flush so no SaveDebounced can race
+	// with the final Flush() write. The defer livenessCancel() is still
+	// present as a safety net — calling a CancelFunc twice is a no-op.
+	livenessCancel()
+
+	// Flush persister to ensure final state is written before removing the lock file.
+	if err := persister.Flush(); err != nil {
+		log.Warn("failed to flush persisted run registry", "error", err)
+	}
 	daemon.RemoveLockFile(daemonDir)
 
 	return nil

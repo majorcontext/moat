@@ -28,6 +28,7 @@ type Server struct {
 	server       *http.Server
 	listener     net.Listener
 	startedAt    time.Time
+	persister    *RunPersister
 	onRegister   func()             // called when a new run is registered
 	onEmpty      func()             // called when last run is unregistered
 	onUnregister func(runID string) // called when a run is unregistered (for resource cleanup)
@@ -87,6 +88,9 @@ func (s *Server) SetOnUnregister(fn func(runID string)) { s.onUnregister = fn }
 // This should signal the main daemon loop to exit (e.g., by sending SIGTERM to self).
 func (s *Server) SetOnShutdown(fn func()) { s.onShutdown = fn }
 
+// SetPersister sets the run persister for saving registry state to disk.
+func (s *Server) SetPersister(p *RunPersister) { s.persister = p }
+
 // SetRoutes sets the route table used for route registration handlers.
 func (s *Server) SetRoutes(rt *routing.RouteTable) { s.routes = rt }
 
@@ -131,12 +135,16 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 
 	rc := req.ToRunContext()
 
+	// Create a per-run context for background work (token refresh, AWS).
+	// This context outlives the HTTP request and is canceled when the run
+	// is unregistered via CancelRefresh().
+	runCtx, cancel := context.WithCancel(context.Background())
+	rc.SetRefreshCancel(cancel)
+
 	// Set up token refresh BEFORE registering so the cancel function is
 	// visible to concurrent readers (e.g., handleUnregisterRun) immediately.
 	if len(req.Grants) > 0 {
-		refreshCtx, cancel := context.WithCancel(context.Background())
-		rc.SetRefreshCancel(cancel)
-		StartTokenRefresh(refreshCtx, rc, req.Grants)
+		StartTokenRefresh(runCtx, rc, req.Grants)
 	}
 
 	// If an auth token was provided, re-register with that token so the
@@ -153,7 +161,7 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// because the auth token is needed for endpoint authentication.
 	if req.AWSConfig != nil {
 		awsProvider, awsErr := proxy.NewAWSCredentialProvider(
-			r.Context(),
+			runCtx,
 			req.AWSConfig.RoleARN,
 			req.AWSConfig.Region,
 			req.AWSConfig.SessionDuration,
@@ -167,6 +175,10 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 			awsProvider.SetAuthToken(token)
 			rc.SetAWSHandler(awsProvider.Handler())
 		}
+	}
+
+	if s.persister != nil {
+		s.persister.SaveDebounced()
 	}
 
 	if s.onRegister != nil {
@@ -213,6 +225,10 @@ func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.persister != nil {
+		s.persister.SaveDebounced()
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -234,6 +250,11 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 	rc.CancelRefresh()
 
 	s.registry.Unregister(token)
+
+	if s.persister != nil {
+		s.persister.SaveDebounced()
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 
 	if s.onUnregister != nil {

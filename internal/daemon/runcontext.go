@@ -10,6 +10,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
 )
 
@@ -59,6 +60,7 @@ type RunContext struct {
 
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
+	Grants           []string          `json:"grants,omitempty"`
 
 	RegisteredAt time.Time `json:"registered_at"`
 
@@ -283,6 +285,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		case "response-scrub":
 			if ts, ok := rc.TokenSubstitutions[spec.Host]; ok {
 				tf = newResponseScrubber(ts.RealToken, ts.Placeholder)
+			} else {
+				log.Warn("response-scrub transformer has no matching token substitution",
+					"host", spec.Host, "run_id", rc.RunID)
 			}
 		}
 		if tf != nil {

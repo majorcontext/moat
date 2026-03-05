@@ -38,7 +38,7 @@ func (l *LockInfo) IsAlive() bool {
 
 // WriteLockFile writes the daemon lock file.
 func WriteLockFile(dir string, info LockInfo) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 	if info.StartedAt.IsZero() {
@@ -81,7 +81,7 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	sockPath := filepath.Join(dir, "daemon.sock")
 
 	// Ensure the directory exists before taking the spawn lock.
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("creating daemon directory: %w", err)
 	}
 

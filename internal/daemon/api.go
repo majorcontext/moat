@@ -126,6 +126,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkPolicy = req.NetworkPolicy
 	rc.NetworkAllow = req.NetworkAllow
 	rc.AWSConfig = req.AWSConfig
+	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
 	return rc
 }
