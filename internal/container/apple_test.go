@@ -135,6 +135,37 @@ func TestBuildCreateArgs(t *testing.T) {
 			},
 			want: []string{"create", "--memory", "16384MB", "--cpus", "12", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
+		{
+			name: "single ulimit",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				Ulimits: []Ulimit{
+					{Name: "nofile", Soft: 1024, Hard: 65536},
+				},
+			},
+			want: []string{"create", "--memory", "4096MB", "--ulimit", "nofile=1024:65536", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
+		{
+			name: "multiple ulimits",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				Ulimits: []Ulimit{
+					{Name: "nofile", Soft: 1024, Hard: 65536},
+					{Name: "memlock", Soft: -1, Hard: -1},
+				},
+			},
+			want: []string{"create", "--memory", "4096MB", "--ulimit", "memlock=-1:-1", "--ulimit", "nofile=1024:65536", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
+		{
+			name: "ulimit with equal soft and hard",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				Ulimits: []Ulimit{
+					{Name: "nproc", Soft: 4096, Hard: 4096},
+				},
+			},
+			want: []string{"create", "--memory", "4096MB", "--ulimit", "nproc=4096:4096", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
 	}
 
 	for _, tt := range tests {

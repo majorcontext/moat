@@ -58,6 +58,13 @@ type Config struct {
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
 }
 
+// UlimitSpec defines a resource limit with soft and hard values.
+// Use -1 for unlimited.
+type UlimitSpec struct {
+	Soft int64 `yaml:"soft"`
+	Hard int64 `yaml:"hard"`
+}
+
 // ContainerConfig configures container resource limits and settings.
 // These settings apply to both Docker and Apple container runtimes.
 type ContainerConfig struct {
@@ -92,6 +99,19 @@ type ContainerConfig struct {
 	// Note: Using public DNS will send queries to that provider,
 	// potentially leaking information about your dependencies and internal services.
 	DNS []string `yaml:"dns,omitempty"`
+
+	// Ulimits specifies resource limits (ulimits) for the container.
+	// Applies to both Docker and Apple containers.
+	// Keys are ulimit names (e.g., "nofile", "nproc", "memlock").
+	// Values specify soft and hard limits. Use -1 for unlimited.
+	//
+	// Example:
+	//   container:
+	//     ulimits:
+	//       nofile:
+	//         soft: 1024
+	//         hard: 65536
+	Ulimits map[string]UlimitSpec `yaml:"ulimits,omitempty"`
 }
 
 // VolumeConfig defines a named volume to mount inside the container.
@@ -401,6 +421,31 @@ func Load(dir string) (*Config, error) {
 	}
 	if cfg.Container.CPUs < 0 {
 		return nil, fmt.Errorf("container.cpus must be non-negative, got %d", cfg.Container.CPUs)
+	}
+
+	// Validate ulimits
+	validUlimits := map[string]bool{
+		"core": true, "cpu": true, "data": true, "fsize": true,
+		"locks": true, "memlock": true, "msgqueue": true, "nice": true,
+		"nofile": true, "nproc": true, "rss": true, "rtprio": true,
+		"rttime": true, "sigpending": true, "stack": true,
+	}
+	for name, spec := range cfg.Container.Ulimits {
+		if !validUlimits[name] {
+			return nil, fmt.Errorf("container.ulimits: unknown ulimit %q", name)
+		}
+		if spec.Soft < -1 {
+			return nil, fmt.Errorf("container.ulimits.%s: soft limit must be -1 (unlimited) or non-negative", name)
+		}
+		if spec.Hard < -1 {
+			return nil, fmt.Errorf("container.ulimits.%s: hard limit must be -1 (unlimited) or non-negative", name)
+		}
+		if spec.Soft == -1 && spec.Hard != -1 {
+			return nil, fmt.Errorf("container.ulimits.%s: soft limit (unlimited) must not exceed hard limit (%d)", name, spec.Hard)
+		}
+		if spec.Soft != -1 && spec.Hard != -1 && spec.Soft > spec.Hard {
+			return nil, fmt.Errorf("container.ulimits.%s: soft limit (%d) must not exceed hard limit (%d)", name, spec.Soft, spec.Hard)
+		}
 	}
 
 	// Set default network policy if not specified

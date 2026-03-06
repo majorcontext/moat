@@ -1876,6 +1876,147 @@ mcp:
 	}
 }
 
+func TestLoadConfigWithUlimits(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+
+	content := `
+agent: claude-code
+container:
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 65536
+    nproc:
+      soft: 4096
+      hard: 4096
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Container.Ulimits) != 2 {
+		t.Fatalf("Ulimits = %d, want 2", len(cfg.Container.Ulimits))
+	}
+	nofile, ok := cfg.Container.Ulimits["nofile"]
+	if !ok {
+		t.Fatal("missing nofile ulimit")
+	}
+	if nofile.Soft != 1024 || nofile.Hard != 65536 {
+		t.Errorf("nofile = %+v, want soft=1024 hard=65536", nofile)
+	}
+	nproc, ok := cfg.Container.Ulimits["nproc"]
+	if !ok {
+		t.Fatal("missing nproc ulimit")
+	}
+	if nproc.Soft != 4096 || nproc.Hard != 4096 {
+		t.Errorf("nproc = %+v, want soft=4096 hard=4096", nproc)
+	}
+}
+
+func TestLoadConfigUlimitValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "soft exceeds hard",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 1024
+`,
+			wantErr: "container.ulimits.nofile: soft limit (65536) must not exceed hard limit (1024)",
+		},
+		{
+			name: "negative soft",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: -2
+      hard: 1024
+`,
+			wantErr: "container.ulimits.nofile: soft limit must be -1 (unlimited) or non-negative",
+		},
+		{
+			name: "unknown ulimit name",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    bogus:
+      soft: 100
+      hard: 100
+`,
+			wantErr: `container.ulimits: unknown ulimit "bogus"`,
+		},
+		{
+			name: "negative hard",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: -2
+`,
+			wantErr: "container.ulimits.nofile: hard limit must be -1 (unlimited) or non-negative",
+		},
+		{
+			name: "unlimited soft with finite hard",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: -1
+      hard: 1024
+`,
+			wantErr: "container.ulimits.nofile: soft limit (unlimited) must not exceed hard limit (1024)",
+		},
+		{
+			name: "unlimited is valid",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    memlock:
+      soft: -1
+      hard: -1
+`,
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			_, err := Load(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_MCP_HttpsLocalhostNotHostLocal(t *testing.T) {
 	// https://localhost should be treated as a remote server (not host-local),
 	// and should be accepted since it uses HTTPS.

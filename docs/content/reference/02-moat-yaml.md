@@ -730,6 +730,33 @@ container:
 
 Applies to both Docker and Apple containers. Used for both build-time dependency installation and runtime name resolution.
 
+### container.ulimits
+
+Resource limits (ulimits) for the container process. Applies to both Docker and Apple containers.
+
+```yaml
+container:
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 65536
+    nproc:
+      soft: 4096
+      hard: 4096
+    memlock:
+      soft: -1
+      hard: -1
+```
+
+- Type: `map[string, {soft: integer, hard: integer}]`
+- Default: Runtime defaults (inherited from host/daemon)
+
+Each key is a ulimit name. Values must include both `soft` and `hard` limits. Use `-1` for unlimited. The soft limit must not exceed the hard limit.
+
+Supported ulimit names: `core`, `cpu`, `data`, `fsize`, `locks`, `memlock`, `msgqueue`, `nice`, `nofile`, `nproc`, `rss`, `rtprio`, `rttime`, `sigpending`, `stack`.
+
+Apple containers require CLI version 0.9.0 or later for ulimit support.
+
 ---
 
 ## Service dependencies

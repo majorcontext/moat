@@ -239,6 +239,13 @@ type AttachOptions struct {
 	InitialHeight uint
 }
 
+// Ulimit represents a resource limit with name, soft, and hard values.
+type Ulimit struct {
+	Name string
+	Soft int64
+	Hard int64
+}
+
 // Config holds configuration for creating a container.
 type Config struct {
 	Name         string
@@ -259,6 +266,7 @@ type Config struct {
 	MemoryMB     int            // Memory limit in megabytes (both Docker and Apple)
 	CPUs         int            // Number of CPUs (both Docker and Apple)
 	DNS          []string       // DNS servers (both Docker and Apple)
+	Ulimits      []Ulimit       // Resource limits (both Docker and Apple)
 }
 
 // SidecarConfig holds configuration for starting a sidecar container.

@@ -1995,10 +1995,21 @@ region = %s
 	// Priority: explicit moat.yaml > agent provider default > runtime fallback.
 	var memoryMB, cpus int
 	var dns []string
+	var ulimits []container.Ulimit
 	if opts.Config != nil {
 		memoryMB = opts.Config.Container.Memory
 		cpus = opts.Config.Container.CPUs
 		dns = opts.Config.Container.DNS
+		for name, spec := range opts.Config.Container.Ulimits {
+			ulimits = append(ulimits, container.Ulimit{
+				Name: name,
+				Soft: spec.Soft,
+				Hard: spec.Hard,
+			})
+		}
+		sort.Slice(ulimits, func(i, j int) bool {
+			return ulimits[i].Name < ulimits[j].Name
+		})
 	}
 
 	// On Apple containers, if moat.yaml didn't set memory and we're running an
@@ -2030,6 +2041,7 @@ region = %s
 		MemoryMB:     memoryMB,
 		CPUs:         cpus,
 		DNS:          dns,
+		Ulimits:      ulimits,
 	})
 	if err != nil {
 		// Clean up BuildKit resources on failure
