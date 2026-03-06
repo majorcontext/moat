@@ -48,6 +48,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
 | `--keep` | Keep container after run completes |
+| `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
@@ -123,6 +124,7 @@ moat run [flags] [path] [-- command]
 | `--rebuild` | Force rebuild of container image |
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |
 | `--keep` | Keep container after run completes |
+| `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
@@ -172,6 +174,14 @@ moat run --name my-feature ./my-project
 
 # Disable gVisor sandbox (when needed for compatibility)
 moat run --no-sandbox ./my-project
+```
+
+### --no-clipboard
+
+Disables host clipboard bridging for this run. Overrides `clipboard: true` in moat.yaml.
+
+```bash
+moat run --no-clipboard ./my-project
 ```
 
 ### --no-sandbox
@@ -395,6 +405,7 @@ Configuration is read from `moat.yaml` in the repository root. If a run is alrea
 | `--rebuild` | Force image rebuild |
 | `--keep` | Keep container after completion |
 | `--runtime` | Container runtime to use (`apple`, `docker`) |
+| `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging |
 

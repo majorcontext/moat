@@ -595,6 +595,23 @@ When `false` (default), output streams to the terminal. Press `Ctrl+C` to stop. 
 
 Required for shells, REPLs, and interactive tools.
 
+### clipboard
+
+Enable host clipboard bridging.
+
+```yaml
+# Disable clipboard bridging
+clipboard: false
+```
+
+- Type: `bool`
+- Default: `true`
+- CLI override: `--no-clipboard`
+
+When enabled, moat intercepts `Ctrl+V` during interactive sessions, reads the host clipboard, and makes the data available inside the container via a headless X server. This allows coding agents to paste images and text from the host clipboard.
+
+Requires `xvfb` and `xclip` in the container image (added automatically to moat-built images).
+
 ---
 
 ## Hooks
