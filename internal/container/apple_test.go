@@ -150,8 +150,8 @@ func TestBuildCreateArgs(t *testing.T) {
 			cfg: Config{
 				Image: "ubuntu:22.04",
 				Ulimits: []Ulimit{
-					{Name: "memlock", Soft: -1, Hard: -1},
 					{Name: "nofile", Soft: 1024, Hard: 65536},
+					{Name: "memlock", Soft: -1, Hard: -1},
 				},
 			},
 			want: []string{"create", "--memory", "4096MB", "--ulimit", "memlock=-1:-1", "--ulimit", "nofile=1024:65536", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
