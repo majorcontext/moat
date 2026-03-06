@@ -77,8 +77,8 @@ func readLinux() (*Content, error) {
 	// Check for image targets
 	for _, imgType := range []string{"image/png", "image/jpeg", "image/bmp"} {
 		if strings.Contains(targets, imgType) {
-			imgData, err := exec.Command("xclip", "-selection", "clipboard", "-t", imgType, "-o").Output()
-			if err == nil && len(imgData) > 0 {
+			imgData, imgErr := exec.Command("xclip", "-selection", "clipboard", "-t", imgType, "-o").Output()
+			if imgErr == nil && len(imgData) > 0 {
 				return &Content{Data: imgData, MIMEType: imgType}, nil
 			}
 		}
@@ -106,8 +106,8 @@ func readLinuxWayland() (*Content, error) {
 	mimeTypes := string(mimeOut)
 	for _, imgType := range []string{"image/png", "image/jpeg"} {
 		if strings.Contains(mimeTypes, imgType) {
-			imgData, err := exec.Command("wl-paste", "--type", imgType).Output()
-			if err == nil && len(imgData) > 0 {
+			imgData, imgErr := exec.Command("wl-paste", "--type", imgType).Output()
+			if imgErr == nil && len(imgData) > 0 {
 				return &Content{Data: imgData, MIMEType: imgType}, nil
 			}
 		}

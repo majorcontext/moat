@@ -125,6 +125,9 @@ func (f *flexibleRuntime) StartAttached(context.Context, string, container.Attac
 	return nil
 }
 func (f *flexibleRuntime) ResizeTTY(context.Context, string, uint, uint) error { return nil }
+func (f *flexibleRuntime) ExecWrite(context.Context, string, []string, []byte) error {
+	return nil
+}
 
 // newEdgeCaseManager creates a Manager with the given runtime and a temporary
 // routes directory. The returned cleanup function should be deferred.

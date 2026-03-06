@@ -87,6 +87,9 @@ func (s *listCleanStubRuntime) StartAttached(ctx context.Context, id string, opt
 func (s *listCleanStubRuntime) ResizeTTY(ctx context.Context, id string, height, width uint) error {
 	panic("unexpected call to ResizeTTY")
 }
+func (s *listCleanStubRuntime) ExecWrite(ctx context.Context, id string, cmd []string, stdin []byte) error {
+	panic("unexpected call to ExecWrite")
+}
 
 // --- isImageInUse tests ---
 

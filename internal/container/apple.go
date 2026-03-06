@@ -583,6 +583,20 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 	return nil
 }
 
+// ExecWrite runs a command inside a running container with data piped to stdin.
+func (r *AppleRuntime) ExecWrite(ctx context.Context, containerID string, cmd []string, stdin []byte) error {
+	args := append([]string{"exec", containerID}, cmd...)
+	c := exec.CommandContext(ctx, r.containerBin, args...)
+	c.Stdin = bytes.NewReader(stdin)
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("exec failed: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
 // ImageExists checks if an image exists locally.
 func (m *appleBuildManager) ImageExists(ctx context.Context, tag string) (bool, error) {
 	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", tag)
