@@ -337,11 +337,11 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 
 		workspace := createTestWorkspaceWithRuntime(t, "python", "3.10")
 
-		// Use Python to make HTTPS request through the proxy. Python is simpler to
-		// set up than gh/curl and handles SSL certificates more gracefully.
+		// Use Python to make HTTPS request through the proxy.
 		//
 		// TODO: Mount CA certificate into container to properly test TLS interception.
-		// Currently using PYTHONHTTPSVERIFY=0 because the Moat CA isn't mounted.
+		// Without the CA, Python's urllib rejects the proxy's cert; NoSandbox
+		// allows the fallback direct connection to succeed and still get logged.
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-test-network-capture",
 			Workspace: workspace,

@@ -1180,8 +1180,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	for {
 		req, err := http.ReadRequest(clientReader)
 		if err != nil {
-			log.Debug("failed to read request from intercepted connection",
-				"subsystem", "proxy", "host", host, "error", err)
+			if err != io.EOF {
+				log.Debug("failed to read request from intercepted connection",
+					"subsystem", "proxy", "host", host, "error", err)
+			}
 			return
 		}
 
