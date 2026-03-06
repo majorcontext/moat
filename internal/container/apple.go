@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,9 +254,16 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	}
 
 	// Ulimits (requires Apple container CLI 0.9.0+)
-	// Assumes caller provides ulimits in deterministic order (manager.go sorts by name).
-	for _, u := range cfg.Ulimits {
-		args = append(args, "--ulimit", fmt.Sprintf("%s=%d:%d", u.Name, u.Soft, u.Hard))
+	// Sort by name for deterministic CLI args regardless of caller ordering.
+	if len(cfg.Ulimits) > 0 {
+		sorted := make([]Ulimit, len(cfg.Ulimits))
+		copy(sorted, cfg.Ulimits)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Name < sorted[j].Name
+		})
+		for _, u := range sorted {
+			args = append(args, "--ulimit", fmt.Sprintf("%s=%d:%d", u.Name, u.Soft, u.Hard))
+		}
 	}
 
 	// Working directory

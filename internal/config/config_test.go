@@ -1907,6 +1907,13 @@ container:
 	if nofile.Soft != 1024 || nofile.Hard != 65536 {
 		t.Errorf("nofile = %+v, want soft=1024 hard=65536", nofile)
 	}
+	nproc, ok := cfg.Container.Ulimits["nproc"]
+	if !ok {
+		t.Fatal("missing nproc ulimit")
+	}
+	if nproc.Soft != 4096 || nproc.Hard != 4096 {
+		t.Errorf("nproc = %+v, want soft=4096 hard=4096", nproc)
+	}
 }
 
 func TestLoadConfigUlimitValidation(t *testing.T) {
