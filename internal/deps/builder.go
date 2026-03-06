@@ -22,6 +22,9 @@ type ImageTagOptions struct {
 	// NeedsGeminiInit indicates the image needs the init script for Gemini setup.
 	NeedsGeminiInit bool
 
+	// NeedsFirewall indicates the image needs iptables for strict network policy.
+	NeedsFirewall bool
+
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
@@ -67,6 +70,9 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 	if opts.NeedsGeminiInit {
 		hashInput += ",gemini:init"
+	}
+	if opts.NeedsFirewall {
+		hashInput += ",firewall:iptables"
 	}
 
 	// Include plugins in hash (different plugins = different image).

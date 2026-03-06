@@ -1331,6 +1331,7 @@ region = %s
 		NeedsClaudeInit: needsClaudeInit,
 		NeedsCodexInit:  needsCodexInit,
 		NeedsGeminiInit: needsGeminiInit,
+		NeedsFirewall:   needsProxyForFirewall,
 		ClaudePlugins:   claudePlugins,
 		Hooks:           hooks,
 	})
@@ -1343,7 +1344,7 @@ region = %s
 
 	// Determine if we need a custom image
 	hasHooks := hooks != nil
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || len(claudePlugins) > 0 || hasHooks
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || needsProxyForFirewall || len(claudePlugins) > 0 || hasHooks
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {

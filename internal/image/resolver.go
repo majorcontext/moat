@@ -20,6 +20,9 @@ type ResolveOptions struct {
 	// NeedsGeminiInit indicates the image needs the init script for Gemini setup.
 	NeedsGeminiInit bool
 
+	// NeedsFirewall indicates the image needs iptables for strict network policy.
+	NeedsFirewall bool
+
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
@@ -38,8 +41,8 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 
 	hasHooks := opts.Hooks != nil && (opts.Hooks.PostBuild != "" || opts.Hooks.PostBuildRoot != "" || opts.Hooks.PreRun != "")
 
-	// Need custom image if we have dependencies, SSH, Claude init, Codex init, Gemini init, plugins, or hooks
-	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || len(opts.ClaudePlugins) > 0 || hasHooks
+	// Need custom image if we have dependencies, SSH, Claude init, Codex init, Gemini init, plugins, hooks, or firewall
+	needsCustomImage := len(depList) > 0 || opts.NeedsSSH || opts.NeedsClaudeInit || opts.NeedsCodexInit || opts.NeedsGeminiInit || opts.NeedsFirewall || len(opts.ClaudePlugins) > 0 || hasHooks
 	if !needsCustomImage {
 		return DefaultImage
 	}
@@ -49,6 +52,7 @@ func Resolve(depList []deps.Dependency, opts *ResolveOptions) string {
 		NeedsClaudeInit: opts.NeedsClaudeInit,
 		NeedsCodexInit:  opts.NeedsCodexInit,
 		NeedsGeminiInit: opts.NeedsGeminiInit,
+		NeedsFirewall:   opts.NeedsFirewall,
 		ClaudePlugins:   opts.ClaudePlugins,
 		Hooks:           opts.Hooks,
 	})

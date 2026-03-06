@@ -81,6 +81,15 @@ func TestImageTagWithHooks(t *testing.T) {
 	}
 }
 
+func TestImageTagWithFirewall(t *testing.T) {
+	deps := []Dependency{{Name: "python", Version: "3.11"}}
+	tagWithout := ImageTag(deps, nil)
+	tagWith := ImageTag(deps, &ImageTagOptions{NeedsFirewall: true})
+	if tagWithout == tagWith {
+		t.Error("firewall option should affect tag")
+	}
+}
+
 func TestImageTagDockerModes(t *testing.T) {
 	// docker:host and docker:dind should produce different image tags
 	// because they install different packages (CLI-only vs full daemon)
