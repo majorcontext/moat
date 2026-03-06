@@ -111,7 +111,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 			ResponseHeaders: proxy.FilterHeaders(data.ResponseHeaders, false, ""),
 			RequestBody:     string(data.RequestBody),
 			ResponseBody:    string(data.ResponseBody),
-			BodyTruncated:   len(data.RequestBody) > proxy.MaxBodySize || len(data.ResponseBody) > proxy.MaxBodySize,
+			BodyTruncated:   len(data.RequestBody) >= proxy.MaxBodySize || len(data.ResponseBody) >= proxy.MaxBodySize,
 		})
 	})
 

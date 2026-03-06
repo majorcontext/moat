@@ -179,7 +179,9 @@ func TestTraceSpans(t *testing.T) {
 		StartTime: time.Now(),
 		EndTime:   time.Now().Add(10 * time.Millisecond),
 	}
-	s.WriteSpan(span2)
+	if err := s.WriteSpan(span2); err != nil {
+		t.Fatalf("WriteSpan: %v", err)
+	}
 
 	spans, err := s.ReadSpans()
 	if err != nil {
@@ -427,6 +429,234 @@ func TestRunStoreRemoveEmptyRunID(t *testing.T) {
 	}
 	if err.Error() != "cannot remove run storage: empty run ID" {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestWriteNetworkRequest(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_net1234")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	req := NetworkRequest{
+		Timestamp:       time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		Method:          "POST",
+		URL:             "https://api.github.com/repos/org/repo/pulls",
+		StatusCode:      201,
+		Duration:        142,
+		Error:           "",
+		RequestHeaders:  map[string]string{"Content-Type": "application/json"},
+		ResponseHeaders: map[string]string{"X-RateLimit-Remaining": "4999"},
+		RequestBody:     `{"title":"test PR"}`,
+		ResponseBody:    `{"id":1,"number":42}`,
+		BodyTruncated:   false,
+	}
+	if err := s.WriteNetworkRequest(req); err != nil {
+		t.Fatalf("WriteNetworkRequest: %v", err)
+	}
+
+	reqs, err := s.ReadNetworkRequests()
+	if err != nil {
+		t.Fatalf("ReadNetworkRequests: %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("got %d requests, want 1", len(reqs))
+	}
+
+	got := reqs[0]
+	if got.Method != req.Method {
+		t.Errorf("Method = %q, want %q", got.Method, req.Method)
+	}
+	if got.URL != req.URL {
+		t.Errorf("URL = %q, want %q", got.URL, req.URL)
+	}
+	if got.StatusCode != req.StatusCode {
+		t.Errorf("StatusCode = %d, want %d", got.StatusCode, req.StatusCode)
+	}
+	if got.Duration != req.Duration {
+		t.Errorf("Duration = %d, want %d", got.Duration, req.Duration)
+	}
+	if got.RequestHeaders["Content-Type"] != "application/json" {
+		t.Errorf("RequestHeaders[Content-Type] = %q, want %q", got.RequestHeaders["Content-Type"], "application/json")
+	}
+	if got.ResponseHeaders["X-RateLimit-Remaining"] != "4999" {
+		t.Errorf("ResponseHeaders[X-RateLimit-Remaining] = %q, want %q", got.ResponseHeaders["X-RateLimit-Remaining"], "4999")
+	}
+	if got.RequestBody != req.RequestBody {
+		t.Errorf("RequestBody = %q, want %q", got.RequestBody, req.RequestBody)
+	}
+	if got.ResponseBody != req.ResponseBody {
+		t.Errorf("ResponseBody = %q, want %q", got.ResponseBody, req.ResponseBody)
+	}
+	if got.BodyTruncated != false {
+		t.Errorf("BodyTruncated = %v, want false", got.BodyTruncated)
+	}
+}
+
+func TestWriteNetworkRequestWithError(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_neterr1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	req := NetworkRequest{
+		Timestamp: time.Now().UTC(),
+		Method:    "GET",
+		URL:       "https://unreachable.example.com/api",
+		Error:     "dial tcp: no such host",
+	}
+	if err := s.WriteNetworkRequest(req); err != nil {
+		t.Fatalf("WriteNetworkRequest: %v", err)
+	}
+
+	reqs, err := s.ReadNetworkRequests()
+	if err != nil {
+		t.Fatalf("ReadNetworkRequests: %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("got %d requests, want 1", len(reqs))
+	}
+	if reqs[0].Error != "dial tcp: no such host" {
+		t.Errorf("Error = %q, want %q", reqs[0].Error, "dial tcp: no such host")
+	}
+	if reqs[0].BodyTruncated {
+		t.Error("BodyTruncated should be false for error requests")
+	}
+}
+
+func TestWriteNetworkRequestMultiple(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_netmulti1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	reqs := []NetworkRequest{
+		{
+			Timestamp:  time.Now().UTC(),
+			Method:     "GET",
+			URL:        "https://api.github.com/user",
+			StatusCode: 200,
+			Duration:   89,
+		},
+		{
+			Timestamp:  time.Now().UTC().Add(time.Second),
+			Method:     "POST",
+			URL:        "https://api.anthropic.com/v1/messages",
+			StatusCode: 200,
+			Duration:   1200,
+		},
+		{
+			Timestamp:  time.Now().UTC().Add(2 * time.Second),
+			Method:     "GET",
+			URL:        "https://api.github.com/repos/org/repo",
+			StatusCode: 404,
+			Duration:   45,
+		},
+	}
+
+	for _, req := range reqs {
+		if err := s.WriteNetworkRequest(req); err != nil {
+			t.Fatalf("WriteNetworkRequest: %v", err)
+		}
+	}
+
+	readReqs, err := s.ReadNetworkRequests()
+	if err != nil {
+		t.Fatalf("ReadNetworkRequests: %v", err)
+	}
+	if len(readReqs) != len(reqs) {
+		t.Fatalf("got %d requests, want %d", len(readReqs), len(reqs))
+	}
+
+	for i, got := range readReqs {
+		want := reqs[i]
+		if got.Method != want.Method {
+			t.Errorf("request[%d].Method = %q, want %q", i, got.Method, want.Method)
+		}
+		if got.URL != want.URL {
+			t.Errorf("request[%d].URL = %q, want %q", i, got.URL, want.URL)
+		}
+		if got.StatusCode != want.StatusCode {
+			t.Errorf("request[%d].StatusCode = %d, want %d", i, got.StatusCode, want.StatusCode)
+		}
+	}
+}
+
+func TestReadNetworkRequestsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_netempty1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	reqs, err := s.ReadNetworkRequests()
+	if err != nil {
+		t.Fatalf("ReadNetworkRequests: %v", err)
+	}
+	if reqs != nil {
+		t.Errorf("expected nil requests, got %v", reqs)
+	}
+}
+
+func TestReadNetworkRequestsMalformed(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_netmal1")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	// Write a valid request first
+	valid := NetworkRequest{
+		Timestamp:  time.Now().UTC(),
+		Method:     "GET",
+		URL:        "https://api.github.com/user",
+		StatusCode: 200,
+		Duration:   50,
+	}
+	if err := s.WriteNetworkRequest(valid); err != nil {
+		t.Fatalf("WriteNetworkRequest: %v", err)
+	}
+
+	// Append a malformed line directly to the file
+	f, err := os.OpenFile(
+		filepath.Join(dir, "run_netmal1", "network.jsonl"),
+		os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	fmt.Fprintln(f, "not valid json {{{")
+	f.Close()
+
+	// Write another valid request after the malformed line
+	valid2 := NetworkRequest{
+		Timestamp:  time.Now().UTC(),
+		Method:     "POST",
+		URL:        "https://api.example.com/data",
+		StatusCode: 201,
+		Duration:   100,
+	}
+	if err := s.WriteNetworkRequest(valid2); err != nil {
+		t.Fatalf("WriteNetworkRequest: %v", err)
+	}
+
+	reqs, err := s.ReadNetworkRequests()
+	if err != nil {
+		t.Fatalf("ReadNetworkRequests: %v", err)
+	}
+	// Should skip the malformed line and return the two valid ones
+	if len(reqs) != 2 {
+		t.Fatalf("got %d requests, want 2", len(reqs))
+	}
+	if reqs[0].Method != "GET" {
+		t.Errorf("request[0].Method = %q, want %q", reqs[0].Method, "GET")
+	}
+	if reqs[1].Method != "POST" {
+		t.Errorf("request[1].Method = %q, want %q", reqs[1].Method, "POST")
 	}
 }
 

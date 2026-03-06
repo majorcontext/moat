@@ -371,7 +371,7 @@ func (s *RunStore) ReadNetworkRequests() ([]NetworkRequest, error) {
 		}
 		reqs = append(reqs, req)
 	}
-	return reqs, nil
+	return reqs, scanner.Err()
 }
 
 // ReadSecretResolutions reads all secret resolutions.
@@ -394,7 +394,7 @@ func (s *RunStore) ReadSecretResolutions() ([]SecretResolution, error) {
 		}
 		resolutions = append(resolutions, res)
 	}
-	return resolutions, nil
+	return resolutions, scanner.Err()
 }
 
 // ExecEvent represents a command execution captured by the tracer.

@@ -217,20 +217,20 @@ The JSONL files are line-delimited JSON, so standard tools like `jq` work direct
 
 ### Log queries
 
-Each log entry has three fields: `timestamp`, `stream` (`stdout` or `stderr`), and `line`.
+Each log entry has two fields: `ts` (timestamp) and `line`.
 
 ```bash
-# Filter stderr lines
-$ jq 'select(.stream == "stderr")' ~/.moat/runs/run_a1b2c3d4e5f6/logs.jsonl
+# Search for lines containing "error"
+$ jq 'select(.line | test("error"; "i"))' ~/.moat/runs/run_a1b2c3d4e5f6/logs.jsonl
 ```
 
 ### Network queries
 
-Each network entry has `timestamp`, `method`, `url`, `status`, `duration_ms`, and header/body fields.
+Each network entry has `ts`, `method`, `url`, `status_code`, `duration_ms`, and header/body fields.
 
 ```bash
 # Count requests by status code
-$ jq -r '.status' ~/.moat/runs/run_a1b2c3d4e5f6/network.jsonl | sort | uniq -c
+$ jq -r '.status_code' ~/.moat/runs/run_a1b2c3d4e5f6/network.jsonl | sort | uniq -c
 
 # Find slow requests (over 1 second)
 $ jq 'select(.duration_ms > 1000) | {method, url, duration_ms}' \
@@ -241,7 +241,7 @@ $ jq -r '.url' ~/.moat/runs/run_a1b2c3d4e5f6/network.jsonl | \
     sed 's|https\?://||' | cut -d/ -f1 | sort -u
 
 # Find all 401 responses across runs
-$ jq 'select(.status == 401)' ~/.moat/runs/run_*/network.jsonl
+$ jq 'select(.status_code == 401)' ~/.moat/runs/run_*/network.jsonl
 ```
 
 > **Note:** Request and response bodies in `network.jsonl` are captured up to 8 KB. Larger bodies are truncated.
