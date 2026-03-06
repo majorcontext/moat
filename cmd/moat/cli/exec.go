@@ -215,6 +215,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		Rebuild:       opts.Flags.Rebuild,
 		KeepContainer: opts.Flags.KeepContainer,
 		Interactive:   opts.Interactive,
+		NoClipboard:   !opts.Clipboard,
 	}
 
 	// Create run

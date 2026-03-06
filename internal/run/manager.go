@@ -487,8 +487,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 
-	// Clipboard bridging: enabled by default (nil = true), disabled if explicitly false
-	needsClipboard := opts.Interactive
+	// Clipboard bridging: enabled by default for interactive sessions.
+	// Disabled by --no-clipboard flag or clipboard: false in moat.yaml.
+	needsClipboard := opts.Interactive && !opts.NoClipboard
 	if needsClipboard && opts.Config != nil && opts.Config.Clipboard != nil && !*opts.Config.Clipboard {
 		needsClipboard = false
 	}
