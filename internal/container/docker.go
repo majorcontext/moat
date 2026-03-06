@@ -857,7 +857,9 @@ func (m *dockerNetworkManager) NetworkGateway(ctx context.Context, networkID str
 	}
 	for _, cfg := range inspect.IPAM.Config {
 		if cfg.Gateway != "" {
-			return cfg.Gateway
+			if ip := net.ParseIP(cfg.Gateway); ip != nil && ip.To4() != nil {
+				return cfg.Gateway
+			}
 		}
 	}
 	return ""

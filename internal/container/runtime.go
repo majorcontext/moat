@@ -78,7 +78,7 @@ type Runtime interface {
 	SupportsHostNetwork() bool
 
 	// NetworkManager returns the network manager if supported, nil otherwise.
-	// Docker provides this, Apple containers return nil.
+	// Both Docker and Apple runtimes provide this.
 	NetworkManager() NetworkManager
 
 	// SidecarManager returns the sidecar manager if supported, nil otherwise.
