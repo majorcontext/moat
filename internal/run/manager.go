@@ -418,6 +418,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Proxy environment and mount configuration
 	var proxyEnv []string
 	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
+	var hostAddr string      // Host address for proxy (may be rewritten for custom networks)
 	var mounts []container.MountConfig
 
 	// Always mount workspace
@@ -657,7 +658,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 
 		// Get proxy host address (needed for both proxy URL and firewall setup)
-		hostAddr := m.runtime.GetHostAddress()
+		hostAddr = m.runtime.GetHostAddress()
 
 		// Store proxy details from daemon response
 		r.ProxyAuthToken = regResp.AuthToken
@@ -892,9 +893,10 @@ region = %s
 				return nil, fmt.Errorf("starting SSH agent proxy (TCP): %w", err)
 			}
 
-			// Get the actual TCP address after binding
+			// Get the actual TCP address after binding.
+			// hostAddr is set earlier from m.runtime.GetHostAddress() and may be
+			// rewritten later for custom networks (replaceHostInEnv).
 			tcpAddr := sshServer.TCPAddr()
-			hostAddr := m.runtime.GetHostAddress()
 			containerSSHDir := "/run/moat/ssh"
 
 			// Extract port from TCP address (format is "host:port" or "[::]:port")
@@ -1988,6 +1990,23 @@ region = %s
 		networkMode = networkID
 	}
 
+	// When a custom network is used (for services or BuildKit), the container
+	// is on a different subnet than the default network. The proxy host address
+	// (derived from the default network gateway) may be unreachable. Rewrite
+	// all env vars that reference the old host address to use the custom
+	// network's gateway instead.
+	if networkID != "" && hostAddr != "" {
+		netMgr := m.runtime.NetworkManager()
+		if netMgr != nil {
+			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
+				log.Debug("rewriting proxy host for custom network",
+					"old", hostAddr, "new", gw, "network", networkID)
+				proxyEnv = replaceHostInEnv(proxyEnv, hostAddr, gw)
+				r.ProxyHost = gw
+			}
+		}
+	}
+
 	// Add BuildKit env vars if enabled
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
@@ -2216,6 +2235,22 @@ region = %s
 
 // StartOptions configures how a run is started.
 type StartOptions struct{}
+
+// replaceHostInEnv replaces all occurrences of oldHost with newHost in the
+// value portion of env vars (after the first '='). This is used to rewrite
+// proxy URLs when a container is placed on a custom network whose gateway
+// differs from the default network gateway.
+func replaceHostInEnv(env []string, oldHost, newHost string) []string {
+	result := make([]string, len(env))
+	for i, e := range env {
+		if idx := strings.IndexByte(e, '='); idx >= 0 {
+			result[i] = e[:idx+1] + strings.ReplaceAll(e[idx+1:], oldHost, newHost)
+		} else {
+			result[i] = e
+		}
+	}
+	return result
+}
 
 // setLogContext configures the structured logger with run-specific fields
 // so all subsequent log entries in this goroutine are correlated to the run.

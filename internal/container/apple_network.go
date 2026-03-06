@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -68,4 +69,34 @@ func (m *appleNetworkManager) ListNetworks(ctx context.Context) ([]NetworkInfo, 
 		}
 	}
 	return result, nil
+}
+
+// NetworkGateway returns the IPv4 gateway for the named Apple container network.
+func (m *appleNetworkManager) NetworkGateway(ctx context.Context, networkID string) string {
+	return inspectAppleNetworkGateway(ctx, m.containerBin, networkID)
+}
+
+// inspectAppleNetworkGateway runs `container network inspect` and extracts the
+// IPv4 gateway address from the JSON output. Returns empty string on failure.
+// Used by both probeDefaultGateway (init-time default network) and
+// NetworkGateway (per-run custom networks).
+func inspectAppleNetworkGateway(ctx context.Context, containerBin, networkName string) string {
+	cmd := exec.CommandContext(ctx, containerBin, "network", "inspect", networkName)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Debug("failed to inspect network for gateway", "network", networkName, "error", err)
+		return ""
+	}
+
+	var networks []struct {
+		Status struct {
+			IPv4Gateway string `json:"ipv4Gateway"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(out, &networks); err != nil || len(networks) == 0 {
+		log.Debug("failed to parse network inspect for gateway", "network", networkName, "error", err)
+		return ""
+	}
+
+	return networks[0].Status.IPv4Gateway
 }

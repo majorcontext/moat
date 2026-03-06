@@ -1117,3 +1117,78 @@ func TestHostGitIdentity(t *testing.T) {
 		}
 	})
 }
+
+// TestReplaceHostInEnv verifies that replaceHostInEnv correctly rewrites
+// the proxy host address in environment variables when a custom network
+// is used. This is critical for Apple containers where custom networks
+// (for service dependencies) have a different gateway than the default network.
+func TestReplaceHostInEnv(t *testing.T) {
+	env := []string{
+		"HTTP_PROXY=http://moat:token@192.168.64.1:19080",
+		"HTTPS_PROXY=http://moat:token@192.168.64.1:19080",
+		"NO_PROXY=192.168.64.1,localhost,127.0.0.1",
+		"ANTHROPIC_BASE_URL=http://192.168.64.1:19080/relay/anthropic",
+		"MOAT_SSH_TCP_ADDR=192.168.64.1:62098",
+		"SOME_UNRELATED_VAR=hello",
+	}
+
+	result := replaceHostInEnv(env, "192.168.64.1", "192.168.72.1")
+
+	want := []string{
+		"HTTP_PROXY=http://moat:token@192.168.72.1:19080",
+		"HTTPS_PROXY=http://moat:token@192.168.72.1:19080",
+		"NO_PROXY=192.168.72.1,localhost,127.0.0.1",
+		"ANTHROPIC_BASE_URL=http://192.168.72.1:19080/relay/anthropic",
+		"MOAT_SSH_TCP_ADDR=192.168.72.1:62098",
+		"SOME_UNRELATED_VAR=hello",
+	}
+
+	if len(result) != len(want) {
+		t.Fatalf("got %d env vars, want %d", len(result), len(want))
+	}
+	for i := range want {
+		if result[i] != want[i] {
+			t.Errorf("env[%d]:\n  got  %q\n  want %q", i, result[i], want[i])
+		}
+	}
+}
+
+func TestReplaceHostInEnv_NoChange(t *testing.T) {
+	env := []string{
+		"HTTP_PROXY=http://moat:token@192.168.64.1:19080",
+		"FOO=bar",
+	}
+
+	// Same old and new — no changes expected
+	result := replaceHostInEnv(env, "192.168.64.1", "192.168.64.1")
+	for i := range env {
+		if result[i] != env[i] {
+			t.Errorf("env[%d] changed unexpectedly: %q -> %q", i, env[i], result[i])
+		}
+	}
+}
+
+func TestReplaceHostInEnv_Empty(t *testing.T) {
+	result := replaceHostInEnv(nil, "192.168.64.1", "192.168.72.1")
+	if len(result) != 0 {
+		t.Errorf("expected empty result for nil input, got %d items", len(result))
+	}
+}
+
+func TestReplaceHostInEnv_KeyNotReplaced(t *testing.T) {
+	// Env var key contains the old host — only the value should be replaced.
+	env := []string{
+		"ADDR_192.168.64.1=http://192.168.64.1:8080",
+		"NO_EQUALS_SIGN",
+	}
+	result := replaceHostInEnv(env, "192.168.64.1", "192.168.72.1")
+	want := []string{
+		"ADDR_192.168.64.1=http://192.168.72.1:8080",
+		"NO_EQUALS_SIGN",
+	}
+	for i := range want {
+		if result[i] != want[i] {
+			t.Errorf("env[%d]:\n  got  %q\n  want %q", i, result[i], want[i])
+		}
+	}
+}

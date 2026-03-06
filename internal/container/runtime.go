@@ -144,6 +144,10 @@ type NetworkManager interface {
 
 	// ListNetworks returns all moat-managed networks.
 	ListNetworks(ctx context.Context) ([]NetworkInfo, error)
+
+	// NetworkGateway returns the IPv4 gateway address for the given network.
+	// Returns empty string if the gateway cannot be determined.
+	NetworkGateway(ctx context.Context, networkID string) string
 }
 
 // NetworkInfo contains information about a network.

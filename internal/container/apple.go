@@ -80,28 +80,9 @@ func probeDefaultGateway(containerBin string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, containerBin, "network", "inspect", "default")
-	out, err := cmd.Output()
-	if err != nil {
-		log.Debug("failed to inspect default network, using fallback gateway",
-			"error", err, "fallback", fallback)
-		return fallback
-	}
-
-	var networks []struct {
-		Status struct {
-			IPv4Gateway string `json:"ipv4Gateway"`
-		} `json:"status"`
-	}
-	if err := json.Unmarshal(out, &networks); err != nil || len(networks) == 0 {
-		log.Debug("failed to parse network inspect output, using fallback gateway",
-			"error", err, "fallback", fallback)
-		return fallback
-	}
-
-	gw := networks[0].Status.IPv4Gateway
+	gw := inspectAppleNetworkGateway(ctx, containerBin, "default")
 	if gw == "" {
-		log.Debug("default network has no ipv4Gateway, using fallback", "fallback", fallback)
+		log.Debug("default network has no gateway, using fallback", "fallback", fallback)
 		return fallback
 	}
 
