@@ -179,7 +179,9 @@ func TestTraceSpans(t *testing.T) {
 		StartTime: time.Now(),
 		EndTime:   time.Now().Add(10 * time.Millisecond),
 	}
-	s.WriteSpan(span2)
+	if err := s.WriteSpan(span2); err != nil {
+		t.Fatalf("WriteSpan: %v", err)
+	}
 
 	spans, err := s.ReadSpans()
 	if err != nil {

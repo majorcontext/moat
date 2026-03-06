@@ -301,9 +301,9 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 // TestNetworkRequestsAreCaptured is runtime-agnostic: tests network request capture through proxy.
 func TestNetworkRequestsAreCaptured(t *testing.T) {
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
-		// Apple containers work here because NoSandbox bypasses the firewall,
-		// allowing Python's urllib to fall back to direct connections.
-		// The CA cert still isn't mounted (see TODO below), so PYTHONHTTPSVERIFY=0 is needed.
+		// PYTHONHTTPSVERIFY=0 is set below so urllib trusts the proxy's
+		// self-signed cert. Without it, urllib rejects the cert and the
+		// request never reaches the proxy for capture.
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
 
@@ -339,13 +339,13 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 
 		// Use Python to make HTTPS request through the proxy.
 		//
-		// TODO: Mount CA certificate into container to properly test TLS interception.
-		// Without the CA, Python's urllib rejects the proxy's cert; NoSandbox
-		// allows the fallback direct connection to succeed and still get logged.
+		// TODO: Mount CA certificate into container so we can remove
+		// PYTHONHTTPSVERIFY=0 and properly verify TLS interception.
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-test-network-capture",
 			Workspace: workspace,
 			Grants:    []string{"github"},
+			Env:       []string{"PYTHONHTTPSVERIFY=0"},
 			Config: &config.Config{
 				Dependencies: []string{"python@3.10"},
 			},
@@ -365,7 +365,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 
 		// Wait for the run to complete
 		if err := mgr.Wait(ctx, r.ID); err != nil {
-			// curl might fail if no network, but we still want to check the trace
+			// Python might fail if no network, but we still want to check the trace
 			t.Logf("Wait returned error (may be expected): %v", err)
 		}
 
