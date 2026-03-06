@@ -370,9 +370,7 @@ func TestServiceCleanup(t *testing.T) {
 
 	// Verify a service container exists before cleanup
 	serviceContainerName := "moat-postgres-" + runID
-	checkBefore := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "-f", "name="+serviceContainerName)
-	beforeOutput, _ := checkBefore.Output()
-	if len(strings.TrimSpace(string(beforeOutput))) == 0 {
+	if found := serviceContainerExists(ctx, t, serviceContainerName); !found {
 		t.Logf("Note: service container %s not found before destroy (may have been cleaned up already)", serviceContainerName)
 	}
 
@@ -382,15 +380,41 @@ func TestServiceCleanup(t *testing.T) {
 	}
 
 	// Verify the service container no longer exists
-	checkAfter := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "-f", "name="+serviceContainerName)
-	afterOutput, err := checkAfter.Output()
-	if err != nil {
-		t.Fatalf("docker ps check: %v", err)
-	}
-
-	if len(strings.TrimSpace(string(afterOutput))) > 0 {
+	if serviceContainerExists(ctx, t, serviceContainerName) {
 		t.Errorf("Service container %s still exists after Destroy", serviceContainerName)
 	} else {
 		t.Logf("Service container %s correctly removed after Destroy", serviceContainerName)
 	}
+}
+
+// serviceContainerExists checks whether a container with the given name exists
+// using whichever CLI is available (docker or Apple container).
+func serviceContainerExists(ctx context.Context, t *testing.T, name string) bool {
+	t.Helper()
+
+	// Try Docker first
+	if _, err := exec.LookPath("docker"); err == nil {
+		cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "-q", "-f", "name="+name)
+		out, err := cmd.Output()
+		if err != nil {
+			// Docker CLI exists but daemon may not be running — fall through to Apple
+			t.Logf("docker ps failed (trying Apple container CLI): %v", err)
+		} else {
+			return len(strings.TrimSpace(string(out))) > 0
+		}
+	}
+
+	// Try Apple container CLI
+	if _, err := exec.LookPath("container"); err == nil {
+		cmd := exec.CommandContext(ctx, "container", "list", "--all", "--format", "json")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Logf("container list failed: %v", err)
+			return false
+		}
+		return strings.Contains(string(out), name)
+	}
+
+	t.Log("No container CLI available to check container existence")
+	return false
 }
