@@ -34,9 +34,11 @@ type Config struct {
 	Codex        CodexConfig       `yaml:"codex,omitempty"`
 	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
-	Snapshots    SnapshotConfig    `yaml:"snapshots,omitempty"`
-	Tracing      TracingConfig     `yaml:"tracing,omitempty"`
-	Hooks        HooksConfig       `yaml:"hooks,omitempty"`
+	// Clipboard enables host clipboard bridging. Default true when nil.
+	Clipboard *bool          `yaml:"clipboard,omitempty"`
+	Snapshots SnapshotConfig `yaml:"snapshots,omitempty"`
+	Tracing   TracingConfig  `yaml:"tracing,omitempty"`
+	Hooks     HooksConfig    `yaml:"hooks,omitempty"`
 
 	// Sandbox configures container sandboxing.
 	// "none" disables gVisor sandbox (Docker only).

@@ -136,6 +136,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		interactive = true
 	}
 
+	// Determine clipboard mode: --no-clipboard flag > config > default (true)
+	clipboard := !runFlags.NoClipboard
+	if clipboard && cfg != nil && cfg.Clipboard != nil && !*cfg.Clipboard {
+		clipboard = false
+	}
+
 	// Warn if command looks interactive but -i wasn't specified
 	if !interactive && len(containerCmd) > 0 {
 		cmdName := containerCmd[0]
@@ -173,6 +179,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		Command:     containerCmd,
 		Config:      cfg,
 		Interactive: interactive,
+		Clipboard:   clipboard,
 	}
 
 	_, err = ExecuteRun(ctx, opts)
