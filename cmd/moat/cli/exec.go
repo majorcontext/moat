@@ -11,6 +11,7 @@ import (
 	"time"
 
 	intcli "github.com/majorcontext/moat/internal/cli"
+	clipboardpkg "github.com/majorcontext/moat/internal/clipboard"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
@@ -376,10 +377,27 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	})
 
-	// Wrap stdin with tracer if tracing is enabled
-	stdin := io.Reader(escapeProxy)
+	// Build stdin reader chain: escape proxy -> clipboard proxy (optional) -> tracer (optional)
+	var stdin io.Reader = escapeProxy
+	if r.Clipboard {
+		clipCtx := context.Background()
+		stdin = term.NewClipboardProxy(stdin, func() {
+			content, err := clipboardpkg.Read()
+			if err != nil {
+				log.Debug("clipboard read failed", "error", err)
+				return
+			}
+			if content == nil {
+				return
+			}
+			target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
+			if err := manager.WriteClipboard(clipCtx, r.ID, content.Data, target); err != nil {
+				log.Debug("clipboard write to container failed", "error", err)
+			}
+		})
+	}
 	if tracer != nil {
-		stdin = trace.NewRecordingReader(escapeProxy, tracer.recorder, trace.EventStdin)
+		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}
 
 	// Set up signal handling

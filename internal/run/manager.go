@@ -3008,6 +3008,23 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 	return m.runtime.ResizeTTY(ctx, containerID, height, width)
 }
 
+// WriteClipboard writes data to the X clipboard inside a running container
+// using xclip. The target parameter specifies the X selection target (e.g.,
+// "UTF8_STRING" for text, "image/png" for images).
+func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte, target string) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	cmd := []string{"xclip", "-selection", "clipboard", "-t", target, "-i"}
+	return m.runtime.ExecWrite(ctx, containerID, cmd, data)
+}
+
 // FollowLogs streams container logs to the provided writer.
 // This is more reliable than Attach for output-only mode on already-running containers.
 func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) error {
