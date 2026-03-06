@@ -90,7 +90,7 @@ type Runtime interface {
 	BuildManager() BuildManager
 
 	// ServiceManager returns the service manager if supported, nil otherwise.
-	// Docker provides this, Apple containers return nil.
+	// Both Docker and Apple runtimes provide this.
 	ServiceManager() ServiceManager
 
 	// Close releases runtime resources.

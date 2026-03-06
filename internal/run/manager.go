@@ -1995,7 +1995,7 @@ region = %s
 	// (derived from the default network gateway) may be unreachable. Rewrite
 	// all env vars that reference the old host address to use the custom
 	// network's gateway instead.
-	if networkID != "" && hostAddr != "" {
+	if networkID != "" && net.ParseIP(hostAddr) != nil {
 		netMgr := m.runtime.NetworkManager()
 		if netMgr != nil {
 			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
