@@ -487,6 +487,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 
+	// Clipboard bridging: enabled by default (nil = true), disabled if explicitly false
+	needsClipboard := opts.Interactive
+	if needsClipboard && opts.Config != nil && opts.Config.Clipboard != nil && !*opts.Config.Clipboard {
+		needsClipboard = false
+	}
+	r.Clipboard = needsClipboard
+
 	// cleanupDaemonRun is a helper to unregister the run from the proxy daemon.
 	// Used in error paths during run creation.
 	cleanupDaemonRun := func() {
@@ -1020,6 +1027,11 @@ region = %s
 		proxyEnv = append(proxyEnv, "MOAT_PRE_RUN="+opts.Config.Hooks.PreRun)
 	}
 
+	// Add clipboard bridging env vars (before explicit env so they can be overridden)
+	if needsClipboard {
+		proxyEnv = append(proxyEnv, "MOAT_CLIPBOARD=1", "DISPLAY=:99")
+	}
+
 	// Add explicit env vars (highest priority - can override config)
 	proxyEnv = append(proxyEnv, opts.Env...)
 
@@ -1260,6 +1272,7 @@ region = %s
 		NeedsFirewall:      needsProxyForFirewall,
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
+		NeedsClipboard:     needsClipboard,
 		UseBuildKit:        &useBuildKit,
 		ClaudeMarketplaces: claudeMarketplaces,
 		ClaudePlugins:      claudePlugins,

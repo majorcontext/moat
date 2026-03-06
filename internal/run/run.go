@@ -58,6 +58,7 @@ type Run struct {
 	SnapEngine        *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer     bool              // If true, don't auto-remove container after run
 	Interactive       bool              // If true, run was started in interactive mode
+	Clipboard         bool              // If true, host clipboard bridging is enabled
 	CreatedAt         time.Time
 	StartedAt         time.Time
 	StoppedAt         time.Time
