@@ -191,6 +191,11 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 		c.aptPkgs = append(c.aptPkgs, "iptables")
 	}
 
+	// Add Xvfb and xclip when clipboard bridging is enabled
+	if opts.NeedsClipboard {
+		c.aptPkgs = append(c.aptPkgs, "xvfb", "xclip")
+	}
+
 	// Write all sections
 	writeAllAptPackages(&b, c.aptPkgs, opts.useBuildKit())
 	writeUserSetup(&b)

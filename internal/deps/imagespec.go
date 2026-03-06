@@ -36,6 +36,11 @@ type ImageSpec struct {
 	// container startup.
 	NeedsInitFiles bool
 
+	// NeedsClipboard indicates the image needs Xvfb and xclip for host
+	// clipboard bridging. Adds xvfb and xclip apt packages, and starts
+	// Xvfb :99 in the moat-init entrypoint.
+	NeedsClipboard bool
+
 	// UseBuildKit enables BuildKit-specific features like cache mounts.
 	// Used only by Dockerfile generation. Defaults to true if nil.
 	UseBuildKit *bool
@@ -59,7 +64,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	}
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.NeedsSSH || len(s.InitProviders) > 0 ||
-		s.NeedsFirewall || s.NeedsInitFiles ||
+		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
 		len(s.ClaudePlugins) > 0 || hasHooks
 }
 
@@ -71,7 +76,7 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 		return dockerMode != ""
 	}
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
-	return s.NeedsSSH || len(s.InitProviders) > 0 ||
+	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles
 }
 
