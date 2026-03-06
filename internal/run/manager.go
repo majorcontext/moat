@@ -2007,6 +2007,9 @@ region = %s
 				Hard: spec.Hard,
 			})
 		}
+		sort.Slice(ulimits, func(i, j int) bool {
+			return ulimits[i].Name < ulimits[j].Name
+		})
 	}
 
 	// On Apple containers, if moat.yaml didn't set memory and we're running an

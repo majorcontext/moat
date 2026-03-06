@@ -1952,6 +1952,30 @@ container:
 			wantErr: `container.ulimits: unknown ulimit "bogus"`,
 		},
 		{
+			name: "negative hard",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: -2
+`,
+			wantErr: "container.ulimits.nofile: hard limit must be -1 (unlimited) or non-negative",
+		},
+		{
+			name: "unlimited soft with finite hard",
+			yaml: `
+agent: test
+container:
+  ulimits:
+    nofile:
+      soft: -1
+      hard: 1024
+`,
+			wantErr: "container.ulimits.nofile: soft limit (unlimited) must not exceed hard limit (1024)",
+		},
+		{
 			name: "unlimited is valid",
 			yaml: `
 agent: test

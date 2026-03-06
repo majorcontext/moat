@@ -440,6 +440,9 @@ func Load(dir string) (*Config, error) {
 		if spec.Hard < -1 {
 			return nil, fmt.Errorf("container.ulimits.%s: hard limit must be -1 (unlimited) or non-negative", name)
 		}
+		if spec.Soft == -1 && spec.Hard != -1 {
+			return nil, fmt.Errorf("container.ulimits.%s: soft limit (unlimited) must not exceed hard limit (%d)", name, spec.Hard)
+		}
 		if spec.Soft != -1 && spec.Hard != -1 && spec.Soft > spec.Hard {
 			return nil, fmt.Errorf("container.ulimits.%s: soft limit (%d) must not exceed hard limit (%d)", name, spec.Soft, spec.Hard)
 		}
