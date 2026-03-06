@@ -18,6 +18,12 @@ const lockFileName = "daemon.lock"
 // spawn a new process.
 const spawnLockFileName = "daemon.spawn.lock"
 
+// DefaultProxyPort is the default port for the daemon's credential-injecting
+// proxy. This is intentionally different from the routing proxy port (8080)
+// to avoid conflicts on macOS where both 0.0.0.0:PORT and 127.0.0.1:PORT
+// can coexist and Docker traffic hits the wrong listener.
+const DefaultProxyPort = 19080
+
 // LockInfo holds information about a running daemon.
 type LockInfo struct {
 	PID       int       `json:"pid"`
@@ -118,6 +124,12 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	// it avoids breaking their network after the daemon restarts.
 	if proxyPort == 0 && lock != nil && lock.ProxyPort > 0 {
 		proxyPort = lock.ProxyPort
+	}
+
+	// Fall back to the default daemon proxy port. Using a fixed port
+	// (rather than OS-assigned 0) ensures stability across restarts.
+	if proxyPort == 0 {
+		proxyPort = DefaultProxyPort
 	}
 
 	// Clean up stale state.

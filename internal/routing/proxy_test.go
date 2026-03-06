@@ -47,6 +47,37 @@ func TestReverseProxy(t *testing.T) {
 	}
 }
 
+func TestReverseProxyRejectsNonLocalhostHost(t *testing.T) {
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	rp := NewReverseProxy(routes)
+
+	tests := []struct {
+		name string
+		host string
+	}{
+		{"external domain", "google.com"},
+		{"external domain with port", "google.com:8080"},
+		{"bare localhost", "localhost"},
+		{"bare localhost with port", "localhost:8080"},
+		{"ip address", "192.168.1.1:8080"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+
+			rp.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("Host %q: status = %d, want 400", tt.host, rec.Code)
+			}
+		})
+	}
+}
+
 func TestReverseProxyUnknownAgent(t *testing.T) {
 	dir := t.TempDir()
 	routes, _ := NewRouteTable(dir)

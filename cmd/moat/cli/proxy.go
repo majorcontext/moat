@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var proxyPort int
-
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Manage the routing proxy",
@@ -23,8 +21,8 @@ var proxyCmd = &cobra.Command{
 The routing proxy enables accessing agent services via hostnames like:
   https://web.my-agent.localhost:8080
 
-Run with sudo to bind to privileged ports like 80:
-  sudo moat proxy start --port=80
+The proxy starts on an available port (shown in the output of "moat proxy start"
+and "moat proxy status").
 
 When called without a subcommand, shows the current proxy status.`,
 	RunE: statusProxy,
@@ -39,9 +37,7 @@ The proxy routes requests based on hostname and supports both HTTP and HTTPS:
   http://<service>.<agent>.localhost:<port> -> container service
   https://<service>.<agent>.localhost:<port> -> container service (TLS)
 
-Use --port to specify a custom port (default: 8080).
-Run with sudo for ports below 1024:
-  sudo moat proxy start --port=80`,
+The proxy starts on an available port, shown in the output.`,
 	RunE: startProxy,
 }
 
@@ -60,8 +56,6 @@ var proxyStatusCmd = &cobra.Command{
 }
 
 func init() {
-	proxyStartCmd.Flags().IntVarP(&proxyPort, "port", "p", 8080, "port to listen on")
-
 	proxyCmd.AddCommand(proxyStartCmd)
 	proxyCmd.AddCommand(proxyStopCmd)
 	proxyCmd.AddCommand(proxyStatusCmd)
@@ -70,7 +64,8 @@ func init() {
 
 func startProxy(_ *cobra.Command, _ []string) error {
 	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
-	client, err := daemon.EnsureRunning(proxyDir, proxyPort)
+	// Port 0 tells the daemon to use its own default (DefaultProxyPort).
+	client, err := daemon.EnsureRunning(proxyDir, 0)
 	if err != nil {
 		return err
 	}

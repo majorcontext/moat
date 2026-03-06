@@ -210,6 +210,16 @@ func TestAcquireSpawnLock_Serializes(t *testing.T) {
 	}
 }
 
+func TestDefaultProxyPort(t *testing.T) {
+	// DefaultProxyPort must not collide with the routing proxy default (8080).
+	if DefaultProxyPort == 8080 {
+		t.Fatal("DefaultProxyPort must differ from routing proxy default (8080)")
+	}
+	if DefaultProxyPort != 19080 {
+		t.Errorf("DefaultProxyPort = %d, want 19080", DefaultProxyPort)
+	}
+}
+
 func TestResolveDaemonExecutable_RejectsTestBinary(t *testing.T) {
 	// Unset MOAT_EXECUTABLE so os.Executable() is used.
 	t.Setenv("MOAT_EXECUTABLE", "")

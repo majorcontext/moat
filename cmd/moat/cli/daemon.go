@@ -31,7 +31,8 @@ var daemonCmd = &cobra.Command{
 
 func init() {
 	daemonCmd.Flags().StringVar(&daemonDir, "dir", "", "daemon working directory")
-	daemonCmd.Flags().IntVar(&daemonProxyPort, "proxy-port", 0, "proxy port")
+	daemonCmd.Flags().IntVar(&daemonProxyPort, "proxy-port", 0, "credential proxy port (0 = use default)")
+
 	rootCmd.AddCommand(daemonCmd)
 }
 

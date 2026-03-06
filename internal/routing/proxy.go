@@ -34,6 +34,13 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		host = host[:idx] // Remove port
 	}
 
+	// Only handle .localhost hosts — reject anything else to avoid
+	// misrouting external traffic (e.g., parsing "google.com" as agent "com").
+	if !strings.HasSuffix(host, ".localhost") {
+		rp.writeError(w, http.StatusBadRequest, "not a .localhost host", host)
+		return
+	}
+
 	// Remove .localhost suffix
 	host = strings.TrimSuffix(host, ".localhost")
 
