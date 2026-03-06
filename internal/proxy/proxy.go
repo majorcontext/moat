@@ -1150,6 +1150,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 	cert, err := p.ca.GenerateCert(host)
 	if err != nil {
+		log.Debug("failed to generate cert for CONNECT interception",
+			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
 
@@ -1159,6 +1161,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	}
 	tlsClientConn := tls.Server(clientConn, tlsConfig)
 	if err := tlsClientConn.Handshake(); err != nil {
+		log.Debug("TLS handshake failed during CONNECT interception",
+			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
 	defer tlsClientConn.Close()
@@ -1176,6 +1180,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	for {
 		req, err := http.ReadRequest(clientReader)
 		if err != nil {
+			log.Debug("failed to read request from intercepted connection",
+				"subsystem", "proxy", "host", host, "error", err)
 			return
 		}
 
