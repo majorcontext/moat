@@ -220,10 +220,9 @@ fi
 # This comment is kept as a placeholder in case Codex MCP support is added later.
 
 # Clipboard Bridging
-# When MOAT_CLIPBOARD is set, start a headless X server so that xclip
-# can operate inside the container. The host moat process writes clipboard
-# data to the X selection via "docker exec xclip", and the agent reads it
-# with its native clipboard tools.
+# When MOAT_CLIPBOARD is set, start a headless X server for clipboard
+# operations. The host writes clipboard data to /tmp/.moat-clipboard
+# and uses xclip to set the X selection.
 if [ "$MOAT_CLIPBOARD" = "1" ]; then
   Xvfb :99 -screen 0 1x1x8 >/dev/null 2>&1 &
   export DISPLAY=:99

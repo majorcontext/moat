@@ -50,8 +50,6 @@ type ExecOptions struct {
 	Command     []string
 	Config      *config.Config
 	Interactive bool // Can be set by flags or command logic
-	// Clipboard indicates host clipboard bridging is enabled (default true)
-	Clipboard bool
 
 	// Worktree tracking (set by moat wt or --wt flag)
 	WorktreeBranch string

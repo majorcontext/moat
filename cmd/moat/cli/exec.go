@@ -204,6 +204,12 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 	defer manager.Close()
 
+	// Resolve clipboard mode: --no-clipboard flag > config > default (true)
+	clipboard := opts.Interactive && !opts.Flags.NoClipboard
+	if clipboard && opts.Config != nil && opts.Config.Clipboard != nil && !*opts.Config.Clipboard {
+		clipboard = false
+	}
+
 	// Build run options
 	runOpts := run.Options{
 		Name:          opts.Flags.Name,
@@ -215,7 +221,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		Rebuild:       opts.Flags.Rebuild,
 		KeepContainer: opts.Flags.KeepContainer,
 		Interactive:   opts.Interactive,
-		NoClipboard:   !opts.Clipboard,
+		Clipboard:     clipboard,
 	}
 
 	// Create run
@@ -386,19 +392,17 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			log.Debug("clipboard: Ctrl+V detected, reading host clipboard")
 			content, err := clipboardpkg.Read()
 			if err != nil {
-				log.Warn("clipboard: failed to read host clipboard", "error", err)
+				log.Debug("clipboard: failed to read host clipboard", "error", err)
 				return
 			}
 			if content == nil {
-				log.Warn("clipboard: host clipboard is empty")
+				log.Debug("clipboard: host clipboard is empty")
 				return
 			}
 			log.Debug("clipboard: read content", "mime", content.MIMEType, "size", len(content.Data))
 			target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
 			if err := manager.WriteClipboard(clipCtx, r.ID, content.Data, target); err != nil {
-				log.Warn("clipboard: failed to write to container", "error", err)
-			} else {
-				log.Debug("clipboard: wrote to container", "target", target, "size", len(content.Data))
+				log.Debug("clipboard: failed to write to container", "error", err)
 			}
 		})
 	}

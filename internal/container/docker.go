@@ -585,8 +585,10 @@ func (r *DockerRuntime) ExecWrite(ctx context.Context, containerID string, cmd [
 	defer resp.Close()
 
 	// Write stdin data and close write side to signal EOF
-	if _, writeErr := resp.Conn.Write(stdin); writeErr != nil {
-		return fmt.Errorf("writing to exec stdin: %w", writeErr)
+	if len(stdin) > 0 {
+		if _, writeErr := resp.Conn.Write(stdin); writeErr != nil {
+			return fmt.Errorf("writing to exec stdin: %w", writeErr)
+		}
 	}
 	if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
 		if closeErr := closeWriter.CloseWrite(); closeErr != nil {

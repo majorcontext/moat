@@ -135,7 +135,7 @@ type Options struct {
 	Rebuild       bool           // Force rebuild of container image (ignores cache)
 	KeepContainer bool           // If true, don't auto-remove container after run
 	Interactive   bool           // Keep stdin open for interactive input
-	NoClipboard   bool           // If true, disable host clipboard bridging
+	Clipboard     bool           // Enable host clipboard bridging
 }
 
 // generateID creates a unique run identifier.
