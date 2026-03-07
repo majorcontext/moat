@@ -177,6 +177,40 @@ if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
   fi
 fi
 
+# Provider Init Files
+# When MOAT_INIT_FILES is set, it contains tab-delimited records (one per line):
+#   <absolute-path><TAB><base64-encoded-content>
+# This is used by credential providers that need config files written to disk
+# (e.g., Graphite CLI config). Using init-time writes instead of bind mounts
+# lets tools write to their config directories freely.
+if [ -n "$MOAT_INIT_FILES" ]; then
+  # Determine ownership target
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    INIT_OWNER="moatuser:moatuser"
+    INIT_HOME="/home/moatuser"
+  else
+    INIT_OWNER=""
+    INIT_HOME="$HOME"
+  fi
+
+  printf '%s\n' "$MOAT_INIT_FILES" | while IFS="$(printf '\t')" read -r filepath content; do
+    [ -z "$filepath" ] && continue
+    dir=$(dirname "$filepath")
+    mkdir -p "$dir" && chmod 755 "$dir"
+    printf '%s' "$content" | base64 -d > "$filepath"
+    chmod 600 "$filepath"
+
+    # Fix ownership if running as root
+    if [ -n "$INIT_OWNER" ]; then
+      chown "$INIT_OWNER" "$filepath" 2>/dev/null || true
+      while [ "$dir" != "/" ] && [ "$dir" != "." ] && [ "$dir" != "$INIT_HOME" ]; do
+        chown "$INIT_OWNER" "$dir" 2>/dev/null || true
+        dir=$(dirname "$dir")
+      done
+    fi
+  done
+fi
+
 # MCP Server Setup
 # MCP servers are now configured via the .claude.json file in the staging directory.
 # The moat run manager writes MCP configuration directly to .claude.json with stub

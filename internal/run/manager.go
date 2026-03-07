@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1316,6 +1317,18 @@ region = %s
 		}
 	}
 
+	// Check if any grant provider implements InitFileProvider
+	var needsInitFiles bool
+	for _, grant := range opts.Grants {
+		grantName := strings.Split(grant, ":")[0]
+		if prov := provider.Get(grantName); prov != nil {
+			if _, ok := prov.(provider.InitFileProvider); ok {
+				needsInitFiles = true
+				break
+			}
+		}
+	}
+
 	// Hooks config for image hashing, Dockerfile generation, and pre_run
 	var hooks *deps.HooksConfig
 	if opts.Config != nil && (opts.Config.Hooks.PostBuild != "" || opts.Config.Hooks.PostBuildRoot != "" || opts.Config.Hooks.PreRun != "") {
@@ -1334,6 +1347,7 @@ region = %s
 		NeedsCodexInit:  needsCodexInit,
 		NeedsGeminiInit: needsGeminiInit,
 		NeedsFirewall:   needsProxyForFirewall,
+		NeedsInitFiles:  needsInitFiles,
 		ClaudePlugins:   claudePlugins,
 		Hooks:           hooks,
 	})
@@ -1346,7 +1360,7 @@ region = %s
 
 	// Determine if we need a custom image
 	hasHooks := hooks != nil
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || needsProxyForFirewall || len(claudePlugins) > 0 || hasHooks
+	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || needsProxyForFirewall || len(claudePlugins) > 0 || hasHooks || needsInitFiles
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1375,6 +1389,7 @@ region = %s
 			NeedsGeminiInit:    needsGeminiInit,
 			NeedsFirewall:      needsProxyForFirewall,
 			NeedsGitIdentity:   hasGit,
+			NeedsInitFiles:     needsInitFiles,
 			UseBuildKit:        &useBuildKit,
 			ClaudeMarketplaces: claudeMarketplaces,
 			ClaudePlugins:      claudePlugins,
@@ -1449,7 +1464,10 @@ region = %s
 		}
 	}
 
-	// Set up provider-specific container mounts (e.g., credential files, state files)
+	// Set up provider-specific container mounts and init files.
+	// Init files are written to disk by moat-init.sh at container startup,
+	// avoiding bind mounts for config dirs that tools need to write to.
+	initFiles := make(map[string]string)
 	if containerHome != "" {
 		key, keyErr := credential.DefaultEncryptionKey()
 		if keyErr == nil {
@@ -1473,11 +1491,32 @@ region = %s
 									r.ProviderCleanupPaths[string(credName)] = cleanupPath
 								}
 							}
+							// Collect init files from providers that implement InitFileProvider
+							if ifp, ok := prov.(provider.InitFileProvider); ok {
+								for p, content := range ifp.ContainerInitFiles(provCred, containerHome) {
+									cleaned := filepath.Clean(p)
+									if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome+string(filepath.Separator)) {
+										log.Warn("init file path outside container home, skipping", "provider", credName, "path", p)
+										continue
+									}
+									initFiles[cleaned] = content
+								}
+							}
 						}
 					}
 				}
 			}
 		}
+	}
+	if len(initFiles) > 0 {
+		var buf strings.Builder
+		for initPath, content := range initFiles {
+			buf.WriteString(initPath)
+			buf.WriteByte('\t')
+			buf.WriteString(base64.StdEncoding.EncodeToString([]byte(content)))
+			buf.WriteByte('\n')
+		}
+		proxyEnv = append(proxyEnv, "MOAT_INIT_FILES="+buf.String())
 	}
 
 	// Build and render runtime context for agent instruction files.

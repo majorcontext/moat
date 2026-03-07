@@ -63,6 +63,10 @@ type DockerfileOptions struct {
 	// apply the MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL env vars.
 	NeedsGitIdentity bool
 
+	// NeedsInitFiles indicates that providers have init files to write at
+	// container startup. This requires the moat-init entrypoint script.
+	NeedsInitFiles bool
+
 	// Hooks contains user-defined lifecycle hook commands.
 	// PostBuild and PostBuildRoot are baked into the image as RUN commands.
 	// PreRun is passed to the init script to execute on every container start.
@@ -90,7 +94,7 @@ func (o *DockerfileOptions) needsInit(dockerMode DockerMode) bool {
 		return dockerMode != ""
 	}
 	hasPreRun := o.Hooks != nil && o.Hooks.PreRun != ""
-	return o.NeedsSSH || o.NeedsClaudeInit || o.NeedsCodexInit || o.NeedsGeminiInit || dockerMode != "" || hasPreRun || o.NeedsGitIdentity
+	return o.NeedsSSH || o.NeedsClaudeInit || o.NeedsCodexInit || o.NeedsGeminiInit || dockerMode != "" || hasPreRun || o.NeedsGitIdentity || o.NeedsInitFiles
 }
 
 // DockerfileResult contains the generated Dockerfile and any additional context files

@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -20,6 +20,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
+| `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token ...` | `GRAPHITE_TOKEN`, `GT_TOKEN`, or prompt |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
@@ -363,6 +364,60 @@ Credential saved to ~/.moat/credentials/npm.enc
 
 $ moat run --grant npm -- npm whoami
 jsmith
+```
+
+## Graphite
+
+### CLI command
+
+```bash
+moat grant graphite
+```
+
+No flags.
+
+### Credential sources
+
+1. **Environment variable** -- Uses `GRAPHITE_TOKEN` or `GT_TOKEN` if set
+2. **Interactive prompt** -- Prompts for a token with instructions to visit `https://app.graphite.com/activate`
+
+### What it injects
+
+The proxy injects an `Authorization: token <token>` header for requests to `api.graphite.com`. Note: Graphite uses the `token` prefix, not `Bearer`.
+
+The container receives a config file at `~/.config/graphite/user_config` with a placeholder token so the Graphite CLI (`gt`) works without prompting.
+
+### Implied dependencies
+
+Granting `graphite` automatically adds `graphite-cli`, `node`, and `git` as container dependencies. These are installed during image build.
+
+### Refresh behavior
+
+Graphite tokens are static and do not refresh.
+
+### moat.yaml
+
+```yaml
+grants:
+  - graphite
+```
+
+### Example
+
+```bash
+$ moat grant graphite
+Enter a Graphite auth token.
+
+To get your token:
+  1. Visit https://app.graphite.com/activate
+  2. Sign in and copy the token
+  3. Paste it below
+
+Token: ••••••••
+Validating token...
+Token validated successfully
+
+$ moat run --grant graphite ./my-project
 ```
 
 ## AWS

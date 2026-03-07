@@ -1,0 +1,26 @@
+name: graphite-example
+
+# Request Graphite credentials - this automatically includes graphite-cli and git
+grants:
+  - graphite
+
+# Check auth status and show useful info
+command:
+  - sh
+  - -c
+  - |
+    echo "=== Graphite Auth Status ==="
+    gt auth
+    echo ""
+    echo "=== Graphite CLI Version ==="
+    gt --version
+    echo ""
+    echo "=== Git Version ==="
+    git --version
+    echo ""
+    echo "=== Graphite Config (in container) ==="
+    cat ~/.config/graphite/user_config
+    echo ""
+    echo ""
+    echo "Token above is a placeholder — the real token is"
+    echo "injected by the proxy at the network layer."
