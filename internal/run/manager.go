@@ -3018,17 +3018,14 @@ func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte,
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	// Pipe data via stdin to avoid command-line length limits (screenshots
-	// can be hundreds of KB, which exceeds what Apple container exec accepts
-	// as a shell argument).
-	//
-	// The script kills any previous xclip (which serves the old selection),
-	// writes stdin to a file, then starts xclip in a new session (setsid)
-	// so the forked selection-serving process survives exec teardown.
+	// Kill any previous xclip (which serves the old X selection) before
+	// setting new clipboard content. xclip reads directly from stdin via
+	// -i and supports large payloads through the X11 INCR mechanism.
+	// setsid ensures xclip survives exec teardown so it can continue
+	// serving the selection to other X clients.
 	script := fmt.Sprintf(
 		`pkill -x xclip 2>/dev/null; `+
-			`cat > /tmp/.moat-clipboard && `+
-			`setsid xclip -selection clipboard -t %s -i < /tmp/.moat-clipboard > /dev/null 2>&1`,
+			`setsid xclip -selection clipboard -t %s -i > /dev/null 2>&1`,
 		target,
 	)
 	cmd := []string{"sh", "-c", script}
