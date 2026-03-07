@@ -1494,7 +1494,7 @@ region = %s
 							if ifp, ok := prov.(provider.InitFileProvider); ok {
 								for p, content := range ifp.ContainerInitFiles(provCred, containerHome) {
 									cleaned := filepath.Clean(p)
-									if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome) {
+									if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome+string(filepath.Separator)) {
 										log.Warn("init file path outside container home, skipping", "provider", credName, "path", p)
 										continue
 									}
