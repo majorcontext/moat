@@ -35,6 +35,7 @@ A **grant** is a credential made available to a run. Each grant type targets spe
 | `codex` | `api.openai.com` | `Authorization: Bearer` header |
 | `openai` | `api.openai.com` | Alias for `codex` |
 | `gemini` | `cloudcode-pa.googleapis.com` (OAuth) or `generativelanguage.googleapis.com` (API key) | `Bearer` token or `x-goog-api-key` header |
+| `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token` header |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`) | `Authorization: Bearer` header |
 | `aws` | `*.amazonaws.com` | `credential_process` via AWS SDK |
 | `ssh:<host>` | The specified host only | SSH agent proxy |

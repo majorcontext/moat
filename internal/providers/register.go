@@ -6,12 +6,13 @@ package providers
 
 import (
 	// Import all providers to trigger their init() registration.
-	_ "github.com/majorcontext/moat/internal/providers/aws"    // registers AWS provider
-	_ "github.com/majorcontext/moat/internal/providers/claude" // registers Claude/Anthropic provider
-	_ "github.com/majorcontext/moat/internal/providers/codex"  // registers Codex/OpenAI provider
-	_ "github.com/majorcontext/moat/internal/providers/gemini" // registers Gemini/Google provider
-	_ "github.com/majorcontext/moat/internal/providers/github" // registers GitHub provider
-	_ "github.com/majorcontext/moat/internal/providers/npm"    // registers npm provider
+	_ "github.com/majorcontext/moat/internal/providers/aws"      // registers AWS provider
+	_ "github.com/majorcontext/moat/internal/providers/claude"   // registers Claude/Anthropic provider
+	_ "github.com/majorcontext/moat/internal/providers/codex"    // registers Codex/OpenAI provider
+	_ "github.com/majorcontext/moat/internal/providers/gemini"   // registers Gemini/Google provider
+	_ "github.com/majorcontext/moat/internal/providers/github"   // registers GitHub provider
+	_ "github.com/majorcontext/moat/internal/providers/graphite" // registers Graphite provider
+	_ "github.com/majorcontext/moat/internal/providers/npm"      // registers npm provider
 
 	"github.com/majorcontext/moat/internal/providers/configprovider"
 )

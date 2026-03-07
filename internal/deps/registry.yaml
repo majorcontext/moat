@@ -93,6 +93,12 @@ gemini-cli:
   package: "@google/gemini-cli"
   requires: [node]
 
+graphite-cli:
+  description: Graphite CLI for stacked PRs
+  type: npm
+  package: "@withgraphite/graphite-cli"
+  requires: [node]
+
 # Build tools (github-binary)
 protoc:
   description: Protocol Buffers compiler

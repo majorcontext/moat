@@ -113,6 +113,10 @@ var grantHosts = map[string][]string{
 		"sts.*.amazonaws.com",
 		"*.amazonaws.com",
 	},
+	"graphite": {
+		"api.graphite.com",
+		"*.graphite.com",
+	},
 }
 
 // RegisterGrantHosts registers host patterns for a grant name.

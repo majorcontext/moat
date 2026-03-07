@@ -89,6 +89,23 @@ type DescribableProvider interface {
 	Source() string // "builtin" or "custom"
 }
 
+// InitFileProvider is an optional interface for providers that need config
+// files written into the container at startup. The run manager collects
+// init files from all providers and passes them to moat-init.sh via the
+// MOAT_INIT_FILES env var. This avoids bind-mounting config directories
+// that the tool needs to write to at runtime.
+//
+// Use InitFileProvider (not ContainerMounts) when the tool needs to write
+// to its config directory at runtime. Bind mounts prevent writes to the
+// mount target, causing silent tool failures.
+type InitFileProvider interface {
+	// ContainerInitFiles returns a map of absolute container paths to file
+	// contents. Paths must be under containerHome. The moat-init.sh script
+	// writes each entry to disk with mode 0600 before executing the user's
+	// command.
+	ContainerInitFiles(cred *Credential, containerHome string) map[string]string
+}
+
 // EndpointProvider exposes HTTP endpoints to containers.
 // Implemented by aws for the credential endpoint.
 type EndpointProvider interface {

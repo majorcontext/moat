@@ -28,12 +28,13 @@ func init() {
 // goProviderDescriptions provides descriptions for Go-implemented providers
 // that don't implement DescribableProvider.
 var goProviderDescriptions = map[string]string{
-	"github": "GitHub token",
-	"claude": "Anthropic API key or OAuth credentials",
-	"codex":  "OpenAI API key or OAuth credentials",
-	"gemini": "Gemini API key or OAuth credentials",
-	"aws":    "AWS IAM role assumption",
-	"npm":    "npm registry credentials",
+	"github":   "GitHub token",
+	"claude":   "Anthropic API key or OAuth credentials",
+	"codex":    "OpenAI API key or OAuth credentials",
+	"gemini":   "Gemini API key or OAuth credentials",
+	"aws":      "AWS IAM role assumption",
+	"npm":      "npm registry credentials",
+	"graphite": "Graphite API token for stacked PRs",
 }
 
 // goProviderCLINames maps internal provider names to their CLI-facing names.

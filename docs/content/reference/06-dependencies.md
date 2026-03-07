@@ -118,6 +118,7 @@ See [Available services](#available-services) below for the full list, and the [
 | Language tools | `golangci-lint`, `ruff`, `typescript` | Go, Python, Node tool ecosystems |
 | CLI tools | `jq`, `yq`, `ripgrep`, `fd`, `bat` | |
 | AI coding tools | `claude-code`, `codex-cli` | Or use `moat claude` / `moat codex` |
+| Workflow tools | `graphite-cli` | Implied by `--grant graphite` |
 | Database clients | `psql`, `mysql-client`, `redis-cli`, `sqlite3` | Pair with corresponding service |
 | Cloud tools | `aws`, `gcloud`, `kubectl`, `terraform`, `helm` | |
 | Services | `postgres`, `mysql`, `redis` | Run as sidecar containers |
