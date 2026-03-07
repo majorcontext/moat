@@ -389,21 +389,12 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if r.Clipboard {
 		clipCtx := context.Background()
 		stdin = term.NewClipboardProxy(stdin, func() {
-			log.Debug("clipboard: Ctrl+V detected, reading host clipboard")
 			content, err := clipboardpkg.Read()
-			if err != nil {
-				log.Debug("clipboard: failed to read host clipboard", "error", err)
+			if err != nil || content == nil {
 				return
 			}
-			if content == nil {
-				log.Debug("clipboard: host clipboard is empty")
-				return
-			}
-			log.Debug("clipboard: read content", "mime", content.MIMEType, "size", len(content.Data))
 			target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
-			if err := manager.WriteClipboard(clipCtx, r.ID, content.Data, target); err != nil {
-				log.Debug("clipboard: failed to write to container", "error", err)
-			}
+			_ = manager.WriteClipboard(clipCtx, r.ID, content.Data, target)
 		})
 	}
 	if tracer != nil {
