@@ -3,6 +3,7 @@ package graphite
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -92,7 +93,10 @@ func validateGraphiteToken(ctx context.Context, token string) error {
 	if err != nil {
 		return fmt.Errorf("validating token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck // drain for connection reuse
+		resp.Body.Close()
+	}()
 
 	switch resp.StatusCode {
 	case 200:

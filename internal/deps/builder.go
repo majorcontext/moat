@@ -25,6 +25,9 @@ type ImageTagOptions struct {
 	// NeedsFirewall indicates the image needs iptables for strict network policy.
 	NeedsFirewall bool
 
+	// NeedsInitFiles indicates providers have init files to write at container startup.
+	NeedsInitFiles bool
+
 	// ClaudePlugins are plugins baked into the image.
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
@@ -73,6 +76,9 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	}
 	if opts.NeedsFirewall {
 		hashInput += ",firewall:iptables"
+	}
+	if opts.NeedsInitFiles {
+		hashInput += ",init-files"
 	}
 
 	// Include plugins in hash (different plugins = different image).

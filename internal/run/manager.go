@@ -1347,6 +1347,7 @@ region = %s
 		NeedsCodexInit:  needsCodexInit,
 		NeedsGeminiInit: needsGeminiInit,
 		NeedsFirewall:   needsProxyForFirewall,
+		NeedsInitFiles:  needsInitFiles,
 		ClaudePlugins:   claudePlugins,
 		Hooks:           hooks,
 	})
