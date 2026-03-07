@@ -77,7 +77,7 @@ injected by the proxy at the network layer.
 ```
 
 1. **Grant phase**: `moat grant graphite` stores your token encrypted locally
-2. **Run phase**: Moat mounts a config file with a placeholder token and starts a TLS-intercepting proxy
+2. **Run phase**: Moat writes a config file with a placeholder token at container startup and routes traffic through a TLS-intercepting proxy
 3. **Request interception**: When the Graphite CLI sends a request to `api.graphite.com`, the proxy replaces the `Authorization: token <stub>` header with the real token
 4. **Response**: The agent receives the response, never having seen the real token
 
@@ -87,11 +87,11 @@ The real token never reaches the container:
 
 ```bash
 # Check the config inside the container — only placeholder token
-moat run --grant graphite -- cat ~/.config/graphite/user_config
+moat run --grant graphite ./my-project -- cat ~/.config/graphite/user_config
 # {"authToken":"moat-proxy-injected"}
 
 # But gt commands work — the proxy injects your real token at the network layer
-moat run --grant graphite -- gt auth
+moat run --grant graphite ./my-project -- gt auth
 # Authenticated as: your-username
 ```
 
