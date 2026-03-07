@@ -2,6 +2,7 @@
 package clipboard
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -42,18 +43,35 @@ func Read() (*Content, error) {
 	}
 }
 
+// osascriptImageRead is an AppleScript that reads image data from the clipboard
+// using the Objective-C bridge (available since macOS 10.10). It returns the
+// image as a base64-encoded string, avoiding binary encoding issues.
+const osascriptImageRead = `use framework "AppKit"
+use scripting additions
+set pb to current application's NSPasteboard's generalPasteboard()
+set pngType to current application's NSPasteboardTypePNG
+set imgData to pb's dataForType:pngType
+if imgData is missing value then
+	error "no image"
+end if
+set b64 to (imgData's base64EncodedStringWithOptions:0) as text
+return b64`
+
 // readDarwin reads clipboard on macOS.
 func readDarwin() (*Content, error) {
-	// Check for image first (pngpaste outputs PNG if clipboard has an image)
-	if pngpaste, err := exec.LookPath("pngpaste"); err == nil {
-		out, err := exec.Command(pngpaste, "-").Output()
-		if err == nil && len(out) > 0 {
-			return &Content{Data: out, MIMEType: "image/png"}, nil
+	// Try image first via osascript (always available, no extra installs)
+	out, err := exec.Command("osascript", "-e", osascriptImageRead).Output()
+	if err == nil && len(out) > 0 {
+		// Output is base64-encoded PNG, decode it
+		b64 := strings.TrimSpace(string(out))
+		imgData, decErr := base64.StdEncoding.DecodeString(b64)
+		if decErr == nil && len(imgData) > 0 {
+			return &Content{Data: imgData, MIMEType: "image/png"}, nil
 		}
 	}
 
 	// Fall back to text via pbpaste
-	out, err := exec.Command("pbpaste").Output()
+	out, err = exec.Command("pbpaste").Output()
 	if err != nil {
 		return nil, fmt.Errorf("pbpaste: %w", err)
 	}
