@@ -49,16 +49,20 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
-		canonical := credential.Provider(provider.ResolveName(grantName))
+
+		// canonical is the provider registry name (e.g. "codex" for an
+		// "openai" grant). This is NOT a credential store key — each case
+		// uses the appropriate credential.Provider* constant for store lookups.
+		canonical := provider.ResolveName(grantName)
 
 		switch canonical {
-		case credential.ProviderClaude:
+		case "claude":
 			initSet["claude"] = true
 
-		case credential.ProviderAnthropic:
+		case "anthropic":
 			// Legacy: only needs Claude init if the stored token is OAuth.
 			if store != nil {
-				if cred, err := store.Get(canonical); err == nil {
+				if cred, err := store.Get(credential.ProviderAnthropic); err == nil {
 					if credential.IsOAuthToken(cred.Token) {
 						initSet["claude"] = true
 					}
@@ -74,9 +78,9 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 				}
 			}
 
-		case credential.ProviderGemini:
+		case "gemini":
 			if store != nil {
-				if _, err := store.Get(canonical); err == nil {
+				if _, err := store.Get(credential.ProviderGemini); err == nil {
 					initSet["gemini"] = true
 				}
 			}
