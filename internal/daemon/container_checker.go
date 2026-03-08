@@ -12,8 +12,12 @@ import (
 // CommandContainerChecker checks container liveness by shelling out to
 // the container runtime CLI. It tries Docker first, then Apple containers.
 type CommandContainerChecker struct {
-	// runtime is cached after first successful check ("docker" or "apple").
-	runtime string
+	// runtimes caches the runtime type per container ID ("docker" or "apple").
+	// A global cache was wrong: when both Docker and Apple containers are
+	// active, caching a single runtime caused all checks for the other
+	// runtime's containers to fail, leading to false liveness failures
+	// and premature token cleanup (407 errors).
+	runtimes map[string]string
 }
 
 // IsContainerRunning checks if a container is still running.
@@ -21,18 +25,18 @@ type CommandContainerChecker struct {
 // (false, nil) when confirmed dead, and (false, err) when the
 // check itself failed (e.g. transient CLI error).
 func (c *CommandContainerChecker) IsContainerRunning(ctx context.Context, id string) (bool, error) {
-	// Try cached runtime first.
-	switch c.runtime {
+	// Try cached runtime for this specific container first.
+	switch c.runtimes[id] {
 	case "docker":
 		return c.checkDocker(ctx, id)
 	case "apple":
 		return c.checkApple(ctx, id)
 	}
 
-	// No cached runtime — try Docker first (most common).
+	// No cached runtime for this container — try Docker first (most common).
 	alive, err := c.checkDocker(ctx, id)
 	if alive {
-		c.runtime = "docker"
+		c.runtimes[id] = "docker"
 		return true, nil
 	}
 	if err == nil {
@@ -43,7 +47,7 @@ func (c *CommandContainerChecker) IsContainerRunning(ctx context.Context, id str
 	// Docker failed with an error — try Apple containers.
 	alive, appleErr := c.checkApple(ctx, id)
 	if alive {
-		c.runtime = "apple"
+		c.runtimes[id] = "apple"
 		return true, nil
 	}
 	if appleErr == nil {
@@ -81,5 +85,7 @@ func (c *CommandContainerChecker) checkApple(ctx context.Context, id string) (bo
 // NewCommandContainerChecker creates a new container checker that uses CLI commands.
 func NewCommandContainerChecker() *CommandContainerChecker {
 	log.Debug("created command-based container checker for liveness monitoring")
-	return &CommandContainerChecker{}
+	return &CommandContainerChecker{
+		runtimes: make(map[string]string),
+	}
 }
