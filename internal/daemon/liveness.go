@@ -109,6 +109,10 @@ func (lc *LivenessChecker) CheckOnce(ctx context.Context) {
 // removeRun cancels refresh, unregisters the run, and fires callbacks.
 func (lc *LivenessChecker) removeRun(rc *RunContext) {
 	rc.CancelRefresh()
+	// Clean up per-container runtime cache to prevent unbounded growth.
+	if fc, ok := lc.checker.(interface{ ForgetContainer(string) }); ok {
+		fc.ForgetContainer(rc.GetContainerID())
+	}
 	lc.registry.Unregister(rc.AuthToken)
 	if lc.persister != nil {
 		lc.persister.SaveDebounced()

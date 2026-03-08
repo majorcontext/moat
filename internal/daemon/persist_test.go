@@ -410,6 +410,20 @@ func TestResolveCredentials_MCPGrant(t *testing.T) {
 	}
 }
 
+func TestResolveCredentials_OpenAI(t *testing.T) {
+	rc := NewRunContext("run-1")
+	store := &mockStore{
+		creds: map[credential.Provider]*credential.Credential{
+			credential.ProviderOpenAI: {Provider: credential.ProviderOpenAI, Token: "sk-test"},
+		},
+	}
+	// "openai" resolves to "codex" via provider alias, but credentials
+	// are stored under credential.ProviderOpenAI ("openai").
+	if err := resolveCredentials(rc, []string{"openai"}, nil, store); err != nil {
+		t.Fatalf("resolveCredentials(openai) = %v, want nil", err)
+	}
+}
+
 func TestResolveCredentials_EmptyGrants(t *testing.T) {
 	rc := NewRunContext("run-1")
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}

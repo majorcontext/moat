@@ -82,6 +82,11 @@ func (c *CommandContainerChecker) checkApple(ctx context.Context, id string) (bo
 	return strings.Contains(output, `"running"`) || strings.Contains(output, `"Running"`), nil
 }
 
+// ForgetContainer removes the cached runtime for a container that no longer exists.
+func (c *CommandContainerChecker) ForgetContainer(id string) {
+	delete(c.runtimes, id)
+}
+
 // NewCommandContainerChecker creates a new container checker that uses CLI commands.
 func NewCommandContainerChecker() *CommandContainerChecker {
 	log.Debug("created command-based container checker for liveness monitoring")
