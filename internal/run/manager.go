@@ -558,8 +558,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					continue
 				}
 
-				// Resolve to canonical provider name for credential lookup.
-				credName := credential.Provider(provider.ResolveName(grantName))
+				// Map grant name to credential store key (handles aliases like
+				// "openai" → codex provider but credential stored under "openai").
+				credName := credentialStoreKey(grantName)
 				log.Debug("processing grant", "grant", grant, "credName", credName)
 				cred, getErr := store.Get(credName)
 				if getErr != nil {

@@ -110,6 +110,18 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	return needs
 }
 
+// credentialStoreKey maps a grant name to the credential store key.
+// Most providers store credentials under a key matching the resolved provider
+// name, but the codex provider is an exception: the provider registry name is
+// "codex" (aliased from "openai"), but credentials are stored under "openai".
+func credentialStoreKey(grantName string) credential.Provider {
+	canonical := provider.ResolveName(grantName)
+	if canonical == providerCodex {
+		return credential.ProviderOpenAI
+	}
+	return credential.Provider(canonical)
+}
+
 func hasDep(depList []deps.Dependency, name string) bool {
 	for _, d := range depList {
 		if d.Name == name {

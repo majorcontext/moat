@@ -275,8 +275,9 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 			continue
 		}
 
-		// Resolve to canonical provider name for credential lookup.
-		credName := credential.Provider(provider.ResolveName(grantName))
+		// Map grant name to credential store key (handles aliases like
+		// "openai" → codex provider but credential stored under "openai").
+		credName := credentialStoreKey(grantName)
 
 		// Check credential exists and can be decrypted
 		_, err := store.Get(credName)
