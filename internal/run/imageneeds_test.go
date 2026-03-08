@@ -107,6 +107,13 @@ func TestResolveImageNeedsOpenAINoStore(t *testing.T) {
 	}
 }
 
+func TestResolveImageNeedsGeminiNoStore(t *testing.T) {
+	needs := resolveImageNeedsWithStore([]string{"gemini"}, nil, nil)
+	if contains(needs.initProviders, "gemini") {
+		t.Error("gemini grant without store should NOT add gemini to initProviders")
+	}
+}
+
 func TestResolveImageNeedsGemini(t *testing.T) {
 	store := newMockStore()
 	store.Save(credential.Credential{

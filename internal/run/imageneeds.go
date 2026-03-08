@@ -10,11 +10,11 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// providerCodex is the canonical provider name for the Codex/OpenAI agent.
+// providerCodex is the provider registry name for the Codex/OpenAI agent.
 // The provider registry resolves "openai" → "codex" via alias
 // (see internal/providers/codex/provider.go), but credentials are stored
-// under credential.ProviderOpenAI.
-const providerCodex credential.Provider = "codex"
+// under credential.ProviderOpenAI — not under this name.
+const providerCodex = "codex"
 
 // imageNeeds holds the results of grant/dependency analysis for image building.
 type imageNeeds struct {
@@ -24,18 +24,19 @@ type imageNeeds struct {
 
 // resolveImageNeeds determines which agent init steps and features are needed
 // based on granted credentials and declared dependencies. It opens the
-// credential store at most once, consolidating the repeated store-open calls
-// that previously existed inline in manager.Create.
+// credential store at most once for the init-detection phase (the
+// PrepareContainer phase in manager.Create still opens its own stores).
 func resolveImageNeeds(grants []string, depList []deps.Dependency) imageNeeds {
 	// Open credential store once (best-effort; if it fails we skip
 	// credential-dependent checks — same behavior as before).
 	var store credential.Store
-	if key, err := credential.DefaultEncryptionKey(); err == nil {
-		if s, err := credential.NewFileStore(credential.DefaultStoreDir(), key); err == nil {
-			store = s
-		} else {
-			log.Debug("failed to open credential store", "error", err)
-		}
+	key, keyErr := credential.DefaultEncryptionKey()
+	if keyErr != nil {
+		log.Debug("failed to derive encryption key", "error", keyErr)
+	} else if s, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key); storeErr != nil {
+		log.Debug("failed to open credential store", "error", storeErr)
+	} else {
+		store = s
 	}
 	return resolveImageNeedsWithStore(grants, depList, store)
 }
