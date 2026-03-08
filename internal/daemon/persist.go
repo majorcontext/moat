@@ -268,7 +268,15 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			continue
 		}
 
-		credName := credential.Provider(provider.ResolveName(grantName))
+		// Map grant name to credential store key. Most providers store
+		// credentials under a key matching the resolved name, but the codex
+		// provider is an exception: "openai" resolves to "codex" in the
+		// registry, but credentials are stored under "openai".
+		canonical := provider.ResolveName(grantName)
+		credName := credential.Provider(canonical)
+		if canonical == "codex" {
+			credName = credential.ProviderOpenAI
+		}
 		cred, err := store.Get(credName)
 		if err != nil {
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
