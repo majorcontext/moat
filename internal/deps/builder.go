@@ -8,39 +8,10 @@ import (
 	"strings"
 )
 
-// ImageTagOptions configures image tag generation.
-type ImageTagOptions struct {
-	// NeedsSSH indicates the image needs SSH packages and init script.
-	NeedsSSH bool
-
-	// NeedsClaudeInit indicates the image needs the init script for Claude setup.
-	NeedsClaudeInit bool
-
-	// NeedsCodexInit indicates the image needs the init script for Codex setup.
-	NeedsCodexInit bool
-
-	// NeedsGeminiInit indicates the image needs the init script for Gemini setup.
-	NeedsGeminiInit bool
-
-	// NeedsFirewall indicates the image needs iptables for strict network policy.
-	NeedsFirewall bool
-
-	// NeedsInitFiles indicates providers have init files to write at container startup.
-	NeedsInitFiles bool
-
-	// ClaudePlugins are plugins baked into the image.
-	// Format: "plugin-name@marketplace-name"
-	ClaudePlugins []string
-
-	// Hooks contains user-defined lifecycle hook commands.
-	// Different hooks produce different image tags.
-	Hooks *HooksConfig
-}
-
 // ImageTag generates a deterministic image tag for a set of dependencies.
-func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
+func ImageTag(deps []Dependency, opts *ImageSpec) string {
 	if opts == nil {
-		opts = &ImageTagOptions{}
+		opts = &ImageSpec{}
 	}
 
 	// Sort deps for deterministic ordering
@@ -65,14 +36,8 @@ func ImageTag(deps []Dependency, opts *ImageTagOptions) string {
 	if opts.NeedsSSH {
 		hashInput += ",ssh:agent"
 	}
-	if opts.NeedsClaudeInit {
-		hashInput += ",claude:init"
-	}
-	if opts.NeedsCodexInit {
-		hashInput += ",codex:init"
-	}
-	if opts.NeedsGeminiInit {
-		hashInput += ",gemini:init"
+	for _, tag := range opts.initProviderHashComponents() {
+		hashInput += "," + tag
 	}
 	if opts.NeedsFirewall {
 		hashInput += ",firewall:iptables"

@@ -68,7 +68,7 @@ func TestGenerateDockerfileHasIptables(t *testing.T) {
 	deps := []Dependency{
 		{Name: "python", Version: "3.11"},
 	}
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsFirewall: true})
+	result, err := GenerateDockerfile(deps, &ImageSpec{NeedsFirewall: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestGenerateDockerfileMergedAptPackages(t *testing.T) {
 func TestGenerateDockerfileBuildKitNoAptCleanup(t *testing.T) {
 	// Verify rm -rf /var/lib/apt/lists/* is NOT present when BuildKit is enabled
 	useBuildKit := true
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{UseBuildKit: &useBuildKit})
+	result, err := GenerateDockerfile(nil, &ImageSpec{UseBuildKit: &useBuildKit})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestGenerateDockerfileBuildKitNoAptCleanup(t *testing.T) {
 func TestGenerateDockerfileNoBuildKitHasAptCleanup(t *testing.T) {
 	// Verify rm -rf /var/lib/apt/lists/* IS present when BuildKit is disabled
 	useBuildKit := false
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{UseBuildKit: &useBuildKit})
+	result, err := GenerateDockerfile(nil, &ImageSpec{UseBuildKit: &useBuildKit})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestGenerateDockerfilePython(t *testing.T) {
 
 func TestGenerateDockerfileWithSSH(t *testing.T) {
 	// Test with NeedsSSH option (triggered by SSH grants)
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{NeedsSSH: true})
+	result, err := GenerateDockerfile(nil, &ImageSpec{NeedsSSH: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -234,13 +234,13 @@ func TestGenerateDockerfileContextFiles(t *testing.T) {
 	// Verify that all init-triggering options produce context files with non-empty content
 	tests := []struct {
 		name string
-		opts *DockerfileOptions
+		opts *ImageSpec
 		deps []Dependency
 	}{
-		{"SSH", &DockerfileOptions{NeedsSSH: true}, nil},
-		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, nil},
-		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, nil},
-		{"GitIdentity", &DockerfileOptions{NeedsGitIdentity: true}, nil},
+		{"SSH", &ImageSpec{NeedsSSH: true}, nil},
+		{"ClaudeInit", &ImageSpec{InitProviders: []string{"claude"}}, nil},
+		{"CodexInit", &ImageSpec{InitProviders: []string{"codex"}}, nil},
+		{"GitIdentity", &ImageSpec{NeedsGitIdentity: true}, nil},
 		{"DockerHost", nil, []Dependency{{Name: "docker", DockerMode: DockerModeHost}}},
 		{"DockerDind", nil, []Dependency{{Name: "docker", DockerMode: DockerModeDind}}},
 	}
@@ -283,7 +283,7 @@ func TestGenerateDockerfileContextFiles(t *testing.T) {
 func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 	// Test combining regular deps with SSH
 	deps := []Dependency{{Name: "node", Version: "20"}}
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{NeedsSSH: true})
+	result, err := GenerateDockerfile(deps, &ImageSpec{NeedsSSH: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestGenerateDockerfileWithoutBuildKit(t *testing.T) {
 		{Name: "curl"},
 	}
 	useBuildKit := false
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &ImageSpec{
 		UseBuildKit: &useBuildKit,
 	})
 	if err != nil {
@@ -602,7 +602,7 @@ func TestGenerateDockerfileWithBuildKit(t *testing.T) {
 		{Name: "git"},
 	}
 	useBuildKit := true
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &ImageSpec{
 		UseBuildKit: &useBuildKit,
 	})
 	if err != nil {
@@ -741,7 +741,7 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 		"aws-agent-skills@aws-agent-skills",
 	}
 
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &ImageSpec{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})
@@ -825,16 +825,16 @@ func TestGenerateDockerfilePluginsWithInitNeedsRoot(t *testing.T) {
 		"test-plugin@test-market",
 	}
 
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{
+	result, err := GenerateDockerfile(deps, &ImageSpec{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
-		NeedsClaudeInit:    true,
+		InitProviders:      []string{"claude"},
 	})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
-	// Should have USER root after plugins because NeedsClaudeInit requires init
+	// Should have USER root after plugins because InitProviders requires init
 	// script setup which needs root for COPY and chmod.
 	lines := strings.Split(result.Dockerfile, "\n")
 	pluginIdx := -1
@@ -865,7 +865,7 @@ func TestGenerateDockerfileNoPlugins(t *testing.T) {
 		{Name: "node", Version: "20"},
 	}
 
-	result, err := GenerateDockerfile(deps, &DockerfileOptions{})
+	result, err := GenerateDockerfile(deps, &ImageSpec{})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
@@ -887,7 +887,7 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 			{Name: "good", Source: "github", Repo: "valid/repo"},
 			{Name: "evil", Source: "github", Repo: "; rm -rf /"},
 		}
-		result, err := GenerateDockerfile(deps, &DockerfileOptions{
+		result, err := GenerateDockerfile(deps, &ImageSpec{
 			ClaudeMarketplaces: marketplaces,
 		})
 		if err != nil {
@@ -913,7 +913,7 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 			"valid-plugin@valid-market",
 			"bad;rm -rf /@market",
 		}
-		result, err := GenerateDockerfile(deps, &DockerfileOptions{
+		result, err := GenerateDockerfile(deps, &ImageSpec{
 			ClaudePlugins: plugins,
 		})
 		if err != nil {
@@ -1138,7 +1138,7 @@ func TestWriteSSHKnownHosts(t *testing.T) {
 
 func TestGenerateDockerfileWithSSHHosts(t *testing.T) {
 	// Test that SSHHosts option adds known_hosts to the Dockerfile
-	opts := &DockerfileOptions{
+	opts := &ImageSpec{
 		NeedsSSH: true,
 		SSHHosts: []string{"github.com"},
 	}
@@ -1164,7 +1164,7 @@ func TestGenerateDockerfileWithSSHHosts(t *testing.T) {
 
 func TestGenerateDockerfileSSHHostsWithoutSSH(t *testing.T) {
 	// SSHHosts without NeedsSSH should still work (hosts are added regardless)
-	opts := &DockerfileOptions{
+	opts := &ImageSpec{
 		NeedsSSH: false,
 		SSHHosts: []string{"github.com"},
 	}
@@ -1350,7 +1350,7 @@ func TestKnownSSHHostKeysComplete(t *testing.T) {
 }
 
 func TestGenerateDockerfile_HooksPostBuild(t *testing.T) {
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+	result, err := GenerateDockerfile(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PostBuild: "git config --global core.autocrlf input",
 		},
@@ -1367,7 +1367,7 @@ func TestGenerateDockerfile_HooksPostBuild(t *testing.T) {
 }
 
 func TestGenerateDockerfile_HooksPostBuildRoot(t *testing.T) {
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+	result, err := GenerateDockerfile(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PostBuildRoot: "apt-get install -y figlet",
 		},
@@ -1387,7 +1387,7 @@ func TestGenerateDockerfile_HooksPostBuildRoot(t *testing.T) {
 }
 
 func TestGenerateDockerfile_HooksBothBuild(t *testing.T) {
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+	result, err := GenerateDockerfile(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PostBuild:     "git config --global core.autocrlf input",
 			PostBuildRoot: "apt-get install -y figlet",
@@ -1408,7 +1408,7 @@ func TestGenerateDockerfile_HooksBothBuild(t *testing.T) {
 }
 
 func TestGenerateDockerfile_HooksNil(t *testing.T) {
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{})
+	result, err := GenerateDockerfile(nil, &ImageSpec{})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
@@ -1419,7 +1419,7 @@ func TestGenerateDockerfile_HooksNil(t *testing.T) {
 
 func TestGenerateDockerfile_HooksWorkdir(t *testing.T) {
 	// Verify that post_build runs in /workspace
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+	result, err := GenerateDockerfile(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PostBuild: "echo hello",
 		},
@@ -1454,7 +1454,7 @@ func TestGenerateDockerfile_HooksWorkdir(t *testing.T) {
 
 func TestGenerateDockerfile_HooksPreRunTriggersInit(t *testing.T) {
 	// pre_run should trigger moat-init entrypoint even without other init features
-	result, err := GenerateDockerfile(nil, &DockerfileOptions{
+	result, err := GenerateDockerfile(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PreRun: "npm install",
 		},
@@ -1524,26 +1524,26 @@ func TestMoatInitScriptGitIdentity(t *testing.T) {
 	}
 }
 
-func TestDockerfileOptionsNeedsInit(t *testing.T) {
+func TestImageSpecNeedsInit(t *testing.T) {
 	tests := []struct {
 		name       string
-		opts       *DockerfileOptions
+		opts       *ImageSpec
 		dockerMode DockerMode
 		want       bool
 	}{
 		{"nil opts no docker", nil, "", false},
 		{"nil opts with docker", nil, DockerModeHost, true},
-		{"empty opts", &DockerfileOptions{}, "", false},
-		{"SSH", &DockerfileOptions{NeedsSSH: true}, "", true},
-		{"ClaudeInit", &DockerfileOptions{NeedsClaudeInit: true}, "", true},
-		{"CodexInit", &DockerfileOptions{NeedsCodexInit: true}, "", true},
-		{"GeminiInit", &DockerfileOptions{NeedsGeminiInit: true}, "", true},
-		{"GitIdentity", &DockerfileOptions{NeedsGitIdentity: true}, "", true},
-		{"docker host", &DockerfileOptions{}, DockerModeHost, true},
-		{"docker dind", &DockerfileOptions{}, DockerModeDind, true},
-		{"pre_run hook", &DockerfileOptions{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
-		{"post_build only", &DockerfileOptions{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
-		{"firewall only", &DockerfileOptions{NeedsFirewall: true}, "", false},
+		{"empty opts", &ImageSpec{}, "", false},
+		{"SSH", &ImageSpec{NeedsSSH: true}, "", true},
+		{"ClaudeInit", &ImageSpec{InitProviders: []string{"claude"}}, "", true},
+		{"CodexInit", &ImageSpec{InitProviders: []string{"codex"}}, "", true},
+		{"GeminiInit", &ImageSpec{InitProviders: []string{"gemini"}}, "", true},
+		{"GitIdentity", &ImageSpec{NeedsGitIdentity: true}, "", true},
+		{"docker host", &ImageSpec{}, DockerModeHost, true},
+		{"docker dind", &ImageSpec{}, DockerModeDind, true},
+		{"pre_run hook", &ImageSpec{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
+		{"post_build only", &ImageSpec{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
+		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", false},
 	}
 
 	for _, tt := range tests {

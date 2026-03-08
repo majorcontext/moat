@@ -43,7 +43,7 @@ func TestImageTagOrderIndependent(t *testing.T) {
 func TestImageTagWithSSH(t *testing.T) {
 	deps := []Dependency{{Name: "node"}}
 	tagWithoutSSH := ImageTag(deps, nil)
-	tagWithSSH := ImageTag(deps, &ImageTagOptions{NeedsSSH: true})
+	tagWithSSH := ImageTag(deps, &ImageSpec{NeedsSSH: true})
 	if tagWithoutSSH == tagWithSSH {
 		t.Error("SSH option should affect tag")
 	}
@@ -51,7 +51,7 @@ func TestImageTagWithSSH(t *testing.T) {
 
 func TestImageTagWithHooks(t *testing.T) {
 	noHooks := ImageTag(nil, nil)
-	withHooks := ImageTag(nil, &ImageTagOptions{
+	withHooks := ImageTag(nil, &ImageSpec{
 		Hooks: &HooksConfig{
 			PostBuild:     "git config --global core.autocrlf input",
 			PostBuildRoot: "apt-get install -y figlet",
@@ -62,10 +62,10 @@ func TestImageTagWithHooks(t *testing.T) {
 	}
 
 	// Different hooks should produce different tags
-	hooks1 := ImageTag(nil, &ImageTagOptions{
+	hooks1 := ImageTag(nil, &ImageSpec{
 		Hooks: &HooksConfig{PostBuild: "echo a"},
 	})
-	hooks2 := ImageTag(nil, &ImageTagOptions{
+	hooks2 := ImageTag(nil, &ImageSpec{
 		Hooks: &HooksConfig{PostBuild: "echo b"},
 	})
 	if hooks1 == hooks2 {
@@ -73,7 +73,7 @@ func TestImageTagWithHooks(t *testing.T) {
 	}
 
 	// pre_run should also affect hash
-	withPreRun := ImageTag(nil, &ImageTagOptions{
+	withPreRun := ImageTag(nil, &ImageSpec{
 		Hooks: &HooksConfig{PreRun: "npm install"},
 	})
 	if noHooks == withPreRun {
@@ -84,7 +84,7 @@ func TestImageTagWithHooks(t *testing.T) {
 func TestImageTagWithFirewall(t *testing.T) {
 	deps := []Dependency{{Name: "python", Version: "3.11"}}
 	tagWithout := ImageTag(deps, nil)
-	tagWith := ImageTag(deps, &ImageTagOptions{NeedsFirewall: true})
+	tagWith := ImageTag(deps, &ImageSpec{NeedsFirewall: true})
 	if tagWithout == tagWith {
 		t.Error("firewall option should affect tag")
 	}

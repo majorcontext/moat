@@ -17,86 +17,6 @@ type HooksConfig struct {
 	PreRun        string
 }
 
-// DockerfileOptions configures Dockerfile generation.
-type DockerfileOptions struct {
-	// NeedsSSH indicates SSH grants are present and the image needs
-	// openssh-client, socat, and the moat-init entrypoint for agent forwarding.
-	NeedsSSH bool
-
-	// SSHHosts lists the hosts for which SSH access is granted (e.g., "github.com").
-	// Known host keys will be added to /etc/ssh/ssh_known_hosts for these hosts.
-	SSHHosts []string
-
-	// NeedsClaudeInit indicates Claude Code configuration files need to be
-	// copied from a staging directory at container startup. This requires
-	// the moat-init entrypoint script.
-	NeedsClaudeInit bool
-
-	// NeedsCodexInit indicates Codex CLI configuration files need to be
-	// copied from a staging directory at container startup. This requires
-	// the moat-init entrypoint script.
-	NeedsCodexInit bool
-
-	// NeedsGeminiInit indicates Gemini CLI configuration files need to be
-	// copied from a staging directory at container startup. This requires
-	// the moat-init entrypoint script.
-	NeedsGeminiInit bool
-
-	// NeedsFirewall indicates that iptables is needed for strict network
-	// policy enforcement. When false, iptables is omitted from base packages.
-	NeedsFirewall bool
-
-	// UseBuildKit enables BuildKit-specific features like cache mounts.
-	// When false, generates Dockerfiles compatible with the legacy builder.
-	// Defaults to true if not explicitly set (checked via useBuildKit method).
-	UseBuildKit *bool
-
-	// ClaudeMarketplaces are plugin marketplaces to register during image build.
-	ClaudeMarketplaces []claude.MarketplaceConfig
-
-	// ClaudePlugins are plugins to install during image build.
-	// Format: "plugin-name@marketplace-name"
-	ClaudePlugins []string
-
-	// NeedsGitIdentity indicates the host's git identity should be injected
-	// into the container. This requires the moat-init entrypoint script to
-	// apply the MOAT_GIT_USER_NAME and MOAT_GIT_USER_EMAIL env vars.
-	NeedsGitIdentity bool
-
-	// NeedsInitFiles indicates that providers have init files to write at
-	// container startup. This requires the moat-init entrypoint script.
-	NeedsInitFiles bool
-
-	// Hooks contains user-defined lifecycle hook commands.
-	// PostBuild and PostBuildRoot are baked into the image as RUN commands.
-	// PreRun is passed to the init script to execute on every container start.
-	Hooks *HooksConfig
-}
-
-// useBuildKit returns whether to use BuildKit features.
-// Defaults to true if UseBuildKit is nil.
-func (o *DockerfileOptions) useBuildKit() bool {
-	if o == nil || o.UseBuildKit == nil {
-		return true
-	}
-	return *o.UseBuildKit
-}
-
-// needsInit returns whether the moat-init entrypoint script is required.
-// This is true when any feature needs privilege management or startup setup:
-// SSH agent forwarding, Claude/Codex/Gemini file setup, Docker socket/daemon,
-// pre-run hooks, or git identity injection.
-//
-// dockerMode must be passed separately because it comes from dependency
-// categorization, not from DockerfileOptions.
-func (o *DockerfileOptions) needsInit(dockerMode DockerMode) bool {
-	if o == nil {
-		return dockerMode != ""
-	}
-	hasPreRun := o.Hooks != nil && o.Hooks.PreRun != ""
-	return o.NeedsSSH || o.NeedsClaudeInit || o.NeedsCodexInit || o.NeedsGeminiInit || dockerMode != "" || hasPreRun || o.NeedsGitIdentity || o.NeedsInitFiles
-}
-
 // DockerfileResult contains the generated Dockerfile and any additional context files
 // that should be placed alongside the Dockerfile in the build context directory.
 type DockerfileResult struct {
@@ -244,9 +164,9 @@ func writeDynamicDeps(b *strings.Builder, comment string, deps []Dependency) {
 }
 
 // GenerateDockerfile creates a Dockerfile for the given dependencies.
-func GenerateDockerfile(deps []Dependency, opts *DockerfileOptions) (*DockerfileResult, error) {
+func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, error) {
 	if opts == nil {
-		opts = &DockerfileOptions{}
+		opts = &ImageSpec{}
 	}
 	var b strings.Builder
 	contextFiles := make(map[string][]byte)
@@ -622,7 +542,7 @@ func writeBuildHooks(b *strings.Builder, hooks *HooksConfig) {
 // When the init script is needed, it is added as a context file and COPYed
 // into the image. This avoids embedding a large base64 blob inline in a RUN
 // command, which triggers gRPC transport errors in Apple's container builder.
-func writeEntrypoint(b *strings.Builder, opts *DockerfileOptions, dockerMode DockerMode, contextFiles map[string][]byte) {
+func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) {
 	if opts.needsInit(dockerMode) {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")

@@ -1,0 +1,115 @@
+package run
+
+import (
+	"sort"
+	"strings"
+
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/provider"
+)
+
+// providerCodex is the canonical provider name for the Codex/OpenAI agent.
+// The provider registry resolves "openai" → "codex" via alias
+// (see internal/providers/codex/provider.go), but credentials are stored
+// under credential.ProviderOpenAI.
+const providerCodex credential.Provider = "codex"
+
+// imageNeeds holds the results of grant/dependency analysis for image building.
+type imageNeeds struct {
+	initProviders []string
+	initFiles     bool
+}
+
+// resolveImageNeeds determines which agent init steps and features are needed
+// based on granted credentials and declared dependencies. It opens the
+// credential store at most once, consolidating the repeated store-open calls
+// that previously existed inline in manager.Create.
+func resolveImageNeeds(grants []string, depList []deps.Dependency) imageNeeds {
+	// Open credential store once (best-effort; if it fails we skip
+	// credential-dependent checks — same behavior as before).
+	var store credential.Store
+	if key, err := credential.DefaultEncryptionKey(); err == nil {
+		if s, err := credential.NewFileStore(credential.DefaultStoreDir(), key); err == nil {
+			store = s
+		} else {
+			log.Debug("failed to open credential store", "error", err)
+		}
+	}
+	return resolveImageNeedsWithStore(grants, depList, store)
+}
+
+// resolveImageNeedsWithStore is the testable core of resolveImageNeeds.
+// It accepts an explicit credential store (which may be nil).
+func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, store credential.Store) imageNeeds {
+	var needs imageNeeds
+	initSet := make(map[string]bool)
+
+	for _, grant := range grants {
+		grantName := strings.Split(grant, ":")[0]
+		canonical := credential.Provider(provider.ResolveName(grantName))
+
+		switch canonical {
+		case credential.ProviderClaude:
+			initSet["claude"] = true
+
+		case credential.ProviderAnthropic:
+			// Legacy: only needs Claude init if the stored token is OAuth.
+			if store != nil {
+				if cred, err := store.Get(canonical); err == nil {
+					if credential.IsOAuthToken(cred.Token) {
+						initSet["claude"] = true
+					}
+				}
+			}
+
+		case providerCodex:
+			// The "openai" grant resolves to "codex" via provider alias.
+			// Credentials are stored under ProviderOpenAI.
+			if store != nil {
+				if _, err := store.Get(credential.ProviderOpenAI); err == nil {
+					initSet["codex"] = true
+				}
+			}
+
+		case credential.ProviderGemini:
+			if store != nil {
+				if _, err := store.Get(canonical); err == nil {
+					initSet["gemini"] = true
+				}
+			}
+		}
+
+		// Check InitFileProvider interface using the original grant name
+		// (not canonical), since provider.Get handles alias resolution.
+		if prov := provider.Get(grantName); prov != nil {
+			if _, ok := prov.(provider.InitFileProvider); ok {
+				needs.initFiles = true
+			}
+		}
+	}
+
+	// Dependency fallbacks: some agents can run without credential injection.
+	if !initSet["claude"] && hasDep(depList, "claude-code") {
+		initSet["claude"] = true
+	}
+	if !initSet["gemini"] && hasDep(depList, "gemini-cli") {
+		initSet["gemini"] = true
+	}
+
+	for name := range initSet {
+		needs.initProviders = append(needs.initProviders, name)
+	}
+	sort.Strings(needs.initProviders)
+	return needs
+}
+
+func hasDep(depList []deps.Dependency, name string) bool {
+	for _, d := range depList {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
+}

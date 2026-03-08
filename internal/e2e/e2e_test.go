@@ -1787,7 +1787,7 @@ func TestClaudePluginBaking(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	result, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+	result, err := deps.GenerateDockerfile(parsedDeps, &deps.ImageSpec{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})
@@ -1839,7 +1839,7 @@ func TestClaudePluginBakingOnlyMoatYaml(t *testing.T) {
 		t.Fatalf("ParseAll: %v", err)
 	}
 
-	result, err := deps.GenerateDockerfile(parsedDeps, &deps.DockerfileOptions{
+	result, err := deps.GenerateDockerfile(parsedDeps, &deps.ImageSpec{
 		ClaudeMarketplaces: marketplaces,
 		ClaudePlugins:      plugins,
 	})

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1230,104 +1231,12 @@ region = %s
 		}
 	}
 
-	// Determine if we need Claude init (for OAuth credentials and host files)
-	// This is triggered by:
-	// - a claude/claude grant (always needs init for OAuth credentials), OR
-	// - an anthropic grant with an OAuth token (legacy migration case), OR
-	// - claude-code in the dependencies list (user may run Claude without credential injection)
-	var needsClaudeInit bool
-	for _, grant := range opts.Grants {
-		grantName := strings.Split(grant, ":")[0]
-		canonicalName := credential.Provider(provider.ResolveName(grantName))
-		if canonicalName == credential.ProviderClaude {
-			// claude/claude grants always need Claude init
-			needsClaudeInit = true
-			break
-		}
-		if canonicalName == credential.ProviderAnthropic {
-			// anthropic grants only need Claude init if it's an OAuth token (legacy migration case)
-			key, keyErr := credential.DefaultEncryptionKey()
-			if keyErr == nil {
-				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-				if storeErr == nil {
-					if cred, err := store.Get(canonicalName); err == nil {
-						if credential.IsOAuthToken(cred.Token) {
-							needsClaudeInit = true
-						}
-					}
-				}
-			}
-			break
-		}
-	}
-	if !needsClaudeInit {
-		for _, d := range depList {
-			if d.Name == "claude-code" {
-				needsClaudeInit = true
-				break
-			}
-		}
-	}
-	// Determine if we need Codex init (for OpenAI credentials - both API keys and subscription tokens)
-	// This is triggered by an openai grant
-	var needsCodexInit bool
-	for _, grant := range opts.Grants {
-		provider := credential.Provider(strings.Split(grant, ":")[0])
-		if provider == credential.ProviderOpenAI {
-			key, keyErr := credential.DefaultEncryptionKey()
-			if keyErr == nil {
-				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-				if storeErr == nil {
-					if _, err := store.Get(provider); err == nil {
-						// We have OpenAI credentials - need Codex init for auth.json
-						needsCodexInit = true
-					}
-				}
-			}
-			break
-		}
-	}
-
-	// Determine if we need Gemini init (for Gemini credentials - both OAuth and API keys)
-	// This is triggered by:
-	// - a gemini grant, OR
-	// - gemini-cli in the dependencies list
-	var needsGeminiInit bool
-	for _, grant := range opts.Grants {
-		provider := credential.Provider(strings.Split(grant, ":")[0])
-		if provider == credential.ProviderGemini {
-			key, keyErr := credential.DefaultEncryptionKey()
-			if keyErr == nil {
-				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-				if storeErr == nil {
-					if _, err := store.Get(provider); err == nil {
-						needsGeminiInit = true
-					}
-				}
-			}
-			break
-		}
-	}
-	if !needsGeminiInit {
-		for _, d := range depList {
-			if d.Name == "gemini-cli" {
-				needsGeminiInit = true
-				break
-			}
-		}
-	}
-
-	// Check if any grant provider implements InitFileProvider
-	var needsInitFiles bool
-	for _, grant := range opts.Grants {
-		grantName := strings.Split(grant, ":")[0]
-		if prov := provider.Get(grantName); prov != nil {
-			if _, ok := prov.(provider.InitFileProvider); ok {
-				needsInitFiles = true
-				break
-			}
-		}
-	}
+	// Resolve which agents need init and which providers need init files.
+	// This opens the credential store once and walks grants in a single pass.
+	imgNeeds := resolveImageNeeds(opts.Grants, depList)
+	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
+	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
+	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
 
 	// Hooks config for image hashing, Dockerfile generation, and pre_run
 	var hooks *deps.HooksConfig
@@ -1339,18 +1248,26 @@ region = %s
 		}
 	}
 
-	// Resolve container image based on dependencies, SSH grants, init needs, plugins, and build hooks
+	// Build the image spec — single source of truth for image resolution,
+	// tag generation, and Dockerfile generation.
 	hasSSHGrants := len(sshGrants) > 0
-	containerImage := image.Resolve(installableDeps, &image.ResolveOptions{
-		NeedsSSH:        hasSSHGrants,
-		NeedsClaudeInit: needsClaudeInit,
-		NeedsCodexInit:  needsCodexInit,
-		NeedsGeminiInit: needsGeminiInit,
-		NeedsFirewall:   needsProxyForFirewall,
-		NeedsInitFiles:  needsInitFiles,
-		ClaudePlugins:   claudePlugins,
-		Hooks:           hooks,
-	})
+	useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
+	imageSpec := &deps.ImageSpec{
+		NeedsSSH:           hasSSHGrants,
+		SSHHosts:           sshGrants,
+		InitProviders:      imgNeeds.initProviders,
+		NeedsFirewall:      needsProxyForFirewall,
+		NeedsGitIdentity:   hasGit,
+		NeedsInitFiles:     imgNeeds.initFiles,
+		UseBuildKit:        &useBuildKit,
+		ClaudeMarketplaces: claudeMarketplaces,
+		ClaudePlugins:      claudePlugins,
+		Hooks:              hooks,
+	}
+
+	// Resolve container image based on dependencies and image spec
+	hasDeps := len(installableDeps) > 0
+	containerImage := image.Resolve(installableDeps, imageSpec)
 
 	// Set agent and image for logging context
 	if opts.Config != nil && opts.Config.Agent != "" {
@@ -1358,9 +1275,7 @@ region = %s
 	}
 	r.Image = containerImage
 
-	// Determine if we need a custom image
-	hasHooks := hooks != nil
-	needsCustomImage := len(installableDeps) > 0 || hasSSHGrants || needsClaudeInit || needsCodexInit || needsGeminiInit || needsProxyForFirewall || len(claudePlugins) > 0 || hasHooks || needsInitFiles
+	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
@@ -1377,24 +1292,8 @@ region = %s
 	// Both Docker and Apple containers support Dockerfile builds.
 	var generatedDockerfile string
 	if needsCustomImage {
-		// Check if BuildKit is disabled (for CI compatibility)
-		useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
-
 		// Always generate the Dockerfile so we can save it to the run directory
-		result, err := deps.GenerateDockerfile(installableDeps, &deps.DockerfileOptions{
-			NeedsSSH:           hasSSHGrants,
-			SSHHosts:           sshGrants,
-			NeedsClaudeInit:    needsClaudeInit,
-			NeedsCodexInit:     needsCodexInit,
-			NeedsGeminiInit:    needsGeminiInit,
-			NeedsFirewall:      needsProxyForFirewall,
-			NeedsGitIdentity:   hasGit,
-			NeedsInitFiles:     needsInitFiles,
-			UseBuildKit:        &useBuildKit,
-			ClaudeMarketplaces: claudeMarketplaces,
-			ClaudePlugins:      claudePlugins,
-			Hooks:              hooks,
-		})
+		result, err := deps.GenerateDockerfile(installableDeps, imageSpec)
 		if err != nil {
 			cleanupDaemonRun()
 			return nil, fmt.Errorf("generating Dockerfile: %w", err)

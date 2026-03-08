@@ -51,7 +51,7 @@ func TestResolveMultipleDeps(t *testing.T) {
 
 func TestResolveWithSSHOnly(t *testing.T) {
 	// SSH grants without other deps should still trigger custom image
-	img := Resolve(nil, &ResolveOptions{NeedsSSH: true})
+	img := Resolve(nil, &deps.ImageSpec{NeedsSSH: true})
 	if img == DefaultImage {
 		t.Error("Resolve with SSH should not return default image")
 	}
@@ -59,7 +59,7 @@ func TestResolveWithSSHOnly(t *testing.T) {
 
 func TestResolveWithHooks(t *testing.T) {
 	// Hooks without other deps should still trigger custom image
-	img := Resolve(nil, &ResolveOptions{
+	img := Resolve(nil, &deps.ImageSpec{
 		Hooks: &deps.HooksConfig{
 			PostBuild: "git config --global core.autocrlf input",
 		},
@@ -70,8 +70,8 @@ func TestResolveWithHooks(t *testing.T) {
 }
 
 func TestResolveWithHooksAffectHash(t *testing.T) {
-	noHooks := Resolve(nil, &ResolveOptions{NeedsSSH: true})
-	withHooks := Resolve(nil, &ResolveOptions{
+	noHooks := Resolve(nil, &deps.ImageSpec{NeedsSSH: true})
+	withHooks := Resolve(nil, &deps.ImageSpec{
 		NeedsSSH: true,
 		Hooks: &deps.HooksConfig{
 			PostBuild: "git config --global core.autocrlf input",
@@ -84,7 +84,7 @@ func TestResolveWithHooksAffectHash(t *testing.T) {
 
 func TestResolveWithPreRunOnly(t *testing.T) {
 	// pre_run alone should trigger custom image (needs moat-init)
-	img := Resolve(nil, &ResolveOptions{
+	img := Resolve(nil, &deps.ImageSpec{
 		Hooks: &deps.HooksConfig{
 			PreRun: "npm install",
 		},
@@ -97,7 +97,7 @@ func TestResolveWithPreRunOnly(t *testing.T) {
 func TestResolveWithDepsAndSSH(t *testing.T) {
 	depList := []deps.Dependency{{Name: "node", Version: "20"}}
 	imgWithoutSSH := Resolve(depList, nil)
-	imgWithSSH := Resolve(depList, &ResolveOptions{NeedsSSH: true})
+	imgWithSSH := Resolve(depList, &deps.ImageSpec{NeedsSSH: true})
 
 	// Both should be custom images but different
 	if imgWithoutSSH == DefaultImage || imgWithSSH == DefaultImage {
