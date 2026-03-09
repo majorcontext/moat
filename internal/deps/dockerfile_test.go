@@ -1526,7 +1526,6 @@ func TestGenerateDockerfileNonInteractiveDeps(t *testing.T) {
 	for _, want := range []string{
 		`COREPACK_ENABLE_DOWNLOAD_PROMPT="0"`,
 		`PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"`,
-		`NODE_PATH="/usr/local/lib/node_modules"`,
 	} {
 		if !strings.Contains(result.Dockerfile, want) {
 			t.Errorf("Dockerfile missing %s\n%s", want, result.Dockerfile)

@@ -322,7 +322,6 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 			EnvVars: map[string]string{
 				"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
-				"NODE_PATH":                "/usr/local/lib/node_modules",
 			},
 		}
 	case "aws":
