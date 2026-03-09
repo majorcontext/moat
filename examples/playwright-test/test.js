@@ -13,7 +13,6 @@ const { chromium } = require("playwright");
     </html>
   `);
 
-  const title = await page.title();
   await page.screenshot({ path: "screenshot.png" });
   await browser.close();
 

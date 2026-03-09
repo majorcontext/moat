@@ -318,7 +318,7 @@ func getCustomCommands(name, version string) InstallCommands {
 		return InstallCommands{
 			Commands: []string{
 				"npm install -g playwright",
-				"npx playwright install --with-deps chromium chromium_headless_shell",
+				"npx playwright install --with-deps chromium chromium-headless-shell",
 			},
 			EnvVars: map[string]string{
 				"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",

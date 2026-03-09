@@ -1,7 +1,7 @@
 #!/bin/sh
 # Playwright Testing Environment Demo
 #
-# Sets up a project with playwright, launches headless Chromium,
+# Installs project dependencies, launches headless Chromium,
 # renders a page, and takes a screenshot.
 
 echo "=================================================="
@@ -11,7 +11,6 @@ echo
 
 echo "--- Versions ---"
 echo "  node:       $(node --version)"
-echo "  pnpm:       $(pnpm --version)"
 echo "  playwright: $(npx playwright --version)"
 echo
 
@@ -20,12 +19,8 @@ echo "  COREPACK_ENABLE_DOWNLOAD_PROMPT=$COREPACK_ENABLE_DOWNLOAD_PROMPT"
 echo "  PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"
 echo
 
-echo "--- Setting up project ---"
-cd /tmp
-npm init -y --silent
-npm install playwright --silent
-cp /workspace/test.js .
-echo "  Installed playwright locally"
+echo "--- Installing project dependencies ---"
+npm install --silent
 echo
 
 echo "--- Running browser test ---"
