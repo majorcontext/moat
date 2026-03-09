@@ -1,0 +1,19 @@
+# Example: Playwright browser testing
+#
+# This example demonstrates a Playwright testing environment with pnpm.
+# Both corepack and playwright are configured for non-interactive use:
+#   - COREPACK_ENABLE_DOWNLOAD_PROMPT=0 suppresses corepack prompts
+#   - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright lets project-local
+#     playwright find the pre-installed browsers
+#
+# Run with:
+#   moat run examples/playwright-test
+
+name: playwright-test
+
+dependencies:
+  - node@20
+  - pnpm
+  - playwright
+
+command: ["sh", "/workspace/demo.sh"]
