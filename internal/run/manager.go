@@ -3005,10 +3005,22 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 	return m.runtime.ResizeTTY(ctx, containerID, height, width)
 }
 
+// validXclipTargets is the set of X selection targets allowed in shell commands.
+var validXclipTargets = map[string]bool{
+	"UTF8_STRING": true,
+	"image/png":   true,
+}
+
 // WriteClipboard writes data to the X clipboard inside a running container
 // using xclip. The target parameter specifies the X selection target (e.g.,
 // "UTF8_STRING" for text, "image/png" for images).
 func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte, target string) error {
+	// Validate target to prevent shell injection. Only known-safe X selection
+	// targets are allowed; the value is interpolated into a shell command.
+	if !validXclipTargets[target] {
+		return fmt.Errorf("invalid xclip target: %q", target)
+	}
+
 	m.mu.RLock()
 	r, ok := m.runs[runID]
 	if !ok {
