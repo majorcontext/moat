@@ -1,27 +1,17 @@
 #!/bin/sh
 # Playwright Testing Environment Demo
 #
-# Verifies that pnpm and playwright are ready for non-interactive use.
+# Launches headless Chromium, renders a page, and takes a screenshot.
 
 echo "=================================================="
 echo "Playwright Testing Environment"
 echo "=================================================="
 echo
 
-echo "--- Node ---"
-node --version
-echo
-
-echo "--- pnpm (via corepack) ---"
-pnpm --version
-echo
-
-echo "--- Playwright ---"
-npx playwright --version
-echo
-
-echo "--- Chromium ---"
-npx playwright install --dry-run chromium 2>&1 | head -3
+echo "--- Versions ---"
+echo "  node:       $(node --version)"
+echo "  pnpm:       $(pnpm --version)"
+echo "  playwright: $(npx playwright --version)"
 echo
 
 echo "--- Environment ---"
@@ -29,12 +19,5 @@ echo "  COREPACK_ENABLE_DOWNLOAD_PROMPT=$COREPACK_ENABLE_DOWNLOAD_PROMPT"
 echo "  PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"
 echo
 
-echo "=================================================="
-echo "Environment ready for browser testing!"
-echo "=================================================="
-echo
-echo "Example workflows:"
-echo "  pnpm init                           # Initialize project"
-echo "  pnpm add -D @playwright/test        # Add playwright"
-echo "  pnpm exec playwright test           # Run tests"
-echo "  pnpm exec playwright codegen        # Generate tests"
+echo "--- Running browser test ---"
+node /workspace/test.js
