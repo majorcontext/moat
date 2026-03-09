@@ -242,7 +242,7 @@ func TestGetCustomCommands(t *testing.T) {
 		contains []string
 		envVars  []string
 	}{
-		{"playwright", "", []string{"npm install -g playwright", "npx playwright install"}, nil},
+		{"playwright", "", []string{"npm install -g playwright", "npx playwright install"}, []string{"PLAYWRIGHT_BROWSERS_PATH"}},
 		{"aws", "", []string{"awscli", "uname -m", "unzip"}, nil},
 		{"gcloud", "", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
 		{"rust", "", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},

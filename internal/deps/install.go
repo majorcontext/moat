@@ -320,6 +320,9 @@ func getCustomCommands(name, version string) InstallCommands {
 				"npm install -g playwright",
 				"npx playwright install --with-deps chromium",
 			},
+			EnvVars: map[string]string{
+				"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+			},
 		}
 	case "aws":
 		// Detect architecture at build time: x86_64 or aarch64
