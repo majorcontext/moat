@@ -16,10 +16,11 @@ type ClipboardProxy struct {
 }
 
 // NewClipboardProxy creates a ClipboardProxy that wraps the given reader.
-// The onCtrlV callback is called synchronously before the 0x16 byte is
-// returned. It should write clipboard data into the container so the
-// agent's subsequent clipboard read succeeds. The callback must not block
-// for long.
+// The onCtrlV callback is called synchronously during Read() calls before
+// the 0x16 byte is returned. It should write clipboard data into the
+// container so the agent's subsequent clipboard read succeeds.
+//
+// The callback must use a timeout to avoid blocking stdin indefinitely.
 func NewClipboardProxy(r io.Reader, onCtrlV func()) *ClipboardProxy {
 	return &ClipboardProxy{r: r, onCtrlV: onCtrlV}
 }

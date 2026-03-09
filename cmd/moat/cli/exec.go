@@ -387,14 +387,23 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	// Build stdin reader chain: escape proxy -> clipboard proxy (optional) -> tracer (optional)
 	var stdin io.Reader = escapeProxy
 	if r.Clipboard {
-		clipCtx := context.Background()
 		stdin = term.NewClipboardProxy(stdin, func() {
-			content, err := clipboardpkg.Read()
-			if err != nil || content == nil {
-				return
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				clipCtx, clipCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer clipCancel()
+				content, err := clipboardpkg.Read()
+				if err != nil || content == nil {
+					return
+				}
+				target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
+				_ = manager.WriteClipboard(clipCtx, r.ID, content.Data, target)
+			}()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
 			}
-			target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
-			_ = manager.WriteClipboard(clipCtx, r.ID, content.Data, target)
 		})
 	}
 	if tracer != nil {
