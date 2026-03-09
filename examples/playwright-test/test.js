@@ -14,9 +14,9 @@ const { chromium } = require("playwright");
   `);
 
   const title = await page.title();
-  await page.screenshot({ path: "/workspace/screenshot.png" });
+  await page.screenshot({ path: "screenshot.png" });
   await browser.close();
 
   console.log("  Page rendered successfully");
-  console.log("  Screenshot saved to /workspace/screenshot.png");
+  console.log("  Screenshot saved to screenshot.png");
 })();

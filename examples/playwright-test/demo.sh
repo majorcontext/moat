@@ -24,8 +24,9 @@ echo "--- Setting up project ---"
 cd /tmp
 npm init -y --silent
 npm install playwright --silent
+cp /workspace/test.js .
 echo "  Installed playwright locally"
 echo
 
 echo "--- Running browser test ---"
-node /workspace/test.js
+node test.js
