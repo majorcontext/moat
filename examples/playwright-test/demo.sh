@@ -20,4 +20,4 @@ echo "  PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"
 echo
 
 echo "--- Running browser test ---"
-NODE_PATH="$(npm root -g)" node /workspace/test.js
+node /workspace/test.js
