@@ -410,6 +410,9 @@ func getCustomCommands(name, version string) InstallCommands {
 				"corepack enable",
 				"corepack prepare yarn@stable --activate",
 			},
+			EnvVars: map[string]string{
+				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+			},
 		}
 	case "pnpm":
 		// Enable pnpm via Corepack (Node.js 16.10+)
@@ -418,6 +421,9 @@ func getCustomCommands(name, version string) InstallCommands {
 			Commands: []string{
 				"corepack enable",
 				"corepack prepare pnpm@latest --activate",
+			},
+			EnvVars: map[string]string{
+				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
 			},
 		}
 	default:
