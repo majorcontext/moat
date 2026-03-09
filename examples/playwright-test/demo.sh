@@ -15,7 +15,6 @@ echo "  playwright: $(npx playwright --version)"
 echo
 
 echo "--- Environment ---"
-echo "  COREPACK_ENABLE_DOWNLOAD_PROMPT=$COREPACK_ENABLE_DOWNLOAD_PROMPT"
 echo "  PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"
 echo
 
