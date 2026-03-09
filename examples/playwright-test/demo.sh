@@ -19,7 +19,7 @@ echo "  PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"
 echo
 
 echo "--- Installing project dependencies ---"
-npm install --silent
+npm install
 echo
 
 echo "--- Running browser test ---"

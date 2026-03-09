@@ -1,7 +1,7 @@
 const { chromium } = require("playwright");
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const page = await browser.newPage();
 
   await page.setContent(`
