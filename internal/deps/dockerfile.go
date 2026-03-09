@@ -316,8 +316,8 @@ func writeUserSetup(b *strings.Builder) {
 	b.WriteString("      userdel -r \"$existing_user\" || echo \"Warning: failed to remove user $existing_user\"; \\\n")
 	b.WriteString("    fi && \\\n")
 	b.WriteString(fmt.Sprintf("    useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
-	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects && \\\n", containerUser))
-	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude\n\n", containerUser, containerUser, containerUser))
+	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects /home/%s/.config && \\\n", containerUser, containerUser))
+	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude /home/%s/.config\n\n", containerUser, containerUser, containerUser, containerUser))
 }
 
 // writeDockerCLI installs Docker CLI from Docker's official repository.

@@ -1,13 +1,13 @@
 package github
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
+	"gopkg.in/yaml.v3"
 )
 
 // Token source values stored in Credential.Metadata[provider.MetaKeyTokenSource].
@@ -24,6 +24,7 @@ type Provider struct{}
 var (
 	_ provider.CredentialProvider  = (*Provider)(nil)
 	_ provider.RefreshableProvider = (*Provider)(nil)
+	_ provider.InitFileProvider    = (*Provider)(nil)
 )
 
 func init() {
@@ -55,62 +56,57 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 	}
 }
 
-// ContainerMounts returns mounts for GitHub.
-// Copies user's gh CLI config (for aliases, preferences) if it exists.
-// Authentication is handled via GH_TOKEN environment variable.
-// Returns the temp directory path for cleanup when the run ends.
-func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome string) ([]provider.MountConfig, string, error) {
+// ContainerInitFiles copies the user's gh CLI config (aliases, preferences)
+// into the container via the init-file mechanism. This avoids a bind mount
+// to ~/.config/gh which would cause Docker to create ~/.config as root,
+// preventing the container user from writing to ~/.config.
+//
+// The config is sanitized to remove any embedded credentials (oauth_token,
+// hosts section) that may be present when gh uses insecure storage.
+// Authentication is handled separately via GH_TOKEN environment variable.
+func (p *Provider) ContainerInitFiles(cred *provider.Credential, containerHome string) map[string]string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", nil
+		return nil
 	}
 
 	userGhConfig := filepath.Join(homeDir, ".config", "gh", "config.yml")
-	if _, statErr := os.Stat(userGhConfig); os.IsNotExist(statErr) {
-		return nil, "", nil
-	}
-
-	tmpDir, err := os.MkdirTemp("", "moat-gh-config-*")
+	content, err := os.ReadFile(userGhConfig)
 	if err != nil {
-		return nil, "", fmt.Errorf("creating gh config dir: %w", err)
-	}
-	if chmodErr := os.Chmod(tmpDir, 0700); chmodErr != nil {
-		os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("setting permissions on gh config dir: %w", chmodErr)
+		return nil
 	}
 
-	success := false
-	defer func() {
-		if !success {
-			os.RemoveAll(tmpDir)
-		}
-	}()
-
-	ghDir := filepath.Join(tmpDir, "gh")
-	if mkdirErr := os.MkdirAll(ghDir, 0700); mkdirErr != nil {
-		return nil, "", fmt.Errorf("creating gh dir: %w", mkdirErr)
+	sanitized, err := sanitizeGhConfig(content)
+	if err != nil || sanitized == nil {
+		return nil
 	}
 
-	configContent, err := os.ReadFile(userGhConfig)
-	if err != nil {
-		return nil, "", fmt.Errorf("reading user gh config: %w", err)
+	configPath := filepath.Join(containerHome, ".config", "gh", "config.yml")
+	return map[string]string{
+		configPath: string(sanitized),
 	}
+}
 
-	configPath := filepath.Join(ghDir, "config.yml")
-	if writeErr := os.WriteFile(configPath, configContent, 0600); writeErr != nil {
-		return nil, "", fmt.Errorf("writing config.yml: %w", writeErr)
+// sanitizeGhConfig removes credential-bearing fields from gh CLI config.
+// Older gh versions (or --insecure-storage) store oauth_token in config.yml.
+// We strip the hosts section entirely since authentication is handled by the
+// proxy, and only pass through preferences (git_protocol, editor, aliases, etc.).
+func sanitizeGhConfig(content []byte) ([]byte, error) {
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		return nil, err
 	}
-
-	mounts := []provider.MountConfig{
-		{
-			Source:   ghDir,
-			Target:   filepath.Join(containerHome, ".config", "gh"),
-			ReadOnly: false,
-		},
+	delete(cfg, "hosts")
+	delete(cfg, "oauth_token")
+	if len(cfg) == 0 {
+		return nil, nil
 	}
+	return yaml.Marshal(cfg)
+}
 
-	success = true
-	return mounts, tmpDir, nil
+// ContainerMounts returns no mounts — config is written via moat-init.sh.
+func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome string) ([]provider.MountConfig, string, error) {
+	return nil, "", nil
 }
 
 // CanRefresh reports whether this credential can be refreshed.
@@ -128,12 +124,8 @@ func (p *Provider) RefreshInterval() time.Duration {
 	return 30 * time.Minute
 }
 
-// Cleanup cleans up GitHub resources.
-func (p *Provider) Cleanup(cleanupPath string) {
-	if cleanupPath != "" {
-		os.RemoveAll(cleanupPath)
-	}
-}
+// Cleanup is a no-op — no temp files are created.
+func (p *Provider) Cleanup(cleanupPath string) {}
 
 // ImpliedDependencies returns dependencies implied by this provider.
 func (p *Provider) ImpliedDependencies() []string {

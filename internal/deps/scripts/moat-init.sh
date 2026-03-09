@@ -209,6 +209,7 @@ if [ -n "$MOAT_INIT_FILES" ]; then
       done
     fi
   done
+  unset MOAT_INIT_FILES
 fi
 
 # MCP Server Setup

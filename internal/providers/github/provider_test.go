@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +85,7 @@ func TestProvider_ContainerEnv(t *testing.T) {
 	}
 }
 
-func TestProvider_ContainerMounts(t *testing.T) {
+func TestProvider_ContainerMounts_ReturnsNothing(t *testing.T) {
 	p := &Provider{}
 	cred := &provider.Credential{Token: "test-token"}
 
@@ -91,31 +93,189 @@ func TestProvider_ContainerMounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ContainerMounts() error = %v", err)
 	}
-
-	if len(mounts) > 0 {
-		if mounts[0].Target != "/home/user/.config/gh" {
-			t.Errorf("Mount target = %q, want %q", mounts[0].Target, "/home/user/.config/gh")
-		}
-
-		configPath := mounts[0].Source + "/config.yml"
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			t.Error("config.yml was not created")
-		}
-
-		// Verify cleanup path is returned
-		if cleanupPath == "" {
-			t.Error("ContainerMounts() cleanupPath is empty, expected temp directory path")
-		}
-
-		// Clean up after test
-		if cleanupPath != "" {
-			defer os.RemoveAll(cleanupPath)
-		}
-
-		// Cleanup
-		p.Cleanup(mounts[0].Source)
+	if len(mounts) != 0 {
+		t.Errorf("ContainerMounts() returned %d mounts, want 0", len(mounts))
 	}
-	// Note: If no mounts returned, that's acceptable (user has no gh config)
+	if cleanupPath != "" {
+		t.Errorf("ContainerMounts() cleanupPath = %q, want empty", cleanupPath)
+	}
+}
+
+func TestProvider_ContainerInitFiles(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "test-token"}
+
+	// Create a temp gh config to test with
+	tmpHome := t.TempDir()
+	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
+	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configContent := "git_protocol: ssh\neditor: vim\n"
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	files := p.ContainerInitFiles(cred, "/home/user")
+	if files == nil {
+		t.Fatal("ContainerInitFiles() returned nil, expected config file")
+	}
+
+	wantPath := "/home/user/.config/gh/config.yml"
+	content, ok := files[wantPath]
+	if !ok {
+		t.Fatalf("ContainerInitFiles() missing key %q, got keys: %v", wantPath, files)
+	}
+	// Content goes through YAML parse/marshal so field order may differ
+	if !strings.Contains(content, "git_protocol: ssh") {
+		t.Errorf("config content missing git_protocol, got: %q", content)
+	}
+	if !strings.Contains(content, "editor: vim") {
+		t.Errorf("config content missing editor, got: %q", content)
+	}
+}
+
+func TestProvider_ContainerInitFiles_StripsCredentials(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "test-token"}
+
+	tmpHome := t.TempDir()
+	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
+	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Config with embedded credentials (insecure-storage or older gh versions)
+	configContent := `git_protocol: ssh
+editor: vim
+hosts:
+  github.com:
+    oauth_token: gho_SECRETTOKEN123
+    user: testuser
+`
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	files := p.ContainerInitFiles(cred, "/home/user")
+	if files == nil {
+		t.Fatal("ContainerInitFiles() returned nil, expected config file")
+	}
+
+	content := files["/home/user/.config/gh/config.yml"]
+
+	// Preferences should be preserved
+	if !strings.Contains(content, "git_protocol: ssh") {
+		t.Errorf("config content missing git_protocol, got: %q", content)
+	}
+	if !strings.Contains(content, "editor: vim") {
+		t.Errorf("config content missing editor, got: %q", content)
+	}
+
+	// Credentials must be stripped
+	if strings.Contains(content, "hosts") {
+		t.Errorf("config content should not contain hosts section, got: %q", content)
+	}
+	if strings.Contains(content, "oauth_token") {
+		t.Errorf("config content should not contain oauth_token, got: %q", content)
+	}
+	if strings.Contains(content, "SECRET") {
+		t.Errorf("config content should not contain token value, got: %q", content)
+	}
+}
+
+func TestProvider_ContainerInitFiles_CredentialsOnly(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "test-token"}
+
+	tmpHome := t.TempDir()
+	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
+	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Config with only credential fields, no preferences
+	configContent := "hosts:\n  github.com:\n    oauth_token: gho_SECRET\n"
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	files := p.ContainerInitFiles(cred, "/home/user")
+	if files != nil {
+		t.Errorf("ContainerInitFiles() = %v, want nil for credential-only config", files)
+	}
+}
+
+func TestProvider_ContainerInitFiles_NoConfig(t *testing.T) {
+	p := &Provider{}
+	cred := &provider.Credential{Token: "test-token"}
+
+	// Point HOME to an empty directory
+	t.Setenv("HOME", t.TempDir())
+
+	files := p.ContainerInitFiles(cred, "/home/user")
+	if files != nil {
+		t.Errorf("ContainerInitFiles() = %v, want nil when no gh config exists", files)
+	}
+}
+
+func TestSanitizeGhConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantNil  bool
+		contains []string
+		excludes []string
+	}{
+		{
+			name:     "preferences only",
+			input:    "git_protocol: ssh\neditor: vim\n",
+			contains: []string{"git_protocol: ssh", "editor: vim"},
+		},
+		{
+			name:     "strips hosts section",
+			input:    "git_protocol: ssh\nhosts:\n  github.com:\n    oauth_token: secret\n",
+			contains: []string{"git_protocol: ssh"},
+			excludes: []string{"hosts", "oauth_token", "secret"},
+		},
+		{
+			name:     "strips top-level oauth_token",
+			input:    "git_protocol: ssh\noauth_token: secret\n",
+			contains: []string{"git_protocol: ssh"},
+			excludes: []string{"oauth_token", "secret"},
+		},
+		{
+			name:    "only credentials returns nil",
+			input:   "hosts:\n  github.com:\n    oauth_token: secret\n",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := sanitizeGhConfig([]byte(tt.input))
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("sanitizeGhConfig() = %q, want nil", result)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sanitizeGhConfig() error = %v", err)
+			}
+			for _, s := range tt.contains {
+				if !strings.Contains(string(result), s) {
+					t.Errorf("result missing %q, got: %q", s, result)
+				}
+			}
+			for _, s := range tt.excludes {
+				if strings.Contains(string(result), s) {
+					t.Errorf("result should not contain %q, got: %q", s, result)
+				}
+			}
+		})
+	}
 }
 
 func TestProvider_CanRefresh(t *testing.T) {
