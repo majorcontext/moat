@@ -250,6 +250,11 @@ func TestSanitizeGhConfig(t *testing.T) {
 			input:   "hosts:\n  github.com:\n    oauth_token: secret\n",
 			wantNil: true,
 		},
+		{
+			name:    "invalid yaml returns nil",
+			input:   ":\t:\n",
+			wantNil: true,
+		},
 	}
 
 	for _, tt := range tests {

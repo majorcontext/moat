@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"gopkg.in/yaml.v3"
 )
@@ -77,7 +78,11 @@ func (p *Provider) ContainerInitFiles(cred *provider.Credential, containerHome s
 	}
 
 	sanitized, err := sanitizeGhConfig(content)
-	if err != nil || sanitized == nil {
+	if err != nil {
+		log.Debug("sanitizing gh config", "error", err)
+		return nil
+	}
+	if sanitized == nil {
 		return nil
 	}
 
@@ -91,6 +96,8 @@ func (p *Provider) ContainerInitFiles(cred *provider.Credential, containerHome s
 // Older gh versions (or --insecure-storage) store oauth_token in config.yml.
 // We strip the hosts section entirely since authentication is handled by the
 // proxy, and only pass through preferences (git_protocol, editor, aliases, etc.).
+//
+// Note: the YAML round-trip strips comments and may reorder keys.
 func sanitizeGhConfig(content []byte) ([]byte, error) {
 	var cfg map[string]interface{}
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
