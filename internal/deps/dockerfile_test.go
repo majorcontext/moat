@@ -1508,6 +1508,31 @@ func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileNonInteractiveDeps(t *testing.T) {
+	// Verify that pnpm and playwright produce non-interactive Dockerfiles:
+	// - corepack won't prompt to download package managers
+	// - project-local playwright finds pre-installed browsers
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "pnpm"},
+		{Name: "playwright"},
+	}
+
+	result, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+
+	for _, want := range []string{
+		`COREPACK_ENABLE_DOWNLOAD_PROMPT="0"`,
+		`PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"`,
+	} {
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("Dockerfile missing %s\n%s", want, result.Dockerfile)
+		}
+	}
+}
+
 func TestMoatInitScriptGitIdentity(t *testing.T) {
 	// Verify the embedded moat-init.sh contains git identity setup
 	if !strings.Contains(MoatInitScript, "MOAT_GIT_USER_NAME") {
