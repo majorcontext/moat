@@ -13,7 +13,7 @@ import (
 
 const (
 	graphAPIBase    = "https://graph.facebook.com"
-	graphAPIVersion = "v21.0"
+	graphAPIVersion = "v23.0"
 )
 
 // Grant acquires Meta credentials interactively or from environment.
