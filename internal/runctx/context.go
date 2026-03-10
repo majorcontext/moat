@@ -10,14 +10,15 @@ import (
 // RuntimeContext holds the information about a moat run that is rendered
 // into agent instruction files (CLAUDE.md, AGENTS.md, etc.).
 type RuntimeContext struct {
-	RunID         string
-	Agent         string
-	Workspace     string
-	Grants        []Grant
-	Services      []Service
-	Ports         []Port
-	NetworkPolicy *NetworkPolicy
-	MCPServers    []MCPServer
+	RunID           string
+	Agent           string
+	Workspace       string
+	Grants          []Grant
+	Services        []Service
+	Ports           []Port
+	NetworkPolicy   *NetworkPolicy
+	MCPServers      []MCPServer
+	HasDependencies bool // true when the config declares any dependencies
 }
 
 // Grant describes a credential grant available inside the container.
@@ -51,6 +52,11 @@ type MCPServer struct {
 	Name        string
 	Description string
 }
+
+// Documentation base URL for machine-readable docs.
+// URLs use .md suffixes to serve raw markdown (llms.txt convention) for agent
+// consumption. Extension-less URLs serve HTML for human readers.
+const docsBaseURL = "https://majorcontext.com/moat"
 
 // serviceDisplayNames maps internal service names to human-friendly display names.
 var serviceDisplayNames = map[string]string{
@@ -121,6 +127,27 @@ func Render(rc *RuntimeContext) string {
 	b.WriteString("\n## Run Metadata\n\n")
 	fmt.Fprintf(&b, "- Run ID: %s\n", rc.RunID)
 	fmt.Fprintf(&b, "- Agent: %s\n", rc.Agent)
+
+	// Documentation — always-present index plus context-specific references.
+	b.WriteString("\n## Documentation\n\n")
+	b.WriteString("For details on Moat configuration and capabilities:\n")
+	fmt.Fprintf(&b, "- Index: %s/llms.txt\n", docsBaseURL)
+	fmt.Fprintf(&b, "- moat.yaml reference: %s/reference/moat-yaml.md\n", docsBaseURL)
+	if len(rc.Grants) > 0 {
+		fmt.Fprintf(&b, "- Grants reference: %s/reference/grants.md\n", docsBaseURL)
+	}
+	if len(rc.Services) > 0 || rc.HasDependencies {
+		fmt.Fprintf(&b, "- Dependencies reference: %s/reference/dependencies.md\n", docsBaseURL)
+	}
+	if len(rc.MCPServers) > 0 {
+		fmt.Fprintf(&b, "- MCP servers guide: %s/guides/mcp.md\n", docsBaseURL)
+	}
+	if len(rc.Ports) > 0 {
+		fmt.Fprintf(&b, "- Port exposure guide: %s/guides/ports.md\n", docsBaseURL)
+	}
+	if rc.NetworkPolicy != nil {
+		fmt.Fprintf(&b, "- Networking concepts: %s/concepts/networking.md\n", docsBaseURL)
+	}
 
 	return b.String()
 }

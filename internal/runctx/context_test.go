@@ -50,6 +50,30 @@ func TestRender_minimal(t *testing.T) {
 			t.Errorf("minimal render should not contain %q", section)
 		}
 	}
+
+	// Documentation section must always be present with full base URLs.
+	if !strings.Contains(got, "## Documentation") {
+		t.Error("missing Documentation section")
+	}
+	if !strings.Contains(got, "https://majorcontext.com/moat/llms.txt") {
+		t.Error("missing llms.txt index URL")
+	}
+	if !strings.Contains(got, "https://majorcontext.com/moat/reference/moat-yaml.md") {
+		t.Error("missing moat-yaml reference URL")
+	}
+
+	// Conditional doc URLs must NOT appear in minimal render.
+	for _, url := range []string{
+		"reference/grants.md",
+		"reference/dependencies.md",
+		"guides/mcp.md",
+		"guides/ports.md",
+		"concepts/networking.md",
+	} {
+		if strings.Contains(got, url) {
+			t.Errorf("minimal render should not contain %q", url)
+		}
+	}
 }
 
 func TestRender_full(t *testing.T) {
@@ -74,6 +98,7 @@ func TestRender_full(t *testing.T) {
 		MCPServers: []MCPServer{
 			{Name: "github", Description: "GitHub tools (issues, PRs, search)"},
 		},
+		HasDependencies: true,
 	}
 
 	got := Render(rc)
@@ -153,6 +178,21 @@ func TestRender_full(t *testing.T) {
 	if !strings.Contains(got, "codex") {
 		t.Error("missing agent in metadata")
 	}
+
+	// Documentation — all conditional URLs should be present with full base.
+	for _, url := range []string{
+		"https://majorcontext.com/moat/llms.txt",
+		"https://majorcontext.com/moat/reference/moat-yaml.md",
+		"https://majorcontext.com/moat/reference/grants.md",
+		"https://majorcontext.com/moat/reference/dependencies.md",
+		"https://majorcontext.com/moat/guides/mcp.md",
+		"https://majorcontext.com/moat/guides/ports.md",
+		"https://majorcontext.com/moat/concepts/networking.md",
+	} {
+		if !strings.Contains(got, url) {
+			t.Errorf("full render missing doc URL %q", url)
+		}
+	}
 }
 
 func TestRender_omitsEmptySections(t *testing.T) {
@@ -183,6 +223,21 @@ func TestRender_omitsEmptySections(t *testing.T) {
 			t.Errorf("should not contain %q when only Grants is set", section)
 		}
 	}
+
+	// Grants doc URL should appear; other conditional URLs should not.
+	if !strings.Contains(got, "reference/grants.md") {
+		t.Error("grants-only render should include grants doc URL")
+	}
+	for _, url := range []string{
+		"reference/dependencies.md",
+		"guides/mcp.md",
+		"guides/ports.md",
+		"concepts/networking.md",
+	} {
+		if strings.Contains(got, url) {
+			t.Errorf("grants-only render should not contain %q", url)
+		}
+	}
 }
 
 func TestRender_networkPolicyWithoutAllowedHosts(t *testing.T) {
@@ -208,6 +263,22 @@ func TestRender_networkPolicyWithoutAllowedHosts(t *testing.T) {
 	// Allowed hosts line must NOT be present.
 	if strings.Contains(got, "Allowed hosts") {
 		t.Error("Allowed hosts line should not appear when AllowedHosts is empty")
+	}
+}
+
+func TestRender_docsHasDependenciesWithoutServices(t *testing.T) {
+	rc := &RuntimeContext{
+		RunID:           "run-dep",
+		Agent:           "claude",
+		Workspace:       "/workspace",
+		HasDependencies: true,
+	}
+
+	got := Render(rc)
+
+	// Dependencies URL should appear even without services.
+	if !strings.Contains(got, "reference/dependencies.md") {
+		t.Error("HasDependencies=true should include dependencies doc URL")
 	}
 }
 
