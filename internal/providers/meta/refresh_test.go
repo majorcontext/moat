@@ -12,7 +12,7 @@ import (
 
 func TestRefresh(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/"+graphAPIVersion+"/oauth/access_token" {
+		if r.URL.Path != "/"+apiVersion()+"/oauth/access_token" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		q := r.URL.Query()

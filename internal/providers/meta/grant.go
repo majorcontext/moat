@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/majorcontext/moat/internal/provider"
@@ -12,9 +13,17 @@ import (
 )
 
 const (
-	graphAPIBase    = "https://graph.facebook.com"
-	graphAPIVersion = "v23.0"
+	graphAPIBase           = "https://graph.facebook.com"
+	defaultGraphAPIVersion = "v23.0"
 )
+
+// apiVersion returns the Graph API version, checking META_API_VERSION first.
+func apiVersion() string {
+	if v := os.Getenv("META_API_VERSION"); v != "" {
+		return v
+	}
+	return defaultGraphAPIVersion
+}
 
 // Grant acquires Meta credentials interactively or from environment.
 //
@@ -118,7 +127,7 @@ func validateMetaToken(ctx context.Context, token, baseURL string) (string, erro
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+graphAPIVersion+"/me?fields=id,name", nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+apiVersion()+"/me?fields=id,name", nil)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
