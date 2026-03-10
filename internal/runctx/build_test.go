@@ -38,6 +38,11 @@ func TestBuildFromConfig(t *testing.T) {
 		t.Errorf("Workspace = %q, want %q", rc.Workspace, "/workspace")
 	}
 
+	// HasDependencies
+	if !rc.HasDependencies {
+		t.Error("HasDependencies = false, want true")
+	}
+
 	// Grants
 	if len(rc.Grants) != 2 {
 		t.Fatalf("len(Grants) = %d, want 2", len(rc.Grants))
@@ -191,7 +196,10 @@ func TestBuildFromConfig_noOptionalSections(t *testing.T) {
 		t.Errorf("Workspace = %q, want %q", rc.Workspace, "/workspace")
 	}
 
-	// All optional fields should be empty/nil
+	// All optional fields should be empty/nil/false
+	if rc.HasDependencies {
+		t.Error("HasDependencies = true, want false")
+	}
 	if len(rc.Grants) != 0 {
 		t.Errorf("len(Grants) = %d, want 0", len(rc.Grants))
 	}

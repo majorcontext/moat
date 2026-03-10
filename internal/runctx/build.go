@@ -22,9 +22,10 @@ var grantDescriptions = map[string]string{
 // BuildFromConfig constructs a RuntimeContext from a moat config and run ID.
 func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
 	rc := &RuntimeContext{
-		RunID:     runID,
-		Agent:     cfg.Agent,
-		Workspace: "/workspace",
+		RunID:           runID,
+		Agent:           cfg.Agent,
+		Workspace:       "/workspace",
+		HasDependencies: len(cfg.Dependencies) > 0,
 	}
 
 	// Grants.
