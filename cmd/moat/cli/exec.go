@@ -11,6 +11,7 @@ import (
 	"time"
 
 	intcli "github.com/majorcontext/moat/internal/cli"
+	clipboardpkg "github.com/majorcontext/moat/internal/clipboard"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
@@ -203,6 +204,12 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 	defer manager.Close()
 
+	// Resolve clipboard mode: --no-clipboard flag > config > default (true)
+	clipboard := opts.Interactive && !opts.Flags.NoClipboard
+	if clipboard && opts.Config != nil && opts.Config.Clipboard != nil && !*opts.Config.Clipboard {
+		clipboard = false
+	}
+
 	// Build run options
 	runOpts := run.Options{
 		Name:          opts.Flags.Name,
@@ -214,6 +221,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		Rebuild:       opts.Flags.Rebuild,
 		KeepContainer: opts.Flags.KeepContainer,
 		Interactive:   opts.Interactive,
+		Clipboard:     clipboard,
 	}
 
 	// Create run
@@ -376,10 +384,30 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	})
 
-	// Wrap stdin with tracer if tracing is enabled
-	stdin := io.Reader(escapeProxy)
+	// Build stdin reader chain: escape proxy -> clipboard proxy (optional) -> tracer (optional)
+	var stdin io.Reader = escapeProxy
+	if r.Clipboard {
+		stdin = term.NewClipboardProxy(stdin, func() {
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				clipCtx, clipCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer clipCancel()
+				content, err := clipboardpkg.Read()
+				if err != nil || content == nil {
+					return
+				}
+				target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
+				_ = manager.WriteClipboard(clipCtx, r.ID, content.Data, target)
+			}()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+			}
+		})
+	}
 	if tracer != nil {
-		stdin = trace.NewRecordingReader(escapeProxy, tracer.recorder, trace.EventStdin)
+		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}
 
 	// Set up signal handling

@@ -45,6 +45,9 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 	if opts.NeedsInitFiles {
 		hashInput += ",init-files"
 	}
+	if opts.NeedsClipboard {
+		hashInput += ",clipboard:xvfb"
+	}
 
 	// Include plugins in hash (different plugins = different image).
 	// Note: Plugin format validation happens in claude.GenerateDockerfileSnippet()

@@ -123,6 +123,10 @@ type Runtime interface {
 
 	// ResizeTTY resizes the container's TTY to the given dimensions.
 	ResizeTTY(ctx context.Context, id string, height, width uint) error
+
+	// ExecWrite runs a command inside a running container with data piped to stdin.
+	// Used for writing clipboard data via xclip.
+	ExecWrite(ctx context.Context, id string, cmd []string, stdin []byte) error
 }
 
 // NetworkManager handles Docker network operations.

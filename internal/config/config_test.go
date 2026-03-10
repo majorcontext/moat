@@ -2035,3 +2035,41 @@ mcp:
 		t.Fatalf("expected 1 MCP server, got %d", len(cfg.MCP))
 	}
 }
+
+func TestClipboardConfig(t *testing.T) {
+	t.Run("clipboard false parses as bool pointer", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "moat.yaml")
+		os.WriteFile(configPath, []byte(`
+agent: claude-code
+clipboard: false
+`), 0644)
+
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Clipboard == nil {
+			t.Fatal("Clipboard should not be nil when explicitly set to false")
+		}
+		if *cfg.Clipboard != false {
+			t.Errorf("Clipboard = %v, want false", *cfg.Clipboard)
+		}
+	})
+
+	t.Run("clipboard omitted defaults to nil", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "moat.yaml")
+		os.WriteFile(configPath, []byte(`
+agent: claude-code
+`), 0644)
+
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Clipboard != nil {
+			t.Errorf("Clipboard should be nil when omitted, got %v", *cfg.Clipboard)
+		}
+	})
+}

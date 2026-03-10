@@ -583,6 +583,46 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 	return nil
 }
 
+// ExecWrite runs a command inside a running container with data piped to stdin.
+func (r *AppleRuntime) ExecWrite(ctx context.Context, containerID string, cmd []string, stdin []byte) error {
+	var args []string
+	if len(stdin) > 0 {
+		// -i attaches stdin so the container process can read our data.
+		// Without it, the process sees an immediately-closed stdin.
+		args = append([]string{"exec", "-i", containerID}, cmd...)
+	} else {
+		args = append([]string{"exec", containerID}, cmd...)
+	}
+
+	c := exec.CommandContext(ctx, r.containerBin, args...)
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+
+	if len(stdin) > 0 {
+		// Use an explicit pipe so we control exactly when EOF is delivered.
+		pipe, err := c.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("creating stdin pipe: %w", err)
+		}
+		if err := c.Start(); err != nil {
+			return fmt.Errorf("exec start: %w: %s", err, stderr.String())
+		}
+		if _, err := io.Copy(pipe, bytes.NewReader(stdin)); err != nil {
+			return fmt.Errorf("writing to exec stdin: %w", err)
+		}
+		pipe.Close() // signal EOF
+		if err := c.Wait(); err != nil {
+			return fmt.Errorf("exec failed: %w: %s", err, stderr.String())
+		}
+		return nil
+	}
+
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("exec failed: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
 // ImageExists checks if an image exists locally.
 func (m *appleBuildManager) ImageExists(ctx context.Context, tag string) (bool, error) {
 	cmd := exec.CommandContext(ctx, m.containerBin, "image", "inspect", tag)

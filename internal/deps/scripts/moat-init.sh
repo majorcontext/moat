@@ -220,6 +220,15 @@ fi
 #
 # This comment is kept as a placeholder in case Codex MCP support is added later.
 
+# Clipboard Bridging
+# When MOAT_CLIPBOARD is set, start a headless X server for clipboard
+# operations. The host writes clipboard data to /tmp/.moat-clipboard
+# and uses xclip to set the X selection.
+if [ "$MOAT_CLIPBOARD" = "1" ]; then
+  Xvfb :99 -screen 0 1x1x8 >/dev/null 2>&1 &
+  export DISPLAY=:99
+fi
+
 # Git Configuration
 # 1. Safe directory: The workspace is mounted from the host with different
 #    ownership than the container user. Git 2.35.2+ rejects operations on

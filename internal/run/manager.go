@@ -487,6 +487,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 
+	// Clipboard bridging is resolved by the caller (ExecuteRun).
+	needsClipboard := opts.Clipboard
+	r.Clipboard = needsClipboard
+
 	// cleanupDaemonRun is a helper to unregister the run from the proxy daemon.
 	// Used in error paths during run creation.
 	cleanupDaemonRun := func() {
@@ -1020,6 +1024,11 @@ region = %s
 		proxyEnv = append(proxyEnv, "MOAT_PRE_RUN="+opts.Config.Hooks.PreRun)
 	}
 
+	// Add clipboard bridging env vars (before explicit env so they can be overridden)
+	if needsClipboard {
+		proxyEnv = append(proxyEnv, "MOAT_CLIPBOARD=1", "DISPLAY=:99")
+	}
+
 	// Add explicit env vars (highest priority - can override config)
 	proxyEnv = append(proxyEnv, opts.Env...)
 
@@ -1260,6 +1269,7 @@ region = %s
 		NeedsFirewall:      needsProxyForFirewall,
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
+		NeedsClipboard:     needsClipboard,
 		UseBuildKit:        &useBuildKit,
 		ClaudeMarketplaces: claudeMarketplaces,
 		ClaudePlugins:      claudePlugins,
@@ -2993,6 +3003,45 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 	m.mu.RUnlock()
 
 	return m.runtime.ResizeTTY(ctx, containerID, height, width)
+}
+
+// validXclipTargets is the set of X selection targets allowed in shell commands.
+var validXclipTargets = map[string]bool{
+	"UTF8_STRING": true,
+	"image/png":   true,
+}
+
+// WriteClipboard writes data to the X clipboard inside a running container
+// using xclip. The target parameter specifies the X selection target (e.g.,
+// "UTF8_STRING" for text, "image/png" for images).
+func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte, target string) error {
+	// Validate target to prevent shell injection. Only known-safe X selection
+	// targets are allowed; the value is interpolated into a shell command.
+	if !validXclipTargets[target] {
+		return fmt.Errorf("invalid xclip target: %q", target)
+	}
+
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	m.mu.RUnlock()
+
+	// Kill any previous xclip (which serves the old X selection) before
+	// setting new clipboard content. xclip reads directly from stdin via
+	// -i and supports large payloads through the X11 INCR mechanism.
+	// setsid ensures xclip survives exec teardown so it can continue
+	// serving the selection to other X clients.
+	script := fmt.Sprintf(
+		`pkill -x xclip 2>/dev/null; `+
+			`setsid xclip -selection clipboard -t %s -i > /dev/null 2>&1`,
+		target,
+	)
+	cmd := []string{"sh", "-c", script}
+	return m.runtime.ExecWrite(ctx, containerID, cmd, data)
 }
 
 // FollowLogs streams container logs to the provided writer.

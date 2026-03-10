@@ -1569,6 +1569,7 @@ func TestImageSpecNeedsInit(t *testing.T) {
 		{"pre_run hook", &ImageSpec{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
 		{"post_build only", &ImageSpec{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
 		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", false},
+		{"clipboard", &ImageSpec{NeedsClipboard: true}, "", true},
 	}
 
 	for _, tt := range tests {
@@ -1578,5 +1579,35 @@ func TestImageSpecNeedsInit(t *testing.T) {
 				t.Errorf("needsInit() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGenerateDockerfileClipboard(t *testing.T) {
+	result, err := GenerateDockerfile(nil, &ImageSpec{NeedsClipboard: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.Contains(result.Dockerfile, "xvfb") {
+		t.Errorf("Dockerfile should install xvfb when NeedsClipboard is true.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+	if !strings.Contains(result.Dockerfile, "xclip") {
+		t.Errorf("Dockerfile should install xclip when NeedsClipboard is true.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+}
+
+func TestGenerateDockerfileNoClipboard(t *testing.T) {
+	result, err := GenerateDockerfile(nil, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if strings.Contains(result.Dockerfile, "xvfb") {
+		t.Errorf("Dockerfile should NOT install xvfb by default.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+}
+
+func TestGenerateDockerfileClipboardNeedsInit(t *testing.T) {
+	opts := &ImageSpec{NeedsClipboard: true}
+	if !opts.needsInit("") {
+		t.Error("NeedsClipboard should trigger needsInit")
 	}
 }

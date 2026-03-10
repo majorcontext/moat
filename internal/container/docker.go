@@ -564,6 +564,53 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	return nil
 }
 
+// ExecWrite runs a command inside a running container with data piped to stdin.
+func (r *DockerRuntime) ExecWrite(ctx context.Context, containerID string, cmd []string, stdin []byte) error {
+	execConfig := container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return fmt.Errorf("creating exec: %w", err)
+	}
+
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return fmt.Errorf("attaching to exec: %w", err)
+	}
+	defer resp.Close()
+
+	// Write stdin data and close write side to signal EOF
+	if len(stdin) > 0 {
+		if _, writeErr := resp.Conn.Write(stdin); writeErr != nil {
+			return fmt.Errorf("writing to exec stdin: %w", writeErr)
+		}
+	}
+	if closeWriter, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+		if closeErr := closeWriter.CloseWrite(); closeErr != nil {
+			return fmt.Errorf("closing exec stdin: %w", closeErr)
+		}
+	}
+
+	// Drain output
+	var output bytes.Buffer
+	_, _ = io.Copy(&output, resp.Reader)
+
+	// Check exit code
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting exec: %w", err)
+	}
+	if inspect.ExitCode != 0 {
+		return fmt.Errorf("exec failed with exit code %d: %s", inspect.ExitCode, output.String())
+	}
+	return nil
+}
+
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
 	exists, err := r.buildMgr.ImageExists(ctx, imageName)
