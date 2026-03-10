@@ -318,7 +318,11 @@ func getCustomCommands(name, version string) InstallCommands {
 		return InstallCommands{
 			Commands: []string{
 				"npm install -g playwright",
-				"npx playwright install --with-deps chromium",
+				"PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npx playwright install --with-deps chromium chromium-headless-shell",
+				"chmod -R o+rX /ms-playwright",
+			},
+			EnvVars: map[string]string{
+				"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
 			},
 		}
 	case "aws":
@@ -410,6 +414,9 @@ func getCustomCommands(name, version string) InstallCommands {
 				"corepack enable",
 				"corepack prepare yarn@stable --activate",
 			},
+			EnvVars: map[string]string{
+				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+			},
 		}
 	case "pnpm":
 		// Enable pnpm via Corepack (Node.js 16.10+)
@@ -418,6 +425,9 @@ func getCustomCommands(name, version string) InstallCommands {
 			Commands: []string{
 				"corepack enable",
 				"corepack prepare pnpm@latest --activate",
+			},
+			EnvVars: map[string]string{
+				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
 			},
 		}
 	default:

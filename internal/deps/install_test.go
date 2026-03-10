@@ -242,15 +242,15 @@ func TestGetCustomCommands(t *testing.T) {
 		contains []string
 		envVars  []string
 	}{
-		{"playwright", "", []string{"npm install -g playwright", "npx playwright install"}, nil},
+		{"playwright", "", []string{"npm install -g playwright", "npx playwright install", "chromium-headless-shell"}, []string{"PLAYWRIGHT_BROWSERS_PATH"}},
 		{"aws", "", []string{"awscli", "uname -m", "unzip"}, nil},
 		{"gcloud", "", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
 		{"rust", "", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},
 		{"kubectl", "", []string{"dl.k8s.io", "uname -m", "chmod"}, nil},
 		{"terraform", "1.10.0", []string{"releases.hashicorp.com", "terraform_1.10.0", "unzip"}, nil},
 		{"helm", "3.16.0", []string{"get.helm.sh", "helm-v3.16.0", "tar"}, nil},
-		{"yarn", "", []string{"corepack enable", "corepack prepare yarn@stable"}, nil},
-		{"pnpm", "", []string{"corepack enable", "corepack prepare pnpm@latest"}, nil},
+		{"yarn", "", []string{"corepack enable", "corepack prepare yarn@stable"}, []string{"COREPACK_ENABLE_DOWNLOAD_PROMPT"}},
+		{"pnpm", "", []string{"corepack enable", "corepack prepare pnpm@latest"}, []string{"COREPACK_ENABLE_DOWNLOAD_PROMPT"}},
 	}
 
 	for _, tt := range tests {

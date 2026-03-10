@@ -1,0 +1,19 @@
+# Example: Playwright browser testing
+#
+# This example demonstrates a Playwright testing environment.
+# The playwright dependency provides:
+#   - Chromium browsers pre-installed at /ms-playwright
+#   - System libraries (GTK, etc.) for running browsers
+#   - PLAYWRIGHT_BROWSERS_PATH set so project-local playwright
+#     finds the pre-installed browsers
+#
+# Run with:
+#   moat run examples/playwright-test
+
+name: playwright-test
+
+dependencies:
+  - node@20
+  - playwright
+
+command: ["sh", "/workspace/demo.sh"]
