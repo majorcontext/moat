@@ -461,7 +461,7 @@ All three can be set as environment variables or entered interactively. `META_AC
 
 The grant flow accepts any Meta access token. What happens next depends on which kind of token you provide and whether you also provide app credentials (app ID + app secret).
 
-**Long-lived user tokens with app credentials** are the recommended setup. The token expires after ~60 days, but Moat exchanges it for a fresh one once per day, keeping it valid indefinitely. If the token is ever compromised, it expires on its own. Generate a long-lived token by exchanging a short-lived one through the Graph API Explorer or your app's OAuth flow, and provide your app ID and secret during `moat grant meta`.
+**Long-lived user tokens with app credentials** are the recommended setup. The token expires after ~60 days, but Moat exchanges it for a fresh one once per day, keeping it valid indefinitely. Generate a long-lived token by exchanging a short-lived one through the Graph API Explorer or your app's OAuth flow, and provide your app ID and secret during `moat grant meta`. If a token is compromised, revoke it immediately in the Meta developer dashboard -- do not rely on expiry.
 
 **Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one on the first refresh cycle, then refreshes it daily. This is a valid way to bootstrap -- you do not need to exchange the token yourself first. Without app credentials, the token expires quickly and there is no way to extend it.
 
