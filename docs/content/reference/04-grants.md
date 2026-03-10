@@ -438,22 +438,6 @@ No flags.
 
 The grant command validates the token against Meta's Graph API before saving.
 
-### Token types
-
-Meta issues several kinds of access tokens. Which one you use determines whether you need app credentials and how long the token lasts.
-
-| Token type | Lifetime | How to get it | Refresh needed? |
-|-----------|----------|---------------|-----------------|
-| **System user token** | Never expires | Business Manager > System Users > Generate Token | No -- skip app ID/secret during grant |
-| **Long-lived user token** | ~60 days | Exchange a short-lived token (requires app ID + secret) | Yes -- provide app ID/secret during grant |
-| **Short-lived user token** | 1--2 hours | Graph API Explorer, OAuth login flow | Not directly usable -- see below |
-
-**System user tokens** are the recommended choice for server-to-server integrations (ads reporting, campaign management). They do not expire unless manually revoked. Skip the app ID/secret prompts during `moat grant meta`.
-
-**Long-lived user tokens** last ~60 days. When you provide app ID and app secret during the grant flow, Moat's proxy automatically exchanges the token for a fresh long-lived token once per day.
-
-**Short-lived user tokens** (from Graph API Explorer or OAuth login) expire in 1--2 hours. Moat does not extend them automatically. If you grant a short-lived token with app credentials, the first refresh cycle exchanges it for a long-lived token (~60 days). Without app credentials, the token expires and requests start failing after 1--2 hours. If you only have a short-lived token, provide app ID and secret so Moat can exchange it.
-
 ### What it injects
 
 The proxy injects an `Authorization: Bearer <token>` header for requests to:
@@ -463,21 +447,38 @@ The proxy injects an `Authorization: Bearer <token>` header for requests to:
 
 No environment variables or config files are set inside the container.
 
-### App credentials
+### Environment variables
 
-After providing the access token, the grant flow optionally collects `META_APP_ID` and `META_APP_SECRET`. These enable automatic token refresh via Meta's `fb_exchange_token` endpoint.
+| Variable | Purpose |
+|----------|---------|
+| `META_ACCESS_TOKEN` | Access token -- any Meta token type (see below) |
+| `META_APP_ID` | Facebook app ID -- needed for token refresh |
+| `META_APP_SECRET` | Facebook app secret -- needed for token refresh |
 
-When to provide them:
+All three can be set as environment variables or entered interactively. `META_ACCESS_TOKEN` is required. `META_APP_ID` and `META_APP_SECRET` are optional -- the grant flow prompts for them after the token, and you can press Enter to skip.
 
-- **Short-lived user token** -- Required. Without app credentials, the token expires in 1--2 hours.
-- **Long-lived user token** -- Recommended. Keeps the token valid beyond its 60-day expiry.
-- **System user token** -- Not needed. Skip by pressing Enter.
+### Token types and refresh
 
-| Environment variable | Purpose |
-|---------------------|---------|
-| `META_ACCESS_TOKEN` | Access token (required) |
-| `META_APP_ID` | Facebook app ID (optional, for refresh) |
-| `META_APP_SECRET` | Facebook app secret (optional, for refresh) |
+The grant flow accepts any Meta access token. What happens next depends on which kind of token you provide and whether you also provide app credentials (app ID + app secret).
+
+**System user tokens** never expire. Create one in Business Manager > System Users > Generate Token. This is the recommended choice for production use (ads reporting, campaign management). You do not need app credentials -- skip the prompts.
+
+**Long-lived user tokens** expire after ~60 days. If you provide app credentials, Moat exchanges the token for a fresh one once per day, keeping it valid indefinitely. Without app credentials, the token works until it expires and then requests fail.
+
+**Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one (~60 days) on the first refresh cycle, then refreshes it daily. Without app credentials, the token expires quickly and there is no way to extend it.
+
+> **Warning:** If you grant a short-lived token without app credentials, it expires in 1--2 hours and cannot be refreshed. Either provide `META_APP_ID` and `META_APP_SECRET`, or use a system user token instead.
+
+Summary:
+
+| Token type | App credentials provided? | What happens |
+|-----------|--------------------------|-------------|
+| System user | No | Token never expires. No refresh needed. |
+| System user | Yes | Unnecessary but harmless. Refresh is a no-op. |
+| Long-lived user | Yes | Exchanged for a fresh long-lived token once per day. |
+| Long-lived user | No | Works for ~60 days, then expires. |
+| Short-lived user | Yes | Exchanged for a long-lived token on first refresh, then refreshed daily. |
+| Short-lived user | No | Expires in 1--2 hours. Requests fail after that. |
 
 ### API version
 
@@ -486,17 +487,6 @@ The provider uses Meta Graph API v23.0 by default. Override with the `META_API_V
 ```bash
 META_API_VERSION=v24.0 moat grant meta
 ```
-
-### Refresh behavior
-
-| Token + app credentials | Refresh behavior |
-|------------------------|------------------|
-| System user token, no app credentials | No refresh needed (token does not expire) |
-| Long-lived token + app credentials | Exchanged for a new long-lived token once per day |
-| Short-lived token + app credentials | Exchanged for a long-lived token on first refresh (~5 minutes after run start), then refreshed daily |
-| Any token, no app credentials | Static -- token used as granted until it expires |
-
-> **Warning:** Short-lived tokens without app credentials expire in 1--2 hours. If your run lasts longer than that, requests to Meta APIs will fail with 401 errors. Provide `META_APP_ID` and `META_APP_SECRET` or use a system user token instead.
 
 ### moat.yaml
 
