@@ -51,14 +51,14 @@ func TestRender_minimal(t *testing.T) {
 		}
 	}
 
-	// Documentation section must always be present with base URLs.
+	// Documentation section must always be present with full base URLs.
 	if !strings.Contains(got, "## Documentation") {
 		t.Error("missing Documentation section")
 	}
-	if !strings.Contains(got, "llms.txt") {
+	if !strings.Contains(got, "https://majorcontext.com/moat/llms.txt") {
 		t.Error("missing llms.txt index URL")
 	}
-	if !strings.Contains(got, "reference/moat-yaml.md") {
+	if !strings.Contains(got, "https://majorcontext.com/moat/reference/moat-yaml.md") {
 		t.Error("missing moat-yaml reference URL")
 	}
 
@@ -179,15 +179,15 @@ func TestRender_full(t *testing.T) {
 		t.Error("missing agent in metadata")
 	}
 
-	// Documentation — all conditional URLs should be present in a full render.
+	// Documentation — all conditional URLs should be present with full base.
 	for _, url := range []string{
-		"llms.txt",
-		"reference/moat-yaml.md",
-		"reference/grants.md",
-		"reference/dependencies.md",
-		"guides/mcp.md",
-		"guides/ports.md",
-		"concepts/networking.md",
+		"https://majorcontext.com/moat/llms.txt",
+		"https://majorcontext.com/moat/reference/moat-yaml.md",
+		"https://majorcontext.com/moat/reference/grants.md",
+		"https://majorcontext.com/moat/reference/dependencies.md",
+		"https://majorcontext.com/moat/guides/mcp.md",
+		"https://majorcontext.com/moat/guides/ports.md",
+		"https://majorcontext.com/moat/concepts/networking.md",
 	} {
 		if !strings.Contains(got, url) {
 			t.Errorf("full render missing doc URL %q", url)
