@@ -51,7 +51,7 @@ func TestValidateMetaToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/v21.0/me" {
+				if r.URL.Path != "/"+graphAPIVersion+"/me" {
 					t.Errorf("unexpected path: %s", r.URL.Path)
 				}
 				if got := r.Header.Get("Authorization"); got != "Bearer test-token" {

@@ -37,7 +37,7 @@ func (p *Provider) refresh(ctx context.Context, proxy provider.ProxyConfigurer, 
 		"fb_exchange_token": {cred.Token},
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/v21.0/oauth/access_token?"+params.Encode(), nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+graphAPIVersion+"/oauth/access_token?"+params.Encode(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating refresh request: %w", err)
 	}

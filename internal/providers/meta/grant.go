@@ -11,7 +11,10 @@ import (
 	"github.com/majorcontext/moat/internal/provider/util"
 )
 
-const graphAPIBase = "https://graph.facebook.com"
+const (
+	graphAPIBase    = "https://graph.facebook.com"
+	graphAPIVersion = "v21.0"
+)
 
 // Grant acquires Meta credentials interactively or from environment.
 //
@@ -115,7 +118,7 @@ func validateMetaToken(ctx context.Context, token, baseURL string) (string, erro
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/v21.0/me?fields=id,name", nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+graphAPIVersion+"/me?fields=id,name", nil)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
