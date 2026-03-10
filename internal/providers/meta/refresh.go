@@ -26,6 +26,12 @@ func (p *Provider) refresh(ctx context.Context, proxy provider.ProxyConfigurer, 
 	appID := cred.Metadata[MetaKeyAppID]
 	appSecret := cred.Metadata[MetaKeyAppSecret]
 
+	// Use the API version persisted at grant time, not the current environment.
+	version := cred.Metadata[MetaKeyAPIVersion]
+	if version == "" {
+		version = defaultGraphAPIVersion
+	}
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -37,7 +43,7 @@ func (p *Provider) refresh(ctx context.Context, proxy provider.ProxyConfigurer, 
 		"fb_exchange_token": {cred.Token},
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+apiVersion()+"/oauth/access_token?"+params.Encode(), nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", baseURL+"/"+version+"/oauth/access_token?"+params.Encode(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating refresh request: %w", err)
 	}

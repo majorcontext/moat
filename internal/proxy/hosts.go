@@ -117,6 +117,10 @@ var grantHosts = map[string][]string{
 		"api.graphite.com",
 		"*.graphite.com",
 	},
+	"meta": {
+		"graph.facebook.com",
+		"graph.instagram.com",
+	},
 }
 
 // RegisterGrantHosts registers host patterns for a grant name.

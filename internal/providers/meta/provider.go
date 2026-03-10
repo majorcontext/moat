@@ -6,10 +6,11 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// Metadata keys for app credentials used in token refresh.
+// Metadata keys stored in Credential.Metadata.
 const (
-	MetaKeyAppID     = "meta_app_id"
-	MetaKeyAppSecret = "meta_app_secret"
+	MetaKeyAppID      = "meta_app_id"
+	MetaKeyAppSecret  = "meta_app_secret"
+	MetaKeyAPIVersion = "meta_api_version"
 )
 
 // Provider implements provider.CredentialProvider for Meta Graph API.

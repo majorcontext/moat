@@ -42,8 +42,9 @@ func TestRefresh(t *testing.T) {
 	cred := &provider.Credential{
 		Token: "old-token",
 		Metadata: map[string]string{
-			MetaKeyAppID:     "app-123",
-			MetaKeyAppSecret: "secret-456",
+			MetaKeyAppID:      "app-123",
+			MetaKeyAppSecret:  "secret-456",
+			MetaKeyAPIVersion: apiVersion(),
 		},
 	}
 

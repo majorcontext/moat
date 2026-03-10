@@ -112,6 +112,9 @@ To create one:
 		}
 	}
 
+	// Persist the API version so the daemon's refresh uses the same version.
+	metadata[MetaKeyAPIVersion] = apiVersion()
+
 	return &provider.Credential{
 		Provider:  "meta",
 		Token:     token,
