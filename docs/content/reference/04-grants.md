@@ -463,11 +463,9 @@ The grant flow accepts any Meta access token. What happens next depends on which
 
 **Long-lived user tokens with app credentials** are the recommended setup. The token expires after ~60 days, but Moat exchanges it for a fresh one once per day, keeping it valid indefinitely. Generate a long-lived token by exchanging a short-lived one through the Graph API Explorer or your app's OAuth flow, and provide your app ID and secret during `moat grant meta`. If a token is compromised, revoke it immediately in the Meta developer dashboard -- do not rely on expiry.
 
-**Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one on the first refresh cycle, then refreshes it daily. This is a valid way to bootstrap -- you do not need to exchange the token yourself first. Without app credentials, the token expires quickly and there is no way to extend it.
+**Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one on the first refresh cycle, then refreshes it daily. This is a valid way to bootstrap -- you do not need to exchange the token yourself first. Without app credentials, the token expires quickly and there is no way to extend it. This can provide additional security at the cost of capping the amount of time your agent will be able to run independently.
 
 **System user tokens** never expire. They are created in Business Manager > System Users > Generate Token and are typically reserved for business owners or internal infrastructure. Because they never expire and cannot be scoped per-session, a leaked system user token has no automatic damage window. Prefer long-lived user tokens with app credentials for delegated access and agent use.
-
-> **Warning:** If you grant a short-lived token without app credentials, it expires in 1--2 hours and cannot be refreshed. Provide `META_APP_ID` and `META_APP_SECRET` so Moat can exchange it.
 
 Summary:
 
@@ -482,10 +480,10 @@ Summary:
 
 ### API version
 
-The provider uses Meta Graph API v23.0 by default. Override with the `META_API_VERSION` environment variable:
+The provider uses Meta Graph API v25.0 by default. Override with the `META_API_VERSION` environment variable:
 
 ```bash
-META_API_VERSION=v24.0 moat grant meta
+META_API_VERSION=v26.0 moat grant meta
 ```
 
 ### moat.yaml
