@@ -54,6 +54,8 @@ type MCPServer struct {
 }
 
 // Documentation base URL for machine-readable docs.
+// URLs use .md suffixes to serve raw markdown (llms.txt convention) for agent
+// consumption. Extension-less URLs serve HTML for human readers.
 const docsBaseURL = "https://majorcontext.com/moat"
 
 // serviceDisplayNames maps internal service names to human-friendly display names.

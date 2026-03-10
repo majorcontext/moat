@@ -223,6 +223,21 @@ func TestRender_omitsEmptySections(t *testing.T) {
 			t.Errorf("should not contain %q when only Grants is set", section)
 		}
 	}
+
+	// Grants doc URL should appear; other conditional URLs should not.
+	if !strings.Contains(got, "reference/grants.md") {
+		t.Error("grants-only render should include grants doc URL")
+	}
+	for _, url := range []string{
+		"reference/dependencies.md",
+		"guides/mcp.md",
+		"guides/ports.md",
+		"concepts/networking.md",
+	} {
+		if strings.Contains(got, url) {
+			t.Errorf("grants-only render should not contain %q", url)
+		}
+	}
 }
 
 func TestRender_networkPolicyWithoutAllowedHosts(t *testing.T) {
