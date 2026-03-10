@@ -14,7 +14,7 @@ import (
 
 const (
 	graphAPIBase           = "https://graph.facebook.com"
-	defaultGraphAPIVersion = "v23.0"
+	defaultGraphAPIVersion = "v25.0"
 )
 
 // apiVersion returns the Graph API version, checking META_API_VERSION first.
@@ -46,7 +46,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 To create one:
   1. Go to https://developers.facebook.com/tools/explorer/
   2. Select your app and generate a token with the required permissions
-  3. For long-lived server use, create a System User token in Business Settings`)
+  3. Provide your app ID and secret next to enable automatic token refresh`)
 
 		var err error
 		token, err = util.PromptForToken("Access token")

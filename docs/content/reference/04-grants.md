@@ -461,24 +461,24 @@ All three can be set as environment variables or entered interactively. `META_AC
 
 The grant flow accepts any Meta access token. What happens next depends on which kind of token you provide and whether you also provide app credentials (app ID + app secret).
 
-**System user tokens** never expire. Create one in Business Manager > System Users > Generate Token. This is the recommended choice for production use (ads reporting, campaign management). You do not need app credentials -- skip the prompts.
+**Long-lived user tokens with app credentials** are the recommended setup. The token expires after ~60 days, but Moat exchanges it for a fresh one once per day, keeping it valid indefinitely. If the token is ever compromised, it expires on its own. Generate a long-lived token by exchanging a short-lived one through the Graph API Explorer or your app's OAuth flow, and provide your app ID and secret during `moat grant meta`.
 
-**Long-lived user tokens** expire after ~60 days. If you provide app credentials, Moat exchanges the token for a fresh one once per day, keeping it valid indefinitely. Without app credentials, the token works until it expires and then requests fail.
+**Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one on the first refresh cycle, then refreshes it daily. This is a valid way to bootstrap -- you do not need to exchange the token yourself first. Without app credentials, the token expires quickly and there is no way to extend it.
 
-**Short-lived user tokens** (from Graph API Explorer or an OAuth login flow) expire in 1--2 hours. If you provide app credentials, Moat exchanges the short-lived token for a long-lived one (~60 days) on the first refresh cycle, then refreshes it daily. Without app credentials, the token expires quickly and there is no way to extend it.
+**System user tokens** never expire. They are created in Business Manager > System Users > Generate Token and are typically reserved for business owners or internal infrastructure. Because they never expire and cannot be scoped per-session, a leaked system user token has no automatic damage window. Prefer long-lived user tokens with app credentials for delegated access and agent use.
 
-> **Warning:** If you grant a short-lived token without app credentials, it expires in 1--2 hours and cannot be refreshed. Either provide `META_APP_ID` and `META_APP_SECRET`, or use a system user token instead.
+> **Warning:** If you grant a short-lived token without app credentials, it expires in 1--2 hours and cannot be refreshed. Provide `META_APP_ID` and `META_APP_SECRET` so Moat can exchange it.
 
 Summary:
 
 | Token type | App credentials provided? | What happens |
 |-----------|--------------------------|-------------|
-| System user | No | Token never expires. No refresh needed. |
-| System user | Yes | Unnecessary but harmless. Refresh is a no-op. |
-| Long-lived user | Yes | Exchanged for a fresh long-lived token once per day. |
+| Long-lived user | Yes | Exchanged for a fresh long-lived token once per day. **Recommended.** |
 | Long-lived user | No | Works for ~60 days, then expires. |
 | Short-lived user | Yes | Exchanged for a long-lived token on first refresh, then refreshed daily. |
 | Short-lived user | No | Expires in 1--2 hours. Requests fail after that. |
+| System user | No | Token never expires. No refresh needed. |
+| System user | Yes | Unnecessary but harmless. Refresh is a no-op. |
 
 ### API version
 
@@ -497,7 +497,7 @@ grants:
 
 ### Examples
 
-**System user token (recommended for production):**
+**User token with app credentials (recommended):**
 
 ```bash
 $ moat grant meta
@@ -507,21 +507,21 @@ Enter a Meta access token.
 To create one:
   1. Go to https://developers.facebook.com/tools/explorer/
   2. Select your app and generate a token with the required permissions
-  3. For long-lived server use, create a System User token in Business Settings
 
 Access token: ••••••••
-Authenticated as: My Business
+Authenticated as: Jane Developer
 
 Optional: provide app ID and app secret to enable automatic token refresh.
 Press Enter to skip.
 
-App ID (or Enter to skip):
-Token refresh disabled (no app credentials)
+App ID (or Enter to skip): ••••••••
+App secret: ••••••••
+Token refresh enabled
 
 $ moat run --grant meta ./my-project
 ```
 
-**Short-lived or long-lived user token (with refresh):**
+**Via environment variables:**
 
 ```bash
 $ META_ACCESS_TOKEN=EAAx... META_APP_ID=123456 META_APP_SECRET=abc123 moat grant meta
