@@ -138,7 +138,7 @@ func Render(rc *RuntimeContext) string {
 		fmt.Fprintf(&b, "- Dependencies reference: %s/reference/dependencies.md\n", docsBaseURL)
 	}
 	if len(rc.MCPServers) > 0 {
-		fmt.Fprintf(&b, "- MCP servers guide: %s/guides/mcp-servers.md\n", docsBaseURL)
+		fmt.Fprintf(&b, "- MCP servers guide: %s/guides/mcp.md\n", docsBaseURL)
 	}
 	if len(rc.Ports) > 0 {
 		fmt.Fprintf(&b, "- Port exposure guide: %s/guides/ports.md\n", docsBaseURL)

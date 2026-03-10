@@ -66,7 +66,7 @@ func TestRender_minimal(t *testing.T) {
 	for _, url := range []string{
 		"reference/grants.md",
 		"reference/dependencies.md",
-		"guides/mcp-servers.md",
+		"guides/mcp.md",
 		"guides/ports.md",
 		"concepts/networking.md",
 	} {
@@ -185,7 +185,7 @@ func TestRender_full(t *testing.T) {
 		"reference/moat-yaml.md",
 		"reference/grants.md",
 		"reference/dependencies.md",
-		"guides/mcp-servers.md",
+		"guides/mcp.md",
 		"guides/ports.md",
 		"concepts/networking.md",
 	} {
