@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/majorcontext/moat/internal/deps/versions"
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // versionCache is the global cache for resolved versions.
@@ -34,14 +35,30 @@ func ResolveVersions(ctx context.Context, deps []Dependency) ([]Dependency, erro
 	for i, dep := range deps {
 		result[i] = dep // Copy the dependency
 
-		// Skip if no version specified or not a runtime
-		if dep.Version == "" {
-			continue
-		}
-
 		spec, ok := GetSpec(dep.Name)
 		if !ok || spec.Type != TypeRuntime {
 			continue
+		}
+
+		// If no version specified, use the registry default.
+		// This ensures default versions like "1.25" get resolved to a full
+		// patch version (e.g., "1.25.8"), preventing broken tarball URLs
+		// when the runtime is installed via curl rather than a base image.
+		version := dep.Version
+		if version == "" {
+			version = spec.Default
+			if version == "" {
+				continue
+			}
+		}
+
+		// Populate the version and OriginalVersion into the result now, so
+		// even if resolution fails below, the Dockerfile generator sees the
+		// default rather than an empty string, and selectBaseImage can use
+		// OriginalVersion for Docker Hub floating tags.
+		result[i].Version = version
+		if dep.Version == "" {
+			result[i].OriginalVersion = version
 		}
 
 		// Get cached resolver for this runtime
@@ -51,14 +68,17 @@ func ResolveVersions(ctx context.Context, deps []Dependency) ([]Dependency, erro
 		}
 
 		// Resolve the version
-		resolved, err := resolver.Resolve(ctx, dep.Version)
+		resolved, err := resolver.Resolve(ctx, version)
 		if err != nil {
-			// If resolution fails, keep the original version
-			// This allows users to specify exact versions that may not be in APIs
+			// Resolution failed — the partial version (e.g., "1.25") may
+			// produce a broken tarball URL at build time. Log a warning so
+			// the user knows resolution was skipped.
+			log.Warn("version resolution failed, using unresolved version",
+				"runtime", dep.Name, "version", version, "error", err)
 			continue
 		}
 
-		result[i].OriginalVersion = dep.Version
+		result[i].OriginalVersion = version
 		result[i].Version = resolved
 	}
 

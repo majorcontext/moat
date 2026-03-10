@@ -9,8 +9,11 @@ import (
 )
 
 func TestResolveVersions(t *testing.T) {
-	// Use a fresh in-memory cache for testing
-	SetVersionCache(versions.NewCache(24*time.Hour, ""))
+	// Pre-seed cache so tests don't hit the network
+	cache := versions.NewCache(24*time.Hour, "")
+	cache.Set("go@1.25", "1.25.8")
+	cache.Set("node@22", "22.14.0")
+	SetVersionCache(cache)
 
 	ctx := context.Background()
 
@@ -40,13 +43,31 @@ func TestResolveVersions(t *testing.T) {
 			},
 		},
 		{
-			name: "runtime without version unchanged",
+			name: "runtime without version resolves default",
 			deps: []Dependency{
-				{Name: "node"},
+				{Name: "go"},
+			},
+			validate: func(t *testing.T, deps []Dependency) {
+				// When no version is specified, ResolveVersions should populate
+				// the registry default and resolve it to a full patch version.
+				// This prevents tarball URLs like "go1.25.linux-amd64.tar.gz"
+				// (which don't exist) when Go is installed via curl.
+				if deps[0].Version != "1.25.8" {
+					t.Errorf("go version should be resolved to 1.25.8, got %q", deps[0].Version)
+				}
+				if deps[0].OriginalVersion != "1.25" {
+					t.Errorf("go OriginalVersion should be 1.25, got %q", deps[0].OriginalVersion)
+				}
+			},
+		},
+		{
+			name: "non-runtime without version unchanged",
+			deps: []Dependency{
+				{Name: "jq"},
 			},
 			validate: func(t *testing.T, deps []Dependency) {
 				if deps[0].Version != "" {
-					t.Errorf("node version should remain empty, got %q", deps[0].Version)
+					t.Errorf("jq version should remain empty, got %q", deps[0].Version)
 				}
 			},
 		},
@@ -112,7 +133,6 @@ func TestResolveVersionsOriginalVersionEmptyWhenUnchanged(t *testing.T) {
 
 	ctx := context.Background()
 	deps := []Dependency{
-		{Name: "node"},                    // No version specified
 		{Name: "jq"},                      // Non-runtime dependency
 		{Name: "protoc", Version: "25.1"}, // Non-runtime with version
 	}
@@ -148,5 +168,39 @@ func TestResolveVersionsPreservesOriginalOnError(t *testing.T) {
 	// Original version should be preserved since resolution failed
 	if result[0].Version != "99.99" {
 		t.Errorf("Expected version to remain 99.99, got %q", result[0].Version)
+	}
+}
+
+func TestResolveVersionsDefaultPopulatedOnError(t *testing.T) {
+	// When no version is specified and resolution fails (e.g., network error),
+	// the default version should still be populated so the Dockerfile generator
+	// doesn't fall back to the bare default (e.g., "1.25") which produces
+	// broken tarball URLs.
+	//
+	// Pre-seed cache with an error-inducing value by NOT seeding it,
+	// then use a canceled context to force resolution failure.
+	SetVersionCache(versions.NewCache(24*time.Hour, ""))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately to force resolver failure
+
+	deps := []Dependency{
+		{Name: "go"}, // No version; default "1.25" should be populated even on failure
+	}
+
+	result, err := ResolveVersions(ctx, deps)
+	if err != nil {
+		t.Fatalf("ResolveVersions() unexpected error: %v", err)
+	}
+
+	// Even though resolution failed, Version should be populated with the
+	// registry default rather than remaining empty.
+	if result[0].Version != "1.25" {
+		t.Errorf("go version should be registry default %q on resolution failure, got %q", "1.25", result[0].Version)
+	}
+	// OriginalVersion should also be set so selectBaseImage can use it
+	// for Docker Hub floating tags.
+	if result[0].OriginalVersion != "1.25" {
+		t.Errorf("go OriginalVersion should be registry default %q on resolution failure, got %q", "1.25", result[0].OriginalVersion)
 	}
 }
