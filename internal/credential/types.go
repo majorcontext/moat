@@ -23,6 +23,7 @@ const (
 	ProviderGemini    Provider = "gemini"
 	ProviderNpm       Provider = "npm"
 	ProviderGraphite  Provider = "graphite"
+	ProviderMeta      Provider = "meta"
 )
 
 // Credential represents a stored credential.
@@ -54,14 +55,14 @@ func RegisterDynamicProvider(p Provider) {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
 	return append(base, dynamicProviders...)
 }
 
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
 		return true
 	default:
 		for _, dp := range dynamicProviders {
