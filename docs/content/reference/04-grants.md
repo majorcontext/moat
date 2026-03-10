@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -21,6 +21,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
 | `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token ...` | `GRAPHITE_TOKEN`, `GT_TOKEN`, or prompt |
+| `meta` | `graph.facebook.com`, `graph.instagram.com` | `Authorization: Bearer ...` | `META_ACCESS_TOKEN` or prompt |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
@@ -418,6 +419,90 @@ Validating token...
 Token validated successfully
 
 $ moat run --grant graphite ./my-project
+```
+
+## Meta
+
+### CLI command
+
+```bash
+moat grant meta
+```
+
+No flags.
+
+### Credential sources
+
+1. **Environment variable** -- Uses `META_ACCESS_TOKEN` if set
+2. **Interactive prompt** -- Prompts for an access token
+
+The grant command validates the token against Meta's Graph API before saving.
+
+### What it injects
+
+The proxy injects an `Authorization: Bearer <token>` header for requests to:
+
+- `graph.facebook.com`
+- `graph.instagram.com`
+
+No environment variables or config files are set inside the container.
+
+### App credentials for token refresh
+
+After providing the access token, the grant flow optionally collects `META_APP_ID` and `META_APP_SECRET`. These are used to exchange short-lived tokens for long-lived ones via Meta's `fb_exchange_token` endpoint.
+
+If both are provided (via environment variables or prompt), token refresh is enabled. If skipped, the token is used as-is. System user tokens do not expire and do not need app credentials.
+
+| Environment variable | Purpose |
+|---------------------|---------|
+| `META_ACCESS_TOKEN` | Access token (required) |
+| `META_APP_ID` | Facebook app ID (optional, for refresh) |
+| `META_APP_SECRET` | Facebook app secret (optional, for refresh) |
+
+### API version
+
+The provider uses Meta Graph API v23.0 by default. Override with the `META_API_VERSION` environment variable:
+
+```bash
+META_API_VERSION=v24.0 moat grant meta
+```
+
+### Refresh behavior
+
+When app credentials are present, the proxy refreshes the token once per day by exchanging it for a new long-lived token (valid ~60 days). Without app credentials, the token is static.
+
+System user tokens (created in Business Manager) do not expire and do not require refresh.
+
+### moat.yaml
+
+```yaml
+grants:
+  - meta
+```
+
+### Example
+
+```bash
+$ moat grant meta
+
+Enter a Meta access token.
+
+To create one:
+  1. Go to https://developers.facebook.com/tools/explorer/
+  2. Select your app and generate a token with the required permissions
+  3. For long-lived server use, create a System User token in Business Settings
+
+Access token: ••••••••
+Authenticated as: My App
+
+Optional: provide app ID and app secret to enable automatic token refresh.
+Press Enter to skip.
+
+App ID (or Enter to skip): ••••••••
+App secret: ••••••••
+Token refresh enabled
+
+$ moat run --grant meta ./my-project
 ```
 
 ## AWS
