@@ -64,7 +64,7 @@ ports:
 # Network policy
 network:
   policy: strict
-  allow:
+  rules:
     - "api.openai.com"
     - "*.amazonaws.com"
 
@@ -535,25 +535,70 @@ network:
 | `permissive` | All outbound HTTP/HTTPS allowed |
 | `strict` | Only allowed hosts + grant hosts |
 
-### network.allow
+### network.rules
 
-Hosts allowed in strict mode.
+Per-host access rules. Each entry is either a plain hostname string or a map of hostname to a list of method+path rules.
 
 ```yaml
 network:
   policy: strict
-  allow:
+  rules:
     - "api.openai.com"
     - "*.github.com"
     - "*.*.amazonaws.com"
 ```
 
-- Type: `array[string]`
+- Type: `array[string | map[string]array[string]]`
 - Default: `[]`
 
-Supports wildcard patterns with `*`.
+Hostname patterns support `*` (matches any single segment).
 
-Hosts from granted credentials are automatically allowed.
+Hosts from granted credentials are automatically allowed regardless of this list.
+
+#### Per-host request rules
+
+Each host entry can include a list of method+path rules that filter requests to that host:
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.github.com":
+        - "allow GET /repos/**"
+        - "deny * /**"
+    - "api.openai.com"
+```
+
+Rule format: `"<allow|deny> <method> <path-pattern>"`
+
+- `method`: HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, etc.) or `*` for any method
+- `path-pattern`: URL path pattern where `*` matches a single path segment and `**` matches zero or more segments
+
+Rules are evaluated in order — the first matching rule wins. If no rule matches, the request falls through to the policy default (`permissive` allows it, `strict` blocks it).
+
+#### Examples
+
+Read-only access to a REST API:
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.example.com":
+        - "allow GET /**"
+        - "deny * /**"
+```
+
+Block administrative endpoints while allowing everything else:
+
+```yaml
+network:
+  policy: permissive
+  rules:
+    - "api.example.com":
+        - "deny * /admin/**"
+        - "deny DELETE /**"
+```
 
 ---
 

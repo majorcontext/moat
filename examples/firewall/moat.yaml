@@ -17,8 +17,10 @@ dependencies:
 
 network:
   policy: strict
-  allow:
-    - "httpbin.org"
+  rules:
+    - "httpbin.org":
+        - "allow GET /**"
+        - "deny * /**"
     - "*.httpbin.org"
 
 command: ["python3", "/workspace/demo.py"]

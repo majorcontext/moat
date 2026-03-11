@@ -122,7 +122,7 @@ In strict mode, the proxy checks every request against the allow list before for
 - Allowed requests proceed normally
 - Blocked requests receive a `407 Proxy Authentication Required` response with a message explaining which host was blocked and how to allow it
 
-The allow list supports exact hostnames and wildcard patterns (e.g., `*.amazonaws.com`). Hosts from granted credentials are automatically added to the allow list. For example, `--grant github` allows `api.github.com` and `github.com` even if they are not listed in `network.allow`.
+The rules list supports exact hostnames and wildcard patterns (e.g., `*.amazonaws.com`). Hosts from granted credentials are automatically added to the allow list. For example, `--grant github` allows `api.github.com` and `github.com` even if they are not listed in `network.rules`.
 
 For non-HTTP traffic in strict mode, iptables rules provide enforcement independently of the proxy. The firewall blocks all outbound traffic except loopback, DNS (UDP port 53), established connections, and traffic to the proxy itself. This prevents code from bypassing the proxy by making direct socket connections.
 

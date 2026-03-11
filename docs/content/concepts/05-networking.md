@@ -41,12 +41,12 @@ This is the default. Containers can reach any host on the internet.
 
 ### Strict mode
 
-Only explicitly allowed hosts are reachable:
+Only explicitly listed hosts are reachable:
 
 ```yaml
 network:
   policy: strict
-  allow:
+  rules:
     - "api.github.com"
     - "api.anthropic.com"
     - "*.amazonaws.com"
@@ -63,20 +63,86 @@ HTTP/1.1 407 Proxy Authentication Required
 
 Moat: request blocked by network policy.
 Host "blocked.example.com" is not in the allow list.
-Add it to network.allow in moat.yaml or use policy: permissive.
+Add it to network.rules in moat.yaml or use policy: permissive.
 ```
 
 The error message tells the agent (and you, via logs) exactly what happened and how to fix it.
 
 ### Wildcard patterns
 
-The `allow` list supports wildcard patterns:
+The `rules` list supports wildcard hostname patterns:
 
 | Pattern | Matches |
 |---------|---------|
 | `api.github.com` | Exact match only |
 | `*.github.com` | Any subdomain of github.com |
 | `*.*.amazonaws.com` | Two levels of subdomains |
+
+## Request-level rules
+
+In addition to host-level access control, each host entry in `network.rules` can include per-request rules that filter by HTTP method and path.
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.github.com":
+        - "allow GET /repos/**"
+        - "deny * /**"
+    - "api.anthropic.com"
+```
+
+### Rule format
+
+Each rule is a string: `"<allow|deny> <method> <path-pattern>"`
+
+- `method`: HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, etc.) or `*` for any method
+- `path-pattern`: URL path where `*` matches a single path segment and `**` matches zero or more segments
+
+### Evaluation order
+
+Rules are evaluated top to bottom. The first matching rule wins. If no rule matches, the request falls through to the policy default:
+
+- `permissive` — allows the request
+- `strict` — blocks the request
+
+### Common patterns
+
+**Read-only access to an API:**
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.example.com":
+        - "allow GET /**"
+        - "deny * /**"
+```
+
+The explicit `deny * /**` rule at the end ensures non-GET requests are blocked even in permissive mode. Without it, a non-matching request would fall through to the policy default.
+
+**Block admin endpoints while allowing everything else:**
+
+```yaml
+network:
+  policy: permissive
+  rules:
+    - "api.example.com":
+        - "deny * /admin/**"
+        - "deny DELETE /**"
+```
+
+**Restrict to specific paths:**
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.example.com":
+        - "allow POST /v1/messages"
+        - "allow GET /v1/models"
+        - "deny * /**"
+```
 
 ## Hostname routing
 

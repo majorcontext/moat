@@ -226,7 +226,7 @@ Or configure in `moat.yaml`:
 
 ```yaml
 network:
-  allow:
+  rules:
     - example.com
     - "*.internal.corp"
 ```
