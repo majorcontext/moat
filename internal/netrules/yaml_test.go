@@ -39,6 +39,11 @@ func TestNetworkRuleEntryUnmarshal(t *testing.T) {
 			yaml:    `"": ["allow GET /"]`,
 			wantErr: true,
 		},
+		{
+			name:    "empty host scalar",
+			yaml:    `""`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -16,6 +16,9 @@ type NetworkRuleEntry struct {
 func (e *NetworkRuleEntry) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
+		if value.Value == "" {
+			return fmt.Errorf("network.rules entry: host cannot be empty")
+		}
 		e.Host = value.Value
 		return nil
 

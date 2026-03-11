@@ -24,6 +24,8 @@ func TestMatchPath(t *testing.T) {
 		{"/**", "/", true},
 		{"/repos/*/issues/**", "/repos/foo/issues/123/comments", true},
 		{"/repos/*/issues/**", "/repos/foo/bar/issues/123", false},
+		{"/repos/**/issues", "/repos/foo/issues", true},
+		{"/repos/**/issues", "/repos/issues", false}, // ** in middle requires 1+ segment
 		{"/repos/*", "/repos/foo/", true},
 		{"/repos/*", "//repos//foo", true},
 		{"/", "/", true},
