@@ -1423,3 +1423,34 @@ func TestProxy_SetNetworkPolicyClearsHostRules(t *testing.T) {
 		t.Error("GET /test should be allowed after SetNetworkPolicy clears hostRules")
 	}
 }
+
+func TestProxy_HasPathRulesForHost(t *testing.T) {
+	p := NewProxy()
+	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
+		{
+			Host:  "api.github.com",
+			Rules: []netrules.Rule{{Action: "allow", Method: "GET", PathPattern: "/repos/*"}},
+		},
+		{
+			Host: "example.com",
+			// No rules — host-only entry.
+		},
+	})
+
+	req, _ := http.NewRequest("GET", "http://api.github.com/repos/foo", nil)
+
+	// Host with per-path rules.
+	if !p.hasPathRulesForHost(req, "api.github.com", 443) {
+		t.Error("api.github.com should have path rules")
+	}
+
+	// Host-only entry (no rules).
+	if p.hasPathRulesForHost(req, "example.com", 443) {
+		t.Error("example.com should not have path rules")
+	}
+
+	// Unlisted host.
+	if p.hasPathRulesForHost(req, "evil.com", 443) {
+		t.Error("unlisted host should not have path rules")
+	}
+}
