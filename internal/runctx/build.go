@@ -67,10 +67,13 @@ func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
 
 	// Network policy.
 	if cfg.Network.Policy != "" {
-		rc.NetworkPolicy = &NetworkPolicy{
-			Policy:       cfg.Network.Policy,
-			AllowedHosts: cfg.Network.Allow,
+		np := &NetworkPolicy{
+			Policy: cfg.Network.Policy,
 		}
+		for _, entry := range cfg.Network.Rules {
+			np.AllowedHosts = append(np.AllowedHosts, entry.Host)
+		}
+		rc.NetworkPolicy = np
 	}
 
 	// Ports (sorted by name for deterministic output).

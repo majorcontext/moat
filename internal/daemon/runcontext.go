@@ -303,18 +303,20 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		copy(d.MCPServers, rc.MCPServers)
 	}
 
-	// Convert allowed hosts.
-	for _, host := range rc.NetworkAllow {
-		d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(host))
-	}
-
-	// Copy host rules.
+	// Convert network allow list to AllowedHosts.
+	// If NetworkRules is populated (new CLI), use that as the primary source.
+	// Fall back to NetworkAllow (old CLI) for backwards compatibility.
 	if len(rc.NetworkRules) > 0 {
 		d.HostRules = make([]netrules.HostRules, len(rc.NetworkRules))
 		copy(d.HostRules, rc.NetworkRules)
-		// Also add rule hosts to AllowedHosts for host-level matching
+		// Also add rule hosts to AllowedHosts for host-level matching.
 		for _, hr := range rc.NetworkRules {
 			d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(hr.Host))
+		}
+	} else {
+		// Old CLI: NetworkAllow contains plain host strings.
+		for _, host := range rc.NetworkAllow {
+			d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(host))
 		}
 	}
 

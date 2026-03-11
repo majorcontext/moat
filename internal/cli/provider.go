@@ -7,6 +7,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/netrules"
 	"github.com/spf13/cobra"
 )
 
@@ -170,9 +171,14 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		}
 	}
 
-	// Network: provider hosts first, then user-specified allowed hosts
-	cfg.Network.Allow = append(cfg.Network.Allow, rc.NetworkHosts...)
-	cfg.Network.Allow = append(cfg.Network.Allow, rc.AllowedHosts...)
+	// Network: provider hosts first, then user-specified allowed hosts.
+	// Convert plain host strings to NetworkRuleEntry (host-level allow, no method/path rules).
+	for _, host := range rc.NetworkHosts {
+		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
+	}
+	for _, host := range rc.AllowedHosts {
+		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
+	}
 
 	// Provider-specific config tweaks (e.g., enabling log sync)
 	if rc.ConfigureAgent != nil {

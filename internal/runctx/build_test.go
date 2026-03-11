@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/netrules"
 )
 
 func TestBuildFromConfig(t *testing.T) {
@@ -13,7 +14,10 @@ func TestBuildFromConfig(t *testing.T) {
 		Dependencies: []string{"postgres@16", "redis", "node@20"},
 		Network: config.NetworkConfig{
 			Policy: "strict",
-			Allow:  []string{"api.github.com", "*.npmjs.org"},
+			Rules: []netrules.NetworkRuleEntry{
+				{HostRules: netrules.HostRules{Host: "api.github.com"}},
+				{HostRules: netrules.HostRules{Host: "*.npmjs.org"}},
+			},
 		},
 		Ports: map[string]int{
 			"api": 8080,
