@@ -511,6 +511,7 @@ func (p *Proxy) SetNetworkPolicy(policy string, allows []string, grants []string
 
 	p.policy = policy
 	p.allowedHosts = nil
+	p.hostRules = nil
 
 	// Parse explicit allow patterns
 	for _, pattern := range allows {

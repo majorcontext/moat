@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/majorcontext/moat/internal/netrules"
 )
 
 func TestProxy_ForwardsRequests(t *testing.T) {
@@ -1363,5 +1365,61 @@ func TestProxy_LegacyModeUnchanged(t *testing.T) {
 
 	if receivedAuth != "Bearer legacy-token" {
 		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer legacy-token")
+	}
+}
+
+// TestProxy_ConnectPreCheckSkipsPathRules verifies that CONNECT requests are not
+// evaluated against per-path deny rules. The CONNECT tunnel must be allowed at
+// the host level so TLS interception can apply path rules to inner HTTP requests.
+func TestProxy_ConnectPreCheckSkipsPathRules(t *testing.T) {
+	p := NewProxy()
+	// Set up strict policy with a catch-all deny rule for httpbin.org.
+	// Without the CONNECT guard, "deny * /**" would block the tunnel itself.
+	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
+		{
+			Host: "httpbin.org",
+			Rules: []netrules.Rule{
+				{Action: "deny", Method: "*", PathPattern: "/**"},
+			},
+		},
+	})
+
+	req, _ := http.NewRequest("CONNECT", "http://httpbin.org:443", nil)
+
+	// CONNECT pre-check should allow the tunnel (host is listed).
+	if !p.checkNetworkPolicyForRequest(req, "httpbin.org", 443, "CONNECT", "") {
+		t.Error("CONNECT to httpbin.org:443 should be allowed at tunnel stage despite deny * /** rule")
+	}
+
+	// A subsequent inner GET should be denied by the rule.
+	getReq, _ := http.NewRequest("GET", "http://httpbin.org/anything", nil)
+	if p.checkNetworkPolicyForRequest(getReq, "httpbin.org", 443, "GET", "/anything") {
+		t.Error("GET /anything should be denied by deny * /** rule")
+	}
+
+	// Unlisted host should still be blocked under strict policy.
+	connectReq2, _ := http.NewRequest("CONNECT", "http://example.com:443", nil)
+	if p.checkNetworkPolicyForRequest(connectReq2, "example.com", 443, "CONNECT", "") {
+		t.Error("CONNECT to unlisted host example.com should be blocked under strict policy")
+	}
+}
+
+// TestProxy_SetNetworkPolicyClearsHostRules verifies that SetNetworkPolicy
+// clears any previously set hostRules to prevent stale rules.
+func TestProxy_SetNetworkPolicyClearsHostRules(t *testing.T) {
+	p := NewProxy()
+
+	// First set rules via SetNetworkPolicyWithRules.
+	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
+		{Host: "example.com", Rules: []netrules.Rule{{Action: "deny", Method: "*", PathPattern: "/**"}}},
+	})
+
+	// Now switch to plain SetNetworkPolicy — hostRules should be cleared.
+	p.SetNetworkPolicy("strict", []string{"example.com"}, nil)
+
+	// Without the fix, stale hostRules would cause GET to be denied.
+	req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+	if !p.checkNetworkPolicyForRequest(req, "example.com", 443, "GET", "/test") {
+		t.Error("GET /test should be allowed after SetNetworkPolicy clears hostRules")
 	}
 }
