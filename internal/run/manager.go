@@ -644,7 +644,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Configure network policy on the RunContext
 		if opts.Config != nil {
 			runCtx.NetworkPolicy = opts.Config.Network.Policy
-			runCtx.NetworkAllow = opts.Config.Network.Allow
+			// Convert NetworkRuleEntry to HostRules for the daemon
+			for _, entry := range opts.Config.Network.Rules {
+				runCtx.NetworkRules = append(runCtx.NetworkRules, entry.HostRules)
+			}
 		}
 
 		// Configure MCP servers on the RunContext
@@ -3286,6 +3289,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		RunID:         rc.RunID,
 		NetworkPolicy: rc.NetworkPolicy,
 		NetworkAllow:  rc.NetworkAllow,
+		NetworkRules:  rc.NetworkRules,
 		MCPServers:    rc.MCPServers,
 		Grants:        grants,
 		AWSConfig:     rc.AWSConfig,

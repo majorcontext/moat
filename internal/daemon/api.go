@@ -21,6 +21,7 @@ package daemon
 
 import (
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/netrules"
 )
 
 // CredentialSpec describes a credential to inject for a host.
@@ -70,6 +71,7 @@ type RegisterRequest struct {
 	MCPServers           []config.MCPServerConfig `json:"mcp_servers,omitempty"`
 	NetworkPolicy        string                   `json:"network_policy,omitempty"`
 	NetworkAllow         []string                 `json:"network_allow,omitempty"`
+	NetworkRules         []netrules.HostRules     `json:"network_rules,omitempty"`
 	Grants               []string                 `json:"grants,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
@@ -125,6 +127,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.MCPServers = req.MCPServers
 	rc.NetworkPolicy = req.NetworkPolicy
 	rc.NetworkAllow = req.NetworkAllow
+	rc.NetworkRules = req.NetworkRules
 	rc.AWSConfig = req.AWSConfig
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers

@@ -11,6 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/netrules"
 	"github.com/majorcontext/moat/internal/proxy"
 )
 
@@ -57,6 +58,7 @@ type RunContext struct {
 	MCPServers    []config.MCPServerConfig `json:"mcp_servers,omitempty"`
 	NetworkPolicy string                   `json:"network_policy,omitempty"`
 	NetworkAllow  []string                 `json:"network_allow,omitempty"`
+	NetworkRules  []netrules.HostRules     `json:"network_rules,omitempty"`
 
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
@@ -304,6 +306,16 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	// Convert allowed hosts.
 	for _, host := range rc.NetworkAllow {
 		d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(host))
+	}
+
+	// Copy host rules.
+	if len(rc.NetworkRules) > 0 {
+		d.HostRules = make([]netrules.HostRules, len(rc.NetworkRules))
+		copy(d.HostRules, rc.NetworkRules)
+		// Also add rule hosts to AllowedHosts for host-level matching
+		for _, hr := range rc.NetworkRules {
+			d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(hr.Host))
+		}
 	}
 
 	// Include AWS handler if configured.
