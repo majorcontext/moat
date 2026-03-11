@@ -4,6 +4,7 @@ package container
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 )
@@ -124,9 +125,21 @@ type Runtime interface {
 	// ResizeTTY resizes the container's TTY to the given dimensions.
 	ResizeTTY(ctx context.Context, id string, height, width uint) error
 
-	// ExecWrite runs a command inside a running container with data piped to stdin.
-	// Used for writing clipboard data via xclip.
-	ExecWrite(ctx context.Context, id string, cmd []string, stdin []byte) error
+	// Exec runs a command inside a running container.
+	// stdin is piped to the command's stdin (may be nil).
+	// stdout and stderr receive the command's output.
+	// Returns *ExecError for non-zero exit codes.
+	Exec(ctx context.Context, id string, cmd []string, stdin []byte, stdout, stderr io.Writer) error
+}
+
+// ExecError is returned when a command executed inside a container exits
+// with a non-zero exit code.
+type ExecError struct {
+	ExitCode int
+}
+
+func (e *ExecError) Error() string {
+	return fmt.Sprintf("exec failed with exit code %d", e.ExitCode)
 }
 
 // NetworkManager handles Docker network operations.

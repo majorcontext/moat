@@ -3048,7 +3048,26 @@ func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte,
 		target,
 	)
 	cmd := []string{"sh", "-c", script}
-	return m.runtime.ExecWrite(ctx, containerID, cmd, data)
+	return m.runtime.Exec(ctx, containerID, cmd, data, io.Discard, io.Discard)
+}
+
+// Exec runs a command inside a running container and streams output.
+func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []byte, stdout, stderr io.Writer) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	state := r.GetState()
+	m.mu.RUnlock()
+
+	if state != StateRunning {
+		return fmt.Errorf("run %s is not running (state: %s)", runID, state)
+	}
+
+	return m.runtime.Exec(ctx, containerID, cmd, stdin, stdout, stderr)
 }
 
 // FollowLogs streams container logs to the provided writer.
