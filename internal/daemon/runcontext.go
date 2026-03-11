@@ -307,6 +307,8 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	// If NetworkRules is populated (new CLI), use that as the primary source.
 	// Fall back to NetworkAllow (old CLI) for backwards compatibility.
 	if len(rc.NetworkRules) > 0 {
+		// Shallow copy: inner Rules slices share backing arrays, which is safe
+		// because these are never mutated after creation.
 		d.HostRules = make([]netrules.HostRules, len(rc.NetworkRules))
 		copy(d.HostRules, rc.NetworkRules)
 		// Also add rule hosts to AllowedHosts for host-level matching.

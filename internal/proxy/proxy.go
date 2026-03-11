@@ -718,9 +718,12 @@ func hostMatchAdapter(pattern, host string, port int) bool {
 
 // checkNetworkPolicyForRequest checks network policy using RunContextData first,
 // then falling back to the proxy's own policy.
+//
+// For CONNECT requests, only host-level checking is performed. Per-path rules
+// are enforced on the inner HTTP requests after TLS interception.
 func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port int, method, path string) bool {
 	if rc := getRunContext(r); rc != nil {
-		if len(rc.HostRules) > 0 {
+		if method != "CONNECT" && len(rc.HostRules) > 0 {
 			return netrules.Check(rc.Policy, rc.HostRules, host, port, method, path, hostMatchAdapter)
 		}
 		if rc.Policy != "strict" {
@@ -734,10 +737,28 @@ func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port 
 	policy := p.policy
 	p.mu.RUnlock()
 
-	if len(rules) > 0 {
+	if method != "CONNECT" && len(rules) > 0 {
 		return netrules.Check(policy, rules, host, port, method, path, hostMatchAdapter)
 	}
 	return p.checkNetworkPolicy(host, port)
+}
+
+// hasPathRulesForHost returns true if any matching host entry has per-path rules.
+func (p *Proxy) hasPathRulesForHost(r *http.Request, host string, port int) bool {
+	var rules []netrules.HostRules
+	if rc := getRunContext(r); rc != nil {
+		rules = rc.HostRules
+	} else {
+		p.mu.RLock()
+		rules = p.hostRules
+		p.mu.RUnlock()
+	}
+	for _, hr := range rules {
+		if hostMatchAdapter(hr.Host, host, port) && len(hr.Rules) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // getMCPServersForRequest returns MCP servers from RunContextData or falls
@@ -1129,6 +1150,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		p.handleConnectWithInterception(w, r, host)
 		return
 	}
+
+	// Without TLS interception, per-path rules cannot be enforced on HTTPS
+	// traffic — only host-level allow/deny applies. Warn if rules exist.
+	if p.hasPathRulesForHost(r, host, port) {
+		log.Warn("per-path rules configured but TLS interception disabled; only host-level rules apply",
+			"subsystem", "proxy", "host", host)
+	}
+
 	p.handleConnectTunnel(w, r)
 }
 
