@@ -234,7 +234,7 @@ func TestProxy_NetworkPolicyStrictBlocked(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
 	}
 
-	if resp.Header.Get("X-Moat-Blocked") != "network-policy" {
+	if resp.Header.Get("X-Moat-Blocked") != "request-rule" {
 		t.Errorf("X-Moat-Blocked header missing or wrong")
 	}
 
@@ -1042,7 +1042,7 @@ func TestProxy_PerContextNetworkPolicy(t *testing.T) {
 	}
 
 	// Verify the blocked header
-	if resp.Header.Get("X-Moat-Blocked") != "network-policy" {
+	if resp.Header.Get("X-Moat-Blocked") != "request-rule" {
 		t.Errorf("expected X-Moat-Blocked header, got %q", resp.Header.Get("X-Moat-Blocked"))
 	}
 
