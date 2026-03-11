@@ -6,7 +6,7 @@ func TestEvaluateRules(t *testing.T) {
 	rules := []Rule{
 		{Action: "allow", Method: "GET", PathPattern: "/repos/*"},
 		{Action: "allow", Method: "POST", PathPattern: "/repos/*/pulls"},
-		{Action: "deny", Method: "DELETE", PathPattern: "/*"},
+		{Action: "deny", Method: "DELETE", PathPattern: "/**"},
 	}
 
 	tests := []struct {
@@ -35,7 +35,7 @@ func TestEvaluateRules(t *testing.T) {
 func TestEvaluateRulesWildcardMethod(t *testing.T) {
 	rules := []Rule{
 		{Action: "deny", Method: "*", PathPattern: "/admin/**"},
-		{Action: "allow", Method: "*", PathPattern: "/*"},
+		{Action: "allow", Method: "*", PathPattern: "/**"},
 	}
 
 	tests := []struct {
@@ -62,7 +62,7 @@ func TestEvaluateRulesWildcardMethod(t *testing.T) {
 func TestEvaluateRulesFirstMatchWins(t *testing.T) {
 	rules := []Rule{
 		{Action: "allow", Method: "GET", PathPattern: "/repos/*"},
-		{Action: "deny", Method: "GET", PathPattern: "/*"},
+		{Action: "deny", Method: "GET", PathPattern: "/**"},
 	}
 
 	got := EvaluateRules(rules, "GET", "/repos/foo")
@@ -93,7 +93,7 @@ func TestCheckStrict(t *testing.T) {
 			Host: "api.github.com",
 			Rules: []Rule{
 				{Action: "allow", Method: "GET", PathPattern: "/repos/*"},
-				{Action: "deny", Method: "DELETE", PathPattern: "/*"},
+				{Action: "deny", Method: "DELETE", PathPattern: "/**"},
 			},
 		},
 		{Host: "registry.npmjs.org"},
@@ -129,7 +129,7 @@ func TestCheckPermissive(t *testing.T) {
 		{
 			Host: "api.github.com",
 			Rules: []Rule{
-				{Action: "deny", Method: "DELETE", PathPattern: "/*"},
+				{Action: "deny", Method: "DELETE", PathPattern: "/**"},
 			},
 		},
 	}

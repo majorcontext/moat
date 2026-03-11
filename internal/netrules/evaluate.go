@@ -28,13 +28,7 @@ func matchesRule(rule Rule, method, path string) bool {
 	if rule.Method != "*" && !strings.EqualFold(rule.Method, method) {
 		return false
 	}
-	pattern := rule.PathPattern
-	// Treat "/*" as a catch-all equivalent to "/**" so that a single trailing
-	// wildcard at the root matches any path depth.
-	if pattern == "/*" {
-		pattern = "/**"
-	}
-	return MatchPath(pattern, path)
+	return MatchPath(rule.PathPattern, path)
 }
 
 // Check is the single entry point for request-level rule evaluation.
