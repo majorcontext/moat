@@ -326,7 +326,7 @@ func TestLoadConfigWithNetworkStrict(t *testing.T) {
 agent: test
 network:
   policy: strict
-  allow:
+  rules:
     - "api.openai.com"
     - "*.amazonaws.com"
 `
@@ -339,14 +339,14 @@ network:
 	if cfg.Network.Policy != "strict" {
 		t.Errorf("Network.Policy = %q, want %q", cfg.Network.Policy, "strict")
 	}
-	if len(cfg.Network.Allow) != 2 {
-		t.Fatalf("Network.Allow = %d, want 2", len(cfg.Network.Allow))
+	if len(cfg.Network.Rules) != 2 {
+		t.Fatalf("Network.Rules = %d, want 2", len(cfg.Network.Rules))
 	}
-	if cfg.Network.Allow[0] != "api.openai.com" {
-		t.Errorf("Network.Allow[0] = %q, want %q", cfg.Network.Allow[0], "api.openai.com")
+	if cfg.Network.Rules[0].Host != "api.openai.com" {
+		t.Errorf("Network.Rules[0].Host = %q, want %q", cfg.Network.Rules[0].Host, "api.openai.com")
 	}
-	if cfg.Network.Allow[1] != "*.amazonaws.com" {
-		t.Errorf("Network.Allow[1] = %q, want %q", cfg.Network.Allow[1], "*.amazonaws.com")
+	if cfg.Network.Rules[1].Host != "*.amazonaws.com" {
+		t.Errorf("Network.Rules[1].Host = %q, want %q", cfg.Network.Rules[1].Host, "*.amazonaws.com")
 	}
 }
 
@@ -368,8 +368,8 @@ network:
 	if cfg.Network.Policy != "permissive" {
 		t.Errorf("Network.Policy = %q, want %q", cfg.Network.Policy, "permissive")
 	}
-	if len(cfg.Network.Allow) != 0 {
-		t.Errorf("Network.Allow = %d, want 0", len(cfg.Network.Allow))
+	if len(cfg.Network.Rules) != 0 {
+		t.Errorf("Network.Rules = %d, want 0", len(cfg.Network.Rules))
 	}
 }
 
@@ -389,8 +389,8 @@ agent: test
 	if cfg.Network.Policy != "permissive" {
 		t.Errorf("Network.Policy = %q, want %q (default)", cfg.Network.Policy, "permissive")
 	}
-	if len(cfg.Network.Allow) != 0 {
-		t.Errorf("Network.Allow = %d, want 0 (default)", len(cfg.Network.Allow))
+	if len(cfg.Network.Rules) != 0 {
+		t.Errorf("Network.Rules = %d, want 0 (default)", len(cfg.Network.Rules))
 	}
 }
 
@@ -406,19 +406,12 @@ network:
 `
 	os.WriteFile(configPath, []byte(content), 0644)
 
-	cfg, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error on deprecated network.allow field")
 	}
-	// Policy should default to permissive even if allow is specified
-	if cfg.Network.Policy != "permissive" {
-		t.Errorf("Network.Policy = %q, want %q (default)", cfg.Network.Policy, "permissive")
-	}
-	if len(cfg.Network.Allow) != 1 {
-		t.Fatalf("Network.Allow = %d, want 1", len(cfg.Network.Allow))
-	}
-	if cfg.Network.Allow[0] != "example.com" {
-		t.Errorf("Network.Allow[0] = %q, want %q", cfg.Network.Allow[0], "example.com")
+	if !strings.Contains(err.Error(), "network.allow") {
+		t.Errorf("error should mention network.allow, got: %v", err)
 	}
 }
 
@@ -439,6 +432,56 @@ network:
 	}
 	if !strings.Contains(err.Error(), "invalid network policy") {
 		t.Errorf("error should mention 'invalid network policy', got: %v", err)
+	}
+}
+
+func TestNetworkRulesConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantN   int
+		wantErr string
+	}{
+		{
+			name:  "plain host",
+			yaml:  "network:\n  policy: strict\n  rules:\n    - \"api.github.com\"\n",
+			wantN: 1,
+		},
+		{
+			name:  "host with rules",
+			yaml:  "network:\n  policy: strict\n  rules:\n    - \"api.github.com\":\n        - \"allow GET /repos/*\"\n",
+			wantN: 1,
+		},
+		{
+			name:  "mixed",
+			yaml:  "network:\n  policy: strict\n  rules:\n    - \"npmjs.org\"\n    - \"api.github.com\":\n        - \"allow GET /repos/*\"\n",
+			wantN: 2,
+		},
+		{
+			name:    "old allow field errors",
+			yaml:    "network:\n  policy: strict\n  allow:\n    - \"api.github.com\"\n",
+			wantErr: "network.allow",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			cfg, err := Load(dir)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cfg.Network.Rules) != tt.wantN {
+				t.Errorf("got %d rules, want %d", len(cfg.Network.Rules), tt.wantN)
+			}
+		})
 	}
 }
 
@@ -492,8 +535,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Network.Policy != "permissive" {
 		t.Errorf("DefaultConfig() Network.Policy = %q, want %q", cfg.Network.Policy, "permissive")
 	}
-	if len(cfg.Network.Allow) != 0 {
-		t.Errorf("DefaultConfig() Network.Allow = %d, want 0", len(cfg.Network.Allow))
+	if len(cfg.Network.Rules) != 0 {
+		t.Errorf("DefaultConfig() Network.Rules = %d, want 0", len(cfg.Network.Rules))
 	}
 }
 

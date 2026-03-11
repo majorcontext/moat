@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/majorcontext/moat/internal/langserver"
+	"github.com/majorcontext/moat/internal/netrules"
 	"gopkg.in/yaml.v3"
 )
 
@@ -177,8 +178,9 @@ func (c *Config) ValidateServices(serviceNames []string) error {
 
 // NetworkConfig configures network access policies for the agent.
 type NetworkConfig struct {
-	Policy string   `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
-	Allow  []string `yaml:"allow,omitempty"`  // allowed host patterns
+	Policy string                      `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
+	Allow  []string                    `yaml:"allow,omitempty"`  // deprecated: hard error
+	Rules  []netrules.NetworkRuleEntry `yaml:"rules,omitempty"`
 }
 
 // ClaudeConfig configures Claude Code integration options.
@@ -458,6 +460,10 @@ func Load(dir string) (*Config, error) {
 	// Validate network policy
 	if cfg.Network.Policy != "permissive" && cfg.Network.Policy != "strict" {
 		return nil, fmt.Errorf("invalid network policy %q: must be 'permissive' or 'strict'", cfg.Network.Policy)
+	}
+
+	if len(cfg.Network.Allow) > 0 {
+		return nil, fmt.Errorf("\"network.allow\" is no longer supported, use \"network.rules\" instead\n\nExample:\n  network:\n    rules:\n      - \"api.github.com\"")
 	}
 
 	// Validate sandbox setting
