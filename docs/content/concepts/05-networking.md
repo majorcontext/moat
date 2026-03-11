@@ -99,6 +99,15 @@ Each rule is a string: `"<allow|deny> <method> <path-pattern>"`
 - `method`: HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, etc.) or `*` for any method
 - `path-pattern`: URL path where `*` matches a single path segment and `**` matches zero or more segments
 
+> **Note:** `/prefix/**` matches paths with one or more segments after the prefix, but does not match `/prefix` itself. To block both `/admin` and everything under it, use two rules:
+>
+> ```yaml
+> - "deny * /admin"
+> - "deny * /admin/**"
+> ```
+>
+> The root wildcard `/**` is an exception — it matches all paths including `/`.
+
 ### Evaluation order
 
 Rules are evaluated top to bottom. The first matching rule wins. If no rule matches, the request falls through to the policy default:
@@ -128,6 +137,7 @@ network:
   policy: permissive
   rules:
     - "api.example.com":
+        - "deny * /admin"
         - "deny * /admin/**"
         - "deny DELETE /**"
 ```

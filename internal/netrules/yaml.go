@@ -24,6 +24,9 @@ func (e *NetworkRuleEntry) UnmarshalYAML(value *yaml.Node) error {
 			return fmt.Errorf("network.rules entry must have exactly one host key, got %d", len(value.Content)/2)
 		}
 		e.Host = value.Content[0].Value
+		if e.Host == "" {
+			return fmt.Errorf("network.rules entry: host cannot be empty")
+		}
 
 		var ruleStrings []string
 		if err := value.Content[1].Decode(&ruleStrings); err != nil {

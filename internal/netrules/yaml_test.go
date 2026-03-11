@@ -34,6 +34,11 @@ func TestNetworkRuleEntryUnmarshal(t *testing.T) {
 			yaml:    `"api.github.com": ["block GET /foo"]`,
 			wantErr: true,
 		},
+		{
+			name:    "empty host in mapping",
+			yaml:    `"": ["allow GET /"]`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

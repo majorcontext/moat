@@ -1282,12 +1282,14 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// The CONNECT request r carries the per-run context for rule lookup.
 		if !p.checkNetworkPolicyForRequest(r, host, connectPort, req.Method, req.URL.Path) {
 			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			body := "Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n"
 			blockedResp := &http.Response{
-				StatusCode: http.StatusProxyAuthRequired,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader("Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n")),
+				StatusCode:    http.StatusProxyAuthRequired,
+				ProtoMajor:    1,
+				ProtoMinor:    1,
+				Header:        make(http.Header),
+				ContentLength: int64(len(body)),
+				Body:          io.NopCloser(strings.NewReader(body)),
 			}
 			blockedResp.Header.Set("X-Moat-Blocked", "request-rule")
 			blockedResp.Header.Set("Content-Type", "text/plain")
