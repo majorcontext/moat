@@ -1219,6 +1219,15 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// HTTP/2 on the upstream side causes framing mismatches and hangs.
 	}
 
+	// Extract port from the CONNECT request for rule checking.
+	// Defaults to 443 since this is a TLS-intercepted connection.
+	connectPort := 443
+	if _, pStr, err := net.SplitHostPort(r.Host); err == nil {
+		if p, err := net.LookupPort("tcp", pStr); err == nil {
+			connectPort = p
+		}
+	}
+
 	clientReader := bufio.NewReader(tlsClientConn)
 	for {
 		req, err := http.ReadRequest(clientReader)
@@ -1238,6 +1247,23 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.URL.Scheme = "https"
 		req.URL.Host = r.Host
 		req.RequestURI = ""
+
+		// Check request-level rules (method + path) for the inner HTTP request.
+		// The CONNECT request r carries the per-run context for rule lookup.
+		if !p.checkNetworkPolicyForRequest(r, host, connectPort, req.Method, req.URL.Path) {
+			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			blockedResp := &http.Response{
+				StatusCode: http.StatusProxyAuthRequired,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n")),
+			}
+			blockedResp.Header.Set("X-Moat-Blocked", "request-rule")
+			blockedResp.Header.Set("Content-Type", "text/plain")
+			_ = blockedResp.Write(tlsClientConn)
+			continue
+		}
 
 		// Inject MCP credentials if this is an MCP request.
 		// Use the CONNECT request r for context lookups since inner

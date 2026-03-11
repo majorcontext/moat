@@ -88,7 +88,7 @@ func matchPartsInner(pattern, reqPath []string, consumed bool) bool {
 			continue
 		}
 
-		if !strings.EqualFold(seg, reqPath[0]) {
+		if seg != reqPath[0] {
 			return false
 		}
 		reqPath = reqPath[1:]
