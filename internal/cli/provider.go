@@ -173,10 +173,7 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	// Network: provider hosts first, then user-specified allowed hosts.
 	// Convert plain host strings to NetworkRuleEntry (host-level allow, no method/path rules).
-	for _, host := range rc.NetworkHosts {
-		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
-	}
-	for _, host := range rc.AllowedHosts {
+	for _, host := range append(rc.NetworkHosts, rc.AllowedHosts...) {
 		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
 	}
 

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Firewall demo script
+Firewall demo script — HTTP request rules
 
-Demonstrates:
-  1. Allowed request to httpbin.org (in allow list)
-  2. Blocked request to example.com (not in allow list)
-  3. Direct socket connection blocked (bypasses proxy env vars)
+Demonstrates fine-grained network rules with method + path matching:
+  1. GET to httpbin.org      → allowed (matches "allow GET /**")
+  2. POST to httpbin.org     → blocked (matches "deny * /**")
+  3. GET to api.github.com   → allowed (matches "allow GET /repos/*")
+  4. DELETE to api.github.com → blocked (matches "deny * /**")
+  5. GET /admin on github    → blocked (matches "deny * /admin/**")
+  6. Request to example.com  → blocked (host not in rules, strict policy)
+  7. Direct socket bypass    → blocked (iptables firewall)
 """
 
 import socket
@@ -13,127 +17,144 @@ import urllib.request
 import urllib.error
 import ssl
 
-# Create SSL context that trusts the Moat CA
+# Trust the Moat proxy's generated TLS certs
 ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE  # Trust proxy's generated certs
+ssl_context.verify_mode = ssl.CERT_NONE
 
-def make_request(url: str) -> tuple[int, str, dict]:
-    """Make HTTP request, return (status_code, body, headers)"""
+
+def make_request(url: str, method: str = "GET") -> tuple[int, str, dict]:
+    """Make HTTP request, return (status_code, body, headers)."""
     try:
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, method=method)
         with urllib.request.urlopen(req, timeout=10, context=ssl_context) as resp:
             return resp.status, resp.read().decode()[:500], dict(resp.headers)
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode(), dict(e.headers)
+        return e.code, e.read().decode()[:500], dict(e.headers)
     except urllib.error.URLError as e:
         reason = str(e.reason)
-        # Python wraps proxy 407 errors in a tunnel connection failure message
         if "407" in reason:
             return 407, reason, {}
         return 0, reason, {}
 
+
+def run_test(num: int, desc: str, url: str, method: str, expect_allowed: bool):
+    """Run a single test and print the result."""
+    print(f"Test {num}: {desc}")
+    print(f"  {method} {url}")
+
+    status, body, headers = make_request(url, method)
+
+    blocked = status == 407 or status == 0
+    allowed = not blocked
+
+    if allowed == expect_allowed:
+        result = "PASS"
+    else:
+        result = "FAIL"
+
+    if allowed:
+        print(f"  → {status} OK")
+    elif status == 407:
+        blocked_by = headers.get("X-Moat-Blocked", "network-policy")
+        print(f"  → Blocked ({blocked_by})")
+    else:
+        print(f"  → Connection refused")
+
+    label = "allowed" if expect_allowed else "blocked"
+    print(f"  [{result}] Expected: {label}")
+    print()
+    return result == "PASS"
+
+
 def main():
-    print("=" * 50)
-    print("Network Firewall Demo")
-    print("=" * 50)
+    print("=" * 55)
+    print("  Network Firewall Demo — HTTP Request Rules")
+    print("=" * 55)
     print()
-    print("Policy: strict")
-    print("Allowed hosts: httpbin.org, *.httpbin.org")
-    print()
-
-    # Test 1: Allowed request
-    print("-" * 50)
-    print("Test 1: Request to httpbin.org (ALLOWED)")
-    print("-" * 50)
+    print("  Policy: strict (default deny)")
+    print("  Rules: method + path patterns per host")
     print()
 
-    status, body, headers = make_request("https://httpbin.org/get")
+    results = []
 
-    if status == 200:
-        print(f"Status: {status} OK")
-        print()
-        # Show first few lines of response
-        for line in body.split('\n')[:8]:
-            print(f"  {line}")
-        print("  ...")
-        print()
-        print("Result: SUCCESS - Request allowed")
-    else:
-        print(f"Status: {status}")
-        print(f"Body: {body[:200]}")
-        print()
-        print("Result: UNEXPECTED - Request should have succeeded")
-
-    print()
+    # --- httpbin.org: allow GET, deny everything else ---
+    print("-" * 55)
+    print("  httpbin.org — allow GET only")
+    print("-" * 55)
     print()
 
-    # Test 2: Blocked request
-    print("-" * 50)
-    print("Test 2: Request to example.com (BLOCKED)")
-    print("-" * 50)
+    results.append(run_test(
+        1, "GET allowed by 'allow GET /**'",
+        "https://httpbin.org/get", "GET", expect_allowed=True,
+    ))
+
+    results.append(run_test(
+        2, "POST blocked by 'deny * /**'",
+        "https://httpbin.org/post", "POST", expect_allowed=False,
+    ))
+
+    # --- api.github.com: path-based rules ---
+    print("-" * 55)
+    print("  api.github.com — path-based access control")
+    print("-" * 55)
     print()
 
-    status, body, headers = make_request("https://example.com")
+    results.append(run_test(
+        3, "GET /repos/moat allowed by 'allow GET /repos/*'",
+        "https://api.github.com/repos/moat", "GET", expect_allowed=True,
+    ))
 
-    if status == 407:
-        print(f"Status: {status} Proxy Authentication Required")
-        print()
-        if "X-Moat-Blocked" in headers:
-            print(f"Header: X-Moat-Blocked: {headers['X-Moat-Blocked']}")
-        print()
-        print("Response body:")
-        for line in body.strip().split('\n'):
-            print(f"  {line}")
-        print()
-        print("Result: SUCCESS - Request blocked by network policy")
-    else:
-        print(f"Status: {status}")
-        print(f"Body: {body[:200]}")
-        print()
-        print("Result: UNEXPECTED - Request should have been blocked with 407")
+    results.append(run_test(
+        4, "DELETE blocked by 'deny * /**'",
+        "https://api.github.com/repos/moat", "DELETE", expect_allowed=False,
+    ))
 
-    print()
+    results.append(run_test(
+        5, "GET /admin/users blocked by 'deny * /admin/**'",
+        "https://api.github.com/admin/users", "GET", expect_allowed=False,
+    ))
+
+    # --- example.com: not in rules, strict policy blocks ---
+    print("-" * 55)
+    print("  example.com — unlisted host (strict = deny)")
+    print("-" * 55)
     print()
 
-    # Test 3: Direct socket connection (bypasses proxy)
-    print("-" * 50)
-    print("Test 3: Direct socket to example.com:80 (BLOCKED)")
-    print("-" * 50)
+    results.append(run_test(
+        6, "Blocked by strict policy (host not in rules)",
+        "https://example.com", "GET", expect_allowed=False,
+    ))
+
+    # --- Direct socket bypass ---
+    print("-" * 55)
+    print("  Direct socket — iptables blocks proxy bypass")
+    print("-" * 55)
     print()
-    print("This test bypasses HTTP_PROXY by opening a raw socket.")
-    print("The iptables firewall should block it.")
-    print()
+    print("Test 7: Raw socket to example.com:80")
+    print("  Bypasses HTTP_PROXY env var")
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
-        # Try to connect directly to example.com
-        sock.connect(("93.184.216.34", 80))  # example.com's IP
+        sock.connect(("93.184.216.34", 80))
         sock.close()
-        print("Status: Connected successfully")
-        print()
-        print("Result: UNEXPECTED - Direct socket should have been blocked")
-    except socket.timeout:
-        print("Status: Connection timed out")
-        print()
-        print("Result: SUCCESS - Firewall blocked direct connection")
-    except OSError as e:
-        print(f"Status: Connection failed: {e}")
-        print()
-        print("Result: SUCCESS - Firewall blocked direct connection")
+        print("  → Connected (unexpected)")
+        print("  [FAIL] Expected: blocked")
+        results.append(False)
+    except (socket.timeout, OSError) as e:
+        print(f"  → Blocked ({e})")
+        print("  [PASS] Expected: blocked")
+        results.append(True)
 
+    # --- Summary ---
     print()
-    print()
-    print("=" * 50)
-    print("Demo complete!")
-    print("=" * 50)
-    print()
-    print("The firewall blocked example.com because it's not in the allow list.")
-    print("Only httpbin.org and *.httpbin.org are permitted.")
-    print()
-    print("Direct socket connections are also blocked by iptables rules,")
-    print("preventing bypass of the HTTP proxy.")
+    print("=" * 55)
+    passed = sum(results)
+    total = len(results)
+    print(f"  Results: {passed}/{total} tests passed")
+    print("=" * 55)
+
 
 if __name__ == "__main__":
     main()
