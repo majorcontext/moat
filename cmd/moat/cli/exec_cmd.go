@@ -57,10 +57,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Read stdin if it's not a terminal (piped input)
+	// Read stdin if it's not a terminal (piped input), capped at 64 MB.
+	const maxStdin = 64 << 20
 	var stdin []byte
 	if !term.IsTerminal(os.Stdin) {
-		stdin, err = io.ReadAll(os.Stdin)
+		stdin, err = io.ReadAll(io.LimitReader(os.Stdin, maxStdin))
 		if err != nil {
 			return fmt.Errorf("reading stdin: %w", err)
 		}
