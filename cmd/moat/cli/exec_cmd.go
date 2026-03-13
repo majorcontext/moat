@@ -26,9 +26,8 @@ Examples:
   moat exec run_a1b2c3d4e5f6 -- ls /workspace
   echo "data" | moat exec run_a1b2c3d4e5f6 -- cat
   moat exec run_a1b2c3d4e5f6 -- sh -c "ps aux"`,
-	Args:               cobra.MinimumNArgs(1),
-	RunE:               runExec,
-	DisableFlagParsing: false,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runExec,
 }
 
 func init() {
