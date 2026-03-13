@@ -181,6 +181,11 @@ func (s *Store) AppendContainer(data ContainerData) (*Entry, error) {
 	return s.Append(EntryContainer, &data)
 }
 
+// AppendExec adds an exec command entry.
+func (s *Store) AppendExec(data ExecData) (*Entry, error) {
+	return s.Append(EntryExec, &data)
+}
+
 // Get retrieves an entry by sequence number.
 func (s *Store) Get(seq uint64) (*Entry, error) {
 	row := s.db.QueryRow(`

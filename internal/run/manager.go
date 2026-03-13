@@ -3060,6 +3060,7 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []
 		return fmt.Errorf("run %s not found", runID)
 	}
 	containerID := r.ContainerID
+	auditStore := r.AuditStore
 	state := r.GetState()
 	m.mu.RUnlock()
 
@@ -3067,7 +3068,22 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []
 		return fmt.Errorf("run %s is not running (state: %s)", runID, state)
 	}
 
-	return m.runtime.Exec(ctx, containerID, cmd, stdin, stdout, stderr)
+	execErr := m.runtime.Exec(ctx, containerID, cmd, stdin, stdout, stderr)
+
+	if auditStore != nil {
+		exitCode := 0
+		var ee *container.ExecError
+		if errors.As(execErr, &ee) {
+			exitCode = ee.ExitCode
+		}
+		_, _ = auditStore.AppendExec(audit.ExecData{
+			Command:  cmd,
+			HasStdin: len(stdin) > 0,
+			ExitCode: exitCode,
+		})
+	}
+
+	return execErr
 }
 
 // FollowLogs streams container logs to the provided writer.
