@@ -569,7 +569,7 @@ func (r *DockerRuntime) Exec(ctx context.Context, containerID string, cmd []stri
 	execConfig := container.ExecOptions{
 		Cmd:          cmd,
 		User:         "moatuser",
-		AttachStdin:  true,
+		AttachStdin:  len(stdin) > 0,
 		AttachStdout: true,
 		AttachStderr: true,
 	}

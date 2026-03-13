@@ -3028,15 +3028,6 @@ func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte,
 		return fmt.Errorf("invalid xclip target: %q", target)
 	}
 
-	m.mu.RLock()
-	r, ok := m.runs[runID]
-	if !ok {
-		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
-	}
-	containerID := r.ContainerID
-	m.mu.RUnlock()
-
 	// Kill any previous xclip (which serves the old X selection) before
 	// setting new clipboard content. xclip reads directly from stdin via
 	// -i and supports large payloads through the X11 INCR mechanism.
@@ -3048,7 +3039,7 @@ func (m *Manager) WriteClipboard(ctx context.Context, runID string, data []byte,
 		target,
 	)
 	cmd := []string{"sh", "-c", script}
-	return m.runtime.Exec(ctx, containerID, cmd, data, io.Discard, io.Discard)
+	return m.Exec(ctx, runID, cmd, data, io.Discard, io.Discard)
 }
 
 // Exec runs a command inside a running container and streams output.
