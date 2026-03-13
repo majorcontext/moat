@@ -72,6 +72,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if execErr != nil {
 		var ee *container.ExecError
 		if errors.As(execErr, &ee) {
+			manager.Close()
 			os.Exit(ee.ExitCode)
 		}
 		return execErr
