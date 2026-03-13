@@ -125,7 +125,7 @@ func (f *flexibleRuntime) StartAttached(context.Context, string, container.Attac
 	return nil
 }
 func (f *flexibleRuntime) ResizeTTY(context.Context, string, uint, uint) error { return nil }
-func (f *flexibleRuntime) ExecWrite(context.Context, string, []string, []byte) error {
+func (f *flexibleRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	return nil
 }
 

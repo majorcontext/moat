@@ -908,6 +908,41 @@ moat stop run_a1b2c3d4e5f6
 
 ---
 
+## moat exec
+
+Run a command inside a running container.
+
+```
+moat exec <run> -- <command> [args...]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `run` | Run ID or name |
+| `command` | Command and arguments to execute (after `--`) |
+
+The exit code from the executed command is forwarded to the caller. If stdin is piped, it is forwarded to the command.
+
+### Examples
+
+```bash
+# Run a command
+moat exec run_a1b2c3d4e5f6 -- echo hello
+
+# List workspace files
+moat exec run_a1b2c3d4e5f6 -- ls /workspace
+
+# Pipe data to a command
+echo "data" | moat exec run_a1b2c3d4e5f6 -- cat
+
+# Run a shell command
+moat exec run_a1b2c3d4e5f6 -- sh -c "ps aux"
+```
+
+---
+
 ## moat destroy
 
 Remove a stopped run and its artifacts.

@@ -890,7 +890,7 @@ func (s *stubRuntime) StartAttached(context.Context, string, container.AttachOpt
 func (s *stubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 	panic("not implemented")
 }
-func (s *stubRuntime) ExecWrite(context.Context, string, []string, []byte) error {
+func (s *stubRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	panic("not implemented")
 }
 

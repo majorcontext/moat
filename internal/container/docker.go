@@ -564,11 +564,12 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	return nil
 }
 
-// ExecWrite runs a command inside a running container with data piped to stdin.
-func (r *DockerRuntime) ExecWrite(ctx context.Context, containerID string, cmd []string, stdin []byte) error {
+// Exec runs a command inside a running container.
+func (r *DockerRuntime) Exec(ctx context.Context, containerID string, cmd []string, stdin []byte, stdout, stderr io.Writer) error {
 	execConfig := container.ExecOptions{
 		Cmd:          cmd,
-		AttachStdin:  true,
+		User:         "moatuser",
+		AttachStdin:  len(stdin) > 0,
 		AttachStdout: true,
 		AttachStderr: true,
 	}
@@ -596,9 +597,8 @@ func (r *DockerRuntime) ExecWrite(ctx context.Context, containerID string, cmd [
 		}
 	}
 
-	// Drain output
-	var output bytes.Buffer
-	_, _ = io.Copy(&output, resp.Reader)
+	// Demux stdout/stderr from the Docker multiplexed stream
+	_, _ = stdcopy.StdCopy(stdout, stderr, resp.Reader)
 
 	// Check exit code
 	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
@@ -606,7 +606,7 @@ func (r *DockerRuntime) ExecWrite(ctx context.Context, containerID string, cmd [
 		return fmt.Errorf("inspecting exec: %w", err)
 	}
 	if inspect.ExitCode != 0 {
-		return fmt.Errorf("exec failed with exit code %d: %s", inspect.ExitCode, output.String())
+		return &ExecError{ExitCode: inspect.ExitCode}
 	}
 	return nil
 }

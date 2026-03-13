@@ -21,6 +21,7 @@ const (
 	EntrySecret     EntryType = "secret"
 	EntrySSH        EntryType = "ssh"
 	EntryContainer  EntryType = "container"
+	EntryExec       EntryType = "exec"
 )
 
 // FirstSequence is the sequence number of the first entry in a log.
@@ -74,6 +75,13 @@ type ContainerData struct {
 	BuildKitEnabled     bool   `json:"buildkit_enabled,omitempty"`
 	BuildKitContainerID string `json:"buildkit_container_id,omitempty"`
 	BuildKitNetworkID   string `json:"buildkit_network_id,omitempty"`
+}
+
+// ExecData holds exec command entry data.
+type ExecData struct {
+	Command  []string `json:"command"`
+	HasStdin bool     `json:"has_stdin"`
+	ExitCode int      `json:"exit_code"`
 }
 
 // Entry represents a single hash-chained log entry.
