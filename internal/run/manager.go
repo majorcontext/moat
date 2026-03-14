@@ -447,20 +447,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Add mounts from config
 	if opts.Config != nil {
-		for _, mountStr := range opts.Config.Mounts {
-			mount, err := config.ParseMount(mountStr)
-			if err != nil {
-				return nil, fmt.Errorf("parsing mount %q: %w", mountStr, err)
-			}
+		for _, me := range opts.Config.Mounts {
 			// Resolve relative paths against workspace
-			source := mount.Source
+			source := me.Source
 			if !filepath.IsAbs(source) {
 				source = filepath.Join(opts.Workspace, source)
 			}
 			mounts = append(mounts, container.MountConfig{
 				Source:   source,
-				Target:   mount.Target,
-				ReadOnly: mount.ReadOnly,
+				Target:   me.Target,
+				ReadOnly: me.ReadOnly,
 			})
 		}
 	}
