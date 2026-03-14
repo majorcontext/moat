@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
@@ -476,7 +477,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			// Resolve excludes to tmpfs mounts
 			for _, exc := range me.Exclude {
 				tmpfsMounts = append(tmpfsMounts, container.TmpfsMount{
-					Target: filepath.Join(me.Target, exc),
+					Target: path.Join(me.Target, exc),
 				})
 			}
 		}

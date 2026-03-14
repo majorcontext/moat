@@ -143,5 +143,18 @@ func ValidateExcludes(excludes []string, target string) ([]string, error) {
 		cleaned = append(cleaned, c)
 	}
 
+	// Check for overlapping excludes (e.g., "foo" and "foo/bar" — the
+	// deeper path is already shadowed by the parent tmpfs).
+	for i, a := range cleaned {
+		for _, b := range cleaned[i+1:] {
+			if strings.HasPrefix(b+"/", a+"/") {
+				return nil, fmt.Errorf("mount %s: exclude %q is redundant with %q", target, b, a)
+			}
+			if strings.HasPrefix(a+"/", b+"/") {
+				return nil, fmt.Errorf("mount %s: exclude %q is redundant with %q", target, a, b)
+			}
+		}
+	}
+
 	return cleaned, nil
 }

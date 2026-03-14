@@ -205,6 +205,18 @@ func TestValidateExcludes(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:     "rejects overlapping excludes",
+			excludes: []string{"foo", "foo/bar"},
+			target:   "/workspace",
+			wantErr:  true,
+		},
+		{
+			name:     "rejects overlapping excludes reverse order",
+			excludes: []string{"foo/bar", "foo"},
+			target:   "/workspace",
+			wantErr:  true,
+		},
+		{
 			name:     "rejects normalized duplicates",
 			excludes: []string{"node_modules", "./node_modules"},
 			target:   "/workspace",
