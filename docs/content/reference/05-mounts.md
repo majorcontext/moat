@@ -51,7 +51,7 @@ String and object forms can be mixed in the same `mounts` array.
 
 ## CLI usage
 
-The `--mount` flag adds mounts from the command line. It is repeatable.
+The `--mount` flag adds mounts from the command line. It is repeatable. CLI mounts are combined with any mounts defined in `moat.yaml`. Duplicate targets are rejected.
 
 ```bash
 # Mount a directory read-only
@@ -63,6 +63,8 @@ moat run --mount ./configs:/app/configs:ro --mount /tmp/output:/output:rw ./my-p
 # Combine with other flags
 moat run --grant github --mount ./data:/data:ro ./my-project
 ```
+
+If a `--mount` targets `/workspace`, it replaces the automatic workspace mount. The workspace directory will not be available unless you mount it explicitly.
 
 ## moat.yaml usage
 

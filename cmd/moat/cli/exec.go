@@ -219,6 +219,11 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		if opts.Config == nil {
 			opts.Config = &config.Config{}
 		}
+		for _, existing := range opts.Config.Mounts {
+			if existing.Target == me.Target {
+				return nil, fmt.Errorf("--mount %s: target %q already mounted", ms, me.Target)
+			}
+		}
 		opts.Config.Mounts = append(opts.Config.Mounts, *me)
 	}
 

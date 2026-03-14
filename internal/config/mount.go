@@ -73,8 +73,8 @@ func (m *MountEntry) UnmarshalYAML(value *yaml.Node) error {
 // parseMount parses a mount string like "./data:/data:ro".
 func parseMount(s string) (*MountEntry, error) {
 	parts := strings.Split(s, ":")
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid mount: %s (expected source:target[:ro])", s)
+	if len(parts) < 2 || len(parts) > 3 {
+		return nil, fmt.Errorf("invalid mount: %s (expected source:target[:mode])", s)
 	}
 
 	if !filepath.IsAbs(parts[1]) {
@@ -86,8 +86,15 @@ func parseMount(s string) (*MountEntry, error) {
 		Target: parts[1],
 	}
 
-	if len(parts) >= 3 && parts[2] == "ro" {
-		m.ReadOnly = true
+	if len(parts) == 3 {
+		switch parts[2] {
+		case "ro":
+			m.ReadOnly = true
+		case "rw", "":
+			// default read-write
+		default:
+			return nil, fmt.Errorf("invalid mount: %s (mode must be 'ro' or 'rw')", s)
+		}
 	}
 
 	return m, nil

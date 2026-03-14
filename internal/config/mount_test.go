@@ -257,6 +257,8 @@ func TestParseMount(t *testing.T) {
 		{"./cache:/cache:rw", "./cache", "/cache", false, false},
 		{"invalid", "", "", false, true},
 		{"./data:relative", "", "", false, true},
+		{"./data:/data:ro:extra", "", "", false, true},
+		{"./data:/data:badmode", "", "", false, true},
 	}
 
 	for _, tt := range tests {
