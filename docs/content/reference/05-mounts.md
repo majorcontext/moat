@@ -36,6 +36,19 @@ The mode field is optional. When omitted, the mount is read-write.
 | `/host/path:/container/path` | `/host/path` (absolute) | `/container/path` | read-write |
 | `./cache:/cache:rw` | `./cache` (relative) | `/cache` | read-write |
 
+## Object form
+
+For advanced configuration like directory exclusion, use the object form:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `source` | `string` | yes | | Host path. Absolute or relative to the workspace directory. |
+| `target` | `string` | yes | | Container path. Must be absolute. |
+| `mode` | `string` | no | `rw` | `ro` (read-only) or `rw` (read-write). |
+| `exclude` | `[]string` | no | `[]` | Paths relative to `target` to overlay with tmpfs. |
+
+String and object forms can be mixed in the same `mounts` array.
+
 ## CLI usage
 
 The `--mount` flag adds mounts from the command line. It is repeatable.
@@ -53,13 +66,16 @@ moat run --grant github --mount ./data:/data:ro ./my-project
 
 ## moat.yaml usage
 
-The `mounts` field accepts a list of mount strings.
+The `mounts` field accepts a list of mount strings, objects, or both.
 
 ```yaml
 mounts:
   - ./data:/data:ro
   - /host/path:/container/path:rw
-  - ./cache:/cache
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
 ```
 
 CLI `--mount` flags are additive with `moat.yaml` `mounts`. Both sources are combined at runtime.
@@ -80,6 +96,16 @@ package.json
 
 The workspace path is resolved to an absolute path on the host before mounting. Changes the agent makes in `/workspace` are written directly to the host filesystem and persist after the run completes.
 
+To add excludes to the workspace mount, declare it explicitly with the object form. This replaces the automatic mount:
+
+```yaml
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+```
+
 ## Path resolution
 
 Relative `source` paths are resolved against the workspace directory. The `target` path must be absolute.
@@ -98,6 +124,38 @@ Relative `source` paths are resolved against the workspace directory. The `targe
 | `ro` | Container reads from the mounted directory. Write attempts fail. |
 
 `rw` is the default when no mode is specified.
+
+## Excluding directories
+
+Excluded directories are overlaid with tmpfs (in-memory) mounts inside the container. The host files at those paths are hidden, and the container sees an empty directory. Files written to excluded paths live in memory and do not touch the host filesystem.
+
+This is useful for large dependency trees (`node_modules`, `.venv`, `vendor/`) that cause performance problems with shared filesystem mounts -- particularly VirtioFS on Apple Containers, where each file descriptor accumulates over time.
+
+```yaml
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+      - .venv
+```
+
+Since excluded directories start empty, install dependencies inside the container. Use a `pre_run` hook:
+
+```yaml
+hooks:
+  pre_run: npm install
+
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+```
+
+Tmpfs overlays are always writable, even when the parent mount is read-only. This allows installing dependencies on tmpfs while keeping source files read-only.
+
+Excludes are only available in `moat.yaml` (object form). The `--mount` CLI flag uses the string format and does not support excludes.
 
 ## Runtime differences
 
