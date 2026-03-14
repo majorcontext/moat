@@ -259,6 +259,7 @@ func TestParseMount(t *testing.T) {
 		{"./data:relative", "", "", false, true},
 		{"./data:/data:ro:extra", "", "", false, true},
 		{"./data:/data:badmode", "", "", false, true},
+		{":/data", "", "", false, true},
 	}
 
 	for _, tt := range tests {

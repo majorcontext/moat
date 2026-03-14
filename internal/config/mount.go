@@ -77,6 +77,10 @@ func parseMount(s string) (*MountEntry, error) {
 		return nil, fmt.Errorf("invalid mount: %s (expected source:target[:mode])", s)
 	}
 
+	if parts[0] == "" {
+		return nil, fmt.Errorf("invalid mount: %s (source must not be empty)", s)
+	}
+
 	if !filepath.IsAbs(parts[1]) {
 		return nil, fmt.Errorf("invalid mount: %s (target must be an absolute path)", s)
 	}
