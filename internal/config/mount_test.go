@@ -82,6 +82,14 @@ func TestMountEntryUnmarshalYAML(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "rejects relative target in object form",
+			yaml: `
+- source: .
+  target: relative/path
+`,
+			wantErr: true,
+		},
+		{
 			name: "invalid yaml node type",
 			yaml: `
 - 42
@@ -236,6 +244,7 @@ func TestParseMount(t *testing.T) {
 		{"/abs/path:/container", "/abs/path", "/container", false, false},
 		{"./cache:/cache:rw", "./cache", "/cache", false, false},
 		{"invalid", "", "", false, true},
+		{"./data:relative", "", "", false, true},
 	}
 
 	for _, tt := range tests {

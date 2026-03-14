@@ -243,6 +243,21 @@ volumes:
 `,
 			wantErr: "conflicts with volume target",
 		},
+		{
+			name: "rejects volume nested under exclude",
+			yaml: `
+name: myagent
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+volumes:
+  - name: cache
+    target: /workspace/node_modules/cache
+`,
+			wantErr: "conflicts with volume target",
+		},
 	}
 
 	for _, tt := range tests {

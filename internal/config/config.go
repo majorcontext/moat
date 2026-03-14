@@ -608,7 +608,7 @@ func Load(dir string) (*Config, error) {
 			for _, exc := range cleaned {
 				excAbs := filepath.Join(m.Target, exc)
 				for _, vol := range cfg.Volumes {
-					if vol.Target == excAbs {
+					if vol.Target == excAbs || strings.HasPrefix(vol.Target, excAbs+"/") {
 						return nil, fmt.Errorf("%s: exclude path %q conflicts with volume target %q", prefix, exc, vol.Target)
 					}
 				}

@@ -49,6 +49,9 @@ func (m *MountEntry) UnmarshalYAML(value *yaml.Node) error {
 		if raw.Target == "" {
 			return fmt.Errorf("mount object: 'target' is required")
 		}
+		if !filepath.IsAbs(raw.Target) {
+			return fmt.Errorf("mount object: 'target' must be an absolute path, got %q", raw.Target)
+		}
 		switch raw.Mode {
 		case "", "rw":
 			// default read-write
@@ -72,6 +75,10 @@ func parseMount(s string) (*MountEntry, error) {
 	parts := strings.Split(s, ":")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid mount: %s (expected source:target[:ro])", s)
+	}
+
+	if !filepath.IsAbs(parts[1]) {
+		return nil, fmt.Errorf("invalid mount: %s (target must be an absolute path)", s)
 	}
 
 	m := &MountEntry{
