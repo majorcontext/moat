@@ -298,6 +298,11 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--volume", mountStr)
 	}
 
+	// Tmpfs mounts (overlays for excluded directories)
+	for _, tm := range cfg.TmpfsMounts {
+		args = append(args, "--tmpfs", tm.Target)
+	}
+
 	// Image
 	args = append(args, cfg.Image)
 
