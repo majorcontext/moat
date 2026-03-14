@@ -1611,3 +1611,124 @@ func TestGenerateDockerfileClipboardNeedsInit(t *testing.T) {
 		t.Error("NeedsClipboard should trigger needsInit")
 	}
 }
+
+func TestGenerateDockerfileValidForLegacyBuilder(t *testing.T) {
+	// Validate that generated Dockerfiles are parseable by Docker's legacy builder.
+	// Every non-blank, non-comment line must either:
+	// 1. Start with a known Dockerfile instruction
+	// 2. Be a continuation of the previous instruction (previous line ends with \)
+	//
+	// This catches bugs where shell commands like ARCH=$(uname ...) appear as
+	// standalone lines without a RUN prefix, which causes "unknown instruction" errors.
+	knownInstructions := map[string]bool{
+		"FROM": true, "RUN": true, "CMD": true, "LABEL": true,
+		"EXPOSE": true, "ENV": true, "ADD": true, "COPY": true,
+		"ENTRYPOINT": true, "VOLUME": true, "USER": true,
+		"WORKDIR": true, "ARG": true, "ONBUILD": true,
+		"STOPSIGNAL": true, "HEALTHCHECK": true, "SHELL": true,
+	}
+
+	// Test with a representative set of dependencies
+	testCases := []struct {
+		name string
+		deps []Dependency
+		opts *ImageSpec
+	}{
+		{
+			name: "github binaries with arch detect",
+			deps: []Dependency{
+				{Name: "go"},
+				{Name: "gofumpt"},
+				{Name: "goreleaser"},
+				{Name: "golangci-lint"},
+				{Name: "ripgrep"},
+				{Name: "fd"},
+				{Name: "bat"},
+				{Name: "bun"},
+				{Name: "gh"},
+				{Name: "sqlc"},
+				{Name: "node"},
+			},
+		},
+		{
+			name: "custom deps with arch detect",
+			deps: []Dependency{
+				{Name: "go"},
+				{Name: "helm"},
+				{Name: "terraform"},
+				{Name: "kubectl"},
+				{Name: "aws"},
+			},
+		},
+		{
+			name: "mixed with SSH and hooks",
+			deps: []Dependency{
+				{Name: "go"},
+				{Name: "gofumpt"},
+				{Name: "claude-code"},
+				{Name: "node"},
+				{Name: "docker", DockerMode: "host"},
+			},
+			opts: &ImageSpec{
+				NeedsSSH: true,
+				SSHHosts: []string{"github.com"},
+				Hooks:    &HooksConfig{PostBuild: "echo done"},
+			},
+		},
+	}
+
+	for _, buildKit := range []bool{true, false} {
+		for _, tc := range testCases {
+			name := tc.name
+			if buildKit {
+				name += "/buildkit"
+			} else {
+				name += "/legacy"
+			}
+			t.Run(name, func(t *testing.T) {
+				bk := buildKit
+				var opts *ImageSpec
+				if tc.opts != nil {
+					optsCopy := *tc.opts
+					opts = &optsCopy
+				} else {
+					opts = &ImageSpec{}
+				}
+				opts.UseBuildKit = &bk
+
+				result, err := GenerateDockerfile(tc.deps, opts)
+				if err != nil {
+					t.Fatalf("GenerateDockerfile error: %v", err)
+				}
+
+				lines := strings.Split(result.Dockerfile, "\n")
+				inContinuation := false
+				for i, line := range lines {
+					trimmed := strings.TrimSpace(line)
+
+					// Skip empty lines and comments
+					if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+						if trimmed == "" {
+							inContinuation = false
+						}
+						continue
+					}
+
+					if inContinuation {
+						// This line is a continuation of the previous instruction — valid
+						inContinuation = strings.HasSuffix(trimmed, "\\")
+						continue
+					}
+
+					// This line must start with a known Dockerfile instruction
+					firstWord := strings.SplitN(trimmed, " ", 2)[0]
+					if !knownInstructions[strings.ToUpper(firstWord)] {
+						t.Errorf("line %d is not a valid Dockerfile instruction and not a continuation:\n  %s", i+1, line)
+					}
+
+					inContinuation = strings.HasSuffix(trimmed, "\\")
+				}
+			})
+		}
+	}
+}

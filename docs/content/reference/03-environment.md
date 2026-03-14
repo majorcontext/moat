@@ -54,17 +54,28 @@ export MOAT_RUNTIME=apple   # Force Apple containers runtime
 
 See [Runtimes](../concepts/07-runtimes.md) for details on runtime selection.
 
+### BUILDKIT_HOST
+
+Enable BuildKit for image builds. When set, Moat generates Dockerfiles with BuildKit-specific features like `--mount=type=cache` for faster apt installs.
+
+```bash
+export BUILDKIT_HOST=docker-container://buildkitd
+```
+
+- Default: BuildKit disabled (legacy builder compatibility)
+- Set this to a BuildKit daemon address to enable BuildKit features
+- BuildKit builds are faster and support layer caching
+
 ### MOAT_DISABLE_BUILDKIT
 
-Disable BuildKit for image builds, falling back to the legacy Docker builder.
+Force-disable BuildKit even when `BUILDKIT_HOST` is set.
 
 ```bash
 export MOAT_DISABLE_BUILDKIT=1
 ```
 
-- Default: BuildKit enabled (faster builds, better caching)
-- Use this if BuildKit is unavailable or causes issues in your environment
-- **Warning:** Legacy builder is significantly slower and doesn't cache build layers
+- Only meaningful when `BUILDKIT_HOST` is also set
+- Use this to temporarily fall back to legacy-compatible Dockerfiles without unsetting `BUILDKIT_HOST`
 
 See [Runtimes](../concepts/07-runtimes.md#buildkit) for BuildKit configuration.
 

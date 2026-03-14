@@ -42,7 +42,7 @@ type ImageSpec struct {
 	NeedsClipboard bool
 
 	// UseBuildKit enables BuildKit-specific features like cache mounts.
-	// Used only by Dockerfile generation. Defaults to true if nil.
+	// Used only by Dockerfile generation. Defaults to false if nil.
 	UseBuildKit *bool
 
 	// ClaudeMarketplaces are plugin marketplaces to register during image build.
@@ -95,10 +95,12 @@ func (s *ImageSpec) initProviderHashComponents() []string {
 }
 
 // useBuildKit returns whether to use BuildKit features.
-// Defaults to true if UseBuildKit is nil.
+// Defaults to false if UseBuildKit is nil, since BuildKit availability
+// cannot be assumed — the Docker legacy builder fails to parse
+// BuildKit-specific syntax like --mount=type=cache.
 func (s *ImageSpec) useBuildKit() bool {
 	if s == nil || s.UseBuildKit == nil {
-		return true
+		return false
 	}
 	return *s.UseBuildKit
 }

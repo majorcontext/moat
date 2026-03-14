@@ -1268,7 +1268,12 @@ region = %s
 	// Build the image spec — single source of truth for image resolution,
 	// tag generation, and Dockerfile generation.
 	hasSSHGrants := len(sshGrants) > 0
-	useBuildKit := os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
+	// Only enable BuildKit-specific Dockerfile features (--mount=type=cache) when
+	// we're certain BuildKit is available. With BUILDKIT_HOST set, a standalone
+	// BuildKit daemon is guaranteed. Without it, Docker may fall back to the legacy
+	// builder, which can fail to parse BuildKit syntax (e.g., --mount=type=cache
+	// confuses legacy parser line counting, causing "unknown instruction" errors).
+	useBuildKit := os.Getenv("BUILDKIT_HOST") != "" && os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
 	imageSpec := &deps.ImageSpec{
 		NeedsSSH:           hasSSHGrants,
 		SSHHosts:           sshGrants,
