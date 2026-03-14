@@ -228,6 +228,21 @@ mounts:
 `,
 			wantErr: "invalid mode",
 		},
+		{
+			name: "rejects volume/exclude conflict",
+			yaml: `
+name: myagent
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+volumes:
+  - name: deps
+    target: /workspace/node_modules
+`,
+			wantErr: "conflicts with volume target",
+		},
 	}
 
 	for _, tt := range tests {
