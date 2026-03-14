@@ -43,6 +43,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 |------|-------------|
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable). See [Grants reference](./04-grants.md) for available providers. |
 | `-e`, `--env KEY=VALUE` | Set environment variable (repeatable) |
+| `-m`, `--mount SOURCE:TARGET[:MODE]` | Additional mount (repeatable). See [Mounts reference](./05-mounts.md). |
 | `-n`, `--name NAME` | Run name (default: from `moat.yaml` or random) |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
@@ -120,6 +121,7 @@ moat run [flags] [path] [-- command]
 | `-n`, `--name NAME` | Set run name (used for hostname routing) |
 | `-g`, `--grant PROVIDER` | Inject credential (repeatable) |
 | `-e`, `--env KEY=VALUE` | Set environment variable (repeatable) |
+| `-m`, `--mount SOURCE:TARGET[:MODE]` | Additional mount (repeatable). See [Mounts reference](./05-mounts.md). |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |

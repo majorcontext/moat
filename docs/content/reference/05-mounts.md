@@ -127,7 +127,7 @@ Relative `source` paths are resolved against the workspace directory. The `targe
 
 ## Excluding directories
 
-Excluded directories are overlaid with tmpfs (in-memory) mounts inside the container. The host files at those paths are hidden, and the container sees an empty directory. Files written to excluded paths live in memory and do not touch the host filesystem.
+Excluded directories are overlaid with tmpfs (in-memory) mounts inside the container. The host files at those paths are hidden, and the container sees an empty directory. Files written to excluded paths live in memory and do not touch the host filesystem. Each tmpfs mount defaults to 50% of system RAM (Docker's default). On machines with many excludes or large dependency trees, monitor memory usage.
 
 This is useful for large dependency trees (`node_modules`, `.venv`, `vendor/`) that cause performance problems with shared filesystem mounts -- particularly VirtioFS on Apple Containers, where open file handles accumulate over time.
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1294,7 +1295,7 @@ func TestResolveMountExcludesToTmpfs(t *testing.T) {
 				})
 				for _, exc := range me.Exclude {
 					tmpfsMounts = append(tmpfsMounts, container.TmpfsMount{
-						Target: filepath.Join(me.Target, exc),
+						Target: path.Join(me.Target, exc),
 					})
 				}
 			}
