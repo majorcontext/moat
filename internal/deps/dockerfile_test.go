@@ -1687,8 +1687,11 @@ func TestGenerateDockerfileValidForLegacyBuilder(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				bk := buildKit
-				opts := tc.opts
-				if opts == nil {
+				var opts *ImageSpec
+				if tc.opts != nil {
+					optsCopy := *tc.opts
+					opts = &optsCopy
+				} else {
 					opts = &ImageSpec{}
 				}
 				opts.UseBuildKit = &bk

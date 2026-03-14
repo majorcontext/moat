@@ -42,7 +42,7 @@ type ImageSpec struct {
 	NeedsClipboard bool
 
 	// UseBuildKit enables BuildKit-specific features like cache mounts.
-	// Used only by Dockerfile generation. Defaults to true if nil.
+	// Used only by Dockerfile generation. Defaults to false if nil.
 	UseBuildKit *bool
 
 	// ClaudeMarketplaces are plugin marketplaces to register during image build.
