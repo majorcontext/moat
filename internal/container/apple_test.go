@@ -166,6 +166,30 @@ func TestBuildCreateArgs(t *testing.T) {
 			},
 			want: []string{"create", "--memory", "4096MB", "--ulimit", "nproc=4096:4096", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
 		},
+		{
+			name: "with tmpfs mount",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				TmpfsMounts: []TmpfsMount{
+					{Target: "/workspace/node_modules"},
+				},
+			},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--tmpfs", "/workspace/node_modules", "ubuntu:22.04"},
+		},
+		{
+			name: "with volume and tmpfs mounts",
+			cfg: Config{
+				Image: "ubuntu:22.04",
+				Mounts: []MountConfig{
+					{Source: "/home/user/project", Target: "/workspace"},
+				},
+				TmpfsMounts: []TmpfsMount{
+					{Target: "/workspace/node_modules"},
+					{Target: "/workspace/.venv"},
+				},
+			},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "--tmpfs", "/workspace/node_modules", "--tmpfs", "/workspace/.venv", "ubuntu:22.04"},
+		},
 	}
 
 	for _, tt := range tests {

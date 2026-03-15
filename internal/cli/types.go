@@ -10,6 +10,7 @@ import (
 type ExecFlags struct {
 	Grants        []string
 	Env           []string
+	Mounts        []string
 	Name          string
 	Runtime       string
 	Rebuild       bool
@@ -24,6 +25,7 @@ type ExecFlags struct {
 func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringSliceVarP(&flags.Grants, "grant", "g", nil, "capabilities to grant (e.g., github, aws:s3.read)")
 	cmd.Flags().StringArrayVarP(&flags.Env, "env", "e", nil, "environment variables (KEY=VALUE)")
+	cmd.Flags().StringArrayVarP(&flags.Mounts, "mount", "m", nil, "additional mounts (source:target[:ro])")
 	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from moat.yaml or random)")
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")

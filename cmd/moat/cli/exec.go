@@ -210,6 +210,23 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		clipboard = false
 	}
 
+	// Append CLI --mount flags to config mounts
+	for _, ms := range opts.Flags.Mounts {
+		me, parseErr := config.ParseMount(ms)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing --mount flag: %w", parseErr)
+		}
+		if opts.Config == nil {
+			opts.Config = &config.Config{}
+		}
+		for _, existing := range opts.Config.Mounts {
+			if existing.Target == me.Target {
+				return nil, fmt.Errorf("--mount %s: target %q already mounted", ms, me.Target)
+			}
+		}
+		opts.Config.Mounts = append(opts.Config.Mounts, *me)
+	}
+
 	// Build run options
 	runOpts := run.Options{
 		Name:          opts.Flags.Name,

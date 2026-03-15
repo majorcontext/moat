@@ -174,14 +174,22 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 	}
 
 	// Convert mounts
-	mounts := make([]mount.Mount, len(cfg.Mounts))
-	for i, m := range cfg.Mounts {
-		mounts[i] = mount.Mount{
+	mounts := make([]mount.Mount, 0, len(cfg.Mounts)+len(cfg.TmpfsMounts))
+	for _, m := range cfg.Mounts {
+		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   m.Source,
 			Target:   m.Target,
 			ReadOnly: m.ReadOnly,
-		}
+		})
+	}
+	// Tmpfs mounts — overlays for excluded directories.
+	// Appended after bind mounts so tmpfs overlays subdirectories of bind-mounted paths.
+	for _, tm := range cfg.TmpfsMounts {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeTmpfs,
+			Target: tm.Target,
+		})
 	}
 
 	// Default to bridge network if not specified

@@ -66,10 +66,7 @@ mounts:
 	if len(cfg.Mounts) != 1 {
 		t.Fatalf("Mounts = %d", len(cfg.Mounts))
 	}
-	m, err := ParseMount(cfg.Mounts[0])
-	if err != nil {
-		t.Fatalf("ParseMount: %v", err)
-	}
+	m := cfg.Mounts[0]
 	if m.Source != "./data" || m.Target != "/data" || !m.ReadOnly {
 		t.Errorf("Mount = %+v", m)
 	}

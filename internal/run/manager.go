@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
@@ -422,13 +423,28 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
 	var hostAddr string      // Host address for proxy (may be rewritten for custom networks)
 	var mounts []container.MountConfig
+	var tmpfsMounts []container.TmpfsMount
 
-	// Always mount workspace
-	mounts = append(mounts, container.MountConfig{
-		Source:   opts.Workspace,
-		Target:   "/workspace",
-		ReadOnly: false,
-	})
+	// Check if any config mount explicitly targets /workspace.
+	// If so, skip the implicit workspace mount (the explicit one replaces it).
+	hasExplicitWorkspace := false
+	if opts.Config != nil {
+		for _, me := range opts.Config.Mounts {
+			if me.Target == "/workspace" {
+				hasExplicitWorkspace = true
+				break
+			}
+		}
+	}
+
+	// Mount workspace (unless replaced by an explicit mount)
+	if !hasExplicitWorkspace {
+		mounts = append(mounts, container.MountConfig{
+			Source:   opts.Workspace,
+			Target:   "/workspace",
+			ReadOnly: false,
+		})
+	}
 
 	// If workspace is a git worktree, mount the main .git directory so git
 	// operations work inside the container. The .git file in worktrees contains
@@ -447,21 +463,23 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 	// Add mounts from config
 	if opts.Config != nil {
-		for _, mountStr := range opts.Config.Mounts {
-			mount, err := config.ParseMount(mountStr)
-			if err != nil {
-				return nil, fmt.Errorf("parsing mount %q: %w", mountStr, err)
-			}
+		for _, me := range opts.Config.Mounts {
 			// Resolve relative paths against workspace
-			source := mount.Source
+			source := me.Source
 			if !filepath.IsAbs(source) {
 				source = filepath.Join(opts.Workspace, source)
 			}
 			mounts = append(mounts, container.MountConfig{
 				Source:   source,
-				Target:   mount.Target,
-				ReadOnly: mount.ReadOnly,
+				Target:   me.Target,
+				ReadOnly: me.ReadOnly,
 			})
+			// Resolve excludes to tmpfs mounts
+			for _, exc := range me.Exclude {
+				tmpfsMounts = append(tmpfsMounts, container.TmpfsMount{
+					Target: path.Join(me.Target, exc),
+				})
+			}
 		}
 	}
 
@@ -2008,6 +2026,7 @@ region = %s
 		ExtraHosts:   extraHosts,
 		NetworkMode:  networkMode,
 		Mounts:       mounts,
+		TmpfsMounts:  tmpfsMounts,
 		PortBindings: portBindings,
 		CapAdd:       capAdd,
 		GroupAdd:     groupAdd,

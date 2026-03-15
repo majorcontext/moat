@@ -109,8 +109,170 @@ mounts:
 	if len(cfg.Mounts) != 2 {
 		t.Fatalf("Mounts = %d, want 2", len(cfg.Mounts))
 	}
-	if cfg.Mounts[0] != "./data:/data:ro" {
-		t.Errorf("Mounts[0] = %q, want %q", cfg.Mounts[0], "./data:/data:ro")
+	if cfg.Mounts[0].Source != "./data" || cfg.Mounts[0].Target != "/data" || !cfg.Mounts[0].ReadOnly {
+		t.Errorf("Mounts[0] = %+v, want source=./data target=/data ro=true", cfg.Mounts[0])
+	}
+}
+
+func TestLoadConfigWithMountExcludes(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+
+	content := `
+agent: claude-code
+
+mounts:
+  - ./data:/data:ro
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+      - .venv
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Mounts) != 2 {
+		t.Fatalf("Mounts = %d, want 2", len(cfg.Mounts))
+	}
+
+	// First mount: string form
+	if cfg.Mounts[0].Source != "./data" {
+		t.Errorf("Mounts[0].Source = %q, want %q", cfg.Mounts[0].Source, "./data")
+	}
+	if !cfg.Mounts[0].ReadOnly {
+		t.Error("Mounts[0].ReadOnly = false, want true")
+	}
+
+	// Second mount: object form with excludes
+	if cfg.Mounts[1].Source != "." {
+		t.Errorf("Mounts[1].Source = %q, want %q", cfg.Mounts[1].Source, ".")
+	}
+	if cfg.Mounts[1].Target != "/workspace" {
+		t.Errorf("Mounts[1].Target = %q, want %q", cfg.Mounts[1].Target, "/workspace")
+	}
+	if len(cfg.Mounts[1].Exclude) != 2 {
+		t.Fatalf("Mounts[1].Exclude = %d, want 2", len(cfg.Mounts[1].Exclude))
+	}
+	if cfg.Mounts[1].Exclude[0] != "node_modules" {
+		t.Errorf("Mounts[1].Exclude[0] = %q, want %q", cfg.Mounts[1].Exclude[0], "node_modules")
+	}
+}
+
+func TestLoadConfigMountExcludeValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "rejects absolute exclude path",
+			yaml: `
+agent: test
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - /tmp/foo
+`,
+			wantErr: "must be relative",
+		},
+		{
+			name: "rejects dotdot exclude path",
+			yaml: `
+agent: test
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - ../foo
+`,
+			wantErr: "must not contain '..'",
+		},
+		{
+			name: "rejects duplicate exclude paths",
+			yaml: `
+agent: test
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+      - node_modules
+`,
+			wantErr: "duplicate exclude",
+		},
+		{
+			name: "rejects duplicate mount targets",
+			yaml: `
+agent: test
+mounts:
+  - source: .
+    target: /workspace
+  - source: ./other
+    target: /workspace
+`,
+			wantErr: "duplicate mount target",
+		},
+		{
+			name: "rejects invalid mode",
+			yaml: `
+agent: test
+mounts:
+  - source: .
+    target: /workspace
+    mode: readonly
+`,
+			wantErr: "invalid mode",
+		},
+		{
+			name: "rejects volume/exclude conflict",
+			yaml: `
+name: myagent
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+volumes:
+  - name: deps
+    target: /workspace/node_modules
+`,
+			wantErr: "conflicts with volume target",
+		},
+		{
+			name: "rejects volume nested under exclude",
+			yaml: `
+name: myagent
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+volumes:
+  - name: cache
+    target: /workspace/node_modules/cache
+`,
+			wantErr: "conflicts with volume target",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

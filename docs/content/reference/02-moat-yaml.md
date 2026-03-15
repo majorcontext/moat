@@ -413,19 +413,23 @@ secrets:
 
 ### mounts
 
-Additional directories to mount in the container.
+Additional directories to mount in the container. Accepts a mixed array of strings and objects.
 
 ```yaml
 mounts:
   - ./data:/data:ro
-  - /host/path:/container/path:rw
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+      - .venv
 ```
 
-- Type: `array[string]`
+- Type: `array[string | object]`
 - Default: `[]`
-- CLI override: `--mount` (additive)
+- CLI override: `--mount` (additive, string form only)
 
-#### Mount format
+#### String format
 
 ```text
 <host-path>:<container-path>:<mode>
@@ -437,7 +441,18 @@ mounts:
 | `container-path` | Path inside container (absolute) |
 | `mode` | `ro` (read-only) or `rw` (read-write, default) |
 
-The workspace is always mounted at `/workspace`.
+#### Object format
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `source` | `string` | yes | | Host path (relative or absolute) |
+| `target` | `string` | yes | | Container path (absolute) |
+| `mode` | `string` | no | `rw` | `ro` or `rw` |
+| `exclude` | `[]string` | no | `[]` | Paths relative to `target` to overlay with tmpfs |
+
+Excluded paths are overlaid with tmpfs (in-memory) mounts inside the container. The host files at those paths are hidden. This prevents VirtioFS file descriptor accumulation from large dependency trees on Apple Containers. See [Excluding directories](./05-mounts.md#excluding-directories) for details.
+
+The workspace is always mounted at `/workspace` unless an explicit mount targets `/workspace`, in which case it replaces the automatic mount.
 
 ---
 

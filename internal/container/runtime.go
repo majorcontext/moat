@@ -263,6 +263,7 @@ type Config struct {
 	Env          []string
 	User         string // User to run as (e.g., "1000:1000" or "moatuser")
 	Mounts       []MountConfig
+	TmpfsMounts  []TmpfsMount   // tmpfs overlays (e.g., for mount excludes)
 	ExtraHosts   []string       // host:ip mappings (Docker-specific)
 	NetworkMode  string         // "bridge", "host", "none", or a network name/ID
 	PortBindings map[int]string // container port -> host bind address (e.g., 3000 -> "127.0.0.1")
@@ -316,6 +317,12 @@ type MountConfig struct {
 	Source   string
 	Target   string
 	ReadOnly bool
+}
+
+// TmpfsMount describes a tmpfs mount inside the container.
+// Used to overlay excluded directories with in-memory filesystems.
+type TmpfsMount struct {
+	Target string // absolute container path
 }
 
 // ImageInfo contains information about a container image.

@@ -27,7 +27,7 @@ type Config struct {
 	Grants       []string          `yaml:"grants,omitempty"`
 	Env          map[string]string `yaml:"env,omitempty"`
 	Secrets      map[string]string `yaml:"secrets,omitempty"`
-	Mounts       []string          `yaml:"mounts,omitempty"`
+	Mounts       []MountEntry      `yaml:"mounts,omitempty"`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
@@ -583,6 +583,36 @@ func Load(dir string) (*Config, error) {
 				return nil, fmt.Errorf("%s: duplicate volume target %q", prefix, vol.Target)
 			}
 			seenVolTargets[vol.Target] = true
+		}
+	}
+
+	// Validate mounts
+	if len(cfg.Mounts) > 0 {
+		seenMountTargets := make(map[string]bool)
+		for i, m := range cfg.Mounts {
+			prefix := fmt.Sprintf("mounts[%d]", i)
+			if m.Target != "" {
+				if seenMountTargets[m.Target] {
+					return nil, fmt.Errorf("%s: duplicate mount target %q", prefix, m.Target)
+				}
+				seenMountTargets[m.Target] = true
+			}
+			// Validate and normalize exclude paths
+			cleaned, err := ValidateExcludes(m.Exclude, m.Target)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Mounts[i].Exclude = cleaned
+
+			// Check for volume/exclude conflicts
+			for _, exc := range cleaned {
+				excAbs := filepath.Join(m.Target, exc)
+				for _, vol := range cfg.Volumes {
+					if vol.Target == excAbs || strings.HasPrefix(vol.Target, excAbs+"/") {
+						return nil, fmt.Errorf("%s: exclude path %q conflicts with volume target %q", prefix, exc, vol.Target)
+					}
+				}
+			}
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1193,5 +1194,131 @@ func TestReplaceHostInEnv_KeyNotReplaced(t *testing.T) {
 		if result[i] != want[i] {
 			t.Errorf("env[%d]:\n  got  %q\n  want %q", i, result[i], want[i])
 		}
+	}
+}
+
+// TestResolveMountExcludesToTmpfs verifies that mount excludes are correctly
+// resolved to tmpfs mounts with absolute container paths.
+func TestResolveMountExcludesToTmpfs(t *testing.T) {
+	tests := []struct {
+		name       string
+		workspace  string
+		mounts     []config.MountEntry
+		wantMounts []container.MountConfig
+		wantTmpfs  []container.TmpfsMount
+	}{
+		{
+			name:      "relative source with single exclude",
+			workspace: "/home/user/project",
+			mounts: []config.MountEntry{
+				{Source: ".", Target: "/workspace", Exclude: []string{"node_modules"}},
+			},
+			wantMounts: []container.MountConfig{
+				{Source: "/home/user/project", Target: "/workspace"},
+			},
+			wantTmpfs: []container.TmpfsMount{
+				{Target: "/workspace/node_modules"},
+			},
+		},
+		{
+			name:      "absolute source with multiple excludes",
+			workspace: "/home/user/project",
+			mounts: []config.MountEntry{
+				{Source: "/opt/code", Target: "/workspace", Exclude: []string{"node_modules", ".venv", "dist"}},
+			},
+			wantMounts: []container.MountConfig{
+				{Source: "/opt/code", Target: "/workspace"},
+			},
+			wantTmpfs: []container.TmpfsMount{
+				{Target: "/workspace/node_modules"},
+				{Target: "/workspace/.venv"},
+				{Target: "/workspace/dist"},
+			},
+		},
+		{
+			name:      "nested exclude subdirectory",
+			workspace: "/home/user/project",
+			mounts: []config.MountEntry{
+				{Source: ".", Target: "/workspace", Exclude: []string{"vendor/cache"}},
+			},
+			wantMounts: []container.MountConfig{
+				{Source: "/home/user/project", Target: "/workspace"},
+			},
+			wantTmpfs: []container.TmpfsMount{
+				{Target: "/workspace/vendor/cache"},
+			},
+		},
+		{
+			name:      "read-only mount with exclude",
+			workspace: "/home/user/project",
+			mounts: []config.MountEntry{
+				{Source: ".", Target: "/workspace", ReadOnly: true, Exclude: []string{"tmp"}},
+			},
+			wantMounts: []container.MountConfig{
+				{Source: "/home/user/project", Target: "/workspace", ReadOnly: true},
+			},
+			wantTmpfs: []container.TmpfsMount{
+				{Target: "/workspace/tmp"},
+			},
+		},
+		{
+			name:      "mount without excludes produces no tmpfs",
+			workspace: "/home/user/project",
+			mounts: []config.MountEntry{
+				{Source: "./data", Target: "/data"},
+			},
+			wantMounts: []container.MountConfig{
+				{Source: "/home/user/project/data", Target: "/data"},
+			},
+			wantTmpfs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mounts := make([]container.MountConfig, 0, len(tt.mounts))
+			numExcludes := 0
+			for _, me := range tt.mounts {
+				numExcludes += len(me.Exclude)
+			}
+			tmpfsMounts := make([]container.TmpfsMount, 0, numExcludes)
+
+			for _, me := range tt.mounts {
+				source := me.Source
+				if !filepath.IsAbs(source) {
+					source = filepath.Join(tt.workspace, source)
+				}
+				mounts = append(mounts, container.MountConfig{
+					Source:   source,
+					Target:   me.Target,
+					ReadOnly: me.ReadOnly,
+				})
+				for _, exc := range me.Exclude {
+					tmpfsMounts = append(tmpfsMounts, container.TmpfsMount{
+						Target: path.Join(me.Target, exc),
+					})
+				}
+			}
+
+			if len(mounts) != len(tt.wantMounts) {
+				t.Fatalf("mounts: got %d, want %d", len(mounts), len(tt.wantMounts))
+			}
+			for i, got := range mounts {
+				want := tt.wantMounts[i]
+				if got.Source != want.Source || got.Target != want.Target || got.ReadOnly != want.ReadOnly {
+					t.Errorf("mount[%d]: got %+v, want %+v", i, got, want)
+				}
+			}
+
+			if len(tmpfsMounts) != len(tt.wantTmpfs) {
+				t.Fatalf("tmpfs: got %d, want %d", len(tmpfsMounts), len(tt.wantTmpfs))
+			}
+			for i, got := range tmpfsMounts {
+				want := tt.wantTmpfs[i]
+				if got.Target != want.Target {
+					t.Errorf("tmpfs[%d]: got %q, want %q", i, got.Target, want.Target)
+				}
+			}
+		})
 	}
 }
