@@ -20,7 +20,7 @@ func TestMountEntryUnmarshalYAML(t *testing.T) {
 - ./data:/data:ro
 `,
 			want: []MountEntry{
-				{Source: "./data", Target: "/data", ReadOnly: true},
+				{Source: "./data", Target: "/data", Mode: "ro", ReadOnly: true},
 			},
 		},
 		{
@@ -44,7 +44,7 @@ func TestMountEntryUnmarshalYAML(t *testing.T) {
   mode: ro
 `,
 			want: []MountEntry{
-				{Source: "./data", Target: "/data", ReadOnly: true},
+				{Source: "./data", Target: "/data", Mode: "ro", ReadOnly: true},
 			},
 		},
 		{
@@ -57,7 +57,7 @@ func TestMountEntryUnmarshalYAML(t *testing.T) {
     - node_modules
 `,
 			want: []MountEntry{
-				{Source: "./data", Target: "/data", ReadOnly: true},
+				{Source: "./data", Target: "/data", Mode: "ro", ReadOnly: true},
 				{Source: ".", Target: "/workspace", Exclude: []string{"node_modules"}},
 			},
 		},

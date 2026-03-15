@@ -14,6 +14,7 @@ import (
 type MountEntry struct {
 	Source   string   `yaml:"source"`
 	Target   string   `yaml:"target"`
+	Mode     string   `yaml:"mode,omitempty"`
 	ReadOnly bool     `yaml:"-"`
 	Exclude  []string `yaml:"exclude,omitempty"`
 }
@@ -57,6 +58,7 @@ func (m *MountEntry) UnmarshalYAML(value *yaml.Node) error {
 			// default read-write
 		case "ro":
 			m.ReadOnly = true
+			m.Mode = "ro"
 		default:
 			return fmt.Errorf("mount object: invalid mode %q (must be 'ro' or 'rw')", raw.Mode)
 		}
@@ -94,6 +96,7 @@ func parseMount(s string) (*MountEntry, error) {
 		switch parts[2] {
 		case "ro":
 			m.ReadOnly = true
+			m.Mode = "ro"
 		case "rw", "":
 			// default read-write
 		default:
