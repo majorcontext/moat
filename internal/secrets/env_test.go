@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -52,12 +53,15 @@ func TestEnvResolver_Resolve_NotSet(t *testing.T) {
 		t.Fatal("expected error for unset variable")
 	}
 
-	var notFound *NotFoundError
-	if !errors.As(err, &notFound) {
-		t.Fatalf("expected NotFoundError, got %T: %v", err, err)
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("expected BackendError, got %T: %v", err, err)
 	}
-	if notFound.Backend != "host environment" {
-		t.Errorf("expected backend 'host environment', got %q", notFound.Backend)
+	if backendErr.Backend != "host environment" {
+		t.Errorf("expected backend 'host environment', got %q", backendErr.Backend)
+	}
+	if !strings.Contains(backendErr.Fix, "export MOAT_TEST_DEFINITELY_NOT_SET_12345") {
+		t.Errorf("expected fix to contain export hint, got %q", backendErr.Fix)
 	}
 }
 
@@ -98,6 +102,19 @@ func TestEnvResolver_Resolve_CanceledContext(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestEnvResolver_GlobalDispatch(t *testing.T) {
+	// Exercises the init() registration path through the package-level Resolve function.
+	t.Setenv("MOAT_TEST_DISPATCH", "dispatched-value")
+
+	val, err := Resolve(context.Background(), "env://MOAT_TEST_DISPATCH")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "dispatched-value" {
+		t.Errorf("expected 'dispatched-value', got %q", val)
 	}
 }
 

@@ -24,6 +24,7 @@ func (r *EnvResolver) Resolve(ctx context.Context, reference string) (string, er
 		return "", err
 	}
 
+	// Validate reference format (defense in depth - registry already checks scheme)
 	if !strings.HasPrefix(reference, "env://") {
 		return "", &InvalidReferenceError{
 			Reference: reference,
@@ -41,9 +42,11 @@ func (r *EnvResolver) Resolve(ctx context.Context, reference string) (string, er
 
 	val, ok := os.LookupEnv(varName)
 	if !ok {
-		return "", &NotFoundError{
-			Reference: reference,
+		return "", &BackendError{
 			Backend:   "host environment",
+			Reference: reference,
+			Reason:    "variable not set",
+			Fix:       "Set it before running moat:\n  export " + varName + "=<value>",
 		}
 	}
 
