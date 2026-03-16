@@ -158,6 +158,8 @@ func (rt *RouteTable) RemoveIfStale(agent string) bool {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 
+	rt.reload()
+
 	if _, ok := rt.routes[agent]; !ok {
 		return false
 	}
