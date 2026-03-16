@@ -368,7 +368,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	} else {
 		// Check for collision with explicit name
 		if m.routes.AgentExists(agentName) {
-			return nil, fmt.Errorf("agent %q is already running. Use --name to specify a different name, or stop the existing agent first", agentName)
+			// The route may be stale (leftover from a crashed process).
+			// Probe the registered endpoints — if none are reachable, clean up.
+			if !m.routes.RemoveIfStale(agentName) {
+				return nil, fmt.Errorf("agent %q is already running. Use --name to specify a different name, or stop the existing agent first", agentName)
+			}
+			log.Debug("removed stale route for agent", "name", agentName)
 		}
 	}
 

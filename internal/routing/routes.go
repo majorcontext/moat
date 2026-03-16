@@ -3,9 +3,11 @@ package routing
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // RouteTable manages agent -> endpoint -> host:port mappings.
@@ -122,6 +124,41 @@ func (rt *RouteTable) AgentExists(agent string) bool {
 
 	_, ok := rt.routes[agent]
 	return ok
+}
+
+// RemoveIfStale checks whether any of the agent's registered endpoints are
+// reachable via TCP. If none respond within a short timeout, the route is
+// considered stale (leftover from a crashed or stopped process) and is removed.
+// Returns true if the route was removed, false if the agent is still alive or
+// was not registered.
+func (rt *RouteTable) RemoveIfStale(agent string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
+
+	endpoints, ok := rt.routes[agent]
+	if !ok {
+		return false
+	}
+
+	for _, addr := range endpoints {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return false // at least one endpoint is alive
+		}
+	}
+
+	// All endpoints unreachable — remove stale route
+	delete(rt.routes, agent)
+	if len(rt.routes) == 0 {
+		path := filepath.Join(rt.dir, "routes.json")
+		_ = os.Remove(path)
+	} else {
+		_ = rt.save()
+	}
+	return true
 }
 
 // Agents returns all registered agent names.

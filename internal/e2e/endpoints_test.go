@@ -357,6 +357,13 @@ func startEndpointRun(t *testing.T, name string, ports map[string]int, cmd []str
 	t.Helper()
 	requireDocker(t)
 
+	// Clean up any stale route for this name from a previous interrupted run
+	// or a live moat instance using the same proxy directory.
+	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	if rt, err := routing.NewRouteTable(proxyDir); err == nil {
+		rt.RemoveIfStale(name)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 
 	workspace := createTestWorkspaceWithPorts(t, ports)

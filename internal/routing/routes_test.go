@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"net"
 	"testing"
 )
 
@@ -79,5 +80,57 @@ func TestRouteTableAgentExists(t *testing.T) {
 	}
 	if rt.AgentExists("other") {
 		t.Error("AgentExists(other) = true, want false")
+	}
+}
+
+func TestRemoveIfStaleUnreachable(t *testing.T) {
+	dir := t.TempDir()
+	rt, _ := NewRouteTable(dir)
+
+	// Add a route pointing to a port nothing is listening on
+	rt.Add("stale-agent", map[string]string{"web": "127.0.0.1:1"})
+
+	if !rt.AgentExists("stale-agent") {
+		t.Fatal("precondition: agent should exist")
+	}
+
+	removed := rt.RemoveIfStale("stale-agent")
+	if !removed {
+		t.Error("RemoveIfStale should return true for unreachable endpoint")
+	}
+	if rt.AgentExists("stale-agent") {
+		t.Error("agent should be removed after RemoveIfStale")
+	}
+}
+
+func TestRemoveIfStaleReachable(t *testing.T) {
+	dir := t.TempDir()
+	rt, _ := NewRouteTable(dir)
+
+	// Start a real listener
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer ln.Close()
+
+	rt.Add("live-agent", map[string]string{"web": ln.Addr().String()})
+
+	removed := rt.RemoveIfStale("live-agent")
+	if removed {
+		t.Error("RemoveIfStale should return false for reachable endpoint")
+	}
+	if !rt.AgentExists("live-agent") {
+		t.Error("agent should still exist after RemoveIfStale")
+	}
+}
+
+func TestRemoveIfStaleNotRegistered(t *testing.T) {
+	dir := t.TempDir()
+	rt, _ := NewRouteTable(dir)
+
+	removed := rt.RemoveIfStale("nonexistent")
+	if removed {
+		t.Error("RemoveIfStale should return false for unregistered agent")
 	}
 }
