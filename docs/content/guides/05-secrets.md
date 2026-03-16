@@ -1,13 +1,13 @@
 ---
 title: "Secrets management"
 navTitle: "Secrets"
-description: "Pull secrets from 1Password and AWS SSM into container environment variables."
-keywords: ["moat", "secrets", "1password", "aws ssm", "environment variables"]
+description: "Pull secrets from 1Password, AWS SSM, or host environment variables into container environment variables."
+keywords: ["moat", "secrets", "1password", "aws ssm", "environment variables", "env forwarding"]
 ---
 
 # Secrets management
 
-This guide covers pulling secrets from external backends into container environment variables. Moat supports 1Password and AWS Systems Manager Parameter Store (SSM).
+This guide covers pulling secrets from external backends into container environment variables. Moat supports 1Password, AWS Systems Manager Parameter Store (SSM), and host environment variable forwarding.
 
 ## Secrets vs. credentials
 
@@ -209,6 +209,63 @@ $ moat run
 # DATABASE_URL and REDIS_URL are available in the container
 ```
 
+## Host environment variables
+
+Forward environment variables from your host machine into the container. This is convenient for local development and low-risk configuration, but less secure than external secret backends.
+
+### Configuration
+
+Reference host variables using the `env://` URL format:
+
+```yaml
+secrets:
+  MY_API_KEY: env://MY_API_KEY
+  DATABASE_URL: env://LOCAL_DB_URL
+```
+
+Format: `env://<VARIABLE_NAME>`
+
+The variable name after `env://` is the host environment variable to read. The key on the left is the name it gets inside the container — these can differ.
+
+### How it works
+
+When the run starts:
+
+1. Moat parses the `secrets` field
+2. For each `env://` reference, Moat reads the variable from the host environment
+3. If the variable is not set, the run fails with an error
+4. The resolved value is set as an environment variable in the container
+
+### Example
+
+```yaml
+name: my-agent
+
+secrets:
+  OPENAI_API_KEY: env://OPENAI_API_KEY
+  CUSTOM_ENDPOINT: env://MY_ENDPOINT
+
+command: ["python", "app.py"]
+```
+
+```bash
+$ export OPENAI_API_KEY="sk-..."
+$ export MY_ENDPOINT="https://api.example.com"
+$ moat run
+
+# OPENAI_API_KEY and CUSTOM_ENDPOINT are available in the container
+```
+
+### When to use
+
+Use `env://` for:
+
+- Local development where secrets are already in your shell environment
+- CI/CD pipelines that inject secrets as environment variables
+- Low-risk configuration values that don't warrant a secret manager
+
+For production secrets, prefer 1Password (`op://`) or AWS SSM (`ssm://`). For credentials with dedicated grant support (GitHub, Anthropic, OpenAI, AWS), use `grants:` instead.
+
 ## Combining multiple backends
 
 Use secrets from different backends in the same configuration:
@@ -220,9 +277,12 @@ secrets:
 
   # From AWS SSM
   DATABASE_URL: ssm:///production/database/url
+
+  # From host environment
+  CUSTOM_API_KEY: env://CUSTOM_API_KEY
 ```
 
-All secret values must use a URI scheme (e.g., `op://` or `ssm://`). Plain values like `LOG_LEVEL: debug` are not supported -- use the `env:` field for non-secret environment variables instead.
+All secret values must use a URI scheme (e.g., `op://`, `ssm://`, or `env://`). Plain values like `LOG_LEVEL: debug` are not supported — use the `env:` field for non-secret environment variables instead.
 
 For services with dedicated grants (GitHub, Anthropic, OpenAI, AWS), use `grants:` instead of `secrets:`. Grants provide better security by injecting credentials at the network layer.
 
