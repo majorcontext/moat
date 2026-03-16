@@ -109,7 +109,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 
 	if err := rt.Ping(ctx); err != nil {
 		// If DOCKER_HOST is not explicitly set, try known alternative socket
-		// paths from tools like Rancher Desktop and Colima.
+		// paths from tools like Rancher Desktop.
 		if os.Getenv("DOCKER_HOST") == "" {
 			if altRT := tryAlternativeDockerSockets(sandbox); altRT != nil {
 				rt = altRT
