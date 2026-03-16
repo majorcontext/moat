@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // RouteTable manages agent -> endpoint -> host:port mappings.
@@ -132,13 +134,13 @@ func (rt *RouteTable) AgentExists(agent string) bool {
 // Returns true if the route was removed, false if the agent is still alive or
 // was not registered.
 func (rt *RouteTable) RemoveIfStale(agent string) bool {
+	// Collect addresses under lock, then release for network I/O.
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
-
 	rt.reload()
+	endpoints := rt.routes[agent]
+	rt.mu.Unlock()
 
-	endpoints, ok := rt.routes[agent]
-	if !ok {
+	if endpoints == nil {
 		return false
 	}
 
@@ -150,13 +152,25 @@ func (rt *RouteTable) RemoveIfStale(agent string) bool {
 		}
 	}
 
-	// All endpoints unreachable — remove stale route
+	// All endpoints unreachable — re-acquire lock and remove stale route.
+	// Re-check the agent is still registered (it may have been removed or
+	// re-registered by a concurrent caller while we were probing).
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	if _, ok := rt.routes[agent]; !ok {
+		return false
+	}
 	delete(rt.routes, agent)
 	if len(rt.routes) == 0 {
 		path := filepath.Join(rt.dir, "routes.json")
-		_ = os.Remove(path)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Debug("failed to remove empty routes file", "error", err)
+		}
 	} else {
-		_ = rt.save()
+		if err := rt.save(); err != nil {
+			log.Debug("failed to save routes after stale removal", "error", err)
+		}
 	}
 	return true
 }
