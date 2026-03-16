@@ -219,8 +219,16 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 	// TTY mode with non-TTY stdin (e.g., piped input, tests).
 	useTTY := cfg.Interactive && term.IsTerminal(os.Stdin)
 
-	// Configure DNS servers (defaults to Google DNS if not specified)
-	dns := DefaultDNS(cfg.DNS)
+	// Configure DNS servers for Docker containers.
+	// On macOS/Windows without custom DNS, leave unset so Docker's built-in
+	// DNS is used — it resolves host.docker.internal, which is required for
+	// proxy connectivity. Overriding with Google DNS breaks this on Rancher
+	// Desktop where host-gateway maps to the wrong IP.
+	// (Apple containers handle DNS separately in apple.go.)
+	var dns []string
+	if goruntime.GOOS == "linux" || len(cfg.DNS) > 0 {
+		dns = DefaultDNS(cfg.DNS)
+	}
 
 	// Configure resource limits
 	var memoryBytes int64

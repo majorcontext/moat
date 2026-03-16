@@ -1030,8 +1030,12 @@ region = %s
 		} else {
 			// Use bridge mode when we need port publishing, or on macOS/Windows/Apple
 			networkMode = "bridge"
-			// Docker needs extra host mapping to reach host from bridge network
-			if m.runtime.Type() == container.RuntimeDocker {
+			// On Linux, Docker doesn't provide host.docker.internal by default,
+			// so add it via host-gateway mapping. On macOS/Windows, Docker
+			// Desktop and Rancher Desktop resolve it via built-in DNS — adding
+			// host-gateway would override the correct IP with the bridge
+			// gateway (which is unreachable on Rancher Desktop).
+			if m.runtime.Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}

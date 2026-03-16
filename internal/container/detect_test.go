@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -95,6 +97,47 @@ func TestTryAppleRuntimeNoContainerCLI(t *testing.T) {
 	}
 	if !strings.Contains(reason, "not found in PATH") {
 		t.Errorf("reason should mention PATH, got: %s", reason)
+	}
+}
+
+func TestAlternativeDockerSockets(t *testing.T) {
+	candidates := alternativeDockerSockets()
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one alternative socket candidate")
+	}
+
+	// Verify known tools are included.
+	names := make(map[string]bool)
+	for _, c := range candidates {
+		names[c.name] = true
+	}
+	if !names["Rancher Desktop"] {
+		t.Error("missing expected candidate \"Rancher Desktop\"")
+	}
+}
+
+func TestAlternativeDockerSocketPaths(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+
+	candidates := alternativeDockerSockets()
+	wantPath := filepath.Join(home, ".rd", "docker.sock")
+	for _, c := range candidates {
+		if c.name == "Rancher Desktop" && c.path != wantPath {
+			t.Errorf("Rancher Desktop: path = %q, want %q", c.path, wantPath)
+		}
+	}
+}
+
+func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
+	// With HOME pointing to an empty dir, no alternative sockets should exist.
+	t.Setenv("HOME", t.TempDir())
+
+	rt := tryAlternativeDockerSockets(false)
+	if rt != nil {
+		t.Error("expected nil when no alternative sockets exist")
 	}
 }
 
