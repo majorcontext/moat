@@ -394,6 +394,7 @@ Environment variables resolved from external backends.
 secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
   DATABASE_URL: ssm:///production/database/url
+  CUSTOM_API_KEY: env://CUSTOM_API_KEY
 ```
 
 - Type: `map[string]string`
@@ -406,6 +407,7 @@ secrets:
 | `op://VAULT/ITEM/FIELD` | 1Password | `op://Dev/OpenAI/api-key` |
 | `ssm:///PATH` | AWS SSM (default region) | `ssm:///prod/db/url` |
 | `ssm://REGION/PATH` | AWS SSM (specific region) | `ssm://us-west-2/prod/db/url` |
+| `env://VAR_NAME` | Host environment | `env://MY_API_KEY` |
 
 ---
 
