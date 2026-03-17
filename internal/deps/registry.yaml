@@ -492,8 +492,8 @@ redis:
 ollama:
   description: Ollama local model server
   type: service
-  default: "0.9"
-  versions: ["0.6", "0.7", "0.8", "0.9"]
+  default: "0.18.1"
+  versions: ["0.16.3", "0.17.7", "0.18.0", "0.18.1"]
   service:
     image: "ollama/ollama"
     ports:

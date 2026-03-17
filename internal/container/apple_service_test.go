@@ -118,7 +118,7 @@ func TestGetContainerIPExists(t *testing.T) {
 func TestAppleBuildRunArgsWithCachePath(t *testing.T) {
 	cfg := ServiceConfig{
 		Name:          "ollama",
-		Version:       "0.9",
+		Version:       "0.18.1",
 		Image:         "ollama/ollama",
 		Env:           map[string]string{},
 		RunID:         "test-run-789",

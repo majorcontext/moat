@@ -12,7 +12,7 @@
 name: service-ollama
 
 dependencies:
-  - ollama@0.9
+  - ollama@0.18.1
   - curl
 
 services:

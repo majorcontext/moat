@@ -46,7 +46,7 @@ func TestBuildSidecarConfigRedis(t *testing.T) {
 func TestBuildSidecarConfigWithCachePath(t *testing.T) {
 	cfg := ServiceConfig{
 		Name:          "ollama",
-		Version:       "0.9",
+		Version:       "0.18.1",
 		Image:         "ollama/ollama",
 		Ports:         map[string]int{"default": 11434},
 		Env:           map[string]string{},
@@ -56,7 +56,7 @@ func TestBuildSidecarConfigWithCachePath(t *testing.T) {
 	}
 
 	sidecarCfg := buildSidecarConfig(cfg, "net-789")
-	assert.Equal(t, "ollama/ollama:0.9", sidecarCfg.Image)
+	assert.Equal(t, "ollama/ollama:0.18.1", sidecarCfg.Image)
 	assert.Equal(t, "moat-ollama-test-run-789", sidecarCfg.Name)
 
 	require.Len(t, sidecarCfg.Mounts, 1)

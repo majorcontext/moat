@@ -145,7 +145,7 @@ func TestBuildServiceConfigUnknown(t *testing.T) {
 }
 
 func TestBuildServiceConfigOllama(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	userSpec := &config.ServiceSpec{
 		Extra: map[string][]string{
@@ -157,7 +157,7 @@ func TestBuildServiceConfigOllama(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "ollama", cfg.Name)
-	assert.Equal(t, "0.9", cfg.Version)
+	assert.Equal(t, "0.18.1", cfg.Version)
 	assert.Equal(t, "ollama/ollama", cfg.Image)
 	assert.Equal(t, 11434, cfg.Ports["default"])
 	assert.Equal(t, "/root/.ollama", cfg.CachePath)
@@ -170,7 +170,7 @@ func TestBuildServiceConfigOllama(t *testing.T) {
 }
 
 func TestBuildServiceConfigOllamaNoModels(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	cfg, err := buildServiceConfig(dep, "run-ollama", nil)
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestBuildServiceConfigOllamaNoModels(t *testing.T) {
 }
 
 func TestBuildServiceConfigNoPasswordForNoAuth(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	cfg, err := buildServiceConfig(dep, "run-test", nil)
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestBuildServiceConfigPostgresStillHasPassword(t *testing.T) {
 }
 
 func TestBuildServiceConfigValidatesProvisionsKey(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	userSpec := &config.ServiceSpec{
 		Extra: map[string][]string{
@@ -213,7 +213,7 @@ func TestBuildServiceConfigValidatesProvisionsKey(t *testing.T) {
 }
 
 func TestBuildServiceConfigRejectsScalarProvisions(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	userSpec := &config.ServiceSpec{
 		Extra: map[string][]string{
@@ -242,7 +242,7 @@ func TestBuildServiceConfigRejectsExtraKeysOnNonProvisionService(t *testing.T) {
 }
 
 func TestBuildServiceConfigRejectsShellInjection(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	tests := []struct {
 		name  string
@@ -271,7 +271,7 @@ func TestBuildServiceConfigRejectsShellInjection(t *testing.T) {
 }
 
 func TestBuildServiceConfigAcceptsValidModelNames(t *testing.T) {
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	validModels := []string{
 		"qwen2.5-coder:7b",
@@ -295,7 +295,7 @@ func TestBuildServiceConfigAcceptsValidModelNames(t *testing.T) {
 func TestBuildServiceConfigOllamaProvisionsIncompatibleWithWaitFalse(t *testing.T) {
 	// Validates the fields the manager's wait:false guard checks.
 	// The guard rejects ProvisionCmd != "" && len(Provisions) > 0 when wait: false.
-	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
 	userSpec := &config.ServiceSpec{
 		Extra: map[string][]string{
