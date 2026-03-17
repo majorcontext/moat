@@ -216,6 +216,8 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 
 		// Create a per-run context and set cancel BEFORE registering so that
 		// a concurrent handleUnregisterRun sees a valid cancel function.
+		// Set up AWS credentials BEFORE RegisterWithToken so the RunContext is
+		// fully initialized before the proxy can observe it.
 		// This matches the ordering in handleRegisterRun.
 		runCtx, cancel := context.WithCancel(ctx)
 		rc.SetRefreshCancel(cancel)
@@ -224,8 +226,6 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		if len(pr.Grants) > 0 {
 			StartTokenRefresh(runCtx, rc, pr.Grants)
 		}
-
-		registry.RegisterWithToken(rc, pr.AuthToken)
 
 		// Set up AWS credential provider if configured.
 		if pr.AWSConfig != nil {
@@ -245,6 +245,8 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 				rc.SetAWSHandler(awsProvider.Handler())
 			}
 		}
+
+		registry.RegisterWithToken(rc, pr.AuthToken)
 
 		log.Info("restored run from disk",
 			"run_id", pr.RunID,

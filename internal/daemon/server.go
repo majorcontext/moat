@@ -141,24 +141,25 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	rc.SetRefreshCancel(cancel)
 
-	// Set up token refresh BEFORE registering so the cancel function is
-	// visible to concurrent readers (e.g., handleUnregisterRun) immediately.
+	// Generate the auth token upfront so all setup (token refresh, AWS
+	// credentials) can complete before the run is inserted into the registry.
+	// This prevents a race where a fast-starting container sends its first
+	// request through the proxy before the RunContext is fully initialized.
+	var token string
+	if req.AuthToken != "" {
+		token = req.AuthToken
+	} else {
+		token = generateToken()
+	}
+
+	// Set up token refresh before registry insertion so the initial credential
+	// refresh has a head start before the proxy can observe this run.
 	if len(req.Grants) > 0 {
 		StartTokenRefresh(runCtx, rc, req.Grants)
 	}
 
-	// If an auth token was provided, re-register with that token so the
-	// container keeps using the same proxy credentials after a daemon restart.
-	var token string
-	if req.AuthToken != "" {
-		s.registry.RegisterWithToken(rc, req.AuthToken)
-		token = req.AuthToken
-	} else {
-		token = s.registry.Register(rc)
-	}
-
-	// Create AWS credential provider if configured. Must happen after Register()
-	// because the auth token is needed for endpoint authentication.
+	// Create AWS credential provider if configured. Uses the pre-generated
+	// token for endpoint authentication.
 	if req.AWSConfig != nil {
 		awsProvider, awsErr := proxy.NewAWSCredentialProvider(
 			runCtx,
@@ -176,6 +177,10 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 			rc.SetAWSHandler(awsProvider.Handler())
 		}
 	}
+
+	// Register the fully-initialized RunContext so the proxy never sees
+	// an incomplete run.
+	s.registry.RegisterWithToken(rc, token)
 
 	if s.persister != nil {
 		s.persister.SaveDebounced()
