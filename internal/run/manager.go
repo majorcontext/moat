@@ -1878,6 +1878,7 @@ region = %s
 		// Start services
 		r.ServiceContainers = make(map[string]string)
 		var serviceInfos []container.ServiceInfo
+		var svcConfigs []container.ServiceConfig
 
 		cleanupServices := func() {
 			for _, info := range serviceInfos {
@@ -1902,6 +1903,21 @@ region = %s
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
+			}
+
+			svcConfigs = append(svcConfigs, svcCfg)
+
+			// Create cache directory if needed
+			if svcCfg.CacheHostPath != "" {
+				if mkdirErr := os.MkdirAll(svcCfg.CacheHostPath, 0o755); mkdirErr != nil {
+					cleanupServices()
+					cleanupDaemonRun()
+					cleanupSSH(sshServer)
+					cleanupAgentConfig(claudeConfig)
+					cleanupAgentConfig(codexConfig)
+					cleanupAgentConfig(geminiConfig)
+					return nil, fmt.Errorf("creating cache directory for %s: %w", dep.Name, mkdirErr)
+				}
 			}
 
 			info, err := svcMgr.StartService(ctx, svcCfg)
@@ -1944,6 +1960,22 @@ region = %s
 					"Service container logs:\n  moat logs %s --service %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
 					dep.Name, err, r.ID, dep.Name, dep.Name)
+			}
+
+			// Provision items (e.g., pull models) if configured
+			if svcConfigs[i].ProvisionCmd != "" && len(svcConfigs[i].Provisions) > 0 {
+				log.Debug("provisioning service", "service", dep.Name, "items", svcConfigs[i].Provisions)
+				if err := provisionService(ctx, svcMgr, info, svcConfigs[i], os.Stderr); err != nil {
+					cleanupServices()
+					cleanupDaemonRun()
+					cleanupSSH(sshServer)
+					cleanupAgentConfig(claudeConfig)
+					cleanupAgentConfig(codexConfig)
+					cleanupAgentConfig(geminiConfig)
+					return nil, fmt.Errorf("%s service provisioning failed: %w\n\n"+
+						"Service container logs:\n  moat logs %s --service %s",
+						dep.Name, err, r.ID, dep.Name)
+				}
 			}
 		}
 

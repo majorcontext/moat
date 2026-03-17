@@ -226,3 +226,13 @@ func TestBuildServiceConfigRejectsExtraKeysOnNonProvisionService(t *testing.T) {
 	assert.Contains(t, err.Error(), "plugins")
 	assert.Contains(t, err.Error(), "not a valid")
 }
+
+func TestBuildProvisionCmds(t *testing.T) {
+	cmds := buildProvisionCmds("ollama pull {item}", []string{"qwen2.5-coder:7b", "nomic-embed-text"})
+	assert.Equal(t, []string{"ollama pull qwen2.5-coder:7b", "ollama pull nomic-embed-text"}, cmds)
+}
+
+func TestBuildProvisionCmdsEmpty(t *testing.T) {
+	cmds := buildProvisionCmds("ollama pull {item}", nil)
+	assert.Empty(t, cmds)
+}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -215,6 +217,50 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		Provisions:    provisions,
 		ProvisionCmd:  spec.Service.ProvisionCmd,
 	}, nil
+}
+
+const provisionTimeout = 30 * time.Minute
+
+// buildProvisionCmds creates concrete commands from a template and item list.
+func buildProvisionCmds(cmdTemplate string, items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	cmds := make([]string, len(items))
+	for i, item := range items {
+		cmds[i] = strings.ReplaceAll(cmdTemplate, "{item}", item)
+	}
+	return cmds
+}
+
+// provisionService runs provision commands inside a started service container.
+// Uses flock-based advisory locking on the cache directory to prevent concurrent
+// corruption from parallel runs.
+func provisionService(ctx context.Context, mgr container.ServiceManager, info container.ServiceInfo, cfg container.ServiceConfig, stdout io.Writer) error {
+	cmds := buildProvisionCmds(cfg.ProvisionCmd, cfg.Provisions)
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
+	defer cancel()
+
+	// Advisory lock on cache directory to prevent concurrent pull corruption.
+	// Cache directory is already created by the manager before starting the sidecar.
+	if cfg.CacheHostPath != "" {
+		lockPath := filepath.Join(cfg.CacheHostPath, ".lock")
+		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening cache lock %s: %w", lockPath, err)
+		}
+		defer lockFile.Close()
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+			return fmt.Errorf("acquiring cache lock: %w", err)
+		}
+		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+	}
+
+	return mgr.ProvisionService(ctx, info, cmds, stdout)
 }
 
 // waitForServiceReady polls CheckReady until success or timeout.
