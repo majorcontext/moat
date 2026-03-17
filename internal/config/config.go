@@ -708,10 +708,13 @@ func validateMarketplaceSpec(name string, spec MarketplaceSpec) error {
 }
 
 // validateMCPServerSpec validates an MCP server specification.
-// The section parameter is "claude" or "codex" for error messages.
+// The section parameter is "claude", "codex", or "gemini" for error messages.
 func validateMCPServerSpec(section, name string, spec MCPServerSpec) error {
 	if spec.Command == "" {
 		return fmt.Errorf("%s.mcp.%s: 'command' is required", section, name)
+	}
+	if section == "claude" && spec.Grant != "" {
+		return fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude Code local MCP servers — Claude Code manages its own credential injection", name)
 	}
 	return nil
 }

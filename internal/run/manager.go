@@ -1598,7 +1598,7 @@ region = %s
 				claudeLocalMCP = make(map[string]provider.LocalMCPServerConfig)
 				for name, spec := range opts.Config.Claude.MCP {
 					if spec.Grant != "" {
-						cleanupProxy(proxyServer)
+						cleanupDaemonRun()
 						cleanupSSH(sshServer)
 						return nil, fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude local MCP servers; use codex.mcp or gemini.mcp instead, or set the env var directly", name)
 					}
@@ -1623,7 +1623,6 @@ region = %s
 			})
 			if prepErr != nil {
 				cleanupDaemonRun()
-				cleanupProxy(proxyServer)
 				cleanupSSH(sshServer)
 				return nil, fmt.Errorf("preparing Claude container config: %w", prepErr)
 			}
@@ -1692,13 +1691,13 @@ region = %s
 				if spec.Grant != "" {
 					v, ok := grantToEnvVar(spec.Grant)
 					if !ok {
-						cleanupProxy(proxyServer)
+						cleanupDaemonRun()
 						cleanupSSH(sshServer)
 						cleanupAgentConfig(claudeConfig)
 						return nil, fmt.Errorf("codex.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
 					}
 					if !hasGrant(opts.Config.Grants, spec.Grant) {
-						cleanupProxy(proxyServer)
+						cleanupDaemonRun()
 						cleanupSSH(sshServer)
 						cleanupAgentConfig(claudeConfig)
 						return nil, fmt.Errorf("codex.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
@@ -1713,7 +1712,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					env[v] = credential.ProxyInjectedPlaceholder
+					env[v] = grantToPlaceholder(spec.Grant)
 				}
 				codexLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -1734,7 +1733,6 @@ region = %s
 		})
 		if prepErr != nil {
 			cleanupDaemonRun()
-			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)
@@ -1781,14 +1779,14 @@ region = %s
 				if spec.Grant != "" {
 					v, ok := grantToEnvVar(spec.Grant)
 					if !ok {
-						cleanupProxy(proxyServer)
+						cleanupDaemonRun()
 						cleanupSSH(sshServer)
 						cleanupAgentConfig(claudeConfig)
 						cleanupAgentConfig(codexConfig)
 						return nil, fmt.Errorf("gemini.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
 					}
 					if !hasGrant(opts.Config.Grants, spec.Grant) {
-						cleanupProxy(proxyServer)
+						cleanupDaemonRun()
 						cleanupSSH(sshServer)
 						cleanupAgentConfig(claudeConfig)
 						cleanupAgentConfig(codexConfig)
@@ -1803,7 +1801,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					env[v] = credential.ProxyInjectedPlaceholder
+					env[v] = grantToPlaceholder(spec.Grant)
 				}
 				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -1824,7 +1822,6 @@ region = %s
 		})
 		if prepErr != nil {
 			cleanupDaemonRun()
-			cleanupProxy(proxyServer)
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
@@ -3738,6 +3735,22 @@ func grantToEnvVar(grant string) (string, bool) {
 		return "GEMINI_API_KEY", true
 	default:
 		return "", false
+	}
+}
+
+// grantToPlaceholder returns a format-valid placeholder value for the given
+// grant. Some SDKs validate credential format before making HTTP requests
+// (e.g. gh CLI requires ghp_ prefix, OpenAI SDK requires sk- prefix), so
+// ProxyInjectedPlaceholder would fail their format check before the proxy
+// can inject the real token.
+func grantToPlaceholder(grant string) string {
+	switch grant {
+	case "github":
+		return credential.GitHubTokenPlaceholder
+	case "openai":
+		return credential.OpenAIAPIKeyPlaceholder
+	default:
+		return credential.ProxyInjectedPlaceholder
 	}
 }
 

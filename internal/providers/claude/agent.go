@@ -57,6 +57,9 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		}
 		// Local process MCP servers (type: stdio)
 		for name, cfg := range opts.LocalMCPServers {
+			if _, exists := mcpServers[name]; exists {
+				return nil, fmt.Errorf("mcp server name %q is used by both a remote and a local server — names must be unique", name)
+			}
 			mcpServers[name] = MCPServerForContainer{
 				Type:    "stdio",
 				Command: cfg.Command,

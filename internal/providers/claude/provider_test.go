@@ -850,7 +850,7 @@ func TestRegisterCLI_PromptFlag(t *testing.T) {
 }
 
 func TestPrepareContainer_LocalMCPServers(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -924,7 +924,7 @@ func TestPrepareContainer_LocalMCPServers(t *testing.T) {
 }
 
 func TestPrepareContainer_MixedRemoteAndLocal(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -986,7 +986,7 @@ func TestPrepareContainer_MixedRemoteAndLocal(t *testing.T) {
 }
 
 func TestPrepareContainer_NoMCPServers(t *testing.T) {
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
@@ -1015,7 +1015,7 @@ func TestPrepareContainer_NoMCPServers(t *testing.T) {
 
 func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
 	// Test that a local MCP server with only command (no args, env, cwd) works
-	p := &Provider{}
+	p := &OAuthProvider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",

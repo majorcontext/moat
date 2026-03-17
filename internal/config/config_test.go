@@ -1146,7 +1146,6 @@ claude:
     github:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-github"]
-      grant: github
     filesystem:
       command: npx
       args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
@@ -1175,9 +1174,6 @@ claude:
 	if len(github.Args) != 2 {
 		t.Errorf("github.Args = %d, want 2", len(github.Args))
 	}
-	if github.Grant != "github" {
-		t.Errorf("github.Grant = %q, want %q", github.Grant, "github")
-	}
 
 	filesystem := cfg.Claude.MCP["filesystem"]
 	if filesystem.Cwd != "/workspace" {
@@ -1190,6 +1186,30 @@ claude:
 	}
 	if custom.Env["TOKEN"] != "${secrets.MY_TOKEN}" {
 		t.Errorf("custom.Env[TOKEN] = %q, want %q", custom.Env["TOKEN"], "${secrets.MY_TOKEN}")
+	}
+}
+
+func TestLoadConfigClaudeMCPGrantRejected(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "agent.yaml")
+
+	content := `
+agent: test
+claude:
+  mcp:
+    github:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      grant: github
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when grant is set in claude.mcp")
+	}
+	if !strings.Contains(err.Error(), "grant") {
+		t.Errorf("error should mention 'grant', got: %v", err)
 	}
 }
 
