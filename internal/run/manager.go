@@ -1977,6 +1977,7 @@ region = %s
 			}
 
 			info := serviceInfos[i]
+			fmt.Fprintf(os.Stderr, "Waiting for %s to be ready...\n", dep.Name)
 			log.Debug("waiting for service to be ready", "service", dep.Name)
 			if err := waitForServiceReady(ctx, svcMgr, info); err != nil {
 				cleanupServices()
@@ -1993,6 +1994,8 @@ region = %s
 
 			// Provision items (e.g., pull models) if configured
 			if svcConfigs[i].ProvisionCmd != "" && len(svcConfigs[i].Provisions) > 0 {
+				fmt.Fprintf(os.Stderr, "Pulling %d item(s) for %s: %s\n",
+					len(svcConfigs[i].Provisions), dep.Name, strings.Join(svcConfigs[i].Provisions, ", "))
 				log.Debug("provisioning service", "service", dep.Name, "items", svcConfigs[i].Provisions)
 				// IIFE so defer lw.Close() fires after provisionService, not at function exit.
 				// Without this, multiple provision-capable services would accumulate deferred
