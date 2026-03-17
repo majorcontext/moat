@@ -380,3 +380,21 @@ func TestParseAppleInspectPortBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestIsKernelNotConfiguredError(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"kernel not configured", true},
+		{"default kernel", true},
+		{"some other error", false},
+		{"", false},
+		{"Error: kernel not configured for this architecture", true},
+	}
+	for _, tt := range tests {
+		if got := isKernelNotConfiguredError(tt.msg); got != tt.want {
+			t.Errorf("isKernelNotConfiguredError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}

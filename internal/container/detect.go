@@ -110,15 +110,14 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	if err := rt.Ping(ctx); err != nil {
 		// If DOCKER_HOST is not explicitly set, try known alternative socket
 		// paths from tools like Rancher Desktop.
-		if os.Getenv("DOCKER_HOST") == "" {
-			if altRT := tryAlternativeDockerSockets(sandbox); altRT != nil {
-				rt = altRT
-			} else {
-				return nil, err
-			}
-		} else {
+		if os.Getenv("DOCKER_HOST") != "" {
 			return nil, err
 		}
+		altRT := tryAlternativeDockerSockets(sandbox)
+		if altRT == nil {
+			return nil, err
+		}
+		rt = altRT
 	}
 
 	runtimeName := "Docker"
@@ -160,31 +159,16 @@ func alternativeDockerSockets() []dockerSocketCandidate {
 // client creation uses the discovered socket.
 func tryAlternativeDockerSockets(sandbox bool) *DockerRuntime {
 	for _, c := range alternativeDockerSockets() {
-		if _, err := os.Stat(c.path); err != nil {
+		info, err := os.Lstat(c.path)
+		if err != nil || info.Mode()&os.ModeSocket == 0 {
 			continue
 		}
 
 		host := "unix://" + c.path
 		log.Debug("trying alternative Docker socket", "path", c.path, "tool", c.name)
 
-		// Probe the socket with a lightweight client before creating a full runtime.
-		probe, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
-		if err != nil {
-			continue
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, pingErr := probe.Ping(ctx)
-		cancel()
-		probe.Close()
-
-		if pingErr != nil {
-			continue
-		}
-
-		// Socket is reachable — set DOCKER_HOST so all Docker clients
-		// (including the one inside NewDockerRuntime) use this socket.
-		log.Debug("auto-detected Docker via "+c.name, "socket", c.path)
+		// Set DOCKER_HOST so NewDockerRuntime picks up the socket, then
+		// ping to verify it's reachable before committing to it.
 		os.Setenv("DOCKER_HOST", host)
 
 		rt, err := NewDockerRuntime(sandbox)
@@ -193,6 +177,16 @@ func tryAlternativeDockerSockets(sandbox bool) *DockerRuntime {
 			continue
 		}
 
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pingErr := rt.Ping(ctx)
+		cancel()
+		if pingErr != nil {
+			os.Unsetenv("DOCKER_HOST")
+			continue
+		}
+
+		// Socket is reachable — DOCKER_HOST is already set.
+		log.Debug("auto-detected Docker via "+c.name, "socket", c.path)
 		return rt
 	}
 

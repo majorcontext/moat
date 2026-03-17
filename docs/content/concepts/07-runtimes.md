@@ -17,6 +17,8 @@ Moat detects the available runtime automatically:
 2. If Apple containers are unavailable, it uses Docker
 3. On Linux and Windows, it uses Docker
 
+If the default Docker socket is unreachable and `DOCKER_HOST` is not set, Moat checks known alternative socket locations before returning an error.
+
 The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing either `docker` or `apple`. If the requested runtime is unavailable, Moat returns an error.
 
 ## Docker runtime

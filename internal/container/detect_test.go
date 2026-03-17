@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -141,20 +142,40 @@ func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
 	}
 }
 
-func TestIsKernelNotConfiguredError(t *testing.T) {
-	tests := []struct {
-		msg  string
-		want bool
-	}{
-		{"kernel not configured", true},
-		{"default kernel", true},
-		{"some other error", false},
-		{"", false},
-		{"Error: kernel not configured for this architecture", true},
+func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
+	// Create a real Unix socket in a temp dir so os.Lstat + ModeSocket check passes.
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "docker.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("creating test socket: %v", err)
 	}
-	for _, tt := range tests {
-		if got := isKernelNotConfiguredError(tt.msg); got != tt.want {
-			t.Errorf("isKernelNotConfiguredError(%q) = %v, want %v", tt.msg, got, tt.want)
-		}
+	defer ln.Close()
+
+	// Point HOME at the temp dir so alternativeDockerSockets returns our socket.
+	// The Rancher Desktop path is ~/.rd/docker.sock, so create the subdirectory.
+	rdDir := filepath.Join(dir, ".rd")
+	if err := os.Mkdir(rdDir, 0o755); err != nil {
+		t.Fatalf("creating .rd dir: %v", err)
+	}
+	rdSock := filepath.Join(rdDir, "docker.sock")
+	ln2, err := net.Listen("unix", rdSock)
+	if err != nil {
+		t.Fatalf("creating .rd/docker.sock: %v", err)
+	}
+	defer ln2.Close()
+
+	t.Setenv("HOME", dir)
+	t.Setenv("DOCKER_HOST", "") // ensure it starts unset
+
+	// The socket exists and is a real socket, but it's not a Docker daemon,
+	// so Ping will fail and DOCKER_HOST should be cleared.
+	rt := tryAlternativeDockerSockets(false)
+	if rt != nil {
+		t.Error("expected nil runtime when ping fails")
+	}
+	if got := os.Getenv("DOCKER_HOST"); got != "" {
+		t.Errorf("DOCKER_HOST should be cleared on failure, got %q", got)
 	}
 }
