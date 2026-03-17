@@ -156,7 +156,7 @@ network:
 
 ## Hostname routing
 
-Moat includes a routing proxy that gives each agent its own hostname namespace. When agents declare `ports` in `moat.yaml`, the proxy maps hostnames like `https://web.my-project.localhost:8080` to the corresponding container port. This allows multiple agents to expose the same internal ports without conflicts -- the routing proxy directs traffic based on the hostname in each request. The proxy also serves HTTPS using a generated CA certificate and sets `MOAT_URL_*` environment variables inside each container for inter-service communication.
+Moat includes a routing proxy that gives each agent its own hostname namespace. When agents declare `ports` in `moat.yaml`, the proxy maps hostnames like `https://web.my-agent.localhost:8080` to the corresponding container port. This allows multiple agents to expose the same internal ports without conflicts -- the routing proxy directs traffic based on the hostname in each request. The proxy also serves HTTPS using a generated CA certificate and sets `MOAT_URL_*` environment variables inside each container for inter-service communication.
 
 See [Exposing ports](../guides/06-ports.md) for configuration and usage. See [Proxy architecture](../concepts/09-proxy.md) for details on how the routing proxy works.
 

@@ -28,7 +28,7 @@ Commands that operate on a run (`stop`, `destroy`, `logs`, `trace`, `audit`, `sn
 ```bash
 moat stop run_a1b2c3d4e5f6   # by full ID
 moat stop run_a1b2                # by ID prefix
-moat stop my-project                # by name
+moat stop my-agent                # by name
 ```
 
 Resolution priority: exact ID > ID prefix > exact name.
@@ -730,7 +730,7 @@ moat logs [flags] [run]
 moat logs
 
 # By name
-moat logs my-project
+moat logs my-agent
 
 # By ID
 moat logs run_a1b2c3d4e5f6
@@ -739,10 +739,10 @@ moat logs run_a1b2c3d4e5f6
 moat logs -n 50
 
 # Follow logs from a running container
-moat logs -f my-project
+moat logs -f my-agent
 
 # Show last 20 lines, then follow
-moat logs -n 20 -f my-project
+moat logs -n 20 -f my-agent
 ```
 
 ---
@@ -781,7 +781,7 @@ moat trace --network
 moat trace --network -v
 
 # By name or ID
-moat trace --network my-project
+moat trace --network my-agent
 moat trace --network run_a1b2c3d4e5f6
 ```
 
@@ -811,7 +811,7 @@ moat audit [flags] <run>
 
 ```bash
 # Verify by name or ID
-moat audit my-project
+moat audit my-agent
 moat audit run_a1b2c3d4e5f6
 
 # Export proof bundle
@@ -902,7 +902,7 @@ If a name matches multiple runs, you'll be prompted to confirm stopping all of t
 moat stop
 
 # Stop by name
-moat stop my-project
+moat stop my-agent
 
 # Stop by ID
 moat stop run_a1b2c3d4e5f6
@@ -965,7 +965,7 @@ If a name matches multiple runs, you'll be prompted to confirm destroying all of
 
 ```bash
 # Destroy by name
-moat destroy my-project
+moat destroy my-agent
 
 # Destroy by ID
 moat destroy run_a1b2c3d4e5f6
@@ -1038,8 +1038,8 @@ moat volumes rm <agent-name> [flags]
 #### Examples
 
 ```bash
-moat volumes rm my-project
-moat volumes rm my-project --force
+moat volumes rm my-agent
+moat volumes rm my-agent --force
 ```
 
 ### moat volumes prune
@@ -1084,7 +1084,7 @@ moat snapshot <run> [flags]
 ### Examples
 
 ```bash
-moat snapshot my-project
+moat snapshot my-agent
 moat snapshot run_a1b2c3d4e5f6
 moat snapshot run_a1b2c3d4e5f6 --label "before refactor"
 ```
@@ -1100,7 +1100,7 @@ moat snapshot list <run>
 #### Examples
 
 ```bash
-moat snapshot list my-project
+moat snapshot list my-agent
 moat snapshot list run_a1b2c3d4e5f6 --json
 ```
 
@@ -1122,7 +1122,7 @@ moat snapshot prune <run> [flags]
 #### Examples
 
 ```bash
-moat snapshot prune my-project --keep 3
+moat snapshot prune my-agent --keep 3
 moat snapshot prune run_a1b2c3d4e5f6 --dry-run
 ```
 
@@ -1143,7 +1143,7 @@ moat snapshot restore <run> [snapshot-id] [flags]
 #### Examples
 
 ```bash
-moat snapshot restore my-project
+moat snapshot restore my-agent
 moat snapshot restore run_a1b2c3d4e5f6 snap_abc123
 moat snapshot restore run_a1b2c3d4e5f6 --to /tmp/recovery
 ```

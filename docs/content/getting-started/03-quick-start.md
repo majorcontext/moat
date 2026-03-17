@@ -112,7 +112,7 @@ $ moat logs
 You can auto-generate a configuration file using `moat init`:
 
 ```bash
-moat init ./my-project
+moat init ./my-agent
 ```
 
 This scans the project and uses AI to generate an appropriate `moat.yaml`. Alternatively, create one manually.
@@ -120,14 +120,14 @@ This scans the project and uses AI to generate an appropriate `moat.yaml`. Alter
 For repeated runs, create a configuration file. Make a new directory:
 
 ```bash
-mkdir my-project
-cd my-project
+mkdir my-agent
+cd my-agent
 ```
 
 Create `moat.yaml`:
 
 ```yaml
-name: my-project
+name: my-agent
 
 dependencies:
   - node@20
@@ -186,9 +186,9 @@ List all runs:
 $ moat list
 
 NAME       RUN ID              STATE    AGE       ENDPOINTS
-my-project   run_a1b2c3d4e5f6   stopped  2m ago
-my-project   run_f6e5d4c3b2a1   stopped  5m ago
-my-project   run_1a2b3c4d5e6f   stopped  8m ago
+my-agent   run_a1b2c3d4e5f6   stopped  2m ago
+my-agent   run_f6e5d4c3b2a1   stopped  5m ago
+my-agent   run_1a2b3c4d5e6f   stopped  8m ago
 ```
 
 View system status including disk usage:
@@ -222,17 +222,17 @@ $ moat clean
 Scanning for resources to clean...
 
 Stopped runs (3):
-  my-project   run_a1b2c3d4e5f6   stopped  2m ago
-  my-project   run_f6e5d4c3b2a1   stopped  5m ago
-  my-project   run_1a2b3c4d5e6f   stopped  8m ago
+  my-agent   run_a1b2c3d4e5f6   stopped  2m ago
+  my-agent   run_f6e5d4c3b2a1   stopped  5m ago
+  my-agent   run_1a2b3c4d5e6f   stopped  8m ago
 
 Total: 3 resources, 0 MB
 
 Remove these resources? [y/N]: y
 
-Removing run my-project (run_a1b2c3d4e5f6)... done
-Removing run my-project (run_f6e5d4c3b2a1)... done
-Removing run my-project (run_1a2b3c4d5e6f)... done
+Removing run my-agent (run_a1b2c3d4e5f6)... done
+Removing run my-agent (run_f6e5d4c3b2a1)... done
+Removing run my-agent (run_1a2b3c4d5e6f)... done
 
 Cleaned 3 resources, freed 0 MB
 ```

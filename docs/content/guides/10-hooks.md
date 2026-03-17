@@ -158,7 +158,7 @@ hooks:
 ### Claude Code agent with setup
 
 ```yaml
-name: my-project
+name: my-agent
 
 dependencies:
   - node@20

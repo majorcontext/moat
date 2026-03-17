@@ -81,7 +81,7 @@ Or use the 1Password desktop app: right-click a field and select "Copy Secret Re
 ### Example
 
 ```yaml
-name: my-project
+name: my-agent
 
 dependencies:
   - python@3.11
@@ -191,7 +191,7 @@ For encrypted parameters, also add:
 ### Example
 
 ```yaml
-name: my-project
+name: my-agent
 
 dependencies:
   - node@20
@@ -239,7 +239,7 @@ When the run starts:
 ### Example
 
 ```yaml
-name: my-project
+name: my-agent
 
 secrets:
   OPENAI_API_KEY: env://OPENAI_API_KEY

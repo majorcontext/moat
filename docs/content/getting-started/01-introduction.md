@@ -73,7 +73,7 @@ $ moat run --grant github -- env | grep -i token
 For repeated use, create a `moat.yaml` file:
 
 ```yaml
-name: my-project
+name: my-agent
 
 dependencies:
   - node@20
