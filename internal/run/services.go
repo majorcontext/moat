@@ -308,6 +308,11 @@ func provisionItem(ctx context.Context, mgr container.ServiceManager, info conta
 // flockContext acquires an exclusive flock, but respects context cancellation.
 // syscall.Flock blocks indefinitely; this wraps it in a goroutine so the caller
 // can bail out when the context expires.
+//
+// When context cancellation wins the select, the goroutine remains blocked on
+// Flock until either the lock becomes available or the file descriptor is closed.
+// The caller's deferred lockFile.Close() handles the latter — so the goroutine
+// always terminates promptly. The buffered channel ensures it never blocks on send.
 func flockContext(ctx context.Context, f *os.File) error {
 	done := make(chan error, 1)
 	go func() {
