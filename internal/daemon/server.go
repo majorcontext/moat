@@ -152,8 +152,8 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 		token = generateToken()
 	}
 
-	// Set up token refresh BEFORE registering so the cancel function is
-	// visible to concurrent readers (e.g., handleUnregisterRun) immediately.
+	// Set up token refresh before registry insertion so the initial credential
+	// refresh has a head start before the proxy can observe this run.
 	if len(req.Grants) > 0 {
 		StartTokenRefresh(runCtx, rc, req.Grants)
 	}
