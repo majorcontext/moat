@@ -930,6 +930,8 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `MOAT_OLLAMA_HOST` | Service hostname | `ollama` |
+| `MOAT_OLLAMA_PORT` | Service port | `11434` |
 | `MOAT_OLLAMA_URL` | Base URL for the Ollama API | `http://ollama:11434` |
 
 ---

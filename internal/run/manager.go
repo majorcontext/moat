@@ -1944,6 +1944,20 @@ region = %s
 				}
 			}
 			if !wait {
+				// Reject wait: false when provisions are declared — models can't
+				// be pulled until the service is ready.
+				if svcConfigs[i].ProvisionCmd != "" && len(svcConfigs[i].Provisions) > 0 {
+					cleanupServices()
+					cleanupDaemonRun()
+					cleanupSSH(sshServer)
+					cleanupAgentConfig(claudeConfig)
+					cleanupAgentConfig(codexConfig)
+					cleanupAgentConfig(geminiConfig)
+					return nil, fmt.Errorf("%s: wait: false is incompatible with provisioning — "+
+						"items cannot be pulled until the service is ready\n\n"+
+						"Either remove wait: false or remove the provisioned items",
+						dep.Name)
+				}
 				continue
 			}
 
