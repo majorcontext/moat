@@ -1520,7 +1520,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					env[v] = credential.ProxyInjectedPlaceholder
+					env[v] = grantToPlaceholder(spec.Grant)
 				}
 				codexLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -1608,7 +1608,7 @@ region = %s
 						}
 						env = envCopy
 					}
-					env[v] = credential.ProxyInjectedPlaceholder
+					env[v] = grantToPlaceholder(spec.Grant)
 				}
 				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
 					Command: spec.Command,
@@ -3411,6 +3411,22 @@ func grantToEnvVar(grant string) (string, bool) {
 		return "GEMINI_API_KEY", true
 	default:
 		return "", false
+	}
+}
+
+// grantToPlaceholder returns a format-valid placeholder value for the given
+// grant. Some SDKs validate credential format before making HTTP requests
+// (e.g. gh CLI requires ghp_ prefix, OpenAI SDK requires sk- prefix), so
+// ProxyInjectedPlaceholder would fail their format check before the proxy
+// can inject the real token.
+func grantToPlaceholder(grant string) string {
+	switch grant {
+	case "github":
+		return credential.GitHubTokenPlaceholder
+	case "openai":
+		return credential.OpenAIAPIKeyPlaceholder
+	default:
+		return credential.ProxyInjectedPlaceholder
 	}
 }
 

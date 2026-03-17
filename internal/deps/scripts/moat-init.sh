@@ -180,7 +180,11 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -f "$MOAT_CODEX_INIT/mcp.json" ]; then
   fi
 fi
 
-# Copy .mcp.json from Gemini staging if present
+# Copy .mcp.json from Gemini staging if present.
+# Both Codex and Gemini write to the same destination path. This is safe because
+# config validation rejects runs that activate both agents simultaneously — at
+# most one of these blocks will execute. Adding a third agent with its own
+# .mcp.json must preserve this mutual-exclusion invariant.
 if [ -n "$MOAT_GEMINI_INIT" ] && [ -f "$MOAT_GEMINI_INIT/mcp.json" ]; then
   cp -p "$MOAT_GEMINI_INIT/mcp.json" /workspace/.mcp.json
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
