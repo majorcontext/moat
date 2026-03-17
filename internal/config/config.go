@@ -152,6 +152,44 @@ type ServiceSpec struct {
 	Env   map[string]string `yaml:"env,omitempty"`
 	Image string            `yaml:"image,omitempty"`
 	Wait  *bool             `yaml:"wait,omitempty"`
+	// Extra holds unknown list-valued keys (e.g., "models" for ollama).
+	// Populated by UnmarshalYAML. The run layer maps these to provisions
+	// using the registry's provisions_key.
+	Extra map[string][]string `yaml:"-"`
+}
+
+// UnmarshalYAML implements custom unmarshaling to capture unknown list-valued keys
+// into Extra. Known keys (env, image, wait) are parsed normally.
+func (s *ServiceSpec) UnmarshalYAML(value *yaml.Node) error {
+	// First, decode known fields using an alias to avoid recursion.
+	type plain ServiceSpec
+	if err := value.Decode((*plain)(s)); err != nil {
+		return err
+	}
+
+	// Then scan for unknown keys that have sequence values.
+	if value.Kind != yaml.MappingNode {
+		return nil
+	}
+	known := map[string]bool{"env": true, "image": true, "wait": true}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		val := value.Content[i+1]
+		if known[key] {
+			continue
+		}
+		if val.Kind == yaml.SequenceNode {
+			items := make([]string, 0, len(val.Content))
+			for _, item := range val.Content {
+				items = append(items, item.Value)
+			}
+			if s.Extra == nil {
+				s.Extra = make(map[string][]string)
+			}
+			s.Extra[key] = items
+		}
+	}
+	return nil
 }
 
 // ServiceWait returns whether to wait for this service to be ready (default: true).
