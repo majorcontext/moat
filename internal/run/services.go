@@ -175,6 +175,13 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 	// Resolve provisions from user spec Extra using registry's provisions_key
 	var provisions []string
 	if userSpec != nil && spec.Service.ProvisionsKey != "" {
+		// Check if key is present but was a scalar (nil) instead of a list
+		if val, exists := userSpec.Extra[spec.Service.ProvisionsKey]; exists && val == nil {
+			return container.ServiceConfig{}, fmt.Errorf(
+				"services.%s.%s must be a list, not a scalar value",
+				dep.Name, spec.Service.ProvisionsKey,
+			)
+		}
 		provisions = userSpec.Extra[spec.Service.ProvisionsKey]
 
 		// Validate: reject unknown Extra keys that don't match provisions_key
@@ -272,30 +279,31 @@ func provisionService(ctx context.Context, mgr container.ServiceManager, info co
 	}
 
 	for _, cmd := range cmds {
-		// Per-item timeout: each provision command gets its own deadline.
-		cmdCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
-
-		// Acquire lock per-item so parallel runs pulling different items don't serialize.
-		if lockFile != nil {
-			if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-				cancel()
-				return fmt.Errorf("acquiring cache lock: %w", err)
-			}
-		}
-
-		err := mgr.ProvisionService(cmdCtx, info, []string{cmd}, stdout)
-
-		if lockFile != nil {
-			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		}
-		cancel()
-
-		if err != nil {
+		if err := provisionItem(ctx, mgr, info, cmd, lockFile, stdout); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// provisionItem runs a single provision command with its own timeout and lock scope.
+// The lock is shared across parallel moat runs — concurrent runs pulling different
+// models will still serialize on this single lock file. See todo/005 for narrowing
+// to per-model locks.
+func provisionItem(ctx context.Context, mgr container.ServiceManager, info container.ServiceInfo, cmd string, lockFile *os.File, stdout io.Writer) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
+	defer cancel()
+
+	// Acquire/release lock per-item to avoid holding it across the full batch.
+	if lockFile != nil {
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+			return fmt.Errorf("acquiring cache lock: %w", err)
+		}
+		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+	}
+
+	return mgr.ProvisionService(cmdCtx, info, []string{cmd}, stdout)
 }
 
 // waitForServiceReady polls CheckReady until success or timeout.

@@ -212,6 +212,20 @@ func TestBuildServiceConfigValidatesProvisionsKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "model")
 }
 
+func TestBuildServiceConfigRejectsScalarProvisions(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"models": nil, // scalar value captured as nil by UnmarshalYAML
+		},
+	}
+
+	_, err := buildServiceConfig(dep, "run-ollama", userSpec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a list")
+}
+
 func TestBuildServiceConfigRejectsExtraKeysOnNonProvisionService(t *testing.T) {
 	dep := deps.Dependency{Name: "postgres", Version: "17", Type: deps.TypeService}
 
