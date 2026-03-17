@@ -116,6 +116,20 @@ type ServiceDef struct {
 	ReadinessCmd string            `yaml:"readiness_cmd"`
 	URLScheme    string            `yaml:"url_scheme"`
 	URLFormat    string            `yaml:"url_format"`
+
+	// CachePath is the container-side path to mount for host-side caching.
+	// If set, ~/.moat/cache/<service-name>/ is bind-mounted here.
+	// This allows data to persist across runs (e.g., downloaded models).
+	CachePath string `yaml:"cache_path,omitempty"`
+
+	// ProvisionsKey names the key in user's services.<name> config that contains
+	// a list of items to provision (e.g., "models"). Used with ProvisionCmd.
+	ProvisionsKey string `yaml:"provisions_key,omitempty"`
+
+	// ProvisionCmd is a command template executed once per provision item.
+	// The placeholder {item} is replaced with each item value.
+	// Commands run via sh -c inside the service container after readiness.
+	ProvisionCmd string `yaml:"provision_cmd,omitempty"`
 }
 
 // Dependency represents a parsed dependency from moat.yaml.

@@ -58,6 +58,26 @@ func TestRegistryHasPlaywright(t *testing.T) {
 	}
 }
 
+func TestRegistryHasOllama(t *testing.T) {
+	ollama, ok := GetSpec("ollama")
+	if !ok {
+		t.Fatal("Registry should have 'ollama'")
+	}
+	if ollama.Type != TypeService {
+		t.Errorf("ollama.Type = %v, want %v", ollama.Type, TypeService)
+	}
+	if ollama.Service == nil {
+		t.Fatal("ollama.Service should not be nil")
+	}
+	assert.Equal(t, "ollama/ollama", ollama.Service.Image)
+	assert.Equal(t, 11434, ollama.Service.Ports["default"])
+	assert.Equal(t, "OLLAMA", ollama.Service.EnvPrefix)
+	assert.Equal(t, "/root/.ollama", ollama.Service.CachePath)
+	assert.Equal(t, "models", ollama.Service.ProvisionsKey)
+	assert.Equal(t, "ollama pull {item}", ollama.Service.ProvisionCmd)
+	assert.Empty(t, ollama.Service.PasswordEnv)
+}
+
 func TestServiceDepSpec(t *testing.T) {
 	spec, ok := GetSpec("postgres")
 	require.True(t, ok)

@@ -489,6 +489,22 @@ redis:
     url_scheme: "redis"
     url_format: "{scheme}://:{password}@{host}:{port}"
 
+ollama:
+  description: Ollama local model server
+  type: service
+  default: "0.9"
+  service:
+    image: ollama/ollama
+    ports:
+      default: 11434
+    env_prefix: OLLAMA
+    readiness_cmd: "ollama list"
+    url_scheme: "http"
+    url_format: "{scheme}://{host}:{port}"
+    cache_path: /root/.ollama
+    provisions_key: models
+    provision_cmd: "ollama pull {item}"
+
 # Meta dependencies (bundles)
 go-extras:
   description: Common Go development tools (gofumpt, govulncheck, goreleaser)
