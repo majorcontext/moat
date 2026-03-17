@@ -125,6 +125,8 @@ configures git to use SSH instead of HTTPS for `github.com`. This means
 `git@github.com:org/repo.git`. This avoids authentication issues caused by the
 proxy's TLS interception conflicting with git's HTTPS transport.
 
+To disable the rewrite and use HTTPS for GitHub even when an SSH grant is active, set `MOAT_GIT_SSH_GITHUB=0` in `moat.yaml` under `env:` or pass it via `--env`.
+
 ```bash
 $ moat run -- sh -c "
   # This uses SSH under the hood (automatic rewrite)
