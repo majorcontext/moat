@@ -172,7 +172,7 @@ func (s *ServiceSpec) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.MappingNode {
 		return nil
 	}
-	known := map[string]bool{"env": true, "image": true, "wait": true}
+	known := map[string]bool{"env": true, "image": true, "wait": true, "memory": true}
 	for i := 0; i+1 < len(value.Content); i += 2 {
 		key := value.Content[i].Value
 		val := value.Content[i+1]

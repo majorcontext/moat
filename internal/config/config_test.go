@@ -2350,3 +2350,20 @@ typo_key: some_value
 	assert.Contains(t, spec.Extra, "typo_key")
 	assert.Nil(t, spec.Extra["typo_key"])
 }
+
+func TestServiceSpecUnmarshalMemoryNotLeakedToExtra(t *testing.T) {
+	// memory: is a known ServiceSpec field — it must not leak into Extra.
+	// If it did, buildServiceConfig would reject it as an unknown key when
+	// combined with a provisions-capable service like ollama.
+	input := `
+memory: 2048
+models:
+  - qwen2.5-coder:1.5b
+`
+	var spec ServiceSpec
+	err := yaml.Unmarshal([]byte(input), &spec)
+	require.NoError(t, err)
+	assert.Equal(t, 2048, spec.Memory)
+	assert.NotContains(t, spec.Extra, "memory", "memory must not appear in Extra")
+	assert.Equal(t, []string{"qwen2.5-coder:1.5b"}, spec.Extra["models"])
+}
