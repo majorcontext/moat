@@ -171,6 +171,12 @@ Documentation is part of the feature. A feature without docs is incomplete.
   - Scope is optional but encouraged (e.g., `feat(api): add user endpoint`)
 - Do not include `Co-Authored-By` lines for Claude in commit messages
 
+## Design Specs & Plans
+
+- Store all design specs and implementation plans in `docs/plans/`
+- Naming convention: `YYYY-MM-DD-<topic>-design.md` for specs, `YYYY-MM-DD-<topic>-plan.md` for plans
+- Do not create `docs/superpowers/` or other directories for specs — `docs/plans/` is the single location
+
 ## Creating Pull Requests
 
 - Use `gh pr create` with default flags only (no `--base`, `--head`, etc.)
