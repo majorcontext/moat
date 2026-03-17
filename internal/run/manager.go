@@ -1292,6 +1292,44 @@ region = %s
 		}
 	}
 
+	// Clone marketplace repos on the host so private repos are accessible
+	// without passing credentials into the build context. The host's git
+	// credentials (gh auth, SSH keys, credential helpers) handle authentication.
+	var marketplaceCleanups []string
+	var marketplaceContextFiles map[string][]byte
+	for i := range claudeMarketplaces {
+		m := &claudeMarketplaces[i]
+		clonedDir, cloneErr := claude.CloneMarketplace(ctx, m.Repo, "")
+		if cloneErr != nil {
+			log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
+				"name", m.Name, "repo", m.Repo, "error", cloneErr)
+			continue
+		}
+		marketplaceCleanups = append(marketplaceCleanups, clonedDir)
+
+		files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
+		if collectErr != nil {
+			log.Warn("could not collect marketplace files after clone; will try build-time clone",
+				"name", m.Name, "error", collectErr)
+			continue
+		}
+
+		if marketplaceContextFiles == nil {
+			marketplaceContextFiles = make(map[string][]byte)
+		}
+		for path, content := range files {
+			marketplaceContextFiles[path] = content
+		}
+
+		m.PreCloned = "marketplaces/" + m.Name
+		log.Info("pre-cloned marketplace on host", "name", m.Name)
+	}
+	defer func() {
+		for _, dir := range marketplaceCleanups {
+			os.RemoveAll(dir)
+		}
+	}()
+
 	// Resolve which agents need init and which providers need init files.
 	// This opens the credential store once and walks grants in a single pass.
 	imgNeeds := resolveImageNeeds(opts.Grants, depList)
@@ -1393,6 +1431,17 @@ region = %s
 				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtime.Type())
 			}
 
+			// Merge pre-cloned marketplace files into build context.
+			// These are added alongside the files from Dockerfile generation
+			// (which includes known_marketplaces.json via ExtraContextFiles).
+			if len(marketplaceContextFiles) > 0 {
+				if result.ContextFiles == nil {
+					result.ContextFiles = make(map[string][]byte)
+				}
+				for path, content := range marketplaceContextFiles {
+					result.ContextFiles[path] = content
+				}
+			}
 			buildOpts.ContextFiles = result.ContextFiles
 			if err := buildMgr.BuildImage(ctx, result.Dockerfile, containerImage, buildOpts); err != nil {
 				cleanupDaemonRun()
