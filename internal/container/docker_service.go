@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -66,12 +67,24 @@ func (m *dockerServiceManager) CheckReady(ctx context.Context, info ServiceInfo)
 	_, _ = io.Copy(io.Discard, resp.Reader)
 	resp.Close()
 
-	execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
-	if err != nil {
-		return fmt.Errorf("inspecting readiness check: %w", err)
+	// Docker may not commit the exit code immediately after the stream closes.
+	// Retry briefly to avoid a false "running" state from ContainerExecInspect.
+	var exitCode int
+	for attempt := 0; attempt < 3; attempt++ {
+		execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
+		if err != nil {
+			return fmt.Errorf("inspecting readiness check: %w", err)
+		}
+		if !execInspect.Running {
+			exitCode = execInspect.ExitCode
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
-	if execInspect.ExitCode != 0 {
-		return fmt.Errorf("readiness check failed with exit code %d", execInspect.ExitCode)
+	if exitCode != 0 {
+		return fmt.Errorf("readiness check failed with exit code %d", exitCode)
 	}
 
 	return nil
@@ -101,12 +114,24 @@ func (m *dockerServiceManager) ProvisionService(ctx context.Context, info Servic
 		_, _ = stdcopy.StdCopy(stdout, stdout, resp.Reader)
 		resp.Close()
 
-		execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
-		if err != nil {
-			return fmt.Errorf("inspecting provision command %q: %w", cmd, err)
+		// Docker may not commit the exit code immediately after the stream closes.
+		// Retry briefly to avoid a false "running" state from ContainerExecInspect.
+		var exitCode int
+		for attempt := 0; attempt < 3; attempt++ {
+			execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
+			if err != nil {
+				return fmt.Errorf("inspecting provision command %q: %w", cmd, err)
+			}
+			if !execInspect.Running {
+				exitCode = execInspect.ExitCode
+				break
+			}
+			if attempt < 2 {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
-		if execInspect.ExitCode != 0 {
-			return fmt.Errorf("provision command %q failed with exit code %d", cmd, execInspect.ExitCode)
+		if exitCode != 0 {
+			return fmt.Errorf("provision command %q failed with exit code %d", cmd, exitCode)
 		}
 	}
 	return nil

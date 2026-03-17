@@ -292,6 +292,31 @@ func TestBuildServiceConfigAcceptsValidModelNames(t *testing.T) {
 	assert.Equal(t, validModels, cfg.Provisions)
 }
 
+func TestBuildServiceConfigOllamaProvisionsIncompatibleWithWaitFalse(t *testing.T) {
+	// Validates the fields the manager's wait:false guard checks.
+	// The guard rejects ProvisionCmd != "" && len(Provisions) > 0 when wait: false.
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"models": {"qwen2.5-coder:7b"},
+		},
+	}
+
+	cfg, err := buildServiceConfig(dep, "run-test", userSpec)
+	require.NoError(t, err)
+
+	// These are the exact conditions the wait:false guard checks
+	assert.NotEmpty(t, cfg.ProvisionCmd, "ProvisionCmd must be set for guard to trigger")
+	assert.NotEmpty(t, cfg.Provisions, "Provisions must be set for guard to trigger")
+
+	// Without provisions, the guard should not trigger
+	cfgNoProv, err := buildServiceConfig(dep, "run-test", nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, cfgNoProv.ProvisionCmd, "ProvisionCmd is set even without user models")
+	assert.Empty(t, cfgNoProv.Provisions, "No provisions when user doesn't specify models")
+}
+
 func TestBuildProvisionCmds(t *testing.T) {
 	cmds := buildProvisionCmds("ollama pull {item}", []string{"qwen2.5-coder:7b", "nomic-embed-text"})
 	assert.Equal(t, []string{"ollama pull qwen2.5-coder:7b", "ollama pull nomic-embed-text"}, cmds)

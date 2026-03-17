@@ -296,13 +296,32 @@ func provisionItem(ctx context.Context, mgr container.ServiceManager, info conta
 
 	// Acquire/release lock per-item to avoid holding it across the full batch.
 	if lockFile != nil {
-		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-			return fmt.Errorf("acquiring cache lock: %w", err)
+		if err := flockContext(cmdCtx, lockFile); err != nil {
+			return err
 		}
 		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
 	}
 
 	return mgr.ProvisionService(cmdCtx, info, []string{cmd}, stdout)
+}
+
+// flockContext acquires an exclusive flock, but respects context cancellation.
+// syscall.Flock blocks indefinitely; this wraps it in a goroutine so the caller
+// can bail out when the context expires.
+func flockContext(ctx context.Context, f *os.File) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("acquiring cache lock: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("acquiring cache lock: %w", ctx.Err())
+	}
 }
 
 // waitForServiceReady polls CheckReady until success or timeout.
