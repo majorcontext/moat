@@ -218,6 +218,15 @@ type ServiceConfig struct {
 	PasswordEnv  string         // Env var containing the password (e.g., "POSTGRES_PASSWORD")
 	ExtraCmd     []string       // Extra command args with {placeholder} substitution
 	ReadinessCmd string         // Command to check if service is ready
+
+	// CachePath is the container-side path for cache mounting (e.g., "/root/.ollama").
+	CachePath string
+	// CacheHostPath is the resolved host-side path (e.g., "~/.moat/cache/ollama/").
+	CacheHostPath string
+	// Provisions is the list of items to provision (e.g., model names).
+	Provisions []string
+	// ProvisionCmd is the command template with {item} placeholder.
+	ProvisionCmd string
 }
 
 // ServiceInfo contains connection details for a started service.
