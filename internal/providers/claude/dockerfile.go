@@ -30,6 +30,21 @@ var validPluginKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$`)
 // Rejects characters like single quotes that could break shell syntax.
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// validPreClonedPath matches safe build-context-relative paths for COPY directives.
+// Allows alphanumeric, dots, hyphens, underscores, and forward slashes only.
+// Rejects spaces, newlines, shell metacharacters, and backslashes.
+var validPreClonedPath = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+
+// validMarketplaceName matches safe marketplace names for use in filesystem paths.
+// Allows alphanumeric, hyphens, and underscores only.
+var validMarketplaceName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// Note on error handling: When validation fails, error messages include the
+// marketplace name or plugin key (which are user-visible identifiers) but NOT
+// the invalid repo/value itself. This prevents potentially malicious content
+// from appearing in the Dockerfile. Users can look up the name in their
+// moat.yaml to see and fix the actual invalid value.
+
 // PluginSnippetResult holds the Dockerfile snippet and optional script context file.
 type PluginSnippetResult struct {
 	// DockerfileSnippet is the Dockerfile text to append (COPY + RUN).
@@ -38,6 +53,9 @@ type PluginSnippetResult struct {
 	ScriptName string
 	// ScriptContent is the shell script content (nil if no plugins).
 	ScriptContent []byte
+	// ExtraContextFiles maps build-context-relative paths to file contents.
+	// Used for known_marketplaces.json for pre-cloned marketplaces.
+	ExtraContextFiles map[string][]byte
 }
 
 // GenerateDockerfileSnippet generates Dockerfile commands for Claude Code plugin installation.
@@ -69,6 +87,17 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	copy(sortedPlugins, plugins)
 	sort.Strings(sortedPlugins)
 
+	// Separate pre-cloned and remote marketplaces.
+	var preCloned []MarketplaceConfig
+	var remote []MarketplaceConfig
+	for _, m := range sortedMarketplaces {
+		if m.PreCloned != "" {
+			preCloned = append(preCloned, m)
+		} else {
+			remote = append(remote, m)
+		}
+	}
+
 	// Build the install script
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\n")
@@ -80,8 +109,9 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	script.WriteString(fmt.Sprintf("export PATH=\"/home/%s/.claude/local/bin:/home/%s/.local/bin:$PATH\"\n\n", containerUser, containerUser))
 	script.WriteString("failures=0\n\n")
 
-	// Add marketplaces - failures are fatal (marketplaces are prerequisites for plugins)
-	for _, m := range sortedMarketplaces {
+	// Add remote marketplaces only — pre-cloned ones are COPYed into the image.
+	// Failures are fatal (marketplaces are prerequisites for plugins).
+	for _, m := range remote {
 		if m.Repo == "" {
 			continue
 		}
@@ -135,6 +165,49 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	dockerfile.WriteString("# Claude Code plugins\n")
 	dockerfile.WriteString(fmt.Sprintf("USER %s\n", containerUser))
 	dockerfile.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
+
+	// COPY pre-cloned marketplace directories into the plugins path.
+	// Filter out entries with invalid PreCloned paths or Names to prevent
+	// injection into Dockerfile COPY directives.
+	var validPreCloned []MarketplaceConfig
+	for _, m := range preCloned {
+		if !validMarketplaceName.MatchString(m.Name) {
+			script.WriteString("echo 'WARNING: Invalid marketplace name for pre-cloned entry, skipping'\n")
+			continue
+		}
+		if !validPreClonedPath.MatchString(m.PreCloned) {
+			script.WriteString(fmt.Sprintf("echo 'WARNING: Invalid pre-cloned path for marketplace %s, skipping'\n", m.Name))
+			continue
+		}
+		validPreCloned = append(validPreCloned, m)
+		dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s %s /home/%s/.claude/plugins/marketplaces/%s\n",
+			containerUser, m.PreCloned, containerUser, m.Name))
+	}
+
+	// Generate known_marketplaces.json for pre-cloned marketplaces.
+	var extraFiles map[string][]byte
+	if len(validPreCloned) > 0 {
+		pcList := make([]PreClonedMarketplace, len(validPreCloned))
+		for i, m := range validPreCloned {
+			pcList[i] = PreClonedMarketplace{
+				Name:   m.Name,
+				Source: m.Source,
+				Repo:   m.Repo,
+			}
+		}
+		knownJSON, err := GenerateKnownMarketplaces(pcList, containerUser)
+		// GenerateKnownMarketplaces only fails if json.MarshalIndent fails,
+		// which cannot happen in practice for simple string maps. The error
+		// guard is defense-in-depth only.
+		if err == nil {
+			extraFiles = map[string][]byte{
+				"known-marketplaces.json": knownJSON,
+			}
+			dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s known-marketplaces.json /home/%s/.claude/plugins/known_marketplaces.json\n",
+				containerUser, containerUser))
+		}
+	}
+
 	dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s claude-plugins.sh /tmp/claude-plugins.sh\n", containerUser))
 	dockerfile.WriteString("RUN bash /tmp/claude-plugins.sh && rm /tmp/claude-plugins.sh\n\n")
 
@@ -142,5 +215,6 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		DockerfileSnippet: dockerfile.String(),
 		ScriptName:        "claude-plugins.sh",
 		ScriptContent:     []byte(script.String()),
+		ExtraContextFiles: extraFiles,
 	}
 }

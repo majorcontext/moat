@@ -168,6 +168,136 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 	})
 }
 
+func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
+	// Mixed: one pre-cloned, one remote marketplace.
+	marketplaces := []MarketplaceConfig{
+		{Name: "private-market", Source: "github", Repo: "org/private-market", PreCloned: "marketplaces/private-market"},
+		{Name: "public-market", Source: "github", Repo: "org/public-market"},
+	}
+	plugins := []string{
+		"my-plugin@private-market",
+		"other-plugin@public-market",
+	}
+
+	result := GenerateDockerfileSnippet(marketplaces, plugins, "moatuser")
+
+	// --- Dockerfile snippet checks ---
+
+	// Pre-cloned marketplace should get COPY commands
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/private-market /home/moatuser/.claude/plugins/marketplaces/private-market") {
+		t.Error("should COPY pre-cloned marketplace directory")
+	}
+	// known_marketplaces.json should get a COPY command
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser known-marketplaces.json /home/moatuser/.claude/plugins/known_marketplaces.json") {
+		t.Error("should COPY known-marketplaces.json")
+	}
+
+	// Script COPY and RUN should still be present
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser claude-plugins.sh /tmp/claude-plugins.sh") {
+		t.Error("should COPY plugin install script")
+	}
+	if !strings.Contains(result.DockerfileSnippet, "RUN bash /tmp/claude-plugins.sh") {
+		t.Error("should run plugin install script")
+	}
+
+	// --- Script checks ---
+	scriptStr := string(result.ScriptContent)
+
+	// Remote marketplace should get marketplace add
+	if !strings.Contains(scriptStr, "marketplace add org/public-market") {
+		t.Error("remote marketplace should use marketplace add")
+	}
+	// Pre-cloned marketplace should NOT get marketplace add
+	if strings.Contains(scriptStr, "marketplace add org/private-market") {
+		t.Error("pre-cloned marketplace should NOT use marketplace add")
+	}
+
+	// ALL plugins should get plugin install
+	if !strings.Contains(scriptStr, "plugin install my-plugin@private-market") {
+		t.Error("should install plugin from pre-cloned marketplace")
+	}
+	if !strings.Contains(scriptStr, "plugin install other-plugin@public-market") {
+		t.Error("should install plugin from remote marketplace")
+	}
+
+	// --- ExtraContextFiles checks ---
+	if result.ExtraContextFiles == nil {
+		t.Fatal("ExtraContextFiles should not be nil when pre-cloned marketplaces exist")
+	}
+	knownJSON, ok := result.ExtraContextFiles["known-marketplaces.json"]
+	if !ok {
+		t.Fatal("ExtraContextFiles should contain known-marketplaces.json")
+	}
+	// Verify it's valid JSON containing the pre-cloned marketplace
+	if !strings.Contains(string(knownJSON), "private-market") {
+		t.Error("known-marketplaces.json should contain the pre-cloned marketplace name")
+	}
+	// Should NOT contain the remote marketplace
+	if strings.Contains(string(knownJSON), "public-market") {
+		t.Error("known-marketplaces.json should NOT contain remote marketplace")
+	}
+}
+
+func TestGenerateDockerfileSnippetAllPreCloned(t *testing.T) {
+	// All marketplaces are pre-cloned — no marketplace add commands at all.
+	marketplaces := []MarketplaceConfig{
+		{Name: "alpha", Source: "github", Repo: "org/alpha", PreCloned: "marketplaces/alpha"},
+		{Name: "beta", Source: "git", Repo: "https://git.example.com/beta.git", PreCloned: "marketplaces/beta"},
+	}
+	plugins := []string{
+		"tool-a@alpha",
+		"tool-b@beta",
+	}
+
+	result := GenerateDockerfileSnippet(marketplaces, plugins, "moatuser")
+
+	// --- Script checks ---
+	scriptStr := string(result.ScriptContent)
+
+	// No marketplace add at all
+	if strings.Contains(scriptStr, "marketplace add") {
+		t.Error("all pre-cloned: should have NO marketplace add commands")
+	}
+
+	// Plugin install should still work
+	if !strings.Contains(scriptStr, "plugin install tool-a@alpha") {
+		t.Error("should install tool-a plugin")
+	}
+	if !strings.Contains(scriptStr, "plugin install tool-b@beta") {
+		t.Error("should install tool-b plugin")
+	}
+
+	// --- Dockerfile snippet checks ---
+
+	// Both marketplaces should have COPY commands
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/alpha /home/moatuser/.claude/plugins/marketplaces/alpha") {
+		t.Error("should COPY alpha marketplace")
+	}
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/beta /home/moatuser/.claude/plugins/marketplaces/beta") {
+		t.Error("should COPY beta marketplace")
+	}
+
+	// known_marketplaces.json should be present
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser known-marketplaces.json /home/moatuser/.claude/plugins/known_marketplaces.json") {
+		t.Error("should COPY known-marketplaces.json")
+	}
+
+	// --- ExtraContextFiles checks ---
+	if result.ExtraContextFiles == nil {
+		t.Fatal("ExtraContextFiles should not be nil")
+	}
+	knownJSON, ok := result.ExtraContextFiles["known-marketplaces.json"]
+	if !ok {
+		t.Fatal("ExtraContextFiles should contain known-marketplaces.json")
+	}
+	if !strings.Contains(string(knownJSON), "alpha") {
+		t.Error("known-marketplaces.json should contain alpha")
+	}
+	if !strings.Contains(string(knownJSON), "beta") {
+		t.Error("known-marketplaces.json should contain beta")
+	}
+}
+
 func TestGenerateDockerfileSnippetKeepsDockerfileSmall(t *testing.T) {
 	// Verify the Dockerfile snippet is small regardless of plugin count
 	var plugins []string
