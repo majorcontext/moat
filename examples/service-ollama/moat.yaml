@@ -19,6 +19,6 @@ dependencies:
 services:
   ollama:
     models:
-      - qwen2.5-coder:1.5b
+      - qwen2.5-coder:0.5b
 
 command: ["sh", "/workspace/demo.sh"]

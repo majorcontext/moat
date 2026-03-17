@@ -12,6 +12,6 @@ echo
 echo "--- Generating response ---"
 result=$(curl -s -H 'Content-Type: application/json' \
   "$MOAT_OLLAMA_URL/api/generate" \
-  -d '{"model":"qwen2.5-coder:1.5b","prompt":"Write hello world in Go","stream":false}')
+  -d '{"model":"qwen2.5-coder:0.5b","prompt":"Write hello world in Go","stream":false}')
 echo "$result" | jq -r '.response // (.error | "Error: " + .)'
 echo
