@@ -203,6 +203,11 @@ type ServiceManager interface {
 	CheckReady(ctx context.Context, info ServiceInfo) error
 	StopService(ctx context.Context, info ServiceInfo) error
 	SetNetworkID(id string)
+
+	// ProvisionService executes commands sequentially inside the service container.
+	// Each command is run via sh -c. stdout receives streaming output for user feedback.
+	// Returns on first command failure (fail-fast).
+	ProvisionService(ctx context.Context, info ServiceInfo, cmds []string, stdout io.Writer) error
 }
 
 // ServiceConfig defines what service to provision.

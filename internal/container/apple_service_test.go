@@ -114,3 +114,25 @@ func TestGetContainerIPExists(t *testing.T) {
 	// Expected to fail — we just verify the method exists and returns an error
 	assert.Error(t, err)
 }
+
+func TestAppleBuildRunArgsWithCachePath(t *testing.T) {
+	cfg := ServiceConfig{
+		Name:          "ollama",
+		Version:       "0.9",
+		Image:         "ollama/ollama",
+		Env:           map[string]string{},
+		RunID:         "test-run-789",
+		CachePath:     "/root/.ollama",
+		CacheHostPath: "/tmp/test-cache/ollama",
+	}
+
+	args := buildAppleRunArgs(cfg, "moat-test-net")
+	assert.Contains(t, args, "--volume")
+	for i, a := range args {
+		if a == "--volume" && i+1 < len(args) {
+			assert.Equal(t, "/tmp/test-cache/ollama:/root/.ollama", args[i+1])
+			return
+		}
+	}
+	t.Fatal("--volume flag not found in args")
+}

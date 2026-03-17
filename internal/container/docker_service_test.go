@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildSidecarConfigPostgres(t *testing.T) {
@@ -40,4 +41,39 @@ func TestBuildSidecarConfigRedis(t *testing.T) {
 	sidecarCfg := buildSidecarConfig(cfg, "net-456")
 	assert.Equal(t, "redis:7", sidecarCfg.Image)
 	assert.Equal(t, []string{"--requirepass", "redispass"}, sidecarCfg.Cmd)
+}
+
+func TestBuildSidecarConfigWithCachePath(t *testing.T) {
+	cfg := ServiceConfig{
+		Name:          "ollama",
+		Version:       "0.9",
+		Image:         "ollama/ollama",
+		Ports:         map[string]int{"default": 11434},
+		Env:           map[string]string{},
+		RunID:         "test-run-789",
+		CachePath:     "/root/.ollama",
+		CacheHostPath: "/tmp/test-cache/ollama",
+	}
+
+	sidecarCfg := buildSidecarConfig(cfg, "net-789")
+	assert.Equal(t, "ollama/ollama:0.9", sidecarCfg.Image)
+	assert.Equal(t, "moat-ollama-test-run-789", sidecarCfg.Name)
+
+	require.Len(t, sidecarCfg.Mounts, 1)
+	assert.Equal(t, "/tmp/test-cache/ollama", sidecarCfg.Mounts[0].Source)
+	assert.Equal(t, "/root/.ollama", sidecarCfg.Mounts[0].Target)
+	assert.False(t, sidecarCfg.Mounts[0].ReadOnly)
+}
+
+func TestBuildSidecarConfigNoCachePath(t *testing.T) {
+	cfg := ServiceConfig{
+		Name:    "postgres",
+		Version: "17",
+		Image:   "postgres",
+		Env:     map[string]string{},
+		RunID:   "test-run-000",
+	}
+
+	sidecarCfg := buildSidecarConfig(cfg, "net-000")
+	assert.Empty(t, sidecarCfg.Mounts)
 }

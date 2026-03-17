@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strings"
@@ -90,6 +91,19 @@ func (m *appleServiceManager) StopService(ctx context.Context, info ServiceInfo)
 	return nil
 }
 
+// ProvisionService executes commands sequentially inside the service container.
+func (m *appleServiceManager) ProvisionService(ctx context.Context, info ServiceInfo, cmds []string, stdout io.Writer) error {
+	for _, cmd := range cmds {
+		execCmd := exec.CommandContext(ctx, m.containerBin, "exec", info.ID, "sh", "-c", cmd)
+		execCmd.Stdout = stdout
+		execCmd.Stderr = stdout
+		if err := execCmd.Run(); err != nil {
+			return fmt.Errorf("provision command %q failed: %w", cmd, err)
+		}
+	}
+	return nil
+}
+
 // getContainerIP inspects a container and returns its IPv4 address on the network.
 func (m *appleServiceManager) getContainerIP(ctx context.Context, containerID string) (string, error) {
 	cmd := exec.CommandContext(ctx, m.containerBin, "inspect", containerID)
@@ -137,6 +151,11 @@ func buildAppleRunArgs(cfg ServiceConfig, networkID string) []string {
 
 	if networkID != "" {
 		args = append(args, "--network", networkID)
+	}
+
+	// Add cache mount if configured
+	if cfg.CachePath != "" && cfg.CacheHostPath != "" {
+		args = append(args, "--volume", cfg.CacheHostPath+":"+cfg.CachePath)
 	}
 
 	// Sort env keys for deterministic ordering

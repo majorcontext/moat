@@ -8,6 +8,7 @@ import (
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // dockerServiceManager implements ServiceManager using Docker sidecars.
@@ -81,6 +82,36 @@ func (m *dockerServiceManager) StopService(ctx context.Context, info ServiceInfo
 	return m.cli.ContainerRemove(ctx, info.ID, dockercontainer.RemoveOptions{Force: true})
 }
 
+// ProvisionService executes commands sequentially inside the service container.
+func (m *dockerServiceManager) ProvisionService(ctx context.Context, info ServiceInfo, cmds []string, stdout io.Writer) error {
+	for _, cmd := range cmds {
+		execCreateResp, err := m.cli.ContainerExecCreate(ctx, info.ID, dockercontainer.ExecOptions{
+			Cmd:          []string{"sh", "-c", cmd},
+			AttachStdout: true,
+			AttachStderr: true,
+		})
+		if err != nil {
+			return fmt.Errorf("creating exec for provision command %q: %w", cmd, err)
+		}
+
+		resp, err := m.cli.ContainerExecAttach(ctx, execCreateResp.ID, dockercontainer.ExecAttachOptions{})
+		if err != nil {
+			return fmt.Errorf("attaching to provision command %q: %w", cmd, err)
+		}
+		_, _ = stdcopy.StdCopy(stdout, stdout, resp.Reader)
+		resp.Close()
+
+		execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
+		if err != nil {
+			return fmt.Errorf("inspecting provision command %q: %w", cmd, err)
+		}
+		if execInspect.ExitCode != 0 {
+			return fmt.Errorf("provision command %q failed with exit code %d", cmd, execInspect.ExitCode)
+		}
+	}
+	return nil
+}
+
 // buildSidecarConfig converts a ServiceConfig into a SidecarConfig.
 func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 	image := cfg.Image + ":" + cfg.Version
@@ -107,6 +138,14 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 		Labels: map[string]string{
 			"moat.role": "service",
 		},
+	}
+
+	// Add cache mount if configured
+	if cfg.CachePath != "" && cfg.CacheHostPath != "" {
+		sc.Mounts = append(sc.Mounts, MountConfig{
+			Source: cfg.CacheHostPath,
+			Target: cfg.CachePath,
+		})
 	}
 
 	if len(cfg.ExtraCmd) > 0 {
