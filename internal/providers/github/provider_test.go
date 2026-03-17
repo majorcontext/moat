@@ -266,6 +266,18 @@ func TestSanitizeGhConfig(t *testing.T) {
 			input:   ":\t:\n",
 			wantNil: true,
 		},
+		{
+			name:     "strips nil values to prevent YAML null round-trip",
+			input:    "git_protocol: https\neditor:\npager:\nbrowser:\nhttp_unix_socket:\n",
+			contains: []string{"git_protocol: https"},
+			excludes: []string{"null", "http_unix_socket", "editor", "pager", "browser"},
+		},
+		{
+			name:     "strips http_unix_socket even when set",
+			input:    "git_protocol: ssh\nhttp_unix_socket: /tmp/gh.sock\n",
+			contains: []string{"git_protocol: ssh"},
+			excludes: []string{"http_unix_socket", "/tmp/gh.sock"},
+		},
 	}
 
 	for _, tt := range tests {
