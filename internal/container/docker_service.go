@@ -70,6 +70,7 @@ func (m *dockerServiceManager) CheckReady(ctx context.Context, info ServiceInfo)
 	// Docker may not commit the exit code immediately after the stream closes.
 	// Retry briefly to avoid a false "running" state from ContainerExecInspect.
 	var exitCode int
+	complete := false
 	for attempt := 0; attempt < 3; attempt++ {
 		execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
 		if err != nil {
@@ -77,11 +78,15 @@ func (m *dockerServiceManager) CheckReady(ctx context.Context, info ServiceInfo)
 		}
 		if !execInspect.Running {
 			exitCode = execInspect.ExitCode
+			complete = true
 			break
 		}
 		if attempt < 2 {
 			time.Sleep(100 * time.Millisecond)
 		}
+	}
+	if !complete {
+		return fmt.Errorf("readiness check exec still running after retries")
 	}
 	if exitCode != 0 {
 		return fmt.Errorf("readiness check failed with exit code %d", exitCode)
@@ -117,6 +122,7 @@ func (m *dockerServiceManager) ProvisionService(ctx context.Context, info Servic
 		// Docker may not commit the exit code immediately after the stream closes.
 		// Retry briefly to avoid a false "running" state from ContainerExecInspect.
 		var exitCode int
+		complete := false
 		for attempt := 0; attempt < 3; attempt++ {
 			execInspect, err := m.cli.ContainerExecInspect(ctx, execCreateResp.ID)
 			if err != nil {
@@ -124,11 +130,15 @@ func (m *dockerServiceManager) ProvisionService(ctx context.Context, info Servic
 			}
 			if !execInspect.Running {
 				exitCode = execInspect.ExitCode
+				complete = true
 				break
 			}
 			if attempt < 2 {
 				time.Sleep(100 * time.Millisecond)
 			}
+		}
+		if !complete {
+			return fmt.Errorf("provision command %q exec still running after retries", cmd)
 		}
 		if exitCode != 0 {
 			return fmt.Errorf("provision command %q failed with exit code %d", cmd, exitCode)
