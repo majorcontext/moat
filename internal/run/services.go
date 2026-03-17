@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +100,21 @@ func generateServiceEnv(def *deps.ServiceDef, info container.ServiceInfo, userSp
 	return env
 }
 
+// serviceUsesPasswordPlaceholder reports whether a service's extra_cmd or
+// readiness_cmd contains the {password} placeholder, indicating it needs a
+// generated password even when password_env is empty (e.g., Redis).
+func serviceUsesPasswordPlaceholder(svc *deps.ServiceDef) bool {
+	if strings.Contains(svc.ReadinessCmd, "{password}") {
+		return true
+	}
+	for _, arg := range svc.ExtraCmd {
+		if strings.Contains(arg, "{password}") {
+			return true
+		}
+	}
+	return false
+}
+
 // buildServiceConfig creates a ServiceConfig for a service dependency.
 // Populates both generic fields and service definition fields from the registry.
 func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.ServiceSpec) (container.ServiceConfig, error) {
@@ -109,25 +126,37 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		return container.ServiceConfig{}, fmt.Errorf("%s has type %q but expected %q", dep.Name, spec.Type, deps.TypeService)
 	}
 
-	password, err := generatePassword()
-	if err != nil {
-		return container.ServiceConfig{}, err
-	}
-
 	env := make(map[string]string)
 
-	// Set password
-	if spec.Service.PasswordEnv != "" {
-		env[spec.Service.PasswordEnv] = password
-	} else {
-		env["password"] = password
-	}
+	// Determine if this service needs a password.
+	// A service needs auth if it has a named password env var OR if its
+	// extra_cmd / readiness_cmd reference the {password} placeholder (e.g., Redis).
+	needsPassword := spec.Service.PasswordEnv != "" || serviceUsesPasswordPlaceholder(spec.Service)
 
-	// Set extra_env from registry with placeholder substitution
-	for k, v := range spec.Service.ExtraEnv {
-		v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
-		v = strings.ReplaceAll(v, "{password}", password)
-		env[k] = v
+	// Only generate password for services that have auth
+	if needsPassword {
+		password, err := generatePassword()
+		if err != nil {
+			return container.ServiceConfig{}, err
+		}
+		if spec.Service.PasswordEnv != "" {
+			env[spec.Service.PasswordEnv] = password
+		} else {
+			env["password"] = password
+		}
+
+		// Set extra_env from registry with placeholder substitution
+		for k, v := range spec.Service.ExtraEnv {
+			v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
+			v = strings.ReplaceAll(v, "{password}", password)
+			env[k] = v
+		}
+	} else {
+		// No auth — still apply extra_env without password substitution
+		for k, v := range spec.Service.ExtraEnv {
+			v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
+			env[k] = v
+		}
 	}
 
 	// Apply user overrides
@@ -137,16 +166,54 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		}
 	}
 
+	// Resolve provisions from user spec Extra using registry's provisions_key
+	var provisions []string
+	if userSpec != nil && spec.Service.ProvisionsKey != "" {
+		provisions = userSpec.Extra[spec.Service.ProvisionsKey]
+
+		// Validate: reject unknown Extra keys that don't match provisions_key
+		for key := range userSpec.Extra {
+			if key != spec.Service.ProvisionsKey {
+				return container.ServiceConfig{}, fmt.Errorf(
+					"services.%s.%s is not a valid key (did you mean %q?)",
+					dep.Name, key, spec.Service.ProvisionsKey,
+				)
+			}
+		}
+	} else if userSpec != nil && len(userSpec.Extra) > 0 {
+		// Service doesn't support provisions but user provided extra keys
+		for key := range userSpec.Extra {
+			return container.ServiceConfig{}, fmt.Errorf(
+				"services.%s.%s is not a valid configuration key",
+				dep.Name, key,
+			)
+		}
+	}
+
+	// Resolve cache host path
+	var cacheHostPath string
+	if spec.Service.CachePath != "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return container.ServiceConfig{}, fmt.Errorf("resolving home directory for cache: %w", err)
+		}
+		cacheHostPath = filepath.Join(homeDir, ".moat", "cache", dep.Name)
+	}
+
 	return container.ServiceConfig{
-		Name:         dep.Name,
-		Version:      dep.Version,
-		Env:          env,
-		RunID:        runID,
-		Image:        spec.Service.Image,
-		Ports:        spec.Service.Ports,
-		PasswordEnv:  spec.Service.PasswordEnv,
-		ExtraCmd:     spec.Service.ExtraCmd,
-		ReadinessCmd: spec.Service.ReadinessCmd,
+		Name:          dep.Name,
+		Version:       dep.Version,
+		Env:           env,
+		RunID:         runID,
+		Image:         spec.Service.Image,
+		Ports:         spec.Service.Ports,
+		PasswordEnv:   spec.Service.PasswordEnv,
+		ExtraCmd:      spec.Service.ExtraCmd,
+		ReadinessCmd:  spec.Service.ReadinessCmd,
+		CachePath:     spec.Service.CachePath,
+		CacheHostPath: cacheHostPath,
+		Provisions:    provisions,
+		ProvisionCmd:  spec.Service.ProvisionCmd,
 	}, nil
 }
 

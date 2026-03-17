@@ -143,3 +143,86 @@ func TestBuildServiceConfigUnknown(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown service")
 }
+
+func TestBuildServiceConfigOllama(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"models": {"qwen2.5-coder:7b", "nomic-embed-text"},
+		},
+	}
+
+	cfg, err := buildServiceConfig(dep, "run-ollama", userSpec)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ollama", cfg.Name)
+	assert.Equal(t, "0.9", cfg.Version)
+	assert.Equal(t, "ollama/ollama", cfg.Image)
+	assert.Equal(t, 11434, cfg.Ports["default"])
+	assert.Equal(t, "/root/.ollama", cfg.CachePath)
+	assert.Equal(t, "ollama pull {item}", cfg.ProvisionCmd)
+	assert.Equal(t, []string{"qwen2.5-coder:7b", "nomic-embed-text"}, cfg.Provisions)
+
+	// Ollama has no auth — no password should be set
+	assert.Empty(t, cfg.Env)
+	assert.Empty(t, cfg.PasswordEnv)
+}
+
+func TestBuildServiceConfigOllamaNoModels(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-ollama", nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.Provisions)
+	assert.Equal(t, "ollama pull {item}", cfg.ProvisionCmd)
+}
+
+func TestBuildServiceConfigNoPasswordForNoAuth(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-test", nil)
+	require.NoError(t, err)
+
+	_, hasPassword := cfg.Env["password"]
+	assert.False(t, hasPassword, "should not set phantom password for no-auth services")
+}
+
+func TestBuildServiceConfigPostgresStillHasPassword(t *testing.T) {
+	dep := deps.Dependency{Name: "postgres", Version: "17", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-pg", nil)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, cfg.Env["POSTGRES_PASSWORD"], "postgres should still get a password")
+}
+
+func TestBuildServiceConfigValidatesProvisionsKey(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"model": {"qwen2.5-coder:7b"},
+		},
+	}
+
+	_, err := buildServiceConfig(dep, "run-ollama", userSpec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model")
+}
+
+func TestBuildServiceConfigRejectsExtraKeysOnNonProvisionService(t *testing.T) {
+	dep := deps.Dependency{Name: "postgres", Version: "17", Type: deps.TypeService}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"plugins": {"pg_trgm"},
+		},
+	}
+
+	_, err := buildServiceConfig(dep, "run-pg", userSpec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plugins")
+	assert.Contains(t, err.Error(), "not a valid")
+}
