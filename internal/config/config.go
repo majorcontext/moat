@@ -149,9 +149,10 @@ type MCPAuthConfig struct {
 
 // ServiceSpec allows customizing service behavior.
 type ServiceSpec struct {
-	Env   map[string]string `yaml:"env,omitempty"`
-	Image string            `yaml:"image,omitempty"`
-	Wait  *bool             `yaml:"wait,omitempty"`
+	Env    map[string]string `yaml:"env,omitempty"`
+	Image  string            `yaml:"image,omitempty"`
+	Wait   *bool             `yaml:"wait,omitempty"`
+	Memory int               `yaml:"memory,omitempty"` // Memory limit in MB for the service container (0 = runtime default)
 	// Extra holds unknown list-valued keys (e.g., "models" for ollama).
 	// Populated by UnmarshalYAML. The run layer maps these to provisions
 	// using the registry's provisions_key.

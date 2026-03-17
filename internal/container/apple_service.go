@@ -153,6 +153,10 @@ func buildAppleRunArgs(cfg ServiceConfig, networkID string) []string {
 		args = append(args, "--network", networkID)
 	}
 
+	if cfg.MemoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dMB", cfg.MemoryMB))
+	}
+
 	// Add cache mount if configured
 	if cfg.CachePath != "" && cfg.CacheHostPath != "" {
 		args = append(args, "--volume", cfg.CacheHostPath+":"+cfg.CachePath)

@@ -170,6 +170,7 @@ func buildSidecarConfig(cfg ServiceConfig, networkID string) SidecarConfig {
 		NetworkID: networkID,
 		RunID:     cfg.RunID,
 		Env:       envList,
+		MemoryMB:  cfg.MemoryMB,
 		Labels: map[string]string{
 			"moat.role": "service",
 		},

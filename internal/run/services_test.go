@@ -179,6 +179,22 @@ func TestBuildServiceConfigOllamaNoModels(t *testing.T) {
 	assert.Equal(t, "ollama pull {item}", cfg.ProvisionCmd)
 }
 
+func TestBuildServiceConfigMemory(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-test", &config.ServiceSpec{Memory: 2048})
+	require.NoError(t, err)
+	assert.Equal(t, 2048, cfg.MemoryMB)
+}
+
+func TestBuildServiceConfigMemoryDefault(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-test", nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.MemoryMB, "zero means runtime default")
+}
+
 func TestBuildServiceConfigNoPasswordForNoAuth(t *testing.T) {
 	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 

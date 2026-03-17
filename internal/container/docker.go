@@ -976,6 +976,9 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 			NetworkMode: container.NetworkMode(cfg.NetworkID),
 			Privileged:  cfg.Privileged,
 			Mounts:      mounts,
+			Resources: container.Resources{
+				Memory: int64(cfg.MemoryMB) * 1024 * 1024, // 0 means no limit
+			},
 		},
 		&network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{

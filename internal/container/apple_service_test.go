@@ -115,6 +115,37 @@ func TestGetContainerIPExists(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestAppleBuildRunArgsWithMemory(t *testing.T) {
+	cfg := ServiceConfig{
+		Name:     "ollama",
+		Version:  "0.18.1",
+		Image:    "ollama/ollama",
+		Env:      map[string]string{},
+		MemoryMB: 2048,
+	}
+
+	args := buildAppleRunArgs(cfg, "")
+	for i, a := range args {
+		if a == "--memory" && i+1 < len(args) {
+			assert.Equal(t, "2048MB", args[i+1])
+			return
+		}
+	}
+	t.Fatal("--memory flag not found in args")
+}
+
+func TestAppleBuildRunArgsNoMemoryByDefault(t *testing.T) {
+	cfg := ServiceConfig{
+		Name:    "ollama",
+		Version: "0.18.1",
+		Image:   "ollama/ollama",
+		Env:     map[string]string{},
+	}
+
+	args := buildAppleRunArgs(cfg, "")
+	assert.NotContains(t, args, "--memory")
+}
+
 func TestAppleBuildRunArgsWithCachePath(t *testing.T) {
 	cfg := ServiceConfig{
 		Name:          "ollama",

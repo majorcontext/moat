@@ -232,6 +232,8 @@ type ServiceConfig struct {
 	Provisions []string
 	// ProvisionCmd is the command template with {item} placeholder.
 	ProvisionCmd string
+	// MemoryMB is the memory limit for the service container in megabytes (0 = runtime default).
+	MemoryMB int
 }
 
 // ServiceInfo contains connection details for a started service.
@@ -337,6 +339,9 @@ type SidecarConfig struct {
 
 	// Labels are container labels (merged with defaults)
 	Labels map[string]string
+
+	// MemoryMB is the memory limit for the container in megabytes (0 = no limit).
+	MemoryMB int
 }
 
 // MountConfig describes a volume mount (bind mount from host to container).

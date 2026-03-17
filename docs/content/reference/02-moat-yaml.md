@@ -869,9 +869,12 @@ Each key matches a service name from `dependencies:` (e.g., `postgres`, `mysql`,
 |-------|------|---------|-------------|
 | `env` | `map[string]string` | `{}` | Environment variables for the service container. Supports secret references. |
 | `image` | `string` | (auto) | Override default image (Docker runtime only) |
+| `memory` | `integer` | (runtime default) | Memory limit for the service container in MB. Useful for memory-intensive services like Ollama. |
 | `wait` | `boolean` | `true` | Block main container start until service is ready |
 
 Setting `wait: false` starts the main container without waiting for the service health check to pass.
+
+`memory` sets the limit for the service sidecar container, independent of `container.memory` (which limits the main agent container).
 
 ### Service-specific lists
 
@@ -886,6 +889,7 @@ Example:
 ```yaml
 services:
   ollama:
+    memory: 4096  # 4 GB — size to match your largest model
     models:
       - qwen2.5-coder:7b
       - nomic-embed-text

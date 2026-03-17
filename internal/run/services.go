@@ -224,6 +224,11 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		cacheHostPath = filepath.Join(homeDir, ".moat", "cache", dep.Name)
 	}
 
+	var memoryMB int
+	if userSpec != nil {
+		memoryMB = userSpec.Memory
+	}
+
 	return container.ServiceConfig{
 		Name:          dep.Name,
 		Version:       dep.Version,
@@ -238,6 +243,7 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		CacheHostPath: cacheHostPath,
 		Provisions:    provisions,
 		ProvisionCmd:  spec.Service.ProvisionCmd,
+		MemoryMB:      memoryMB,
 	}, nil
 }
 
