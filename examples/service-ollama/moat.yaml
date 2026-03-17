@@ -14,6 +14,7 @@ name: service-ollama
 dependencies:
   - ollama@0.18.1
   - curl
+  - jq
 
 services:
   ollama:

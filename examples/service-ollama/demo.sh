@@ -12,5 +12,5 @@ echo
 echo "--- Generating response ---"
 curl -s "$MOAT_OLLAMA_URL/api/generate" \
   -d '{"model":"qwen2.5-coder:1.5b","prompt":"Write hello world in Go","stream":false}' \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['response'])"
+  | jq -r .response
 echo
