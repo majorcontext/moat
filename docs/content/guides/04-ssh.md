@@ -119,7 +119,11 @@ grants:
   - ssh:github.com # SSH git access
 ```
 
-When both `github` and `ssh:github.com` grants are active, Moat automatically configures git to use SSH instead of HTTPS for `github.com`. This means `git clone https://github.com/org/repo.git` is transparently rewritten to use `git@github.com:org/repo.git`. This avoids authentication issues caused by the proxy's TLS interception conflicting with git's HTTPS transport.
+When both `github` and `ssh:github.com` grants are active, Moat automatically
+configures git to use SSH instead of HTTPS for `github.com`. This means
+`git clone https://github.com/org/repo.git` is transparently rewritten to use
+`git@github.com:org/repo.git`. This avoids authentication issues caused by the
+proxy's TLS interception conflicting with git's HTTPS transport.
 
 ```bash
 $ moat run -- sh -c "

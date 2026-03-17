@@ -245,9 +245,9 @@ if command -v git >/dev/null 2>&1; then
   if [ -n "$MOAT_GIT_USER_EMAIL" ]; then
     git config --system user.email "$MOAT_GIT_USER_EMAIL" 2>/dev/null || true
   fi
-  # When both github and ssh:github.com grants are active, route git
-  # operations to github.com over SSH instead of HTTPS. The proxy's TLS
-  # interception doesn't work reliably with git's HTTPS transport.
+  # When both github and ssh:github.com grants are active, route all
+  # GitHub HTTPS URLs (git, pip, npm, etc.) over SSH instead. The proxy's
+  # TLS interception doesn't work reliably with git's HTTPS transport.
   if [ "$MOAT_GIT_SSH_GITHUB" = "1" ]; then
     git config --system url."git@github.com:".insteadOf "https://github.com/" 2>/dev/null || true
   fi

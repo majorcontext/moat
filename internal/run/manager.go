@@ -999,7 +999,15 @@ region = %s
 		// credential injection doesn't work reliably with git's HTTPS transport,
 		// so routing git over SSH (which goes through the SSH agent proxy) is
 		// more reliable.
-		if slices.Contains(sshGrants, "github.com") && slices.Contains(opts.Grants, "github") {
+		// Check if user explicitly set MOAT_GIT_SSH_GITHUB (e.g. =0 to opt out)
+		gitSSHAlreadySet := false
+		for _, e := range opts.Env {
+			if strings.HasPrefix(e, "MOAT_GIT_SSH_GITHUB=") {
+				gitSSHAlreadySet = true
+				break
+			}
+		}
+		if !gitSSHAlreadySet && slices.Contains(sshGrants, "github.com") && slices.Contains(opts.Grants, "github") {
 			proxyEnv = append(proxyEnv, "MOAT_GIT_SSH_GITHUB=1")
 		}
 	}
