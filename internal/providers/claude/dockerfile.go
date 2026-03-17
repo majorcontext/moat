@@ -9,9 +9,10 @@ import (
 
 // MarketplaceConfig represents a Claude Code plugin marketplace for image building.
 type MarketplaceConfig struct {
-	Name   string // Marketplace name (e.g., "claude-plugins-official")
-	Source string // "github" or "git"
-	Repo   string // Repository path (e.g., "anthropics/claude-plugins-official")
+	Name      string // Marketplace name (e.g., "claude-plugins-official")
+	Source    string // "github" or "git"
+	Repo      string // Repository path (e.g., "anthropics/claude-plugins-official")
+	PreCloned string // PreCloned is the build-context-relative path prefix for a marketplace that was cloned on the host. When set, GenerateDockerfileSnippet will COPY the files instead of running claude plugin marketplace add.
 }
 
 // validMarketplaceRepo matches valid marketplace repo formats:
