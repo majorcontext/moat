@@ -235,6 +235,8 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 		ExtraKnownMarketplaces: make(map[string]MarketplaceEntry),
 		PluginSources:          make(map[string]SettingSource),
 		MarketplaceSources:     make(map[string]SettingSource),
+		// Bool fields: true wins (override or base sets it).
+		SkipDangerousModePermissionPrompt: base.SkipDangerousModePermissionPrompt || override.SkipDangerousModePermissionPrompt,
 	}
 
 	// Copy base plugins and sources
