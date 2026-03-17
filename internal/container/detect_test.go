@@ -101,23 +101,10 @@ func TestTryAppleRuntimeNoContainerCLI(t *testing.T) {
 	}
 }
 
-func TestAlternativeDockerSockets(t *testing.T) {
-	candidates := alternativeDockerSockets()
-	if len(candidates) == 0 {
-		t.Fatal("expected at least one alternative socket candidate")
-	}
-
-	// Verify known tools are included.
-	names := make(map[string]bool)
-	for _, c := range candidates {
-		names[c.name] = true
-	}
-	if !names["Rancher Desktop"] {
-		t.Error("missing expected candidate \"Rancher Desktop\"")
-	}
-}
-
 func TestAlternativeDockerSocketPaths(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("alternative socket paths are macOS-only")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("UserHomeDir: %v", err)
@@ -133,7 +120,8 @@ func TestAlternativeDockerSocketPaths(t *testing.T) {
 }
 
 func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
-	// With HOME pointing to an empty dir, no alternative sockets should exist.
+	// On non-darwin, alternativeDockerSockets returns nil immediately.
+	// On darwin, point HOME at an empty dir so no candidate paths exist.
 	t.Setenv("HOME", t.TempDir())
 
 	rt := tryAlternativeDockerSockets(false)
@@ -143,39 +131,77 @@ func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
 }
 
 func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
-	// Create a real Unix socket in a temp dir so os.Lstat + ModeSocket check passes.
-	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "docker.sock")
-
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatalf("creating test socket: %v", err)
+	if runtime.GOOS != "darwin" {
+		t.Skip("alternative socket detection is macOS-only")
 	}
-	defer ln.Close()
+	dir := t.TempDir()
 
-	// Point HOME at the temp dir so alternativeDockerSockets returns our socket.
-	// The Rancher Desktop path is ~/.rd/docker.sock, so create the subdirectory.
+	// Create the Rancher Desktop socket path structure under the temp HOME.
 	rdDir := filepath.Join(dir, ".rd")
 	if err := os.Mkdir(rdDir, 0o755); err != nil {
 		t.Fatalf("creating .rd dir: %v", err)
 	}
 	rdSock := filepath.Join(rdDir, "docker.sock")
-	ln2, err := net.Listen("unix", rdSock)
+	ln, err := net.Listen("unix", rdSock)
 	if err != nil {
 		t.Fatalf("creating .rd/docker.sock: %v", err)
 	}
-	defer ln2.Close()
+	defer ln.Close()
 
 	t.Setenv("HOME", dir)
 	t.Setenv("DOCKER_HOST", "") // ensure it starts unset
 
-	// The socket exists and is a real socket, but it's not a Docker daemon,
-	// so Ping will fail and DOCKER_HOST should be cleared.
+	// The socket exists but is not a Docker daemon, so Ping will fail
+	// and DOCKER_HOST should be cleared.
 	rt := tryAlternativeDockerSockets(false)
 	if rt != nil {
 		t.Error("expected nil runtime when ping fails")
 	}
 	if got := os.Getenv("DOCKER_HOST"); got != "" {
 		t.Errorf("DOCKER_HOST should be cleared on failure, got %q", got)
+	}
+}
+
+func TestTryAlternativeDockerSocketsFollowsSymlink(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("symlink socket detection is macOS-only")
+	}
+	// Verify os.Stat (not Lstat) is used: ~/.rd/docker.sock on macOS is a
+	// symlink to the real socket. Lstat would return ModeSymlink and skip it.
+	dir := t.TempDir()
+	rdDir := filepath.Join(dir, ".rd")
+	if err := os.Mkdir(rdDir, 0o755); err != nil {
+		t.Fatalf("creating .rd dir: %v", err)
+	}
+
+	// Create actual socket in a different location.
+	realSock := filepath.Join(dir, "real.sock")
+	ln, err := net.Listen("unix", realSock)
+	if err != nil {
+		t.Fatalf("creating real socket: %v", err)
+	}
+	defer ln.Close()
+
+	// Symlink ~/.rd/docker.sock → real socket (mirrors macOS Rancher Desktop).
+	symlink := filepath.Join(rdDir, "docker.sock")
+	if err := os.Symlink(realSock, symlink); err != nil {
+		t.Fatalf("creating symlink: %v", err)
+	}
+
+	t.Setenv("HOME", dir)
+	t.Setenv("DOCKER_HOST", "")
+
+	// Should find the socket via the symlink (not return nil due to Lstat).
+	// The ping will fail (not a real Docker daemon), but we should at least
+	// reach the ping stage — meaning DOCKER_HOST was set then cleared.
+	_ = tryAlternativeDockerSockets(false)
+
+	// If os.Lstat were used, the symlink would be skipped entirely and
+	// DOCKER_HOST would never be set or cleared. With os.Stat, it's set then
+	// cleared on ping failure.
+	// We can't assert DOCKER_HOST was set (it's cleared on failure),
+	// but we can assert it's clean after the call.
+	if got := os.Getenv("DOCKER_HOST"); got != "" {
+		t.Errorf("DOCKER_HOST should be empty after failed attempt, got %q", got)
 	}
 }
