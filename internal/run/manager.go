@@ -1994,12 +1994,18 @@ region = %s
 			// Provision items (e.g., pull models) if configured
 			if svcConfigs[i].ProvisionCmd != "" && len(svcConfigs[i].Provisions) > 0 {
 				log.Debug("provisioning service", "service", dep.Name, "items", svcConfigs[i].Provisions)
-				provOut := io.Writer(os.Stderr)
-				if lw, lwErr := store.LogWriter(); lwErr == nil {
-					provOut = io.MultiWriter(os.Stderr, lw)
-					defer lw.Close()
-				}
-				if err := provisionService(ctx, svcMgr, info, svcConfigs[i], provOut); err != nil {
+				// IIFE so defer lw.Close() fires after provisionService, not at function exit.
+				// Without this, multiple provision-capable services would accumulate deferred
+				// closes until the outer function returns.
+				provErr := func() error {
+					provOut := io.Writer(os.Stderr)
+					if lw, lwErr := store.LogWriter(); lwErr == nil {
+						defer lw.Close()
+						provOut = io.MultiWriter(os.Stderr, lw)
+					}
+					return provisionService(ctx, svcMgr, info, svcConfigs[i], provOut)
+				}()
+				if err := provErr; err != nil {
 					cleanupServices()
 					cleanupDaemonRun()
 					cleanupSSH(sshServer)
