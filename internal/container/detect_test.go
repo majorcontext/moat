@@ -153,6 +153,17 @@ func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
 		t.Fatalf("creating .rd/docker.sock: %v", err)
 	}
 	defer ln.Close()
+	// Accept and immediately close connections so the Docker ping fails fast
+	// instead of waiting for the full 5-second timeout.
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
 
 	t.Setenv("HOME", dir)
 	t.Setenv("DOCKER_HOST", "") // ensure it starts unset
@@ -192,6 +203,16 @@ func TestTryAlternativeDockerSocketsFollowsSymlink(t *testing.T) {
 		t.Fatalf("creating real socket: %v", err)
 	}
 	defer ln.Close()
+	// Accept and immediately close connections so the Docker ping fails fast.
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
 
 	// Symlink ~/.rd/docker.sock → real socket (mirrors macOS Rancher Desktop).
 	symlink := filepath.Join(rdDir, "docker.sock")
