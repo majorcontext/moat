@@ -139,6 +139,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 		ConfigureAgent: func(cfg *config.Config) {
 			syncLogs := true
 			cfg.Claude.SyncLogs = &syncLogs
+			cfg.Claude.SkipPermissionsPrompt = !claudeNoYolo
 		},
 	})
 }

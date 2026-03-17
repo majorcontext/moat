@@ -1549,10 +1549,14 @@ region = %s
 			mounts = append(mounts, claudeConfig.Mounts...)
 			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
-			// Write merged settings.json when there are plugins or marketplaces to configure.
-			// Other Claude settings are handled separately and don't require staging.
+			// Write settings.json to suppress startup prompts and configure plugins.
 			// moat-init.sh copies $MOAT_CLAUDE_INIT/settings.json to ~/.claude/settings.json.
-			if hasPlugins {
+			skipPrompt := opts.Config != nil && opts.Config.Claude.SkipPermissionsPrompt
+			if hasPlugins || skipPrompt {
+				if claudeSettings == nil {
+					claudeSettings = &claude.Settings{}
+				}
+				claudeSettings.SkipDangerousModePermissionPrompt = skipPrompt
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
 				if jsonErr != nil {

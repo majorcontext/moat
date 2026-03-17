@@ -113,6 +113,14 @@ func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForCont
 	config["hasCompletedOnboarding"] = true
 	config["theme"] = "dark"
 
+	// Pre-accept the trust dialog for /workspace so Claude Code doesn't prompt
+	// "Is this a project you trust?" on every container startup.
+	config["projects"] = map[string]any{
+		"/workspace": map[string]any{
+			"hasTrustDialogAccepted": true,
+		},
+	}
+
 	// Add MCP servers if provided
 	if len(mcpServers) > 0 {
 		config["mcpServers"] = mcpServers

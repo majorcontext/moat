@@ -206,6 +206,11 @@ type ClaudeConfig struct {
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+
+	// SkipPermissionsPrompt controls whether to suppress the bypass-permissions
+	// warning in Claude Code. Set automatically by moat when
+	// --dangerously-skip-permissions is being passed. Not a moat.yaml field.
+	SkipPermissionsPrompt bool `yaml:"-"`
 }
 
 // CodexConfig configures OpenAI Codex CLI integration options.
