@@ -53,6 +53,7 @@ func (p *OAuthProvider) Grant(ctx context.Context) (*provider.Credential, error)
 			importCredsOpt = optNum
 			fmt.Printf("  %d. Import existing Claude Code credentials\n", optNum)
 			fmt.Println("     Import OAuth tokens from your local Claude Code installation.")
+			fmt.Println("     Note: Imported tokens are short-lived and will not auto-refresh.")
 			fmt.Println()
 			optNum++
 		}
@@ -504,6 +505,11 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 
 	fmt.Println()
 	fmt.Println("Found Claude Code credentials.")
+	fmt.Println()
+	fmt.Println("  Warning: This imports your current authorization token only.")
+	fmt.Println("  It is short-lived and will not be refreshed automatically.")
+	fmt.Println("  For a longer-lived session, use the Claude subscription (OAuth)")
+	fmt.Println("  or existing OAuth token options instead.")
 	if token.SubscriptionType != "" {
 		fmt.Printf("  Subscription: %s\n", token.SubscriptionType)
 	}

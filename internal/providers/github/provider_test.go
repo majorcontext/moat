@@ -251,6 +251,17 @@ func TestSanitizeGhConfig(t *testing.T) {
 			wantNil: true,
 		},
 		{
+			name:     "strips null values",
+			input:    "git_protocol: ssh\nhttp_unix_socket: null\npager: less\n",
+			contains: []string{"git_protocol: ssh", "pager: less"},
+			excludes: []string{"null", "http_unix_socket"},
+		},
+		{
+			name:    "only null values returns nil",
+			input:   "http_unix_socket: null\n",
+			wantNil: true,
+		},
+		{
 			name:    "invalid yaml returns nil",
 			input:   ":\t:\n",
 			wantNil: true,

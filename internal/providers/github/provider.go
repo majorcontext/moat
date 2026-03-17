@@ -105,6 +105,16 @@ func sanitizeGhConfig(content []byte) ([]byte, error) {
 	}
 	delete(cfg, "hosts")
 	delete(cfg, "oauth_token")
+	// Remove nil values to prevent YAML null serialization.
+	// When gh CLI encounters `http_unix_socket: null` in config.yml,
+	// it interprets the YAML null as the literal string "null" and
+	// tries to connect to a unix socket at that path. Stripping nil
+	// values avoids this (see #234).
+	for k, v := range cfg {
+		if v == nil {
+			delete(cfg, k)
+		}
+	}
 	if len(cfg) == 0 {
 		return nil, nil
 	}
