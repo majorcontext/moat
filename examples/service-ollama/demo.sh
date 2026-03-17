@@ -6,7 +6,7 @@ echo "MOAT_OLLAMA_URL=$MOAT_OLLAMA_URL"
 echo
 
 echo "--- Available models ---"
-curl -s "$MOAT_OLLAMA_URL/api/tags"
+curl -s "$MOAT_OLLAMA_URL/api/tags" | jq .
 echo
 
 echo "--- Generating response ---"

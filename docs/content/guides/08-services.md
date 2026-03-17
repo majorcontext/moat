@@ -200,7 +200,7 @@ Ollama provides local model inference without external API keys:
 
 ```yaml
 dependencies:
-  - ollama@0.9
+  - ollama@0.18.1
 
 services:
   ollama:

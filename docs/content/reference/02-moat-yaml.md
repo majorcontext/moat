@@ -266,7 +266,7 @@ dependencies:
 | `mysql@8` | MySQL 8 | 3306 |
 | `mysql@9` | MySQL 9 | 3306 |
 | `redis@7` | Redis 7 | 6379 |
-| `ollama@0.9` | Ollama | 11434 |
+| `ollama@0.18.1` | Ollama | 11434 |
 
 Each service injects `MOAT_*` environment variables into the main container. See [Service environment variables](#service-environment-variables) for the full list.
 
