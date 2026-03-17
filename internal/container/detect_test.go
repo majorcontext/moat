@@ -134,7 +134,13 @@ func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("alternative socket detection is macOS-only")
 	}
-	dir := t.TempDir()
+	// Use os.MkdirTemp with a short prefix: t.TempDir() embeds the full test
+	// name in the path, pushing it over the 104-char Unix socket path limit.
+	dir, err := os.MkdirTemp("", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	// Create the Rancher Desktop socket path structure under the temp HOME.
 	rdDir := filepath.Join(dir, ".rd")
@@ -168,7 +174,12 @@ func TestTryAlternativeDockerSocketsFollowsSymlink(t *testing.T) {
 	}
 	// Verify os.Stat (not Lstat) is used: ~/.rd/docker.sock on macOS is a
 	// symlink to the real socket. Lstat would return ModeSymlink and skip it.
-	dir := t.TempDir()
+	// Use os.MkdirTemp with a short prefix to stay under the 104-char socket limit.
+	dir, err := os.MkdirTemp("", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	rdDir := filepath.Join(dir, ".rd")
 	if err := os.Mkdir(rdDir, 0o755); err != nil {
 		t.Fatalf("creating .rd dir: %v", err)
