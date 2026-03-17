@@ -993,6 +993,15 @@ region = %s
 				"hosts", sshGrants,
 				"keys", len(sshMappings))
 		}
+
+		// When both github and ssh:github.com grants are active, configure git
+		// to use SSH instead of HTTPS for github.com. The proxy's TLS MITM and
+		// credential injection doesn't work reliably with git's HTTPS transport,
+		// so routing git over SSH (which goes through the SSH agent proxy) is
+		// more reliable.
+		if slices.Contains(sshGrants, "github.com") && slices.Contains(opts.Grants, "github") {
+			proxyEnv = append(proxyEnv, "MOAT_GIT_SSH_GITHUB=1")
+		}
 	}
 
 	// Configure network mode and extra hosts based on runtime capabilities
