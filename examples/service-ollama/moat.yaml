@@ -1,0 +1,23 @@
+# Example: Ollama service dependency
+#
+# Demonstrates local model inference using Ollama as a service dependency.
+# Moat starts an Ollama sidecar, pulls the declared model, and injects
+# MOAT_OLLAMA_* environment variables into the agent container.
+#
+# Run with:
+#   moat run examples/service-ollama
+#
+# The demo script queries the Ollama API to list models and generate a response.
+
+name: service-ollama
+
+dependencies:
+  - ollama@0.9
+  - curl
+
+services:
+  ollama:
+    models:
+      - qwen2.5-coder:1.5b
+
+command: ["sh", "/workspace/demo.sh"]
