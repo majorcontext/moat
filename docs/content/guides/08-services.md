@@ -158,8 +158,9 @@ The agent must retry connections until the service is ready. This is useful when
 3. Pull service images (if not cached)
 4. Start service containers in parallel on the network
 5. Run readiness checks (poll every 1 second, timeout after 30 seconds)
-6. Inject `MOAT_*` environment variables
-7. Start the agent container on the same network
+6. Run provisioning commands, if any (e.g., pull Ollama models)
+7. Inject `MOAT_*` environment variables
+8. Start the agent container on the same network
 
 ### Shutdown sequence
 
@@ -189,7 +190,7 @@ Each service has a built-in readiness command:
 | `postgres` | `pg_isready -h localhost -U postgres` |
 | `mysql` | `mysqladmin ping -h localhost -u root --password=<pw>` |
 | `redis` | `redis-cli -a <pw> PING` |
-| `ollama` | `ollama list` + pull declared models |
+| `ollama` | `ollama list` |
 
 Readiness checks run inside the service container via `docker exec`. They verify that the service accepts connections with the generated credentials.
 
@@ -243,7 +244,7 @@ Service dependencies are designed for development and testing. They are not inte
 
 - **Ephemeral** — All data is destroyed when the run ends. Nothing persists between runs.
 - **Isolated** — Service containers are on a private Docker network. No ports are exposed to the host.
-- **Authenticated** — Every service requires a password, even on the isolated network. Passwords are 32-character alphanumeric strings generated from `crypto/rand` and unique per run.
+- **Authenticated** — Services that support authentication receive a randomly generated password per run. Passwords are 32-character alphanumeric strings from `crypto/rand`. Services without auth (e.g., Ollama) rely on network isolation.
 - **Scoped** — Credentials exist only in run metadata and are cleared on cleanup.
 
 ## Troubleshooting

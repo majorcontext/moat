@@ -289,8 +289,7 @@ func provisionService(ctx context.Context, mgr container.ServiceManager, info co
 
 // provisionItem runs a single provision command with its own timeout and lock scope.
 // The lock is shared across parallel moat runs — concurrent runs pulling different
-// models will still serialize on this single lock file. See todo/005 for narrowing
-// to per-model locks.
+// models will still serialize on this single lock file.
 func provisionItem(ctx context.Context, mgr container.ServiceManager, info container.ServiceInfo, cmd string, lockFile *os.File, stdout io.Writer) error {
 	cmdCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
 	defer cancel()
