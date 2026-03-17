@@ -213,6 +213,9 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	b.WriteString(pluginResult.DockerfileSnippet)
 	if pluginResult.ScriptName != "" {
 		contextFiles[pluginResult.ScriptName] = pluginResult.ScriptContent
+		for name, content := range pluginResult.ExtraContextFiles {
+			contextFiles[name] = content
+		}
 	}
 
 	// Restore root context only if user-space sections switched to moatuser
