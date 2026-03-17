@@ -130,6 +130,23 @@ func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
 	}
 }
 
+// serveHTTPError accepts connections and responds with HTTP 403 so that
+// Docker's Ping() fails immediately rather than timing out.
+func serveHTTPError(ln net.Listener) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			buf := make([]byte, 512)
+			c.Read(buf)                                                                                 //nolint:errcheck // best-effort drain so client finishes writing
+			c.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")) //nolint:errcheck
+		}(c)
+	}
+}
+
 func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("alternative socket detection is macOS-only")
@@ -153,17 +170,9 @@ func TestTryAlternativeDockerSocketsCleansUpOnRuntimeFailure(t *testing.T) {
 		t.Fatalf("creating .rd/docker.sock: %v", err)
 	}
 	defer ln.Close()
-	// Accept and immediately close connections so the Docker ping fails fast
-	// instead of waiting for the full 5-second timeout.
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			c.Close()
-		}
-	}()
+	// Serve a non-200 HTTP response so the Docker ping fails fast rather than
+	// waiting for the 5-second context timeout.
+	go serveHTTPError(ln)
 
 	t.Setenv("HOME", dir)
 	t.Setenv("DOCKER_HOST", "") // ensure it starts unset
@@ -203,16 +212,7 @@ func TestTryAlternativeDockerSocketsFollowsSymlink(t *testing.T) {
 		t.Fatalf("creating real socket: %v", err)
 	}
 	defer ln.Close()
-	// Accept and immediately close connections so the Docker ping fails fast.
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			c.Close()
-		}
-	}()
+	go serveHTTPError(ln)
 
 	// Symlink ~/.rd/docker.sock → real socket (mirrors macOS Rancher Desktop).
 	symlink := filepath.Join(rdDir, "docker.sock")
