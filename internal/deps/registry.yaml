@@ -493,8 +493,9 @@ ollama:
   description: Ollama local model server
   type: service
   default: "0.9"
+  versions: ["0.6", "0.7", "0.8", "0.9"]
   service:
-    image: ollama/ollama
+    image: "ollama/ollama"
     ports:
       default: 11434
     env_prefix: OLLAMA

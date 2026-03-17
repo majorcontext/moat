@@ -227,6 +227,57 @@ func TestBuildServiceConfigRejectsExtraKeysOnNonProvisionService(t *testing.T) {
 	assert.Contains(t, err.Error(), "not a valid")
 }
 
+func TestBuildServiceConfigRejectsShellInjection(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{"semicolon", "foo; rm -rf /"},
+		{"pipe", "foo | cat /etc/passwd"},
+		{"dollar", "foo$(whoami)"},
+		{"backtick", "foo`whoami`"},
+		{"ampersand", "foo && echo pwned"},
+		{"empty", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userSpec := &config.ServiceSpec{
+				Extra: map[string][]string{
+					"models": {tt.model},
+				},
+			}
+			_, err := buildServiceConfig(dep, "run-test", userSpec)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "disallowed characters")
+		})
+	}
+}
+
+func TestBuildServiceConfigAcceptsValidModelNames(t *testing.T) {
+	dep := deps.Dependency{Name: "ollama", Version: "0.9", Type: deps.TypeService}
+
+	validModels := []string{
+		"qwen2.5-coder:7b",
+		"nomic-embed-text",
+		"llama3.1:70b",
+		"library/model:latest",
+		"user/repo:v1.2.3",
+	}
+
+	userSpec := &config.ServiceSpec{
+		Extra: map[string][]string{
+			"models": validModels,
+		},
+	}
+
+	cfg, err := buildServiceConfig(dep, "run-test", userSpec)
+	require.NoError(t, err)
+	assert.Equal(t, validModels, cfg.Provisions)
+}
+
 func TestBuildProvisionCmds(t *testing.T) {
 	cmds := buildProvisionCmds("ollama pull {item}", []string{"qwen2.5-coder:7b", "nomic-embed-text"})
 	assert.Equal(t, []string{"ollama pull qwen2.5-coder:7b", "ollama pull nomic-embed-text"}, cmds)

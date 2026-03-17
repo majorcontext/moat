@@ -1909,7 +1909,7 @@ region = %s
 
 			// Create cache directory if needed
 			if svcCfg.CacheHostPath != "" {
-				if mkdirErr := os.MkdirAll(svcCfg.CacheHostPath, 0o755); mkdirErr != nil {
+				if mkdirErr := os.MkdirAll(svcCfg.CacheHostPath, 0o700); mkdirErr != nil {
 					cleanupServices()
 					cleanupDaemonRun()
 					cleanupSSH(sshServer)
@@ -1957,9 +1957,9 @@ region = %s
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
 				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
-					"Service container logs:\n  moat logs %s --service %s\n\n"+
+					"Check run logs:\n  moat logs %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
-					dep.Name, err, r.ID, dep.Name, dep.Name)
+					dep.Name, err, r.ID, dep.Name)
 			}
 
 			// Provision items (e.g., pull models) if configured
@@ -1973,8 +1973,8 @@ region = %s
 					cleanupAgentConfig(codexConfig)
 					cleanupAgentConfig(geminiConfig)
 					return nil, fmt.Errorf("%s service provisioning failed: %w\n\n"+
-						"Service container logs:\n  moat logs %s --service %s",
-						dep.Name, err, r.ID, dep.Name)
+						"Check run logs:\n  moat logs %s",
+						dep.Name, err, r.ID)
 				}
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,6 +23,12 @@ const passwordLength = 32
 const passwordChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const readinessTimeout = 30 * time.Second
 const readinessInterval = 1 * time.Second
+
+// validProvisionItem matches safe provision item names (e.g., Ollama model names).
+// Allows alphanumerics, dots, dashes, underscores, colons, slashes, and @ signs.
+// Rejects shell metacharacters (;, |, $, `, &, (, ), etc.) to prevent injection
+// when items are interpolated into sh -c commands.
+var validProvisionItem = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/@-]*$`)
 
 // generatePassword creates a cryptographically random alphanumeric password.
 func generatePassword() (string, error) {
@@ -136,8 +143,10 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 	needsPassword := spec.Service.PasswordEnv != "" || serviceUsesPasswordPlaceholder(spec.Service)
 
 	// Only generate password for services that have auth
+	var password string
 	if needsPassword {
-		password, err := generatePassword()
+		var err error
+		password, err = generatePassword()
 		if err != nil {
 			return container.ServiceConfig{}, err
 		}
@@ -146,19 +155,14 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		} else {
 			env["password"] = password
 		}
+	}
 
-		// Set extra_env from registry with placeholder substitution
-		for k, v := range spec.Service.ExtraEnv {
-			v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
-			v = strings.ReplaceAll(v, "{password}", password)
-			env[k] = v
-		}
-	} else {
-		// No auth — still apply extra_env without password substitution
-		for k, v := range spec.Service.ExtraEnv {
-			v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
-			env[k] = v
-		}
+	// Set extra_env from registry with placeholder substitution.
+	// When password is empty, ReplaceAll is a no-op for {password}.
+	for k, v := range spec.Service.ExtraEnv {
+		v = strings.ReplaceAll(v, "{db}", spec.Service.DefaultDB)
+		v = strings.ReplaceAll(v, "{password}", password)
+		env[k] = v
 	}
 
 	// Apply user overrides
@@ -179,6 +183,17 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 				return container.ServiceConfig{}, fmt.Errorf(
 					"services.%s.%s is not a valid key (did you mean %q?)",
 					dep.Name, key, spec.Service.ProvisionsKey,
+				)
+			}
+		}
+
+		// Validate provision items to prevent shell injection.
+		// Items are interpolated into sh -c commands; reject shell metacharacters.
+		for _, item := range provisions {
+			if !validProvisionItem.MatchString(item) {
+				return container.ServiceConfig{}, fmt.Errorf(
+					"invalid %s item %q: contains disallowed characters (must match %s)",
+					spec.Service.ProvisionsKey, item, validProvisionItem.String(),
 				)
 			}
 		}
@@ -235,32 +250,52 @@ func buildProvisionCmds(cmdTemplate string, items []string) []string {
 
 // provisionService runs provision commands inside a started service container.
 // Uses flock-based advisory locking on the cache directory to prevent concurrent
-// corruption from parallel runs.
+// corruption from parallel runs. Each provision item gets its own timeout
+// (provisionTimeout) rather than a single timeout for the entire batch.
 func provisionService(ctx context.Context, mgr container.ServiceManager, info container.ServiceInfo, cfg container.ServiceConfig, stdout io.Writer) error {
 	cmds := buildProvisionCmds(cfg.ProvisionCmd, cfg.Provisions)
 	if len(cmds) == 0 {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
-	defer cancel()
-
 	// Advisory lock on cache directory to prevent concurrent pull corruption.
 	// Cache directory is already created by the manager before starting the sidecar.
+	var lockFile *os.File
 	if cfg.CacheHostPath != "" {
 		lockPath := filepath.Join(cfg.CacheHostPath, ".lock")
-		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+		var err error
+		lockFile, err = os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 		if err != nil {
 			return fmt.Errorf("opening cache lock %s: %w", lockPath, err)
 		}
 		defer lockFile.Close()
-		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-			return fmt.Errorf("acquiring cache lock: %w", err)
-		}
-		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
 	}
 
-	return mgr.ProvisionService(ctx, info, cmds, stdout)
+	for _, cmd := range cmds {
+		// Per-item timeout: each provision command gets its own deadline.
+		cmdCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
+
+		// Acquire lock per-item so parallel runs pulling different items don't serialize.
+		if lockFile != nil {
+			if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+				cancel()
+				return fmt.Errorf("acquiring cache lock: %w", err)
+			}
+		}
+
+		err := mgr.ProvisionService(cmdCtx, info, []string{cmd}, stdout)
+
+		if lockFile != nil {
+			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		}
+		cancel()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // waitForServiceReady polls CheckReady until success or timeout.

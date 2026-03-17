@@ -187,6 +187,13 @@ func (s *ServiceSpec) UnmarshalYAML(value *yaml.Node) error {
 				s.Extra = make(map[string][]string)
 			}
 			s.Extra[key] = items
+		} else {
+			// Capture unknown non-sequence keys as single-element entries
+			// so the run layer can validate and reject them with useful errors.
+			if s.Extra == nil {
+				s.Extra = make(map[string][]string)
+			}
+			s.Extra[key] = nil // nil signals "key present but not a list"
 		}
 	}
 	return nil

@@ -2336,3 +2336,17 @@ models: []
 	require.NoError(t, err)
 	assert.Empty(t, spec.Extra["models"])
 }
+
+func TestServiceSpecUnmarshalCapturesScalarKeys(t *testing.T) {
+	input := `
+env:
+  FOO: bar
+typo_key: some_value
+`
+	var spec ServiceSpec
+	err := yaml.Unmarshal([]byte(input), &spec)
+	require.NoError(t, err)
+	// Unknown scalar keys are captured in Extra with nil value
+	assert.Contains(t, spec.Extra, "typo_key")
+	assert.Nil(t, spec.Extra["typo_key"])
+}
