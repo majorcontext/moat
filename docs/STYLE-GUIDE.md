@@ -231,6 +231,8 @@ Use placeholder names that don't imply specific technologies or products:
 | `openai-agent` | `my-agent` |
 | `claude-assistant` | `my-assistant` |
 
+Use `my-agent` for agent/run names (the `name:` field in `moat.yaml`, CLI name arguments). Use `my-project` for directory paths (`moat run ./my-project`, `mkdir my-project`).
+
 ### Error Messages
 When documenting errors, show the full error message and explain how to resolve it:
 
