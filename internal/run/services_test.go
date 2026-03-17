@@ -236,3 +236,29 @@ func TestBuildProvisionCmdsEmpty(t *testing.T) {
 	cmds := buildProvisionCmds("ollama pull {item}", nil)
 	assert.Empty(t, cmds)
 }
+
+func TestGenerateServiceEnvOllama(t *testing.T) {
+	spec, ok := deps.GetSpec("ollama")
+	require.True(t, ok)
+
+	info := container.ServiceInfo{
+		Name:  "ollama",
+		Host:  "ollama",
+		Ports: map[string]int{"default": 11434},
+		Env:   map[string]string{},
+	}
+
+	env := generateServiceEnv(spec.Service, info, nil)
+
+	assert.Equal(t, "ollama", env["MOAT_OLLAMA_HOST"])
+	assert.Equal(t, "11434", env["MOAT_OLLAMA_PORT"])
+	assert.Equal(t, "http://ollama:11434", env["MOAT_OLLAMA_URL"])
+
+	// No auth — should not have password, user, or db
+	_, hasPassword := env["MOAT_OLLAMA_PASSWORD"]
+	assert.False(t, hasPassword, "should not inject password for no-auth services")
+	_, hasUser := env["MOAT_OLLAMA_USER"]
+	assert.False(t, hasUser)
+	_, hasDB := env["MOAT_OLLAMA_DB"]
+	assert.False(t, hasDB)
+}
