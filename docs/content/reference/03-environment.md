@@ -173,10 +173,10 @@ ports:
 ```bash
 # Inside container:
 echo $MOAT_URL_WEB
-# http://web.my-agent.localhost:8080
+# http://web.my-project.localhost:8080
 
 echo $MOAT_URL_API
-# http://api.my-agent.localhost:8080
+# http://api.my-project.localhost:8080
 ```
 
 Use these for inter-endpoint communication or OAuth callback URLs.
@@ -198,7 +198,7 @@ Name of the current run.
 ```bash
 # Inside container:
 echo $MOAT_RUN_NAME
-# my-agent
+# my-project
 ```
 
 ### User-defined environment

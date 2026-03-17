@@ -45,7 +45,7 @@ $ moat logs -n 50
 Follow logs in real time with `--follow`:
 
 ```bash
-$ moat logs -f my-agent
+$ moat logs -f my-project
 ```
 
 See [CLI reference](../reference/01-cli.md) for the complete list of `moat logs` flags.

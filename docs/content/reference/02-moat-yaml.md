@@ -15,8 +15,8 @@ The `moat.yaml` file configures how Moat runs your agent. Place it in your works
 
 ```yaml
 # Metadata
-name: my-agent
-agent: my-agent
+name: my-project
+agent: my-project
 version: 1.0.0
 
 # Runtime
@@ -165,7 +165,7 @@ tracing:
 Human-readable name for the run. Used in `moat list` and hostname routing.
 
 ```yaml
-name: my-agent
+name: my-project
 ```
 
 - Type: `string`
@@ -179,7 +179,7 @@ When using `moat wt` or `--worktree`, the `name` field is used to generate the r
 Agent identifier. Used internally for tracking.
 
 ```yaml
-agent: my-agent
+agent: my-project
 ```
 
 - Type: `string`
@@ -465,7 +465,7 @@ The workspace is always mounted at `/workspace` unless an explicit mount targets
 Named volumes that persist data across runs for the same agent name.
 
 ```yaml
-name: my-agent
+name: my-project
 
 volumes:
   - name: state

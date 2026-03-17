@@ -105,9 +105,9 @@ Check on all worktree runs:
 $ moat wt list
 
 BRANCH              RUN NAME               STATUS   WORKTREE
-feature/auth        my-agent-feature/auth  running  ~/.moat/worktrees/github.com/my-org/my-project/feature/auth
-feature/dark-mode   my-agent-feature/...   running  ~/.moat/worktrees/github.com/my-org/my-project/feature/dark-mode
-fix/login-bug       my-agent-fix/login-bug stopped  ~/.moat/worktrees/github.com/my-org/my-project/fix/login-bug
+feature/auth        my-project-feature/auth  running  ~/.moat/worktrees/github.com/my-org/my-project/feature/auth
+feature/dark-mode   my-project-feature/...   running  ~/.moat/worktrees/github.com/my-org/my-project/feature/dark-mode
+fix/login-bug       my-project-fix/login-bug stopped  ~/.moat/worktrees/github.com/my-org/my-project/fix/login-bug
 ```
 
 ## Active run detection
@@ -115,7 +115,7 @@ fix/login-bug       my-agent-fix/login-bug stopped  ~/.moat/worktrees/github.com
 If a run is already active in a worktree, `moat wt` returns an error:
 
 ```text
-Error: a run is already active in worktree for branch "dark-mode": my-agent-dark-mode (run_a1b2c3d4e5f6)
+Error: a run is already active in worktree for branch "dark-mode": my-project-dark-mode (run_a1b2c3d4e5f6)
 Follow with 'moat logs -f run_a1b2c3d4e5f6' or stop with 'moat stop run_a1b2c3d4e5f6'
 ```
 
@@ -170,7 +170,7 @@ Branch-specific configuration works as follows:
 
 1. Configure `moat.yaml`:
    ```yaml
-   name: my-agent
+   name: my-project
 
    grants:
      - anthropic
