@@ -2,7 +2,7 @@
 title: "Service dependencies"
 navTitle: "Services"
 description: "Run ephemeral databases and caches alongside your agent containers."
-keywords: ["moat", "postgres", "mysql", "redis", "database", "service", "sidecar"]
+keywords: ["moat", "postgres", "mysql", "redis", "ollama", "database", "service", "sidecar"]
 ---
 
 # Service dependencies
@@ -189,8 +189,39 @@ Each service has a built-in readiness command:
 | `postgres` | `pg_isready -h localhost -U postgres` |
 | `mysql` | `mysqladmin ping -h localhost -u root --password=<pw>` |
 | `redis` | `redis-cli -a <pw> PING` |
+| `ollama` | `ollama list` + pull declared models |
 
 Readiness checks run inside the service container via `docker exec`. They verify that the service accepts connections with the generated credentials.
+
+### Ollama (local models)
+
+Ollama provides local model inference without external API keys:
+
+```yaml
+dependencies:
+  - ollama@0.9
+
+services:
+  ollama:
+    models:
+      - qwen2.5-coder:7b
+      - nomic-embed-text
+```
+
+Models are pulled during startup and cached at `~/.moat/cache/ollama/` on the host. Subsequent runs skip the download.
+
+```python
+import requests
+import os
+
+url = os.environ["MOAT_OLLAMA_URL"]
+resp = requests.post(f"{url}/api/generate", json={
+    "model": "qwen2.5-coder:7b",
+    "prompt": "Write hello world in Go",
+    "stream": False,
+})
+print(resp.json()["response"])
+```
 
 ## Network architecture
 

@@ -266,6 +266,7 @@ dependencies:
 | `mysql@8` | MySQL 8 | 3306 |
 | `mysql@9` | MySQL 9 | 3306 |
 | `redis@7` | Redis 7 | 6379 |
+| `ollama@0.9` | Ollama | 11434 |
 
 Each service injects `MOAT_*` environment variables into the main container. See [Service environment variables](#service-environment-variables) for the full list.
 
@@ -872,6 +873,24 @@ Each key matches a service name from `dependencies:` (e.g., `postgres`, `mysql`,
 
 Setting `wait: false` starts the main container without waiting for the service health check to pass.
 
+### Service-specific lists
+
+Some services accept additional list configuration beyond `env` and `wait`. These keys are defined by the service's registry entry:
+
+| Service | Key | Purpose |
+|---------|-----|---------|
+| `ollama` | `models` | Models to pull during startup |
+
+Example:
+
+```yaml
+services:
+  ollama:
+    models:
+      - qwen2.5-coder:7b
+      - nomic-embed-text
+```
+
 ### Service environment variables
 
 Moat injects `MOAT_*` environment variables into the main container for each service dependency. Credentials are auto-generated per run.
@@ -906,6 +925,12 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 | `MOAT_REDIS_HOST` | Hostname | `redis` |
 | `MOAT_REDIS_PORT` | Port | `6379` |
 | `MOAT_REDIS_PASSWORD` | Auto-generated password | |
+
+#### Ollama
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MOAT_OLLAMA_URL` | Base URL for the Ollama API | `http://ollama:11434` |
 
 ---
 

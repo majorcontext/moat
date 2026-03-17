@@ -121,7 +121,7 @@ See [Available services](#available-services) below for the full list, and the [
 | Workflow tools | `graphite-cli` | Implied by `--grant graphite` |
 | Database clients | `psql`, `mysql-client`, `redis-cli`, `sqlite3` | Pair with corresponding service |
 | Cloud tools | `aws`, `gcloud`, `kubectl`, `terraform`, `helm` | |
-| Services | `postgres`, `mysql`, `redis` | Run as sidecar containers |
+| Services | `postgres`, `mysql`, `redis`, `ollama` | Run as sidecar containers |
 
 Run `moat deps list --type <type>` to filter by category.
 
@@ -190,6 +190,7 @@ Both modes require Docker runtime. Apple containers do not support Docker socket
 | `postgres` | 17 | `MOAT_POSTGRES_*` |
 | `mysql` | 8 | `MOAT_MYSQL_*` |
 | `redis` | 7 | `MOAT_REDIS_*` |
+| `ollama` | 0.9 | `MOAT_OLLAMA_URL` |
 
 Service dependencies require Docker or Apple container runtime. See the [service dependencies guide](../guides/08-services.md) for environment variable details, networking, and security information.
 
