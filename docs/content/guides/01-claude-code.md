@@ -320,10 +320,10 @@ claude:
     custom:
       source: github
       repo: owner/repo
-      ref: main
 ```
 
-Marketplaces are cloned during image build. `moat claude --rebuild` updates the container image after changing marketplace configuration.
+Marketplace repos are cloned on the host before image build, using your local git credentials (`gh auth`, SSH keys, credential helpers). 
+This means private marketplace repos work without leaking credentials into the Docker image. Use `moat claude --rebuild` update the container image after changing marketplace configuration.
 
 ## Language servers
 

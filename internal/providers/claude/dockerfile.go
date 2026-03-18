@@ -181,11 +181,11 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	var validPreCloned []MarketplaceConfig
 	for _, m := range preCloned {
 		if !validMarketplaceName.MatchString(m.Name) {
-			script.WriteString("echo 'WARNING: Invalid marketplace name for pre-cloned entry, skipping'\n")
+			log.Warn("invalid marketplace name for pre-cloned entry, skipping")
 			continue
 		}
 		if strings.Contains(m.PreCloned, "..") || !validPreClonedPath.MatchString(m.PreCloned) {
-			script.WriteString(fmt.Sprintf("echo 'WARNING: Invalid pre-cloned path for marketplace %s, skipping'\n", m.Name))
+			log.Warn("invalid pre-cloned path for marketplace, skipping", "name", m.Name)
 			continue
 		}
 		validPreCloned = append(validPreCloned, m)

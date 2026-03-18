@@ -166,6 +166,35 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 			t.Error("invalid marketplace name should not appear in output")
 		}
 	})
+
+	t.Run("path traversal in pre-cloned path", func(t *testing.T) {
+		marketplaces := []MarketplaceConfig{
+			{Name: "legit", Source: "github", Repo: "org/legit", PreCloned: "marketplaces/legit"},
+			{Name: "evil", Source: "github", Repo: "org/evil", PreCloned: "../../../etc/passwd"},
+		}
+
+		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
+
+		// Legitimate marketplace should get COPY
+		if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/legit") {
+			t.Error("valid pre-cloned marketplace should get COPY directive")
+		}
+		// Path traversal should be rejected — no COPY for it
+		if strings.Contains(result.DockerfileSnippet, "etc/passwd") {
+			t.Error("path traversal in PreCloned should be rejected from Dockerfile")
+		}
+		// known_marketplaces.json should only contain the valid entry
+		if result.ExtraContextFiles == nil {
+			t.Fatal("ExtraContextFiles should not be nil")
+		}
+		knownJSON := string(result.ExtraContextFiles["known-marketplaces.json"])
+		if !strings.Contains(knownJSON, "legit") {
+			t.Error("known_marketplaces.json should contain the valid marketplace")
+		}
+		if strings.Contains(knownJSON, "evil") {
+			t.Error("known_marketplaces.json should NOT contain the rejected marketplace")
+		}
+	})
 }
 
 func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
