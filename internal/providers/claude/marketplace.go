@@ -20,9 +20,15 @@ type PreClonedMarketplace struct {
 	LastUpdated string // ISO 8601 timestamp of the last commit in the repo
 }
 
+// maxMarketplaceFileSize is the maximum size of a single file to collect
+// from a marketplace repo. Files larger than this are skipped to prevent
+// loading large binaries into memory.
+const maxMarketplaceFileSize = 10 << 20 // 10 MB
+
 // CollectMarketplaceFiles walks a cloned marketplace directory and returns
 // all files keyed by their build-context-relative path. The .git directory
-// is excluded. Paths use forward slashes for Docker compatibility.
+// is excluded. Files larger than 10MB are skipped.
+// Paths use forward slashes for Docker compatibility.
 func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) {
 	files := make(map[string][]byte)
 
@@ -38,6 +44,15 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 
 		// Skip directories — only collect files.
 		if d.IsDir() {
+			return nil
+		}
+
+		// Skip files that are too large (e.g., binaries checked into the repo).
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", d.Name(), err)
+		}
+		if info.Size() > maxMarketplaceFileSize {
 			return nil
 		}
 
