@@ -134,11 +134,14 @@ mounts:
     target: /workspace
     exclude:
       - target
+
+hooks:
+  pre_run: cargo build
 ```
 
 `target/` contains compiled artifacts that are architecture- and OS-specific. A macOS `target/` directory does not work in a Linux container.
 
-> **Note:** Unlike `npm install`, `cargo build` against an empty tmpfs `target/` recompiles from scratch on every container start. For large projects, consider using a [named volume](../reference/02-moat-yaml.md#volumes) for `target/` to persist build artifacts across runs.
+> **Note:** `cargo build` against an empty tmpfs `target/` recompiles from scratch on every container start. For large projects, consider using a [named volume](../reference/02-moat-yaml.md#volumes) for `target/` to persist build artifacts across runs.
 
 ## Multiple excludes
 
