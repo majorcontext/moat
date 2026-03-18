@@ -350,15 +350,12 @@ Attaching to session serene-willow...
 
 ## Migration Path
 
-The existing `moat claude plugins` and `moat claude marketplace` commands remain unchanged. The new `moat claude` (without subcommand) becomes the primary entry point for running Claude Code.
+The new `moat claude` (without subcommand) becomes the primary entry point for running Claude Code.
 
 Command structure:
 ```
 moat claude                       # Run Claude Code (new)
 moat claude sessions              # List sessions (new)
-moat claude plugins list          # List plugins (existing)
-moat claude marketplace list      # List marketplaces (existing)
-moat claude marketplace update    # Update marketplaces (existing)
 ```
 
 ## Future Enhancements
