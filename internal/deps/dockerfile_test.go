@@ -774,20 +774,33 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 	}
 	script := string(scriptContent)
 
+	// Script should use set -e and track failures
+	if !strings.Contains(script, "set -e") {
+		t.Error("script should use set -e to fail on errors")
+	}
+	if !strings.Contains(script, "failures=0") {
+		t.Error("script should initialize failure counter")
+	}
+
 	// Script should add marketplaces with error handling (in sorted order)
-	if !strings.Contains(script, "claude plugin marketplace add anthropics/claude-plugins-official && echo 'Added marketplace claude-plugins-official' || echo 'WARNING: Could not add marketplace claude-plugins-official") {
+	if !strings.Contains(script, "if claude plugin marketplace add anthropics/claude-plugins-official; then") {
 		t.Error("script should add claude-plugins-official marketplace with error handling")
 	}
-	if !strings.Contains(script, "claude plugin marketplace add itsmostafa/aws-agent-skills && echo 'Added marketplace aws-agent-skills' || echo 'WARNING: Could not add marketplace aws-agent-skills") {
+	if !strings.Contains(script, "if claude plugin marketplace add itsmostafa/aws-agent-skills; then") {
 		t.Error("script should add aws-agent-skills marketplace with error handling")
 	}
 
 	// Script should install plugins with error handling (in sorted order)
-	if !strings.Contains(script, "claude plugin install aws-agent-skills@aws-agent-skills && echo 'Installed plugin aws-agent-skills@aws-agent-skills' || echo 'WARNING: Could not install plugin aws-agent-skills@aws-agent-skills") {
+	if !strings.Contains(script, "if claude plugin install aws-agent-skills@aws-agent-skills; then") {
 		t.Error("script should install aws-agent-skills plugin with error handling")
 	}
-	if !strings.Contains(script, "claude plugin install claude-md-management@claude-plugins-official && echo 'Installed plugin claude-md-management@claude-plugins-official' || echo 'WARNING: Could not install plugin claude-md-management@claude-plugins-official") {
+	if !strings.Contains(script, "if claude plugin install claude-md-management@claude-plugins-official; then") {
 		t.Error("script should install claude-md-management plugin with error handling")
+	}
+
+	// Script should exit with failure if any operations failed
+	if !strings.Contains(script, "exit 1") {
+		t.Error("script should exit with non-zero status on failures")
 	}
 
 	// Should NOT have USER root after plugin installation when no subsequent

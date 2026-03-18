@@ -55,20 +55,35 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("script should export PATH with Claude CLI locations")
 	}
 
+	// Script should use set -e
+	if !strings.Contains(scriptStr, "set -e") {
+		t.Error("script should use set -e")
+	}
+
+	// Script should track failures
+	if !strings.Contains(scriptStr, "failures=0") {
+		t.Error("script should initialize failure counter")
+	}
+
 	// Script should add marketplaces (in sorted order)
-	if !strings.Contains(scriptStr, "marketplace add anthropics/claude-plugins-official &&") {
+	if !strings.Contains(scriptStr, "if claude plugin marketplace add anthropics/claude-plugins-official; then") {
 		t.Error("should add claude-plugins-official marketplace")
 	}
-	if !strings.Contains(scriptStr, "marketplace add itsmostafa/aws-agent-skills &&") {
+	if !strings.Contains(scriptStr, "if claude plugin marketplace add itsmostafa/aws-agent-skills; then") {
 		t.Error("should add aws-agent-skills marketplace")
 	}
 
 	// Script should install plugins (in sorted order)
-	if !strings.Contains(scriptStr, "plugin install aws-agent-skills@aws-agent-skills &&") {
+	if !strings.Contains(scriptStr, "if claude plugin install aws-agent-skills@aws-agent-skills; then") {
 		t.Error("should install aws-agent-skills plugin")
 	}
-	if !strings.Contains(scriptStr, "plugin install claude-md-management@claude-plugins-official &&") {
+	if !strings.Contains(scriptStr, "if claude plugin install claude-md-management@claude-plugins-official; then") {
 		t.Error("should install claude-md-management plugin")
+	}
+
+	// Script should exit with failure if any operations failed
+	if !strings.Contains(scriptStr, "exit 1") {
+		t.Error("script should exit with failure on errors")
 	}
 }
 
@@ -101,9 +116,9 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 		if !strings.Contains(scriptStr, "marketplace add valid/repo") {
 			t.Error("valid marketplace should be included")
 		}
-		// Invalid repo should trigger warning message
-		if !strings.Contains(scriptStr, "WARNING: Invalid marketplace repo format: evil") {
-			t.Error("invalid marketplace should show warning message with name")
+		// Invalid repo should trigger error message
+		if !strings.Contains(scriptStr, "ERROR: Invalid marketplace repo format: evil") {
+			t.Error("invalid marketplace should show error message with name")
 		}
 		// The malicious repo value should NOT appear in the output
 		if strings.Contains(scriptStr, "; rm -rf /") {
@@ -124,9 +139,9 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 		if !strings.Contains(scriptStr, "plugin install valid-plugin@valid-market") {
 			t.Error("valid plugin should be included")
 		}
-		// Invalid plugin should trigger warning message
-		if !strings.Contains(scriptStr, "WARNING: Invalid plugin format") {
-			t.Error("invalid plugin should show warning message")
+		// Invalid plugin should trigger error message
+		if !strings.Contains(scriptStr, "ERROR: Invalid plugin format") {
+			t.Error("invalid plugin should show error message")
 		}
 	})
 }
