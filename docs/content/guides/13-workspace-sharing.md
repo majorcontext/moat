@@ -37,7 +37,7 @@ hooks:
   pre_run: npm install
 ```
 
-`npm install` runs on every container start. When packages are already in npm's local cache (`~/.npm`), it installs without network requests.
+`npm install` runs on every container start and performs a full install since `node_modules` starts empty on the tmpfs overlay.
 
 ### How excludes work
 
