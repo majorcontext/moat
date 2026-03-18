@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // PreClonedMarketplace describes a marketplace that was cloned on the host
@@ -23,11 +25,11 @@ type PreClonedMarketplace struct {
 // maxMarketplaceFileSize is the maximum size of a single file to collect
 // from a marketplace repo. Files larger than this are skipped to prevent
 // loading large binaries into memory.
-const maxMarketplaceFileSize = 10 << 20 // 10 MB
+const maxMarketplaceFileSize = 1 << 20 // 1 MB
 
 // CollectMarketplaceFiles walks a cloned marketplace directory and returns
 // all files keyed by their build-context-relative path. The .git directory
-// is excluded. Files larger than 10MB are skipped.
+// is excluded. Files larger than 1MB are skipped with a warning.
 // Paths use forward slashes for Docker compatibility.
 func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) {
 	files := make(map[string][]byte)
@@ -53,6 +55,11 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 			return fmt.Errorf("stat %s: %w", d.Name(), err)
 		}
 		if info.Size() > maxMarketplaceFileSize {
+			rel, _ := filepath.Rel(clonedDir, path)
+			log.Warn("skipping large file in marketplace",
+				"file", filepath.ToSlash(rel),
+				"size", info.Size(),
+				"limit", maxMarketplaceFileSize)
 			return nil
 		}
 
