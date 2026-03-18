@@ -3581,27 +3581,25 @@ func cloneMarketplacesOnHost(ctx context.Context, marketplaces []claude.Marketpl
 		}
 		result.cleanupDirs = append(result.cleanupDirs, clonedDir)
 
-		files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
+		contextKey, tarData, collectErr := claude.CollectMarketplaceTar(clonedDir, m.Name)
 		if collectErr != nil {
 			log.Warn("could not collect marketplace files after clone; will try build-time clone",
 				"name", m.Name, "error", collectErr)
 			continue
 		}
 
-		if len(files) == 0 {
+		if len(tarData) == 0 {
 			log.Warn("marketplace has no files, skipping pre-clone", "name", m.Name)
 			continue
 		}
 		if result.contextFiles == nil {
 			result.contextFiles = make(map[string][]byte)
 		}
-		for path, content := range files {
-			result.contextFiles[path] = content
-		}
+		result.contextFiles[contextKey] = tarData
 
 		result.precloned = append(result.precloned, preclonedInfo{
 			index:         i,
-			contextPrefix: "marketplaces/" + m.Name,
+			contextPrefix: contextKey, // now a tar filename like "marketplace-name.tar"
 			commitTime:    commitTime,
 		})
 		log.Info("pre-cloned marketplace on host", "name", m.Name)

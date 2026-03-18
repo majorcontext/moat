@@ -1,13 +1,16 @@
 package claude
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestCollectMarketplaceFiles(t *testing.T) {
+func TestCollectMarketplaceTar(t *testing.T) {
 	// Create a temp directory simulating a cloned marketplace repo.
 	dir := t.TempDir()
 
@@ -34,46 +37,93 @@ func TestCollectMarketplaceFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := CollectMarketplaceFiles(dir, "my-marketplace")
+	contextKey, tarData, err := CollectMarketplaceTar(dir, "my-marketplace")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// marketplace.json should be present with the right key
-	key := "marketplaces/my-marketplace/.claude-plugin/marketplace.json"
-	if _, ok := files[key]; !ok {
-		t.Errorf("expected key %s in files, got keys: %v", key, mapKeys(files))
+	// Context key should be a flat tar filename
+	if contextKey != "marketplace-my-marketplace.tar" {
+		t.Errorf("expected context key 'marketplace-my-marketplace.tar', got %q", contextKey)
+	}
+
+	// Tar data should not be empty
+	if len(tarData) == 0 {
+		t.Fatal("tar data should not be empty")
+	}
+
+	// Extract tar and verify contents
+	files := extractTar(t, tarData)
+
+	// marketplace.json should be present
+	if content, ok := files[".claude-plugin/marketplace.json"]; !ok {
+		t.Errorf("expected .claude-plugin/marketplace.json in tar, got keys: %v", tarKeys(files))
+	} else if string(content) != `{"name":"test"}` {
+		t.Errorf("unexpected marketplace.json content: %q", string(content))
 	}
 
 	// README should be present
-	readmeKey := "marketplaces/my-marketplace/README.md"
-	if content, ok := files[readmeKey]; !ok {
-		t.Errorf("expected key %s in files, got keys: %v", readmeKey, mapKeys(files))
+	if content, ok := files["README.md"]; !ok {
+		t.Errorf("expected README.md in tar, got keys: %v", tarKeys(files))
 	} else if string(content) != "# Test" {
 		t.Errorf("expected README content '# Test', got %q", string(content))
 	}
 
 	// .git/ contents should be excluded
-	gitKey := "marketplaces/my-marketplace/.git/HEAD"
-	if _, ok := files[gitKey]; ok {
-		t.Errorf(".git directory should be excluded, but found key %s", gitKey)
-	}
-
-	// Should have exactly 2 files
-	if len(files) != 2 {
-		t.Errorf("expected 2 files, got %d: %v", len(files), mapKeys(files))
+	for key := range files {
+		if key == ".git/HEAD" || key == ".git/" {
+			t.Errorf(".git directory should be excluded, but found key %s", key)
+		}
 	}
 }
 
-func TestCollectMarketplaceFilesEmptyDir(t *testing.T) {
+func TestCollectMarketplaceTarEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 
-	files, err := CollectMarketplaceFiles(dir, "empty")
+	contextKey, tarData, err := CollectMarketplaceTar(dir, "empty")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 0 {
-		t.Errorf("expected empty map, got %d files: %v", len(files), mapKeys(files))
+
+	if contextKey != "marketplace-empty.tar" {
+		t.Errorf("expected context key 'marketplace-empty.tar', got %q", contextKey)
+	}
+
+	// Tar should only contain the root directory entry
+	files := extractTar(t, tarData)
+	for name, content := range files {
+		if len(content) > 0 {
+			t.Errorf("expected no file entries in empty dir tar, got %s", name)
+		}
+	}
+}
+
+func TestCollectMarketplaceTarSkipsLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a small file
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a file just over the 1MB limit
+	largeContent := make([]byte, maxMarketplaceFileSize+1)
+	if err := os.WriteFile(filepath.Join(dir, "large.bin"), largeContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, tarData, err := CollectMarketplaceTar(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := extractTar(t, tarData)
+
+	if _, ok := files["small.txt"]; !ok {
+		t.Error("small file should be included in tar")
+	}
+	if _, ok := files["large.bin"]; ok {
+		t.Error("large file should be excluded from tar")
 	}
 }
 
@@ -172,8 +222,35 @@ func TestGenerateKnownMarketplacesEmpty(t *testing.T) {
 	}
 }
 
-// mapKeys returns the keys of a map for diagnostic output.
-func mapKeys(m map[string][]byte) []string {
+// extractTar reads a tar archive and returns a map of filename → content.
+// Directory entries are included with nil content.
+func extractTar(t *testing.T, data []byte) map[string][]byte {
+	t.Helper()
+	files := make(map[string][]byte)
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reading tar: %v", err)
+		}
+		if hdr.Typeflag == tar.TypeDir {
+			files[hdr.Name] = nil
+			continue
+		}
+		content, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatalf("reading tar entry %s: %v", hdr.Name, err)
+		}
+		files[hdr.Name] = content
+	}
+	return files
+}
+
+// tarKeys returns the keys of a tar files map for diagnostic output.
+func tarKeys(m map[string][]byte) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

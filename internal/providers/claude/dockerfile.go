@@ -175,9 +175,11 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	dockerfile.WriteString(fmt.Sprintf("USER %s\n", containerUser))
 	dockerfile.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
 
-	// COPY pre-cloned marketplace directories into the plugins path.
-	// Filter out entries with invalid PreCloned paths or Names to prevent
-	// injection into Dockerfile COPY directives.
+	// COPY pre-cloned marketplace tar archives and extract them.
+	// Each marketplace is packaged as a single flat tar file to work around an
+	// Apple container builder bug where nested directory contents in the build
+	// context are not transferred to the builder VM. Single flat files transfer
+	// correctly on all builders.
 	var validPreCloned []MarketplaceConfig
 	for _, m := range preCloned {
 		if !validMarketplaceName.MatchString(m.Name) {
@@ -189,8 +191,10 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 			continue
 		}
 		validPreCloned = append(validPreCloned, m)
-		dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s %s /home/%s/.claude/plugins/marketplaces/%s\n",
-			containerUser, m.PreCloned, containerUser, m.Name))
+		destDir := fmt.Sprintf("/home/%s/.claude/plugins/marketplaces/%s", containerUser, m.Name)
+		dockerfile.WriteString(fmt.Sprintf("COPY --chown=%s %s /tmp/%s\n", containerUser, m.PreCloned, m.PreCloned))
+		dockerfile.WriteString(fmt.Sprintf("RUN mkdir -p %s && tar xf /tmp/%s -C %s && rm /tmp/%s\n",
+			destDir, m.PreCloned, destDir, m.PreCloned))
 	}
 
 	// Generate known_marketplaces.json for pre-cloned marketplaces.

@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,16 +29,22 @@ type PreClonedMarketplace struct {
 // loading large binaries into memory.
 const maxMarketplaceFileSize = 1 << 20 // 1 MB
 
-// CollectMarketplaceFiles walks a cloned marketplace directory and returns
-// all files keyed by their build-context-relative path. The .git directory
-// is excluded. Files larger than 1MB are skipped with a warning.
-// Paths use forward slashes for Docker compatibility.
-func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) {
-	files := make(map[string][]byte)
+// CollectMarketplaceTar walks a cloned marketplace directory and returns
+// a tar archive containing all files. The .git directory is excluded.
+// Files larger than 1MB are skipped with a warning.
+//
+// The tar is returned as a single flat file for the build context, keyed as
+// "marketplace-{name}.tar". This works around an Apple container builder bug
+// where nested directory contents in the build context are not transferred
+// to the builder VM (only ~18KB of metadata is sent instead of the full tree).
+// Single flat files transfer correctly on all builders.
+func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []byte, err error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
 
-	err := filepath.WalkDir(clonedDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err = filepath.WalkDir(clonedDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 
 		// Skip .git directory entirely.
@@ -44,18 +52,30 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 			return filepath.SkipDir
 		}
 
-		// Skip directories — only collect files.
+		rel, relErr := filepath.Rel(clonedDir, path)
+		if relErr != nil {
+			return fmt.Errorf("computing relative path: %w", relErr)
+		}
+
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return fmt.Errorf("stat %s: %w", d.Name(), infoErr)
+		}
+
+		// Add directory entries to the tar for correct extraction.
 		if d.IsDir() {
+			if hdrErr := tw.WriteHeader(&tar.Header{
+				Name:     filepath.ToSlash(rel) + "/",
+				Mode:     0755,
+				Typeflag: tar.TypeDir,
+			}); hdrErr != nil {
+				return fmt.Errorf("writing dir header for %s: %w", rel, hdrErr)
+			}
 			return nil
 		}
 
 		// Skip files that are too large (e.g., binaries checked into the repo).
-		info, err := d.Info()
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", d.Name(), err)
-		}
 		if info.Size() > maxMarketplaceFileSize {
-			rel, _ := filepath.Rel(clonedDir, path)
 			log.Warn("skipping large file in marketplace",
 				"file", filepath.ToSlash(rel),
 				"size", info.Size(),
@@ -63,25 +83,33 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 			return nil
 		}
 
-		rel, err := filepath.Rel(clonedDir, path)
-		if err != nil {
-			return fmt.Errorf("computing relative path: %w", err)
+		fileData, readErr := os.ReadFile(path) //nolint:gosec // G304: path is from our own temp clone dir, not user-controlled
+		if readErr != nil {
+			return fmt.Errorf("reading %s: %w", rel, readErr)
 		}
 
-		data, err := os.ReadFile(path) //nolint:gosec // G304: path is from our own temp clone dir, not user-controlled
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", rel, err)
+		if hdrErr := tw.WriteHeader(&tar.Header{
+			Name: filepath.ToSlash(rel),
+			Mode: 0644,
+			Size: int64(len(fileData)),
+		}); hdrErr != nil {
+			return fmt.Errorf("writing tar header for %s: %w", rel, hdrErr)
 		}
-
-		key := "marketplaces/" + name + "/" + filepath.ToSlash(rel)
-		files[key] = data
+		if _, wErr := tw.Write(fileData); wErr != nil {
+			return fmt.Errorf("writing tar data for %s: %w", rel, wErr)
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("walking marketplace directory: %w", err)
+		return "", nil, fmt.Errorf("walking marketplace directory: %w", err)
 	}
 
-	return files, nil
+	if closeErr := tw.Close(); closeErr != nil {
+		return "", nil, fmt.Errorf("closing tar writer: %w", closeErr)
+	}
+
+	contextKey = "marketplace-" + name + ".tar"
+	return contextKey, buf.Bytes(), nil
 }
 
 // CloneMarketplace clones a marketplace repo to a temporary directory.

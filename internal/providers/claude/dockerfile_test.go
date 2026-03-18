@@ -169,15 +169,18 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 
 	t.Run("path traversal in pre-cloned path", func(t *testing.T) {
 		marketplaces := []MarketplaceConfig{
-			{Name: "legit", Source: "github", Repo: "org/legit", PreCloned: "marketplaces/legit"},
+			{Name: "legit", Source: "github", Repo: "org/legit", PreCloned: "marketplace-legit.tar"},
 			{Name: "evil", Source: "github", Repo: "org/evil", PreCloned: "../../../etc/passwd"},
 		}
 
 		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
 
-		// Legitimate marketplace should get COPY
-		if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/legit") {
+		// Legitimate marketplace should get COPY + tar extract
+		if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplace-legit.tar") {
 			t.Error("valid pre-cloned marketplace should get COPY directive")
+		}
+		if !strings.Contains(result.DockerfileSnippet, "tar xf /tmp/marketplace-legit.tar") {
+			t.Error("valid pre-cloned marketplace should get tar extract")
 		}
 		// Path traversal should be rejected — no COPY for it
 		if strings.Contains(result.DockerfileSnippet, "etc/passwd") {
@@ -200,7 +203,7 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
 	// Mixed: one pre-cloned, one remote marketplace.
 	marketplaces := []MarketplaceConfig{
-		{Name: "private-market", Source: "github", Repo: "org/private-market", PreCloned: "marketplaces/private-market"},
+		{Name: "private-market", Source: "github", Repo: "org/private-market", PreCloned: "marketplace-private-market.tar"},
 		{Name: "public-market", Source: "github", Repo: "org/public-market"},
 	}
 	plugins := []string{
@@ -212,9 +215,12 @@ func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
 
 	// --- Dockerfile snippet checks ---
 
-	// Pre-cloned marketplace should get COPY commands
-	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/private-market /home/moatuser/.claude/plugins/marketplaces/private-market") {
-		t.Error("should COPY pre-cloned marketplace directory")
+	// Pre-cloned marketplace should get COPY + tar extract
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplace-private-market.tar /tmp/marketplace-private-market.tar") {
+		t.Error("should COPY pre-cloned marketplace tar")
+	}
+	if !strings.Contains(result.DockerfileSnippet, "tar xf /tmp/marketplace-private-market.tar -C /home/moatuser/.claude/plugins/marketplaces/private-market") {
+		t.Error("should extract tar into marketplace directory")
 	}
 	// known_marketplaces.json should get a COPY command
 	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser known-marketplaces.json /home/moatuser/.claude/plugins/known_marketplaces.json") {
@@ -270,8 +276,8 @@ func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
 func TestGenerateDockerfileSnippetAllPreCloned(t *testing.T) {
 	// All marketplaces are pre-cloned — no marketplace add commands at all.
 	marketplaces := []MarketplaceConfig{
-		{Name: "alpha", Source: "github", Repo: "org/alpha", PreCloned: "marketplaces/alpha"},
-		{Name: "beta", Source: "git", Repo: "https://git.example.com/beta.git", PreCloned: "marketplaces/beta"},
+		{Name: "alpha", Source: "github", Repo: "org/alpha", PreCloned: "marketplace-alpha.tar"},
+		{Name: "beta", Source: "git", Repo: "https://git.example.com/beta.git", PreCloned: "marketplace-beta.tar"},
 	}
 	plugins := []string{
 		"tool-a@alpha",
@@ -298,12 +304,18 @@ func TestGenerateDockerfileSnippetAllPreCloned(t *testing.T) {
 
 	// --- Dockerfile snippet checks ---
 
-	// Both marketplaces should have COPY commands
-	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/alpha /home/moatuser/.claude/plugins/marketplaces/alpha") {
-		t.Error("should COPY alpha marketplace")
+	// Both marketplaces should have COPY + tar extract
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplace-alpha.tar /tmp/marketplace-alpha.tar") {
+		t.Error("should COPY alpha marketplace tar")
 	}
-	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplaces/beta /home/moatuser/.claude/plugins/marketplaces/beta") {
-		t.Error("should COPY beta marketplace")
+	if !strings.Contains(result.DockerfileSnippet, "tar xf /tmp/marketplace-alpha.tar -C /home/moatuser/.claude/plugins/marketplaces/alpha") {
+		t.Error("should extract alpha tar")
+	}
+	if !strings.Contains(result.DockerfileSnippet, "COPY --chown=moatuser marketplace-beta.tar /tmp/marketplace-beta.tar") {
+		t.Error("should COPY beta marketplace tar")
+	}
+	if !strings.Contains(result.DockerfileSnippet, "tar xf /tmp/marketplace-beta.tar -C /home/moatuser/.claude/plugins/marketplaces/beta") {
+		t.Error("should extract beta tar")
 	}
 
 	// known_marketplaces.json should be present
@@ -344,5 +356,18 @@ func TestGenerateDockerfileSnippetKeepsDockerfileSmall(t *testing.T) {
 	// Script should contain all the commands
 	if !strings.Contains(string(result.ScriptContent), "plugin install") {
 		t.Error("script should contain plugin install commands")
+	}
+}
+
+func TestGenerateDockerfileSnippetTarCleanup(t *testing.T) {
+	// Verify the Dockerfile removes the tar after extraction
+	marketplaces := []MarketplaceConfig{
+		{Name: "test-market", Source: "github", Repo: "org/test", PreCloned: "marketplace-test-market.tar"},
+	}
+
+	result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
+
+	if !strings.Contains(result.DockerfileSnippet, "rm /tmp/marketplace-test-market.tar") {
+		t.Error("should clean up tar file after extraction")
 	}
 }
