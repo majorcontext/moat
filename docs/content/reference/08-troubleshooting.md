@@ -526,10 +526,11 @@ BuildKit requires Docker runtime (sidecars not supported by apple)
 MOAT_RUNTIME=docker moat run ./my-project
 ```
 
-Or unset `BUILDKIT_HOST` to use the legacy builder:
+Or switch from `docker:dind` to `docker:host` in `moat.yaml` to avoid BuildKit:
 
-```bash
-unset BUILDKIT_HOST
+```yaml
+dependencies:
+  - docker
 ```
 
 ---
