@@ -530,7 +530,7 @@ Or switch from `docker:dind` to `docker:host` in `moat.yaml` to avoid BuildKit:
 
 ```yaml
 dependencies:
-  - docker
+  - docker:host
 ```
 
 ---
