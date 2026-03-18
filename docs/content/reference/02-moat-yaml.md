@@ -99,7 +99,6 @@ claude:
     custom:
       source: github
       repo: owner/repo
-
   mcp:
     my_server:
       command: /path/to/server
@@ -1007,7 +1006,6 @@ claude:
     custom:
       source: github
       repo: owner/repo
-
 ```
 
 - Type: `map[string]object`
