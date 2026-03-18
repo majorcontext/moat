@@ -1292,46 +1292,6 @@ region = %s
 		}
 	}
 
-	// cloneMarketplacesOnHost clones marketplace repos on the host so private repos
-	// are accessible without passing credentials into the build context. The host's
-	// git credentials (gh auth, SSH keys, credential helpers) handle authentication.
-	// Returns cleanup directories and context files for the build.
-	cloneMarketplacesOnHost := func() (cleanups []string, contextFiles map[string][]byte) {
-		for i := range claudeMarketplaces {
-			m := &claudeMarketplaces[i]
-			if !claude.ValidMarketplaceName(m.Name) {
-				log.Warn("skipping marketplace with invalid name", "name", m.Name)
-				continue
-			}
-			clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
-			if cloneErr != nil {
-				log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
-					"name", m.Name, "repo", m.Repo, "error", cloneErr)
-				continue
-			}
-			cleanups = append(cleanups, clonedDir)
-
-			files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
-			if collectErr != nil {
-				log.Warn("could not collect marketplace files after clone; will try build-time clone",
-					"name", m.Name, "error", collectErr)
-				continue
-			}
-
-			if contextFiles == nil {
-				contextFiles = make(map[string][]byte)
-			}
-			for path, content := range files {
-				contextFiles[path] = content
-			}
-
-			m.PreCloned = "marketplaces/" + m.Name
-			m.CommitTime = commitTime
-			log.Info("pre-cloned marketplace on host", "name", m.Name)
-		}
-		return cleanups, contextFiles
-	}
-
 	// Resolve which agents need init and which providers need init files.
 	// This opens the credential store once and walks grants in a single pass.
 	imgNeeds := resolveImageNeeds(opts.Grants, depList)
@@ -1416,15 +1376,22 @@ region = %s
 		if !exists {
 			// Clone marketplace repos on host only when we need to build.
 			// When the image is cached this avoids unnecessary git clones.
-			marketplaceCleanups, marketplaceContextFiles := cloneMarketplacesOnHost()
+			cloneResult := cloneMarketplacesOnHost(ctx, claudeMarketplaces)
 			defer func() {
-				for _, dir := range marketplaceCleanups {
+				for _, dir := range cloneResult.cleanupDirs {
 					os.RemoveAll(dir)
 				}
 			}()
 
+			// Apply pre-clone info back to marketplace configs so the
+			// regenerated Dockerfile uses COPY instead of clone commands.
+			for _, p := range cloneResult.precloned {
+				claudeMarketplaces[p.index].PreCloned = p.contextPrefix
+				claudeMarketplaces[p.index].CommitTime = p.commitTime
+			}
+
 			// Regenerate Dockerfile with pre-cloned marketplace info.
-			if len(marketplaceContextFiles) > 0 {
+			if len(cloneResult.contextFiles) > 0 {
 				result, err = deps.GenerateDockerfile(installableDeps, imageSpec)
 				if err != nil {
 					cleanupDaemonRun()
@@ -1455,11 +1422,11 @@ region = %s
 			// Merge pre-cloned marketplace files into build context.
 			// These are added alongside the files from Dockerfile generation
 			// (which includes known_marketplaces.json via ExtraContextFiles).
-			if len(marketplaceContextFiles) > 0 {
+			if len(cloneResult.contextFiles) > 0 {
 				if result.ContextFiles == nil {
 					result.ContextFiles = make(map[string][]byte)
 				}
-				for path, content := range marketplaceContextFiles {
+				for path, content := range cloneResult.contextFiles {
 					result.ContextFiles[path] = content
 				}
 			}
@@ -3580,4 +3547,64 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 	}
 
 	return req
+}
+
+// preclonedInfo holds the result of successfully cloning a single marketplace.
+type preclonedInfo struct {
+	index         int    // index into the original MarketplaceConfig slice
+	contextPrefix string // build-context-relative path prefix (e.g., "marketplaces/name")
+	commitTime    string // ISO 8601 timestamp of the last commit
+}
+
+// marketplaceCloneResult holds all outputs from cloning marketplace repos on the host.
+type marketplaceCloneResult struct {
+	cleanupDirs  []string          // temporary directories to remove after build
+	contextFiles map[string][]byte // files to add to the Docker build context
+	precloned    []preclonedInfo   // which marketplaces were successfully pre-cloned
+}
+
+// cloneMarketplacesOnHost clones marketplace repos on the host so private repos
+// are accessible without passing credentials into the build context. The host's
+// git credentials (gh auth, SSH keys, credential helpers) handle authentication.
+func cloneMarketplacesOnHost(ctx context.Context, marketplaces []claude.MarketplaceConfig) marketplaceCloneResult {
+	var result marketplaceCloneResult
+	for i, m := range marketplaces {
+		if !claude.ValidMarketplaceName(m.Name) {
+			log.Warn("skipping marketplace with invalid name", "name", m.Name)
+			continue
+		}
+		clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
+		if cloneErr != nil {
+			log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
+				"name", m.Name, "repo", m.Repo, "error", cloneErr)
+			continue
+		}
+		result.cleanupDirs = append(result.cleanupDirs, clonedDir)
+
+		files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
+		if collectErr != nil {
+			log.Warn("could not collect marketplace files after clone; will try build-time clone",
+				"name", m.Name, "error", collectErr)
+			continue
+		}
+
+		if len(files) == 0 {
+			log.Warn("marketplace has no files, skipping pre-clone", "name", m.Name)
+			continue
+		}
+		if result.contextFiles == nil {
+			result.contextFiles = make(map[string][]byte)
+		}
+		for path, content := range files {
+			result.contextFiles[path] = content
+		}
+
+		result.precloned = append(result.precloned, preclonedInfo{
+			index:         i,
+			contextPrefix: "marketplaces/" + m.Name,
+			commitTime:    commitTime,
+		})
+		log.Info("pre-cloned marketplace on host", "name", m.Name)
+	}
+	return result
 }
