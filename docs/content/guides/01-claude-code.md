@@ -323,7 +323,7 @@ claude:
       ref: main
 ```
 
-Marketplaces are cloned during image build. `moat claude --rebuild` updates the image after changing marketplace configuration.
+Marketplaces are cloned during image build. `moat claude --rebuild` updates the container image after changing marketplace configuration.
 
 ## Language servers
 
