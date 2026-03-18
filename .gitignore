@@ -29,7 +29,7 @@ go.work.sum
 .envrc
 
 # Editor/IDE
-# .idea/
+.idea/
 # .vscode/
 
 # macOS
