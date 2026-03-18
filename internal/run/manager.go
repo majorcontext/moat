@@ -1299,6 +1299,10 @@ region = %s
 	var marketplaceContextFiles map[string][]byte
 	for i := range claudeMarketplaces {
 		m := &claudeMarketplaces[i]
+		if !claude.ValidMarketplaceName(m.Name) {
+			log.Warn("skipping marketplace with invalid name", "name", m.Name)
+			continue
+		}
 		clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
 		if cloneErr != nil {
 			log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",

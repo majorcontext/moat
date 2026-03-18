@@ -40,6 +40,12 @@ var validPreClonedPath = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 // Allows alphanumeric, hyphens, and underscores only.
 var validMarketplaceName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// ValidMarketplaceName reports whether name is a safe marketplace name
+// for use in filesystem paths and build-context keys.
+func ValidMarketplaceName(name string) bool {
+	return validMarketplaceName.MatchString(name)
+}
+
 // Note on error handling: When validation fails, error messages include the
 // marketplace name or plugin key (which are user-visible identifiers) but NOT
 // the invalid repo/value itself. This prevents potentially malicious content
