@@ -459,9 +459,10 @@ building image with dependencies [node@20, python@3.12]: ...
 
 ```
 BuildKit requires Docker runtime (networks not supported by apple)
+BuildKit requires Docker runtime (sidecars not supported by apple)
 ```
 
-**Cause:** BuildKit sidecars require Docker for network support. Apple containers do not support this.
+**Cause:** BuildKit features (custom networks, sidecar containers) require Docker. Apple containers do not support these.
 
 **Fix:** Use Docker runtime for builds that require BuildKit:
 
@@ -480,18 +481,30 @@ Or unset `BUILDKIT_HOST` to use the legacy builder:
 ```
 postgres service failed to become ready: ...
 
-Check:
-  - Is the service image available?
-  - Is the readiness command correct?
+Check run logs:
+  moat logs <run-id>
+
+Or disable wait:
+  services:
+    postgres:
+      wait: false
 ```
 
 **Cause:** A service dependency (e.g., PostgreSQL, Redis) defined in `moat.yaml` did not pass its readiness check within the timeout.
 
 **Fix:**
 
-1. Verify the service image exists and can be pulled.
-2. Check the readiness check command in `moat.yaml`.
-3. Increase the readiness timeout if the service needs more startup time.
+1. Check run logs for details:
+
+       moat logs <run-id>
+
+2. If the service needs more startup time or you want to skip the readiness check:
+
+   ```yaml
+   services:
+     postgres:
+       wait: false
+   ```
 
 ### `service provisioning failed`
 
