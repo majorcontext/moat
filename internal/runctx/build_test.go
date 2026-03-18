@@ -15,7 +15,13 @@ func TestBuildFromConfig(t *testing.T) {
 		Network: config.NetworkConfig{
 			Policy: "strict",
 			Rules: []netrules.NetworkRuleEntry{
-				{HostRules: netrules.HostRules{Host: "api.github.com"}},
+				{HostRules: netrules.HostRules{
+					Host: "api.github.com",
+					Rules: []netrules.Rule{
+						{Action: "allow", Method: "GET", PathPattern: "/repos/*"},
+						{Action: "deny", Method: "*", PathPattern: "/**"},
+					},
+				}},
 				{HostRules: netrules.HostRules{Host: "*.npmjs.org"}},
 			},
 		},
@@ -120,6 +126,26 @@ func TestBuildFromConfig(t *testing.T) {
 	}
 	if len(rc.NetworkPolicy.AllowedHosts) != 2 {
 		t.Fatalf("len(AllowedHosts) = %d, want 2", len(rc.NetworkPolicy.AllowedHosts))
+	}
+	// First host should have rules.
+	if rc.NetworkPolicy.AllowedHosts[0].Host != "api.github.com" {
+		t.Errorf("AllowedHosts[0].Host = %q, want %q", rc.NetworkPolicy.AllowedHosts[0].Host, "api.github.com")
+	}
+	if len(rc.NetworkPolicy.AllowedHosts[0].Rules) != 2 {
+		t.Fatalf("len(AllowedHosts[0].Rules) = %d, want 2", len(rc.NetworkPolicy.AllowedHosts[0].Rules))
+	}
+	if rc.NetworkPolicy.AllowedHosts[0].Rules[0] != "allow GET /repos/*" {
+		t.Errorf("AllowedHosts[0].Rules[0] = %q, want %q", rc.NetworkPolicy.AllowedHosts[0].Rules[0], "allow GET /repos/*")
+	}
+	if rc.NetworkPolicy.AllowedHosts[0].Rules[1] != "deny * /**" {
+		t.Errorf("AllowedHosts[0].Rules[1] = %q, want %q", rc.NetworkPolicy.AllowedHosts[0].Rules[1], "deny * /**")
+	}
+	// Second host should have no rules.
+	if rc.NetworkPolicy.AllowedHosts[1].Host != "*.npmjs.org" {
+		t.Errorf("AllowedHosts[1].Host = %q, want %q", rc.NetworkPolicy.AllowedHosts[1].Host, "*.npmjs.org")
+	}
+	if len(rc.NetworkPolicy.AllowedHosts[1].Rules) != 0 {
+		t.Errorf("len(AllowedHosts[1].Rules) = %d, want 0", len(rc.NetworkPolicy.AllowedHosts[1].Rules))
 	}
 
 	// Ports
