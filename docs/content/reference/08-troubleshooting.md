@@ -14,9 +14,9 @@ Common errors, their causes, and fixes.
 
 ### `Proxy authentication required` / `Invalid proxy token` (407)
 
-**Cause:** The container's proxy auth token does not match any run registered with the daemon. This happens when the daemon restarts while a container is still running.
+**Cause:** The container's proxy auth token does not match any run registered with the daemon. Runs normally re-register automatically after a daemon restart, so this typically indicates a stale container from a previous run that was not properly stopped.
 
-**Fix:** Stop and re-run the agent:
+**Fix:** Stop the stale container and start a new run:
 
 ```bash
 moat stop <run-id>
