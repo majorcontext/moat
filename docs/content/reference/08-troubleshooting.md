@@ -24,12 +24,16 @@ Proxy authentication required
 
 - The proxy daemon may have restarted while the container was still running. Stop and re-run the agent:
 
-      moat stop <run-id>
-      moat run --grant github ./my-project
+  ```bash
+  moat stop <run-id>
+  moat run --grant github ./my-project
+  ```
 
 - If the error persists, check that the daemon is running:
 
-      moat proxy status
+  ```bash
+  moat proxy status
+  ```
 
 ### `Invalid proxy token` (407)
 
@@ -41,8 +45,10 @@ Invalid proxy token
 
 **Fix:** Stop and re-run the agent:
 
-    moat stop <run-id>
-    moat run --grant github ./my-project
+```bash
+moat stop <run-id>
+moat run --grant github ./my-project
+```
 
 ### `request blocked by network policy` (407)
 
@@ -81,12 +87,16 @@ proxy port mismatch: running on 8080, requested 9000. Either unset MOAT_PROXY_PO
 
 **Fix:** Either unset the variable to use the running proxy's port:
 
-    unset MOAT_PROXY_PORT
+```bash
+unset MOAT_PROXY_PORT
+```
 
 Or stop all running agents so the proxy shuts down (it auto-exits after 5 minutes idle), then start again with the new port:
 
-    moat stop <run-id>
-    # Repeat for each active run
+```bash
+moat stop <run-id>
+# Repeat for each active run
+```
 
 ---
 
@@ -100,11 +110,15 @@ Or stop all running agents so the proxy shuts down (it auto-exits after 5 minute
 
 1. Check the CA cert is mounted inside the container:
 
-       ls /etc/ssl/certs/moat-ca/ca.crt
+   ```bash
+   ls /etc/ssl/certs/moat-ca/ca.crt
+   ```
 
 2. Point the tool at the CA cert. For example, with `curl`:
 
-       curl --cacert /etc/ssl/certs/moat-ca/ca.crt https://api.github.com
+   ```bash
+   curl --cacert /etc/ssl/certs/moat-ca/ca.crt https://api.github.com
+   ```
 
 3. For applications with certificate pinning, TLS interception is expected to fail. These applications cannot use the proxy for credential injection.
 
@@ -130,12 +144,16 @@ credential not found: github
 
 **Fix:** Run the grant command for the missing provider:
 
-    moat grant github
+```bash
+moat grant github
+```
 
 If using profiles, ensure the correct profile is active:
 
-    export MOAT_PROFILE=work
-    moat grant github
+```bash
+export MOAT_PROFILE=work
+moat grant github
+```
 
 ### `missing grants`
 
@@ -166,7 +184,9 @@ decrypting credential for github: cipher: message authentication failed
 
 **Fix:** Re-grant the affected credential:
 
-    moat grant github
+```bash
+moat grant github
+```
 
 ### `Claude Code token has expired`
 
@@ -178,7 +198,9 @@ Claude Code token has expired
 
 **Fix:** Re-authenticate:
 
-    moat grant claude
+```bash
+moat grant claude
+```
 
 ### `invalid API key` (Anthropic)
 
@@ -190,7 +212,9 @@ invalid API key (check that the key is correct and not expired)
 
 **Fix:** Re-grant with a valid key:
 
-    moat grant anthropic
+```bash
+moat grant anthropic
+```
 
 ### `invalid token (401 Unauthorized)` (GitHub)
 
@@ -202,7 +226,9 @@ invalid token (401 Unauthorized)
 
 **Fix:** Re-grant GitHub access:
 
-    moat grant github
+```bash
+moat grant github
+```
 
 ### `MCP server requires grant but it's not configured`
 
@@ -219,7 +245,9 @@ Then run again.
 
 **Fix:** Run the grant command shown in the error:
 
-    moat grant mcp my-server
+```bash
+moat grant mcp my-server
+```
 
 ### `key file has insecure permissions`
 
@@ -231,7 +259,9 @@ key file has insecure permissions: /home/user/.moat/key has permissions 0644 (ex
 
 **Fix:** Restrict permissions:
 
-    chmod 600 ~/.moat/key
+```bash
+chmod 600 ~/.moat/key
+```
 
 ---
 
@@ -249,9 +279,11 @@ Start your SSH agent with: eval "$(ssh-agent -s)" && ssh-add
 
 **Fix:**
 
-    eval "$(ssh-agent -s)"
-    ssh-add
-    moat run --grant ssh:github.com ./my-project
+```bash
+eval "$(ssh-agent -s)"
+ssh-add
+moat run --grant ssh:github.com ./my-project
+```
 
 ### `no SSH keys configured for hosts`
 
@@ -266,7 +298,9 @@ Grant SSH access first:
 
 **Fix:** Grant SSH access:
 
-    moat grant ssh --host github.com
+```bash
+moat grant ssh --host github.com
+```
 
 ---
 
@@ -294,7 +328,9 @@ To force a specific runtime:
 - **Docker:** Start Docker Desktop or the Docker daemon.
 - **Apple containers (macOS 26+):** Start the container system:
 
-      container system start
+  ```bash
+  container system start
+  ```
 
 ### `Docker runtime requested but not available`
 
@@ -306,7 +342,9 @@ Docker runtime requested (via MOAT_RUNTIME or moat.yaml) but not available: ...
 
 **Fix:** Start Docker, or remove the runtime override to use auto-detection:
 
-    unset MOAT_RUNTIME
+```bash
+unset MOAT_RUNTIME
+```
 
 ### `docker daemon not accessible`
 
@@ -337,7 +375,9 @@ Then retry your moat command
 
 **Fix:** Install the recommended kernel:
 
-    container system kernel set --recommended
+```bash
+container system kernel set --recommended
+```
 
 ### `gVisor (runsc) is required but not available`
 
@@ -349,7 +389,9 @@ gVisor (runsc) is required but not available
 
 **Fix:** Install gVisor following the instructions in the error output, or bypass the sandbox requirement:
 
-    moat run --no-sandbox ./my-project
+```bash
+moat run --no-sandbox ./my-project
+```
 
 > **Warning:** Running without gVisor reduces container isolation.
 
@@ -363,11 +405,13 @@ agent "my-agent" is already running. Use --name to specify a different name, or 
 
 **Fix:** Stop the existing run first, or use a different name:
 
-    moat stop my-agent
-    moat run ./my-project
+```bash
+moat stop my-agent
+moat run ./my-project
 
-    # Or use a different name:
-    moat run --name my-agent-2 ./my-project
+# Or use a different name:
+moat run --name my-agent-2 ./my-project
+```
 
 ---
 
@@ -385,16 +429,22 @@ daemon did not start within 5 seconds
 
 1. Check for a stale lock file:
 
-       cat ~/.moat/proxy/daemon.lock
+   ```bash
+   cat ~/.moat/proxy/daemon.lock
+   ```
 
 2. If the PID in the lock file is not running, remove the lock and retry:
 
-       rm ~/.moat/proxy/daemon.lock
-       moat run --grant github ./my-project
+   ```bash
+   rm ~/.moat/proxy/daemon.lock
+   moat run --grant github ./my-project
+   ```
 
 3. Check daemon logs:
 
-       ls ~/.moat/debug/
+   ```bash
+   ls ~/.moat/debug/
+   ```
 
 ### `connecting to daemon`
 
@@ -408,8 +458,10 @@ connecting to daemon: ...
 
 - The daemon may have crashed. Remove stale state and retry:
 
-      rm -f ~/.moat/proxy/daemon.lock ~/.moat/proxy/daemon.sock
-      moat run --grant github ./my-project
+  ```bash
+  rm -f ~/.moat/proxy/daemon.lock ~/.moat/proxy/daemon.sock
+  moat run --grant github ./my-project
+  ```
 
 - Check if another process is using the socket path.
 
@@ -423,8 +475,10 @@ registering run with proxy daemon: ...
 
 **Fix:** Stop active runs so the daemon shuts down (auto-shutdown after 5 minutes idle), then retry:
 
-    moat stop <run-id>
-    # Repeat for each active run
+```bash
+moat stop <run-id>
+# Repeat for each active run
+```
 
 Wait for the daemon to shut down (or remove the lock file), then start a new run.
 
@@ -453,7 +507,9 @@ building image with dependencies [node@20, python@3.12]: ...
 
 3. Run with `--verbose` to see the full build log:
 
-       moat run --verbose ./my-project
+   ```bash
+   moat run --verbose ./my-project
+   ```
 
 ### `BuildKit requires Docker runtime`
 
@@ -466,11 +522,15 @@ BuildKit requires Docker runtime (sidecars not supported by apple)
 
 **Fix:** Use Docker runtime for builds that require BuildKit:
 
-    MOAT_RUNTIME=docker moat run ./my-project
+```bash
+MOAT_RUNTIME=docker moat run ./my-project
+```
 
 Or unset `BUILDKIT_HOST` to use the legacy builder:
 
-    unset BUILDKIT_HOST
+```bash
+unset BUILDKIT_HOST
+```
 
 ---
 
@@ -496,7 +556,9 @@ Or disable wait:
 
 1. Check run logs for details:
 
-       moat logs <run-id>
+   ```bash
+   moat logs <run-id>
+   ```
 
 2. If the service needs more startup time or you want to skip the readiness check:
 
