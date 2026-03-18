@@ -530,7 +530,7 @@ firewall setup failed (required for strict network policy): ...
 
 **Fix:**
 
-- Moat's built images (generated from `dependencies:` in `moat.yaml`) include `iptables` by default. If you are using a custom base image, ensure it includes `iptables`.
+- When using strict network policy (`network.policy: strict`), Moat automatically adds `iptables` to images built from `dependencies:`. Custom base images must include `iptables` themselves.
 
 ---
 
