@@ -162,14 +162,10 @@ func GenerateKnownMarketplaces(marketplaces []PreClonedMarketplace, containerUse
 		} else {
 			src.URL = m.Repo
 		}
-		lastUpdated := m.LastUpdated
-		if lastUpdated == "" {
-			lastUpdated = "1970-01-01T00:00:00Z"
-		}
 		entries[m.Name] = knownMarketplaceEntry{
 			Source:          src,
 			InstallLocation: installLocation,
-			LastUpdated:     lastUpdated,
+			LastUpdated:     m.LastUpdated,
 		}
 	}
 
