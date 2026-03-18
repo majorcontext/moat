@@ -320,10 +320,11 @@ claude:
     custom:
       source: github
       repo: owner/repo
-      ref: main
 ```
 
-Marketplaces are cloned during image build. Moat detects marketplace changes and rebuilds the image automatically on the next run.
+Marketplace repos are cloned on the host before image build, using your local git credentials (`gh auth`, SSH keys, credential helpers).
+This means private marketplace repos work without leaking credentials into the Docker image. Moat detects marketplace changes 
+and rebuilds the image automatically on the next run.
 
 ## Language servers
 

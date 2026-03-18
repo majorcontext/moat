@@ -1004,7 +1004,6 @@ claude:
     internal:
       source: git
       url: git@github.com:org/internal-plugins.git
-      ref: main
     local:
       source: directory
       path: /opt/plugins
@@ -1033,9 +1032,6 @@ claude:
 	}
 	if internal.URL != "git@github.com:org/internal-plugins.git" {
 		t.Errorf("internal.URL = %q, want %q", internal.URL, "git@github.com:org/internal-plugins.git")
-	}
-	if internal.Ref != "main" {
-		t.Errorf("internal.Ref = %q, want %q", internal.Ref, "main")
 	}
 
 	local := cfg.Claude.Marketplaces["local"]
