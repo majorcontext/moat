@@ -46,7 +46,7 @@ When a mount entry includes `exclude` paths, Moat creates a tmpfs overlay at eac
 Exclude paths must be:
 
 - Relative to the mount target (no absolute paths, no `..`)
-- Unique and non-overlapping (`node_modules` and `node_modules/foo` is rejected)
+- Unique and non-overlapping (`node_modules` and `node_modules/foo` are rejected)
 
 See the [moat.yaml reference](../reference/02-moat-yaml.md#mounts) for the full mount object specification.
 
@@ -126,17 +126,19 @@ If your project vendors dependencies (`vendor/`), those are pure Go source and w
 Exclude the `target/` directory:
 
 ```yaml
+dependencies:
+  - rust
+
 mounts:
   - source: .
     target: /workspace
     exclude:
       - target
-
-hooks:
-  pre_run: cargo build
 ```
 
 `target/` contains compiled artifacts that are architecture- and OS-specific. A macOS `target/` directory does not work in a Linux container.
+
+> **Note:** Unlike `npm install`, `cargo build` against an empty tmpfs `target/` recompiles from scratch on every container start. For large projects, consider using a [named volume](../reference/02-moat-yaml.md#volumes) for `target/` to persist build artifacts across runs.
 
 ## Multiple excludes
 
