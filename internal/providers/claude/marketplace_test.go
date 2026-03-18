@@ -79,8 +79,8 @@ func TestCollectMarketplaceFilesEmptyDir(t *testing.T) {
 
 func TestGenerateKnownMarketplaces(t *testing.T) {
 	marketplaces := []PreClonedMarketplace{
-		{Name: "official", Source: "github", Repo: "anthropics/claude-plugins-official"},
-		{Name: "custom", Source: "git", Repo: "https://git.example.com/plugins.git"},
+		{Name: "official", Source: "github", Repo: "anthropics/claude-plugins-official", LastUpdated: "2025-01-15T10:30:00+00:00"},
+		{Name: "custom", Source: "git", Repo: "https://git.example.com/plugins.git", LastUpdated: "2025-02-20T14:00:00+00:00"},
 	}
 
 	data, err := GenerateKnownMarketplaces(marketplaces, "moatuser")
@@ -128,8 +128,8 @@ func TestGenerateKnownMarketplaces(t *testing.T) {
 		t.Errorf("expected installLocation %q, got %q", expectedLocation, githubEntry.InstallLocation)
 	}
 
-	if githubEntry.LastUpdated == "" {
-		t.Error("expected lastUpdated to be set")
+	if githubEntry.LastUpdated != "2025-01-15T10:30:00+00:00" {
+		t.Errorf("expected lastUpdated '2025-01-15T10:30:00+00:00', got %q", githubEntry.LastUpdated)
 	}
 
 	// Check the git-source entry uses "url" field

@@ -9,15 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // PreClonedMarketplace describes a marketplace that was cloned on the host
 // and will be copied into the Docker build context.
 type PreClonedMarketplace struct {
-	Name   string // Marketplace name (e.g., "claude-plugins-official")
-	Source string // "github" or "git"
-	Repo   string // Repository path (e.g., "anthropics/claude-plugins-official")
+	Name        string // Marketplace name (e.g., "claude-plugins-official")
+	Source      string // "github" or "git"
+	Repo        string // Repository path (e.g., "anthropics/claude-plugins-official")
+	LastUpdated string // ISO 8601 timestamp of the last commit in the repo
 }
 
 // CollectMarketplaceFiles walks a cloned marketplace directory and returns
@@ -65,10 +65,12 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 // CloneMarketplace clones a marketplace repo to a temporary directory.
 // If repo doesn't contain "://" or start with "git@", it is treated as a
 // GitHub shorthand and https://github.com/<repo>.git is used.
-// The caller is responsible for removing the returned temp directory.
-func CloneMarketplace(ctx context.Context, repo string) (string, error) {
+// Returns the cloned directory path and the ISO 8601 timestamp of the last
+// commit (for use in known_marketplaces.json). The caller is responsible for
+// removing the returned temp directory.
+func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime string, err error) {
 	if !validMarketplaceRepo.MatchString(repo) {
-		return "", fmt.Errorf("invalid marketplace repo format: %q", repo)
+		return "", "", fmt.Errorf("invalid marketplace repo format: %q", repo)
 	}
 
 	url := repo
@@ -76,9 +78,9 @@ func CloneMarketplace(ctx context.Context, repo string) (string, error) {
 		url = "https://github.com/" + repo + ".git"
 	}
 
-	dir, err := os.MkdirTemp("", "moat-marketplace-*")
+	dir, err = os.MkdirTemp("", "moat-marketplace-*")
 	if err != nil {
-		return "", fmt.Errorf("creating temp dir: %w", err)
+		return "", "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
 	args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
@@ -88,10 +90,19 @@ func CloneMarketplace(ctx context.Context, repo string) (string, error) {
 	if err != nil {
 		// Clean up on failure.
 		os.RemoveAll(dir)
-		return "", fmt.Errorf("git clone %s: %w\n%s", url, err, output)
+		return "", "", fmt.Errorf("git clone %s: %w\n%s", url, err, output)
 	}
 
-	return dir, nil
+	// Extract the last commit timestamp for deterministic known_marketplaces.json.
+	logCmd := exec.CommandContext(ctx, "git", "-C", dir, "log", "-1", "--format=%aI")
+	timeOutput, err := logCmd.Output()
+	if err != nil {
+		commitTime = "1970-01-01T00:00:00+00:00"
+	} else {
+		commitTime = strings.TrimSpace(string(timeOutput))
+	}
+
+	return dir, commitTime, nil
 }
 
 // knownMarketplaceEntry is the JSON structure for a single entry in
@@ -120,8 +131,6 @@ func GenerateKnownMarketplaces(marketplaces []PreClonedMarketplace, containerUse
 		return []byte("{}"), nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
 	entries := make(map[string]knownMarketplaceEntry, len(marketplaces))
 	for _, m := range marketplaces {
 		installLocation := fmt.Sprintf("/home/%s/.claude/plugins/marketplaces/%s", containerUser, m.Name)
@@ -131,10 +140,14 @@ func GenerateKnownMarketplaces(marketplaces []PreClonedMarketplace, containerUse
 		} else {
 			src.URL = m.Repo
 		}
+		lastUpdated := m.LastUpdated
+		if lastUpdated == "" {
+			lastUpdated = "1970-01-01T00:00:00+00:00"
+		}
 		entries[m.Name] = knownMarketplaceEntry{
 			Source:          src,
 			InstallLocation: installLocation,
-			LastUpdated:     now,
+			LastUpdated:     lastUpdated,
 		}
 	}
 

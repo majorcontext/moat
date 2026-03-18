@@ -9,10 +9,11 @@ import (
 
 // MarketplaceConfig represents a Claude Code plugin marketplace for image building.
 type MarketplaceConfig struct {
-	Name      string // Marketplace name (e.g., "claude-plugins-official")
-	Source    string // "github" or "git"
-	Repo      string // Repository path (e.g., "anthropics/claude-plugins-official")
-	PreCloned string // PreCloned is the build-context-relative path prefix for a marketplace that was cloned on the host. When set, GenerateDockerfileSnippet will COPY the files instead of running claude plugin marketplace add.
+	Name       string // Marketplace name (e.g., "claude-plugins-official")
+	Source     string // "github" or "git"
+	Repo       string // Repository path (e.g., "anthropics/claude-plugins-official")
+	PreCloned  string // PreCloned is the build-context-relative path prefix for a marketplace that was cloned on the host. When set, GenerateDockerfileSnippet will COPY the files instead of running claude plugin marketplace add.
+	CommitTime string // CommitTime is the ISO 8601 timestamp of the last commit (for known_marketplaces.json).
 }
 
 // validMarketplaceRepo matches valid marketplace repo formats:
@@ -190,9 +191,10 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		pcList := make([]PreClonedMarketplace, len(validPreCloned))
 		for i, m := range validPreCloned {
 			pcList[i] = PreClonedMarketplace{
-				Name:   m.Name,
-				Source: m.Source,
-				Repo:   m.Repo,
+				Name:        m.Name,
+				Source:      m.Source,
+				Repo:        m.Repo,
+				LastUpdated: m.CommitTime,
 			}
 		}
 		knownJSON, err := GenerateKnownMarketplaces(pcList, containerUser)
