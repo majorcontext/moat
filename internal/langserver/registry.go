@@ -53,7 +53,7 @@ var registry = map[string]ServerSpec{
 		Description:  "Python language server (code intelligence, type checking, diagnostics)",
 		Plugin:       "pyright-lsp@claude-plugins-official",
 		Dependencies: []string{"python"},
-		InstallDeps:  []string{"pip:pyright"},
+		InstallDeps:  []string{"uv:pyright"},
 	},
 }
 
