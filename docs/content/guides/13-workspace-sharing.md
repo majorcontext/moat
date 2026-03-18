@@ -37,7 +37,7 @@ hooks:
   pre_run: npm install
 ```
 
-`npm install` runs on every container start, but it is a fast no-op when `package-lock.json` has not changed since the last run.
+`npm install` runs on every container start. When packages are already in npm's local cache (`~/.npm`), it installs without network requests.
 
 ### How excludes work
 
@@ -154,7 +154,7 @@ mounts:
       - target
 
 hooks:
-  pre_run: npm install && pip install -r requirements.txt
+  pre_run: npm install && python -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 ## Related guides
