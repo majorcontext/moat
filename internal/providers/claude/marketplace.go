@@ -119,7 +119,7 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 	logCmd := exec.CommandContext(ctx, "git", "-C", dir, "log", "-1", "--format=%aI")
 	timeOutput, err := logCmd.Output()
 	if err != nil {
-		commitTime = "1970-01-01T00:00:00+00:00"
+		commitTime = "1970-01-01T00:00:00Z"
 	} else {
 		commitTime = strings.TrimSpace(string(timeOutput))
 	}
@@ -164,7 +164,7 @@ func GenerateKnownMarketplaces(marketplaces []PreClonedMarketplace, containerUse
 		}
 		lastUpdated := m.LastUpdated
 		if lastUpdated == "" {
-			lastUpdated = "1970-01-01T00:00:00+00:00"
+			lastUpdated = "1970-01-01T00:00:00Z"
 		}
 		entries[m.Name] = knownMarketplaceEntry{
 			Source:          src,
