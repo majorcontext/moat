@@ -26,7 +26,7 @@ dependencies:
   - gh
 
 grants:
-  - anthropic
+  - claude
   - github
 
 env:
@@ -61,7 +61,7 @@ dependencies:
   - git
 
 grants:
-  - anthropic
+  - claude
   - github
 
 volumes:
@@ -107,6 +107,7 @@ hooks:
 
 What this demonstrates:
 
+- **`anthropic` grant for API key auth** — uses an Anthropic API key instead of the `claude` grant (which uses Claude subscription OAuth). Use `anthropic` for CI or when billing through the API.
 - **Volume-cached module and build caches** — `go mod download` and `go build` reuse cached artifacts across runs
 - **Two separate volumes** — the module cache (`go/pkg/mod`) and build cache (`go-build`) have different invalidation patterns; splitting them allows independent cleanup
 - **`golangci-lint` as a dependency** — installed at image build time, cached in the Docker layer
@@ -126,7 +127,7 @@ dependencies:
   - gh
 
 grants:
-  - anthropic
+  - claude
   - github
 
 services:
@@ -164,7 +165,7 @@ dependencies:
   - git
 
 grants:
-  - anthropic
+  - claude
   - github
   - ssh:github.com
 
