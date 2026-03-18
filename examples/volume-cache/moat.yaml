@@ -1,0 +1,23 @@
+# Example: Persistent volumes with nested workspace paths
+#
+# Verifies that a volume targeting a subdirectory of /workspace
+# persists data across runs. On first run, writes a timestamp file.
+# On subsequent runs, reads it back to confirm persistence.
+#
+# Run with:
+#   moat run examples/volume-cache
+#
+# Expected behavior:
+#   First run:  "No cached state found. Writing timestamp: <time>"
+#   Second run: "Found cached state from: <time>"
+#
+# Clear the volume to reset:
+#   moat volumes rm volume-cache-test
+
+name: volume-cache-test
+
+volumes:
+  - name: data
+    target: /workspace/.cache
+
+command: ["sh", "/workspace/check.sh"]

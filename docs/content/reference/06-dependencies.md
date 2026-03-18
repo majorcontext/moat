@@ -167,6 +167,8 @@ Moat orders Dockerfile instructions to maximize BuildKit cache hits. Layers are 
 
 When a dependency changes, only that layer and subsequent layers rebuild. BuildKit layer caching is shared across runs.
 
+For complete project examples showing dependencies with volumes and hooks, see [Recipes](../guides/13-recipes.md).
+
 ## Docker dependencies
 
 Dependencies for running Docker inside containers.

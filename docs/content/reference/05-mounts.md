@@ -169,5 +169,6 @@ One difference: Apple containers only support directory mounts, not individual f
 
 - [CLI reference](./01-cli.md) -- `moat run` flags including `--mount`
 - [moat.yaml reference](./02-moat-yaml.md) -- `mounts` field, `volumes` field, and all configuration options
+- [Recipes](../guides/13-recipes.md) -- Complete project examples using volumes and excludes for dependency caching
 - [Sandboxing](../concepts/01-sandboxing.md) -- Workspace mounting and filesystem isolation
 - [Security model](../concepts/08-security.md) -- Trust boundaries and defense in depth

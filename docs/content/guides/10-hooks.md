@@ -197,6 +197,8 @@ If `pre_run` takes a long time on every start, consider whether part of the work
 
 However, build hooks cannot access your workspace files. Only packages or tools that don't depend on your project code can be installed at build time. For project-specific dependencies (those listed in `package.json`, `requirements.txt`, etc.), use `pre_run`. Workspace-aware package managers like `npm install` and `pip install` skip already-installed packages, keeping repeated `pre_run` execution fast.
 
+Combine build hooks with [volumes](../reference/02-moat-yaml.md#volumes) to cache project dependencies across runs. See [Recipes](13-recipes.md) for complete examples.
+
 ## Troubleshooting
 
 ### Hook fails during image build

@@ -512,6 +512,8 @@ moat volumes rm <agent-name>     # Remove volumes for an agent
 moat volumes prune               # Remove all managed volumes
 ```
 
+For examples of using volumes to cache dependencies across runs, see [Recipes](../guides/13-recipes.md).
+
 ---
 
 ## Endpoints
