@@ -1292,48 +1292,45 @@ region = %s
 		}
 	}
 
-	// Clone marketplace repos on the host so private repos are accessible
-	// without passing credentials into the build context. The host's git
-	// credentials (gh auth, SSH keys, credential helpers) handle authentication.
-	var marketplaceCleanups []string
-	var marketplaceContextFiles map[string][]byte
-	for i := range claudeMarketplaces {
-		m := &claudeMarketplaces[i]
-		if !claude.ValidMarketplaceName(m.Name) {
-			log.Warn("skipping marketplace with invalid name", "name", m.Name)
-			continue
-		}
-		clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
-		if cloneErr != nil {
-			log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
-				"name", m.Name, "repo", m.Repo, "error", cloneErr)
-			continue
-		}
-		marketplaceCleanups = append(marketplaceCleanups, clonedDir)
+	// cloneMarketplacesOnHost clones marketplace repos on the host so private repos
+	// are accessible without passing credentials into the build context. The host's
+	// git credentials (gh auth, SSH keys, credential helpers) handle authentication.
+	// Returns cleanup directories and context files for the build.
+	cloneMarketplacesOnHost := func() (cleanups []string, contextFiles map[string][]byte) {
+		for i := range claudeMarketplaces {
+			m := &claudeMarketplaces[i]
+			if !claude.ValidMarketplaceName(m.Name) {
+				log.Warn("skipping marketplace with invalid name", "name", m.Name)
+				continue
+			}
+			clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
+			if cloneErr != nil {
+				log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
+					"name", m.Name, "repo", m.Repo, "error", cloneErr)
+				continue
+			}
+			cleanups = append(cleanups, clonedDir)
 
-		files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
-		if collectErr != nil {
-			log.Warn("could not collect marketplace files after clone; will try build-time clone",
-				"name", m.Name, "error", collectErr)
-			continue
-		}
+			files, collectErr := claude.CollectMarketplaceFiles(clonedDir, m.Name)
+			if collectErr != nil {
+				log.Warn("could not collect marketplace files after clone; will try build-time clone",
+					"name", m.Name, "error", collectErr)
+				continue
+			}
 
-		if marketplaceContextFiles == nil {
-			marketplaceContextFiles = make(map[string][]byte)
-		}
-		for path, content := range files {
-			marketplaceContextFiles[path] = content
-		}
+			if contextFiles == nil {
+				contextFiles = make(map[string][]byte)
+			}
+			for path, content := range files {
+				contextFiles[path] = content
+			}
 
-		m.PreCloned = "marketplaces/" + m.Name
-		m.CommitTime = commitTime
-		log.Info("pre-cloned marketplace on host", "name", m.Name)
+			m.PreCloned = "marketplaces/" + m.Name
+			m.CommitTime = commitTime
+			log.Info("pre-cloned marketplace on host", "name", m.Name)
+		}
+		return cleanups, contextFiles
 	}
-	defer func() {
-		for _, dir := range marketplaceCleanups {
-			os.RemoveAll(dir)
-		}
-	}()
 
 	// Resolve which agents need init and which providers need init files.
 	// This opens the credential store once and walks grants in a single pass.
@@ -1417,6 +1414,25 @@ region = %s
 		}
 
 		if !exists {
+			// Clone marketplace repos on host only when we need to build.
+			// When the image is cached this avoids unnecessary git clones.
+			marketplaceCleanups, marketplaceContextFiles := cloneMarketplacesOnHost()
+			defer func() {
+				for _, dir := range marketplaceCleanups {
+					os.RemoveAll(dir)
+				}
+			}()
+
+			// Regenerate Dockerfile with pre-cloned marketplace info.
+			if len(marketplaceContextFiles) > 0 {
+				result, err = deps.GenerateDockerfile(installableDeps, imageSpec)
+				if err != nil {
+					cleanupDaemonRun()
+					return nil, fmt.Errorf("generating Dockerfile: %w", err)
+				}
+				generatedDockerfile = result.Dockerfile
+			}
+
 			depNames := make([]string, len(installableDeps))
 			for i, d := range installableDeps {
 				depNames[i] = d.Name
