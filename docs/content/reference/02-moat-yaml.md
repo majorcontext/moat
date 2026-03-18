@@ -99,7 +99,7 @@ claude:
     custom:
       source: github
       repo: owner/repo
-      ref: main
+
   mcp:
     my_server:
       command: /path/to/server
@@ -1007,7 +1007,7 @@ claude:
     custom:
       source: github
       repo: owner/repo
-      ref: main
+
 ```
 
 - Type: `map[string]object`
@@ -1019,7 +1019,6 @@ claude:
 |-------|-------------|
 | `source` | Source type (`github`) |
 | `repo` | Repository path (`owner/repo`) |
-| `ref` | Git ref (`main`, `v1.0.0`, commit SHA) |
 
 ### claude.mcp
 

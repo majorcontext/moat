@@ -65,9 +65,8 @@ func CollectMarketplaceFiles(clonedDir, name string) (map[string][]byte, error) 
 // CloneMarketplace clones a marketplace repo to a temporary directory.
 // If repo doesn't contain "://" or start with "git@", it is treated as a
 // GitHub shorthand and https://github.com/<repo>.git is used.
-// If ref is non-empty, it is passed as --branch to git clone.
 // The caller is responsible for removing the returned temp directory.
-func CloneMarketplace(ctx context.Context, repo, ref string) (string, error) {
+func CloneMarketplace(ctx context.Context, repo string) (string, error) {
 	if !validMarketplaceRepo.MatchString(repo) {
 		return "", fmt.Errorf("invalid marketplace repo format: %q", repo)
 	}
@@ -82,11 +81,7 @@ func CloneMarketplace(ctx context.Context, repo, ref string) (string, error) {
 		return "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	args := []string{"clone", "--depth", "1"}
-	if ref != "" {
-		args = append(args, "--branch", ref)
-	}
-	args = append(args, url, dir)
+	args := []string{"clone", "--depth", "1", url, dir}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	output, err := cmd.CombinedOutput()

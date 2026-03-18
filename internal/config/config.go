@@ -296,9 +296,6 @@ type MarketplaceSpec struct {
 
 	// Path is the local directory path (for source: directory)
 	Path string `yaml:"path,omitempty"`
-
-	// Ref is the git branch, tag, or commit to use (optional)
-	Ref string `yaml:"ref,omitempty"`
 }
 
 // MCPServerSpec defines an MCP server configuration.
