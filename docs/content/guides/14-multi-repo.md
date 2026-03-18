@@ -105,32 +105,33 @@ Run separate agents in each repository. Place a `moat.yaml` in each repo:
 
 ```bash
 # Terminal 1
-moat wt feature/auth -C ~/dev/api
+cd ~/dev/api && moat wt feature/auth
 
 # Terminal 2
-moat wt feature/auth -C ~/dev/web
+cd ~/dev/web && moat wt feature/auth
 ```
 
 Each repo gets its own worktree and container. This works well when repos are loosely coupled.
 
 ### Option 2: mount the root directory
 
-If the agent needs access to multiple repos simultaneously, mount the parent directory as the workspace:
+If the agent needs access to multiple repos simultaneously, pass the parent directory as the workspace:
 
 ```bash
-moat run --mount ~/dev:/workspace ./dev
+moat run ~/dev
 ```
 
-Or with a `moat.yaml` inside one of the repos:
+This mounts `~/dev` at `/workspace` inside the container. Place a `moat.yaml` in `~/dev/`:
 
 ```yaml
-mounts:
-  - ../:/workspace
+name: my-agent
 
-command: |
-  cd /workspace
-  # agent has access to api/, web/, shared-lib/
+grants:
+  - anthropic
+  - github
 ```
+
+The agent has access to all repos under `/workspace/api/`, `/workspace/web/`, `/workspace/shared-lib/`.
 
 > **Warning:** Without worktree isolation, concurrent runs on the same directory risk conflicts. Use this approach for sequential runs, or make sure agents work on separate files.
 
