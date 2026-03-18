@@ -83,9 +83,10 @@ proxy port mismatch: running on 8080, requested 9000. Either unset MOAT_PROXY_PO
 
     unset MOAT_PROXY_PORT
 
-Or stop all running agents so the proxy shuts down, then start again with the new port:
+Or stop all running agents so the proxy shuts down (it auto-exits after 5 minutes idle), then start again with the new port:
 
-    moat stop --all
+    moat stop <run-id>
+    # Repeat for each active run
 
 ---
 
@@ -420,9 +421,10 @@ registering run with proxy daemon: ...
 
 **Cause:** The daemon is running but rejected the run registration. This can happen if the daemon is from a different Moat version with an incompatible API.
 
-**Fix:** Stop all runs so the daemon shuts down (auto-shutdown after 5 minutes idle), then retry:
+**Fix:** Stop active runs so the daemon shuts down (auto-shutdown after 5 minutes idle), then retry:
 
-    moat stop --all
+    moat stop <run-id>
+    # Repeat for each active run
 
 Wait for the daemon to shut down (or remove the lock file), then start a new run.
 
@@ -515,15 +517,7 @@ firewall setup failed (required for strict network policy): ...
 
 **Fix:**
 
-- Ensure the container image includes `iptables`. Moat's default images include it.
-- If using a custom image, install `iptables`:
-
-  ```yaml
-  dependencies:
-    - node@20
-  ```
-
-  Using Moat's dependency system ensures `iptables` is available.
+- Moat's built images (generated from `dependencies:` in `moat.yaml`) include `iptables` by default. If you are using a custom base image, ensure it includes `iptables`.
 
 ---
 
