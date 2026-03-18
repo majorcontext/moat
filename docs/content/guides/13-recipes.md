@@ -120,6 +120,7 @@ name: fullstack-app
 dependencies:
   - node@20
   - python@3.12
+  - uv
   - postgres@17
   - redis@7
   - claude-code
