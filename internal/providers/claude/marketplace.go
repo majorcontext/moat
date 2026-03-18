@@ -81,7 +81,7 @@ func CloneMarketplace(ctx context.Context, repo string) (string, error) {
 		return "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	args := []string{"clone", "--depth", "1", url, dir}
+	args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	output, err := cmd.CombinedOutput()
