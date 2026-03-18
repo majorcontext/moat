@@ -143,6 +143,28 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 		if !strings.Contains(scriptStr, "ERROR: Invalid plugin format") {
 			t.Error("invalid plugin should show error message")
 		}
+		// The malicious plugin value should NOT appear in the output
+		if strings.Contains(scriptStr, "bad;rm -rf /") {
+			t.Error("invalid plugin value should not appear in output")
+		}
+	})
+
+	t.Run("invalid marketplace name", func(t *testing.T) {
+		marketplaces := []MarketplaceConfig{
+			{Name: "it's-bad", Source: "github", Repo: "valid/repo"},
+		}
+
+		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
+		scriptStr := string(result.ScriptContent)
+
+		// Invalid name should trigger error but not embed the unsafe name
+		if !strings.Contains(scriptStr, "ERROR: Invalid marketplace name") {
+			t.Error("invalid marketplace name should show error message")
+		}
+		// The name with single quote should NOT appear in the script
+		if strings.Contains(scriptStr, "it's-bad") {
+			t.Error("invalid marketplace name should not appear in output")
+		}
 	})
 }
 

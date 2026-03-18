@@ -25,11 +25,9 @@ var validMarketplaceRepo = regexp.MustCompile(`^[a-zA-Z0-9._@:/-]+$`)
 // Allows alphanumeric, hyphens, underscores, and exactly one @.
 var validPluginKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$`)
 
-// Note on error handling: When validation fails, error messages include the
-// marketplace name or plugin key (which are user-visible identifiers) but NOT
-// the invalid repo/value itself. This prevents potentially malicious content
-// from appearing in the Dockerfile. Users can look up the name in their
-// moat.yaml to see and fix the actual invalid value.
+// validName matches safe names for use in shell echo statements.
+// Rejects characters like single quotes that could break shell syntax.
+var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // PluginSnippetResult holds the Dockerfile snippet and optional script context file.
 type PluginSnippetResult struct {
@@ -86,6 +84,12 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		if m.Repo == "" {
 			continue
 		}
+		// Validate name for safe use in shell echo statements
+		if !validName.MatchString(m.Name) {
+			script.WriteString("echo 'ERROR: Invalid marketplace name, skipping' >&2\n")
+			script.WriteString("failures=$((failures + 1))\n")
+			continue
+		}
 		// Validate repo format to prevent command injection
 		if !validMarketplaceRepo.MatchString(m.Repo) {
 			script.WriteString(fmt.Sprintf("echo 'ERROR: Invalid marketplace repo format: %s, skipping' >&2\n", m.Name))
@@ -102,9 +106,12 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 
 	// Install plugins - failures are fatal (user explicitly requested them)
 	for _, plugin := range sortedPlugins {
-		// Validate plugin format to prevent command injection
+		// Validate plugin format to prevent command injection.
+		// validPluginKey only allows [a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+,
+		// so validated plugins are safe in shell echo statements.
 		if !validPluginKey.MatchString(plugin) {
-			script.WriteString(fmt.Sprintf("echo 'ERROR: Invalid plugin format: %s (expected plugin-name@marketplace-name), skipping' >&2\n", plugin))
+			// Don't embed the invalid value — it failed validation and may contain shell metacharacters.
+			script.WriteString("echo 'ERROR: Invalid plugin format (expected plugin-name@marketplace-name), skipping' >&2\n")
 			script.WriteString("failures=$((failures + 1))\n")
 			continue
 		}
