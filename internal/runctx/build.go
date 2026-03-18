@@ -71,7 +71,11 @@ func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
 			Policy: cfg.Network.Policy,
 		}
 		for _, entry := range cfg.Network.Rules {
-			np.AllowedHosts = append(np.AllowedHosts, entry.Host)
+			ah := AllowedHost{Host: entry.Host}
+			for _, r := range entry.Rules {
+				ah.Rules = append(ah.Rules, fmt.Sprintf("%s %s %s", r.Action, r.Method, r.PathPattern))
+			}
+			np.AllowedHosts = append(np.AllowedHosts, ah)
 		}
 		rc.NetworkPolicy = np
 	}

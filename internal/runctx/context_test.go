@@ -92,8 +92,11 @@ func TestRender_full(t *testing.T) {
 			{Name: "api", ContainerPort: 8080, EnvHostPort: "$MOAT_HOST_API"},
 		},
 		NetworkPolicy: &NetworkPolicy{
-			Policy:       "strict",
-			AllowedHosts: []string{"api.github.com", "*.npmjs.org"},
+			Policy: "strict",
+			AllowedHosts: []AllowedHost{
+				{Host: "api.github.com"},
+				{Host: "*.npmjs.org"},
+			},
 		},
 		MCPServers: []MCPServer{
 			{Name: "github", Description: "GitHub tools (issues, PRs, search)"},
@@ -263,6 +266,38 @@ func TestRender_networkPolicyWithoutAllowedHosts(t *testing.T) {
 	// Allowed hosts line must NOT be present.
 	if strings.Contains(got, "Allowed hosts") {
 		t.Error("Allowed hosts line should not appear when AllowedHosts is empty")
+	}
+}
+
+func TestRender_networkPolicyWithRules(t *testing.T) {
+	rc := &RuntimeContext{
+		RunID:     "run-rules",
+		Agent:     "claude",
+		Workspace: "/workspace",
+		NetworkPolicy: &NetworkPolicy{
+			Policy: "strict",
+			AllowedHosts: []AllowedHost{
+				{
+					Host:  "api.github.com",
+					Rules: []string{"allow GET /repos/*", "deny * /**"},
+				},
+				{Host: "registry.npmjs.org"},
+			},
+		},
+	}
+
+	got := Render(rc)
+
+	// Should use nested list format when rules exist.
+	if !strings.Contains(got, "- Allowed hosts:\n") {
+		t.Error("expected nested allowed hosts format")
+	}
+	if !strings.Contains(got, "api.github.com (2 rules: allow GET /repos/*, deny * /**)") {
+		t.Errorf("expected host with rules summary, got:\n%s", got)
+	}
+	// Host without rules should appear without annotation.
+	if !strings.Contains(got, "  - registry.npmjs.org\n") {
+		t.Errorf("expected plain host entry for registry.npmjs.org, got:\n%s", got)
 	}
 }
 
