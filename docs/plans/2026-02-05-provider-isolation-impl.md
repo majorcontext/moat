@@ -1545,7 +1545,7 @@ This is a larger provider. Key points:
 - Has OAuth workarounds for 403 responses
 - Generates `.claude.json` config
 - Manages staging directories
-- Has CLI commands (sessions, plugins)
+- Has CLI commands (sessions)
 
 **Step 1: Create package doc**
 
@@ -1562,7 +1562,7 @@ This is a larger provider. Key points:
 // As an agent provider, handles:
 //   - Staging directory with .claude.json config
 //   - Session management
-//   - CLI commands (moat claude, sessions, plugins)
+//   - CLI commands (moat claude, sessions)
 //
 // OAuth tokens have special workarounds for 403 responses on
 // non-critical endpoints (/api/oauth/profile, /api/oauth/usage).
@@ -1595,7 +1595,6 @@ package claude
 **Step 7:** Create `cli.go` with RegisterCLI():
 - `moat claude` command
 - `moat claude sessions` subcommand
-- `moat claude plugins` subcommand
 
 **Step 8:** Create `session.go` with session management logic
 

@@ -44,7 +44,14 @@ type Port struct {
 // NetworkPolicy describes the network access policy for the run.
 type NetworkPolicy struct {
 	Policy       string
-	AllowedHosts []string
+	AllowedHosts []AllowedHost
+}
+
+// AllowedHost describes a host that the run is allowed to access,
+// optionally with per-path rules that restrict specific methods/paths.
+type AllowedHost struct {
+	Host  string
+	Rules []string // human-readable rule summaries, e.g. "allow GET /repos/*"
 }
 
 // MCPServer describes an MCP server available to the agent.
@@ -103,7 +110,33 @@ func Render(rc *RuntimeContext) string {
 		b.WriteString("\n## Network Policy\n\n")
 		fmt.Fprintf(&b, "- Policy: %s\n", rc.NetworkPolicy.Policy)
 		if len(rc.NetworkPolicy.AllowedHosts) > 0 {
-			fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(rc.NetworkPolicy.AllowedHosts, ", "))
+			// Check if any host has per-path rules.
+			hasRules := false
+			for _, h := range rc.NetworkPolicy.AllowedHosts {
+				if len(h.Rules) > 0 {
+					hasRules = true
+					break
+				}
+			}
+			if hasRules {
+				// Use nested list so per-path rules are visible.
+				b.WriteString("- Allowed hosts:\n")
+				for _, h := range rc.NetworkPolicy.AllowedHosts {
+					if len(h.Rules) == 0 {
+						fmt.Fprintf(&b, "  - %s\n", h.Host)
+					} else {
+						fmt.Fprintf(&b, "  - %s (%d rules: %s)\n",
+							h.Host, len(h.Rules), strings.Join(h.Rules, ", "))
+					}
+				}
+			} else {
+				// Simple comma-separated list when no per-path rules.
+				hosts := make([]string, len(rc.NetworkPolicy.AllowedHosts))
+				for i, h := range rc.NetworkPolicy.AllowedHosts {
+					hosts[i] = h.Host
+				}
+				fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(hosts, ", "))
+			}
 		}
 	}
 
