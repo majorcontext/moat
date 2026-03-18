@@ -96,7 +96,7 @@ Or stop all running agents so the proxy shuts down (it auto-exits after 5 minute
 
 **Cause:** Moat's TLS-intercepting proxy uses a per-session CA certificate. If a tool inside the container does not trust this CA, TLS verification fails.
 
-**Fix:** Moat mounts the CA certificate and sets `SSL_CERT_FILE` / `NODE_EXTRA_CA_CERTS` automatically. If a tool ignores these variables:
+**Fix:** Moat mounts the CA certificate and sets `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `NODE_EXTRA_CA_CERTS` / `GIT_SSL_CAINFO` automatically. If a tool ignores these variables:
 
 1. Check the CA cert is mounted inside the container:
 
@@ -468,9 +468,7 @@ BuildKit requires Docker runtime (sidecars not supported by apple)
 
     MOAT_RUNTIME=docker moat run ./my-project
 
-Or unset `BUILDKIT_HOST` to use the legacy builder:
-
-    unset BUILDKIT_HOST
+Or remove `docker:dind` from `dependencies:` in `moat.yaml` if you don't need an isolated Docker daemon.
 
 ---
 

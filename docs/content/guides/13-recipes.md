@@ -143,6 +143,7 @@ volumes:
 
 hooks:
   pre_run: |
+    set -e
     cd /workspace/frontend && npm install
     cd /workspace/backend && uv sync
 ```
@@ -152,7 +153,8 @@ What this demonstrates:
 - **Multiple runtimes** — Node and Python in one container (uses `debian:bookworm-slim` base)
 - **Service dependencies** — PostgreSQL and Redis start automatically with readiness checks; connection info injected as `MOAT_POSTGRES_URL` and `MOAT_REDIS_URL`
 - **Per-directory volumes** — separate dependency caches for frontend and backend, each bypassing the workspace's shared filesystem
-- **Strict network policy** — add a `network:` block to restrict which hosts the agent can reach (see [moat.yaml reference](../reference/02-moat-yaml.md#network))
+
+> **Tip:** Add a `network:` block to restrict which hosts the agent can reach. See [moat.yaml reference](../reference/02-moat-yaml.md#network).
 
 ## Multi-repo with clones
 
@@ -175,6 +177,7 @@ volumes:
 
 hooks:
   pre_run: |
+    set -e
     cd /home/moatuser/repos
     test -d api/.git    || git clone git@github.com:my-org/api.git
     test -d shared/.git || git clone git@github.com:my-org/shared.git
