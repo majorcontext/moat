@@ -278,8 +278,13 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error) {
 	var result *Settings
 
+	// MOAT_SKIP_HOST_CLAUDE_SETTINGS=1 skips loading user-level settings
+	// (steps 1-3: ~/.claude/ and ~/.moat/claude/). This keeps e2e tests
+	// hermetic — host plugins and marketplaces won't leak into test builds.
+	skipHost := os.Getenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS") == "1"
+
 	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	if err == nil && !skipHost {
 		// 1. Load Claude's known marketplaces from ~/.claude/plugins/known_marketplaces.json
 		// This provides marketplace URLs for plugins enabled in settings.json
 		knownMarketplacesPath := filepath.Join(homeDir, ".claude", "plugins", "known_marketplaces.json")
