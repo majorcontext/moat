@@ -335,6 +335,67 @@ func TestLoadAllSettings(t *testing.T) {
 	}
 }
 
+func TestLoadAllSettingsSkipHostSettings(t *testing.T) {
+	// Set up a fake home with host-level settings that should be skipped.
+	fakeHome := t.TempDir()
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	hostSettings := `{
+  "enabledPlugins": { "host-plugin@host-market": true },
+  "extraKnownMarketplaces": {
+    "host-market": { "source": { "source": "git", "url": "https://example.com/host.git" } }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(hostSettings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up workspace with project settings that should still load.
+	workspace := t.TempDir()
+	projClaudeDir := filepath.Join(workspace, ".claude")
+	if err := os.MkdirAll(projClaudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projSettings := `{ "enabledPlugins": { "proj-plugin@proj-market": true } }`
+	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Redirect HOME so LoadAllSettings would find the host settings.
+	t.Setenv("HOME", fakeHome)
+
+	// Without skip: host settings should be loaded.
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
+	result, err := LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if !result.EnabledPlugins["host-plugin@host-market"] {
+		t.Error("without skip: host-plugin should be loaded")
+	}
+	if !result.EnabledPlugins["proj-plugin@proj-market"] {
+		t.Error("without skip: proj-plugin should be loaded")
+	}
+
+	// With skip: host settings should be skipped, project settings still load.
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
+	result, err = LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if result.EnabledPlugins["host-plugin@host-market"] {
+		t.Error("with skip: host-plugin should NOT be loaded")
+	}
+	if _, ok := result.ExtraKnownMarketplaces["host-market"]; ok {
+		t.Error("with skip: host-market should NOT be loaded")
+	}
+	if !result.EnabledPlugins["proj-plugin@proj-market"] {
+		t.Error("with skip: proj-plugin should still be loaded")
+	}
+}
+
 func TestLoadAllSettingsNoConfig(t *testing.T) {
 	workspace := t.TempDir()
 
