@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // MarketplaceConfig represents a Claude Code plugin marketplace for image building.
@@ -204,10 +206,10 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 			}
 		}
 		knownJSON, err := GenerateKnownMarketplaces(pcList, containerUser)
-		// GenerateKnownMarketplaces only fails if json.MarshalIndent fails,
-		// which cannot happen in practice for simple string maps. The error
-		// guard is defense-in-depth only.
-		if err == nil {
+		if err != nil {
+			log.Warn("could not generate known_marketplaces.json; pre-cloned marketplaces may not be recognized",
+				"error", err)
+		} else {
 			extraFiles = map[string][]byte{
 				"known-marketplaces.json": knownJSON,
 			}
