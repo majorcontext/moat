@@ -29,6 +29,10 @@ grants:
   - anthropic
   - github
 
+env:
+  ANTHROPIC_MODEL: opus
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: 1
+
 volumes:
   - name: node-modules
     target: /workspace/node_modules
@@ -40,6 +44,7 @@ hooks:
 What this demonstrates:
 
 - **Volume-cached `node_modules`** — persists across runs so `npm install` is a fast no-op when `package-lock.json` hasn't changed. The volume is a bind mount from `~/.moat/volumes/`, so it bypasses the workspace's shared filesystem (no VirtioFS performance issues).
+- **`env` for Claude Code configuration** — sets the model and enables experimental features via environment variables injected into the container
 - **`pre_run` hook** — installs dependencies on every start, but skips work when the volume is warm
 
 > **Tip:** Run `moat volumes rm my-node-app` after major lockfile changes or Node version bumps to start fresh.
