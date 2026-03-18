@@ -229,6 +229,31 @@ moat stop <run-id>
 
 `moat stop` stops the container but does not remove the worktree. Use `moat wt clean` to remove stopped worktree directories, or `moat clean` to remove all stopped resources including worktrees.
 
+## Multi-repo workspaces
+
+### Submodules and subtrees
+
+If your repository uses git submodules or subtrees, worktrees do not automatically initialize them. Add initialization to your `moat.yaml` command or `pre_run` hook:
+
+```yaml
+hooks:
+  pre_run: git submodule update --init --recursive
+```
+
+Submodule HEAD pointers in a worktree are frozen at the commit recorded in the parent repo at branch creation time. Run `git submodule update --remote` inside the worktree to pick up newer commits.
+
+### Multiple independent repos
+
+To give an agent access to multiple independent repos at once, pass their parent directory as the workspace:
+
+```bash
+moat run ~/dev
+```
+
+This mounts `~/dev` at `/workspace`, giving the agent access to all repos underneath. However, `moat wt` does not work here because the parent directory is not a git repository — there is no branch to create a worktree from.
+
+For worktree-style isolation across independent repos, one approach is a wrapper git repository above the child repos (with the repos in `.gitignore`) and a `pre_run` hook that clones or checks out matching branches. This requires project-specific scripting and is beyond the scope of this guide.
+
 ## Related guides
 
 - [Running Claude Code](./01-claude-code.md) — Use `--worktree` with Claude Code

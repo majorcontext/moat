@@ -511,6 +511,8 @@ moat volumes rm <agent-name>     # Remove volumes for an agent
 moat volumes prune               # Remove all managed volumes
 ```
 
+For examples of using volumes to cache dependencies across runs, see [Recipes](../guides/13-recipes.md).
+
 ---
 
 ## Endpoints
@@ -994,7 +996,7 @@ Moat automatically discovers plugins you've installed on your host machine via C
 
 This means plugins you've enabled on your host are automatically available in Moat containers without additional configuration.
 
-Use `--rebuild` to update plugins after changing configuration or installing new plugins on the host.
+Moat detects plugin changes and rebuilds the image automatically on the next run. Use `--rebuild` only to force a fresh build when the configuration has not changed (e.g., to pick up updated base images or unpinned package versions).
 
 ### claude.marketplaces
 

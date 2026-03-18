@@ -296,7 +296,7 @@ The next time you run `moat claude`, the plugin is available inside the containe
 - `~/.claude/plugins/known_marketplaces.json` — Marketplaces registered via `claude plugin marketplace add`
 - `~/.claude/settings.json` — Plugin enable/disable settings
 
-No additional configuration required. `moat claude --rebuild` updates the container image after installing new plugins.
+No additional configuration required. Moat detects plugin changes and rebuilds the image automatically on the next run.
 
 ### Explicit plugin configuration
 
@@ -322,8 +322,9 @@ claude:
       repo: owner/repo
 ```
 
-Marketplace repos are cloned on the host before image build, using your local git credentials (`gh auth`, SSH keys, credential helpers). 
-This means private marketplace repos work without leaking credentials into the Docker image. Use `moat claude --rebuild` update the container image after changing marketplace configuration.
+Marketplace repos are cloned on the host before image build, using your local git credentials (`gh auth`, SSH keys, credential helpers).
+This means private marketplace repos work without leaking credentials into the Docker image. Moat detects marketplace changes 
+and rebuilds the image automatically on the next run.
 
 ## Language servers
 
@@ -357,7 +358,7 @@ When you add a language server to `language_servers`:
 2. The corresponding Claude Code plugin is enabled and baked into the container image
 3. Claude Code discovers and manages the language server through its plugin system
 
-Runtime dependencies are added automatically -- listing them in `dependencies:` is not required. `moat claude --rebuild` updates the container image after changing language server configuration.
+Runtime dependencies are added automatically -- listing them in `dependencies:` is not required. Moat detects language server changes and rebuilds the image automatically on the next run.
 
 ### Multiple language servers
 

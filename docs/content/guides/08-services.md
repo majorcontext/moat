@@ -299,6 +299,7 @@ command:
 
 ## Related guides
 
+- [Recipes](13-recipes.md) — Complete project examples including full-stack with services
 - [Dependencies concept](../reference/06-dependencies.md) — Dependency types and registry
 - [moat.yaml reference](../reference/02-moat-yaml.md) — Full configuration options
 - [Secrets management](05-secrets.md) — Using secret references in service config
