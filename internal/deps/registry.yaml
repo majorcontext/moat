@@ -6,7 +6,7 @@ node:
   description: Node.js runtime
   type: runtime
   default: "20"
-  versions: ["18", "20", "22"]
+  versions: ["18", "20", "22", "24"]
 
 go:
   description: Go programming language
