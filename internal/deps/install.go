@@ -358,12 +358,13 @@ func getCustomCommands(name, version string) InstallCommands {
 		}
 	case "claude-code":
 		// Native installer - avoids Claude startup warnings from npm-based installs.
+		// The installer places the binary in ~/.claude/local/bin/.
 		return InstallCommands{
 			Commands: []string{
 				`curl -fsSL https://claude.ai/install.sh | bash`,
 			},
 			EnvVars: map[string]string{
-				"PATH": "/home/moatuser/.local/bin:$PATH",
+				"PATH": "/home/moatuser/.claude/local/bin:/home/moatuser/.local/bin:$PATH",
 			},
 		}
 	case "kubectl":

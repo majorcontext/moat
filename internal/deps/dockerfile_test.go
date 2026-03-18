@@ -659,8 +659,8 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 		t.Errorf("claude-code installer should run as moatuser, got %q", foundUser)
 	}
 
-	// Should add PATH from install commands' EnvVars
-	if !strings.Contains(result.Dockerfile, `ENV PATH="/home/moatuser/.local/bin:$PATH"`) {
+	// Should add PATH from install commands' EnvVars (includes native installer path)
+	if !strings.Contains(result.Dockerfile, `ENV PATH="/home/moatuser/.claude/local/bin:/home/moatuser/.local/bin:$PATH"`) {
 		t.Error("Dockerfile should add installer's PATH to environment")
 	}
 

@@ -50,6 +50,11 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 
 	scriptStr := string(result.ScriptContent)
 
+	// Script should export PATH so claude CLI is findable
+	if !strings.Contains(scriptStr, `export PATH="/home/moatuser/.claude/local/bin:/home/moatuser/.local/bin:$PATH"`) {
+		t.Error("script should export PATH with Claude CLI locations")
+	}
+
 	// Script should add marketplaces (in sorted order)
 	if !strings.Contains(scriptStr, "marketplace add anthropics/claude-plugins-official &&") {
 		t.Error("should add claude-plugins-official marketplace")
