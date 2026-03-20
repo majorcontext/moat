@@ -69,6 +69,17 @@ func TestRegistryHasProtobufEsMeta(t *testing.T) {
 	assert.Contains(t, pb.Requires, "protoc-gen-connect-es")
 }
 
+func TestRegistryHasProtobufGrpcGatewayMeta(t *testing.T) {
+	pb, ok := GetSpec("protobuf-grpc-gateway")
+	if !ok {
+		t.Fatal("Registry should have 'protobuf-grpc-gateway'")
+	}
+	assert.Equal(t, TypeMeta, pb.Type)
+	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway")
+	assert.Contains(t, pb.Requires, "protoc-gen-openapiv2")
+	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway-ts")
+}
+
 func TestRegistryHasProtocGoPlugins(t *testing.T) {
 	plugins := []struct {
 		name      string
@@ -79,6 +90,7 @@ func TestRegistryHasProtocGoPlugins(t *testing.T) {
 		{"protoc-gen-connect-go", "connectrpc.com/connect/cmd/protoc-gen-connect-go"},
 		{"protoc-gen-grpc-gateway", "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway"},
 		{"protoc-gen-openapiv2", "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2"},
+		{"protoc-gen-grpc-gateway-ts", "github.com/dpup/protoc-gen-grpc-gateway-ts/cmd/protoc-gen-grpc-gateway-ts"},
 		{"protoc-gen-validate", "github.com/envoyproxy/protoc-gen-validate"},
 		{"protoc-gen-doc", "github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc"},
 	}

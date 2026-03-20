@@ -135,6 +135,12 @@ protoc-gen-openapiv2:
   go-package: github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2
   requires: [go, protoc]
 
+protoc-gen-grpc-gateway-ts:
+  description: TypeScript client generator for gRPC-Gateway services
+  type: go-install
+  go-package: github.com/dpup/protoc-gen-grpc-gateway-ts/cmd/protoc-gen-grpc-gateway-ts
+  requires: [go, protoc]
+
 protoc-gen-validate:
   description: Protocol Buffers field validation generator
   type: go-install
@@ -589,6 +595,11 @@ protobuf-es:
   description: Protocol Buffers with ES/TypeScript plugins (protoc, protoc-gen-es, Connect RPC)
   type: meta
   requires: [protoc, protoc-gen-es, protoc-gen-connect-es]
+
+protobuf-grpc-gateway:
+  description: gRPC-Gateway tools (REST proxy, OpenAPI, TypeScript client)
+  type: meta
+  requires: [protoc-gen-grpc-gateway, protoc-gen-openapiv2, protoc-gen-grpc-gateway-ts]
 
 # Container tools
 docker:

@@ -88,8 +88,9 @@ dependencies:
   - go-extras       # gofumpt, govulncheck, goreleaser
   - cli-essentials  # jq, yq, fzf, ripgrep, fd, bat
   - python-dev      # uv, ruff, black, mypy, pytest
-  - protobuf        # protoc, protoc-gen-go, protoc-gen-go-grpc, validate, doc
-  - protobuf-es     # protoc, protoc-gen-es, protoc-gen-connect-es
+  - protobuf              # protoc, protoc-gen-go, protoc-gen-go-grpc, validate, doc
+  - protobuf-es           # protoc, protoc-gen-es, protoc-gen-connect-es
+  - protobuf-grpc-gateway # grpc-gateway, openapiv2, grpc-gateway-ts
 ```
 
 Run `moat deps info <name>` to see the expanded contents of any meta dependency.
