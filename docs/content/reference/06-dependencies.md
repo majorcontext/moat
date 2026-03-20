@@ -88,6 +88,8 @@ dependencies:
   - go-extras       # gofumpt, govulncheck, goreleaser
   - cli-essentials  # jq, yq, fzf, ripgrep, fd, bat
   - python-dev      # uv, ruff, black, mypy, pytest
+  - protobuf        # protoc, protoc-gen-go, protoc-gen-go-grpc, validate, doc
+  - protobuf-es     # protoc, protoc-gen-es, protoc-gen-connect-es
 ```
 
 Run `moat deps info <name>` to see the expanded contents of any meta dependency.
@@ -116,6 +118,7 @@ See [Available services](#available-services) below for the full list, and the [
 | Package managers | `uv`, `yarn`, `pnpm` | |
 | Development tools | `git`, `gh`, `lazygit`, `task` | |
 | Language tools | `golangci-lint`, `ruff`, `typescript` | Go, Python, Node tool ecosystems |
+| Protobuf | `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`, `protoc-gen-es` | Or use `protobuf` / `protobuf-es` meta bundles |
 | CLI tools | `jq`, `yq`, `ripgrep`, `fd`, `bat` | |
 | AI coding tools | `claude-code`, `codex-cli` | Or use `moat claude` / `moat codex` |
 | Workflow tools | `graphite-cli` | Implied by `--grant graphite` |

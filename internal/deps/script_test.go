@@ -164,8 +164,8 @@ func TestGenerateInstallScript_GithubBinary(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should download and install protoc
-	if !strings.Contains(script, "https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip") {
+	// Should download and install protoc (custom type with arch detection)
+	if !strings.Contains(script, "protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1") {
 		t.Error("script should contain protoc download URL")
 	}
 	if !strings.Contains(script, "unzip") {
@@ -173,6 +173,10 @@ func TestGenerateInstallScript_GithubBinary(t *testing.T) {
 	}
 	if !strings.Contains(script, "/usr/local") {
 		t.Error("script should install to /usr/local")
+	}
+	// Should install well-known types
+	if !strings.Contains(script, "/usr/local/include/") {
+		t.Error("script should install well-known proto types to /usr/local/include/")
 	}
 }
 
@@ -259,7 +263,7 @@ func TestGenerateInstallScript_InstallOrder(t *testing.T) {
 	deps := []Dependency{
 		{Name: "playwright"}, // custom
 		{Name: "typescript"}, // npm
-		{Name: "protoc"},     // github-binary
+		{Name: "sqlc"},       // github-binary
 		{Name: "node"},       // runtime
 		{Name: "psql"},       // apt
 	}
@@ -272,22 +276,22 @@ func TestGenerateInstallScript_InstallOrder(t *testing.T) {
 	// Find positions in script
 	aptPos := strings.Index(script, "postgresql-client")
 	nodePos := strings.Index(script, "setup_20.x")
-	protocPos := strings.Index(script, "protoc-")
+	sqlcPos := strings.Index(script, "sqlc_")
 	tsPos := strings.Index(script, "typescript")
 	playwrightPos := strings.Index(script, "playwright")
 
 	// Verify install order: apt < runtime < github-binary < npm < custom
-	if aptPos == -1 || nodePos == -1 || protocPos == -1 || tsPos == -1 || playwrightPos == -1 {
+	if aptPos == -1 || nodePos == -1 || sqlcPos == -1 || tsPos == -1 || playwrightPos == -1 {
 		t.Fatal("script missing expected content")
 	}
 
 	if aptPos > nodePos {
 		t.Error("apt packages should be installed before runtimes")
 	}
-	if nodePos > protocPos {
+	if nodePos > sqlcPos {
 		t.Error("runtimes should be installed before github binaries")
 	}
-	if protocPos > tsPos {
+	if sqlcPos > tsPos {
 		t.Error("github binaries should be installed before npm packages")
 	}
 	if tsPos > playwrightPos {
