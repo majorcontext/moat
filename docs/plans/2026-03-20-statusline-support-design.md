@@ -82,8 +82,8 @@ After loading settings and before writing to staging:
 2. Expand `~` → `$HOME`
 3. Read the file, warn and skip if missing/unreadable
 4. Write to `<staging>/moat-statusline/<basename>`
-5. Replace `{{statusLineScript}}` in `StatusLine` command with `/home/moatuser/.claude/moat/<basename>`
-6. Ensure `statusLineScript` is not in the marshaled settings
+5. Replace `{{statusLineScript}}` in `StatusLine` command with `<containerHome>/.claude/moat/<basename>`
+6. `statusLineScript` is excluded from marshaled settings via `json:"-"` and custom `UnmarshalJSON`
 
 #### 3. `internal/deps/scripts/moat-init.sh`
 

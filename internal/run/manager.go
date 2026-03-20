@@ -1586,7 +1586,7 @@ region = %s
 					scriptPath := expandHome(claudeSettings.StatusLineScript)
 					scriptData, readErr := os.ReadFile(scriptPath)
 					if readErr != nil {
-						ui.Warnf("Status line script not found: %s (skipping)", scriptPath)
+						ui.Warnf("Status line script not readable: %s (skipping)", scriptPath)
 						log.Debug("failed to read statusLineScript", "path", scriptPath, "error", readErr)
 					} else {
 						statuslineDir := filepath.Join(claudeConfig.StagingDir, "moat-statusline")
@@ -1598,7 +1598,7 @@ region = %s
 							if writeErr := os.WriteFile(destPath, scriptData, 0755); writeErr != nil {
 								ui.Warnf("Failed to copy status line script: %v", writeErr)
 							} else {
-								containerPath := "/home/moatuser/.claude/moat/" + basename
+								containerPath := containerHome + "/.claude/moat/" + basename
 								claudeSettings.ResolveStatusLineCommand(containerPath)
 								log.Debug("copied status line script to staging",
 									"source", scriptPath, "container_path", containerPath)
@@ -1606,9 +1606,6 @@ region = %s
 						}
 					}
 				}
-
-				// Remove moat-specific fields before writing to container.
-				claudeSettings.ClearMoatFields()
 
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
@@ -3545,14 +3542,22 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 	return req
 }
 
-// expandHome replaces a leading ~ in a path with the user's home directory.
+// expandHome replaces a leading ~/ in a path with the user's home directory.
+// Only expands ~/ (current user); ~otheruser paths are returned as-is.
 func expandHome(path string) string {
-	if !strings.HasPrefix(path, "~") {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return home
+	}
+	if !strings.HasPrefix(path, "~/") {
 		return path
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return path
 	}
-	return filepath.Join(home, path[1:])
+	return filepath.Join(home, path[2:])
 }

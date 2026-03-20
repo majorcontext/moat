@@ -48,14 +48,40 @@ type Settings struct {
 	// StatusLineScript is a moat-specific field: a host path to a script file
 	// that should be copied into the container. The {{statusLineScript}} placeholder
 	// in the statusLine command is replaced with the container path.
-	// Cleared before writing to container (not a Claude Code field).
-	StatusLineScript string `json:"statusLineScript,omitempty"`
+	// Not a Claude Code field — excluded from JSON via json:"-" and parsed
+	// through custom UnmarshalJSON to prevent accidental serialization.
+	StatusLineScript string `json:"-"`
 
 	// PluginSources tracks where each plugin setting came from (not serialized)
 	PluginSources map[string]SettingSource `json:"-"`
 
 	// MarketplaceSources tracks where each marketplace setting came from (not serialized)
 	MarketplaceSources map[string]SettingSource `json:"-"`
+}
+
+// UnmarshalJSON implements custom unmarshaling to parse statusLineScript,
+// which uses json:"-" to prevent accidental serialization into container settings.
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	// Alias avoids infinite recursion by stripping the custom UnmarshalJSON method.
+	type Alias Settings
+	var alias Alias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*s = Settings(alias)
+
+	// Parse statusLineScript manually since it's excluded from json tags.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if v, ok := raw["statusLineScript"]; ok {
+		var script string
+		if err := json.Unmarshal(v, &script); err == nil {
+			s.StatusLineScript = script
+		}
+	}
+	return nil
 }
 
 // MarketplaceEntry represents a marketplace in Claude's settings format.
@@ -427,15 +453,6 @@ func (s *Settings) ResolveStatusLineCommand(containerPath string) {
 	}
 	resolved := strings.ReplaceAll(raw, StatusLineTemplatePlaceholder, containerPath)
 	s.StatusLine = json.RawMessage(resolved)
-}
-
-// ClearMoatFields removes moat-specific fields that should not be written
-// to the container's settings.json (they're not Claude Code fields).
-func (s *Settings) ClearMoatFields() {
-	if s == nil {
-		return
-	}
-	s.StatusLineScript = ""
 }
 
 // GetMarketplaceNames returns the names of all marketplaces referenced in settings.

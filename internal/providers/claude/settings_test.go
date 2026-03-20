@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -841,25 +842,36 @@ func TestResolveStatusLineCommandNoPlaceholder(t *testing.T) {
 	}
 }
 
-func TestClearMoatFields(t *testing.T) {
+func TestStatusLineScriptExcludedFromJSON(t *testing.T) {
 	settings := &Settings{
 		StatusLineScript: "~/scripts/statusline.js",
 		StatusLine:       json.RawMessage(`{"type":"command","command":"node foo"}`),
 		EnabledPlugins:   map[string]bool{"p@m": true},
 	}
 
-	settings.ClearMoatFields()
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if settings.StatusLineScript != "" {
-		t.Error("StatusLineScript should be cleared")
+	// statusLineScript should not appear in serialized JSON (json:"-")
+	if strings.Contains(string(data), "statusLineScript") {
+		t.Errorf("statusLineScript should not be serialized, got %s", data)
 	}
-	// StatusLine and other fields should be preserved
-	if !settings.HasStatusLine() {
-		t.Error("StatusLine should be preserved")
+
+	// StatusLine and other fields should be present
+	if !strings.Contains(string(data), "statusLine") {
+		t.Error("statusLine should be serialized")
 	}
-	if !settings.EnabledPlugins["p@m"] {
-		t.Error("EnabledPlugins should be preserved")
+	if !strings.Contains(string(data), "enabledPlugins") {
+		t.Error("enabledPlugins should be serialized")
 	}
+}
+
+func TestResolveStatusLineCommandNilSettings(t *testing.T) {
+	var s *Settings
+	// Should not panic on nil receiver.
+	s.ResolveStatusLineCommand("/home/moatuser/.claude/moat/statusline.js")
 }
 
 func TestMergeSettingsStatusLine(t *testing.T) {
@@ -934,20 +946,19 @@ func TestSettingsJSONRoundTripWithStatusLine(t *testing.T) {
 		t.Error("statusLine should survive round-trip")
 	}
 
-	// StatusLineScript should NOT survive round-trip when cleared
-	settingsCleared := &Settings{
+	// StatusLineScript should NOT survive marshal round-trip (json:"-")
+	settingsWithScript := &Settings{
 		StatusLine:       json.RawMessage(`{"type":"command","command":"node foo"}`),
 		StatusLineScript: "~/script.js",
 	}
-	settingsCleared.ClearMoatFields()
 
-	data, _ = json.MarshalIndent(settingsCleared, "", "  ")
+	data, _ = json.MarshalIndent(settingsWithScript, "", "  ")
 	path2 := filepath.Join(dir, "settings2.json")
 	os.WriteFile(path2, data, 0644)
 
 	loaded2, _ := LoadSettings(path2)
 	if loaded2.StatusLineScript != "" {
-		t.Error("StatusLineScript should not appear after ClearMoatFields + round-trip")
+		t.Error("StatusLineScript should not survive marshal round-trip (json:\"-\")")
 	}
 }
 
