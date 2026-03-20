@@ -599,7 +599,7 @@ protobuf-es:
 protobuf-grpc-gateway:
   description: gRPC-Gateway tools (REST proxy, OpenAPI, TypeScript client)
   type: meta
-  requires: [protoc-gen-grpc-gateway, protoc-gen-openapiv2, protoc-gen-grpc-gateway-ts]
+  requires: [protoc, protoc-gen-grpc-gateway, protoc-gen-openapiv2, protoc-gen-grpc-gateway-ts]
 
 # Container tools
 docker:

@@ -154,7 +154,7 @@ func TestGenerateInstallScript_NpmPackages(t *testing.T) {
 	}
 }
 
-func TestGenerateInstallScript_GithubBinary(t *testing.T) {
+func TestGenerateInstallScript_Protoc(t *testing.T) {
 	deps := []Dependency{
 		{Name: "protoc", Version: "25.1"},
 	}
