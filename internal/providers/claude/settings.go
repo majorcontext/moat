@@ -41,6 +41,16 @@ type Settings struct {
 	// Set to true for container runs since the container provides isolation.
 	SkipDangerousModePermissionPrompt bool `json:"skipDangerousModePermissionPrompt,omitempty"`
 
+	// StatusLine is the Claude Code statusLine configuration.
+	// Preserved as raw JSON through merge since moat doesn't interpret its structure.
+	StatusLine json.RawMessage `json:"statusLine,omitempty"`
+
+	// StatusLineScript is a moat-specific field: a host path to a script file
+	// that should be copied into the container. The {{statusLineScript}} placeholder
+	// in the statusLine command is replaced with the container path.
+	// Cleared before writing to container (not a Claude Code field).
+	StatusLineScript string `json:"statusLineScript,omitempty"`
+
 	// PluginSources tracks where each plugin setting came from (not serialized)
 	PluginSources map[string]SettingSource `json:"-"`
 
@@ -237,6 +247,15 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 		MarketplaceSources:     make(map[string]SettingSource),
 		// Bool fields: true wins (override or base sets it).
 		SkipDangerousModePermissionPrompt: base.SkipDangerousModePermissionPrompt || override.SkipDangerousModePermissionPrompt,
+		// StatusLine: later source wins (override replaces base if present).
+		StatusLine:       base.StatusLine,
+		StatusLineScript: base.StatusLineScript,
+	}
+	if len(override.StatusLine) > 0 {
+		result.StatusLine = override.StatusLine
+	}
+	if override.StatusLineScript != "" {
+		result.StatusLineScript = override.StatusLineScript
 	}
 
 	// Copy base plugins and sources
@@ -382,6 +401,41 @@ func (s *Settings) HasPluginsOrMarketplaces() bool {
 		return false
 	}
 	return len(s.EnabledPlugins) > 0 || len(s.ExtraKnownMarketplaces) > 0
+}
+
+// HasStatusLine returns true if a statusLine configuration is present.
+func (s *Settings) HasStatusLine() bool {
+	if s == nil {
+		return false
+	}
+	return len(s.StatusLine) > 0
+}
+
+// StatusLineTemplatePlaceholder is replaced in the statusLine command with the
+// container path where the script was copied.
+const StatusLineTemplatePlaceholder = "{{statusLineScript}}"
+
+// ResolveStatusLineCommand replaces {{statusLineScript}} in the statusLine command
+// with the given container path. Returns the updated StatusLine JSON.
+func (s *Settings) ResolveStatusLineCommand(containerPath string) {
+	if s == nil || len(s.StatusLine) == 0 {
+		return
+	}
+	raw := string(s.StatusLine)
+	if !strings.Contains(raw, StatusLineTemplatePlaceholder) {
+		return
+	}
+	resolved := strings.ReplaceAll(raw, StatusLineTemplatePlaceholder, containerPath)
+	s.StatusLine = json.RawMessage(resolved)
+}
+
+// ClearMoatFields removes moat-specific fields that should not be written
+// to the container's settings.json (they're not Claude Code fields).
+func (s *Settings) ClearMoatFields() {
+	if s == nil {
+		return
+	}
+	s.StatusLineScript = ""
 }
 
 // GetMarketplaceNames returns the names of all marketplaces referenced in settings.

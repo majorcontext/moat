@@ -774,3 +774,200 @@ func TestSettingsJSONRoundTrip(t *testing.T) {
 		t.Error("MarketplaceSources should not be serialized (json:\"-\")")
 	}
 }
+
+func TestLoadSettingsWithStatusLine(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "statusLine": {
+    "type": "command",
+    "command": "node {{statusLineScript}}"
+  },
+  "statusLineScript": "~/scripts/my-statusline.js",
+  "enabledPlugins": {
+    "plugin@market": true
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	// statusLine should be preserved as raw JSON
+	if !settings.HasStatusLine() {
+		t.Error("HasStatusLine() should return true")
+	}
+
+	// statusLineScript should be parsed
+	if settings.StatusLineScript != "~/scripts/my-statusline.js" {
+		t.Errorf("StatusLineScript = %q, want %q", settings.StatusLineScript, "~/scripts/my-statusline.js")
+	}
+
+	// plugins should still load
+	if !settings.EnabledPlugins["plugin@market"] {
+		t.Error("plugin@market should be enabled")
+	}
+}
+
+func TestResolveStatusLineCommand(t *testing.T) {
+	settings := &Settings{
+		StatusLine: json.RawMessage(`{"type":"command","command":"node {{statusLineScript}}"}`),
+	}
+
+	settings.ResolveStatusLineCommand("/home/moatuser/.claude/moat/statusline.js")
+
+	want := `{"type":"command","command":"node /home/moatuser/.claude/moat/statusline.js"}`
+	if string(settings.StatusLine) != want {
+		t.Errorf("StatusLine = %s, want %s", settings.StatusLine, want)
+	}
+}
+
+func TestResolveStatusLineCommandNoPlaceholder(t *testing.T) {
+	original := `{"type":"command","command":"date"}`
+	settings := &Settings{
+		StatusLine: json.RawMessage(original),
+	}
+
+	settings.ResolveStatusLineCommand("/home/moatuser/.claude/moat/statusline.js")
+
+	// Should be unchanged
+	if string(settings.StatusLine) != original {
+		t.Errorf("StatusLine should be unchanged, got %s", settings.StatusLine)
+	}
+}
+
+func TestClearMoatFields(t *testing.T) {
+	settings := &Settings{
+		StatusLineScript: "~/scripts/statusline.js",
+		StatusLine:       json.RawMessage(`{"type":"command","command":"node foo"}`),
+		EnabledPlugins:   map[string]bool{"p@m": true},
+	}
+
+	settings.ClearMoatFields()
+
+	if settings.StatusLineScript != "" {
+		t.Error("StatusLineScript should be cleared")
+	}
+	// StatusLine and other fields should be preserved
+	if !settings.HasStatusLine() {
+		t.Error("StatusLine should be preserved")
+	}
+	if !settings.EnabledPlugins["p@m"] {
+		t.Error("EnabledPlugins should be preserved")
+	}
+}
+
+func TestMergeSettingsStatusLine(t *testing.T) {
+	base := &Settings{
+		StatusLine:       json.RawMessage(`{"type":"command","command":"date"}`),
+		StatusLineScript: "/old/path.sh",
+	}
+
+	override := &Settings{
+		StatusLine:       json.RawMessage(`{"type":"command","command":"node {{statusLineScript}}"}`),
+		StatusLineScript: "~/new/statusline.js",
+	}
+
+	result := MergeSettings(base, override, SourceMoatUser)
+
+	// Override should win
+	if string(result.StatusLine) != string(override.StatusLine) {
+		t.Errorf("StatusLine = %s, want %s", result.StatusLine, override.StatusLine)
+	}
+	if result.StatusLineScript != "~/new/statusline.js" {
+		t.Errorf("StatusLineScript = %q, want %q", result.StatusLineScript, "~/new/statusline.js")
+	}
+}
+
+func TestMergeSettingsStatusLineBaseOnly(t *testing.T) {
+	base := &Settings{
+		StatusLine:       json.RawMessage(`{"type":"command","command":"date"}`),
+		StatusLineScript: "/base/script.sh",
+	}
+
+	override := &Settings{
+		EnabledPlugins: map[string]bool{"p@m": true},
+	}
+
+	result := MergeSettings(base, override, SourceProject)
+
+	// Base statusLine should be preserved
+	if string(result.StatusLine) != string(base.StatusLine) {
+		t.Errorf("StatusLine = %s, want %s", result.StatusLine, base.StatusLine)
+	}
+	if result.StatusLineScript != "/base/script.sh" {
+		t.Errorf("StatusLineScript = %q, want %q", result.StatusLineScript, "/base/script.sh")
+	}
+}
+
+func TestSettingsJSONRoundTripWithStatusLine(t *testing.T) {
+	settings := &Settings{
+		StatusLine: json.RawMessage(`{"type":"command","command":"node /home/moatuser/.claude/moat/statusline.js"}`),
+		EnabledPlugins: map[string]bool{
+			"plugin@market": true,
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent: %v", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	if !loaded.HasStatusLine() {
+		t.Error("statusLine should survive round-trip")
+	}
+
+	// StatusLineScript should NOT survive round-trip when cleared
+	settingsCleared := &Settings{
+		StatusLine:       json.RawMessage(`{"type":"command","command":"node foo"}`),
+		StatusLineScript: "~/script.js",
+	}
+	settingsCleared.ClearMoatFields()
+
+	data, _ = json.MarshalIndent(settingsCleared, "", "  ")
+	path2 := filepath.Join(dir, "settings2.json")
+	os.WriteFile(path2, data, 0644)
+
+	loaded2, _ := LoadSettings(path2)
+	if loaded2.StatusLineScript != "" {
+		t.Error("StatusLineScript should not appear after ClearMoatFields + round-trip")
+	}
+}
+
+func TestHasStatusLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings *Settings
+		want     bool
+	}{
+		{"nil settings", nil, false},
+		{"empty settings", &Settings{}, false},
+		{"has status line", &Settings{StatusLine: json.RawMessage(`{"type":"command"}`)}, true},
+		{"empty raw message", &Settings{StatusLine: json.RawMessage{}}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.settings.HasStatusLine(); got != tt.want {
+				t.Errorf("HasStatusLine() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
