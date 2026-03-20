@@ -447,7 +447,7 @@ func (s *Settings) HasStatusLine() bool {
 const StatusLineTemplatePlaceholder = "{{statusLineScript}}"
 
 // ResolveStatusLineCommand replaces {{statusLineScript}} in the statusLine command
-// with the given container path. Returns the updated StatusLine JSON.
+// with the given container path. Modifies StatusLine in place.
 func (s *Settings) ResolveStatusLineCommand(containerPath string) {
 	if s == nil || len(s.StatusLine) == 0 {
 		return
