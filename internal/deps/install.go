@@ -367,6 +367,20 @@ func getCustomCommands(name, version string) InstallCommands {
 				"PATH": "/home/moatuser/.claude/local/bin:/home/moatuser/.local/bin:$PATH",
 			},
 		}
+	case "protoc":
+		// Install protoc with well-known types (include directory).
+		// The protoc zip contains bin/protoc and include/google/protobuf/*.proto.
+		// We need both — without the includes, imports like google/protobuf/timestamp.proto fail.
+		return InstallCommands{
+			Commands: []string{
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/aarch_64/') && curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v%s/protoc-%s-linux-${ARCH}.zip" -o /tmp/protoc.zip`, version, version),
+				"unzip -q /tmp/protoc.zip -d /tmp/protoc",
+				"mv /tmp/protoc/bin/protoc /usr/local/bin/protoc",
+				"chmod +x /usr/local/bin/protoc",
+				"cp -r /tmp/protoc/include/* /usr/local/include/",
+				"rm -rf /tmp/protoc*",
+			},
+		}
 	case "kubectl":
 		// Install kubectl - detects architecture
 		return InstallCommands{

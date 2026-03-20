@@ -68,12 +68,12 @@ func TestGetGithubBinaryCommands(t *testing.T) {
 
 func TestGetGithubBinaryCommandsZip(t *testing.T) {
 	spec := DepSpec{
-		Repo:  "protocolbuffers/protobuf",
-		Asset: "protoc-{version}-linux-x86_64.zip",
-		Bin:   "bin/protoc",
+		Repo:  "some/tool",
+		Asset: "tool-{version}-linux-x86_64.zip",
+		Bin:   "bin/tool",
 	}
 
-	cmds := getGithubBinaryCommands("protoc", "25.1", spec)
+	cmds := getGithubBinaryCommands("tool", "1.0.0", spec)
 	combined := strings.Join(cmds.Commands, " ")
 
 	// Should use unzip for .zip files
@@ -82,7 +82,7 @@ func TestGetGithubBinaryCommandsZip(t *testing.T) {
 	}
 
 	// Cleanup
-	if !strings.Contains(combined, "rm -rf /tmp/protoc") {
+	if !strings.Contains(combined, "rm -rf /tmp/tool") {
 		t.Error("missing cleanup command")
 	}
 }
@@ -246,6 +246,7 @@ func TestGetCustomCommands(t *testing.T) {
 		{"aws", "", []string{"awscli", "uname -m", "unzip"}, nil},
 		{"gcloud", "", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
 		{"rust", "", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},
+		{"protoc", "25.1", []string{"protocolbuffers/protobuf", "protoc-25.1", "uname -m", "unzip", "/usr/local/include/"}, nil},
 		{"kubectl", "", []string{"dl.k8s.io", "uname -m", "chmod"}, nil},
 		{"terraform", "1.10.0", []string{"releases.hashicorp.com", "terraform_1.10.0", "unzip"}, nil},
 		{"helm", "3.16.0", []string{"get.helm.sh", "helm-v3.16.0", "tar"}, nil},

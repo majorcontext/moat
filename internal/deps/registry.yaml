@@ -99,17 +99,65 @@ graphite-cli:
   package: "@withgraphite/graphite-cli"
   requires: [node]
 
-# Build tools (github-binary)
+# Build tools
 protoc:
-  description: Protocol Buffers compiler
-  type: github-binary
-  repo: protocolbuffers/protobuf
-  asset: "protoc-{version}-linux-{arch}.zip"
-  bin: bin/protoc
+  description: Protocol Buffers compiler (with well-known types)
+  type: custom
   default: "25.1"
-  targets:
-    amd64: x86_64
-    arm64: aarch_64
+
+protoc-gen-go:
+  description: Go code generator for Protocol Buffers
+  type: go-install
+  go-package: google.golang.org/protobuf/cmd/protoc-gen-go
+  requires: [go, protoc]
+
+protoc-gen-go-grpc:
+  description: Go gRPC code generator for Protocol Buffers
+  type: go-install
+  go-package: google.golang.org/grpc/cmd/protoc-gen-go-grpc
+  requires: [go, protoc]
+
+protoc-gen-connect-go:
+  description: Connect RPC code generator for Go
+  type: go-install
+  go-package: connectrpc.com/connect/cmd/protoc-gen-connect-go
+  requires: [go, protoc]
+
+protoc-gen-grpc-gateway:
+  description: gRPC-Gateway REST reverse proxy generator
+  type: go-install
+  go-package: github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway
+  requires: [go, protoc]
+
+protoc-gen-openapiv2:
+  description: OpenAPI v2 spec generator from Protocol Buffers
+  type: go-install
+  go-package: github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2
+  requires: [go, protoc]
+
+protoc-gen-validate:
+  description: Protocol Buffers field validation generator
+  type: go-install
+  go-package: github.com/envoyproxy/protoc-gen-validate
+  requires: [go, protoc]
+
+protoc-gen-doc:
+  description: Documentation generator for Protocol Buffers
+  type: go-install
+  go-package: github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc
+  requires: [go, protoc]
+
+protoc-gen-es:
+  description: ECMAScript/TypeScript code generator for Protocol Buffers
+  type: npm
+  package: "@bufbuild/protoc-gen-es"
+  requires: [node, protoc]
+
+protoc-gen-connect-es:
+  description: Connect RPC code generator for ECMAScript/TypeScript
+  type: npm
+  package: "@connectrpc/protoc-gen-connect-es"
+  requires: [node, protoc]
 
 sqlc:
   description: SQL compiler for Go
@@ -531,6 +579,16 @@ k8s:
   description: Kubernetes tools (kubectl, helm)
   type: meta
   requires: [kubectl, helm]
+
+protobuf:
+  description: Protocol Buffers with Go plugins (protoc, codegen, gRPC, validation, docs)
+  type: meta
+  requires: [protoc, protoc-gen-go, protoc-gen-go-grpc, protoc-gen-validate, protoc-gen-doc]
+
+protobuf-es:
+  description: Protocol Buffers with ES/TypeScript plugins (protoc, protoc-gen-es, Connect RPC)
+  type: meta
+  requires: [protoc, protoc-gen-es, protoc-gen-connect-es]
 
 # Container tools
 docker:
