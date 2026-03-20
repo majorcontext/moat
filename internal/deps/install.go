@@ -372,11 +372,11 @@ func getCustomCommands(name, version string) InstallCommands {
 		// We need both — without the includes, imports like google/protobuf/timestamp.proto fail.
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/aarch_64/') && curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v%s/protoc-%s-linux-${ARCH}.zip" -o /tmp/protoc.zip`, version, version),
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/aarch64/aarch_64/') && curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v%s/protoc-%s-linux-${ARCH}.zip" -o /tmp/protoc.zip`, version, version),
 				"unzip -q /tmp/protoc.zip -d /tmp/protoc",
 				"mv /tmp/protoc/bin/protoc /usr/local/bin/protoc",
 				"chmod +x /usr/local/bin/protoc",
-				"cp -r /tmp/protoc/include/* /usr/local/include/",
+				"mkdir -p /usr/local/include && cp -r /tmp/protoc/include/* /usr/local/include/",
 				"rm -rf /tmp/protoc*",
 			},
 		}
