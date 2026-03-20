@@ -102,6 +102,12 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$TARGET_HOME/"
 
+  # Copy status line script if present (user-configured via statusLineScript)
+  if [ -d "$MOAT_CLAUDE_INIT/moat-statusline" ] && [ -n "$(ls -A "$MOAT_CLAUDE_INIT/moat-statusline/" 2>/dev/null)" ]; then
+    mkdir -p "$TARGET_HOME/.claude/moat"
+    cp -p "$MOAT_CLAUDE_INIT/moat-statusline/"* "$TARGET_HOME/.claude/moat/"
+  fi
+
   # Ensure moatuser owns all the files if we're running as root
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
     chown -R moatuser:moatuser "$TARGET_HOME/.claude" 2>/dev/null || true

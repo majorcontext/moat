@@ -1322,3 +1322,33 @@ func TestResolveMountExcludesToTmpfs(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"tilde slash path", "~/scripts/foo.js", filepath.Join(home, "scripts/foo.js")},
+		{"tilde alone", "~", home},
+		{"absolute path", "/usr/local/bin/foo", "/usr/local/bin/foo"},
+		{"relative path", "scripts/foo.js", "scripts/foo.js"},
+		{"tilde other user", "~otheruser/foo", "~otheruser/foo"},
+		{"empty string", "", ""},
+		{"tilde slash only", "~/", home},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandHome(tt.path)
+			if got != tt.want {
+				t.Errorf("expandHome(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}

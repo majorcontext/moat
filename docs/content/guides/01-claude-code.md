@@ -325,6 +325,29 @@ claude:
 
 Marketplaces are cloned during image build. Moat detects marketplace changes and rebuilds the image automatically on the next run.
 
+## Status line
+
+You can configure a custom [Claude Code status line](https://code.claude.com/docs/en/statusline) that appears inside Moat containers. Since status line scripts are typically host files that don't exist in the container, Moat handles copying the script and wiring up the configuration.
+
+Add the configuration to `~/.moat/claude/settings.json` (user-level, not committed to any project):
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node {{statusLineScript}}"
+  },
+  "statusLineScript": "~/.moat/claude/statusline.js"
+}
+```
+
+- `statusLine` — Standard Claude Code status line configuration. Use `{{statusLineScript}}` as a placeholder for the script path inside the container.
+- `statusLineScript` — Path to the script on your host machine. Moat copies this file into the container and replaces the placeholder with the container path.
+
+The script can be written in any language. Use `node`, `bash`, `python`, or run it directly — whatever your script requires. Claude Code pipes session data as JSON to stdin. See the [Claude Code status line docs](https://code.claude.com/docs/en/statusline) for the available fields.
+
+This configuration is per-user. It does not affect other users or appear in project configuration.
+
 ## Language servers
 
 Moat includes prepackaged language server configurations that give Claude Code access to code intelligence features like go-to-definition, find-references, and diagnostics. Language servers are installed as Claude Code plugins during image build.

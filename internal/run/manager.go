@@ -1570,14 +1570,43 @@ region = %s
 			mounts = append(mounts, claudeConfig.Mounts...)
 			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
-			// Write settings.json to suppress startup prompts and configure plugins.
+			// Write settings.json to suppress startup prompts, configure plugins,
+			// and pass through status line configuration.
 			// moat-init.sh copies $MOAT_CLAUDE_INIT/settings.json to ~/.claude/settings.json.
 			skipPrompt := opts.Config != nil && opts.Config.Claude.SkipPermissionsPrompt
-			if hasPlugins || skipPrompt {
+			hasStatusLine := claudeSettings != nil && claudeSettings.HasStatusLine()
+			if hasPlugins || skipPrompt || hasStatusLine {
 				if claudeSettings == nil {
 					claudeSettings = &claude.Settings{}
 				}
 				claudeSettings.SkipDangerousModePermissionPrompt = skipPrompt
+
+				// Copy status line script into staging if configured.
+				if claudeSettings.StatusLineScript != "" {
+					scriptPath := expandHome(claudeSettings.StatusLineScript)
+					scriptData, readErr := os.ReadFile(scriptPath)
+					if readErr != nil {
+						ui.Warnf("Status line script not readable: %s (skipping)", scriptPath)
+						log.Debug("failed to read statusLineScript", "path", scriptPath, "error", readErr)
+					} else {
+						statuslineDir := filepath.Join(claudeConfig.StagingDir, "moat-statusline")
+						if mkErr := os.MkdirAll(statuslineDir, 0755); mkErr != nil {
+							ui.Warnf("Failed to create status line staging dir: %v", mkErr)
+						} else {
+							basename := filepath.Base(scriptPath)
+							destPath := filepath.Join(statuslineDir, basename)
+							if writeErr := os.WriteFile(destPath, scriptData, 0755); writeErr != nil {
+								ui.Warnf("Failed to copy status line script: %v", writeErr)
+							} else {
+								containerPath := containerHome + "/.claude/moat/" + basename
+								claudeSettings.ResolveStatusLineCommand(containerPath)
+								log.Debug("copied status line script to staging",
+									"source", scriptPath, "container_path", containerPath)
+							}
+						}
+					}
+				}
+
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
 				if jsonErr != nil {
@@ -1589,7 +1618,8 @@ region = %s
 				} else {
 					log.Debug("wrote settings.json to staging dir",
 						"plugins", len(claudeSettings.EnabledPlugins),
-						"marketplaces", len(claudeSettings.ExtraKnownMarketplaces))
+						"marketplaces", len(claudeSettings.ExtraKnownMarketplaces),
+						"has_statusline", hasStatusLine)
 				}
 			}
 		}
@@ -3510,4 +3540,24 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 	}
 
 	return req
+}
+
+// expandHome replaces a leading ~/ in a path with the user's home directory.
+// Only expands ~/ (current user); ~otheruser paths are returned as-is.
+func expandHome(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return home
+	}
+	if !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
