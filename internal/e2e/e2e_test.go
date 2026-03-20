@@ -70,6 +70,12 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	// Isolate tests from host Claude settings (~/.claude/settings.json).
+	// Without this, host plugins/marketplaces leak into Docker image builds
+	// via LoadAllSettings(), causing builds to fail when the claude CLI
+	// isn't available in test containers.
+	os.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
+
 	// Build the moat binary so the daemon can self-exec.
 	// Test binaries don't have the _daemon cobra command, so
 	// EnsureRunning needs a real moat binary (via MOAT_EXECUTABLE).

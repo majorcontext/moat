@@ -1,5 +1,6 @@
 ---
 title: "Sharing a workspace between host and container"
+navTitle: "Workspace sharing"
 description: "Use mount excludes to isolate platform-specific dependency directories between host and container."
 keywords: ["moat", "workspace", "node_modules", "venv", "dependencies", "mount", "exclude", "tmpfs"]
 ---

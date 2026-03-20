@@ -1,0 +1,119 @@
+# Changelog
+
+Moat runs AI coding agents in isolated containers with credential injection, network policy enforcement, and full observability. The core loop — declare what your agent needs in `moat.yaml`, run it in an isolated container, and audit everything it did — has stayed the same since v0.1. The runtime layer has broadened from Docker-only to Apple containers and Rancher Desktop, and the proxy now runs as a shared daemon that scopes credentials per run.
+
+Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
+
+## v0.4.0 — 2026-03-19
+
+v0.4 introduces HTTP-level request rules for the network firewall, an `env://` resolver for forwarding host environment variables into containers, and `moat exec` for running commands in existing containers. New credential providers cover Meta Graph API and Graphite CLI, and Ollama is now a declarable service dependency. Rancher Desktop is now a supported runtime alongside Docker and Apple containers. The proxy daemon fixes a credential scoping race and now separates credential traffic from routing traffic on distinct ports.
+
+### Added
+
+- **HTTP request rules for the network firewall** — enforce path-level policies on outbound HTTP traffic ([#230](https://github.com/majorcontext/moat/pull/230))
+- **`moat exec` command** — run commands in an existing container ([#232](https://github.com/majorcontext/moat/pull/232))
+- **`env://` secret resolver** — forward host environment variables into containers as secrets ([#236](https://github.com/majorcontext/moat/pull/236))
+- **Host clipboard bridging** — copy/paste between host and container during interactive sessions ([#219](https://github.com/majorcontext/moat/pull/219))
+- **Rancher Desktop** container runtime support ([#239](https://github.com/majorcontext/moat/pull/239))
+- **Ollama service dependency** — declare Ollama as a service in `moat.yaml` with provisioning and cache support ([#238](https://github.com/majorcontext/moat/pull/238))
+- **Meta Graph API** credential provider ([#226](https://github.com/majorcontext/moat/pull/226))
+- **Graphite CLI** credential provider ([#218](https://github.com/majorcontext/moat/pull/218))
+- **Host-local MCP servers** — run MCP servers as processes on the host and relay them into the container ([#183](https://github.com/majorcontext/moat/pull/183))
+- **`moat init`** command — scaffold a `moat.yaml` and inject runtime context into the container ([#207](https://github.com/majorcontext/moat/pull/207))
+- Expose per-path network rules to agents via the `MOAT_CONTEXT` runtime context ([#266](https://github.com/majorcontext/moat/pull/266))
+- Include documentation URLs in the `MOAT_CONTEXT` runtime context ([#228](https://github.com/majorcontext/moat/pull/228))
+- `ulimits` field in `moat.yaml` for container resource limits ([#211](https://github.com/majorcontext/moat/pull/211))
+- `tmpfs`-backed excludable directories for filesystem mounts ([#233](https://github.com/majorcontext/moat/pull/233))
+- Node 24 runtime support ([#269](https://github.com/majorcontext/moat/pull/269))
+
+### Security
+
+- Separate credential proxy port from routing proxy — previously, credential injection and general traffic routing shared a port, which widened the proxy's attack surface. No action required; upgrading resolves this ([#213](https://github.com/majorcontext/moat/pull/213))
+- Complete run setup before registry insertion — previously, a race window during run startup could cause the proxy to serve requests before credentials were fully configured, resulting in failed or unauthenticated requests. No action required; upgrading resolves this ([#250](https://github.com/majorcontext/moat/pull/250))
+
+### Fixed
+
+- Auto-clean stale routes on agent name collision — previously, reusing a run name while a stale route existed caused traffic to route to the wrong container ([#237](https://github.com/majorcontext/moat/pull/237))
+- Configure git to use SSH for GitHub when the SSH grant is active — previously, git defaulted to HTTPS even with an SSH grant ([#252](https://github.com/majorcontext/moat/pull/252))
+- Generate legacy-compatible Dockerfiles when BuildKit is unavailable — previously, image builds failed on Docker installations without BuildKit ([#235](https://github.com/majorcontext/moat/pull/235))
+- Rewrite proxy host for custom network gateways — previously, non-default Docker network configurations caused the container to fail to reach the proxy ([#217](https://github.com/majorcontext/moat/pull/217))
+- Resolve default runtime versions to prevent broken tarball URLs — previously, omitting a version in `dependencies` could produce a 404 during image build ([#227](https://github.com/majorcontext/moat/pull/227))
+- Suppress interactive prompts for corepack and Playwright — previously, these tools blocked image builds waiting for TTY input ([#223](https://github.com/majorcontext/moat/pull/223))
+- Fail the Docker build on plugin and marketplace install errors — previously, install failures were silently ignored ([#260](https://github.com/majorcontext/moat/pull/260))
+- Add Claude CLI path so plugins can be pre-installed into container images — previously, the missing path caused plugin installs to fail silently ([#261](https://github.com/majorcontext/moat/pull/261))
+
+## v0.3.0 — 2026-03-04
+
+v0.3 replaces the per-run proxy with a shared daemon process that outlives the CLI and scopes credentials by run. The configuration file is renamed from `agent.yaml` to `moat.yaml`, and the attach/detach execution model is removed in favor of a single run lifecycle.
+
+### Breaking
+
+- **Rename `agent.yaml` to `moat.yaml`** — rename the file in your project root; the old filename is no longer recognized ([#204](https://github.com/majorcontext/moat/pull/204))
+- **Remove attach/detach execution model** — runs now have a single lifecycle; `moat attach` and `moat detach` no longer exist ([#196](https://github.com/majorcontext/moat/pull/196))
+
+### Added
+
+- **Shared proxy daemon** with per-run credential scoping — a single daemon serves all active runs ([#193](https://github.com/majorcontext/moat/pull/193))
+- **Credential profiles** via `--profile` and `MOAT_PROFILE` ([#181](https://github.com/majorcontext/moat/pull/181))
+- **Config-driven credential providers** via YAML ([#168](https://github.com/majorcontext/moat/pull/168))
+- **`claude --resume`** — resume a previous Claude Code run by ID ([#187](https://github.com/majorcontext/moat/pull/187))
+- **Prepackaged language servers** in `moat.yaml` ([#185](https://github.com/majorcontext/moat/pull/185))
+- **Initial prompt passthrough** via `--` args ([#156](https://github.com/majorcontext/moat/pull/156))
+- **Manual snapshots** during interactive sessions via Ctrl+/ then s ([#198](https://github.com/majorcontext/moat/pull/198))
+- Import host git identity (name and email) into containers ([#173](https://github.com/majorcontext/moat/pull/173))
+- Resolve runs by name or ID prefix ([#162](https://github.com/majorcontext/moat/pull/162))
+- `claude.base_url` field for host-side LLM proxies ([#191](https://github.com/majorcontext/moat/pull/191))
+- `clean` and `list` commands are now worktree-aware ([#182](https://github.com/majorcontext/moat/pull/182))
+
+### Changed
+
+- Increase Apple container memory default to 8 GB ([#203](https://github.com/majorcontext/moat/pull/203))
+- Decouple Anthropic OAuth tokens from API keys per updated Anthropic ToS — run `moat grant claude` again to re-authenticate ([#190](https://github.com/majorcontext/moat/pull/190))
+
+### Fixed
+
+- Make proxy liveness checks resilient to transient failures — previously, a brief network hiccup during startup caused the CLI to report the proxy as down and abort the run ([#199](https://github.com/majorcontext/moat/pull/199))
+- Add timeouts to container operations and parallelize run loading — previously, a hung container blocked all CLI commands ([#192](https://github.com/majorcontext/moat/pull/192))
+- Improve Apple container runtime detection — previously, detection failed silently on some macOS configurations ([#176](https://github.com/majorcontext/moat/pull/176))
+- Clean up stale routes for stopped containers on startup ([#172](https://github.com/majorcontext/moat/pull/172))
+- Fail early when declared grants are unavailable — previously, runs started and failed mid-execution ([#160](https://github.com/majorcontext/moat/pull/160))
+- Mount main `.git` directory for worktree workspaces — previously, git operations inside the container failed for worktree-based projects ([#157](https://github.com/majorcontext/moat/pull/157))
+
+## v0.2.0 — 2026-02-10
+
+v0.2 removes the sessions abstraction in favor of runs as the single organizational unit, and adds worktree and npm registry support.
+
+### Breaking
+
+- **Remove sessions feature** — runs are the single source of truth; use `moat list` to see runs ([#151](https://github.com/majorcontext/moat/pull/151))
+
+### Added
+
+- **Git worktree utilities** for managing runs inside worktrees ([#153](https://github.com/majorcontext/moat/pull/153))
+- **npm registry** credential provider ([#152](https://github.com/majorcontext/moat/pull/152))
+
+### Fixed
+
+- Connect to Docker Desktop's embedded BuildKit — previously, builds failed on Docker Desktop when BuildKit was only available via DialHijack ([#150](https://github.com/majorcontext/moat/pull/150))
+- Prevent Docker network leaks during cleanup — previously, orphaned Docker networks accumulated after failed runs ([#149](https://github.com/majorcontext/moat/pull/149))
+
+## v0.1.0 — 2026-02-08
+
+First public release. Supports Claude Code and Gemini agents on Docker (Linux, macOS) and Apple containers (macOS 26+ with Apple Silicon).
+
+### Added
+
+- **Container isolation** — each run executes in its own container with workspace mounting
+- **Credential injection** via TLS-intercepting proxy — tokens are injected at the network layer, never exposed in the container environment ([#128](https://github.com/majorcontext/moat/pull/128))
+- **GitHub device flow authentication** and encrypted credential store ([#125](https://github.com/majorcontext/moat/pull/125))
+- **Observability** — stdout/stderr logging with timestamps, network request tracing, and trace spans ([#107](https://github.com/majorcontext/moat/pull/107))
+- **`agent.yaml` configuration** — declarative runtime, dependency, and grant definitions (renamed to `moat.yaml` in v0.3)
+- **Automatic image selection** based on declared runtime (Node, Python, Go) ([#102](https://github.com/majorcontext/moat/pull/102))
+- **Service dependencies** — sidecar containers (e.g., Postgres) with readiness checks ([#102](https://github.com/majorcontext/moat/pull/102))
+- **Apple containers runtime** on macOS 26+ with Apple Silicon ([#102](https://github.com/majorcontext/moat/pull/102))
+- **Gemini agent** support ([#118](https://github.com/majorcontext/moat/pull/118))
+- **`moat doctor`** diagnostic command ([#124](https://github.com/majorcontext/moat/pull/124))
+- **Lifecycle hooks** in `agent.yaml` ([#145](https://github.com/majorcontext/moat/pull/145))
+- **TUI** — interactive terminal with footer controls and trace overlay ([#108](https://github.com/majorcontext/moat/pull/108))
+- **Audit logging** with cryptographic hash chaining ([#114](https://github.com/majorcontext/moat/pull/114))
+- Homebrew tap and GoReleaser for automated releases ([#142](https://github.com/majorcontext/moat/pull/142), [#146](https://github.com/majorcontext/moat/pull/146))
