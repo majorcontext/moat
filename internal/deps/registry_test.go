@@ -75,6 +75,7 @@ func TestRegistryHasProtobufGrpcGatewayMeta(t *testing.T) {
 		t.Fatal("Registry should have 'protobuf-grpc-gateway'")
 	}
 	assert.Equal(t, TypeMeta, pb.Type)
+	assert.Contains(t, pb.Requires, "protoc")
 	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway")
 	assert.Contains(t, pb.Requires, "protoc-gen-openapiv2")
 	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway-ts")
