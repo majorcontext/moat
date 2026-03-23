@@ -1,0 +1,32 @@
+# Example: Sandbox-local MCP server
+#
+# Runs a filesystem MCP server inside the container so Claude Code
+# can browse and edit files through the Model Context Protocol.
+#
+# The MCP server runs as a child process inside the sandbox — no
+# network access is needed and credentials stay local.
+#
+# Run with:
+#   moat claude examples/mcp-local
+#
+# Verify the MCP config is generated correctly (no grant needed):
+#   moat run --no-sandbox examples/mcp-local
+
+name: mcp-local-demo
+
+dependencies:
+  - node@22
+  - claude-code
+
+grants:
+  - claude
+
+command: ["claude"]
+interactive: true
+
+claude:
+  mcp:
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+      cwd: /workspace
