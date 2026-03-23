@@ -307,7 +307,6 @@ type MCPServerSpec struct {
 	Args []string `yaml:"args,omitempty"`
 
 	// Env are environment variables for the server
-	// Supports ${secrets.NAME} syntax for secret references
 	Env map[string]string `yaml:"env,omitempty"`
 
 	// Grant specifies a credential grant to inject (e.g., "github", "anthropic")

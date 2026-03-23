@@ -125,7 +125,10 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 // ANTHROPIC_API_KEY. Both use placeholder values — real credentials are injected
 // by the proxy at the network layer.
 func containerEnvForCredential(cred *provider.Credential) []string {
-	if cred != nil && cred.Provider == "claude" {
+	if cred == nil {
+		return nil
+	}
+	if cred.Provider == "claude" {
 		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
 	}
 	return []string{"ANTHROPIC_API_KEY=" + ProxyInjectedPlaceholder}

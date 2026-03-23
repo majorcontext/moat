@@ -242,10 +242,10 @@ func TestAnthropicProvider_ContainerEnv(t *testing.T) {
 }
 
 func TestContainerEnvForCredential(t *testing.T) {
-	t.Run("nil credential uses API key placeholder", func(t *testing.T) {
+	t.Run("nil credential returns empty slice", func(t *testing.T) {
 		env := containerEnvForCredential(nil)
-		if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY="+ProxyInjectedPlaceholder {
-			t.Errorf("env = %v, want ANTHROPIC_API_KEY placeholder", env)
+		if len(env) != 0 {
+			t.Errorf("env = %v, want empty slice", env)
 		}
 	})
 

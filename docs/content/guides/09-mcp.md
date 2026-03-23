@@ -265,20 +265,17 @@ When `grant` is specified, Moat sets the corresponding environment variable auto
 
 The grant must also appear in the top-level `grants:` list.
 
-### Environment variables and secrets
+### Environment variables
 
-Pass environment variables directly or interpolate from the `secrets:` section:
+Pass environment variables directly:
 
 ```yaml
-secrets:
-  MY_API_KEY: op://Dev/MyService/api-key
-
 claude:
   mcp:
     my_server:
       command: /path/to/server
       env:
-        API_KEY: ${secrets.MY_API_KEY}
+        API_KEY: my-api-key
         DEBUG: "true"
       cwd: /workspace
 ```
@@ -289,7 +286,7 @@ claude:
 |-------|------|-------------|
 | `command` | `string` | Server executable path (required) |
 | `args` | `array[string]` | Command arguments |
-| `env` | `map[string]string` | Environment variables (supports `${secrets.NAME}` interpolation) |
+| `env` | `map[string]string` | Environment variables |
 | `grant` | `string` | Credential to inject as an environment variable (Codex and Gemini only) |
 | `cwd` | `string` | Working directory for the server process |
 

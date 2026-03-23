@@ -1597,11 +1597,6 @@ region = %s
 			if opts.Config != nil && len(opts.Config.Claude.MCP) > 0 {
 				claudeLocalMCP = make(map[string]provider.LocalMCPServerConfig)
 				for name, spec := range opts.Config.Claude.MCP {
-					if spec.Grant != "" {
-						cleanupDaemonRun()
-						cleanupSSH(sshServer)
-						return nil, fmt.Errorf("claude.mcp.%s: 'grant' is not supported for Claude local MCP servers; use codex.mcp or gemini.mcp instead, or set the env var directly", name)
-					}
 					claudeLocalMCP[name] = provider.LocalMCPServerConfig{
 						Command: spec.Command,
 						Args:    spec.Args,
@@ -3757,7 +3752,7 @@ func grantToPlaceholder(grant string) string {
 // hasGrant checks whether a grant name appears in the grants list.
 func hasGrant(grants []string, name string) bool {
 	for _, g := range grants {
-		if g == name {
+		if strings.Split(g, ":")[0] == name {
 			return true
 		}
 	}
