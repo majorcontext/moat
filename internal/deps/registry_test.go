@@ -37,11 +37,99 @@ func TestRegistryHasProtoc(t *testing.T) {
 	if !ok {
 		t.Fatal("Registry should have 'protoc'")
 	}
-	if protoc.Type != TypeGithubBinary {
-		t.Errorf("protoc.Type = %v, want %v", protoc.Type, TypeGithubBinary)
+	if protoc.Type != TypeCustom {
+		t.Errorf("protoc.Type = %v, want %v", protoc.Type, TypeCustom)
 	}
-	if protoc.Repo == "" {
-		t.Error("protoc.Repo should not be empty")
+}
+
+func TestRegistryHasProtobufMeta(t *testing.T) {
+	pb, ok := GetSpec("protobuf")
+	if !ok {
+		t.Fatal("Registry should have 'protobuf'")
+	}
+	if pb.Type != TypeMeta {
+		t.Errorf("protobuf.Type = %v, want %v", pb.Type, TypeMeta)
+	}
+	// Should require protoc and Go plugins
+	assert.Contains(t, pb.Requires, "protoc")
+	assert.Contains(t, pb.Requires, "protoc-gen-go")
+	assert.Contains(t, pb.Requires, "protoc-gen-go-grpc")
+	assert.Contains(t, pb.Requires, "protoc-gen-validate")
+	assert.Contains(t, pb.Requires, "protoc-gen-doc")
+}
+
+func TestRegistryHasProtobufEsMeta(t *testing.T) {
+	pb, ok := GetSpec("protobuf-es")
+	if !ok {
+		t.Fatal("Registry should have 'protobuf-es'")
+	}
+	assert.Equal(t, TypeMeta, pb.Type)
+	assert.Contains(t, pb.Requires, "protoc")
+	assert.Contains(t, pb.Requires, "protoc-gen-es")
+	assert.Contains(t, pb.Requires, "protoc-gen-connect-es")
+}
+
+func TestRegistryHasProtobufGrpcGatewayMeta(t *testing.T) {
+	pb, ok := GetSpec("protobuf-grpc-gateway")
+	if !ok {
+		t.Fatal("Registry should have 'protobuf-grpc-gateway'")
+	}
+	assert.Equal(t, TypeMeta, pb.Type)
+	assert.Contains(t, pb.Requires, "protoc")
+	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway")
+	assert.Contains(t, pb.Requires, "protoc-gen-openapiv2")
+	assert.Contains(t, pb.Requires, "protoc-gen-grpc-gateway-ts")
+}
+
+func TestRegistryHasProtocGoPlugins(t *testing.T) {
+	plugins := []struct {
+		name      string
+		goPackage string
+	}{
+		{"protoc-gen-go", "google.golang.org/protobuf/cmd/protoc-gen-go"},
+		{"protoc-gen-go-grpc", "google.golang.org/grpc/cmd/protoc-gen-go-grpc"},
+		{"protoc-gen-connect-go", "connectrpc.com/connect/cmd/protoc-gen-connect-go"},
+		{"protoc-gen-grpc-gateway", "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway"},
+		{"protoc-gen-openapiv2", "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2"},
+		{"protoc-gen-grpc-gateway-ts", "github.com/dpup/protoc-gen-grpc-gateway-ts/cmd/protoc-gen-grpc-gateway-ts"},
+		{"protoc-gen-validate", "github.com/envoyproxy/protoc-gen-validate"},
+		{"protoc-gen-doc", "github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc"},
+	}
+
+	for _, p := range plugins {
+		t.Run(p.name, func(t *testing.T) {
+			spec, ok := GetSpec(p.name)
+			if !ok {
+				t.Fatalf("Registry should have %q", p.name)
+			}
+			assert.Equal(t, TypeGoInstall, spec.Type)
+			assert.Equal(t, p.goPackage, spec.GoPackage)
+			assert.Contains(t, spec.Requires, "go")
+			assert.Contains(t, spec.Requires, "protoc")
+		})
+	}
+}
+
+func TestRegistryHasProtocEsPlugins(t *testing.T) {
+	plugins := []struct {
+		name   string
+		npmPkg string
+	}{
+		{"protoc-gen-es", "@bufbuild/protoc-gen-es"},
+		{"protoc-gen-connect-es", "@connectrpc/protoc-gen-connect-es"},
+	}
+
+	for _, p := range plugins {
+		t.Run(p.name, func(t *testing.T) {
+			spec, ok := GetSpec(p.name)
+			if !ok {
+				t.Fatalf("Registry should have %q", p.name)
+			}
+			assert.Equal(t, TypeNpm, spec.Type)
+			assert.Equal(t, p.npmPkg, spec.Package)
+			assert.Contains(t, spec.Requires, "node")
+			assert.Contains(t, spec.Requires, "protoc")
+		})
 	}
 }
 
