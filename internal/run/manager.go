@@ -3683,16 +3683,18 @@ func cloneMarketplacesOnHost(ctx context.Context, marketplaces []claude.Marketpl
 		}
 		clonedDir, commitTime, cloneErr := claude.CloneMarketplace(ctx, m.Repo)
 		if cloneErr != nil {
-			log.Warn("could not pre-clone marketplace on host (private repos need 'gh auth login' or SSH keys); will try build-time clone",
-				"name", m.Name, "repo", m.Repo, "error", cloneErr)
+			ui.Warnf("Could not clone marketplace %q on host — the build will attempt to clone it inside the container, "+
+				"but this will fail for private repos.\n"+
+				"  To fix: run 'gh auth login' or configure SSH keys for git on the host.\n"+
+				"  Repo: %s\n"+
+				"  Error: %v", m.Name, m.Repo, cloneErr)
 			continue
 		}
 		result.cleanupDirs = append(result.cleanupDirs, clonedDir)
 
 		contextKey, tarData, collectErr := claude.CollectMarketplaceTar(clonedDir, m.Name)
 		if collectErr != nil {
-			log.Warn("could not collect marketplace files after clone; will try build-time clone",
-				"name", m.Name, "error", collectErr)
+			ui.Warnf("Could not package marketplace %q after cloning (likely a filesystem or permissions issue) — the build will attempt to clone it inside the container: %v", m.Name, collectErr)
 			continue
 		}
 

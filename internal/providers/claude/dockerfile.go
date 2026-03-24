@@ -110,9 +110,8 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	// Build the install script
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\n")
-	script.WriteString("set -e\n")
 	script.WriteString("# Auto-generated Claude Code plugin installer\n")
-	script.WriteString("# Failures are fatal — the build stops if any marketplace or plugin install fails.\n\n")
+	script.WriteString("# Failures are tracked and the script exits non-zero if any operation fails.\n\n")
 	// Ensure the Claude CLI is on PATH. The native installer places the binary
 	// in ~/.claude/local/bin/ which may not be in PATH during image build.
 	script.WriteString(fmt.Sprintf("export PATH=\"/home/%s/.claude/local/bin:/home/%s/.local/bin:$PATH\"\n\n", containerUser, containerUser))

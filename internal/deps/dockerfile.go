@@ -207,6 +207,11 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	writeCustomDeps(&b, c.customDeps)
 	writeUvToolPackages(&b, c.uvToolPkgs)
 
+	// SSH known hosts must be written before plugin installation so that
+	// any in-container git clone fallback can verify SSH host keys.
+	// This runs as root (writes to /etc/ssh/).
+	writeSSHKnownHosts(&b, opts.SSHHosts)
+
 	// User-space custom deps (install-as: user) run as moatuser
 	writeUserCustomDeps(&b, c.userCustomDeps)
 	pluginResult := claude.GenerateDockerfileSnippet(opts.ClaudeMarketplaces, opts.ClaudePlugins, containerUser)
@@ -224,9 +229,8 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	inUserContext := len(c.userCustomDeps) > 0 || pluginResult.DockerfileSnippet != ""
 	if inUserContext {
 		hasDynamicDeps := len(c.dynamicNpm)+len(c.dynamicPip)+len(c.dynamicUv)+len(c.dynamicCargo)+len(c.dynamicGo) > 0
-		hasSSHHosts := len(opts.SSHHosts) > 0
 		hasBuildHooks := opts.Hooks != nil && (opts.Hooks.PostBuildRoot != "" || opts.Hooks.PostBuild != "")
-		if hasDynamicDeps || hasSSHHosts || hasBuildHooks || opts.needsInit(c.dockerMode) {
+		if hasDynamicDeps || hasBuildHooks || opts.needsInit(c.dockerMode) {
 			b.WriteString("USER root\n\n")
 		}
 	}
@@ -237,9 +241,6 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	writeDynamicDeps(&b, "uv packages (dynamic)", c.dynamicUv)
 	writeDynamicDeps(&b, "cargo packages (dynamic)", c.dynamicCargo)
 	writeDynamicDeps(&b, "go packages (dynamic)", c.dynamicGo)
-
-	// SSH known hosts for granted hosts
-	writeSSHKnownHosts(&b, opts.SSHHosts)
 
 	// User-defined build hooks
 	writeBuildHooks(&b, opts.Hooks)

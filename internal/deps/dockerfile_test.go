@@ -774,10 +774,7 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 	}
 	script := string(scriptContent)
 
-	// Script should use set -e and track failures
-	if !strings.Contains(script, "set -e") {
-		t.Error("script should use set -e to fail on errors")
-	}
+	// Script should track failures
 	if !strings.Contains(script, "failures=0") {
 		t.Error("script should initialize failure counter")
 	}
@@ -1172,6 +1169,36 @@ func TestGenerateDockerfileWithSSHHosts(t *testing.T) {
 	}
 	if !strings.Contains(result.Dockerfile, "/etc/ssh/ssh_known_hosts") {
 		t.Error("missing known_hosts path")
+	}
+}
+
+func TestGenerateDockerfileSSHKnownHostsBeforePlugins(t *testing.T) {
+	// SSH known_hosts must appear before the plugin install script so that
+	// in-container git clone fallback can verify SSH host keys.
+	marketplaces := []claude.MarketplaceConfig{
+		{Name: "test-market", Source: "github", Repo: "owner/test-market"},
+	}
+	plugins := []string{"test-plugin@test-market"}
+
+	result, err := GenerateDockerfile(nil, &ImageSpec{
+		SSHHosts:           []string{"github.com"},
+		ClaudeMarketplaces: marketplaces,
+		ClaudePlugins:      plugins,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	sshIdx := strings.Index(result.Dockerfile, "mkdir -p /etc/ssh")
+	pluginIdx := strings.Index(result.Dockerfile, "claude-plugins.sh")
+	if sshIdx < 0 {
+		t.Fatal("SSH known_hosts setup not found in Dockerfile")
+	}
+	if pluginIdx < 0 {
+		t.Fatal("plugin install script not found in Dockerfile")
+	}
+	if sshIdx > pluginIdx {
+		t.Errorf("SSH known_hosts (pos %d) must appear before plugin install (pos %d)", sshIdx, pluginIdx)
 	}
 }
 
