@@ -195,6 +195,43 @@ What this demonstrates:
 
 > **Tip:** Run `moat volumes rm my-platform` to reclone from scratch if the repos get into a bad state.
 
+## Claude Code status line
+
+Use a global mount and `~/.moat/claude/settings.json` to display a custom status line inside moat containers.
+
+**1. Create a status line script:**
+
+```bash
+mkdir -p ~/.moat/scripts
+cat > ~/.moat/scripts/statusline.sh << 'EOF'
+#!/bin/bash
+echo "moat | $(hostname) | $(date +%H:%M)"
+EOF
+chmod +x ~/.moat/scripts/statusline.sh
+```
+
+**2. Mount the script into containers:**
+
+```yaml
+# ~/.moat/config.yaml
+mounts:
+  - source: ~/.moat/scripts/statusline.sh
+    target: /home/user/.claude/moat/statusline.sh
+```
+
+**3. Configure Claude Code to use it:**
+
+```json
+// ~/.moat/claude/settings.json
+{
+  "statusLine": {
+    "command": "/home/user/.claude/moat/statusline.sh"
+  }
+}
+```
+
+The global mount makes the script available in every container, and the settings passthrough forwards the `statusLine` config to Claude Code.
+
 ## Cache invalidation
 
 Volumes persist until explicitly removed. Rebuild or clear caches when:
