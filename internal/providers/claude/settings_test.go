@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -1090,5 +1091,72 @@ func TestSettingsJSONRoundTrip(t *testing.T) {
 	}
 	if loaded.MarketplaceSources != nil {
 		t.Error("MarketplaceSources should not be serialized (json:\"-\")")
+	}
+}
+
+// TestKnownSettingsKeysMatchesStruct uses reflection to verify that every
+// JSON-tagged field on Settings is present in knownSettingsKeys, preventing
+// the two from drifting apart silently.
+func TestKnownSettingsKeysMatchesStruct(t *testing.T) {
+	typ := reflect.TypeOf(Settings{})
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		// Strip options like ",omitempty"
+		jsonKey := tag
+		if idx := len(tag); idx > 0 {
+			if comma := indexOf(tag, ','); comma >= 0 {
+				jsonKey = tag[:comma]
+			}
+		}
+		if jsonKey == "-" {
+			continue
+		}
+		if !knownSettingsKeys[jsonKey] {
+			t.Errorf("Settings field %s has JSON key %q not present in knownSettingsKeys", field.Name, jsonKey)
+		}
+	}
+}
+
+func indexOf(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestMergeSettingsBaseNilDoesNotMutateOverride verifies that MergeSettings
+// does not mutate the caller's override struct when base is nil.
+func TestMergeSettingsBaseNilDoesNotMutateOverride(t *testing.T) {
+	override := &Settings{
+		EnabledPlugins: map[string]bool{
+			"plugin-a@market": true,
+		},
+		ExtraKnownMarketplaces: map[string]MarketplaceEntry{
+			"market": {Source: MarketplaceSource{Source: "git", URL: "https://example.com/repo.git"}},
+		},
+	}
+
+	result := MergeSettings(nil, override, SourceMoatYAML)
+
+	// Result should have the data
+	if !result.EnabledPlugins["plugin-a@market"] {
+		t.Error("result should contain plugin-a@market")
+	}
+
+	// Mutating result must not affect override
+	result.EnabledPlugins["plugin-b@market"] = true
+	result.PluginSources["plugin-b@market"] = SourceProject
+
+	if _, exists := override.EnabledPlugins["plugin-b@market"]; exists {
+		t.Error("mutating result should not affect override's EnabledPlugins")
+	}
+	if override.PluginSources != nil {
+		t.Error("override.PluginSources should remain nil after merge")
 	}
 }

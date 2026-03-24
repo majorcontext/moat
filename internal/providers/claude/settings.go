@@ -127,7 +127,7 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 		m["skipDangerousModePermissionPrompt"] = true
 	}
 
-	// Merge extras (known fields take precedence if there's a conflict).
+	// Emit extras — keys matching known struct fields are skipped (they're already serialized above).
 	for key, val := range s.RawExtras {
 		if !knownSettingsKeys[key] {
 			m[key] = val
@@ -279,24 +279,37 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 		return &Settings{}
 	}
 	if base == nil {
-		// Initialize source tracking for override
-		if override != nil && override.PluginSources == nil {
-			override.PluginSources = make(map[string]SettingSource)
-			for k := range override.EnabledPlugins {
-				override.PluginSources[k] = overrideSource
+		// Clone override to avoid mutating the caller's struct.
+		result := &Settings{
+			EnabledPlugins:                    cloneMapStringBool(override.EnabledPlugins),
+			ExtraKnownMarketplaces:            cloneMapStringMarketplace(override.ExtraKnownMarketplaces),
+			SkipDangerousModePermissionPrompt: override.SkipDangerousModePermissionPrompt,
+			PluginSources:                     make(map[string]SettingSource),
+			MarketplaceSources:                make(map[string]SettingSource),
+		}
+
+		// Initialize source tracking
+		for k := range result.EnabledPlugins {
+			if override.PluginSources != nil {
+				result.PluginSources[k] = override.PluginSources[k]
+			} else {
+				result.PluginSources[k] = overrideSource
 			}
 		}
-		if override != nil && override.MarketplaceSources == nil {
-			override.MarketplaceSources = make(map[string]SettingSource)
-			for k := range override.ExtraKnownMarketplaces {
-				override.MarketplaceSources[k] = overrideSource
+		for k := range result.ExtraKnownMarketplaces {
+			if override.MarketplaceSources != nil {
+				result.MarketplaceSources[k] = override.MarketplaceSources[k]
+			} else {
+				result.MarketplaceSources[k] = overrideSource
 			}
 		}
-		// Drop extras from non-moat sources
-		if override != nil && overrideSource != SourceMoatUser {
-			override.RawExtras = nil
+
+		// Propagate RawExtras only from moat-user source
+		if overrideSource == SourceMoatUser {
+			result.RawExtras = cloneMapStringRawMessage(override.RawExtras)
 		}
-		return override
+
+		return result
 	}
 	if override == nil {
 		return base
@@ -511,4 +524,40 @@ func (s *Settings) GetMarketplaceNames() []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+// cloneMapStringBool returns a shallow copy of the map (nil-safe).
+func cloneMapStringBool(m map[string]bool) map[string]bool {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneMapStringMarketplace returns a shallow copy of the map (nil-safe).
+func cloneMapStringMarketplace(m map[string]MarketplaceEntry) map[string]MarketplaceEntry {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]MarketplaceEntry, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneMapStringRawMessage returns a shallow copy of the map (nil-safe).
+func cloneMapStringRawMessage(m map[string]json.RawMessage) map[string]json.RawMessage {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
