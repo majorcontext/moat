@@ -114,10 +114,17 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 // Most providers store credentials under a key matching the resolved provider
 // name, but the codex provider is an exception: the provider registry name is
 // "codex" (aliased from "openai"), but credentials are stored under "openai".
-func credentialStoreKey(grantName string) credential.Provider {
-	canonical := provider.ResolveName(grantName)
+// For namespaced grants like "oauth:notion", the full grant name is used as
+// the store key so that each OAuth integration has its own credential entry.
+func credentialStoreKey(baseName, fullGrant string) credential.Provider {
+	canonical := provider.ResolveName(baseName)
 	if canonical == providerCodex {
 		return credential.ProviderOpenAI
+	}
+	// OAuth uses the full grant name as store key (oauth:notion → "oauth:notion")
+	// so each integration has its own credential entry.
+	if canonical == "oauth" {
+		return credential.Provider(fullGrant)
 	}
 	return credential.Provider(canonical)
 }

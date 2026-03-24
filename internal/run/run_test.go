@@ -214,7 +214,7 @@ func TestValidateGrants(t *testing.T) {
 			name:    "aws grant with role syntax",
 			grants:  []string{"aws:arn:aws:iam::123456:role/MyRole"},
 			wantErr: true,
-			errMsg:  "aws: not configured",
+			errMsg:  "aws:arn:aws:iam::123456:role/MyRole: not configured",
 		},
 		{
 			name:    "multiple grants one missing",

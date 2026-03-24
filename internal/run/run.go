@@ -279,19 +279,20 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 
 		// Map grant name to credential store key (handles aliases like
 		// "openai" → codex provider but credential stored under "openai").
-		credName := credentialStoreKey(grantName)
+		credName := credentialStoreKey(grantName, grant)
 
 		// Check credential exists and can be decrypted
 		_, err := store.Get(credName)
 		if err != nil {
 			errMsg := err.Error()
+			grantCmd := grantToCommand(grant)
 			switch {
 			case strings.Contains(errMsg, "credential not found"):
-				errs = append(errs, fmt.Sprintf("  - %s: not configured\n    Run: moat grant %s", grantName, grantName))
+				errs = append(errs, fmt.Sprintf("  - %s: not configured\n    Run: moat grant %s", grant, grantCmd))
 			case strings.Contains(errMsg, "decrypting credential"):
-				errs = append(errs, fmt.Sprintf("  - %s: encryption key changed\n    Run: moat grant %s", grantName, grantName))
+				errs = append(errs, fmt.Sprintf("  - %s: encryption key changed\n    Run: moat grant %s", grant, grantCmd))
 			default:
-				errs = append(errs, fmt.Sprintf("  - %s: %v\n    Run: moat grant %s", grantName, err, grantName))
+				errs = append(errs, fmt.Sprintf("  - %s: %v\n    Run: moat grant %s", grant, err, grantCmd))
 			}
 		}
 	}
@@ -300,6 +301,16 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 			strings.Join(errs, "\n"))
 	}
 	return nil
+}
+
+// grantToCommand converts a grant name like "oauth:notion" to a CLI-friendly
+// form "oauth notion" suitable for use in "moat grant <args>" instructions.
+func grantToCommand(grant string) string {
+	parts := strings.SplitN(grant, ":", 2)
+	if len(parts) == 2 {
+		return parts[0] + " " + parts[1]
+	}
+	return grant
 }
 
 // validateMCPGrants checks that all required MCP grants exist.

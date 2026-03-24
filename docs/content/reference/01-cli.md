@@ -489,6 +489,7 @@ moat grant <provider>[:<scopes>]
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
 | `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
 | `aws` | AWS (IAM role assumption) |
+| `oauth` | OAuth 2.0 (authorization code flow with PKCE) |
 
 ### moat grant github
 
@@ -583,6 +584,44 @@ The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be refer
 
 **Storage:**
 - `~/.moat/credentials/mcp-<name>.enc`
+
+### moat grant oauth
+
+Grant OAuth credentials for a service. Acquires tokens via a browser-based authorization code flow with PKCE.
+
+```
+moat grant oauth <name> [flags]
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--url` | MCP server URL for OAuth discovery |
+| `--auth-url` | OAuth authorization endpoint |
+| `--token-url` | OAuth token endpoint |
+| `--client-id` | OAuth client ID |
+| `--client-secret` | OAuth client secret |
+| `--scopes` | OAuth scopes (space-separated) |
+
+Config resolution order: CLI flags, then `~/.moat/oauth/<name>.yaml`, then MCP discovery from `--url`.
+
+#### Examples
+
+```bash
+# Auto-discover OAuth endpoints from an MCP server
+moat grant oauth notion --url https://mcp.notion.com/mcp
+
+# Provide endpoints directly
+moat grant oauth linear \
+    --auth-url https://linear.app/oauth/authorize \
+    --token-url https://linear.app/api/oauth/token \
+    --client-id your-client-id \
+    --scopes "read write"
+```
+
+**Storage:**
+- `~/.moat/credentials/oauth-<name>.enc`
 
 ### moat grant ssh
 

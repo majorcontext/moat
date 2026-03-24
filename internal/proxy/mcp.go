@@ -20,6 +20,14 @@ var mcpRelayClient = &http.Client{
 	},
 }
 
+// formatCredValue prepends "Bearer " for OAuth grants; returns raw value otherwise.
+func formatCredValue(grant, value string) string {
+	if strings.HasPrefix(grant, "oauth:") {
+		return "Bearer " + value
+	}
+	return value
+}
+
 // injectMCPCredentials checks if the request is to an MCP server and injects
 // the real credential if a stub is detected. Uses the request's own context
 // for RunContextData lookup.
@@ -133,7 +141,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	}
 
 	// Replace stub with real credential
-	targetReq.Header.Set(matchedServer.Auth.Header, credValue)
+	targetReq.Header.Set(matchedServer.Auth.Header, formatCredValue(matchedServer.Auth.Grant, credValue))
 
 	log.Debug("credential injected",
 		"subsystem", "proxy",
@@ -242,7 +250,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Inject the real credential
-		proxyReq.Header.Set(mcpServer.Auth.Header, credValue)
+		proxyReq.Header.Set(mcpServer.Auth.Header, formatCredValue(mcpServer.Auth.Grant, credValue))
 	}
 
 	// Send request to actual MCP server using the reused client

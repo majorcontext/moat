@@ -290,6 +290,61 @@ claude:
 | `grant` | `string` | Credential to inject as an environment variable (Codex and Gemini only) |
 | `cwd` | `string` | Working directory for the server process |
 
+## OAuth authentication
+
+MCP servers that use OAuth 2.0 can authenticate through `moat grant oauth`. This acquires tokens via a browser-based authorization code flow with PKCE.
+
+### Grant OAuth credentials
+
+```bash
+moat grant oauth notion --url https://mcp.notion.com/mcp
+```
+
+The `--url` flag triggers MCP OAuth discovery -- Moat fetches the server's OAuth metadata automatically. No manual endpoint configuration is needed.
+
+For servers without MCP discovery, provide OAuth endpoints directly:
+
+```bash
+moat grant oauth linear \
+    --auth-url https://linear.app/oauth/authorize \
+    --token-url https://linear.app/api/oauth/token \
+    --client-id your-client-id \
+    --scopes "read write"
+```
+
+Alternatively, create a config file at `~/.moat/oauth/<name>.yaml`:
+
+```yaml
+auth_url: https://linear.app/oauth/authorize
+token_url: https://linear.app/api/oauth/token
+client_id: your-client-id
+scopes: read write
+```
+
+Config resolution order: CLI flags, then config file (`~/.moat/oauth/<name>.yaml`), then MCP discovery from `--url`.
+
+### Configure in moat.yaml
+
+Reference the OAuth grant with the `oauth:<name>` prefix:
+
+```yaml
+grants:
+  - oauth:notion
+
+mcp:
+  - name: notion
+    url: https://mcp.notion.com/mcp
+    auth:
+      grant: oauth:notion
+      header: Authorization
+```
+
+The proxy injects a `Bearer` prefix when injecting `oauth:` grants into the `Authorization` header.
+
+### Token refresh
+
+OAuth tokens are auto-refreshed during runs. When a token expires, the proxy uses the stored refresh token to obtain a new access token without interrupting the agent.
+
 ## Observability
 
 All MCP traffic (both remote and host-local) flows through the proxy relay, so it appears in network traces:

@@ -587,7 +587,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 				// Map grant name to credential store key (handles aliases like
 				// "openai" → codex provider but credential stored under "openai").
-				credName := credentialStoreKey(grantName)
+				credName := credentialStoreKey(grantName, grant)
 				log.Debug("processing grant", "grant", grant, "credName", credName)
 				cred, getErr := store.Get(credName)
 				if getErr != nil {

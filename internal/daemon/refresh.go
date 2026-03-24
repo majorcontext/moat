@@ -10,6 +10,17 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
+// resolveCredName maps a grant (e.g. "oauth:notion", "github") to the
+// credential store key. OAuth uses the full grant name; all others use
+// the resolved provider name.
+func resolveCredName(grantName, grant string) credential.Provider {
+	canonical := provider.ResolveName(grantName)
+	if canonical == "oauth" {
+		return credential.Provider(grant)
+	}
+	return credential.Provider(canonical)
+}
+
 // StartTokenRefresh begins a background goroutine that periodically
 // refreshes credentials for the given run context.
 func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
@@ -31,7 +42,7 @@ func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
 		if grantName == "ssh" {
 			continue
 		}
-		credName := credential.Provider(provider.ResolveName(grantName))
+		credName := resolveCredName(grantName, grant)
 		prov := provider.Get(grantName)
 		if prov == nil {
 			continue
@@ -77,7 +88,7 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 		if grantName == "ssh" {
 			continue
 		}
-		credName := credential.Provider(provider.ResolveName(grantName))
+		credName := resolveCredName(grantName, grant)
 		prov := provider.Get(grantName)
 		if prov == nil {
 			continue
@@ -96,10 +107,25 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 		}
 
 		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_, err = rp.Refresh(refreshCtx, rc, provCred)
+		updated, err := rp.Refresh(refreshCtx, rc, provCred)
 		cancel()
 		if err != nil {
 			log.Debug("token refresh failed", "provider", credName, "error", err)
+			continue
+		}
+		// Persist refreshed credential to store so restarts don't lose the new token.
+		if updated != nil && updated.Token != provCred.Token {
+			storeCred := credential.Credential{
+				Provider:  credName,
+				Token:     updated.Token,
+				Scopes:    updated.Scopes,
+				ExpiresAt: updated.ExpiresAt,
+				CreatedAt: updated.CreatedAt,
+				Metadata:  updated.Metadata,
+			}
+			if saveErr := store.Save(storeCred); saveErr != nil {
+				log.Debug("failed to persist refreshed credential", "provider", credName, "error", saveErr)
+			}
 		}
 	}
 }

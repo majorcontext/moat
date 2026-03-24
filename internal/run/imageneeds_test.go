@@ -209,6 +209,48 @@ func TestResolveImageNeedsGrantWithScope(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreKey(t *testing.T) {
+	tests := []struct {
+		baseName  string
+		fullGrant string
+		want      credential.Provider
+	}{
+		{"github", "github", "github"},
+		{"claude", "claude", "claude"},
+		{"openai", "openai", credential.ProviderOpenAI},
+		{"oauth", "oauth:notion", "oauth:notion"},
+		{"oauth", "oauth:slack", "oauth:slack"},
+		{"claude", "claude:read", "claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fullGrant, func(t *testing.T) {
+			got := credentialStoreKey(tt.baseName, tt.fullGrant)
+			if got != tt.want {
+				t.Errorf("credentialStoreKey(%q, %q) = %q, want %q", tt.baseName, tt.fullGrant, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGrantToCommand(t *testing.T) {
+	tests := []struct {
+		grant string
+		want  string
+	}{
+		{"github", "github"},
+		{"oauth:notion", "oauth notion"},
+		{"ssh:github.com", "ssh github.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.grant, func(t *testing.T) {
+			got := grantToCommand(tt.grant)
+			if got != tt.want {
+				t.Errorf("grantToCommand(%q) = %q, want %q", tt.grant, got, tt.want)
+			}
+		})
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {

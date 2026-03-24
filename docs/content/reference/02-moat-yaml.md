@@ -373,6 +373,7 @@ grants:
 | `gemini` | Google Gemini API |
 | `npm` | npm registries |
 | `ssh:HOSTNAME` | SSH access to specific host |
+| `oauth:NAME` | OAuth credentials for a service |
 
 Credentials must be stored first with `moat grant`.
 

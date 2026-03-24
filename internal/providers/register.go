@@ -14,6 +14,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/graphite" // registers Graphite provider
 	_ "github.com/majorcontext/moat/internal/providers/meta"     // registers Meta provider
 	_ "github.com/majorcontext/moat/internal/providers/npm"      // registers npm provider
+	_ "github.com/majorcontext/moat/internal/providers/oauth"    // registers OAuth provider
 
 	"github.com/majorcontext/moat/internal/providers/configprovider"
 )

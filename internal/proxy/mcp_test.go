@@ -364,6 +364,151 @@ func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
 	}
 }
 
+func TestMCPOAuthCredentialInjection(t *testing.T) {
+	// OAuth grants should inject Bearer-prefixed tokens
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"oauth:notion": {
+				Provider: "oauth:notion",
+				Token:    "oauth-token-abc",
+			},
+		},
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "notion",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:  "oauth:notion",
+				Header: "Authorization",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "moat-stub-oauth:notion")
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	expected := "Bearer oauth-token-abc"
+	if rec.Body.String() != expected {
+		t.Errorf("expected body %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthRelayInjection(t *testing.T) {
+	// OAuth grants in relay path should inject Bearer-prefixed tokens
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"oauth:notion": {
+				Provider: "oauth:notion",
+				Token:    "oauth-relay-token",
+			},
+		},
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("Authorization")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "notion",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:  "oauth:notion",
+				Header: "Authorization",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	req := httptest.NewRequest("POST", "/mcp/notion", nil)
+	rec := httptest.NewRecorder()
+	p.handleMCPRelay(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	expected := "Bearer oauth-relay-token"
+	if rec.Body.String() != expected {
+		t.Errorf("expected %q, got %q", expected, rec.Body.String())
+	}
+}
+
+func TestMCPStaticCredentialStillRaw(t *testing.T) {
+	// Non-oauth grants should inject raw tokens without Bearer prefix
+	mockStore := &mockCredentialStore{
+		creds: map[credential.Provider]*credential.Credential{
+			"mcp-context7": {
+				Provider: "mcp-context7",
+				Token:    "raw-api-key-456",
+			},
+		},
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("API_KEY")))
+	}))
+	defer backend.Close()
+
+	mcpServers := []config.MCPServerConfig{
+		{
+			Name: "context7",
+			URL:  backend.URL,
+			Auth: &config.MCPAuthConfig{
+				Grant:  "mcp-context7",
+				Header: "API_KEY",
+			},
+		},
+	}
+
+	p := &Proxy{
+		credStore:  mockStore,
+		mcpServers: mcpServers,
+	}
+
+	// Test via proxy injection path
+	req := httptest.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("API_KEY", "moat-stub-mcp-context7")
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Body.String() != "raw-api-key-456" {
+		t.Errorf("expected body 'raw-api-key-456' (no Bearer prefix), got %q", rec.Body.String())
+	}
+
+	// Test via relay path
+	req2 := httptest.NewRequest("POST", "/mcp/context7", nil)
+	rec2 := httptest.NewRecorder()
+	p.handleMCPRelay(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec2.Code)
+	}
+	if rec2.Body.String() != "raw-api-key-456" {
+		t.Errorf("expected 'raw-api-key-456' (no Bearer prefix), got %q", rec2.Body.String())
+	}
+}
+
 // mockCredentialStore for testing
 type mockCredentialStore struct {
 	creds map[credential.Provider]*credential.Credential
