@@ -292,6 +292,10 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 				override.MarketplaceSources[k] = overrideSource
 			}
 		}
+		// Drop extras from non-moat sources
+		if override != nil && overrideSource != SourceMoatUser {
+			override.RawExtras = nil
+		}
 		return override
 	}
 	if override == nil {
@@ -331,6 +335,29 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 	for k, v := range override.ExtraKnownMarketplaces {
 		result.ExtraKnownMarketplaces[k] = v
 		result.MarketplaceSources[k] = overrideSource
+	}
+
+	// Propagate RawExtras only from the moat-user source.
+	// Other sources (host ~/.claude/settings.json, project, moat.yaml)
+	// are filtered to known fields only.
+	if overrideSource == SourceMoatUser && len(override.RawExtras) > 0 {
+		if result.RawExtras == nil {
+			result.RawExtras = make(map[string]json.RawMessage)
+		}
+		for k, v := range override.RawExtras {
+			result.RawExtras[k] = v
+		}
+	}
+	// Preserve base extras (from earlier moat-user merge)
+	if len(base.RawExtras) > 0 {
+		if result.RawExtras == nil {
+			result.RawExtras = make(map[string]json.RawMessage)
+		}
+		for k, v := range base.RawExtras {
+			if _, exists := result.RawExtras[k]; !exists {
+				result.RawExtras[k] = v
+			}
+		}
 	}
 
 	return result

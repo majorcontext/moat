@@ -767,6 +767,67 @@ func TestLoadKnownMarketplacesEmptyURL(t *testing.T) {
 	}
 }
 
+func TestMergeSettingsRawExtras(t *testing.T) {
+	// Extras from moat-user source should be preserved.
+	base := &Settings{
+		EnabledPlugins: map[string]bool{"plugin@market": true},
+	}
+	override := &Settings{
+		RawExtras: map[string]json.RawMessage{
+			"statusLine": json.RawMessage(`{"command":"date"}`),
+		},
+	}
+
+	result := MergeSettings(base, override, SourceMoatUser)
+	if result.RawExtras == nil {
+		t.Fatal("RawExtras should be preserved from moat-user source")
+	}
+	if _, ok := result.RawExtras["statusLine"]; !ok {
+		t.Error("statusLine should be in RawExtras")
+	}
+}
+
+func TestMergeSettingsRawExtrasDroppedFromNonMoatSources(t *testing.T) {
+	// Extras from non-moat sources should be dropped.
+	base := &Settings{}
+	override := &Settings{
+		RawExtras: map[string]json.RawMessage{
+			"statusLine": json.RawMessage(`{"command":"date"}`),
+		},
+	}
+
+	for _, source := range []SettingSource{SourceClaudeUser, SourceProject, SourceMoatYAML} {
+		result := MergeSettings(base, override, source)
+		if len(result.RawExtras) > 0 {
+			t.Errorf("RawExtras should be dropped for source %s", source)
+		}
+	}
+}
+
+func TestMergeSettingsPreservesBaseExtrasWhenOverrideIsNonMoat(t *testing.T) {
+	// Base extras (from a prior moat-user merge) should survive when
+	// the override comes from a non-moat source (e.g., project settings).
+	base := &Settings{
+		RawExtras: map[string]json.RawMessage{
+			"fromMoatUser": json.RawMessage(`"kept"`),
+		},
+	}
+	override := &Settings{
+		EnabledPlugins: map[string]bool{"project-plugin@market": true},
+		RawExtras: map[string]json.RawMessage{
+			"fromProject": json.RawMessage(`"dropped"`),
+		},
+	}
+
+	result := MergeSettings(base, override, SourceProject)
+	if _, ok := result.RawExtras["fromMoatUser"]; !ok {
+		t.Error("base extras from prior moat-user merge should be preserved")
+	}
+	if _, ok := result.RawExtras["fromProject"]; ok {
+		t.Error("override extras from project source should be dropped")
+	}
+}
+
 func TestLoadSettingsPreservesUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "settings.json")
