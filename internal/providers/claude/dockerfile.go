@@ -115,7 +115,8 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	// Ensure the Claude CLI is on PATH. The native installer places the binary
 	// in ~/.claude/local/bin/ which may not be in PATH during image build.
 	script.WriteString(fmt.Sprintf("export PATH=\"/home/%s/.claude/local/bin:/home/%s/.local/bin:$PATH\"\n\n", containerUser, containerUser))
-	script.WriteString("failures=0\n\n")
+	script.WriteString("failures=0\n")
+	script.WriteString("failed_ops=\"\"\n\n")
 
 	// Add remote marketplaces only — pre-cloned ones are COPYed into the image.
 	// Failures are fatal (marketplaces are prerequisites for plugins).
@@ -125,21 +126,24 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		}
 		// Validate name for safe use in shell echo statements
 		if !validName.MatchString(m.Name) {
-			script.WriteString("echo 'ERROR: Invalid marketplace name, skipping' >&2\n")
+			script.WriteString("echo 'ERROR: Invalid marketplace name, skipping'\n")
 			script.WriteString("failures=$((failures + 1))\n")
+			script.WriteString("failed_ops=\"$failed_ops marketplace:unknown\"\n")
 			continue
 		}
 		// Validate repo format to prevent command injection
 		if !validMarketplaceRepo.MatchString(m.Repo) {
-			script.WriteString(fmt.Sprintf("echo 'ERROR: Invalid marketplace repo format: %s, skipping' >&2\n", m.Name))
+			script.WriteString(fmt.Sprintf("echo 'ERROR: Invalid marketplace repo format: %s, skipping'\n", m.Name))
 			script.WriteString("failures=$((failures + 1))\n")
+			script.WriteString(fmt.Sprintf("failed_ops=\"$failed_ops marketplace:%s\"\n", m.Name))
 			continue
 		}
 		script.WriteString(fmt.Sprintf("if claude plugin marketplace add %s; then\n", m.Repo))
 		script.WriteString(fmt.Sprintf("  echo 'Added marketplace %s'\n", m.Name))
 		script.WriteString("else\n")
-		script.WriteString(fmt.Sprintf("  echo 'ERROR: Failed to add marketplace %s' >&2\n", m.Name))
+		script.WriteString(fmt.Sprintf("  echo 'ERROR: Failed to add marketplace %s'\n", m.Name))
 		script.WriteString("  failures=$((failures + 1))\n")
+		script.WriteString(fmt.Sprintf("  failed_ops=\"$failed_ops marketplace:%s\"\n", m.Name))
 		script.WriteString("fi\n")
 	}
 
@@ -150,21 +154,23 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 		// so validated plugins are safe in shell echo statements.
 		if !validPluginKey.MatchString(plugin) {
 			// Don't embed the invalid value — it failed validation and may contain shell metacharacters.
-			script.WriteString("echo 'ERROR: Invalid plugin format (expected plugin-name@marketplace-name), skipping' >&2\n")
+			script.WriteString("echo 'ERROR: Invalid plugin format (expected plugin-name@marketplace-name), skipping'\n")
 			script.WriteString("failures=$((failures + 1))\n")
+			script.WriteString("failed_ops=\"$failed_ops plugin:invalid\"\n")
 			continue
 		}
 		script.WriteString(fmt.Sprintf("if claude plugin install %s; then\n", plugin))
 		script.WriteString(fmt.Sprintf("  echo 'Installed plugin %s'\n", plugin))
 		script.WriteString("else\n")
-		script.WriteString(fmt.Sprintf("  echo 'ERROR: Failed to install plugin %s' >&2\n", plugin))
+		script.WriteString(fmt.Sprintf("  echo 'ERROR: Failed to install plugin %s'\n", plugin))
 		script.WriteString("  failures=$((failures + 1))\n")
+		script.WriteString(fmt.Sprintf("  failed_ops=\"$failed_ops plugin:%s\"\n", plugin))
 		script.WriteString("fi\n")
 	}
 
 	// Exit with failure if anything went wrong
 	script.WriteString("\nif [ \"$failures\" -gt 0 ]; then\n")
-	script.WriteString("  echo \"ERROR: $failures plugin operation(s) failed\" >&2\n")
+	script.WriteString("  echo \"ERROR: $failures plugin operation(s) failed:$failed_ops\"\n")
 	script.WriteString("  exit 1\n")
 	script.WriteString("fi\n")
 
