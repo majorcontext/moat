@@ -277,6 +277,23 @@ moat claude --grant ssh:github.com ./my-project
 
 Claude Code can use `git@github.com:...` URLs for cloning and pushing.
 
+## User settings
+
+`~/.moat/claude/settings.json` is your personal Claude Code settings layer for moat containers. Any field you add to this file is forwarded into the container's `~/.claude/settings.json` as-is -- you do not need to wait for moat to add explicit support for new Claude Code settings.
+
+```json
+{
+  "enabledPlugins": {
+    "my-plugin@marketplace": true
+  },
+  "statusLine": {
+    "command": "node ~/.claude/moat/statusline.js"
+  }
+}
+```
+
+In contrast, moat only reads plugin and marketplace fields from your host `~/.claude/settings.json`. This prevents host-specific settings from leaking into containers.
+
 ## Plugin management
 
 Moat supports Claude Code plugins, with automatic discovery of plugins installed on your host machine.
