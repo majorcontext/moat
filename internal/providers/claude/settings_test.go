@@ -872,6 +872,124 @@ func TestLoadSettingsPreservesUnknownFields(t *testing.T) {
 	}
 }
 
+func TestSettingsRoundTripWithExtras(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "enabledPlugins": {
+    "plugin@market": true
+  },
+  "statusLine": {
+    "command": "node ~/.claude/moat/statusline.js"
+  },
+  "customField": 42
+}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	// Marshal back to JSON
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+
+	// Parse the output and verify both known and unknown fields are present
+	var output map[string]json.RawMessage
+	if err := json.Unmarshal(data, &output); err != nil {
+		t.Fatalf("Unmarshal output: %v", err)
+	}
+
+	if _, ok := output["enabledPlugins"]; !ok {
+		t.Error("enabledPlugins should be in output")
+	}
+	if _, ok := output["statusLine"]; !ok {
+		t.Error("statusLine should be in output")
+	}
+	if _, ok := output["customField"]; !ok {
+		t.Error("customField should be in output")
+	}
+}
+
+func TestLoadAllSettingsPreservesMoatUserExtras(t *testing.T) {
+	// Set up fake home with moat-user settings containing unknown fields.
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
+
+	moatClaudeDir := filepath.Join(fakeHome, ".moat", "claude")
+	if err := os.MkdirAll(moatClaudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	moatSettings := `{
+  "enabledPlugins": { "moat-plugin@market": true },
+  "statusLine": { "command": "date" },
+  "customSetting": "from-moat-user"
+}`
+	if err := os.WriteFile(filepath.Join(moatClaudeDir, "settings.json"), []byte(moatSettings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up workspace with project settings that also have unknown fields.
+	workspace := t.TempDir()
+	projClaudeDir := filepath.Join(workspace, ".claude")
+	if err := os.MkdirAll(projClaudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projSettings := `{
+  "enabledPlugins": { "proj-plugin@market": true },
+  "projectOnlySetting": "should-be-dropped"
+}`
+	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply moat.yaml overrides too.
+	cfg := &config.Config{
+		Claude: config.ClaudeConfig{
+			Plugins: map[string]bool{"yaml-plugin@market": true},
+		},
+	}
+
+	result, err := LoadAllSettings(workspace, cfg)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+
+	// All plugins from all sources should be present.
+	if !result.EnabledPlugins["moat-plugin@market"] {
+		t.Error("moat-plugin should be present")
+	}
+	if !result.EnabledPlugins["proj-plugin@market"] {
+		t.Error("proj-plugin should be present")
+	}
+	if !result.EnabledPlugins["yaml-plugin@market"] {
+		t.Error("yaml-plugin should be present")
+	}
+
+	// Moat-user extras should survive all merge layers.
+	if result.RawExtras == nil {
+		t.Fatal("RawExtras should not be nil")
+	}
+	if _, ok := result.RawExtras["statusLine"]; !ok {
+		t.Error("statusLine from moat-user should survive")
+	}
+	if _, ok := result.RawExtras["customSetting"]; !ok {
+		t.Error("customSetting from moat-user should survive")
+	}
+
+	// Project extras should NOT survive.
+	if _, ok := result.RawExtras["projectOnlySetting"]; ok {
+		t.Error("projectOnlySetting should be dropped (non-moat source)")
+	}
+}
+
 func TestSettingsJSONRoundTrip(t *testing.T) {
 	// Verify that Settings serializes to valid Claude Code settings.json format
 	// and can be loaded back via LoadSettings.
