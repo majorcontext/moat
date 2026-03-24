@@ -165,6 +165,24 @@ Both Docker and Apple containers support directory mounts with read-only and rea
 
 One difference: Apple containers only support directory mounts, not individual file mounts. Moat handles this internally (for example, mounting a directory containing a CA certificate rather than the certificate file directly). If a mount source is a file, Moat mounts the containing directory instead.
 
+## Global mounts
+
+Global mounts are personal mounts that apply to every run. Configure them in `~/.moat/config.yaml`:
+
+```yaml
+mounts:
+  - source: ~/.moat/scripts/statusline.js
+    target: /home/user/.claude/moat/statusline.js
+```
+
+Global mounts use the same syntax as `moat.yaml` mounts (both string and object forms) with these constraints:
+
+- **Source paths must be absolute** (or use `~` for home directory). There is no workspace to resolve relative paths against.
+- **Always read-only.** Moat enforces read-only mode on global mounts regardless of the `mode` field.
+- **Excludes are not supported.**
+
+Global mounts are appended after project mounts and before volumes.
+
 ## Related pages
 
 - [CLI reference](./01-cli.md) -- `moat run` flags including `--mount`
