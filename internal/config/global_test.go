@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -138,6 +139,109 @@ mounts:
 	}
 	if !cfg.Mounts[1].ReadOnly {
 		t.Error("mount[1] should be read-only")
+	}
+}
+
+func TestLoadGlobal_MountsRelativeSourceRejected(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	moatDir := filepath.Join(tmpHome, ".moat")
+	os.MkdirAll(moatDir, 0755)
+
+	content := `
+mounts:
+  - source: ./relative/path
+    target: /container/path
+`
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+
+	_, err := LoadGlobal()
+	if err == nil {
+		t.Fatal("expected error for relative source path")
+	}
+	if !strings.Contains(err.Error(), "absolute path") {
+		t.Errorf("error should mention absolute path, got: %v", err)
+	}
+}
+
+func TestLoadGlobal_MountsExcludeRejected(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	moatDir := filepath.Join(tmpHome, ".moat")
+	os.MkdirAll(moatDir, 0755)
+
+	content := `
+mounts:
+  - source: /home/user/data
+    target: /data
+    exclude:
+      - node_modules
+`
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+
+	_, err := LoadGlobal()
+	if err == nil {
+		t.Fatal("expected error for excludes on global mount")
+	}
+	if !strings.Contains(err.Error(), "excludes") {
+		t.Errorf("error should mention excludes, got: %v", err)
+	}
+}
+
+func TestLoadGlobal_MountsTildeExpansion(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	moatDir := filepath.Join(tmpHome, ".moat")
+	os.MkdirAll(moatDir, 0755)
+
+	content := `
+mounts:
+  - source: ~/.moat/scripts/statusline.js
+    target: /home/user/.claude/moat/statusline.js
+`
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+
+	cfg, err := LoadGlobal()
+	if err != nil {
+		t.Fatalf("LoadGlobal: %v", err)
+	}
+
+	if len(cfg.Mounts) != 1 {
+		t.Fatalf("Mounts = %d, want 1", len(cfg.Mounts))
+	}
+
+	expected := filepath.Join(tmpHome, ".moat/scripts/statusline.js")
+	if cfg.Mounts[0].Source != expected {
+		t.Errorf("Source = %q, want %q", cfg.Mounts[0].Source, expected)
+	}
+}
+
+func TestLoadGlobal_MountsEnforcesReadOnly(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	moatDir := filepath.Join(tmpHome, ".moat")
+	os.MkdirAll(moatDir, 0755)
+
+	// Mount specified as rw — should be forced to ro
+	content := `
+mounts:
+  - source: /home/user/data
+    target: /data
+    mode: rw
+`
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+
+	cfg, err := LoadGlobal()
+	if err != nil {
+		t.Fatalf("LoadGlobal: %v", err)
+	}
+
+	if !cfg.Mounts[0].ReadOnly {
+		t.Error("global mount should be forced to read-only")
 	}
 }
 
