@@ -72,7 +72,7 @@ brews:
   - name: moat
     repository:
       owner: majorcontext
-      name: homebrew-moat
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     commit_author:

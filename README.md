@@ -15,7 +15,7 @@ For design rationale and principles, see [VISION.md](VISION.md), for pretty vers
 ## Installation
 
 ```bash
-brew tap majorcontext/moat
+brew tap majorcontext/tap
 brew install moat
 ```
 

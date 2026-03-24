@@ -15,7 +15,7 @@ keywords: ["moat", "installation", "docker", "apple containers", "setup", "homeb
 ### Homebrew (recommended)
 
 ```bash
-brew tap majorcontext/moat
+brew tap majorcontext/tap
 brew install moat
 ```
 
