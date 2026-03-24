@@ -96,6 +96,51 @@ func TestLoadGlobal_DebugConfig(t *testing.T) {
 	}
 }
 
+func TestLoadGlobal_Mounts(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	moatDir := filepath.Join(tmpHome, ".moat")
+	os.MkdirAll(moatDir, 0755)
+
+	content := `
+mounts:
+  - source: /home/user/.moat/claude/statusline.js
+    target: /home/user/.claude/moat/statusline.js
+    mode: ro
+  - /home/user/.moat/scripts/helper.sh:/home/user/.local/bin/helper.sh:ro
+`
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+
+	cfg, err := LoadGlobal()
+	if err != nil {
+		t.Fatalf("LoadGlobal: %v", err)
+	}
+
+	if len(cfg.Mounts) != 2 {
+		t.Fatalf("Mounts = %d, want 2", len(cfg.Mounts))
+	}
+
+	// Object form
+	if cfg.Mounts[0].Source != "/home/user/.moat/claude/statusline.js" {
+		t.Errorf("mount[0].Source = %q", cfg.Mounts[0].Source)
+	}
+	if cfg.Mounts[0].Target != "/home/user/.claude/moat/statusline.js" {
+		t.Errorf("mount[0].Target = %q", cfg.Mounts[0].Target)
+	}
+	if !cfg.Mounts[0].ReadOnly {
+		t.Error("mount[0] should be read-only")
+	}
+
+	// String form
+	if cfg.Mounts[1].Source != "/home/user/.moat/scripts/helper.sh" {
+		t.Errorf("mount[1].Source = %q", cfg.Mounts[1].Source)
+	}
+	if !cfg.Mounts[1].ReadOnly {
+		t.Error("mount[1] should be read-only")
+	}
+}
+
 func TestDefaultGlobalConfig_DebugDefaults(t *testing.T) {
 	cfg := DefaultGlobalConfig()
 	if cfg.Debug.RetentionDays != 14 {

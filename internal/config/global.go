@@ -1,17 +1,20 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
-	Proxy ProxyConfig `yaml:"proxy"`
-	Debug DebugConfig `yaml:"debug"`
+	Proxy  ProxyConfig  `yaml:"proxy"`
+	Debug  DebugConfig  `yaml:"debug"`
+	Mounts []MountEntry `yaml:"mounts,omitempty"`
 }
 
 // DebugConfig holds debug logging settings.
@@ -47,6 +50,31 @@ func LoadGlobal() (*GlobalConfig, error) {
 		if data, err := os.ReadFile(configPath); err == nil {
 			_ = yaml.Unmarshal(data, cfg) // Ignore unmarshal errors, use defaults
 		}
+
+		// Validate global mounts: require absolute source paths and read-only mode.
+		var validMounts []MountEntry
+		for i, m := range cfg.Mounts {
+			// Expand ~ in source path
+			if strings.HasPrefix(m.Source, "~/") {
+				m.Source = filepath.Join(homeDir, m.Source[2:])
+			}
+
+			if !filepath.IsAbs(m.Source) {
+				return nil, fmt.Errorf("global mount %d: source %q must be an absolute path (no workspace to resolve relative paths against)", i+1, m.Source)
+			}
+
+			// Enforce read-only
+			m.ReadOnly = true
+			m.Mode = "ro"
+
+			// Excludes not supported on global mounts
+			if len(m.Exclude) > 0 {
+				return nil, fmt.Errorf("global mount %d: excludes are not supported on global mounts", i+1)
+			}
+
+			validMounts = append(validMounts, m)
+		}
+		cfg.Mounts = validMounts
 	}
 
 	// Apply environment overrides
