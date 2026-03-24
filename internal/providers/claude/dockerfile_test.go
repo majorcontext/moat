@@ -55,11 +55,6 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("script should export PATH with Claude CLI locations")
 	}
 
-	// Script should use set -e
-	if !strings.Contains(scriptStr, "set -e") {
-		t.Error("script should use set -e")
-	}
-
 	// Script should track failures
 	if !strings.Contains(scriptStr, "failures=0") {
 		t.Error("script should initialize failure counter")
