@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -123,9 +124,18 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 		return "", "", fmt.Errorf("invalid marketplace repo format: %q", repo)
 	}
 
-	url := repo
-	if !strings.Contains(repo, "://") && !strings.HasPrefix(repo, "git@") {
-		url = "https://github.com/" + repo + ".git"
+	// Build the list of URLs to try. For GitHub shorthand repos (org/repo),
+	// try HTTPS first, then fall back to SSH. This handles hosts that have
+	// SSH keys configured but no HTTPS credentials (gh auth / credential helper).
+	isGitHubShorthand := !strings.Contains(repo, "://") && !strings.HasPrefix(repo, "git@")
+	var urls []string
+	if isGitHubShorthand {
+		urls = []string{
+			"https://github.com/" + repo + ".git",
+			"git@github.com:" + repo + ".git",
+		}
+	} else {
+		urls = []string{repo}
 	}
 
 	dir, err = os.MkdirTemp("", "moat-marketplace-*")
@@ -133,19 +143,33 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 		return "", "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
+	var cloneErrors []error
+	var cloned bool
+	for _, url := range urls {
+		args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	// Prevent git from opening /dev/tty to prompt for credentials.
-	// Without this, private repos cause an interactive username/password
-	// prompt that blocks the build. Failing fast lets the caller report
-	// a clear error about needing 'gh auth login' or SSH keys.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Clean up on failure.
+		cmd := exec.CommandContext(ctx, "git", args...)
+		// Prevent git from opening /dev/tty to prompt for credentials.
+		// Without this, private repos cause an interactive username/password
+		// prompt that blocks the build. Failing fast lets us try the next URL.
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		output, cloneErr := cmd.CombinedOutput()
+		if cloneErr == nil {
+			cloned = true
+			break
+		}
+		cloneErrors = append(cloneErrors, fmt.Errorf("git clone %s: %w\n%s", url, cloneErr, output))
+		// Clean dir contents for the next attempt (MkdirTemp created it,
+		// git clone may have partially populated it).
 		os.RemoveAll(dir)
-		return "", "", fmt.Errorf("git clone %s: %w\n%s", url, err, output)
+		if mkErr := os.MkdirAll(dir, 0700); mkErr != nil {
+			os.RemoveAll(dir)
+			return "", "", fmt.Errorf("recreating temp dir: %w", mkErr)
+		}
+	}
+	if !cloned {
+		os.RemoveAll(dir)
+		return "", "", errors.Join(cloneErrors...)
 	}
 
 	// Extract the last commit timestamp for deterministic known_marketplaces.json.

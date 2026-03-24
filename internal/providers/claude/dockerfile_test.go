@@ -195,6 +195,43 @@ func TestGenerateDockerfileSnippetValidation(t *testing.T) {
 	})
 }
 
+func TestGenerateDockerfileSnippetFailedOpsTracking(t *testing.T) {
+	// Verify the script tracks which operations failed by name in the summary.
+	t.Run("failed marketplace names in summary", func(t *testing.T) {
+		marketplaces := []MarketplaceConfig{
+			{Name: "good", Source: "github", Repo: "valid/repo"},
+			{Name: "evil", Source: "github", Repo: "; rm -rf /"},
+		}
+
+		result := GenerateDockerfileSnippet(marketplaces, nil, "moatuser")
+		scriptStr := string(result.ScriptContent)
+
+		// Script should track the invalid marketplace in failed_ops
+		if !strings.Contains(scriptStr, `failed_ops="$failed_ops marketplace:evil"`) {
+			t.Error("should track failed marketplace name in failed_ops")
+		}
+		// Final summary should include failed_ops
+		if !strings.Contains(scriptStr, `failed:$failed_ops"`) {
+			t.Error("final error summary should include failed_ops variable")
+		}
+	})
+
+	t.Run("failed plugin names in summary", func(t *testing.T) {
+		// Use a valid marketplace so only plugin install failures are tracked.
+		plugins := []string{
+			"good-plugin@market",
+		}
+
+		result := GenerateDockerfileSnippet(nil, plugins, "moatuser")
+		scriptStr := string(result.ScriptContent)
+
+		// Script should track the plugin in failed_ops on failure
+		if !strings.Contains(scriptStr, `failed_ops="$failed_ops plugin:good-plugin@market"`) {
+			t.Error("should track failed plugin name in failed_ops")
+		}
+	})
+}
+
 func TestGenerateDockerfileSnippetPreCloned(t *testing.T) {
 	// Mixed: one pre-cloned, one remote marketplace.
 	marketplaces := []MarketplaceConfig{
