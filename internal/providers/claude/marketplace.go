@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -142,7 +143,8 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 		return "", "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	var lastErr error
+	var cloneErrors []error
+	var cloned bool
 	for _, url := range urls {
 		args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
 
@@ -153,10 +155,10 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 		output, cloneErr := cmd.CombinedOutput()
 		if cloneErr == nil {
-			lastErr = nil
+			cloned = true
 			break
 		}
-		lastErr = fmt.Errorf("git clone %s: %w\n%s", url, cloneErr, output)
+		cloneErrors = append(cloneErrors, fmt.Errorf("git clone %s: %w\n%s", url, cloneErr, output))
 		// Clean dir contents for the next attempt (MkdirTemp created it,
 		// git clone may have partially populated it).
 		os.RemoveAll(dir)
@@ -165,9 +167,9 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 			return "", "", fmt.Errorf("recreating temp dir: %w", mkErr)
 		}
 	}
-	if lastErr != nil {
+	if !cloned {
 		os.RemoveAll(dir)
-		return "", "", lastErr
+		return "", "", errors.Join(cloneErrors...)
 	}
 
 	// Extract the last commit timestamp for deterministic known_marketplaces.json.
