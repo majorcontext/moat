@@ -598,24 +598,41 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// Convert credential for new provider interface
 				provCred := provider.FromLegacy(cred)
 
+				// Store MCP credential on RunContext so the daemon proxy can
+				// resolve it by grant name during MCP relay requests. This
+				// runs for ALL grants (not just provider-less ones) because
+				// grants like "oauth:notion" have a registered provider but
+				// still need their credential stored for the MCP relay.
+				if opts.Config != nil {
+					for _, mcp := range opts.Config.MCP {
+						log.Debug("MCP grant match check",
+							"mcp.Name", mcp.Name,
+							"mcp.Auth.Grant", mcp.Auth.Grant,
+							"grant", grant,
+							"match", mcp.Auth != nil && mcp.Auth.Grant == grant)
+						if mcp.Auth != nil && mcp.Auth.Grant == grant {
+							serverHost := mcp.URL
+							if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+								serverHost = u.Host
+							}
+							log.Debug("storing MCP credential on RunContext",
+								"server", mcp.Name,
+								"host", serverHost,
+								"grant", grant,
+								"header", mcp.Auth.Header,
+								"tokenLen", len(provCred.Token))
+							runCtx.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grant)
+						}
+					}
+				} else {
+					log.Debug("no config on opts, skipping MCP credential storage", "grant", grant)
+				}
+
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")
 				// MCP grants (e.g., "mcp-test") have no registered provider — they are
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
 				prov := provider.Get(grantName)
 				if prov == nil {
-					// Store MCP credential on RunContext so the daemon proxy can
-					// resolve it by grant name during MCP relay requests.
-					if opts.Config != nil {
-						for _, mcp := range opts.Config.MCP {
-							if mcp.Auth != nil && mcp.Auth.Grant == grantName {
-								serverHost := mcp.URL // use full URL as key to avoid conflicts
-								if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
-									serverHost = u.Host
-								}
-								runCtx.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grantName)
-							}
-						}
-					}
 					continue
 				}
 				// Configure the RunContext (which implements ProxyConfigurer)

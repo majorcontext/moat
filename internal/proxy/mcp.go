@@ -226,12 +226,22 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 		// Try RunContextData credentials (daemon mode).
 		if rc := getRunContext(r); rc != nil {
-			for _, cred := range rc.Credentials {
+			log.Debug("MCP relay: searching RunContext credentials",
+				"server", serverName,
+				"wantGrant", mcpServer.Auth.Grant,
+				"numCreds", len(rc.Credentials))
+			for host, cred := range rc.Credentials {
+				log.Debug("MCP relay: credential entry",
+					"host", host,
+					"grant", cred.Grant,
+					"hasValue", cred.Value != "")
 				if cred.Grant == mcpServer.Auth.Grant {
 					credValue = cred.Value
 					break
 				}
 			}
+		} else {
+			log.Debug("MCP relay: no RunContext found", "server", serverName)
 		}
 
 		// Fall back to credential store (legacy single-run mode).
@@ -253,6 +263,12 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Header.Set(mcpServer.Auth.Header, formatCredValue(mcpServer.Auth.Grant, credValue))
 	}
 
+	log.Debug("MCP relay: forwarding request",
+		"server", serverName,
+		"method", proxyReq.Method,
+		"url", targetURL.String(),
+		"hasAuth", proxyReq.Header.Get("Authorization") != "")
+
 	// Send request to actual MCP server using the reused client
 	resp, err := mcpRelayClient.Do(proxyReq)
 	if err != nil {
@@ -261,6 +277,11 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
+	log.Debug("MCP relay: response received",
+		"server", serverName,
+		"status", resp.StatusCode,
+		"contentType", resp.Header.Get("Content-Type"))
 
 	// Copy response headers
 	for key, values := range resp.Header {

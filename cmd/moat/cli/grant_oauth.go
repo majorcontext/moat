@@ -163,8 +163,12 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 	if !provCred.ExpiresAt.IsZero() {
 		fmt.Printf("Expires: %s (auto-refresh enabled)\n", provCred.ExpiresAt.Format("2006-01-02 15:04:05"))
 	}
+	serverURL := resource
+	if serverURL == "" {
+		serverURL = "<server-url>"
+	}
 	fmt.Printf("\nUse in moat.yaml:\n\n")
-	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: <server-url>\n    auth:\n      grant: oauth:%s\n\n", name, name, name)
+	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n\n", name, name, serverURL, name)
 
 	return nil
 }

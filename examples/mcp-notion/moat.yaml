@@ -1,0 +1,32 @@
+# Example: Notion MCP server with OAuth
+#
+# Gives Claude Code access to your Notion workspace through the
+# remote Notion MCP server. Credentials are injected transparently
+# by the proxy — the agent never sees raw tokens.
+#
+# First, grant OAuth credentials (one-time):
+#   moat grant oauth notion
+#
+# Then run:
+#   moat claude examples/mcp-notion
+#
+# The OAuth token is automatically refreshed in the background.
+
+name: mcp-notion
+
+dependencies:
+  - claude-code
+
+grants:
+  - claude
+  - oauth:notion
+
+command: ["claude"]
+interactive: true
+
+mcp:
+  - name: notion
+    url: https://mcp.notion.com
+    auth:
+      grant: oauth:notion
+      header: Authorization
