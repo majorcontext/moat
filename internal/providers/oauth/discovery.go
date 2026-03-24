@@ -61,13 +61,8 @@ func DiscoverFromMCPServer(ctx context.Context, mcpServerURL string) (*Config, s
 	}
 
 	if asm.RegistrationEndpoint != "" {
-		log.Debug("performing dynamic client registration", "endpoint", asm.RegistrationEndpoint)
-		reg, err := registerClient(ctx, asm.RegistrationEndpoint, "moat", []string{"http://localhost/callback"})
-		if err != nil {
-			return nil, "", fmt.Errorf("dynamic client registration: %w", err)
-		}
-		cfg.ClientID = reg.ClientID
-		log.Debug("registered client", "client_id", reg.ClientID)
+		cfg.RegistrationEndpoint = asm.RegistrationEndpoint
+		log.Debug("DCR endpoint available (deferred until redirect URI known)", "endpoint", asm.RegistrationEndpoint)
 	}
 
 	return cfg, prm.Resource, nil

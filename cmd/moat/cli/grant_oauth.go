@@ -113,12 +113,6 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 				cfg = discovered
 				resource = res
 				fmt.Println("Discovered OAuth endpoints.")
-				// Cache discovered config (with DCR client_id)
-				if cfg.ClientID != "" {
-					if saveErr := oauth.SaveConfig(oauth.DefaultConfigDir(), name, cfg); saveErr != nil {
-						log.Debug("failed to cache discovered config", "error", saveErr)
-					}
-				}
 			} else {
 				fmt.Printf("Discovery failed: %v\n", err)
 			}
@@ -134,10 +128,17 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 			"See: https://majorcontext.com/moat/guides/mcp", name, name)
 	}
 
-	// Run the OAuth flow
+	// Run the OAuth flow (includes DCR if RegistrationEndpoint is set)
 	provCred, err := oauth.RunGrant(ctx, name, cfg, resource)
 	if err != nil {
 		return err
+	}
+
+	// Cache config after successful grant (DCR may have populated ClientID)
+	if cfg.ClientID != "" {
+		if saveErr := oauth.SaveConfig(oauth.DefaultConfigDir(), name, cfg); saveErr != nil {
+			log.Debug("failed to cache OAuth config", "error", saveErr)
+		}
 	}
 
 	// Store credential

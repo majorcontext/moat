@@ -212,6 +212,20 @@ func RunGrant(ctx context.Context, name string, cfg *Config, resource string) (*
 	}()
 
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	// Perform DCR now that we know the actual redirect URI.
+	if cfg.ClientID == "" && cfg.RegistrationEndpoint != "" {
+		fmt.Println("Registering OAuth client...")
+		reg, regErr := registerClient(ctx, cfg.RegistrationEndpoint, "moat", []string{redirectURI})
+		if regErr != nil {
+			return nil, fmt.Errorf("dynamic client registration: %w", regErr)
+		}
+		cfg.ClientID = reg.ClientID
+	}
+	if cfg.ClientID == "" {
+		return nil, fmt.Errorf("no client_id: discovery did not find a registration endpoint and no client_id was configured")
+	}
+
 	authURL := buildAuthURL(cfg, state, challenge, redirectURI, resource)
 
 	// Try to open browser; not fatal if it fails.

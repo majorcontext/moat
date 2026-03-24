@@ -17,6 +17,11 @@ type Config struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret,omitempty"`
 	Scopes       string `yaml:"scopes,omitempty"`
+
+	// RegistrationEndpoint is set by discovery when Dynamic Client
+	// Registration (RFC 7591) is available. It is not persisted to YAML;
+	// once DCR succeeds the resulting ClientID is cached instead.
+	RegistrationEndpoint string `yaml:"-"`
 }
 
 // Validate checks that required fields are present and URLs use HTTPS.

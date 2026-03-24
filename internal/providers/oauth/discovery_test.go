@@ -219,8 +219,12 @@ func TestDiscoverFromMCPServer(t *testing.T) {
 	if cfg.TokenURL != authSrv.URL+"/token" {
 		t.Errorf("token_url = %q", cfg.TokenURL)
 	}
-	if cfg.ClientID != "discovered-client" {
-		t.Errorf("client_id = %q, want discovered-client", cfg.ClientID)
+	// DCR is now deferred to RunGrant — discovery returns the registration endpoint instead.
+	if cfg.RegistrationEndpoint != authSrv.URL+"/register" {
+		t.Errorf("registration_endpoint = %q, want %q", cfg.RegistrationEndpoint, authSrv.URL+"/register")
+	}
+	if cfg.ClientID != "" {
+		t.Errorf("client_id should be empty before DCR, got %q", cfg.ClientID)
 	}
 	if resource != mcpSrv.URL {
 		t.Errorf("resource = %q, want %q", resource, mcpSrv.URL)
