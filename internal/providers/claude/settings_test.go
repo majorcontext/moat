@@ -990,6 +990,40 @@ func TestLoadAllSettingsPreservesMoatUserExtras(t *testing.T) {
 	}
 }
 
+func TestSettingsMarshalForContainerWrite(t *testing.T) {
+	// Simulate what manager.go does: create Settings, set fields, marshal.
+	settings := &Settings{
+		EnabledPlugins: map[string]bool{
+			"plugin@market": true,
+		},
+		SkipDangerousModePermissionPrompt: true,
+		RawExtras: map[string]json.RawMessage{
+			"statusLine": json.RawMessage(`{"command":"node /home/user/.claude/moat/statusline.js"}`),
+		},
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+
+	// Verify the output is valid JSON with all fields
+	var output map[string]json.RawMessage
+	if err := json.Unmarshal(data, &output); err != nil {
+		t.Fatalf("Unmarshal output: %v", err)
+	}
+
+	if _, ok := output["enabledPlugins"]; !ok {
+		t.Error("enabledPlugins missing from output")
+	}
+	if _, ok := output["skipDangerousModePermissionPrompt"]; !ok {
+		t.Error("skipDangerousModePermissionPrompt missing from output")
+	}
+	if _, ok := output["statusLine"]; !ok {
+		t.Error("statusLine missing from output")
+	}
+}
+
 func TestSettingsJSONRoundTrip(t *testing.T) {
 	// Verify that Settings serializes to valid Claude Code settings.json format
 	// and can be loaded back via LoadSettings.
