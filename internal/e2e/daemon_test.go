@@ -191,13 +191,17 @@ func TestDaemonNetworkLogging(t *testing.T) {
 		// The proxy intercepts TLS for hosts with configured credentials (github)
 		// and logs the request. curl respects HTTP_PROXY and SSL_CERT_FILE env vars
 		// set by moat, so it works on all runtimes without extra setup.
+		//
+		// Use --retry with a small delay to handle Apple container VM network
+		// startup delays — the VM's network stack may not be fully ready when
+		// the container first starts executing.
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-daemon-netlog",
 			Workspace: workspace,
 			Grants:    []string{"github"},
 			Cmd: []string{
 				"sh", "-c",
-				"curl -s --connect-timeout 10 https://api.github.com/zen || true",
+				"curl -sS --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors https://api.github.com/zen 2>&1 || true",
 			},
 		})
 		if err != nil {
@@ -238,7 +242,7 @@ func TestDaemonNetworkLogging(t *testing.T) {
 		}
 
 		if !found {
-			// Dump logs for diagnosis
+			// Dump logs and proxy details for diagnosis
 			logs, logErr := store.ReadLogs(0, 100)
 			var logLines []string
 			if logErr == nil {
@@ -247,8 +251,9 @@ func TestDaemonNetworkLogging(t *testing.T) {
 				}
 			}
 			t.Errorf("Network request to api.github.com not captured in daemon mode.\n"+
+				"Runtime: %s, ProxyHost: %s, ProxyPort: %d\n"+
 				"Captured requests (%d): %v\n"+
-				"Container logs: %v", len(requests), requests, logLines)
+				"Container logs: %v", mgr.RuntimeType(), r.ProxyHost, r.ProxyPort, len(requests), requests, logLines)
 		}
 	})
 }
@@ -279,7 +284,7 @@ func TestDaemonCredentialInjection(t *testing.T) {
 			Grants:    []string{"github"},
 			Cmd: []string{
 				"sh", "-c",
-				"curl -s --connect-timeout 10 https://api.github.com/zen || true",
+				"curl -sS --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors https://api.github.com/zen 2>&1 || true",
 			},
 		})
 		if err != nil {
@@ -426,7 +431,7 @@ func TestDaemonNetworkLoggingIsolation(t *testing.T) {
 			Grants:    []string{"github"},
 			Cmd: []string{
 				"sh", "-c",
-				"curl -s --connect-timeout 10 https://api.github.com/zen || true",
+				"curl -sS --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors https://api.github.com/zen 2>&1 || true",
 			},
 		})
 		if err != nil {
@@ -441,7 +446,7 @@ func TestDaemonNetworkLoggingIsolation(t *testing.T) {
 			Grants:    []string{"github"},
 			Cmd: []string{
 				"sh", "-c",
-				"curl -s --connect-timeout 10 https://api.github.com/octocat || true",
+				"curl -sS --connect-timeout 10 --retry 3 --retry-delay 1 --retry-all-errors https://api.github.com/octocat 2>&1 || true",
 			},
 		})
 		if err != nil {
