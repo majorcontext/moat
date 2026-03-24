@@ -767,6 +767,50 @@ func TestLoadKnownMarketplacesEmptyURL(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsPreservesUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	content := `{
+  "enabledPlugins": {
+    "plugin@market": true
+  },
+  "statusLine": {
+    "command": "node /home/user/.claude/moat/statusline.js"
+  },
+  "customUnknownField": "preserved"
+}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+
+	// Known fields should be parsed normally
+	if !settings.EnabledPlugins["plugin@market"] {
+		t.Error("plugin@market should be enabled")
+	}
+
+	// Unknown fields should be captured in RawExtras
+	if settings.RawExtras == nil {
+		t.Fatal("RawExtras should not be nil")
+	}
+	if _, ok := settings.RawExtras["statusLine"]; !ok {
+		t.Error("statusLine should be in RawExtras")
+	}
+	if _, ok := settings.RawExtras["customUnknownField"]; !ok {
+		t.Error("customUnknownField should be in RawExtras")
+	}
+
+	// Known fields should NOT appear in RawExtras
+	if _, ok := settings.RawExtras["enabledPlugins"]; ok {
+		t.Error("enabledPlugins should not be in RawExtras (it's a known field)")
+	}
+}
+
 func TestSettingsJSONRoundTrip(t *testing.T) {
 	// Verify that Settings serializes to valid Claude Code settings.json format
 	// and can be loaded back via LoadSettings.

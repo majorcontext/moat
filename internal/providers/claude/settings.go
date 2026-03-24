@@ -41,6 +41,13 @@ type Settings struct {
 	// Set to true for container runs since the container provides isolation.
 	SkipDangerousModePermissionPrompt bool `json:"skipDangerousModePermissionPrompt,omitempty"`
 
+	// RawExtras holds unknown JSON fields from settings files.
+	// Only extras from the moat-user source (~/.moat/claude/settings.json)
+	// are preserved through merge and written to the container.
+	// This allows users to pass arbitrary Claude Code settings without
+	// needing a code change for each new field.
+	RawExtras map[string]json.RawMessage `json:"-"`
+
 	// PluginSources tracks where each plugin setting came from (not serialized)
 	PluginSources map[string]SettingSource `json:"-"`
 
@@ -67,6 +74,67 @@ type MarketplaceSource struct {
 
 	// Path is the local directory path (for source: directory)
 	Path string `json:"path,omitempty"`
+}
+
+// knownSettingsKeys lists the JSON keys that map to explicit Settings fields.
+// Everything else is captured in RawExtras.
+var knownSettingsKeys = map[string]bool{
+	"enabledPlugins":                    true,
+	"extraKnownMarketplaces":            true,
+	"skipDangerousModePermissionPrompt": true,
+}
+
+// UnmarshalJSON implements custom unmarshaling to capture unknown fields in RawExtras.
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	// First, unmarshal known fields using an alias to avoid recursion.
+	type settingsAlias Settings
+	var alias settingsAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*s = Settings(alias)
+
+	// Then, unmarshal the full object to find unknown keys.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	for key, val := range raw {
+		if !knownSettingsKeys[key] {
+			if s.RawExtras == nil {
+				s.RawExtras = make(map[string]json.RawMessage)
+			}
+			s.RawExtras[key] = val
+		}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements custom marshaling that includes RawExtras fields.
+func (s Settings) MarshalJSON() ([]byte, error) {
+	// Build a map of known fields.
+	m := make(map[string]any)
+
+	if len(s.EnabledPlugins) > 0 {
+		m["enabledPlugins"] = s.EnabledPlugins
+	}
+	if len(s.ExtraKnownMarketplaces) > 0 {
+		m["extraKnownMarketplaces"] = s.ExtraKnownMarketplaces
+	}
+	if s.SkipDangerousModePermissionPrompt {
+		m["skipDangerousModePermissionPrompt"] = true
+	}
+
+	// Merge extras (known fields take precedence if there's a conflict).
+	for key, val := range s.RawExtras {
+		if !knownSettingsKeys[key] {
+			m[key] = val
+		}
+	}
+
+	return json.Marshal(m)
 }
 
 // LoadSettings loads a single Claude settings.json file.
