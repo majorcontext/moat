@@ -230,7 +230,7 @@ mounts:
 }
 ```
 
-The global mount makes the script available in every container, and the settings passthrough forwards the `statusLine` config to Claude Code.
+The global mount makes the script available in every container, and the settings passthrough forwards the `statusLine` config to Claude Code. Step 3 requires the settings passthrough feature.
 
 ## Cache invalidation
 

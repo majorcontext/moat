@@ -492,7 +492,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// These are personal read-only mounts that apply to every run.
 	globalCfg, globalErr := config.LoadGlobal()
 	if globalErr != nil {
-		log.Warn("failed to load global config for mounts", "error", globalErr)
+		ui.Warnf("Failed to load global config (~/.moat/config.yaml): %v", globalErr)
 	} else if len(globalCfg.Mounts) > 0 {
 		for _, gm := range globalCfg.Mounts {
 			mounts = append(mounts, container.MountConfig{

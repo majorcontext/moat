@@ -171,8 +171,8 @@ Global mounts are personal mounts that apply to every run. Configure them in `~/
 
 ```yaml
 mounts:
-  - source: ~/.moat/scripts/statusline.js
-    target: /home/user/.claude/moat/statusline.js
+  - source: ~/.moat/scripts/statusline.sh
+    target: /home/user/.claude/moat/statusline.sh
 ```
 
 Global mounts use the same syntax as `moat.yaml` mounts (both string and object forms) with these constraints:
