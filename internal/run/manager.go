@@ -3694,7 +3694,7 @@ func cloneMarketplacesOnHost(ctx context.Context, marketplaces []claude.Marketpl
 
 		contextKey, tarData, collectErr := claude.CollectMarketplaceTar(clonedDir, m.Name)
 		if collectErr != nil {
-			ui.Warnf("Could not package marketplace %q after cloning — the build will attempt to clone it inside the container: %v", m.Name, collectErr)
+			ui.Warnf("Could not package marketplace %q after cloning (likely a filesystem or permissions issue) — the build will attempt to clone it inside the container: %v", m.Name, collectErr)
 			continue
 		}
 
