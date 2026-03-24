@@ -134,8 +134,11 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Cache config after successful grant (DCR may have populated ClientID)
-	if cfg.ClientID != "" {
+	// Cache config only when ClientID was NOT obtained via DCR. DCR-issued
+	// client_ids are bound to a specific redirect URI (including port), and
+	// the callback port is random on each run, so caching would cause
+	// "Invalid redirect URI" on the next invocation.
+	if cfg.ClientID != "" && cfg.RegistrationEndpoint == "" {
 		if saveErr := oauth.SaveConfig(oauth.DefaultConfigDir(), name, cfg); saveErr != nil {
 			log.Debug("failed to cache OAuth config", "error", saveErr)
 		}
