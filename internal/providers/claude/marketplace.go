@@ -136,6 +136,11 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 	args := []string{"clone", "--depth", "1", "--no-recurse-submodules", url, dir}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
+	// Prevent git from opening /dev/tty to prompt for credentials.
+	// Without this, private repos cause an interactive username/password
+	// prompt that blocks the build. Failing fast lets the caller report
+	// a clear error about needing 'gh auth login' or SSH keys.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Clean up on failure.
