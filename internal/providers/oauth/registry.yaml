@@ -1,0 +1,17 @@
+# Well-known MCP server URLs for OAuth auto-discovery.
+# When a user runs `moat grant oauth <name>`, the name is matched against this
+# registry to find a discovery URL without requiring --url or a config file.
+#
+# Each entry maps a short name to the MCP server's base URL. The OAuth flow
+# uses RFC 9728 (Protected Resource Metadata) and RFC 8414 (Authorization
+# Server Metadata) to discover endpoints automatically.
+#
+# Users can override or extend this registry by placing YAML files in
+# ~/.moat/oauth/registry.d/<name>.yaml with a single "url" key.
+
+asana: https://mcp.asana.com
+cloudflare: https://mcp.cloudflare.com
+hubspot: https://mcp.hubspot.com
+linear: https://mcp.linear.app
+notion: https://mcp.notion.com
+stripe: https://mcp.stripe.com
