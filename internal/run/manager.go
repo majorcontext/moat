@@ -488,6 +488,22 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Add global mounts from ~/.moat/config.yaml.
+	// These are personal read-only mounts that apply to every run.
+	globalCfg, globalErr := config.LoadGlobal()
+	if globalErr != nil {
+		log.Warn("failed to load global config for mounts", "error", globalErr)
+	} else if len(globalCfg.Mounts) > 0 {
+		for _, gm := range globalCfg.Mounts {
+			mounts = append(mounts, container.MountConfig{
+				Source:   gm.Source,
+				Target:   gm.Target,
+				ReadOnly: gm.ReadOnly,
+			})
+			log.Debug("added global mount", "source", gm.Source, "target", gm.Target)
+		}
+	}
+
 	// Add volume mounts from config.
 	// All runtimes use host-backed bind mounts (~/.moat/volumes/<agent>/<name>/)
 	// so the directory is owned by the current user, matching the container user.
