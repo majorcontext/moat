@@ -9,7 +9,7 @@ keywords: ["moat", "ai agents", "containers", "credentials", "observability"]
 Run AI agents in isolated containers with credential injection and observability.
 
 ```bash
-brew tap majorcontext/moat
+brew tap majorcontext/tap
 brew install moat
 ```
 
