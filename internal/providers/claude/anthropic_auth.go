@@ -17,6 +17,10 @@ import (
 const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 
+	// oauthProfileURL is the endpoint for fetching OAuth user profile
+	// information including subscription type.
+	oauthProfileURL = "https://api.anthropic.com/api/oauth/profile"
+
 	// validationModel is the model used for token validation.
 	// Using Haiku for minimal cost during key verification.
 	validationModel = "claude-haiku-4-5-20251001"
@@ -208,4 +212,118 @@ func (a *anthropicAuth) ValidateOAuthToken(ctx context.Context, token string) er
 	default:
 		return fmt.Errorf("API error (status %d)", resp.StatusCode)
 	}
+}
+
+// OAuthProfileInfo contains subscription information from the OAuth profile endpoint.
+type OAuthProfileInfo struct {
+	SubscriptionType string
+	RateLimitTier    string
+}
+
+// FetchOAuthProfile calls the OAuth profile endpoint to retrieve subscription
+// information for the authenticated user. This is used at container setup time
+// to determine account capabilities (e.g. Max subscription for 1M context).
+//
+// Returns nil with no error if the endpoint returns a non-200 status (best-effort).
+func (a *anthropicAuth) FetchOAuthProfile(ctx context.Context, token string) (*OAuthProfileInfo, error) {
+	profileURL := oauthProfileURL
+	if a.APIURL != "" {
+		// For testing: derive profile URL from the overridden base URL
+		profileURL = strings.TrimSuffix(a.APIURL, "/v1/messages") + "/api/oauth/profile"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", profileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating profile request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+
+	start := time.Now()
+	resp, err := a.httpClient().Do(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		return nil, fmt.Errorf("fetching OAuth profile: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Debug("OAuth profile response",
+		"subsystem", "claude",
+		"status", resp.StatusCode,
+		"elapsed", elapsed.String(),
+	)
+
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		// Non-200 is not fatal — long-lived tokens return 403 here
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading profile response: %w", err)
+	}
+
+	// Parse the profile response. The exact structure may vary, so we
+	// use a flexible map and look for subscription-related fields.
+	var profile map[string]any
+	if err := json.Unmarshal(body, &profile); err != nil {
+		log.Debug("could not parse OAuth profile response",
+			"subsystem", "claude",
+			"error", err,
+		)
+		return nil, nil
+	}
+
+	log.Debug("OAuth profile fetched",
+		"subsystem", "claude",
+		"fields", mapKeys(profile),
+	)
+
+	info := &OAuthProfileInfo{}
+
+	// Look for subscription type in common field names
+	for _, key := range []string{"subscription_type", "subscriptionType", "plan_type", "planType"} {
+		if v, ok := profile[key].(string); ok && v != "" {
+			info.SubscriptionType = v
+			break
+		}
+	}
+
+	// Look for rate limit tier
+	for _, key := range []string{"rate_limit_tier", "rateLimitTier"} {
+		if v, ok := profile[key].(string); ok && v != "" {
+			info.RateLimitTier = v
+			break
+		}
+	}
+
+	// Check nested "subscription" object
+	if info.SubscriptionType == "" {
+		if sub, ok := profile["subscription"].(map[string]any); ok {
+			if v, ok := sub["type"].(string); ok && v != "" {
+				info.SubscriptionType = v
+			}
+			if v, ok := sub["rate_limit_tier"].(string); ok && v != "" {
+				info.RateLimitTier = v
+			}
+		}
+	}
+
+	if info.SubscriptionType == "" {
+		return nil, nil
+	}
+
+	return info, nil
+}
+
+// mapKeys returns the keys of a map for debug logging.
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

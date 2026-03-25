@@ -3762,6 +3762,8 @@ func grantToPlaceholder(grant string) string {
 		return credential.GitHubTokenPlaceholder
 	case "openai":
 		return credential.OpenAIAPIKeyPlaceholder
+	case "claude":
+		return credential.ClaudeOAuthPlaceholder
 	default:
 		return credential.ProxyInjectedPlaceholder
 	}

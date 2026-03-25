@@ -784,9 +784,7 @@ func validateTokenViaProxy(ctx context.Context, token string) *validationLevelRe
 	// proxy's credential injection replaces the auth header.
 	placeholder := credential.ProxyInjectedPlaceholder
 	if credential.IsOAuthToken(token) {
-		// Use a placeholder that looks like an OAuth token so newValidationRequest
-		// sets the correct OAuth headers (Bearer auth, beta flags).
-		placeholder = "sk-ant-oat-" + credential.ProxyInjectedPlaceholder
+		placeholder = credential.ClaudeOAuthPlaceholder
 	}
 	req, err := newValidationRequest(ctx, placeholder)
 	if err != nil {

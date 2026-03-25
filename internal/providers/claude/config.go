@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -159,7 +160,7 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	// handled transparently by the TLS-intercepting proxy.
 	creds := oauthCredentials{
 		ClaudeAiOauth: &oauthToken{
-			AccessToken:      ProxyInjectedPlaceholder,
+			AccessToken:      credential.ClaudeOAuthPlaceholder,
 			ExpiresAt:        cred.ExpiresAt.UnixMilli(),
 			Scopes:           cred.Scopes,
 			SubscriptionType: cred.Metadata["subscriptionType"],

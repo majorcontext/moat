@@ -36,6 +36,16 @@ const OpenAIAPIKeyPlaceholder = "sk-moat-proxy-injected-placeholder-000000000000
 // Authorization headers, so this placeholder never reaches GitHub's servers.
 const GitHubTokenPlaceholder = "ghp_moatProxyInjectedPlaceholder000000000000"
 
+// ClaudeOAuthPlaceholder is a placeholder that looks like a valid Claude Code
+// OAuth token. Claude Code checks the sk-ant-oat prefix to determine if the
+// session is OAuth-authenticated. Without this prefix, it skips OAuth-specific
+// API calls (e.g. /api/oauth/profile) that determine account capabilities like
+// 1M context window access.
+//
+// The proxy intercepts all Anthropic HTTPS traffic and injects the real token
+// via Authorization headers, so this placeholder never reaches Anthropic's servers.
+const ClaudeOAuthPlaceholder = "sk-ant-oat01-moat-proxy-injected-placeholder-not-a-real-token"
+
 // JWTPlaceholder is a basic placeholder JWT for format validation only.
 // Use GenerateIDTokenPlaceholder for Codex CLI which needs account_id in claims.
 const JWTPlaceholder = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtb2F0LXByb3h5LXBsYWNlaG9sZGVyIiwiZXhwIjo5OTk5OTk5OTk5fQ.placeholder-signature-not-valid"

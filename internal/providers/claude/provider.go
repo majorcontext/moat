@@ -60,10 +60,16 @@ func (p *OAuthProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *pro
 
 // ContainerEnv returns environment variables for OAuth token injection.
 func (p *OAuthProvider) ContainerEnv(cred *provider.Credential) []string {
-	// Set CLAUDE_CODE_OAUTH_TOKEN with a placeholder.
-	// This tells Claude Code it's authenticated (skips login prompts).
-	// The real token is injected by the proxy at the network layer.
-	return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+	// NOTE: We intentionally do NOT set CLAUDE_CODE_OAUTH_TOKEN for OAuth
+	// credentials. When that env var is set, Claude Code ignores
+	// .credentials.json and hardcodes subscriptionType=null, which breaks
+	// features like 1M context that depend on subscription detection.
+	//
+	// Instead, Claude Code reads from .credentials.json (written by
+	// WriteCredentialsFile) which contains the OAuth placeholder token along
+	// with subscription metadata. The proxy injects the real token at the
+	// network layer regardless.
+	return nil
 }
 
 // ContainerMounts returns mounts needed for Claude Code.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
@@ -39,10 +40,10 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 	}()
 
 	// Write credentials file for OAuth tokens.
-	// Enrich with subscription info from the host's Claude Code credentials
-	// so Claude Code in the container knows the account tier (e.g. Max for 1M context).
+	// Enrich with subscription info so Claude Code in the container knows
+	// the account tier (e.g. Max subscription for 1M context window).
 	if opts.Credential != nil {
-		enrichCredentialWithHostSubscription(opts.Credential)
+		enrichCredentialWithSubscription(ctx, opts.Credential)
 		if err := WriteCredentialsFile(opts.Credential, tmpDir); err != nil {
 			return nil, fmt.Errorf("writing credentials file: %w", err)
 		}
@@ -124,11 +125,17 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 	}, nil
 }
 
-// enrichCredentialWithHostSubscription reads the host's Claude Code credentials
-// to populate subscription metadata (subscriptionType, rateLimitTier) if not
-// already present. This ensures Claude Code in the container knows the account
-// tier regardless of which grant method was used.
-func enrichCredentialWithHostSubscription(cred *provider.Credential) {
+// enrichCredentialWithSubscription populates subscription metadata on the
+// credential so Claude Code in the container can determine account capabilities
+// (e.g. Max subscription for 1M context window).
+//
+// It tries two sources in order:
+//  1. Host's Claude Code credentials (keychain or ~/.claude/.credentials.json)
+//  2. OAuth profile API call with the real token (fetches fresh subscription info)
+//
+// This is best-effort — if both fail, the container runs without subscription
+// info and Claude Code falls back to default behavior.
+func enrichCredentialWithSubscription(ctx context.Context, cred *provider.Credential) {
 	if cred.Provider != "claude" {
 		return
 	}
@@ -138,33 +145,52 @@ func enrichCredentialWithHostSubscription(cred *provider.Credential) {
 		return
 	}
 
+	// Try 1: read from host's Claude Code credentials (fast, no network)
 	cc := &credential.ClaudeCodeCredentials{}
-	hostToken, err := cc.GetClaudeCodeCredentials()
+	if hostToken, err := cc.GetClaudeCodeCredentials(); err == nil && hostToken.SubscriptionType != "" {
+		setSubscriptionMetadata(cred, hostToken.SubscriptionType, hostToken.RateLimitTier)
+		log.Debug("enriched credential from host credentials",
+			"subsystem", "claude",
+			"subscription_type", hostToken.SubscriptionType,
+		)
+		return
+	}
+
+	// Try 2: fetch from OAuth profile API (requires network, uses real token)
+	auth := &anthropicAuth{}
+	profileCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	profile, err := auth.FetchOAuthProfile(profileCtx, cred.Token)
 	if err != nil {
-		log.Debug("could not read host Claude credentials for subscription info",
+		log.Debug("could not fetch OAuth profile for subscription info",
 			"subsystem", "claude",
 			"error", err,
 		)
 		return
 	}
-
-	if hostToken.SubscriptionType == "" {
+	if profile == nil {
+		log.Debug("OAuth profile returned no subscription info",
+			"subsystem", "claude",
+		)
 		return
 	}
 
+	setSubscriptionMetadata(cred, profile.SubscriptionType, profile.RateLimitTier)
+	log.Debug("enriched credential from OAuth profile API",
+		"subsystem", "claude",
+		"subscription_type", profile.SubscriptionType,
+	)
+}
+
+func setSubscriptionMetadata(cred *provider.Credential, subscriptionType, rateLimitTier string) {
 	if cred.Metadata == nil {
 		cred.Metadata = make(map[string]string)
 	}
-	cred.Metadata["subscriptionType"] = hostToken.SubscriptionType
-	if hostToken.RateLimitTier != "" {
-		cred.Metadata["rateLimitTier"] = hostToken.RateLimitTier
+	cred.Metadata["subscriptionType"] = subscriptionType
+	if rateLimitTier != "" {
+		cred.Metadata["rateLimitTier"] = rateLimitTier
 	}
-
-	log.Debug("enriched credential with host subscription info",
-		"subsystem", "claude",
-		"subscription_type", hostToken.SubscriptionType,
-		"rate_limit_tier", hostToken.RateLimitTier,
-	)
 }
 
 // containerEnvForCredential returns the correct environment variable based on
@@ -177,7 +203,16 @@ func containerEnvForCredential(cred *provider.Credential) []string {
 		return nil
 	}
 	if cred.Provider == "claude" {
-		return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+		// NOTE: We intentionally do NOT set CLAUDE_CODE_OAUTH_TOKEN here.
+		// When that env var is set, Claude Code hardcodes subscriptionType=null
+		// and scopes=["user:inference"], ignoring .credentials.json entirely.
+		// This prevents features like 1M context from working because the
+		// subscription type check fails (null != "team"/"max").
+		//
+		// Instead, we write a complete .credentials.json with the OAuth
+		// placeholder token, subscription type, and scopes. Claude Code reads
+		// this file when the env var is absent, preserving all metadata.
+		return nil
 	}
 	return []string{"ANTHROPIC_API_KEY=" + ProxyInjectedPlaceholder}
 }
