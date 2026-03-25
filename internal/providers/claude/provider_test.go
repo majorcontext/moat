@@ -656,6 +656,42 @@ func TestWriteCredentialsFile(t *testing.T) {
 		}
 	})
 
+	t.Run("subscription info passed through from metadata", func(t *testing.T) {
+		stagingDir := t.TempDir()
+		cred := &provider.Credential{
+			Provider:  "claude",
+			Token:     "sk-ant-oat01-abc123",
+			ExpiresAt: time.Now().Add(time.Hour),
+			Scopes:    []string{"user:read"},
+			Metadata: map[string]string{
+				"subscriptionType": "max",
+				"rateLimitTier":    "default",
+			},
+		}
+
+		err := WriteCredentialsFile(cred, stagingDir)
+		if err != nil {
+			t.Fatalf("WriteCredentialsFile() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".credentials.json"))
+		if err != nil {
+			t.Fatalf("failed to read credentials file: %v", err)
+		}
+
+		var creds oauthCredentials
+		if err := json.Unmarshal(data, &creds); err != nil {
+			t.Fatalf("failed to parse credentials file: %v", err)
+		}
+
+		if creds.ClaudeAiOauth.SubscriptionType != "max" {
+			t.Errorf("SubscriptionType = %q, want %q", creds.ClaudeAiOauth.SubscriptionType, "max")
+		}
+		if creds.ClaudeAiOauth.RateLimitTier != "default" {
+			t.Errorf("RateLimitTier = %q, want %q", creds.ClaudeAiOauth.RateLimitTier, "default")
+		}
+	})
+
 	t.Run("anthropic provider does not create file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{

@@ -159,9 +159,11 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	// handled transparently by the TLS-intercepting proxy.
 	creds := oauthCredentials{
 		ClaudeAiOauth: &oauthToken{
-			AccessToken: ProxyInjectedPlaceholder,
-			ExpiresAt:   cred.ExpiresAt.UnixMilli(),
-			Scopes:      cred.Scopes,
+			AccessToken:      ProxyInjectedPlaceholder,
+			ExpiresAt:        cred.ExpiresAt.UnixMilli(),
+			Scopes:           cred.Scopes,
+			SubscriptionType: cred.Metadata["subscriptionType"],
+			RateLimitTier:    cred.Metadata["rateLimitTier"],
 		},
 	}
 

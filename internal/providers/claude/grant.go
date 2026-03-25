@@ -546,6 +546,13 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 		Scopes:    token.Scopes,
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now(),
+		Metadata:  make(map[string]string),
+	}
+	if token.SubscriptionType != "" {
+		cred.Metadata["subscriptionType"] = token.SubscriptionType
+	}
+	if token.RateLimitTier != "" {
+		cred.Metadata["rateLimitTier"] = token.RateLimitTier
 	}
 
 	fmt.Println("\nClaude Code credentials imported.")
