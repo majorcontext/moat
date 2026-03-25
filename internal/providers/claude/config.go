@@ -73,6 +73,12 @@ var HostConfigAllowlist = []string{
 
 	// First launch tracking
 	"firstStartTime", // Initial startup timestamp
+
+	// Managed settings approval state — without CLAUDE_CODE_OAUTH_TOKEN env var,
+	// Claude Code prompts for managed settings approval on startup. This field
+	// carries the host's approval so the container doesn't re-prompt (and can't
+	// persist approval since .claude.json is read-only in the container).
+	"customApiKeyResponses",
 }
 
 // ReadHostConfig reads the host's ~/.claude.json and returns allowlisted fields.
