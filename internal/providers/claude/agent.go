@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -36,8 +38,11 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		}
 	}()
 
-	// Write credentials file for OAuth tokens
+	// Write credentials file for OAuth tokens.
+	// Enrich with subscription info from the host's Claude Code credentials
+	// so Claude Code in the container knows the account tier (e.g. Max for 1M context).
 	if opts.Credential != nil {
+		enrichCredentialWithHostSubscription(opts.Credential)
 		if err := WriteCredentialsFile(opts.Credential, tmpDir); err != nil {
 			return nil, fmt.Errorf("writing credentials file: %w", err)
 		}
@@ -117,6 +122,49 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 			os.RemoveAll(tmpDir)
 		},
 	}, nil
+}
+
+// enrichCredentialWithHostSubscription reads the host's Claude Code credentials
+// to populate subscription metadata (subscriptionType, rateLimitTier) if not
+// already present. This ensures Claude Code in the container knows the account
+// tier regardless of which grant method was used.
+func enrichCredentialWithHostSubscription(cred *provider.Credential) {
+	if cred.Provider != "claude" {
+		return
+	}
+
+	// Already has subscription info from the grant flow
+	if cred.Metadata["subscriptionType"] != "" {
+		return
+	}
+
+	cc := &credential.ClaudeCodeCredentials{}
+	hostToken, err := cc.GetClaudeCodeCredentials()
+	if err != nil {
+		log.Debug("could not read host Claude credentials for subscription info",
+			"subsystem", "claude",
+			"error", err,
+		)
+		return
+	}
+
+	if hostToken.SubscriptionType == "" {
+		return
+	}
+
+	if cred.Metadata == nil {
+		cred.Metadata = make(map[string]string)
+	}
+	cred.Metadata["subscriptionType"] = hostToken.SubscriptionType
+	if hostToken.RateLimitTier != "" {
+		cred.Metadata["rateLimitTier"] = hostToken.RateLimitTier
+	}
+
+	log.Debug("enriched credential with host subscription info",
+		"subsystem", "claude",
+		"subscription_type", hostToken.SubscriptionType,
+		"rate_limit_tier", hostToken.RateLimitTier,
+	)
 }
 
 // containerEnvForCredential returns the correct environment variable based on
