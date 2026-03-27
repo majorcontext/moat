@@ -1410,6 +1410,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 							resp.Header.Set("X-Moat-Blocked", "llm-policy")
 						} else if result.Events != nil {
 							// SSE response allowed — re-serialize evaluated events.
+							// Events were decompressed for evaluation, so the
+							// re-serialized body is plaintext — remove Content-Encoding.
 							var buf bytes.Buffer
 							for _, ev := range result.Events {
 								if ev.Type != "" {
@@ -1417,6 +1419,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 								}
 								fmt.Fprintf(&buf, "data: %s\n\n", ev.Data)
 							}
+							resp.Header.Del("Content-Encoding")
 							resp.Body = io.NopCloser(&buf)
 							resp.ContentLength = int64(buf.Len())
 						} else {

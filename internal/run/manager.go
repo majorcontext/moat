@@ -348,8 +348,6 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 	if runState == StateRunning {
 		go m.monitorContainerExit(r)
 	}
-
-	log.Debug("loaded persisted run", "id", runID, "name", meta.Name, "state", runState)
 }
 
 // Create initializes a new run without starting it.

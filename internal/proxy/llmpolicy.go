@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,15 +38,43 @@ type llmPolicyResult struct {
 
 // evaluateLLMResponse evaluates an Anthropic API response against a Keep
 // engine. Handles both JSON and SSE (streaming) responses based on Content-Type.
+// Transparently decompresses gzip responses for evaluation.
 // Fail-closed: evaluation errors cause denial.
 func evaluateLLMResponse(eng *keeplib.Engine, body []byte, resp *http.Response) llmPolicyResult {
 	ct := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(ct, "text/event-stream")
 
-	if isSSE {
-		return evaluateLLMStream(eng, body)
+	// Decompress gzip responses for evaluation. The client (Claude Code) sends
+	// Accept-Encoding: gzip, so Anthropic responds with compressed bodies.
+	// Go's transport doesn't auto-decompress when the client explicitly requests it.
+	evalBody := body
+	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		gr, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			log.Warn("LLM policy gzip decompression failed, denying (fail-closed)", "error", err)
+			return llmPolicyResult{
+				Denied:  true,
+				Rule:    "evaluation-error",
+				Message: fmt.Sprintf("Failed to decompress response: %v", err),
+			}
+		}
+		decompressed, err := io.ReadAll(gr)
+		gr.Close()
+		if err != nil {
+			log.Warn("LLM policy gzip read failed, denying (fail-closed)", "error", err)
+			return llmPolicyResult{
+				Denied:  true,
+				Rule:    "evaluation-error",
+				Message: fmt.Sprintf("Failed to decompress response: %v", err),
+			}
+		}
+		evalBody = decompressed
 	}
-	return evaluateLLMJSON(eng, body)
+
+	if isSSE {
+		return evaluateLLMStream(eng, evalBody)
+	}
+	return evaluateLLMJSON(eng, evalBody)
 }
 
 // evaluateLLMJSON evaluates a non-streaming JSON response.
