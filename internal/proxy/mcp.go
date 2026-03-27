@@ -247,6 +247,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 				} else {
 					switch result.Decision {
 					case keeplib.Deny:
+						p.logPolicy(r, scope, "mcp.tool_call", result.Rule, result.Message)
 						msg := "Moat: MCP tool call blocked by policy."
 						if result.Message != "" {
 							msg += " " + result.Message

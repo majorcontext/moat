@@ -140,7 +140,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		}
 		auditMu.Unlock()
 
-		_ = as.AppendPolicyEntry(data.Scope, data.Operation, data.Decision, data.Rule, data.Message)
+		_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 	})
 
 	// Start credential proxy.

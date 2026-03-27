@@ -80,17 +80,16 @@ type RequestLogData struct {
 // RequestLogger is called for each proxied request.
 type RequestLogger func(data RequestLogData)
 
-// PolicyLogData contains data for a policy decision event.
+// PolicyLogData contains data for a policy denial event.
 type PolicyLogData struct {
 	RunID     string
 	Scope     string
 	Operation string
-	Decision  string
 	Rule      string
 	Message   string
 }
 
-// PolicyLogger is called when a policy decision is made.
+// PolicyLogger is called when a policy denial occurs.
 type PolicyLogger func(data PolicyLogData)
 
 // isTextContentType returns true for text-based content types that should be captured.
@@ -338,8 +337,8 @@ func (p *Proxy) SetPolicyLogger(logger PolicyLogger) {
 	p.policyLogger = logger
 }
 
-// logPolicy logs a policy decision if a logger is configured.
-func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, decision, rule, message string) {
+// logPolicy logs a policy denial if a logger is configured.
+func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, rule, message string) {
 	if p.policyLogger == nil {
 		return
 	}
@@ -353,7 +352,6 @@ func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, decision, rule
 		RunID:     runID,
 		Scope:     scope,
 		Operation: operation,
-		Decision:  decision,
 		Rule:      rule,
 		Message:   message,
 	})
@@ -1075,6 +1073,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		duration := time.Since(start)
 		// Log blocked request
 		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
+		p.logPolicy(r, "network", "http.request", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
 		return
@@ -1179,6 +1178,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if p.logger != nil {
 			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
 		}
+		p.logPolicy(r, "network", "http.connect", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
 		return
@@ -1327,6 +1327,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// The CONNECT request r carries the per-run context for rule lookup.
 		if !p.checkNetworkPolicyForRequest(r, host, connectPort, req.Method, req.URL.Path) {
 			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			p.logPolicy(r, "network", "http.request", "", req.Method+" "+host+req.URL.Path)
 			body := "Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n"
 			blockedResp := &http.Response{
 				StatusCode:    http.StatusProxyAuthRequired,
@@ -1364,6 +1365,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 						"path", req.URL.Path,
 						"error", evalErr)
 				} else if result.Decision == keeplib.Deny {
+					p.logPolicy(r, scope, "http.request", result.Rule, result.Message)
 					msg := "Moat: request blocked by Keep policy.\nHost: " + host + "\n"
 					if result.Message != "" {
 						msg += result.Message + "\n"
@@ -1437,7 +1439,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 						if result.Denied {
 							log.Info("LLM tool_use denied by policy",
 								"rule", result.Rule, "message", result.Message)
-							p.logPolicy(r, "llm-gateway", "llm.tool_use", "deny", result.Rule, result.Message)
+							p.logPolicy(r, "llm-gateway", "llm.tool_use", result.Rule, result.Message)
 							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)
 							resp = &http.Response{
 								StatusCode:    http.StatusBadRequest,
