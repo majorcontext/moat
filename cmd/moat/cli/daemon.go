@@ -244,6 +244,13 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		storeMu.Lock()
 		delete(stores, runID)
 		storeMu.Unlock()
+
+		auditMu.Lock()
+		if as, ok := auditStores[runID]; ok {
+			as.Close()
+			delete(auditStores, runID)
+		}
+		auditMu.Unlock()
 	}
 	lc.SetOnCleanup(func(_, runID string) { cleanupStore(runID) })
 	lc.SetOnEmpty(idleShutdown.Reset)

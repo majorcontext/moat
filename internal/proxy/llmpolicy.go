@@ -18,8 +18,8 @@ import (
 )
 
 // maxLLMResponseSize is the maximum response body size (10MB) the proxy will
-// buffer for LLM policy evaluation. Responses exceeding this are forwarded
-// without evaluation (with a warning log).
+// buffer for LLM policy evaluation. Responses exceeding this are denied
+// (fail-closed) to prevent policy bypass via oversized responses.
 const maxLLMResponseSize = 10 << 20
 
 // llmCodec is the shared Anthropic codec instance. Codecs are stateless and

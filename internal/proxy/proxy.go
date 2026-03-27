@@ -1344,18 +1344,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		}
 
 		// Evaluate Keep policy for the inner HTTP request.
-		// Check per-host engine first, then fall back to global "http" engine
-		// (from network.keep_policy which applies to all hosts).
+		// Uses the global "http" engine from network.keep_policy.
 		if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
-			scope := "http-" + host
-			eng, ok := rc.KeepEngines[scope]
-			if !ok {
-				eng, ok = rc.KeepEngines["http"]
-				if ok {
-					scope = "http"
-				}
-			}
-			if ok {
+			scope := "http"
+			if eng, ok := rc.KeepEngines[scope]; ok {
 				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
 				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
@@ -1428,12 +1420,28 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if resp != nil && resp.StatusCode == http.StatusOK && host == "api.anthropic.com" {
 			if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
 				if eng, ok := rc.KeepEngines["llm-gateway"]; ok {
-					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize))
+					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize+1))
 					resp.Body.Close()
 					if readErr != nil {
 						log.Warn("failed to read response body for LLM policy",
 							"host", host, "error", readErr)
 						resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+					} else if int64(len(respBodyBytes)) > maxLLMResponseSize {
+						// Response exceeds size limit — deny (fail-closed).
+						log.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
+							"size", len(respBodyBytes), "limit", maxLLMResponseSize)
+						p.logPolicy(r, "llm-gateway", "llm.response_too_large", "size-limit", "Response too large for policy evaluation")
+						errorBody := buildPolicyDeniedResponse("size-limit", "Response too large for policy evaluation.")
+						resp = &http.Response{
+							StatusCode:    http.StatusBadRequest,
+							ProtoMajor:    1,
+							ProtoMinor:    1,
+							Header:        make(http.Header),
+							ContentLength: int64(len(errorBody)),
+							Body:          io.NopCloser(bytes.NewReader(errorBody)),
+						}
+						resp.Header.Set("Content-Type", "application/json")
+						resp.Header.Set("X-Moat-Blocked", "llm-policy")
 					} else {
 						result := evaluateLLMResponse(eng, respBodyBytes, resp)
 						if result.Denied {
@@ -1460,7 +1468,12 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 								if ev.Type != "" {
 									fmt.Fprintf(&buf, "event: %s\n", ev.Type)
 								}
-								fmt.Fprintf(&buf, "data: %s\n\n", ev.Data)
+								// Per SSE spec, multi-line data needs a `data:` prefix per line.
+								lines := strings.Split(ev.Data, "\n")
+								for _, line := range lines {
+									fmt.Fprintf(&buf, "data: %s\n", line)
+								}
+								buf.WriteByte('\n') // Event terminator.
 							}
 							resp.Header.Del("Content-Encoding")
 							resp.Body = io.NopCloser(&buf)

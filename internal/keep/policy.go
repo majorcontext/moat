@@ -15,10 +15,11 @@ import (
 //   - File path: string containing "/" or ending in ".yaml"
 //   - Inline rules: YAML mapping with deny/mode fields
 type PolicyConfig struct {
-	Pack string   `yaml:"-"`
-	File string   `yaml:"-"`
-	Deny []string `yaml:"deny,omitempty"`
-	Mode string   `yaml:"mode,omitempty"`
+	Pack  string   `yaml:"-"`
+	File  string   `yaml:"-"`
+	Allow []string `yaml:"allow,omitempty"`
+	Deny  []string `yaml:"deny,omitempty"`
+	Mode  string   `yaml:"mode,omitempty"`
 }
 
 func (p *PolicyConfig) UnmarshalYAML(node *yaml.Node) error {
@@ -37,6 +38,9 @@ func (p *PolicyConfig) UnmarshalYAML(node *yaml.Node) error {
 		if err := node.Decode(&alias); err != nil {
 			return fmt.Errorf("invalid inline policy: %w", err)
 		}
+		if !ValidModes[alias.Mode] {
+			return fmt.Errorf("invalid policy mode %q: must be \"enforce\" or \"audit\"", alias.Mode)
+		}
 		*p = PolicyConfig(alias)
 		return nil
 	default:
@@ -45,7 +49,7 @@ func (p *PolicyConfig) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (p *PolicyConfig) IsInline() bool {
-	return p.Pack == "" && p.File == "" && len(p.Deny) > 0
+	return p.Pack == "" && p.File == "" && (len(p.Deny) > 0 || len(p.Allow) > 0)
 }
 
 func (p *PolicyConfig) IsFile() bool {
@@ -56,7 +60,18 @@ func (p *PolicyConfig) IsPack() bool {
 	return p.Pack != ""
 }
 
+// ValidModes lists the accepted values for PolicyConfig.Mode.
+var ValidModes = map[string]bool{
+	"":        true,
+	"enforce": true,
+	"audit":   true,
+}
+
 // ToKeepYAML converts inline rules to Keep's native YAML rule format.
+// When Allow is specified, listed operations get allow rules and a catch-all
+// deny is appended so unlisted operations are denied by default.
+// When only Deny is specified, listed operations are denied and everything
+// else is implicitly allowed.
 func (p *PolicyConfig) ToKeepYAML(scope string) ([]byte, error) {
 	if !p.IsInline() {
 		return nil, fmt.Errorf("ToKeepYAML called on non-inline policy")
@@ -73,12 +88,32 @@ func (p *PolicyConfig) ToKeepYAML(scope string) ([]byte, error) {
 
 	var rules []keepRule
 
+	// Allow rules: explicitly allow listed operations, then deny everything else.
+	for _, op := range p.Allow {
+		rules = append(rules, keepRule{
+			Name:   "allow-" + op,
+			Match:  keepMatch{Operation: op},
+			Action: "allow",
+		})
+	}
+
 	for _, op := range p.Deny {
 		rules = append(rules, keepRule{
 			Name:    "deny-" + op,
 			Match:   keepMatch{Operation: op},
 			Action:  "deny",
 			Message: "Operation blocked by policy.",
+		})
+	}
+
+	// When allow is specified, append a catch-all deny so unlisted operations
+	// are blocked by default.
+	if len(p.Allow) > 0 {
+		rules = append(rules, keepRule{
+			Name:    "default-deny",
+			Match:   keepMatch{Operation: "*"},
+			Action:  "deny",
+			Message: "Operation not in allow list.",
 		})
 	}
 

@@ -235,7 +235,14 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 					Arguments map[string]any `json:"arguments"`
 				} `json:"params"`
 			}
-			if json.Unmarshal(bodyBytes, &mcpReq) == nil && mcpReq.Method == "tools/call" && mcpReq.Params.Name != "" {
+			if unmarshalErr := json.Unmarshal(bodyBytes, &mcpReq); unmarshalErr != nil {
+				// Fail-closed: deny non-JSON requests when a policy is configured.
+				log.Warn("MCP request body is not valid JSON, denying (fail-closed)",
+					"server", serverName, "error", unmarshalErr)
+				http.Error(w, "Moat: MCP request blocked — invalid JSON body.", http.StatusForbidden)
+				return
+			}
+			if mcpReq.Method == "tools/call" && mcpReq.Params.Name != "" {
 				scope := "mcp-" + serverName
 				call := internalkeep.NormalizeMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments, scope)
 				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)

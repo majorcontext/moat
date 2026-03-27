@@ -148,7 +148,7 @@ network:
 
 ## LLM gateway
 
-The LLM gateway enforces policy on traffic between the agent and the LLM API (prompts and responses). It runs as a Keep sidecar inside the container.
+The LLM gateway enforces policy on Anthropic API responses. The proxy buffers each response, evaluates tool_use blocks against Keep rules, and denies responses that violate the policy before they reach the container.
 
 ```yaml
 claude:
@@ -156,17 +156,7 @@ claude:
     policy: .keep/llm-rules.yaml
 ```
 
-The gateway intercepts LLM API traffic and applies policy rules before requests leave the container. This is separate from MCP and network policies, which operate at the proxy layer.
-
-Configuration options:
-
-```yaml
-claude:
-  llm-gateway:
-    policy: .keep/llm-rules.yaml
-    version: v0.2.0          # Keep release version (default: latest)
-    port: 18080              # Local port (default: 18080)
-```
+The gateway operates at the proxy layer alongside MCP and network policies. It supports both JSON and SSE (streaming) responses, and handles gzip-compressed bodies transparently.
 
 The LLM gateway is mutually exclusive with `claude.base_url` -- both redirect LLM traffic, so only one can be active.
 

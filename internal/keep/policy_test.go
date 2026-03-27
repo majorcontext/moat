@@ -111,6 +111,78 @@ func TestToKeepYAML_DefaultMode(t *testing.T) {
 	assert.Contains(t, string(yamlBytes), "mode: enforce")
 }
 
+func TestPolicyConfigUnmarshalYAML_AllowField(t *testing.T) {
+	input := `
+allow:
+  - get_issue
+  - list_issues
+deny:
+  - delete_issue
+mode: enforce
+`
+	var pc PolicyConfig
+	err := yaml.Unmarshal([]byte(input), &pc)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"get_issue", "list_issues"}, pc.Allow)
+	assert.Equal(t, []string{"delete_issue"}, pc.Deny)
+	assert.True(t, pc.IsInline())
+}
+
+func TestPolicyConfigUnmarshalYAML_AllowOnly(t *testing.T) {
+	input := `
+allow:
+  - get_issue
+`
+	var pc PolicyConfig
+	err := yaml.Unmarshal([]byte(input), &pc)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"get_issue"}, pc.Allow)
+	assert.Empty(t, pc.Deny)
+	assert.True(t, pc.IsInline())
+}
+
+func TestPolicyConfigUnmarshalYAML_InvalidMode(t *testing.T) {
+	input := `
+deny:
+  - delete_issue
+mode: monitor
+`
+	var pc PolicyConfig
+	err := yaml.Unmarshal([]byte(input), &pc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid policy mode")
+}
+
+func TestToKeepYAML_AllowWithDefaultDeny(t *testing.T) {
+	pc := PolicyConfig{
+		Allow: []string{"get_issue", "list_issues"},
+	}
+	yamlBytes, err := pc.ToKeepYAML("mcp-tools")
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+	assert.Contains(t, yamlStr, "name: allow-get_issue")
+	assert.Contains(t, yamlStr, "name: allow-list_issues")
+	assert.Contains(t, yamlStr, "action: allow")
+	assert.Contains(t, yamlStr, "name: default-deny")
+	assert.Contains(t, yamlStr, "operation: '*'")
+	assert.Contains(t, yamlStr, "action: deny")
+}
+
+func TestToKeepYAML_AllowAndDeny(t *testing.T) {
+	pc := PolicyConfig{
+		Allow: []string{"get_issue"},
+		Deny:  []string{"delete_issue"},
+	}
+	yamlBytes, err := pc.ToKeepYAML("mcp-tools")
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+	assert.Contains(t, yamlStr, "name: allow-get_issue")
+	assert.Contains(t, yamlStr, "name: deny-delete_issue")
+	assert.Contains(t, yamlStr, "name: default-deny")
+}
+
 func TestToKeepYAML_NonInlineErrors(t *testing.T) {
 	pc := PolicyConfig{File: "rules.yaml"}
 	_, err := pc.ToKeepYAML("test")

@@ -113,7 +113,7 @@ func TestSafeEvaluatePanicRecovery(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from panic recovery")
 	}
-	if result.Decision != keeplib.Allow {
-		t.Errorf("Decision = %q, want %q (fail-open on panic)", result.Decision, keeplib.Allow)
+	if result.Decision != keeplib.Deny {
+		t.Errorf("Decision = %q, want %q (fail-closed on panic)", result.Decision, keeplib.Deny)
 	}
 }

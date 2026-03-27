@@ -41,7 +41,7 @@ func SafeEvaluate(eng *keeplib.Engine, call keeplib.Call, scope string) (result 
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("keep: panic during evaluation: %v", r)
-			result = keeplib.EvalResult{Decision: keeplib.Allow}
+			result = keeplib.EvalResult{Decision: keeplib.Deny}
 		}
 	}()
 	return eng.Evaluate(call, scope)
