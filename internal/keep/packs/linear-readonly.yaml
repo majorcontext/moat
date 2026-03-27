@@ -1,0 +1,23 @@
+scope: linear
+mode: enforce
+rules:
+  - name: allow-read-operations
+    match:
+      operation: "list_*"
+    action: allow
+
+  - name: allow-get-operations
+    match:
+      operation: "get_*"
+    action: allow
+
+  - name: allow-search
+    match:
+      operation: "search_*"
+    action: allow
+
+  - name: default-deny
+    match:
+      operation: "*"
+    action: deny
+    message: "Only read operations are allowed by the linear-readonly policy."

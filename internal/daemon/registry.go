@@ -37,9 +37,10 @@ func (r *Registry) RegisterWithToken(rc *RunContext, token string) {
 	rc.AuthToken = token
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Cancel refresh on any existing run with this token to prevent leaks.
+	// Clean up any existing run with this token to prevent leaks.
 	if old, ok := r.runs[token]; ok {
 		old.CancelRefresh()
+		old.Close()
 	}
 	r.runs[token] = rc
 }

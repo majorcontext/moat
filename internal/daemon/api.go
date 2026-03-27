@@ -75,12 +75,24 @@ type RegisterRequest struct {
 	Grants               []string                 `json:"grants,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
+	PolicyYAML           map[string][]byte        `json:"policy_yaml,omitempty"`
+	PolicyRuleSets       []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
+}
+
+// PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.
+// Used for inline deny-list policies from moat.yaml. The daemon compiles these
+// with keep.NewRuleSet() instead of parsing YAML.
+type PolicyRuleSetSpec struct {
+	Scope string   `json:"scope"`
+	Mode  string   `json:"mode"`
+	Deny  []string `json:"deny"`
 }
 
 // RegisterResponse is returned from POST /v1/runs.
 type RegisterResponse struct {
 	AuthToken string `json:"auth_token"`
 	ProxyPort int    `json:"proxy_port"`
+	Error     string `json:"error,omitempty"`
 }
 
 // UpdateRunRequest is sent to PATCH /v1/runs/{token}.
@@ -90,11 +102,12 @@ type UpdateRunRequest struct {
 
 // HealthResponse is returned from GET /v1/health.
 type HealthResponse struct {
-	PID       int    `json:"pid"`
-	ProxyPort int    `json:"proxy_port"`
-	RunCount  int    `json:"run_count"`
-	StartedAt string `json:"started_at"`
-	Commit    string `json:"commit,omitempty"` // Git commit hash of the daemon binary
+	PID          int      `json:"pid"`
+	ProxyPort    int      `json:"proxy_port"`
+	RunCount     int      `json:"run_count"`
+	StartedAt    string   `json:"started_at"`
+	Commit       string   `json:"commit,omitempty"`       // Git commit hash of the daemon binary
+	Capabilities []string `json:"capabilities,omitempty"` // Feature capabilities supported by this daemon
 }
 
 // RunInfo is an element of the list returned by GET /v1/runs.
