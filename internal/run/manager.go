@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	keeplib "github.com/majorcontext/keep"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
@@ -31,6 +32,8 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/image"
+
+	internalkeep "github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/langserver"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/name"
@@ -702,8 +705,101 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			runCtx.MCPServers = opts.Config.MCP
 		}
 
+		// Resolve Keep policies for daemon registration.
+		// Inline deny-list policies use the RuleSet builder (no YAML round-trip).
+		// File/pack policies are validated with ValidateRuleBytes and passed as YAML.
+		var policyYAML map[string][]byte
+		var policyRuleSets []daemon.PolicyRuleSetSpec
+		if opts.Config != nil {
+			for _, mcp := range opts.Config.MCP {
+				if mcp.Policy == nil {
+					continue
+				}
+				if mcp.Policy.IsInline() {
+					mode := mcp.Policy.Mode
+					if mode == "" {
+						mode = "enforce"
+					}
+					policyRuleSets = append(policyRuleSets, daemon.PolicyRuleSetSpec{
+						Scope: mcp.Name,
+						Mode:  mode,
+						Deny:  mcp.Policy.Deny,
+					})
+				} else {
+					if policyYAML == nil {
+						policyYAML = make(map[string][]byte)
+					}
+					yamlBytes, err := internalkeep.ResolvePolicyYAML(mcp.Policy, mcp.Name, opts.Workspace)
+					if err != nil {
+						return nil, fmt.Errorf("MCP server %q policy: %w", mcp.Name, err)
+					}
+					if err := keeplib.ValidateRuleBytes(yamlBytes); err != nil {
+						return nil, fmt.Errorf("MCP server %q policy validation: %w", mcp.Name, err)
+					}
+					policyYAML[mcp.Name] = yamlBytes
+				}
+			}
+
+			// Resolve network keep_policy if configured.
+			if opts.Config.Network.KeepPolicy != nil {
+				if opts.Config.Network.KeepPolicy.IsInline() {
+					mode := opts.Config.Network.KeepPolicy.Mode
+					if mode == "" {
+						mode = "enforce"
+					}
+					policyRuleSets = append(policyRuleSets, daemon.PolicyRuleSetSpec{
+						Scope: "http",
+						Mode:  mode,
+						Deny:  opts.Config.Network.KeepPolicy.Deny,
+					})
+				} else {
+					if policyYAML == nil {
+						policyYAML = make(map[string][]byte)
+					}
+					yamlBytes, err := internalkeep.ResolvePolicyYAML(opts.Config.Network.KeepPolicy, "http", opts.Workspace)
+					if err != nil {
+						return nil, fmt.Errorf("network keep_policy: %w", err)
+					}
+					if err := keeplib.ValidateRuleBytes(yamlBytes); err != nil {
+						return nil, fmt.Errorf("network keep_policy validation: %w", err)
+					}
+					policyYAML["http"] = yamlBytes
+				}
+			}
+
+			// Resolve LLM gateway policy if configured.
+			if opts.Config.Claude.LLMGateway != nil && opts.Config.Claude.LLMGateway.Policy != nil {
+				gwPolicy := opts.Config.Claude.LLMGateway.Policy
+				if gwPolicy.IsInline() {
+					mode := gwPolicy.Mode
+					if mode == "" {
+						mode = "enforce"
+					}
+					policyRuleSets = append(policyRuleSets, daemon.PolicyRuleSetSpec{
+						Scope: "llm-gateway",
+						Mode:  mode,
+						Deny:  gwPolicy.Deny,
+					})
+				} else {
+					if policyYAML == nil {
+						policyYAML = make(map[string][]byte)
+					}
+					yamlBytes, err := internalkeep.ResolvePolicyYAML(gwPolicy, "llm-gateway", opts.Workspace)
+					if err != nil {
+						return nil, fmt.Errorf("llm-gateway policy: %w", err)
+					}
+					if err := keeplib.ValidateRuleBytes(yamlBytes); err != nil {
+						return nil, fmt.Errorf("llm-gateway policy validation: %w", err)
+					}
+					policyYAML["llm-gateway"] = yamlBytes
+				}
+			}
+		}
+
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
+		regReq.PolicyYAML = policyYAML
+		regReq.PolicyRuleSets = policyRuleSets
 
 		// Save registration request for re-registration after proxy restart
 		r.ProxyRegReq = &regReq
@@ -712,6 +808,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		regResp, regErr := m.daemonClient.RegisterRun(ctx, regReq)
 		if regErr != nil {
 			return nil, fmt.Errorf("registering run with proxy daemon: %w", regErr)
+		}
+		if regResp.Error != "" {
+			return nil, fmt.Errorf("policy compilation failed: %s", regResp.Error)
 		}
 
 		// Get proxy host address (needed for both proxy URL and firewall setup)

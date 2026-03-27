@@ -206,7 +206,6 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	writeGoInstallPackages(&b, c.goInstallPkgs)
 	writeCustomDeps(&b, c.customDeps)
 	writeUvToolPackages(&b, c.uvToolPkgs)
-
 	// SSH known hosts must be written before plugin installation so that
 	// any in-container git clone fallback can verify SSH host keys.
 	// This runs as root (writes to /etc/ssh/).

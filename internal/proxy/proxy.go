@@ -35,6 +35,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -42,8 +43,11 @@ import (
 	"sync"
 	"time"
 
+	keeplib "github.com/majorcontext/keep"
+
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	internalkeep "github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/netrules"
 )
@@ -242,6 +246,7 @@ type RunContextData struct {
 	HostRules            []netrules.HostRules
 	AWSHandler           http.Handler
 	CredStore            credential.Store
+	KeepEngines          map[string]*keeplib.Engine
 }
 
 // ContextResolver resolves a proxy auth token to per-run context data.
@@ -1297,6 +1302,48 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			continue
 		}
 
+		// Evaluate Keep policy for the inner HTTP request.
+		// Check per-host engine first, then fall back to global "http" engine
+		// (from network.keep_policy which applies to all hosts).
+		if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
+			scope := "http-" + host
+			eng, ok := rc.KeepEngines[scope]
+			if !ok {
+				eng, ok = rc.KeepEngines["http"]
+				if ok {
+					scope = "http"
+				}
+			}
+			if ok {
+				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
+				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				if evalErr != nil {
+					log.Warn("Keep evaluation error for HTTP request",
+						"host", host,
+						"method", req.Method,
+						"path", req.URL.Path,
+						"error", evalErr)
+				} else if result.Decision == keeplib.Deny {
+					msg := "Moat: request blocked by Keep policy.\nHost: " + host + "\n"
+					if result.Message != "" {
+						msg += result.Message + "\n"
+					}
+					blockedResp := &http.Response{
+						StatusCode:    http.StatusForbidden,
+						ProtoMajor:    1,
+						ProtoMinor:    1,
+						Header:        make(http.Header),
+						ContentLength: int64(len(msg)),
+						Body:          io.NopCloser(strings.NewReader(msg)),
+					}
+					blockedResp.Header.Set("X-Moat-Blocked", "keep-policy")
+					blockedResp.Header.Set("Content-Type", "text/plain")
+					_ = blockedResp.Write(tlsClientConn)
+					continue
+				}
+			}
+		}
+
 		// Inject MCP credentials if this is an MCP request.
 		// Use the CONNECT request r for context lookups since inner
 		// requests from the TLS stream don't carry the request context.
@@ -1334,6 +1381,53 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		start := time.Now()
 		resp, err := transport.RoundTrip(req)
 		duration := time.Since(start)
+
+		// Evaluate LLM gateway policy on Anthropic API responses.
+		if resp != nil && resp.StatusCode == http.StatusOK && host == "api.anthropic.com" {
+			if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
+				if eng, ok := rc.KeepEngines["llm-gateway"]; ok {
+					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize))
+					resp.Body.Close()
+					if readErr != nil {
+						log.Warn("failed to read response body for LLM policy",
+							"host", host, "error", readErr)
+						resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+					} else {
+						result := evaluateLLMResponse(eng, respBodyBytes, resp)
+						if result.Denied {
+							log.Info("LLM tool_use denied by policy",
+								"rule", result.Rule, "message", result.Message)
+							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)
+							resp = &http.Response{
+								StatusCode:    http.StatusBadRequest,
+								ProtoMajor:    1,
+								ProtoMinor:    1,
+								Header:        make(http.Header),
+								ContentLength: int64(len(errorBody)),
+								Body:          io.NopCloser(bytes.NewReader(errorBody)),
+							}
+							resp.Header.Set("Content-Type", "application/json")
+							resp.Header.Set("X-Moat-Blocked", "llm-policy")
+						} else if result.Events != nil {
+							// SSE response allowed — re-serialize evaluated events.
+							var buf bytes.Buffer
+							for _, ev := range result.Events {
+								if ev.Type != "" {
+									fmt.Fprintf(&buf, "event: %s\n", ev.Type)
+								}
+								fmt.Fprintf(&buf, "data: %s\n\n", ev.Data)
+							}
+							resp.Body = io.NopCloser(&buf)
+							resp.ContentLength = int64(buf.Len())
+						} else {
+							// JSON response allowed — restore original body.
+							resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+							resp.ContentLength = int64(len(respBodyBytes))
+						}
+					}
+				}
+			}
+		}
 
 		// Capture response
 		var respBody []byte

@@ -1,14 +1,19 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
+	keeplib "github.com/majorcontext/keep"
+
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	internalkeep "github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/log"
 )
 
@@ -212,6 +217,62 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 	// Preserve query string
 	targetURL.RawQuery = r.URL.RawQuery
+
+	// Evaluate Keep policy for MCP tool calls before consuming the body.
+	if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
+		if eng, ok := rc.KeepEngines[serverName]; ok {
+			bodyBytes, readErr := io.ReadAll(r.Body)
+			if readErr != nil {
+				http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			var mcpReq struct {
+				Method string `json:"method"`
+				Params struct {
+					Name      string         `json:"name"`
+					Arguments map[string]any `json:"arguments"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(bodyBytes, &mcpReq) == nil && mcpReq.Method == "tools/call" && mcpReq.Params.Name != "" {
+				scope := "mcp-" + serverName
+				call := internalkeep.NormalizeMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments, scope)
+				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				if evalErr != nil {
+					log.Warn("Keep evaluation error for MCP call",
+						"server", serverName,
+						"tool", mcpReq.Params.Name,
+						"error", evalErr)
+				} else {
+					switch result.Decision {
+					case keeplib.Deny:
+						msg := "Moat: MCP tool call blocked by policy."
+						if result.Message != "" {
+							msg += " " + result.Message
+						}
+						http.Error(w, msg, http.StatusForbidden)
+						return
+					case keeplib.Redact:
+						mutated := keeplib.ApplyMutations(mcpReq.Params.Arguments, result.Mutations)
+						// Re-encode the body with mutated arguments.
+						var raw map[string]any
+						_ = json.Unmarshal(bodyBytes, &raw)
+						if params, ok := raw["params"].(map[string]any); ok {
+							params["arguments"] = mutated
+						}
+						if mutatedBody, marshalErr := json.Marshal(raw); marshalErr != nil {
+							log.Debug("failed to marshal redacted MCP body", "error", marshalErr)
+						} else {
+							bodyBytes = mutatedBody
+						}
+						r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+						r.ContentLength = int64(len(bodyBytes))
+					}
+				}
+			}
+		}
+	}
 
 	// Create new request to target with context
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL.String(), r.Body)
