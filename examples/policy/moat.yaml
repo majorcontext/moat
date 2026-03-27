@@ -1,0 +1,39 @@
+# Example: Keep LLM gateway policy
+#
+# Evaluates Keep policy rules on Claude's API responses. The Moat proxy
+# inspects tool_use blocks returned by the Anthropic API and denies any
+# that match the policy rules.
+#
+# Run with:
+#   moat run examples/policy
+#
+# What happens:
+#
+#   Claude tries to edit moat.yaml but the proxy evaluates the tool_use
+#   against the Keep policy and returns a 400 policy_denied error:
+#
+#     Policy denied: deny-edit. File editing is blocked by policy.
+#
+#   Claude reports that it cannot make the change.
+#
+# Override the prompt to try a read (allowed):
+#   moat run examples/policy -- claude -p "read moat.yaml and summarize it"
+#
+# Prerequisites:
+#   moat grant claude
+
+name: policy-demo
+
+dependencies:
+  - node@20
+  - claude-code
+
+grants:
+  - claude
+
+# Ask Claude to edit moat.yaml — blocked by the read-only policy.
+command: ["claude", "-p", "add a yaml comment to the top of moat.yaml that says 'edited by claude'"]
+
+claude:
+  llm-gateway:
+    policy: .keep/read-only.yaml

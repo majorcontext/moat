@@ -1,0 +1,30 @@
+scope: llm-gateway
+mode: enforce
+rules:
+  - name: deny-edit
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'edit'"
+    action: deny
+    message: "File editing is blocked by policy."
+
+  - name: deny-write
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'write'"
+    action: deny
+    message: "File writing is blocked by policy."
+
+  - name: deny-bash
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'bash'"
+    action: deny
+    message: "Shell commands are blocked by policy."
+
+  - name: deny-notebook-edit
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'notebookedit'"
+    action: deny
+    message: "Notebook editing is blocked by policy."
