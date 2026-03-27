@@ -605,27 +605,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				// still need their credential stored for the MCP relay.
 				if opts.Config != nil {
 					for _, mcp := range opts.Config.MCP {
-						log.Debug("MCP grant match check",
-							"mcp.Name", mcp.Name,
-							"mcp.Auth.Grant", mcp.Auth.Grant,
-							"grant", grant,
-							"match", mcp.Auth != nil && mcp.Auth.Grant == grant)
 						if mcp.Auth != nil && mcp.Auth.Grant == grant {
 							serverHost := mcp.URL
 							if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
 								serverHost = u.Host
 							}
-							log.Debug("storing MCP credential on RunContext",
-								"server", mcp.Name,
-								"host", serverHost,
-								"grant", grant,
-								"header", mcp.Auth.Header,
-								"tokenLen", len(provCred.Token))
 							runCtx.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grant)
 						}
 					}
-				} else {
-					log.Debug("no config on opts, skipping MCP credential storage", "grant", grant)
 				}
 
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")

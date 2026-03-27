@@ -26,7 +26,7 @@ interactive: true
 
 mcp:
   - name: notion
-    url: https://mcp.notion.com
+    url: https://mcp.notion.com/mcp
     auth:
       grant: oauth:notion
       header: Authorization

@@ -7,12 +7,12 @@ func TestLookupServerURL(t *testing.T) {
 		name string
 		want string
 	}{
-		{"notion", "https://mcp.notion.com"},
-		{"linear", "https://mcp.linear.app"},
-		{"cloudflare", "https://mcp.cloudflare.com"},
+		{"notion", "https://mcp.notion.com/mcp"},
+		{"linear", "https://mcp.linear.app/mcp"},
+		{"cloudflare", "https://mcp.cloudflare.com/mcp"},
 		{"hubspot", "https://mcp.hubspot.com"},
 		{"stripe", "https://mcp.stripe.com"},
-		{"asana", "https://mcp.asana.com"},
+		{"asana", "https://mcp.asana.com/mcp"},
 		{"nonexistent", ""},
 	}
 	for _, tt := range tests {

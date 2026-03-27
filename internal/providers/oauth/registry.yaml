@@ -9,9 +9,9 @@
 # Users can override or extend this registry by placing YAML files in
 # ~/.moat/oauth/registry.d/<name>.yaml with a single "url" key.
 
-asana: https://mcp.asana.com
-cloudflare: https://mcp.cloudflare.com
+asana: https://mcp.asana.com/mcp
+cloudflare: https://mcp.cloudflare.com/mcp
 hubspot: https://mcp.hubspot.com
-linear: https://mcp.linear.app
-notion: https://mcp.notion.com
+linear: https://mcp.linear.app/mcp
+notion: https://mcp.notion.com/mcp
 stripe: https://mcp.stripe.com

@@ -71,6 +71,7 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 
 	var cfg *oauth.Config
 	var resource string
+	var mcpURL string
 
 	// Resolution order: CLI flags -> config file -> MCP discovery
 
@@ -99,7 +100,7 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 
 	// 3. MCP discovery (--url flag → moat.yaml → built-in registry)
 	if cfg == nil {
-		mcpURL := oauthURL
+		mcpURL = oauthURL
 		if mcpURL == "" {
 			mcpURL = findMCPServerURL(name)
 		}
@@ -163,7 +164,13 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 	if !provCred.ExpiresAt.IsZero() {
 		fmt.Printf("Expires: %s (auto-refresh enabled)\n", provCred.ExpiresAt.Format("2006-01-02 15:04:05"))
 	}
-	serverURL := resource
+	// Prefer the MCP server URL we actually used for discovery (includes
+	// the correct path like /mcp) over the PRM resource field (which is
+	// often just the base domain).
+	serverURL := mcpURL
+	if serverURL == "" {
+		serverURL = resource
+	}
 	if serverURL == "" {
 		serverURL = "<server-url>"
 	}
