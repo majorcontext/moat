@@ -80,6 +80,19 @@ type RequestLogData struct {
 // RequestLogger is called for each proxied request.
 type RequestLogger func(data RequestLogData)
 
+// PolicyLogData contains data for a policy decision event.
+type PolicyLogData struct {
+	RunID     string
+	Scope     string
+	Operation string
+	Decision  string
+	Rule      string
+	Message   string
+}
+
+// PolicyLogger is called when a policy decision is made.
+type PolicyLogger func(data PolicyLogData)
+
 // isTextContentType returns true for text-based content types that should be captured.
 func isTextContentType(ct string) bool {
 	if ct == "" {
@@ -290,6 +303,7 @@ type Proxy struct {
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
 	relays               map[string]string             // name -> target URL for relay endpoints
 	contextResolver      ContextResolver               // optional per-run credential resolver
+	policyLogger         PolicyLogger                  // optional policy decision logger
 }
 
 // NewProxy creates a new auth proxy.
@@ -317,6 +331,32 @@ func (p *Proxy) SetCA(ca *CA) {
 // SetLogger sets the request logger.
 func (p *Proxy) SetLogger(logger RequestLogger) {
 	p.logger = logger
+}
+
+// SetPolicyLogger sets the policy decision logger.
+func (p *Proxy) SetPolicyLogger(logger PolicyLogger) {
+	p.policyLogger = logger
+}
+
+// logPolicy logs a policy decision if a logger is configured.
+func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, decision, rule, message string) {
+	if p.policyLogger == nil {
+		return
+	}
+	var runID string
+	if ctxReq != nil {
+		if rc := getRunContext(ctxReq); rc != nil {
+			runID = rc.RunID
+		}
+	}
+	p.policyLogger(PolicyLogData{
+		RunID:     runID,
+		Scope:     scope,
+		Operation: operation,
+		Decision:  decision,
+		Rule:      rule,
+		Message:   message,
+	})
 }
 
 // SetAWSHandler sets the handler for AWS credential requests.
@@ -1397,6 +1437,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 						if result.Denied {
 							log.Info("LLM tool_use denied by policy",
 								"rule", result.Rule, "message", result.Message)
+							p.logPolicy(r, "llm-gateway", "llm.tool_use", "deny", result.Rule, result.Message)
 							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)
 							resp = &http.Response{
 								StatusCode:    http.StatusBadRequest,

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
@@ -113,6 +114,33 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 			ResponseBody:    string(data.ResponseBody),
 			BodyTruncated:   len(data.RequestBody) >= proxy.MaxBodySize || len(data.ResponseBody) >= proxy.MaxBodySize,
 		})
+	})
+
+	// Wire policy decision logging. Routes to per-run audit stores.
+	var auditMu sync.Mutex
+	auditStores := make(map[string]*audit.Store)
+	p.SetPolicyLogger(func(data proxy.PolicyLogData) {
+		if data.RunID == "" {
+			return
+		}
+
+		auditMu.Lock()
+		as, ok := auditStores[data.RunID]
+		if !ok {
+			runDir := filepath.Join(baseDir, data.RunID)
+			var openErr error
+			as, openErr = audit.OpenStore(filepath.Join(runDir, "audit.db"))
+			if openErr != nil {
+				auditMu.Unlock()
+				log.Warn("failed to open audit store for policy log",
+					"run_id", data.RunID, "error", openErr)
+				return
+			}
+			auditStores[data.RunID] = as
+		}
+		auditMu.Unlock()
+
+		_ = as.AppendPolicyEntry(data.Scope, data.Operation, data.Decision, data.Rule, data.Message)
 	})
 
 	// Start credential proxy.

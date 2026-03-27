@@ -16,3 +16,15 @@ type PolicyDecisionData struct {
 func (s *Store) AppendPolicy(data PolicyDecisionData) (*Entry, error) {
 	return s.Append(EntryPolicy, &data)
 }
+
+// AppendPolicyEntry is a convenience method for logging policy decisions.
+func (s *Store) AppendPolicyEntry(scope, operation, decision, rule, message string) error {
+	_, err := s.AppendPolicy(PolicyDecisionData{
+		Scope:     scope,
+		Operation: operation,
+		Decision:  decision,
+		Rule:      rule,
+		Message:   message,
+	})
+	return err
+}
