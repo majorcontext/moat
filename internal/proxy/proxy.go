@@ -1143,7 +1143,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	//
 	// Security note: This intercepts ALL HTTPS traffic, not just credential-injected hosts.
 	// This is intentional for full observability - a core Moat feature. The container
-	// trusts our CA (mounted at /etc/ssl/certs/) and we verify upstream certs.
+	// trusts our CA (mounted at /etc/ssl/certs/moat-ca/) and we verify upstream certs.
 	//
 	// Applications with certificate pinning may fail. This is expected behavior since
 	// observability requires seeing all traffic.

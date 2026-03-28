@@ -231,7 +231,7 @@ Then retry — the daemon will pick up the new credentials automatically.`
 
 	case strings.Contains(msg, "context deadline exceeded") ||
 		strings.Contains(msg, "context canceled"):
-		return "AWS credential error: request timed out. Retry or check network connectivity."
+		return "AWS credential error: request canceled or timed out. Retry or check network connectivity."
 
 	default:
 		return "AWS credential error: unexpected error assuming role.\n\nCheck the daemon log for details: ~/.moat/debug/daemon.log"

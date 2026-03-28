@@ -19,25 +19,27 @@ if [ -z "$MOAT_AWS_CREDENTIAL_URL" ]; then
     exit 1
   fi
 fi
+TMPWORK=$(mktemp -d /tmp/moat-aws-XXXXXX) || { echo "moat: failed to create temp dir" >&2; exit 1; }
+trap 'rm -rf "$TMPWORK"' EXIT
 if [ -n "$MOAT_AWS_CREDENTIAL_TOKEN" ]; then
-  HTTP_CODE=$(curl -sS -o /tmp/moat-aws-resp -w "%{http_code}" -m 10 -H "Authorization: Bearer $MOAT_AWS_CREDENTIAL_TOKEN" "$MOAT_AWS_CREDENTIAL_URL" 2>/tmp/moat-aws-err) || {
+  HTTP_CODE=$(curl -sS -o "$TMPWORK/resp" -w "%{http_code}" -m 10 -H "Authorization: Bearer $MOAT_AWS_CREDENTIAL_TOKEN" "$MOAT_AWS_CREDENTIAL_URL" 2>"$TMPWORK/err") || {
     echo "moat: AWS credential fetch failed:" >&2
-    cat /tmp/moat-aws-err >&2
+    cat "$TMPWORK/err" >&2
     exit 1
   }
 else
-  HTTP_CODE=$(curl -sS -o /tmp/moat-aws-resp -w "%{http_code}" -m 10 "$MOAT_AWS_CREDENTIAL_URL" 2>/tmp/moat-aws-err) || {
+  HTTP_CODE=$(curl -sS -o "$TMPWORK/resp" -w "%{http_code}" -m 10 "$MOAT_AWS_CREDENTIAL_URL" 2>"$TMPWORK/err") || {
     echo "moat: AWS credential fetch failed:" >&2
-    cat /tmp/moat-aws-err >&2
+    cat "$TMPWORK/err" >&2
     exit 1
   }
 fi
 if [ "$HTTP_CODE" -ge 400 ]; then
   echo "moat: AWS credential fetch failed (HTTP $HTTP_CODE):" >&2
-  cat /tmp/moat-aws-resp >&2
+  cat "$TMPWORK/resp" >&2
   exit 1
 fi
-cat /tmp/moat-aws-resp
+cat "$TMPWORK/resp"
 `
 
 // GetCredentialHelper returns the credential helper script as bytes.
