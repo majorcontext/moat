@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -126,9 +127,21 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 			if saveErr := store.Save(storeCred); saveErr != nil {
 				log.Debug("failed to persist refreshed credential", "provider", credName, "error", saveErr)
 			}
-			// Update in-memory RunContext credential so the proxy uses the
-			// new token immediately (it checks in-memory first).
-			rc.UpdateCredentialValue(grant, updated.Token)
+			// Re-apply credentials to the RunContext so the proxy uses the
+			// new token immediately. We use the same mechanisms as initial
+			// setup (ConfigureProxy + MCP loop) to ensure header values are
+			// formatted correctly (e.g., "Bearer " prefix for GitHub).
+			prov.ConfigureProxy(rc, updated)
+			for _, mcp := range rc.MCPServers {
+				if mcp.Auth != nil && mcp.Auth.Grant == grant {
+					serverHost := mcp.URL
+					if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+						serverHost = u.Host
+					}
+					rc.SetCredentialWithGrant(serverHost, mcp.Auth.Header, updated.Token, grant)
+				}
+			}
+			log.Debug("token refreshed", "provider", credName)
 		}
 	}
 }
