@@ -276,9 +276,15 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
 						return
 					}
-					if params, ok := raw["params"].(map[string]any); ok {
-						params["arguments"] = mutated
+					params, ok := raw["params"].(map[string]any)
+					if !ok {
+						log.Warn("MCP body missing params map for redaction, denying (fail-closed)",
+							"server", serverName)
+						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
+						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
+						return
 					}
+					params["arguments"] = mutated
 					mutatedBody, marshalErr := json.Marshal(raw)
 					if marshalErr != nil {
 						log.Warn("failed to marshal redacted MCP body, denying (fail-closed)",

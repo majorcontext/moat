@@ -106,8 +106,16 @@ func (rc *RunContext) Close() {
 	engines := rc.KeepEngines
 	rc.KeepEngines = nil
 	rc.mu.Unlock()
-	for _, eng := range engines {
-		eng.Close()
+	if len(engines) > 0 {
+		// Close engines after a short delay to let any in-flight proxy
+		// evaluations complete. ToProxyContextData copies the engine map
+		// pointer, so concurrent Evaluate calls may still hold references.
+		go func() {
+			time.Sleep(2 * time.Second)
+			for _, eng := range engines {
+				eng.Close()
+			}
+		}()
 	}
 }
 

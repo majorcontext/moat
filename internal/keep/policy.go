@@ -138,7 +138,20 @@ func ResolvePolicyYAML(pc *PolicyConfig, scope, baseDir string) ([]byte, error) 
 		}
 		return data, nil
 	case pc.IsPack():
-		return GetStarterPack(pc.Pack)
+		data, err := GetStarterPack(pc.Pack)
+		if err != nil {
+			return nil, err
+		}
+		// Rewrite scope to match how the engine will be keyed and evaluated.
+		var doc map[string]any
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return data, nil // best-effort: return original YAML
+		}
+		doc["scope"] = scope
+		if rewritten, err := yaml.Marshal(doc); err == nil {
+			return rewritten, nil
+		}
+		return data, nil
 	default:
 		return nil, fmt.Errorf("empty policy config")
 	}

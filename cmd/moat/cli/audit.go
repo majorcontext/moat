@@ -190,10 +190,14 @@ func formatEntryData(e *audit.Entry) string {
 
 	case audit.EntryPolicy:
 		scope, _ := data["scope"].(string)
+		operation, _ := data["operation"].(string)
 		decision, _ := data["decision"].(string)
 		rule, _ := data["rule"].(string)
 		message, _ := data["message"].(string)
 		s := fmt.Sprintf("%s %s", scope, decision)
+		if operation != "" {
+			s += " " + operation
+		}
 		if rule != "" {
 			s += fmt.Sprintf(" rule=%s", rule)
 		}

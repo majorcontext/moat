@@ -571,9 +571,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		m.daemonClient = daemonCl
 		m.mu.Unlock()
 
-		// Capture daemon build commit for version skew detection.
+		// Capture daemon build commit and capabilities for version skew detection.
+		var daemonCapabilities []string
 		if health, healthErr := daemonCl.Health(ctx); healthErr == nil {
 			r.DaemonCommit = health.Commit
+			daemonCapabilities = health.Capabilities
 		}
 
 		// Create a RunContext that implements credential.ProxyConfigurer.
@@ -791,6 +793,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					}
 					policyYAML["llm-gateway"] = yamlBytes
 				}
+			}
+		}
+
+		// Verify the daemon supports Keep policies before sending them.
+		if len(policyYAML) > 0 || len(policyRuleSets) > 0 {
+			hasKeepPolicy := false
+			for _, cap := range daemonCapabilities {
+				if cap == "keep-policy" {
+					hasKeepPolicy = true
+					break
+				}
+			}
+			if !hasKeepPolicy {
+				return nil, fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy restart' to upgrade")
 			}
 		}
 
