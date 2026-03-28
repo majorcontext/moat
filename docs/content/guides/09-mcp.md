@@ -209,12 +209,11 @@ mcp:
   - name: linear
     url: https://mcp.linear.app/mcp
     policy:
-      allow: [get_issue, list_issues, search_issues]
       deny: [delete_issue, update_issue]
       mode: enforce
 ```
 
-When `allow` is specified, unlisted operations are denied by default. When only `deny` is specified, unlisted operations are allowed.
+Listed operations are denied; unlisted operations are implicitly allowed.
 
 The `mode` field controls enforcement:
 
@@ -243,21 +242,17 @@ Keep rules files use Keep's native YAML format with `scope`, `mode`, and `rules`
 scope: linear
 mode: enforce
 rules:
-  - name: allow-reads
+  - name: deny-deletes
     match:
-      operation: "get_*"
-    action: allow
-
-  - name: allow-lists
-    match:
-      operation: "list_*"
-    action: allow
-
-  - name: default-deny
-    match:
-      operation: "*"
+      operation: "delete_*"
     action: deny
-    message: "Operation not allowed by policy."
+    message: "Delete operations are not allowed."
+
+  - name: deny-updates
+    match:
+      operation: "update_*"
+    action: deny
+    message: "Update operations are not allowed."
 ```
 
 See the [Keep documentation](https://github.com/majorcontext/keep) for the full rule format, including pattern matching, CEL expressions, and redaction.

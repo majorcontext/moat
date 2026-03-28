@@ -651,7 +651,6 @@ network:
   rules:
     - "api.example.com"
   keep_policy:
-    allow: [GET, HEAD]
     deny: [DELETE]
     mode: enforce
 ```
@@ -1223,7 +1222,7 @@ Accepts three formats:
 
 - **Starter pack name:** A built-in policy (e.g., `linear-readonly`)
 - **File path:** Path to a Keep rules YAML file (e.g., `.keep/linear.yaml`)
-- **Inline rules:** An object with `allow`, `deny`, and optional `mode` fields
+- **Inline rules:** An object with `deny` and optional `mode` fields
 
 ```yaml
 # Starter pack
@@ -1243,7 +1242,6 @@ mcp:
   - name: linear
     url: https://mcp.linear.app/mcp
     policy:
-      allow: [get_issue, list_issues, search_issues]
       deny: [delete_issue, update_issue]
       mode: enforce
 ```
@@ -1253,7 +1251,7 @@ mcp:
 
 Available starter packs: `linear-readonly`.
 
-When `allow` is specified, unlisted operations are denied by default. When only `deny` is specified, unlisted operations are allowed.
+Listed operations are denied; unlisted operations are implicitly allowed.
 
 Set `mode: audit` to log policy decisions without enforcing them.
 

@@ -32,7 +32,7 @@ moat run examples/policy -- claude -p "read moat.yaml and summarize it"
 
 ## How it works
 
-The `claude.llm-gateway` field runs a [Keep](https://github.com/majorcontext/keep) sidecar process inside the container. It sits between Claude Code and the Anthropic API, evaluating tool calls against a policy before they execute.
+The `claude.llm-gateway` field configures the Moat proxy to evaluate [Keep](https://github.com/majorcontext/keep) rules against tool calls in Anthropic API responses before they reach the container.
 
 ```yaml
 claude:
@@ -40,29 +40,33 @@ claude:
     policy: .keep/read-only.yaml
 ```
 
-The rules file uses Keep's native YAML format:
+The rules file uses Keep's native YAML format. Keep supports three rule actions: `deny`, `log`, and `redact`. Unmatched operations are implicitly allowed.
 
 ```yaml
 # .keep/read-only.yaml
-scope: llm
+scope: llm-gateway
 mode: enforce
 rules:
-  - name: allow-read
-    match:
-      operation: "Read"
-    action: allow
-
   - name: deny-edit
     match:
-      operation: "Edit"
+      operation: "llm.tool_use"
+      when: "params.name == 'edit'"
     action: deny
     message: "File editing is blocked by policy."
 
-  - name: default-deny
+  - name: deny-write
     match:
-      operation: "*"
+      operation: "llm.tool_use"
+      when: "params.name == 'write'"
     action: deny
-    message: "Operation not in allowlist."
+    message: "File writing is blocked by policy."
+
+  - name: deny-bash
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'bash'"
+    action: deny
+    message: "Shell commands are blocked by policy."
 ```
 
 ## Audit mode
@@ -77,5 +81,5 @@ Switch back to `mode: enforce` once you are confident in the rules.
 
 ## See also
 
-- [Policy guide](https://majorcontext.com/moat/guides/policy)
+- [MCP policy enforcement](https://majorcontext.com/moat/guides/mcp#policy-enforcement)
 - [moat.yaml reference](https://majorcontext.com/moat/reference/moat-yaml)
