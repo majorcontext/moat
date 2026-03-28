@@ -1315,6 +1315,7 @@ Moat creates temporary directories in `/tmp` for AWS credentials, Claude configu
 
 This command scans for and removes temporary directories matching these patterns:
 - `moat-aws-*` - AWS credential helper directories
+- `agentops-aws-*` - AWS credential helper directories (legacy)
 - `moat-claude-staging-*` - Claude configuration staging directories
 - `moat-codex-staging-*` - Codex configuration staging directories
 - `moat-npm-*` - npm credential configuration directories

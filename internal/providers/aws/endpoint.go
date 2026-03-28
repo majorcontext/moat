@@ -220,7 +220,7 @@ Ensure one of these is configured on your host:
 
 Run 'aws sts get-caller-identity' on your host to verify.`, roleARN)
 
-	case strings.Contains(msg, "ExpiredToken") || strings.Contains(msg, "expired"):
+	case strings.Contains(msg, "ExpiredToken") || strings.Contains(msg, "ExpiredTokenException"):
 		return `AWS credential error: host credentials expired
 
 Your host AWS credentials have expired. Refresh them:
