@@ -18,7 +18,8 @@ type TempDirPattern struct {
 
 // MoatTempPatterns lists all temporary directory patterns created by moat
 var MoatTempPatterns = []TempDirPattern{
-	{Pattern: "agentops-aws-*", Description: "AWS credential helper directories"},
+	{Pattern: "moat-aws-*", Description: "AWS credential helper directories"},
+	{Pattern: "agentops-aws-*", Description: "AWS credential helper directories (legacy)"},
 	{Pattern: "moat-claude-staging-*", Description: "Claude configuration staging directories"},
 	{Pattern: "moat-codex-staging-*", Description: "Codex configuration staging directories"},
 	{Pattern: "moat-npm-*", Description: "npm credential configuration directories"},

@@ -15,8 +15,8 @@ func TestFindOrphanedTempDirs(t *testing.T) {
 	defer os.Setenv("TMPDIR", oldTmpDir)
 
 	// Create test directories
-	oldDir := filepath.Join(tmpDir, "agentops-aws-old")
-	recentDir := filepath.Join(tmpDir, "agentops-aws-recent")
+	oldDir := filepath.Join(tmpDir, "moat-aws-old")
+	recentDir := filepath.Join(tmpDir, "moat-aws-recent")
 	claudeOldDir := filepath.Join(tmpDir, "moat-claude-staging-old")
 
 	if err := os.Mkdir(oldDir, 0755); err != nil {

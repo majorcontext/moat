@@ -821,7 +821,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// A small binary inside the container fetches credentials from our proxy on demand.
 		if r.AWSCredentialProvider != nil {
 			// Create temp directory for credential helper and config
-			awsDir, err := os.MkdirTemp("", "agentops-aws-*")
+			awsDir, err := os.MkdirTemp("", "moat-aws-*")
 			if err != nil {
 				cleanupDaemonRun()
 				return nil, fmt.Errorf("creating AWS credential helper directory: %w", err)
@@ -838,7 +838,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 			// Write AWS config file
 			awsConfig := fmt.Sprintf(`[default]
-credential_process = /agentops/aws/credentials
+credential_process = /moat/aws/credentials
 region = %s
 `, r.AWSCredentialProvider.Region())
 			configPath := filepath.Join(awsDir, "config")
@@ -850,7 +850,7 @@ region = %s
 			// Mount the directory
 			mounts = append(mounts, container.MountConfig{
 				Source:   awsDir,
-				Target:   "/agentops/aws",
+				Target:   "/moat/aws",
 				ReadOnly: true,
 			})
 
@@ -859,8 +859,8 @@ region = %s
 
 			// Set environment variables
 			proxyEnv = append(proxyEnv,
-				"AWS_CONFIG_FILE=/agentops/aws/config",
-				"AGENTOPS_CREDENTIAL_URL="+credentialURL,
+				"AWS_CONFIG_FILE=/moat/aws/config",
+				"MOAT_AWS_CREDENTIAL_URL="+credentialURL,
 				"AWS_REGION="+r.AWSCredentialProvider.Region(),
 				// AWS traffic goes through proxy for firewall/observability.
 				// Tell AWS SDK to trust our CA for MITM SSL.
@@ -871,7 +871,7 @@ region = %s
 
 			// Include auth token if proxy requires it
 			if regResp.AuthToken != "" {
-				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+regResp.AuthToken)
+				proxyEnv = append(proxyEnv, "MOAT_AWS_CREDENTIAL_TOKEN="+regResp.AuthToken)
 			}
 
 			fmt.Printf("AWS credential_process configured (role: %s)\n",

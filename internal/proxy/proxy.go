@@ -1142,8 +1142,8 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Do MITM interception when we have a CA configured.
 	//
 	// Security note: This intercepts ALL HTTPS traffic, not just credential-injected hosts.
-	// This is intentional for full observability - a core AgentOps feature. The container
-	// trusts our CA (mounted at /etc/ssl/certs/agentops-ca/) and we verify upstream certs.
+	// This is intentional for full observability - a core Moat feature. The container
+	// trusts our CA (mounted at /etc/ssl/certs/) and we verify upstream certs.
 	//
 	// Applications with certificate pinning may fail. This is expected behavior since
 	// observability requires seeing all traffic.

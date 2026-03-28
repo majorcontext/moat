@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,9 +90,9 @@ func (h *EndpointHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	creds, err := h.getCredentials(r.Context())
 	if err != nil {
-		// Log detailed error server-side but return generic message to prevent leaking sensitive info
-		log.Error("AWS credential fetch error", "error", err)
-		http.Error(w, "failed to get credentials", http.StatusInternalServerError)
+		log.Error("AWS credential fetch error", "error", err, "role", h.cfg.RoleARN)
+		msg := classifyAWSError(err, h.cfg.RoleARN)
+		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
 
@@ -185,4 +186,54 @@ func (h *EndpointHandler) Region() string {
 // RoleARN returns the configured IAM role ARN.
 func (h *EndpointHandler) RoleARN() string {
 	return h.cfg.RoleARN
+}
+
+// classifyAWSError returns an actionable error message based on the STS error.
+// The full error is logged server-side; this returns enough for the container
+// user to diagnose the problem without leaking sensitive details.
+func classifyAWSError(err error, roleARN string) string {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "AccessDenied"):
+		return fmt.Sprintf(`AWS credential error: access denied assuming role %s
+
+Your host AWS identity does not have permission to assume this role.
+Check that:
+  1. The role's trust policy allows your AWS identity
+  2. Your IAM user/role has sts:AssumeRole permission
+
+Run 'moat grant aws' to reconfigure, or check the daemon log:
+  ~/.moat/debug/daemon.log`, roleARN)
+
+	case strings.Contains(msg, "no EC2 IMDS role found") ||
+		strings.Contains(msg, "failed to refresh cached credentials"):
+		return fmt.Sprintf(`AWS credential error: no host credentials found
+
+The moat daemon cannot find AWS credentials to assume role %s.
+The daemon runs on your host machine, not inside the container.
+
+Ensure one of these is configured on your host:
+  - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment variables
+  - ~/.aws/credentials file
+  - AWS SSO session (run 'aws sso login')
+
+Run 'aws sts get-caller-identity' on your host to verify.`, roleARN)
+
+	case strings.Contains(msg, "ExpiredToken") || strings.Contains(msg, "expired"):
+		return `AWS credential error: host credentials expired
+
+Your host AWS credentials have expired. Refresh them:
+  - For SSO: aws sso login
+  - For temporary credentials: re-export AWS_SESSION_TOKEN
+
+Then retry — the daemon will pick up the new credentials automatically.`
+
+	case strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "context canceled"):
+		return "AWS credential error: request timed out. Retry or check network connectivity."
+
+	default:
+		return fmt.Sprintf("AWS credential error: %s\n\nCheck the daemon log for details: ~/.moat/debug/daemon.log", msg)
+	}
 }
