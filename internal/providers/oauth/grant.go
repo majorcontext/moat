@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -98,7 +99,7 @@ func startCallbackServer(expectedState string, codeCh chan<- string, errCh chan<
 			}
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "<html><body><h1>Authorization failed</h1><p>%s</p></body></html>", msg)
+			fmt.Fprintf(w, "<html><body><h1>Authorization failed</h1><p>%s</p></body></html>", html.EscapeString(msg))
 			errCh <- fmt.Errorf("oauth error: %s", msg)
 			return
 		}
@@ -108,7 +109,7 @@ func startCallbackServer(expectedState string, codeCh chan<- string, errCh chan<
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, "<html><body><h1>Invalid state parameter</h1></body></html>")
-			errCh <- fmt.Errorf("state mismatch: expected %q, got %q", expectedState, q.Get("state"))
+			errCh <- fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")
 			return
 		}
 

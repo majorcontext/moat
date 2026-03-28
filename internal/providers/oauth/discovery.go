@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -36,6 +37,10 @@ type ClientRegistration struct {
 // DiscoverFromMCPServer performs full OAuth discovery from an MCP server URL.
 // It returns the discovered Config, the resource identifier (for RFC 8707), and any error.
 func DiscoverFromMCPServer(ctx context.Context, mcpServerURL string) (*Config, string, error) {
+	if err := requireHTTPS(mcpServerURL, "MCP server URL"); err != nil {
+		return nil, "", err
+	}
+
 	log.Debug("discovering OAuth config from MCP server", "url", mcpServerURL)
 
 	prm, err := discoverProtectedResourceMetadata(ctx, mcpServerURL)
@@ -48,11 +53,22 @@ func DiscoverFromMCPServer(ctx context.Context, mcpServerURL string) (*Config, s
 	}
 
 	authServerURL := prm.AuthorizationServers[0]
+	if err = requireHTTPS(authServerURL, "authorization server URL"); err != nil {
+		return nil, "", err
+	}
 	log.Debug("discovered authorization server", "url", authServerURL)
 
 	asm, err := discoverAuthServerMetadata(ctx, authServerURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("auth server metadata discovery: %w", err)
+	}
+
+	// Validate discovered endpoints use HTTPS.
+	if err = requireHTTPS(asm.AuthorizationEndpoint, "authorization endpoint"); err != nil {
+		return nil, "", err
+	}
+	if err = requireHTTPS(asm.TokenEndpoint, "token endpoint"); err != nil {
+		return nil, "", err
 	}
 
 	cfg := &Config{
@@ -61,6 +77,9 @@ func DiscoverFromMCPServer(ctx context.Context, mcpServerURL string) (*Config, s
 	}
 
 	if asm.RegistrationEndpoint != "" {
+		if err = requireHTTPS(asm.RegistrationEndpoint, "registration endpoint"); err != nil {
+			return nil, "", err
+		}
 		cfg.RegistrationEndpoint = asm.RegistrationEndpoint
 		log.Debug("DCR endpoint available (deferred until redirect URI known)", "endpoint", asm.RegistrationEndpoint)
 	}
@@ -172,8 +191,12 @@ func registerClient(ctx context.Context, endpoint, clientName string, redirectUR
 		return nil, fmt.Errorf("registration failed with status %d", resp.StatusCode)
 	}
 
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("reading registration response: %w", err)
+	}
 	var reg ClientRegistration
-	if err := json.NewDecoder(resp.Body).Decode(&reg); err != nil {
+	if err := json.Unmarshal(respBody, &reg); err != nil {
 		return nil, fmt.Errorf("decoding registration response: %w", err)
 	}
 	return &reg, nil
@@ -199,8 +222,12 @@ func fetchJSON[T any](ctx context.Context, url string) (*T, error) {
 		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
 	}
 
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("reading response from %s: %w", url, err)
+	}
 	var result T
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decoding response from %s: %w", url, err)
 	}
 	return &result, nil

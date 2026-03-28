@@ -5,9 +5,7 @@
 # Each entry maps a short name to the MCP server's base URL. The OAuth flow
 # uses RFC 9728 (Protected Resource Metadata) and RFC 8414 (Authorization
 # Server Metadata) to discover endpoints automatically.
-#
-# Users can override or extend this registry by placing YAML files in
-# ~/.moat/oauth/registry.d/<name>.yaml with a single "url" key.
+
 
 asana: https://mcp.asana.com/mcp
 cloudflare: https://mcp.cloudflare.com/mcp

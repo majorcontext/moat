@@ -175,8 +175,10 @@ func TestRegisterClientFailure(t *testing.T) {
 }
 
 func TestDiscoverFromMCPServer(t *testing.T) {
-	// Auth server with ASM and DCR endpoints. Use NewUnstartedServer so
-	// we can reference authSrv.URL in the handler.
+	// Use TLS servers because DiscoverFromMCPServer enforces HTTPS.
+	// Override discoveryClient to trust the test CA.
+
+	// Auth server with ASM and DCR endpoints.
 	authSrv := httptest.NewUnstartedServer(nil)
 	authMux := http.NewServeMux()
 	authMux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, _ *http.Request) {
@@ -191,12 +193,12 @@ func TestDiscoverFromMCPServer(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]string{"client_id": "discovered-client"})
 	})
 	authSrv.Config.Handler = authMux
-	authSrv.Start()
+	authSrv.StartTLS()
 	defer authSrv.Close()
 
 	// MCP server with PRM endpoint.
 	var mcpSrvURL string
-	mcpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mcpSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/oauth-protected-resource" {
 			json.NewEncoder(w).Encode(ProtectedResourceMetadata{
 				Resource:             mcpSrvURL,
@@ -208,6 +210,13 @@ func TestDiscoverFromMCPServer(t *testing.T) {
 	}))
 	defer mcpSrv.Close()
 	mcpSrvURL = mcpSrv.URL
+
+	// Override the discovery HTTP client to trust the test TLS certificates.
+	origClient := discoveryClient
+	discoveryClient = mcpSrv.Client()
+	// Both servers share the same test CA, but we need a transport that
+	// trusts both. The mcpSrv client's transport already does.
+	t.Cleanup(func() { discoveryClient = origClient })
 
 	cfg, resource, err := DiscoverFromMCPServer(context.Background(), mcpSrv.URL)
 	if err != nil {

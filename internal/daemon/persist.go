@@ -270,41 +270,30 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			continue
 		}
 
-		// Map grant name to credential store key. Most providers store
-		// credentials under a key matching the resolved name, but the codex
-		// provider is an exception: "openai" resolves to "codex" in the
-		// registry, but credentials are stored under "openai".
-		canonical := provider.ResolveName(grantName)
-		credName := credential.Provider(canonical)
-		if canonical == "codex" {
-			credName = credential.ProviderOpenAI
-		}
+		credName := resolveCredName(grantName, grant)
 		cred, err := store.Get(credName)
 		if err != nil {
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
 		}
 		provCred := provider.FromLegacy(cred)
 
-		prov := provider.Get(grantName)
-		if prov == nil {
-			// MCP grant — match to MCP server config and set credential directly.
-			matched := false
-			for _, mcp := range mcpServers {
-				if mcp.Auth != nil && mcp.Auth.Grant == grantName {
-					serverHost := mcp.URL
-					if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
-						serverHost = u.Host
-					}
-					rc.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grantName)
-					matched = true
+		// Store MCP credential on RunContext (runs for all grants, not just
+		// provider-less ones, because oauth: grants have a registered provider
+		// but still need their credential stored for the MCP relay).
+		for _, mcp := range mcpServers {
+			if mcp.Auth != nil && mcp.Auth.Grant == grant {
+				serverHost := mcp.URL
+				if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+					serverHost = u.Host
 				}
+				rc.SetCredentialWithGrant(serverHost, mcp.Auth.Header, provCred.Token, grant)
 			}
-			if !matched {
-				log.Warn("restore: no MCP server config found for grant", "grant", grantName)
-			}
-			continue
 		}
 
+		prov := provider.Get(grantName)
+		if prov == nil {
+			continue
+		}
 		prov.ConfigureProxy(rc, provCred)
 	}
 	return nil

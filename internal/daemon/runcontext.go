@@ -134,6 +134,20 @@ func (rc *RunContext) SetCredentialWithGrant(host, headerName, headerValue, gran
 	rc.Credentials[host] = CredentialEntry{Name: headerName, Value: headerValue, Grant: grant}
 }
 
+// UpdateCredentialValue updates the token value for all credential entries
+// matching the given grant name. Used by the refresh loop to keep the
+// in-memory credential current after a token refresh.
+func (rc *RunContext) UpdateCredentialValue(grant, newValue string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for host, entry := range rc.Credentials {
+		if entry.Grant == grant {
+			entry.Value = newValue
+			rc.Credentials[host] = entry
+		}
+	}
+}
+
 // AddExtraHeader implements credential.ProxyConfigurer.
 func (rc *RunContext) AddExtraHeader(host, headerName, headerValue string) {
 	rc.mu.Lock()

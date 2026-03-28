@@ -126,6 +126,9 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 			if saveErr := store.Save(storeCred); saveErr != nil {
 				log.Debug("failed to persist refreshed credential", "provider", credName, "error", saveErr)
 			}
+			// Update in-memory RunContext credential so the proxy uses the
+			// new token immediately (it checks in-memory first).
+			rc.UpdateCredentialValue(grant, updated.Token)
 		}
 	}
 }
