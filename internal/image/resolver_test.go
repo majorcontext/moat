@@ -94,6 +94,22 @@ func TestResolveWithPreRunOnly(t *testing.T) {
 	}
 }
 
+func TestResolveWithBaseImage(t *testing.T) {
+	// base_image alone (no deps) should trigger custom image build
+	img := Resolve(nil, &deps.ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:latest"})
+	if img == DefaultImage {
+		t.Error("Resolve with base_image should not return default image")
+	}
+}
+
+func TestResolveWithBaseImageAffectsHash(t *testing.T) {
+	img1 := Resolve(nil, &deps.ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:v1"})
+	img2 := Resolve(nil, &deps.ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:v2"})
+	if img1 == img2 {
+		t.Error("different base images should produce different image tags")
+	}
+}
+
 func TestResolveWithDepsAndSSH(t *testing.T) {
 	depList := []deps.Dependency{{Name: "node", Version: "20"}}
 	imgWithoutSSH := Resolve(depList, nil)

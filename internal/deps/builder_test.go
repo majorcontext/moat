@@ -90,6 +90,22 @@ func TestImageTagWithFirewall(t *testing.T) {
 	}
 }
 
+func TestImageTagWithBaseImage(t *testing.T) {
+	// Base image should affect tag
+	tagDefault := ImageTag(nil, nil)
+	tagCustom := ImageTag(nil, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:latest"})
+	if tagDefault == tagCustom {
+		t.Error("base_image should change the image hash")
+	}
+
+	// Different base images should produce different tags
+	tag1 := ImageTag(nil, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:v1"})
+	tag2 := ImageTag(nil, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:v2"})
+	if tag1 == tag2 {
+		t.Error("different base images should produce different tags")
+	}
+}
+
 func TestImageTagDockerModes(t *testing.T) {
 	// docker:host and docker:dind should produce different image tags
 	// because they install different packages (CLI-only vs full daemon)

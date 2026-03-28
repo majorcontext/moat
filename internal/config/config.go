@@ -18,6 +18,10 @@ import (
 // Must start with a letter or digit.
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// imageRefRe matches valid Docker image references: registry/repo:tag or @sha256:digest.
+// Prevents Dockerfile injection via newlines or special characters in base_image.
+var imageRefRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*(@sha256:[a-f0-9]{64})?$`)
+
 // Config represents a moat.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
@@ -56,6 +60,11 @@ type Config struct {
 	MCP             []MCPServerConfig      `yaml:"mcp,omitempty"`
 	Services        map[string]ServiceSpec `yaml:"services,omitempty"`
 	LanguageServers []string               `yaml:"language_servers,omitempty"`
+
+	// BaseImage specifies a custom base image for the container.
+	// Moat layers its infrastructure (user, entrypoint, etc.) on top.
+	// Must be Debian-based (Ubuntu, Debian) since moat uses apt-get.
+	BaseImage string `yaml:"base_image,omitempty"`
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
@@ -516,6 +525,20 @@ func Load(dir string) (*Config, error) {
 	// Validate sandbox setting
 	if cfg.Sandbox != "" && cfg.Sandbox != "none" {
 		return nil, fmt.Errorf("invalid sandbox value %q: must be empty (default) or 'none'", cfg.Sandbox)
+	}
+
+	// Validate base_image: prevent Dockerfile injection via newlines/whitespace.
+	if cfg.BaseImage != "" {
+		cfg.BaseImage = strings.TrimSpace(cfg.BaseImage)
+		if cfg.BaseImage == "" {
+			return nil, fmt.Errorf("base_image must not be empty or whitespace-only")
+		}
+		if strings.ContainsAny(cfg.BaseImage, " \t\n\r") {
+			return nil, fmt.Errorf("base_image %q: must not contain whitespace", cfg.BaseImage)
+		}
+		if !imageRefRe.MatchString(cfg.BaseImage) {
+			return nil, fmt.Errorf("base_image %q: invalid image reference", cfg.BaseImage)
+		}
 	}
 
 	// Check for overlapping env and secrets keys

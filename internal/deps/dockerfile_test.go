@@ -63,6 +63,36 @@ func TestGenerateDockerfileEmpty(t *testing.T) {
 	}
 }
 
+func TestGenerateDockerfileCustomBaseImage(t *testing.T) {
+	// Custom base image should be used as FROM line
+	result, err := GenerateDockerfile(nil, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:latest"})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.HasPrefix(result.Dockerfile, "FROM ghcr.io/test-org/custom-base:latest") {
+		t.Errorf("Dockerfile should use custom base image, got:\n%s", result.Dockerfile[:100])
+	}
+}
+
+func TestGenerateDockerfileCustomBaseImageWithDeps(t *testing.T) {
+	// Custom base image should override runtime-based selection
+	deps := []Dependency{
+		{Name: "node", Version: "20"},
+		{Name: "typescript"},
+	}
+	result, err := GenerateDockerfile(deps, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:latest"})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+	if !strings.HasPrefix(result.Dockerfile, "FROM ghcr.io/test-org/custom-base:latest") {
+		t.Errorf("Dockerfile should use custom base image even with runtime deps, got:\n%s", result.Dockerfile[:100])
+	}
+	// Node runtime should still be installed since custom base image doesn't provide it
+	if strings.Contains(result.Dockerfile, "provided by base image") {
+		t.Error("custom base image should not skip runtime installation")
+	}
+}
+
 func TestGenerateDockerfileHasIptables(t *testing.T) {
 	// Verify iptables is installed when NeedsFirewall is true
 	deps := []Dependency{

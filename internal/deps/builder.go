@@ -33,6 +33,9 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 
 	// Build the hash input
 	hashInput := strings.Join(sorted, ",")
+	if opts.BaseImage != "" {
+		hashInput += ",base:" + opts.BaseImage
+	}
 	if opts.NeedsSSH {
 		hashInput += ",ssh:agent"
 	}

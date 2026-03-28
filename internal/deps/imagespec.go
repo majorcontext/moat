@@ -10,6 +10,10 @@ import (
 // and Dockerfile generation. A single ImageSpec is constructed once and passed
 // through the entire image pipeline.
 type ImageSpec struct {
+	// BaseImage overrides the default base image selection. When set, the
+	// Dockerfile uses this image as the FROM line instead of auto-selecting
+	// based on runtime dependencies. Must be Debian-based.
+	BaseImage string
 	// NeedsSSH indicates SSH grants are present and the image needs
 	// openssh-client, socat, and the moat-init entrypoint for agent forwarding.
 	NeedsSSH bool
@@ -63,7 +67,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 		return hasDeps
 	}
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
-	return hasDeps || s.NeedsSSH || len(s.InitProviders) > 0 ||
+	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
 		len(s.ClaudePlugins) > 0 || hasHooks
 }

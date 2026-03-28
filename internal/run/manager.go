@@ -1340,7 +1340,12 @@ region = %s
 	// builder, which can fail to parse BuildKit syntax (e.g., --mount=type=cache
 	// confuses legacy parser line counting, causing "unknown instruction" errors).
 	useBuildKit := os.Getenv("BUILDKIT_HOST") != "" && os.Getenv("MOAT_DISABLE_BUILDKIT") != "1"
+	var baseImage string
+	if opts.Config != nil {
+		baseImage = opts.Config.BaseImage
+	}
 	imageSpec := &deps.ImageSpec{
+		BaseImage:          baseImage,
 		NeedsSSH:           hasSSHGrants,
 		SSHHosts:           sshGrants,
 		InitProviders:      imgNeeds.initProviders,

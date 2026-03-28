@@ -25,6 +25,9 @@ dependencies:
   - postgres@17
   - redis@7
 
+# Custom base image (optional, must be Debian-based)
+# base_image: ghcr.io/myorg/my-project-deps:latest
+
 # Service overrides
 services:
   postgres:
@@ -341,6 +344,28 @@ Both docker modes require Docker runtime:
 ```bash
 # Force Docker runtime on macOS
 moat run --runtime docker ./my-project
+```
+
+### base_image
+
+Use a custom base image instead of the default image selection. Moat layers its infrastructure (non-root user, entrypoint, CA certs, etc.) on top of this image.
+
+```yaml
+base_image: ghcr.io/myorg/my-project-deps:latest
+```
+
+- Type: `string`
+- Default: Auto-selected based on `dependencies` (see table above)
+
+The base image must be **Debian-based** (Debian, Ubuntu) because Moat uses `apt-get` to install its dependencies. Alpine, Fedora, and other distributions are not supported.
+
+When `base_image` is set, it overrides the automatic image selection from `dependencies`. Runtime dependencies are still installed on top of the custom base image.
+
+```yaml
+# Pre-built image with project tooling, plus TypeScript on top
+base_image: ghcr.io/myorg/my-project-deps:latest
+dependencies:
+  - typescript
 ```
 
 ---

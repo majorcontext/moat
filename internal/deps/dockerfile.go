@@ -181,8 +181,15 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	// Note: Docker CLI is installed separately from Docker's official repo,
 	// not via apt, to ensure a recent version compatible with modern daemons.
 
-	// Determine base image and write header
-	baseImage, baseRuntime := selectBaseImage(c.runtimes)
+	// Determine base image and write header.
+	// A user-specified base image overrides automatic runtime selection.
+	var baseImage string
+	var baseRuntime *Dependency
+	if opts.BaseImage != "" {
+		baseImage = opts.BaseImage
+	} else {
+		baseImage, baseRuntime = selectBaseImage(c.runtimes)
+	}
 	b.WriteString("FROM " + baseImage + "\n\n")
 	b.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n\n")
 

