@@ -110,11 +110,15 @@ func refreshToken(ctx context.Context, cred *provider.Credential) (*provider.Cre
 	}
 
 	// Build updated credential (copy, not mutate).
+	expiresAt := cred.ExpiresAt
+	if tokenResp.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	}
 	updated := &provider.Credential{
 		Provider:  cred.Provider,
 		Token:     tokenResp.AccessToken,
 		Scopes:    cred.Scopes,
-		ExpiresAt: time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		ExpiresAt: expiresAt,
 		CreatedAt: cred.CreatedAt,
 		Metadata:  newMeta,
 	}

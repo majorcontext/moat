@@ -303,12 +303,15 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 	return nil
 }
 
-// grantToCommand converts a grant name like "oauth:notion" to a CLI-friendly
-// form "oauth notion" suitable for use in "moat grant <args>" instructions.
+// grantToCommand converts a grant name like "oauth:notion" or "mcp-context7"
+// to a CLI-friendly form suitable for use in "moat grant <args>" instructions.
+// Examples: "oauth:notion" → "oauth notion", "mcp-context7" → "mcp context7".
 func grantToCommand(grant string) string {
-	parts := strings.SplitN(grant, ":", 2)
-	if len(parts) == 2 {
+	if parts := strings.SplitN(grant, ":", 2); len(parts) == 2 {
 		return parts[0] + " " + parts[1]
+	}
+	if after, ok := strings.CutPrefix(grant, "mcp-"); ok {
+		return "mcp " + after
 	}
 	return grant
 }
@@ -325,9 +328,9 @@ func validateMCPGrants(cfg *config.Config, store *credential.FileStore) error {
 			return fmt.Errorf(`MCP server '%s' requires grant '%s' but it's not configured
 
 To fix:
-  moat grant mcp %s
+  moat grant %s
 
-Then run again.`, mcp.Name, mcp.Auth.Grant, strings.TrimPrefix(mcp.Auth.Grant, "mcp-"))
+Then run again.`, mcp.Name, mcp.Auth.Grant, grantToCommand(mcp.Auth.Grant))
 		}
 	}
 	return nil

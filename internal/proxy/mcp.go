@@ -21,6 +21,19 @@ var mcpRelayClient = &http.Client{
 }
 
 // formatCredValue prepends "Bearer " for OAuth grants; returns raw value otherwise.
+// grantToCommand converts a grant name like "oauth:notion" or "mcp-context7"
+// to a CLI-friendly form suitable for use in "moat grant <args>" instructions.
+// Examples: "oauth:notion" → "oauth notion", "mcp-context7" → "mcp context7".
+func grantToCommand(grant string) string {
+	if parts := strings.SplitN(grant, ":", 2); len(parts) == 2 {
+		return parts[0] + " " + parts[1]
+	}
+	if after, ok := strings.CutPrefix(grant, "mcp-"); ok {
+		return "mcp " + after
+	}
+	return grant
+}
+
 func formatCredValue(grant, value string) string {
 	if strings.HasPrefix(grant, "oauth:") {
 		return "Bearer " + value
@@ -135,7 +148,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 			"action", "inject-error",
 			"server", matchedServer.Name,
 			"grant", matchedServer.Auth.Grant,
-			"fix", "Run: moat grant mcp "+strings.TrimPrefix(matchedServer.Auth.Grant, "mcp-"))
+			"fix", "Run: moat grant "+grantToCommand(matchedServer.Auth.Grant))
 		// Leave stub in place - request will fail with stub credential
 		return
 	}
@@ -243,8 +256,8 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if credValue == "" {
-			http.Error(w, fmt.Sprintf("MOAT: Failed to load credential for '%s'. Grant: %s. Run: moat grant mcp %s",
-				serverName, mcpServer.Auth.Grant, strings.TrimPrefix(mcpServer.Auth.Grant, "mcp-")),
+			http.Error(w, fmt.Sprintf("MOAT: Failed to load credential for '%s'. Grant: %s. Run: moat grant %s",
+				serverName, mcpServer.Auth.Grant, grantToCommand(mcpServer.Auth.Grant)),
 				http.StatusInternalServerError)
 			return
 		}

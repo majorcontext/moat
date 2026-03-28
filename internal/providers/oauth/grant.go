@@ -100,7 +100,10 @@ func startCallbackServer(expectedState string, codeCh chan<- string, errCh chan<
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, "<html><body><h1>Authorization failed</h1><p>%s</p></body></html>", html.EscapeString(msg))
-			errCh <- fmt.Errorf("oauth error: %s", msg)
+			select {
+			case errCh <- fmt.Errorf("oauth error: %s", msg):
+			default:
+			}
 			return
 		}
 
@@ -109,7 +112,10 @@ func startCallbackServer(expectedState string, codeCh chan<- string, errCh chan<
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, "<html><body><h1>Invalid state parameter</h1></body></html>")
-			errCh <- fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")
+			select {
+			case errCh <- fmt.Errorf("state mismatch in OAuth callback (possible CSRF)"):
+			default:
+			}
 			return
 		}
 
@@ -119,13 +125,19 @@ func startCallbackServer(expectedState string, codeCh chan<- string, errCh chan<
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, "<html><body><h1>Missing authorization code</h1></body></html>")
-			errCh <- fmt.Errorf("missing authorization code in callback")
+			select {
+			case errCh <- fmt.Errorf("missing authorization code in callback"):
+			default:
+			}
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<html><body><h1>Authorization successful</h1><p>You can close this window.</p></body></html>")
-		codeCh <- code
+		select {
+		case codeCh <- code:
+		default:
+		}
 	})
 
 	srv := &http.Server{
@@ -228,6 +240,9 @@ func RunGrant(ctx context.Context, name string, cfg *Config, resource string) (*
 	}
 
 	authURL := buildAuthURL(cfg, state, challenge, redirectURI, resource)
+
+	// Always print the URL so headless/SSH users can open it manually.
+	fmt.Printf("Open this URL in your browser to authorize:\n\n  %s\n\n", authURL)
 
 	// Try to open browser; not fatal if it fails.
 	_ = openBrowser(authURL)
