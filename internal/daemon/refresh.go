@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -126,9 +127,25 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 			if saveErr := store.Save(storeCred); saveErr != nil {
 				log.Debug("failed to persist refreshed credential", "provider", credName, "error", saveErr)
 			}
-			// Update in-memory RunContext credential so the proxy uses the
-			// new token immediately (it checks in-memory first).
-			rc.UpdateCredentialValue(grant, updated.Token)
+			// Update MCP server credentials that use this grant.
+			// We don't call prov.ConfigureProxy here because Refresh()
+			// already updates the proxy's host credentials directly (e.g.,
+			// GitHub sets api.github.com and github.com in Refresh). Calling
+			// ConfigureProxy again would be redundant for credentials, and
+			// would duplicate any AddExtraHeader/AddResponseTransformer calls.
+			//
+			// rc.MCPServers is safe to read without locking — it's written once
+			// during run registration and never modified after.
+			for _, mcp := range rc.MCPServers {
+				if mcp.Auth != nil && mcp.Auth.Grant == grant {
+					serverHost := mcp.URL
+					if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
+						serverHost = u.Host
+					}
+					rc.SetCredentialWithGrant(serverHost, mcp.Auth.Header, updated.Token, grant)
+				}
+			}
+			log.Debug("token refreshed", "provider", credName)
 		}
 	}
 }

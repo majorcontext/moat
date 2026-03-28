@@ -111,6 +111,13 @@ func Names() []string {
 	return names
 }
 
+// Unregister removes a provider by name. For testing only.
+func Unregister(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(providers, name)
+}
+
 // Clear removes all registered providers and aliases. For testing only.
 func Clear() {
 	mu.Lock()
