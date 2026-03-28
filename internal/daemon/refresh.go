@@ -127,11 +127,15 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 			if saveErr := store.Save(storeCred); saveErr != nil {
 				log.Debug("failed to persist refreshed credential", "provider", credName, "error", saveErr)
 			}
-			// Re-apply credentials to the RunContext so the proxy uses the
-			// new token immediately. We use the same mechanisms as initial
-			// setup (ConfigureProxy + MCP loop) to ensure header values are
-			// formatted correctly (e.g., "Bearer " prefix for GitHub).
-			prov.ConfigureProxy(rc, updated)
+			// Update MCP server credentials that use this grant.
+			// We don't call prov.ConfigureProxy here because Refresh()
+			// already updates the proxy's host credentials directly (e.g.,
+			// GitHub sets api.github.com and github.com in Refresh). Calling
+			// ConfigureProxy again would be redundant for credentials, and
+			// would duplicate any AddExtraHeader/AddResponseTransformer calls.
+			//
+			// rc.MCPServers is safe to read without locking — it's written once
+			// during run registration and never modified after.
 			for _, mcp := range rc.MCPServers {
 				if mcp.Auth != nil && mcp.Auth.Grant == grant {
 					serverHost := mcp.URL
