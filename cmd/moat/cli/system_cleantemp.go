@@ -26,6 +26,7 @@ This command finds and removes temporary directories that:
 
 Patterns scanned:
   - moat-aws-*               (AWS credential helpers)
+  - agentops-aws-*           (AWS credential helpers, legacy)
   - moat-claude-staging-*    (Claude configuration)
   - moat-codex-staging-*     (Codex configuration)`,
 	RunE: runCleanTemp,

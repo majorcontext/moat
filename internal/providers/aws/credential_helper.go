@@ -20,19 +20,24 @@ if [ -z "$MOAT_AWS_CREDENTIAL_URL" ]; then
   fi
 fi
 if [ -n "$MOAT_AWS_CREDENTIAL_TOKEN" ]; then
-  RESPONSE=$(curl -sS -m 10 -H "Authorization: Bearer $MOAT_AWS_CREDENTIAL_TOKEN" "$MOAT_AWS_CREDENTIAL_URL" 2>&1) || {
+  HTTP_CODE=$(curl -sS -o /tmp/moat-aws-resp -w "%{http_code}" -m 10 -H "Authorization: Bearer $MOAT_AWS_CREDENTIAL_TOKEN" "$MOAT_AWS_CREDENTIAL_URL" 2>/tmp/moat-aws-err) || {
     echo "moat: AWS credential fetch failed:" >&2
-    echo "$RESPONSE" >&2
+    cat /tmp/moat-aws-err >&2
     exit 1
   }
 else
-  RESPONSE=$(curl -sS -m 10 "$MOAT_AWS_CREDENTIAL_URL" 2>&1) || {
+  HTTP_CODE=$(curl -sS -o /tmp/moat-aws-resp -w "%{http_code}" -m 10 "$MOAT_AWS_CREDENTIAL_URL" 2>/tmp/moat-aws-err) || {
     echo "moat: AWS credential fetch failed:" >&2
-    echo "$RESPONSE" >&2
+    cat /tmp/moat-aws-err >&2
     exit 1
   }
 fi
-echo "$RESPONSE"
+if [ "$HTTP_CODE" -ge 400 ]; then
+  echo "moat: AWS credential fetch failed (HTTP $HTTP_CODE):" >&2
+  cat /tmp/moat-aws-resp >&2
+  exit 1
+fi
+cat /tmp/moat-aws-resp
 `
 
 // GetCredentialHelper returns the credential helper script as bytes.

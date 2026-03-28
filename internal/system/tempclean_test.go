@@ -18,24 +18,20 @@ func TestFindOrphanedTempDirs(t *testing.T) {
 	oldDir := filepath.Join(tmpDir, "moat-aws-old")
 	recentDir := filepath.Join(tmpDir, "moat-aws-recent")
 	claudeOldDir := filepath.Join(tmpDir, "moat-claude-staging-old")
+	legacyOldDir := filepath.Join(tmpDir, "agentops-aws-old")
 
-	if err := os.Mkdir(oldDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(recentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(claudeOldDir, 0755); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{oldDir, recentDir, claudeOldDir, legacyOldDir} {
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Make old directories appear old (2 hours ago)
 	oldTime := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(oldDir, oldTime, oldTime); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(claudeOldDir, oldTime, oldTime); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{oldDir, claudeOldDir, legacyOldDir} {
+		if err := os.Chtimes(dir, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	tests := []struct {
@@ -47,7 +43,7 @@ func TestFindOrphanedTempDirs(t *testing.T) {
 		{
 			name:      "find directories older than 1 hour",
 			minAge:    1 * time.Hour,
-			wantCount: 2, // oldDir and claudeOldDir
+			wantCount: 3, // oldDir, claudeOldDir, and legacyOldDir
 		},
 		{
 			name:      "find directories older than 3 hours",
@@ -57,7 +53,7 @@ func TestFindOrphanedTempDirs(t *testing.T) {
 		{
 			name:      "find directories older than 30 minutes",
 			minAge:    30 * time.Minute,
-			wantCount: 2, // oldDir and claudeOldDir
+			wantCount: 3, // oldDir, claudeOldDir, and legacyOldDir
 		},
 	}
 

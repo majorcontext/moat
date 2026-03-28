@@ -234,6 +234,6 @@ Then retry — the daemon will pick up the new credentials automatically.`
 		return "AWS credential error: request timed out. Retry or check network connectivity."
 
 	default:
-		return fmt.Sprintf("AWS credential error: %s\n\nCheck the daemon log for details: ~/.moat/debug/daemon.log", msg)
+		return "AWS credential error: unexpected error assuming role.\n\nCheck the daemon log for details: ~/.moat/debug/daemon.log"
 	}
 }
