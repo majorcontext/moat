@@ -1351,11 +1351,25 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
 				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
-					log.Warn("Keep evaluation error for HTTP request",
+					log.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
 						"host", host,
 						"method", req.Method,
 						"path", req.URL.Path,
 						"error", evalErr)
+					p.logPolicy(r, scope, "http.request", "evaluation-error", "Policy evaluation failed")
+					msg := "Moat: request blocked — policy evaluation error.\nHost: " + host + "\n"
+					blockedResp := &http.Response{
+						StatusCode:    http.StatusForbidden,
+						ProtoMajor:    1,
+						ProtoMinor:    1,
+						Header:        make(http.Header),
+						ContentLength: int64(len(msg)),
+						Body:          io.NopCloser(strings.NewReader(msg)),
+					}
+					blockedResp.Header.Set("X-Moat-Blocked", "keep-policy")
+					blockedResp.Header.Set("Content-Type", "text/plain")
+					_ = blockedResp.Write(tlsClientConn)
+					continue
 				} else if result.Decision == keeplib.Deny {
 					p.logPolicy(r, scope, "http.request", result.Rule, result.Message)
 					msg := "Moat: request blocked by Keep policy.\nHost: " + host + "\n"
@@ -1423,9 +1437,20 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize+1))
 					resp.Body.Close()
 					if readErr != nil {
-						log.Warn("failed to read response body for LLM policy",
+						log.Warn("failed to read response body for LLM policy, denying (fail-closed)",
 							"host", host, "error", readErr)
-						resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+						p.logPolicy(r, "llm-gateway", "llm.read_error", "read-error", "Failed to read response body for policy evaluation")
+						errorBody := buildPolicyDeniedResponse("read-error", "Failed to read response body for policy evaluation.")
+						resp = &http.Response{
+							StatusCode:    http.StatusBadRequest,
+							ProtoMajor:    1,
+							ProtoMinor:    1,
+							Header:        make(http.Header),
+							ContentLength: int64(len(errorBody)),
+							Body:          io.NopCloser(bytes.NewReader(errorBody)),
+						}
+						resp.Header.Set("Content-Type", "application/json")
+						resp.Header.Set("X-Moat-Blocked", "llm-policy")
 					} else if int64(len(respBodyBytes)) > maxLLMResponseSize {
 						// Response exceeds size limit — deny (fail-closed).
 						log.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
@@ -1465,6 +1490,9 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 							// re-serialized body is plaintext — remove Content-Encoding.
 							var buf bytes.Buffer
 							for _, ev := range result.Events {
+								if ev.ID != "" {
+									fmt.Fprintf(&buf, "id: %s\n", ev.ID)
+								}
 								if ev.Type != "" {
 									fmt.Fprintf(&buf, "event: %s\n", ev.Type)
 								}

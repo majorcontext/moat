@@ -719,7 +719,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						mode = "enforce"
 					}
 					policyRuleSets = append(policyRuleSets, daemon.PolicyRuleSetSpec{
-						Scope: mcp.Name,
+						Scope: "mcp-" + mcp.Name, // Prefix avoids key collisions with "http" and "llm-gateway".
 						Mode:  mode,
 						Deny:  mcp.Policy.Deny,
 					})
@@ -727,14 +727,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					if policyYAML == nil {
 						policyYAML = make(map[string][]byte)
 					}
-					yamlBytes, err := internalkeep.ResolvePolicyYAML(mcp.Policy, mcp.Name, opts.Workspace)
+					yamlBytes, err := internalkeep.ResolvePolicyYAML(mcp.Policy, "mcp-"+mcp.Name, opts.Workspace)
 					if err != nil {
 						return nil, fmt.Errorf("MCP server %q policy: %w", mcp.Name, err)
 					}
 					if err := keeplib.ValidateRuleBytes(yamlBytes); err != nil {
 						return nil, fmt.Errorf("MCP server %q policy validation: %w", mcp.Name, err)
 					}
-					policyYAML[mcp.Name] = yamlBytes
+					policyYAML["mcp-"+mcp.Name] = yamlBytes
 				}
 			}
 

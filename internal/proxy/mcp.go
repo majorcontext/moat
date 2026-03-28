@@ -219,8 +219,9 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 	targetURL.RawQuery = r.URL.RawQuery
 
 	// Evaluate Keep policy for MCP tool calls before consuming the body.
+	// Engine key uses "mcp-" prefix to avoid collisions with "http" and "llm-gateway" keys.
 	if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
-		if eng, ok := rc.KeepEngines[serverName]; ok {
+		if eng, ok := rc.KeepEngines["mcp-"+serverName]; ok {
 			bodyBytes, readErr := io.ReadAll(r.Body)
 			if readErr != nil {
 				http.Error(w, "Failed to read request body", http.StatusInternalServerError)
@@ -247,36 +248,48 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 				call := internalkeep.NormalizeMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments, scope)
 				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
-					log.Warn("Keep evaluation error for MCP call",
+					log.Warn("Keep evaluation error for MCP call, denying (fail-closed)",
 						"server", serverName,
 						"tool", mcpReq.Params.Name,
 						"error", evalErr)
-				} else {
-					switch result.Decision {
-					case keeplib.Deny:
-						p.logPolicy(r, scope, "mcp.tool_call", result.Rule, result.Message)
-						msg := "Moat: MCP tool call blocked by policy."
-						if result.Message != "" {
-							msg += " " + result.Message
-						}
-						http.Error(w, msg, http.StatusForbidden)
-						return
-					case keeplib.Redact:
-						mutated := keeplib.ApplyMutations(mcpReq.Params.Arguments, result.Mutations)
-						// Re-encode the body with mutated arguments.
-						var raw map[string]any
-						_ = json.Unmarshal(bodyBytes, &raw)
-						if params, ok := raw["params"].(map[string]any); ok {
-							params["arguments"] = mutated
-						}
-						if mutatedBody, marshalErr := json.Marshal(raw); marshalErr != nil {
-							log.Debug("failed to marshal redacted MCP body", "error", marshalErr)
-						} else {
-							bodyBytes = mutatedBody
-						}
-						r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-						r.ContentLength = int64(len(bodyBytes))
+					p.logPolicy(r, scope, "mcp.tool_call", "evaluation-error", "Policy evaluation failed")
+					http.Error(w, "Moat: MCP tool call blocked — policy evaluation error.", http.StatusForbidden)
+					return
+				}
+				switch result.Decision {
+				case keeplib.Deny:
+					p.logPolicy(r, scope, "mcp.tool_call", result.Rule, result.Message)
+					msg := "Moat: MCP tool call blocked by policy."
+					if result.Message != "" {
+						msg += " " + result.Message
 					}
+					http.Error(w, msg, http.StatusForbidden)
+					return
+				case keeplib.Redact:
+					mutated := keeplib.ApplyMutations(mcpReq.Params.Arguments, result.Mutations)
+					// Re-encode the body with mutated arguments.
+					var raw map[string]any
+					if unmarshalErr := json.Unmarshal(bodyBytes, &raw); unmarshalErr != nil {
+						log.Warn("failed to unmarshal MCP body for redaction, denying (fail-closed)",
+							"server", serverName, "error", unmarshalErr)
+						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
+						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
+						return
+					}
+					if params, ok := raw["params"].(map[string]any); ok {
+						params["arguments"] = mutated
+					}
+					mutatedBody, marshalErr := json.Marshal(raw)
+					if marshalErr != nil {
+						log.Warn("failed to marshal redacted MCP body, denying (fail-closed)",
+							"server", serverName, "error", marshalErr)
+						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
+						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
+						return
+					}
+					bodyBytes = mutatedBody
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					r.ContentLength = int64(len(bodyBytes))
 				}
 			}
 		}

@@ -157,8 +157,8 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show event log.
-	count, _ := store.Count()
-	if count > 0 {
+	count, countErr := store.Count()
+	if countErr == nil && count > 0 {
 		entries, rangeErr := store.Range(1, count)
 		if rangeErr == nil && len(entries) > 0 {
 			fmt.Println()
