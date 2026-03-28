@@ -633,20 +633,33 @@ network:
 
 ### network.keep_policy
 
-Keep policy rules for HTTP requests passing through the proxy. Applies to all outbound HTTP traffic (not MCP -- use `mcp[].policy` for that).
+[Keep](https://github.com/majorcontext/keep) policy rules for HTTP requests passing through the proxy. Works alongside `network.rules` -- the network policy controls which hosts are reachable, while `keep_policy` controls what operations are allowed on those hosts.
 
 Accepts the same three formats as `mcp[].policy`: starter pack name, file path, or inline rules.
 
 ```yaml
+# File-based rules
 network:
   policy: strict
+  rules:
+    - "api.example.com"
   keep_policy: .keep/api-rules.yaml
+
+# Inline rules
+network:
+  policy: strict
+  rules:
+    - "api.example.com"
+  keep_policy:
+    allow: [GET, HEAD]
+    deny: [DELETE]
+    mode: enforce
 ```
 
 - Type: `string` or `object`
 - Default: none (no Keep policy enforcement)
 
-**See also:** [Policy enforcement guide](../guides/14-policy.md)
+**See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement) for the same rule format applied to MCP tool calls
 
 ---
 
@@ -989,15 +1002,13 @@ Moat routes traffic through a relay endpoint on the Moat proxy, which forwards r
 
 ### claude.llm-gateway
 
-Runs a [Keep LLM gateway](https://github.com/majorcontext/keep) sidecar inside the container to enforce policy on LLM API traffic (prompts and responses).
+Evaluates [Keep](https://github.com/majorcontext/keep) policy rules on Anthropic API responses. The proxy buffers each response, checks tool_use blocks against the rules, and denies responses that violate the policy before they reach the container.
 
 Mutually exclusive with `claude.base_url`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `policy` | string or object | -- | Policy rules (same format as `mcp[].policy`) |
-| `version` | string | `latest` | Keep release version to download |
-| `port` | integer | `18080` | Local port for the gateway |
 
 ```yaml
 claude:
@@ -1006,9 +1017,9 @@ claude:
 ```
 
 - Type: `object`
-- Default: none (no LLM gateway)
+- Default: none (no LLM policy)
 
-**See also:** [Policy enforcement guide](../guides/14-policy.md)
+**See also:** [Running Claude Code: LLM response policy](../guides/01-claude-code.md#llm-response-policy)
 
 ### claude.sync_logs
 
@@ -1246,7 +1257,7 @@ When `allow` is specified, unlisted operations are denied by default. When only 
 
 Set `mode: audit` to log policy decisions without enforcing them.
 
-**See also:** [Policy enforcement guide](../guides/14-policy.md)
+**See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement)
 
 ---
 

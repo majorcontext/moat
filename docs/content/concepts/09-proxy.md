@@ -13,11 +13,12 @@ The container never communicates directly with external services. Every outbound
 
 ## What the proxy does
 
-The proxy serves four functions:
+The proxy serves five functions:
 
 - **Credential injection** -- Matches outbound requests by hostname and injects Authorization headers (or other configured headers) into the request. The container process does not have access to the raw tokens.
 - **MCP relay** -- Relays requests from the container to remote MCP servers, injecting credentials along the way. This works around HTTP clients that do not respect `HTTP_PROXY` settings.
 - **Network policy enforcement** -- In strict mode, blocks requests to hosts not on the allow list. In permissive mode (the default), all hosts are reachable.
+- **Policy evaluation** -- Evaluates [Keep](https://github.com/majorcontext/keep) rules against MCP tool calls, HTTP requests, and LLM API responses. Denied operations are blocked before reaching the destination or the container. Policy decisions are recorded in the run's audit log.
 - **Request logging** -- Captures HTTP method, URL, status code, timing, headers, and body snippets (up to 8 KB) for every proxied request. This data is written to `~/.moat/runs/<run-id>/network.jsonl`.
 
 ## How traffic flows

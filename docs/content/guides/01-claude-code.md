@@ -266,6 +266,32 @@ Start the proxy on your host, then run as usual:
 moat claude ./my-project
 ```
 
+## LLM response policy
+
+Enforce policy on what Claude Code can do by evaluating tool_use blocks in Anthropic API responses. The proxy buffers each response, checks tool_use blocks against [Keep](https://github.com/majorcontext/keep) rules, and denies responses that violate the policy before they reach the container.
+
+```yaml
+claude:
+  llm-gateway:
+    policy: .keep/llm-rules.yaml
+```
+
+Inline rules work the same way as MCP policy:
+
+```yaml
+claude:
+  llm-gateway:
+    policy:
+      deny: [Edit, Write, Bash]
+      mode: enforce
+```
+
+This blocks Claude Code from editing files, writing new files, or running shell commands. The agent receives a policy denial error and can adapt its approach.
+
+The LLM gateway supports both JSON and SSE (streaming) responses and handles gzip-compressed bodies transparently. It is mutually exclusive with `claude.base_url` -- both redirect LLM traffic, so only one can be active.
+
+See the [Keep documentation](https://github.com/majorcontext/keep) for the full rule format. See [moat.yaml reference](../reference/02-moat-yaml.md#claudellm-gateway) for configuration details.
+
 ## Adding SSH access
 
 For SSH-based git operations:
