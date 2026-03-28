@@ -2502,8 +2502,8 @@ func TestLoadConfigBaseImageRejectsWhitespace(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for base_image with spaces")
 	}
-	if !strings.Contains(err.Error(), "whitespace") {
-		t.Errorf("error should mention whitespace, got: %v", err)
+	if !strings.Contains(err.Error(), "base_image") {
+		t.Errorf("error should mention base_image, got: %v", err)
 	}
 }
 

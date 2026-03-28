@@ -533,9 +533,6 @@ func Load(dir string) (*Config, error) {
 		if cfg.BaseImage == "" {
 			return nil, fmt.Errorf("base_image must not be empty or whitespace-only")
 		}
-		if strings.ContainsAny(cfg.BaseImage, " \t\n\r") {
-			return nil, fmt.Errorf("base_image %q: must not contain whitespace", cfg.BaseImage)
-		}
 		if !imageRefRe.MatchString(cfg.BaseImage) {
 			return nil, fmt.Errorf("base_image %q: invalid image reference", cfg.BaseImage)
 		}
