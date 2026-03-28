@@ -1226,13 +1226,15 @@ region = %s
 	}
 
 	// Extract plugins and marketplaces for image building.
-	// We use the merged settings which includes both moat.yaml config and host settings.
-	// This allows plugins configured on the host to work in containers.
+	// Only relevant when claude-code is a dependency (explicit or implied by agent).
+	// Host marketplace settings are loaded for all runs, but the claude binary
+	// is only present in claude-code containers.
+	hasClaudeCode := hasDep(depList, "claude-code")
 	var claudeMarketplaces []claude.MarketplaceConfig
 	var claudePlugins []string
 	marketplaceRepos := make(map[string]string)
 
-	if claudeSettings != nil {
+	if claudeSettings != nil && hasClaudeCode {
 		// Build a map of marketplace name -> repo URL from merged settings.
 		// The claude CLI accepts marketplace repos in several formats:
 		// - GitHub shorthand: owner/repo

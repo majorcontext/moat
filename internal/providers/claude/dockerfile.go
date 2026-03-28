@@ -115,6 +115,13 @@ func GenerateDockerfileSnippet(marketplaces []MarketplaceConfig, plugins []strin
 	// Ensure the Claude CLI is on PATH. The native installer places the binary
 	// in ~/.claude/local/bin/ which may not be in PATH during image build.
 	script.WriteString(fmt.Sprintf("export PATH=\"/home/%s/.claude/local/bin:/home/%s/.local/bin:$PATH\"\n\n", containerUser, containerUser))
+	// Skip plugin installation if Claude Code is not installed.
+	// Host-level marketplace settings are loaded for all runs, but the claude
+	// binary is only present when claude-code is a dependency or implicit (moat claude).
+	script.WriteString("if ! command -v claude >/dev/null 2>&1; then\n")
+	script.WriteString("  echo 'Claude Code not installed, skipping plugin setup'\n")
+	script.WriteString("  exit 0\n")
+	script.WriteString("fi\n\n")
 	script.WriteString("failures=0\n")
 	script.WriteString("failed_ops=\"\"\n\n")
 
