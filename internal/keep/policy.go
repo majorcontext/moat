@@ -40,6 +40,9 @@ func (p *PolicyConfig) UnmarshalYAML(node *yaml.Node) error {
 		if !ValidModes[alias.Mode] {
 			return fmt.Errorf("invalid policy mode %q: must be \"enforce\" or \"audit\"", alias.Mode)
 		}
+		if len(alias.Deny) == 0 {
+			return fmt.Errorf("inline policy must have at least one deny rule; use a file path or pack name for file-based policies")
+		}
 		*p = PolicyConfig(alias)
 		return nil
 	default:

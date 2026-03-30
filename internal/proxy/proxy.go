@@ -1431,6 +1431,9 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		duration := time.Since(start)
 
 		// Evaluate LLM gateway policy on Anthropic API responses.
+		// NOTE: Only applies to the default Anthropic endpoint. Custom
+		// ANTHROPIC_BASE_URL endpoints bypass policy evaluation — this is
+		// mutually exclusive with llm-gateway (see config validation).
 		if resp != nil && resp.StatusCode == http.StatusOK && host == "api.anthropic.com" {
 			if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
 				if eng, ok := rc.KeepEngines["llm-gateway"]; ok {
