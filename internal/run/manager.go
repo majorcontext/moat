@@ -576,6 +576,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if health, healthErr := daemonCl.Health(ctx); healthErr == nil {
 			r.DaemonCommit = health.Commit
 			daemonCapabilities = health.Capabilities
+		} else {
+			log.Warn("daemon health check failed", "error", healthErr)
 		}
 
 		// Create a RunContext that implements credential.ProxyConfigurer.

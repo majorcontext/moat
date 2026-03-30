@@ -20,6 +20,10 @@ func NormalizeMCPCall(toolName string, params map[string]any, scope string) keep
 }
 
 // NormalizeHTTPCall creates a keeplib.Call for an HTTP request.
+// Note: Context.Scope is set to "http-"+host (host-specific) rather than the
+// engine scope ("http"). This means CEL rules using context.scope see the
+// per-host value. The engine scope check in Evaluate uses the scope argument,
+// not Context.Scope, so scope validation is unaffected.
 func NormalizeHTTPCall(method, host, path string) keeplib.Call {
 	return keeplib.Call{
 		Operation: method + " " + host + path,

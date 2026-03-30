@@ -114,7 +114,7 @@ func evaluateLLMStream(eng *keeplib.Engine, body []byte) llmPolicyResult {
 		}
 		events = append(events, ev)
 		if ev.Type == "message_stop" {
-			break
+			break // Intentional: events after message_stop (pings, keepalives) are not policy-relevant.
 		}
 	}
 

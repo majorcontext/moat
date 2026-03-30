@@ -144,14 +144,15 @@ func ResolvePolicyYAML(pc *PolicyConfig, scope, baseDir string) ([]byte, error) 
 		}
 		// Rewrite scope to match how the engine will be keyed and evaluated.
 		var doc map[string]any
-		if err := yaml.Unmarshal(data, &doc); err != nil {
-			return data, nil // best-effort: return original YAML
+		if unmarshalErr := yaml.Unmarshal(data, &doc); unmarshalErr != nil {
+			return nil, fmt.Errorf("failed to parse starter pack %q: %w", pc.Pack, unmarshalErr)
 		}
 		doc["scope"] = scope
-		if rewritten, err := yaml.Marshal(doc); err == nil {
-			return rewritten, nil
+		rewritten, marshalErr := yaml.Marshal(doc)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to rewrite starter pack %q scope: %w", pc.Pack, marshalErr)
 		}
-		return data, nil
+		return rewritten, nil
 	default:
 		return nil, fmt.Errorf("empty policy config")
 	}
