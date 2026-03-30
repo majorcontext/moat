@@ -7,6 +7,100 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 )
 
+func TestHealthResponseCapabilities(t *testing.T) {
+	resp := HealthResponse{
+		PID:          1234,
+		ProxyPort:    9119,
+		RunCount:     2,
+		StartedAt:    "2026-01-01T00:00:00Z",
+		Commit:       "abc123",
+		Capabilities: []string{"keep-policy"},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded HealthResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(decoded.Capabilities) != 1 || decoded.Capabilities[0] != "keep-policy" {
+		t.Errorf("Capabilities: got %v, want [keep-policy]", decoded.Capabilities)
+	}
+	if decoded.PID != 1234 {
+		t.Errorf("PID: got %d, want 1234", decoded.PID)
+	}
+}
+
+func TestHealthResponseBackwardsCompat(t *testing.T) {
+	// Simulate a new daemon response with capabilities being decoded by an old client
+	// that doesn't know about the Capabilities field.
+	newJSON := `{"pid":42,"proxy_port":9119,"run_count":0,"started_at":"2026-01-01T00:00:00Z","capabilities":["keep-policy"]}`
+
+	// Old struct without Capabilities field.
+	type OldHealthResponse struct {
+		PID       int    `json:"pid"`
+		ProxyPort int    `json:"proxy_port"`
+		RunCount  int    `json:"run_count"`
+		StartedAt string `json:"started_at"`
+		Commit    string `json:"commit,omitempty"`
+	}
+
+	var old OldHealthResponse
+	if err := json.Unmarshal([]byte(newJSON), &old); err != nil {
+		t.Fatalf("old client unmarshal of new JSON: %v", err)
+	}
+	if old.PID != 42 {
+		t.Errorf("PID: got %d, want 42", old.PID)
+	}
+	if old.ProxyPort != 9119 {
+		t.Errorf("ProxyPort: got %d, want 9119", old.ProxyPort)
+	}
+
+	// Also verify that old daemon JSON (without capabilities) decodes into new struct.
+	oldJSON := `{"pid":42,"proxy_port":9119,"run_count":0,"started_at":"2026-01-01T00:00:00Z"}`
+	var newResp HealthResponse
+	if err := json.Unmarshal([]byte(oldJSON), &newResp); err != nil {
+		t.Fatalf("new client unmarshal of old JSON: %v", err)
+	}
+	if newResp.Capabilities != nil {
+		t.Errorf("Capabilities: got %v, want nil", newResp.Capabilities)
+	}
+}
+
+func TestRegisterRequestPolicyYAML(t *testing.T) {
+	req := RegisterRequest{
+		RunID: "run_policy",
+		PolicyYAML: map[string][]byte{
+			"mcp": []byte("scope: mcp\nrules:\n  - match: {operation: '*'}\n    decision: allow"),
+		},
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded RegisterRequest
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(decoded.PolicyYAML) != 1 {
+		t.Fatalf("PolicyYAML: got %d entries, want 1", len(decoded.PolicyYAML))
+	}
+	mcpPolicy, ok := decoded.PolicyYAML["mcp"]
+	if !ok {
+		t.Fatal("PolicyYAML: missing 'mcp' key")
+	}
+	if string(mcpPolicy) != string(req.PolicyYAML["mcp"]) {
+		t.Errorf("PolicyYAML[mcp]: got %q, want %q", string(mcpPolicy), string(req.PolicyYAML["mcp"]))
+	}
+}
+
 func TestRegisterRequest_JSON(t *testing.T) {
 	req := RegisterRequest{
 		RunID: "run_abc123",

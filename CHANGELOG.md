@@ -4,6 +4,14 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+### Added
+
+- **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`
+- **LLM response policy** — evaluate tool_use blocks in Anthropic API responses against Keep rules before forwarding to the container, via `claude.llm-gateway`
+- **Starter packs** — built-in policy packs like `linear-readonly` for quick MCP server lockdown
+
 ## v0.4.0 — 2026-03-19
 
 v0.4 introduces HTTP-level request rules for the network firewall, an `env://` resolver for forwarding host environment variables into containers, and `moat exec` for running commands in existing containers. New credential providers cover Meta Graph API and Graphite CLI, and Ollama is now a declarable service dependency. Rancher Desktop is now a supported runtime alongside Docker and Apple containers. The proxy daemon fixes a credential scoping race and now separates credential traffic from routing traffic on distinct ports.

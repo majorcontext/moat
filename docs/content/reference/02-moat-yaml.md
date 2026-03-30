@@ -631,6 +631,35 @@ network:
         - "deny DELETE /**"
 ```
 
+### network.keep_policy
+
+[Keep](https://github.com/majorcontext/keep) policy rules for HTTP requests passing through the proxy. Works alongside `network.rules` -- the network policy controls which hosts are reachable, while `keep_policy` controls what operations are allowed on those hosts.
+
+Accepts the same three formats as `mcp[].policy`: starter pack name, file path, or inline rules.
+
+```yaml
+# File-based rules
+network:
+  policy: strict
+  rules:
+    - "api.example.com"
+  keep_policy: .keep/api-rules.yaml
+
+# Inline rules
+network:
+  policy: strict
+  rules:
+    - "api.example.com"
+  keep_policy:
+    deny: [DELETE]
+    mode: enforce
+```
+
+- Type: `string` or `object`
+- Default: none (no Keep policy enforcement)
+
+**See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement) for the same rule format applied to MCP tool calls
+
 ---
 
 ## Execution
@@ -970,6 +999,27 @@ claude:
 
 Moat routes traffic through a relay endpoint on the Moat proxy, which forwards requests to the configured URL with credentials injected. This works transparently with `localhost` URLs because the relay runs on the host where `localhost` resolves correctly. Credentials from the `anthropic` or `claude` grant are injected for the base URL host in addition to the standard `api.anthropic.com` injection.
 
+### claude.llm-gateway
+
+Evaluates [Keep](https://github.com/majorcontext/keep) policy rules on Anthropic API responses. The proxy buffers each response, checks tool_use blocks against the rules, and denies responses that violate the policy before they reach the container.
+
+Mutually exclusive with `claude.base_url`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `policy` | string or object | -- | Policy rules (same format as `mcp[].policy`) |
+
+```yaml
+claude:
+  llm-gateway:
+    policy: .keep/llm-rules.yaml
+```
+
+- Type: `object`
+- Default: none (no LLM policy)
+
+**See also:** [Running Claude Code: LLM response policy](../guides/01-claude-code.md#llm-response-policy)
+
 ### claude.sync_logs
 
 Mount Claude Code's log directory for observability.
@@ -1163,6 +1213,49 @@ MCP servers running on the host machine (e.g., `http://localhost:3000`) are not 
 **Note:** For sandbox-local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
+
+### mcp[].policy
+
+Keep policy rules for this MCP server. Controls which tool calls are allowed, denied, or redacted.
+
+Accepts three formats:
+
+- **Starter pack name:** A built-in policy (e.g., `linear-readonly`)
+- **File path:** Path to a Keep rules YAML file (e.g., `.keep/linear.yaml`)
+- **Inline rules:** An object with `deny` and optional `mode` fields
+
+```yaml
+# Starter pack
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy: linear-readonly
+
+# File reference
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy: .keep/linear.yaml
+
+# Inline rules
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy:
+      deny: [delete_issue, update_issue]
+      mode: enforce
+```
+
+- Type: `string` or `object`
+- Default: none (no policy enforcement)
+
+Available starter packs: `linear-readonly`.
+
+Listed operations are denied; unlisted operations are implicitly allowed.
+
+Set `mode: audit` to log policy decisions without enforcing them.
+
+**See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement)
 
 ---
 

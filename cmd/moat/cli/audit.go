@@ -81,6 +81,13 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 	defer auditor.Close()
 
+	// Open store for reading entries.
+	store, storeErr := audit.OpenStore(dbPath)
+	if storeErr != nil {
+		return fmt.Errorf("opening audit store: %w", storeErr)
+	}
+	defer store.Close()
+
 	// Export if requested
 	if auditExportFile != "" {
 		bundle, exportErr := exportBundle(dbPath)
@@ -145,12 +152,95 @@ func runAudit(cmd *cobra.Command, args []string) error {
 
 	if result.Valid {
 		fmt.Printf("VERDICT: %s\n", ui.Green("[ok] INTACT — No tampering detected"))
-		return nil
+	} else {
+		fmt.Printf("VERDICT: %s\n", ui.Red(fmt.Sprintf("[FAIL] TAMPERED — %s", result.Error)))
 	}
 
-	fmt.Printf("VERDICT: %s\n", ui.Red(fmt.Sprintf("[FAIL] TAMPERED — %s", result.Error)))
-	// Return error so Cobra exits with code 1
-	return fmt.Errorf("tampering detected")
+	// Show event log.
+	count, countErr := store.Count()
+	if countErr == nil && count > 0 {
+		entries, rangeErr := store.Range(1, count)
+		if rangeErr == nil && len(entries) > 0 {
+			fmt.Println()
+			fmt.Println(ui.Bold("Event Log"))
+			for _, e := range entries {
+				ts := e.Timestamp.Local().Format("15:04:05")
+				fmt.Printf("  %s  %-12s  %s\n", ui.Dim(ts), e.Type, formatEntryData(e))
+			}
+		}
+	}
+
+	if !result.Valid {
+		return fmt.Errorf("tampering detected")
+	}
+	return nil
+}
+
+// formatEntryData returns a human-readable summary of an audit entry's data.
+func formatEntryData(e *audit.Entry) string {
+	data, ok := e.Data.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	switch e.Type {
+	case audit.EntryContainer:
+		action, _ := data["action"].(string)
+		return action
+
+	case audit.EntryPolicy:
+		scope, _ := data["scope"].(string)
+		operation, _ := data["operation"].(string)
+		decision, _ := data["decision"].(string)
+		rule, _ := data["rule"].(string)
+		message, _ := data["message"].(string)
+		s := fmt.Sprintf("%s %s", scope, decision)
+		if operation != "" {
+			s += " " + operation
+		}
+		if rule != "" {
+			s += fmt.Sprintf(" rule=%s", rule)
+		}
+		if message != "" {
+			s += fmt.Sprintf(" — %s", message)
+		}
+		return s
+
+	case audit.EntryNetwork:
+		method, _ := data["method"].(string)
+		url, _ := data["url"].(string)
+		status, _ := data["status_code"].(float64)
+		return fmt.Sprintf("%s %s → %d", method, url, int(status))
+
+	case audit.EntryCredential:
+		name, _ := data["name"].(string)
+		action, _ := data["action"].(string)
+		host, _ := data["host"].(string)
+		return fmt.Sprintf("%s %s (%s)", action, name, host)
+
+	case audit.EntryExec:
+		cmd, _ := data["command"].([]any)
+		if len(cmd) > 0 {
+			first, _ := cmd[0].(string)
+			return first
+		}
+		return ""
+
+	case audit.EntryConsole:
+		line, _ := data["line"].(string)
+		if len(line) > 80 {
+			return line[:80] + "…"
+		}
+		return line
+
+	default:
+		b, _ := json.Marshal(data)
+		s := string(b)
+		if len(s) > 80 {
+			return s[:80] + "…"
+		}
+		return s
+	}
 }
 
 func exportBundle(dbPath string) (*audit.ProofBundle, error) {

@@ -35,6 +35,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -42,8 +43,11 @@ import (
 	"sync"
 	"time"
 
+	keeplib "github.com/majorcontext/keep"
+
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	internalkeep "github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/netrules"
 )
@@ -75,6 +79,18 @@ type RequestLogData struct {
 
 // RequestLogger is called for each proxied request.
 type RequestLogger func(data RequestLogData)
+
+// PolicyLogData contains data for a policy denial event.
+type PolicyLogData struct {
+	RunID     string
+	Scope     string
+	Operation string
+	Rule      string
+	Message   string
+}
+
+// PolicyLogger is called when a policy denial occurs.
+type PolicyLogger func(data PolicyLogData)
 
 // isTextContentType returns true for text-based content types that should be captured.
 func isTextContentType(ct string) bool {
@@ -242,6 +258,7 @@ type RunContextData struct {
 	HostRules            []netrules.HostRules
 	AWSHandler           http.Handler
 	CredStore            credential.Store
+	KeepEngines          map[string]*keeplib.Engine
 }
 
 // ContextResolver resolves a proxy auth token to per-run context data.
@@ -285,6 +302,7 @@ type Proxy struct {
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
 	relays               map[string]string             // name -> target URL for relay endpoints
 	contextResolver      ContextResolver               // optional per-run credential resolver
+	policyLogger         PolicyLogger                  // optional policy decision logger
 }
 
 // NewProxy creates a new auth proxy.
@@ -312,6 +330,31 @@ func (p *Proxy) SetCA(ca *CA) {
 // SetLogger sets the request logger.
 func (p *Proxy) SetLogger(logger RequestLogger) {
 	p.logger = logger
+}
+
+// SetPolicyLogger sets the policy decision logger.
+func (p *Proxy) SetPolicyLogger(logger PolicyLogger) {
+	p.policyLogger = logger
+}
+
+// logPolicy logs a policy denial if a logger is configured.
+func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, rule, message string) {
+	if p.policyLogger == nil {
+		return
+	}
+	var runID string
+	if ctxReq != nil {
+		if rc := getRunContext(ctxReq); rc != nil {
+			runID = rc.RunID
+		}
+	}
+	p.policyLogger(PolicyLogData{
+		RunID:     runID,
+		Scope:     scope,
+		Operation: operation,
+		Rule:      rule,
+		Message:   message,
+	})
 }
 
 // SetAWSHandler sets the handler for AWS credential requests.
@@ -1030,6 +1073,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		duration := time.Since(start)
 		// Log blocked request
 		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
+		p.logPolicy(r, "network", "http.request", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
 		return
@@ -1134,6 +1178,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if p.logger != nil {
 			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
 		}
+		p.logPolicy(r, "network", "http.connect", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
 		return
@@ -1282,6 +1327,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// The CONNECT request r carries the per-run context for rule lookup.
 		if !p.checkNetworkPolicyForRequest(r, host, connectPort, req.Method, req.URL.Path) {
 			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			p.logPolicy(r, "network", "http.request", "", req.Method+" "+host+req.URL.Path)
 			body := "Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n"
 			blockedResp := &http.Response{
 				StatusCode:    http.StatusProxyAuthRequired,
@@ -1295,6 +1341,55 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			blockedResp.Header.Set("Content-Type", "text/plain")
 			_ = blockedResp.Write(tlsClientConn)
 			continue
+		}
+
+		// Evaluate Keep policy for the inner HTTP request.
+		// Uses the global "http" engine from network.keep_policy.
+		if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
+			scope := "http"
+			if eng, ok := rc.KeepEngines[scope]; ok {
+				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
+				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				if evalErr != nil {
+					log.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
+						"host", host,
+						"method", req.Method,
+						"path", req.URL.Path,
+						"error", evalErr)
+					p.logPolicy(r, scope, "http.request", "evaluation-error", "Policy evaluation failed")
+					msg := "Moat: request blocked — policy evaluation error.\nHost: " + host + "\n"
+					blockedResp := &http.Response{
+						StatusCode:    http.StatusForbidden,
+						ProtoMajor:    1,
+						ProtoMinor:    1,
+						Header:        make(http.Header),
+						ContentLength: int64(len(msg)),
+						Body:          io.NopCloser(strings.NewReader(msg)),
+					}
+					blockedResp.Header.Set("X-Moat-Blocked", "keep-policy")
+					blockedResp.Header.Set("Content-Type", "text/plain")
+					_ = blockedResp.Write(tlsClientConn)
+					continue
+				} else if result.Decision == keeplib.Deny {
+					p.logPolicy(r, scope, "http.request", result.Rule, result.Message)
+					msg := "Moat: request blocked by Keep policy.\nHost: " + host + "\n"
+					if result.Message != "" {
+						msg += result.Message + "\n"
+					}
+					blockedResp := &http.Response{
+						StatusCode:    http.StatusForbidden,
+						ProtoMajor:    1,
+						ProtoMinor:    1,
+						Header:        make(http.Header),
+						ContentLength: int64(len(msg)),
+						Body:          io.NopCloser(strings.NewReader(msg)),
+					}
+					blockedResp.Header.Set("X-Moat-Blocked", "keep-policy")
+					blockedResp.Header.Set("Content-Type", "text/plain")
+					_ = blockedResp.Write(tlsClientConn)
+					continue
+				}
+			}
 		}
 
 		// Inject MCP credentials if this is an MCP request.
@@ -1334,6 +1429,95 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		start := time.Now()
 		resp, err := transport.RoundTrip(req)
 		duration := time.Since(start)
+
+		// Evaluate LLM gateway policy on Anthropic API responses.
+		// NOTE: Only applies to the default Anthropic endpoint. Custom
+		// ANTHROPIC_BASE_URL endpoints bypass policy evaluation — this is
+		// mutually exclusive with llm-gateway (see config validation).
+		if resp != nil && resp.StatusCode == http.StatusOK && host == "api.anthropic.com" {
+			if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
+				if eng, ok := rc.KeepEngines["llm-gateway"]; ok {
+					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize+1))
+					resp.Body.Close()
+					if readErr != nil {
+						log.Warn("failed to read response body for LLM policy, denying (fail-closed)",
+							"host", host, "error", readErr)
+						p.logPolicy(r, "llm-gateway", "llm.read_error", "read-error", "Failed to read response body for policy evaluation")
+						errorBody := buildPolicyDeniedResponse("read-error", "Failed to read response body for policy evaluation.")
+						resp = &http.Response{
+							StatusCode:    http.StatusBadRequest,
+							ProtoMajor:    1,
+							ProtoMinor:    1,
+							Header:        make(http.Header),
+							ContentLength: int64(len(errorBody)),
+							Body:          io.NopCloser(bytes.NewReader(errorBody)),
+						}
+						resp.Header.Set("Content-Type", "application/json")
+						resp.Header.Set("X-Moat-Blocked", "llm-policy")
+					} else if int64(len(respBodyBytes)) > maxLLMResponseSize {
+						// Response exceeds size limit — deny (fail-closed).
+						log.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
+							"size", len(respBodyBytes), "limit", maxLLMResponseSize)
+						p.logPolicy(r, "llm-gateway", "llm.response_too_large", "size-limit", "Response too large for policy evaluation")
+						errorBody := buildPolicyDeniedResponse("size-limit", "Response too large for policy evaluation.")
+						resp = &http.Response{
+							StatusCode:    http.StatusBadRequest,
+							ProtoMajor:    1,
+							ProtoMinor:    1,
+							Header:        make(http.Header),
+							ContentLength: int64(len(errorBody)),
+							Body:          io.NopCloser(bytes.NewReader(errorBody)),
+						}
+						resp.Header.Set("Content-Type", "application/json")
+						resp.Header.Set("X-Moat-Blocked", "llm-policy")
+					} else {
+						result := evaluateLLMResponse(eng, respBodyBytes, resp)
+						if result.Denied {
+							log.Info("LLM tool_use denied by policy",
+								"rule", result.Rule, "message", result.Message)
+							p.logPolicy(r, "llm-gateway", "llm.tool_use", result.Rule, result.Message)
+							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)
+							resp = &http.Response{
+								StatusCode:    http.StatusBadRequest,
+								ProtoMajor:    1,
+								ProtoMinor:    1,
+								Header:        make(http.Header),
+								ContentLength: int64(len(errorBody)),
+								Body:          io.NopCloser(bytes.NewReader(errorBody)),
+							}
+							resp.Header.Set("Content-Type", "application/json")
+							resp.Header.Set("X-Moat-Blocked", "llm-policy")
+						} else if result.Events != nil {
+							// SSE response allowed — re-serialize evaluated events.
+							// Events were decompressed for evaluation, so the
+							// re-serialized body is plaintext — remove Content-Encoding.
+							var buf bytes.Buffer
+							for _, ev := range result.Events {
+								if ev.ID != "" {
+									fmt.Fprintf(&buf, "id: %s\n", ev.ID)
+								}
+								if ev.Type != "" {
+									fmt.Fprintf(&buf, "event: %s\n", ev.Type)
+								}
+								// Per SSE spec, multi-line data needs a `data:` prefix per line.
+								lines := strings.Split(ev.Data, "\n")
+								for _, line := range lines {
+									fmt.Fprintf(&buf, "data: %s\n", line)
+								}
+								buf.WriteByte('\n') // Event terminator.
+							}
+							resp.Header.Del("Content-Encoding")
+							resp.Body = io.NopCloser(&buf)
+							resp.ContentLength = int64(buf.Len())
+						} else {
+							// JSON response allowed — restore original body.
+							resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+							resp.ContentLength = int64(len(respBodyBytes))
+						}
+					}
+				}
+			}
+		}
 
 		// Capture response
 		var respBody []byte

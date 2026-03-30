@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/langserver"
 	"github.com/majorcontext/moat/internal/netrules"
 	"gopkg.in/yaml.v3"
@@ -134,9 +135,10 @@ type VolumeConfig struct {
 // through the proxy relay, which runs on the host and can connect to
 // host-local services that the container cannot reach directly.
 type MCPServerConfig struct {
-	Name string         `yaml:"name"`
-	URL  string         `yaml:"url"`
-	Auth *MCPAuthConfig `yaml:"auth,omitempty"`
+	Name   string             `yaml:"name"`
+	URL    string             `yaml:"url"`
+	Auth   *MCPAuthConfig     `yaml:"auth,omitempty"`
+	Policy *keep.PolicyConfig `yaml:"policy,omitempty"`
 }
 
 // MCPAuthConfig defines authentication for an MCP server. It specifies which
@@ -224,9 +226,17 @@ func (c *Config) ValidateServices(serviceNames []string) error {
 
 // NetworkConfig configures network access policies for the agent.
 type NetworkConfig struct {
-	Policy string                      `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
-	Allow  []string                    `yaml:"allow,omitempty"`  // deprecated: hard error
-	Rules  []netrules.NetworkRuleEntry `yaml:"rules,omitempty"`
+	Policy     string                      `yaml:"policy,omitempty"` // "permissive" or "strict", default "permissive"
+	Allow      []string                    `yaml:"allow,omitempty"`  // deprecated: hard error
+	Rules      []netrules.NetworkRuleEntry `yaml:"rules,omitempty"`
+	KeepPolicy *keep.PolicyConfig          `yaml:"keep_policy,omitempty"`
+}
+
+// LLMGatewayConfig configures Keep LLM policy evaluation in the proxy.
+// When configured, the proxy evaluates tool_use blocks in Anthropic API
+// responses against Keep rules before forwarding to the container.
+type LLMGatewayConfig struct {
+	Policy *keep.PolicyConfig `yaml:"policy,omitempty"`
 }
 
 // ClaudeConfig configures Claude Code integration options.
@@ -252,6 +262,10 @@ type ClaudeConfig struct {
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+
+	// LLMGateway configures a Keep LLM gateway sidecar inside the container.
+	// Mutually exclusive with BaseURL.
+	LLMGateway *LLMGatewayConfig `yaml:"llm-gateway,omitempty"`
 
 	// SkipPermissionsPrompt controls whether to suppress the bypass-permissions
 	// warning in Claude Code. Set automatically by moat when
@@ -563,6 +577,10 @@ func Load(dir string) (*Config, error) {
 		if u.Host == "" {
 			return nil, fmt.Errorf("claude.base_url: missing host in %q", cfg.Claude.BaseURL)
 		}
+	}
+
+	if cfg.Claude.BaseURL != "" && cfg.Claude.LLMGateway != nil {
+		return nil, fmt.Errorf("claude: base_url and llm-gateway are mutually exclusive — base_url routes to an external LLM proxy, llm-gateway routes to a local Keep sidecar")
 	}
 
 	// Validate Codex MCP server specs

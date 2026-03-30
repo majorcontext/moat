@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	keeplib "github.com/majorcontext/keep"
+
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
@@ -66,8 +68,9 @@ type RunContext struct {
 
 	RegisteredAt time.Time `json:"registered_at"`
 
-	refreshCancel context.CancelFunc `json:"-"` // cancels token refresh goroutine
-	awsHandler    http.Handler       `json:"-"` // AWS credential endpoint handler
+	KeepEngines   map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
+	refreshCancel context.CancelFunc         `json:"-"` // cancels token refresh goroutine
+	awsHandler    http.Handler               `json:"-"` // AWS credential endpoint handler
 	mu            sync.RWMutex
 }
 
@@ -93,6 +96,26 @@ func (rc *RunContext) CancelRefresh() {
 	rc.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+}
+
+// Close releases resources held by this RunContext, including all Keep engines.
+// Safe to call concurrently and multiple times.
+func (rc *RunContext) Close() {
+	rc.mu.Lock()
+	engines := rc.KeepEngines
+	rc.KeepEngines = nil
+	rc.mu.Unlock()
+	if len(engines) > 0 {
+		// Close engines after a short delay to let any in-flight proxy
+		// evaluations complete. ToProxyContextData copies the engine map
+		// pointer, so concurrent Evaluate calls may still hold references.
+		go func() {
+			time.Sleep(2 * time.Second)
+			for _, eng := range engines {
+				eng.Close()
+			}
+		}()
 	}
 }
 
@@ -324,6 +347,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 
 	// Include AWS handler if configured.
 	d.AWSHandler = rc.awsHandler
+
+	// Propagate Keep policy engines.
+	d.KeepEngines = rc.KeepEngines
 
 	return d
 }

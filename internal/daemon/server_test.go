@@ -73,6 +73,67 @@ func TestServer_HealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestServer_HealthEndpointCapabilities(t *testing.T) {
+	sock := filepath.Join(testSockDir(t), "d.sock")
+	srv := NewServer(sock, 9119)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	client := testClient(sock)
+	resp, err := client.Get("http://localhost/v1/health")
+	if err != nil {
+		t.Fatalf("GET /v1/health: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var health HealthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(health.Capabilities) != 1 || health.Capabilities[0] != "keep-policy" {
+		t.Errorf("expected capabilities [keep-policy], got %v", health.Capabilities)
+	}
+}
+
+func TestServer_RegisterWithInvalidPolicyYAML(t *testing.T) {
+	sock := filepath.Join(testSockDir(t), "d.sock")
+	srv := NewServer(sock, 9119)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	client := testClient(sock)
+
+	reqBody := RegisterRequest{
+		RunID: "run-bad-policy",
+		PolicyYAML: map[string][]byte{
+			"test-scope": []byte("not: valid: keep: yaml: [[["),
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	resp, err := client.Post("http://localhost/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/runs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+
+	var regResp RegisterResponse
+	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if regResp.Error == "" {
+		t.Error("expected non-empty error in response")
+	}
+}
+
 func TestServer_RegisterAndListRuns(t *testing.T) {
 	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)

@@ -1,0 +1,9 @@
+scope: linear
+mode: enforce
+rules:
+  - name: deny-non-read
+    match:
+      operation: "*"
+      when: "!(context.operation.startsWith('list_') || context.operation.startsWith('get_') || context.operation.startsWith('search_'))"
+    action: deny
+    message: "Only read operations are allowed by the linear-readonly policy."

@@ -174,6 +174,110 @@ Some agent HTTP clients do not respect `HTTP_PROXY` for MCP connections, so Moat
 
 See [Proxy architecture](../concepts/09-proxy.md) for details on how the relay works.
 
+## Policy enforcement
+
+Restrict which MCP tool calls an agent can make with the `policy` field. Rules are evaluated by [Keep](https://github.com/majorcontext/keep) at the proxy layer before requests reach the MCP server.
+
+### Starter packs
+
+Starter packs are built-in policy sets for common MCP servers. Apply one by name:
+
+```yaml
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    auth:
+      grant: mcp-linear
+      header: Authorization
+    policy: linear-readonly
+```
+
+This restricts the Linear MCP server to read-only operations. Write operations like `create_issue` or `delete_issue` are denied.
+
+Available starter packs:
+
+| Name | Description |
+|------|-------------|
+| `linear-readonly` | Allows read operations on Linear, denies all writes |
+
+### Inline rules
+
+For simple policies, define rules directly in `moat.yaml`:
+
+```yaml
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy:
+      deny: [delete_issue, update_issue]
+      mode: enforce
+```
+
+Listed operations are denied; unlisted operations are implicitly allowed.
+
+The `mode` field controls enforcement:
+
+| Mode | Behavior |
+|------|----------|
+| `enforce` | Deny blocked operations (default) |
+| `audit` | Log policy decisions without blocking |
+
+### File-based rules
+
+For larger policies, store rules in a separate file. The `.keep/` directory in your workspace root is the conventional location:
+
+```yaml
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy: .keep/linear-rules.yaml
+```
+
+The file path is relative to the workspace root.
+
+Keep rules files use Keep's native YAML format with `scope`, `mode`, and `rules`:
+
+```yaml
+# .keep/linear-rules.yaml
+scope: linear
+mode: enforce
+rules:
+  - name: deny-deletes
+    match:
+      operation: "delete_*"
+    action: deny
+    message: "Delete operations are not allowed."
+
+  - name: deny-updates
+    match:
+      operation: "update_*"
+    action: deny
+    message: "Update operations are not allowed."
+```
+
+See the [Keep documentation](https://github.com/majorcontext/keep) for the full rule format, including pattern matching, CEL expressions, and redaction.
+
+### Audit mode
+
+Use `mode: audit` to observe what the agent does before enforcing restrictions. Policy decisions are logged to the run's audit trail without blocking any operations:
+
+```yaml
+mcp:
+  - name: linear
+    url: https://mcp.linear.app/mcp
+    policy:
+      deny: [delete_issue]
+      mode: audit
+```
+
+Run the agent, then review audit entries:
+
+```bash
+$ moat audit <run-id>
+```
+
+Once you are confident in the rules, switch to `mode: enforce`.
+
 ## Sandbox-local MCP servers
 
 Sandbox-local MCP servers run as child processes inside the container. The agent starts them directly -- no proxy is involved. Configure them under the agent-specific section of `moat.yaml`.

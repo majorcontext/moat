@@ -3,11 +3,14 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	keeplib "github.com/majorcontext/keep"
 
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/proxy"
@@ -116,11 +119,12 @@ func (s *Server) Stop(ctx context.Context) error {
 // handleHealth responds with daemon health information.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	resp := HealthResponse{
-		PID:       os.Getpid(),
-		ProxyPort: s.proxyPort,
-		RunCount:  s.registry.Count(),
-		StartedAt: s.startedAt.Format(time.RFC3339),
-		Commit:    BuildCommit,
+		PID:          os.Getpid(),
+		ProxyPort:    s.proxyPort,
+		RunCount:     s.registry.Count(),
+		StartedAt:    s.startedAt.Format(time.RFC3339),
+		Commit:       BuildCommit,
+		Capabilities: []string{"keep-policy"},
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -134,6 +138,64 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rc := req.ToRunContext()
+
+	// Compile Keep policy engines from YAML and/or RuleSet specs.
+	totalPolicies := len(req.PolicyYAML) + len(req.PolicyRuleSets)
+	if totalPolicies > 0 {
+		engines := make(map[string]*keeplib.Engine, totalPolicies)
+
+		// Helper: build an audit hook for a given scope.
+		auditHook := func(scopeName string) func(keeplib.AuditEntry) {
+			return func(entry keeplib.AuditEntry) {
+				fields := []any{
+					"scope", scopeName,
+					"op", entry.Operation,
+					"decision", string(entry.Decision),
+					"rule", entry.Rule,
+					"message", entry.Message,
+				}
+				if entry.Decision == "deny" {
+					log.Warn("keep policy deny", fields...)
+				} else {
+					log.Info("keep policy evaluation", fields...)
+				}
+			}
+		}
+
+		// Compile YAML-based policies (file/pack rules).
+		for scope, policyBytes := range req.PolicyYAML {
+			eng, err := keeplib.LoadFromBytes(policyBytes, keeplib.WithAuditHook(auditHook(scope)))
+			if err != nil {
+				for _, e := range engines {
+					e.Close()
+				}
+				writeJSON(w, http.StatusBadRequest, RegisterResponse{
+					Error: fmt.Sprintf("keep: compile scope %q: %v", scope, err),
+				})
+				return
+			}
+			engines[scope] = eng
+		}
+
+		// Compile RuleSet-based policies (inline deny lists).
+		for _, spec := range req.PolicyRuleSets {
+			rs := keeplib.NewRuleSet(spec.Scope, spec.Mode)
+			rs.Deny(spec.Deny...)
+			eng, err := rs.Compile(keeplib.WithAuditHook(auditHook(spec.Scope)))
+			if err != nil {
+				for _, e := range engines {
+					e.Close()
+				}
+				writeJSON(w, http.StatusBadRequest, RegisterResponse{
+					Error: fmt.Sprintf("keep: compile ruleset %q: %v", spec.Scope, err),
+				})
+				return
+			}
+			engines[spec.Scope] = eng
+		}
+
+		rc.KeepEngines = engines
+	}
 
 	// Create a per-run context for background work (token refresh, AWS).
 	// This context outlives the HTTP request and is canceled when the run
@@ -251,7 +313,8 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel token refresh before unregistering
+	// Close Keep engines and cancel token refresh before unregistering.
+	rc.Close()
 	rc.CancelRefresh()
 
 	s.registry.Unregister(token)
