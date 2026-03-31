@@ -36,6 +36,24 @@ const OpenAIAPIKeyPlaceholder = "sk-moat-proxy-injected-placeholder-000000000000
 // Authorization headers, so this placeholder never reaches GitHub's servers.
 const GitHubTokenPlaceholder = "ghp_moatProxyInjectedPlaceholder000000000000"
 
+// AnthropicAPIKeyPlaceholder is a placeholder that looks like a valid Anthropic
+// API key.
+// Some tools validate the API key format locally before making requests.
+// Using a valid-looking placeholder bypasses these checks while still allowing
+// the proxy to inject the real key at the network layer.
+//
+// Note: Anthropic API keys start with `sk-ant-api` while OAuth tokens start
+// with `sk-ant-oat` - we may discover we need an OAuth placeholder and smarter
+// logic later.
+const AnthropicAPIKeyPlaceholder = "sk-ant-api03-moatProxyInjectedPlaceholder0000000000000000000000000000000000000000000000000000000000000000000"
+
+// GeminiAPIKeyPlaceholder is a placeholder that looks like a valid Gemini API
+// key.
+// Some tools validate the API key format locally before making requests.
+// Using a valid-looking placeholder bypasses these checks while still allowing
+// the proxy to inject the real key at the network layer.
+const GeminiAPIKeyPlaceholder = "AIzamoatProxyInjectedPlaceholder0000000"
+
 // JWTPlaceholder is a basic placeholder JWT for format validation only.
 // Use GenerateIDTokenPlaceholder for Codex CLI which needs account_id in claims.
 const JWTPlaceholder = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtb2F0LXByb3h5LXBsYWNlaG9sZGVyIiwiZXhwIjo5OTk5OTk5OTk5fQ.placeholder-signature-not-valid"

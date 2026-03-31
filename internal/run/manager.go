@@ -3884,6 +3884,10 @@ func grantToEnvVar(grant string) (string, bool) {
 // can inject the real token.
 func grantToPlaceholder(grant string) string {
 	switch grant {
+	case "anthropic":
+		return credential.AnthropicAPIKeyPlaceholder
+	case "gemini":
+		return credential.GeminiAPIKeyPlaceholder
 	case "github":
 		return credential.GitHubTokenPlaceholder
 	case "openai":

@@ -14,6 +14,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/storage"
@@ -1318,6 +1319,48 @@ func TestResolveMountExcludesToTmpfs(t *testing.T) {
 				if got.Target != want.Target {
 					t.Errorf("tmpfs[%d]: got %q, want %q", i, got.Target, want.Target)
 				}
+			}
+		})
+	}
+}
+
+func Test_grantToPlaceholder(t *testing.T) {
+	tests := []struct {
+		name                string
+		grant               string
+		expectedPlaceholder string
+	}{
+		{
+			name:                "Anthropic grant",
+			grant:               "anthropic",
+			expectedPlaceholder: credential.AnthropicAPIKeyPlaceholder,
+		},
+		{
+			name:                "Gemini grant",
+			grant:               "gemini",
+			expectedPlaceholder: credential.GeminiAPIKeyPlaceholder,
+		},
+		{
+			name:                "GitHub grant",
+			grant:               "github",
+			expectedPlaceholder: credential.GitHubTokenPlaceholder,
+		},
+		{
+			name:                "OpenAI grant",
+			grant:               "openai",
+			expectedPlaceholder: credential.OpenAIAPIKeyPlaceholder,
+		},
+		{
+			name:                "generic grant",
+			grant:               "anything-else",
+			expectedPlaceholder: credential.ProxyInjectedPlaceholder,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := grantToPlaceholder(tt.grant)
+			if got != tt.expectedPlaceholder {
+				t.Errorf("grantToPlaceholder[%s]: got %q, want %q", tt.grant, got, tt.expectedPlaceholder)
 			}
 		})
 	}
