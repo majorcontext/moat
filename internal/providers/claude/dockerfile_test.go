@@ -55,6 +55,11 @@ func TestGenerateDockerfileSnippet(t *testing.T) {
 		t.Error("script should export PATH with Claude CLI locations")
 	}
 
+	// Script should guard against missing claude binary
+	if !strings.Contains(scriptStr, "command -v claude") {
+		t.Error("script should guard against missing claude binary")
+	}
+
 	// Script should track failures
 	if !strings.Contains(scriptStr, "failures=0") {
 		t.Error("script should initialize failure counter")
