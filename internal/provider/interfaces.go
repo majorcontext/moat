@@ -33,18 +33,25 @@ type ProxyConfigurer = credential.ProxyConfigurer
 // This is an alias for credential.ResponseTransformer to ensure type compatibility.
 type ResponseTransformer = credential.ResponseTransformer
 
-// CredentialProvider is implemented by all providers.
-// Handles credential acquisition, proxy configuration, and container setup.
-type CredentialProvider interface {
+// ProxyProvider configures proxy credential injection for a given credential.
+// This is the core interface Gate Keeper needs from a provider.
+type ProxyProvider interface {
 	// Name returns the provider identifier (e.g., "github", "claude").
 	Name() string
 
-	// Grant acquires credentials interactively or from environment.
-	Grant(ctx context.Context) (*Credential, error)
-
 	// ConfigureProxy sets up proxy headers for this credential.
 	ConfigureProxy(p ProxyConfigurer, cred *Credential)
+}
 
+// GrantProvider acquires credentials interactively or from environment.
+// Used by moat CLI — Gate Keeper never calls this.
+type GrantProvider interface {
+	Grant(ctx context.Context) (*Credential, error)
+}
+
+// ContainerProvider sets up the container environment for a credential.
+// Used by moat CLI — Gate Keeper doesn't manage containers.
+type ContainerProvider interface {
 	// ContainerEnv returns environment variables to set in the container.
 	ContainerEnv(cred *Credential) []string
 
@@ -55,10 +62,23 @@ type CredentialProvider interface {
 
 	// Cleanup is called when the run ends to clean up any resources.
 	Cleanup(cleanupPath string)
+}
 
+// ImpliedDepsProvider declares dependencies between providers.
+// Used by moat CLI.
+type ImpliedDepsProvider interface {
 	// ImpliedDependencies returns dependencies implied by this provider.
 	// For example, github implies ["gh", "git"].
 	ImpliedDependencies() []string
+}
+
+// CredentialProvider is the composite interface for full provider implementations.
+// All current providers implement this. Gate Keeper only requires ProxyProvider.
+type CredentialProvider interface {
+	ProxyProvider
+	GrantProvider
+	ContainerProvider
+	ImpliedDepsProvider
 }
 
 // RefreshableProvider is an optional interface for providers that support

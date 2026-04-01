@@ -66,6 +66,8 @@ func NewServer(sockPath string, proxyPort int) *Server {
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return s
 }
@@ -310,17 +312,15 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc, ok := s.registry.Lookup(token)
+	rc, ok, remaining := s.registry.UnregisterAndGetWithCount(token)
 	if !ok {
 		http.Error(w, `{"error":"run not found"}`, http.StatusNotFound)
 		return
 	}
 
-	// Close Keep engines and cancel token refresh before unregistering.
+	// Close Keep engines and cancel token refresh after unregistering.
 	rc.Close()
 	rc.CancelRefresh()
-
-	s.registry.Unregister(token)
 
 	if s.persister != nil {
 		s.persister.SaveDebounced()
@@ -331,7 +331,7 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 	if s.onUnregister != nil {
 		s.onUnregister(rc.RunID)
 	}
-	if s.onEmpty != nil && s.registry.Count() == 0 {
+	if s.onEmpty != nil && remaining == 0 {
 		s.onEmpty()
 	}
 }

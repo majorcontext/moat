@@ -60,6 +60,32 @@ func (r *Registry) Unregister(token string) {
 	delete(r.runs, token)
 }
 
+// UnregisterAndGet atomically removes and returns a RunContext by its auth token.
+// Returns nil, false if the token is not found.
+func (r *Registry) UnregisterAndGet(token string) (*RunContext, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rc, ok := r.runs[token]
+	if ok {
+		delete(r.runs, token)
+	}
+	return rc, ok
+}
+
+// UnregisterAndGetWithCount atomically removes a RunContext and returns both the
+// removed context and the remaining count. This avoids a TOCTOU race where a new
+// registration could slip in between UnregisterAndGet and a separate Count() call.
+func (r *Registry) UnregisterAndGetWithCount(token string) (rc *RunContext, found bool, remaining int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rc, found = r.runs[token]
+	if found {
+		delete(r.runs, token)
+	}
+	remaining = len(r.runs)
+	return
+}
+
 // UpdateContainerID sets the container ID for a registered run.
 // Returns false if the token is not found.
 func (r *Registry) UpdateContainerID(token, containerID string) bool {
@@ -69,9 +95,7 @@ func (r *Registry) UpdateContainerID(token, containerID string) bool {
 	if !ok {
 		return false
 	}
-	rc.mu.Lock()
-	rc.ContainerID = containerID
-	rc.mu.Unlock()
+	rc.SetContainerID(containerID)
 	return true
 }
 
