@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/provider/util"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Metadata keys for AWS credentials.
@@ -19,6 +21,7 @@ const (
 	MetaKeyRegion          = "region"
 	MetaKeySessionDuration = "session_duration"
 	MetaKeyExternalID      = "external_id"
+	MetaKeyProfile         = "profile"
 )
 
 // Default values.
@@ -35,15 +38,17 @@ const (
 	ctxKeyRegion          ctxKey = "aws_region"
 	ctxKeySessionDuration ctxKey = "aws_session_duration"
 	ctxKeyExternalID      ctxKey = "aws_external_id"
+	ctxKeyProfile         ctxKey = "aws_profile"
 )
 
 // WithGrantOptions returns a context with AWS grant options set.
 // These options are used by Grant() instead of prompting interactively.
-func WithGrantOptions(ctx context.Context, role, region, sessionDuration, externalID string) context.Context {
+func WithGrantOptions(ctx context.Context, role, region, sessionDuration, externalID, profile string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyRole, role)
 	ctx = context.WithValue(ctx, ctxKeyRegion, region)
 	ctx = context.WithValue(ctx, ctxKeySessionDuration, sessionDuration)
 	ctx = context.WithValue(ctx, ctxKeyExternalID, externalID)
+	ctx = context.WithValue(ctx, ctxKeyProfile, profile)
 	return ctx
 }
 
@@ -53,6 +58,7 @@ type Config struct {
 	Region          string
 	SessionDuration time.Duration
 	ExternalID      string
+	Profile         string // AWS shared config profile (AWS_PROFILE) used to assume the role
 }
 
 // grant acquires AWS credentials by prompting for an IAM role ARN.
@@ -100,6 +106,16 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 		cfg.ExternalID = v
 	}
 
+	// Capture AWS profile: explicit flag takes precedence, then AWS_PROFILE env var.
+	// This is stored with the credential so the proxy daemon can assume the role
+	// using the correct source identity regardless of its own environment.
+	if v, ok := ctx.Value(ctxKeyProfile).(string); ok && v != "" {
+		cfg.Profile = v
+	} else if v := os.Getenv("AWS_PROFILE"); v != "" {
+		cfg.Profile = v
+		ui.Infof("Using AWS profile from AWS_PROFILE: %s (stored with credential)", v)
+	}
+
 	// Test AssumeRole to verify the role is accessible
 	if err := testAssumeRole(ctx, cfg); err != nil {
 		return nil, &provider.GrantError{
@@ -121,6 +137,9 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 		},
 	}
 
+	if cfg.Profile != "" {
+		cred.Metadata[MetaKeyProfile] = cfg.Profile
+	}
 	if cfg.ExternalID != "" {
 		cred.Metadata[MetaKeyExternalID] = cfg.ExternalID
 	}
@@ -181,8 +200,12 @@ func ParseRoleARN(arn string) (*Config, error) {
 
 // testAssumeRole verifies the role can be assumed with current AWS credentials.
 func testAssumeRole(ctx context.Context, cfg *Config) error {
-	// Load AWS config from environment
-	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(cfg.Region))
+	// Load AWS config from environment, using the explicit profile if set.
+	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
+	if cfg.Profile != "" {
+		opts = append(opts, config.WithSharedConfigProfile(cfg.Profile))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("loading AWS config: %w", err)
 	}
@@ -235,6 +258,9 @@ func ConfigFromCredential(cred *provider.Credential) (*Config, error) {
 
 		if externalID := cred.Metadata[MetaKeyExternalID]; externalID != "" {
 			cfg.ExternalID = externalID
+		}
+		if profile := cred.Metadata[MetaKeyProfile]; profile != "" {
+			cfg.Profile = profile
 		}
 	}
 

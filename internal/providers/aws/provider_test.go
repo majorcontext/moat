@@ -186,6 +186,7 @@ func TestConfigFromCredential(t *testing.T) {
 				MetaKeyRegion:          "eu-west-1",
 				MetaKeySessionDuration: "1h",
 				MetaKeyExternalID:      "ext-123",
+				MetaKeyProfile:         "my-profile",
 			},
 		}
 		cfg, err := ConfigFromCredential(cred)
@@ -200,6 +201,9 @@ func TestConfigFromCredential(t *testing.T) {
 		}
 		if cfg.ExternalID != "ext-123" {
 			t.Errorf("ExternalID = %q, want %q", cfg.ExternalID, "ext-123")
+		}
+		if cfg.Profile != "my-profile" {
+			t.Errorf("Profile = %q, want %q", cfg.Profile, "my-profile")
 		}
 	})
 

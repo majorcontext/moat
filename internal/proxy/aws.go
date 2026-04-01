@@ -76,6 +76,15 @@ type STSAssumeRoler interface {
 	AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
 }
 
+// AWSProviderConfig holds the configuration needed to create an AWSCredentialProvider.
+type AWSProviderConfig struct {
+	RoleARN         string
+	Region          string
+	SessionDuration time.Duration
+	ExternalID      string
+	Profile         string // AWS shared config profile (AWS_PROFILE) used to assume the role
+}
+
 // AWSCredentialProvider manages AWS credential fetching and caching.
 type AWSCredentialProvider struct {
 	roleARN         string
@@ -94,20 +103,28 @@ type AWSCredentialProvider struct {
 }
 
 // NewAWSCredentialProvider creates a new AWS credential provider.
-func NewAWSCredentialProvider(ctx context.Context, roleARN, region string, sessionDuration time.Duration, externalID, sessionName string) (*AWSCredentialProvider, error) {
+// If cfg.Profile is non-empty, it is used as the AWS shared config profile
+// (equivalent to AWS_PROFILE) so the correct source identity is used
+// for AssumeRole regardless of which process creates the provider.
+func NewAWSCredentialProvider(ctx context.Context, cfg AWSProviderConfig, sessionName string) (*AWSCredentialProvider, error) {
 	// Load AWS config from host environment
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
+	if cfg.Profile != "" {
+		opts = append(opts, config.WithSharedConfigProfile(cfg.Profile))
+		log.Debug("AWS credential provider using named profile", "profile", cfg.Profile, "role_arn", cfg.RoleARN)
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 
 	return &AWSCredentialProvider{
-		roleARN:         roleARN,
-		region:          region,
-		sessionDuration: sessionDuration,
-		externalID:      externalID,
+		roleARN:         cfg.RoleARN,
+		region:          cfg.Region,
+		sessionDuration: cfg.SessionDuration,
+		externalID:      cfg.ExternalID,
 		sessionName:     sessionName,
-		stsClient:       sts.NewFromConfig(cfg),
+		stsClient:       sts.NewFromConfig(awsCfg),
 	}, nil
 }
 

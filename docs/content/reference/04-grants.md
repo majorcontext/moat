@@ -547,10 +547,13 @@ moat grant aws --role <ARN> [flags]
 | `--region REGION` | AWS region for API calls | From AWS config |
 | `--session-duration DURATION` | Session duration (e.g., `1h`, `30m`, `15m`) | `15m` |
 | `--external-id ID` | External ID for cross-account role assumption | -- |
+| `--aws-profile PROFILE` | AWS shared config profile for role assumption (falls back to `AWS_PROFILE` env var) | -- |
 
 ### Credential source
 
 Moat uses your host AWS credentials to call `sts:AssumeRole`. Your host must have valid AWS credentials (via `aws configure`, environment variables, or instance profile), and the target role must have a trust policy allowing your host identity to assume it.
+
+If you use named AWS profiles, pass `--aws-profile` (or set `AWS_PROFILE`) at grant time. The profile is stored with the credential so the proxy daemon uses the correct source identity for role assumption, regardless of the daemon's own environment.
 
 ### What it injects
 

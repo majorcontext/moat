@@ -225,10 +225,13 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	if req.AWSConfig != nil {
 		awsProvider, awsErr := proxy.NewAWSCredentialProvider(
 			runCtx,
-			req.AWSConfig.RoleARN,
-			req.AWSConfig.Region,
-			req.AWSConfig.SessionDuration,
-			req.AWSConfig.ExternalID,
+			proxy.AWSProviderConfig{
+				RoleARN:         req.AWSConfig.RoleARN,
+				Region:          req.AWSConfig.Region,
+				SessionDuration: req.AWSConfig.SessionDuration,
+				ExternalID:      req.AWSConfig.ExternalID,
+				Profile:         req.AWSConfig.Profile,
+			},
 			"moat-"+rc.RunID,
 		)
 		if awsErr != nil {

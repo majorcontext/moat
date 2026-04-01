@@ -42,6 +42,7 @@ type AWSConfig struct {
 	Region          string        `json:"region"`
 	SessionDuration time.Duration `json:"session_duration"`
 	ExternalID      string        `json:"external_id,omitempty"`
+	Profile         string        `json:"profile,omitempty"`
 }
 
 // RunContext holds per-run proxy state. It implements credential.ProxyConfigurer

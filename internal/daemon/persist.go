@@ -231,10 +231,13 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		if pr.AWSConfig != nil {
 			awsProvider, awsErr := proxy.NewAWSCredentialProvider(
 				runCtx,
-				pr.AWSConfig.RoleARN,
-				pr.AWSConfig.Region,
-				pr.AWSConfig.SessionDuration,
-				pr.AWSConfig.ExternalID,
+				proxy.AWSProviderConfig{
+					RoleARN:         pr.AWSConfig.RoleARN,
+					Region:          pr.AWSConfig.Region,
+					SessionDuration: pr.AWSConfig.SessionDuration,
+					ExternalID:      pr.AWSConfig.ExternalID,
+					Profile:         pr.AWSConfig.Profile,
+				},
 				"moat-"+pr.RunID,
 			)
 			if awsErr != nil {
