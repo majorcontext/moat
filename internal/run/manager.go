@@ -3744,13 +3744,15 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		AWSConfig:     rc.AWSConfig,
 	}
 
-	for host, cred := range rc.Credentials {
-		req.Credentials = append(req.Credentials, daemon.CredentialSpec{
-			Host:   host,
-			Header: cred.Name,
-			Value:  cred.Value,
-			Grant:  cred.Grant,
-		})
+	for host, creds := range rc.Credentials {
+		for _, cred := range creds {
+			req.Credentials = append(req.Credentials, daemon.CredentialSpec{
+				Host:   host,
+				Header: cred.Name,
+				Value:  cred.Value,
+				Grant:  cred.Grant,
+			})
+		}
 	}
 
 	for host, headers := range rc.ExtraHeaders {

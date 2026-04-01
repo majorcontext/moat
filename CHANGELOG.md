@@ -11,6 +11,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 - **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`
 - **LLM response policy** — evaluate tool_use blocks in Anthropic API responses against Keep rules before forwarding to the container, via `claude.llm-gateway`
 - **Starter packs** — built-in policy packs like `linear-readonly` for quick MCP server lockdown
+- **Multi-credential per host** — multiple grants (e.g., `claude` and `anthropic`) can now target the same host with different headers; clients that send placeholder headers choose which credential to use, otherwise the proxy auto-injects with `anthropic` preferred over `claude`
 
 ## v0.4.0 — 2026-03-19
 

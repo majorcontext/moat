@@ -17,6 +17,19 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 )
 
+// findCredByGrant searches all credentials for one matching the given grant
+// name and returns its value. Returns "" if no match is found.
+func findCredByGrant(creds map[string][]credentialHeader, grant string) string {
+	for _, cs := range creds {
+		for _, c := range cs {
+			if c.Grant == grant {
+				return c.Value
+			}
+		}
+	}
+	return ""
+}
+
 // mcpRelayClient is a reused HTTP client for MCP relay requests.
 // It bypasses proxy settings to prevent circular proxy loops.
 var mcpRelayClient = &http.Client{
@@ -134,12 +147,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	// RunContextData.Credentials (keyed by host, with Grant field).
 	var credValue string
 	if rc := getRunContext(ctxReq); rc != nil {
-		for _, c := range rc.Credentials {
-			if c.Grant == matchedServer.Auth.Grant {
-				credValue = c.Value
-				break
-			}
-		}
+		credValue = findCredByGrant(rc.Credentials, matchedServer.Auth.Grant)
 	}
 	if credValue == "" && credStore != nil {
 		cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
@@ -327,12 +335,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 		// Try RunContextData credentials (daemon mode).
 		if rc := getRunContext(r); rc != nil {
-			for _, cred := range rc.Credentials {
-				if cred.Grant == mcpServer.Auth.Grant {
-					credValue = cred.Value
-					break
-				}
-			}
+			credValue = findCredByGrant(rc.Credentials, mcpServer.Auth.Grant)
 		}
 
 		// Fall back to credential store (legacy single-run mode).
