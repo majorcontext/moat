@@ -700,6 +700,47 @@ moat grant list --json
 moat grant list --profile work
 ```
 
+### moat grant show
+
+Show details of a stored credential. Displays the provider, type, source, scopes, expiration, and a redacted token.
+
+```
+moat grant show <provider>
+```
+
+For SSH credentials, use `ssh:<host>` format.
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--show-token` | Reveal the full credential value (redacted by default) |
+
+#### Examples
+
+```bash
+moat grant show github                    # Show GitHub credential details
+moat grant show github --show-token       # Reveal the full token
+moat grant show aws                       # Show AWS role configuration
+moat grant show ssh:github.com            # Show SSH key details
+moat grant show github --json             # Output as JSON
+moat grant show github --profile myproj   # Show profile credential
+```
+
+#### Output fields
+
+| Field | Description |
+|-------|-------------|
+| **Provider** | Provider name |
+| **Type** | Credential type (token, oauth, api-key, role, key) |
+| **Source** | How the credential was obtained (cli, env, pat, oauth) |
+| **Scopes** | OAuth scopes, if applicable |
+| **Granted** | When the credential was stored |
+| **Expires** | Expiration time, or "never" |
+| **Token** | Last 4 characters shown by default; full value with `--show-token` |
+
+Provider-specific fields (AWS role ARN, region, session duration; SSH fingerprint and key path; npm registries) are shown when applicable.
+
 ### moat grant providers
 
 List all available credential providers.
