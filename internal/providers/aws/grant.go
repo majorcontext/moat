@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/provider/util"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Metadata keys for AWS credentials.
@@ -112,6 +113,7 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 		cfg.Profile = v
 	} else if v := os.Getenv("AWS_PROFILE"); v != "" {
 		cfg.Profile = v
+		ui.Infof("Using AWS profile from AWS_PROFILE: %s (stored with credential)", v)
 	}
 
 	// Test AssumeRole to verify the role is accessible

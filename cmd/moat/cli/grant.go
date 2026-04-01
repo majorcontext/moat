@@ -62,7 +62,7 @@ func init() {
 	grantCmd.Flags().StringVar(&awsRegion, "region", "", "AWS region (default: us-east-1)")
 	grantCmd.Flags().StringVar(&awsSessionDuration, "session-duration", "", "Session duration (default: 15m, max: 12h)")
 	grantCmd.Flags().StringVar(&awsExternalID, "external-id", "", "External ID for role assumption")
-	grantCmd.Flags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile to use for role assumption (defaults to AWS_PROFILE env var)")
+	grantCmd.Flags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile for role assumption (falls back to AWS_PROFILE env var if not set)")
 }
 
 // saveCredential stores a credential and returns the file path.
@@ -114,7 +114,7 @@ Options:
   --region           AWS region (default: us-east-1)
   --session-duration Session duration (default: 15m, max: 12h)
   --external-id      External ID for role assumption
-  --aws-profile      AWS shared config profile (defaults to AWS_PROFILE env var)`)
+  --aws-profile      AWS shared config profile (falls back to AWS_PROFILE env var)`)
 	}
 
 	// Call the provider's Grant method
