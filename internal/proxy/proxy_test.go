@@ -66,7 +66,9 @@ func TestProxy_InjectsAuthHeader(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get(backend.URL)
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "placeholder")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -402,7 +404,9 @@ func TestProxy_SetCredentialHeader(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get(backend.URL)
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("x-api-key", "placeholder")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -418,10 +422,11 @@ func TestProxy_SetCredential_UsesAuthorizationHeader(t *testing.T) {
 	p := NewProxy()
 	p.SetCredential("api.example.com", "Bearer token123")
 
-	cred, ok := p.getCredential("api.example.com")
-	if !ok {
+	creds := p.getCredentials("api.example.com")
+	if len(creds) == 0 {
 		t.Fatal("expected credential to be set")
 	}
+	cred := creds[0]
 	if cred.Name != "Authorization" {
 		t.Errorf("header name = %q, want %q", cred.Name, "Authorization")
 	}
@@ -664,7 +669,7 @@ func TestFilterHeaders_RedactsInjectedCredential(t *testing.T) {
 	}
 
 	// When auth was injected, Authorization should be redacted
-	filtered := FilterHeaders(headers, true, "Authorization")
+	filtered := FilterHeaders(headers, map[string]bool{"authorization": true})
 
 	if filtered["Authorization"] != "[REDACTED]" {
 		t.Errorf("Authorization = %q, want %q", filtered["Authorization"], "[REDACTED]")
@@ -682,7 +687,7 @@ func TestFilterHeaders_PreservesNonInjectedCredential(t *testing.T) {
 	}
 
 	// When auth was NOT injected, Authorization should be preserved
-	filtered := FilterHeaders(headers, false, "")
+	filtered := FilterHeaders(headers, nil)
 
 	if filtered["Authorization"] != "Bearer user-token" {
 		t.Errorf("Authorization = %q, want %q", filtered["Authorization"], "Bearer user-token")
@@ -697,7 +702,7 @@ func TestFilterHeaders_RedactsCustomHeader(t *testing.T) {
 	}
 
 	// When custom header was injected, it should be redacted
-	filtered := FilterHeaders(headers, true, "X-Api-Key")
+	filtered := FilterHeaders(headers, map[string]bool{"x-api-key": true})
 
 	if filtered["X-Api-Key"] != "[REDACTED]" {
 		t.Errorf("X-Api-Key = %q, want %q", filtered["X-Api-Key"], "[REDACTED]")
@@ -712,7 +717,7 @@ func TestFilterHeaders_FiltersProxyHeaders(t *testing.T) {
 		"Content-Type":        []string{"application/json"},
 	}
 
-	filtered := FilterHeaders(headers, false, "")
+	filtered := FilterHeaders(headers, nil)
 
 	if _, exists := filtered["Proxy-Authorization"]; exists {
 		t.Error("Proxy-Authorization should be filtered out")
@@ -731,7 +736,7 @@ func TestFilterHeaders_JoinsMultipleValues(t *testing.T) {
 		"Accept": []string{"text/html", "application/json", "*/*"},
 	}
 
-	filtered := FilterHeaders(headers, false, "")
+	filtered := FilterHeaders(headers, nil)
 
 	expected := "text/html, application/json, */*"
 	if filtered["Accept"] != expected {
@@ -741,7 +746,7 @@ func TestFilterHeaders_JoinsMultipleValues(t *testing.T) {
 
 // TestFilterHeaders_NilHeaders verifies nil header handling.
 func TestFilterHeaders_NilHeaders(t *testing.T) {
-	filtered := FilterHeaders(nil, false, "")
+	filtered := FilterHeaders(nil, nil)
 
 	if filtered != nil {
 		t.Errorf("filtered = %v, want nil", filtered)
@@ -844,8 +849,8 @@ func TestProxy_ContextResolver(t *testing.T) {
 
 	contexts := map[string]*RunContextData{
 		"token_a": {
-			Credentials: map[string]credentialHeader{
-				"api.github.com": {Name: "Authorization", Value: "token aaa"},
+			Credentials: map[string][]credentialHeader{
+				"api.github.com": {{Name: "Authorization", Value: "token aaa"}},
 			},
 		},
 	}
@@ -858,7 +863,7 @@ func TestProxy_ContextResolver(t *testing.T) {
 	if !ok {
 		t.Fatal("expected to resolve token_a")
 	}
-	if rc.Credentials["api.github.com"].Value != "token aaa" {
+	if rc.Credentials["api.github.com"][0].Value != "token aaa" {
 		t.Error("wrong credential value")
 	}
 
@@ -921,8 +926,8 @@ func TestProxy_PerContextHTTPRequest(t *testing.T) {
 	p.SetContextResolver(func(token string) (*RunContextData, bool) {
 		if token == "test_token" {
 			return &RunContextData{
-				Credentials: map[string]credentialHeader{
-					h: {Name: "Authorization", Value: "Bearer injected"},
+				Credentials: map[string][]credentialHeader{
+					h: {{Name: "Authorization", Value: "Bearer injected"}},
 				},
 				Policy: "permissive",
 			}, true
@@ -938,6 +943,7 @@ func TestProxy_PerContextHTTPRequest(t *testing.T) {
 
 	req, _ := http.NewRequest("GET", target.URL+"/test", nil)
 	req.Header.Set("Proxy-Authorization", "Bearer test_token")
+	req.Header.Set("Authorization", "placeholder")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -1053,8 +1059,8 @@ func TestProxy_PerContextNetworkPolicy(t *testing.T) {
 	p2.SetContextResolver(func(token string) (*RunContextData, bool) {
 		if token == "permissive_run" {
 			return &RunContextData{
-				Credentials: map[string]credentialHeader{
-					backendURL.Hostname(): {Name: "Authorization", Value: "Bearer ctx-token"},
+				Credentials: map[string][]credentialHeader{
+					backendURL.Hostname(): {{Name: "Authorization", Value: "Bearer ctx-token"}},
 				},
 				Policy: "permissive",
 			}, true
@@ -1172,6 +1178,228 @@ func TestProxy_PerContextRemoveHeaders(t *testing.T) {
 	}
 }
 
+// TestProxy_RemoveHeaderSkipsInjectedCredential verifies that RemoveRequestHeader
+// does not strip the credential header the proxy just injected. This prevents a
+// conflict when both "claude" (OAuth, removes x-api-key) and "anthropic" (API key,
+// injects x-api-key) grants target the same host.
+func TestProxy_RemoveHeaderSkipsInjectedCredential(t *testing.T) {
+	var receivedKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedKey = r.Header.Get("x-api-key")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "multi_grant_run" {
+			return &RunContextData{
+				// "anthropic" grant won the credential slot with x-api-key
+				Credentials: map[string][]credentialHeader{
+					h: {{Name: "x-api-key", Value: "sk-ant-real-key", Grant: "anthropic"}},
+				},
+				// "claude" grant registered remove x-api-key (for OAuth)
+				RemoveHeaders: map[string][]string{
+					h: {"x-api-key"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer multi_grant_run")
+	// Client sends a placeholder (like Claude Code would with ANTHROPIC_API_KEY env)
+	req.Header.Set("x-api-key", "placeholder-value")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if receivedKey != "sk-ant-real-key" {
+		t.Errorf("x-api-key should be the injected credential, got %q", receivedKey)
+	}
+}
+
+// TestProxy_DualCredentialClientChooses verifies that when both "claude" (OAuth)
+// and "anthropic" (API key) grants are active for the same host, the proxy
+// replaces whichever header the client actually sends. The client's choice of
+// auth scheme determines which credential is injected.
+func TestProxy_DualCredentialClientChooses(t *testing.T) {
+	var receivedAuth, receivedKey string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		receivedKey = r.Header.Get("x-api-key")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "dual_cred" {
+			return &RunContextData{
+				Credentials: map[string][]credentialHeader{
+					h: {
+						{Name: "Authorization", Value: "Bearer oauth-token", Grant: "claude"},
+						{Name: "x-api-key", Value: "sk-ant-real-key", Grant: "anthropic"},
+					},
+				},
+				// Claude OAuth registers RemoveRequestHeader("x-api-key")
+				RemoveHeaders: map[string][]string{
+					h: {"x-api-key"},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	// Test 1: Client sends x-api-key → anthropic credential injected
+	receivedAuth = ""
+	receivedKey = ""
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer dual_cred")
+	req.Header.Set("x-api-key", "placeholder")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if receivedKey != "sk-ant-real-key" {
+		t.Errorf("test 1: x-api-key should be real key, got %q", receivedKey)
+	}
+	if receivedAuth != "" {
+		t.Errorf("test 1: Authorization should be empty (client didn't send it), got %q", receivedAuth)
+	}
+
+	// Test 2: Client sends Authorization → claude credential injected
+	receivedAuth = ""
+	receivedKey = ""
+	req, _ = http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer dual_cred")
+	req.Header.Set("Authorization", "Bearer placeholder")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if receivedAuth != "Bearer oauth-token" {
+		t.Errorf("test 2: Authorization should be OAuth token, got %q", receivedAuth)
+	}
+	// x-api-key was not sent and not injected (first-pass only matched Authorization)
+	if receivedKey != "" {
+		t.Errorf("test 2: x-api-key should be empty (removed by RemoveHeaders), got %q", receivedKey)
+	}
+
+	// Test 3: Client sends both → both replaced
+	receivedAuth = ""
+	receivedKey = ""
+	req, _ = http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer dual_cred")
+	req.Header.Set("Authorization", "Bearer placeholder")
+	req.Header.Set("x-api-key", "placeholder")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if receivedAuth != "Bearer oauth-token" {
+		t.Errorf("test 3: Authorization should be OAuth token, got %q", receivedAuth)
+	}
+	if receivedKey != "sk-ant-real-key" {
+		t.Errorf("test 3: x-api-key should be real key, got %q", receivedKey)
+	}
+
+	// Test 4: Client sends no placeholder → both auto-injected (different header names)
+	receivedAuth = ""
+	receivedKey = ""
+	req, _ = http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer dual_cred")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	// Both credentials have different header names, so both are auto-injected.
+	// The "claude" grant gets Authorization, "anthropic" gets x-api-key.
+	if receivedAuth != "Bearer oauth-token" {
+		t.Errorf("test 4: Authorization should be OAuth token (auto-injected), got %q", receivedAuth)
+	}
+	if receivedKey != "sk-ant-real-key" {
+		t.Errorf("test 4: x-api-key should be real key (auto-injected, protected from RemoveHeaders), got %q", receivedKey)
+	}
+}
+
+// TestProxy_DualCredentialSameHeaderPreference verifies that when multiple
+// credentials share the same header name and no placeholder is sent, the
+// proxy prefers the non-"claude" grant for auto-injection.
+func TestProxy_DualCredentialSameHeaderPreference(t *testing.T) {
+	var receivedAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	h := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "same_header" {
+			return &RunContextData{
+				Credentials: map[string][]credentialHeader{
+					h: {
+						{Name: "Authorization", Value: "Bearer oauth-token", Grant: "claude"},
+						{Name: "Authorization", Value: "Bearer api-key-token", Grant: "anthropic"},
+					},
+				},
+				Policy: "permissive",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	// No placeholder — auto-inject should prefer "anthropic" over "claude"
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer same_header")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if receivedAuth != "Bearer api-key-token" {
+		t.Errorf("Authorization = %q, want %q (anthropic preferred over claude)", receivedAuth, "Bearer api-key-token")
+	}
+}
+
 // TestProxy_PerContextTokenSubstitution verifies that token substitution from
 // RunContextData is applied.
 func TestProxy_PerContextTokenSubstitution(t *testing.T) {
@@ -1233,8 +1461,8 @@ func TestProxy_PerContextBasicAuth(t *testing.T) {
 	p.SetContextResolver(func(token string) (*RunContextData, bool) {
 		if token == "basic_token" {
 			return &RunContextData{
-				Credentials: map[string]credentialHeader{
-					h: {Name: "Authorization", Value: "Bearer injected-via-basic"},
+				Credentials: map[string][]credentialHeader{
+					h: {{Name: "Authorization", Value: "Bearer injected-via-basic"}},
 				},
 				Policy: "permissive",
 			}, true
@@ -1249,7 +1477,9 @@ func TestProxy_PerContextBasicAuth(t *testing.T) {
 	proxyURL.User = url.UserPassword("moat", "basic_token")
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
 
-	resp, err := client.Get(backend.URL)
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "placeholder")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1283,15 +1513,15 @@ func TestProxy_PerContextIsolation(t *testing.T) {
 		switch token {
 		case "run_a":
 			return &RunContextData{
-				Credentials: map[string]credentialHeader{
-					h: {Name: "Authorization", Value: "Bearer token-A"},
+				Credentials: map[string][]credentialHeader{
+					h: {{Name: "Authorization", Value: "Bearer token-A"}},
 				},
 				Policy: "permissive",
 			}, true
 		case "run_b":
 			return &RunContextData{
-				Credentials: map[string]credentialHeader{
-					h: {Name: "Authorization", Value: "Bearer token-B"},
+				Credentials: map[string][]credentialHeader{
+					h: {{Name: "Authorization", Value: "Bearer token-B"}},
 				},
 				Policy: "permissive",
 			}, true
@@ -1308,6 +1538,7 @@ func TestProxy_PerContextIsolation(t *testing.T) {
 	// Request with token A
 	reqA, _ := http.NewRequest("GET", backend.URL+"/path-a", nil)
 	reqA.Header.Set("Proxy-Authorization", "Bearer run_a")
+	reqA.Header.Set("Authorization", "placeholder")
 	respA, err := client.Do(reqA)
 	if err != nil {
 		t.Fatal(err)
@@ -1317,6 +1548,7 @@ func TestProxy_PerContextIsolation(t *testing.T) {
 	// Request with token B
 	reqB, _ := http.NewRequest("GET", backend.URL+"/path-b", nil)
 	reqB.Header.Set("Proxy-Authorization", "Bearer run_b")
+	reqB.Header.Set("Authorization", "placeholder")
 	respB, err := client.Do(reqB)
 	if err != nil {
 		t.Fatal(err)
@@ -1335,7 +1567,7 @@ func TestProxy_PerContextIsolation(t *testing.T) {
 }
 
 // TestProxy_LegacyModeUnchanged verifies that when no ContextResolver is set,
-// the proxy works exactly as before.
+// the proxy injects credentials when the client sends a matching placeholder header.
 func TestProxy_LegacyModeUnchanged(t *testing.T) {
 	var receivedAuth string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1346,7 +1578,7 @@ func TestProxy_LegacyModeUnchanged(t *testing.T) {
 
 	p := NewProxy()
 	p.SetCredential("127.0.0.1", "Bearer legacy-token")
-	// No ContextResolver set - should work exactly as before
+	// No ContextResolver set - should work with placeholder header
 
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
@@ -1357,7 +1589,9 @@ func TestProxy_LegacyModeUnchanged(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get(backend.URL)
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Authorization", "placeholder")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1365,6 +1599,41 @@ func TestProxy_LegacyModeUnchanged(t *testing.T) {
 
 	if receivedAuth != "Bearer legacy-token" {
 		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer legacy-token")
+	}
+}
+
+// TestProxy_AutoInjectWithoutPlaceholder verifies that credentials are
+// auto-injected when the client doesn't send a placeholder header.
+// This ensures transparent auth for tools like curl, git, npm, etc.
+func TestProxy_AutoInjectWithoutPlaceholder(t *testing.T) {
+	var receivedAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetCredential("127.0.0.1", "Bearer secret-token")
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+		},
+	}
+
+	// No Authorization header sent — credential should be auto-injected
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if receivedAuth != "Bearer secret-token" {
+		t.Errorf("Authorization = %q, want %q (auto-injected)", receivedAuth, "Bearer secret-token")
 	}
 }
 

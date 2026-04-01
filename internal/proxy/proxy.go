@@ -63,18 +63,18 @@ const MaxBodySize = 8 * 1024
 
 // RequestLogData contains all data for a logged request.
 type RequestLogData struct {
-	Method             string
-	URL                string
-	StatusCode         int
-	Duration           time.Duration
-	Err                error
-	RequestHeaders     http.Header
-	ResponseHeaders    http.Header
-	RequestBody        []byte
-	ResponseBody       []byte
-	AuthInjected       bool   // True if credential header was injected for this host
-	InjectedHeaderName string // Name of the injected header (for filtering)
-	RunID              string // Run ID from per-run context (daemon mode)
+	Method          string
+	URL             string
+	StatusCode      int
+	Duration        time.Duration
+	Err             error
+	RequestHeaders  http.Header
+	ResponseHeaders http.Header
+	RequestBody     []byte
+	ResponseBody    []byte
+	AuthInjected    bool            // True if any credential header was injected for this host
+	InjectedHeaders map[string]bool // Lower-cased header names that were injected
+	RunID           string          // Run ID from per-run context (daemon mode)
 }
 
 // RequestLogger is called for each proxied request.
@@ -151,8 +151,9 @@ func captureBody(body io.ReadCloser, contentType string) ([]byte, io.ReadCloser)
 }
 
 // FilterHeaders creates a copy of headers with sensitive values filtered.
-// If authInjected is true, the specified header name is redacted.
-func FilterHeaders(headers http.Header, authInjected bool, injectedHeaderName string) map[string]string {
+// injectedHeaders is a set of lower-cased header names whose values should be
+// redacted (credential headers the proxy injected).
+func FilterHeaders(headers http.Header, injectedHeaders map[string]bool) map[string]string {
 	if headers == nil {
 		return nil
 	}
@@ -163,8 +164,8 @@ func FilterHeaders(headers http.Header, authInjected bool, injectedHeaderName st
 		if strings.EqualFold(key, "Proxy-Authorization") || strings.EqualFold(key, "Proxy-Connection") {
 			continue
 		}
-		// Redact the injected credential header
-		if authInjected && strings.EqualFold(key, injectedHeaderName) {
+		// Redact injected credential headers
+		if injectedHeaders[strings.ToLower(key)] {
 			result[key] = "[REDACTED]"
 			continue
 		}
@@ -177,7 +178,7 @@ func FilterHeaders(headers http.Header, authInjected bool, injectedHeaderName st
 // logRequest is a helper that logs request data if a logger is configured.
 // The ctxReq parameter provides the RunContextData (from CONNECT or HTTP request context)
 // for extracting the RunID; it may be nil when context is unavailable.
-func (p *Proxy) logRequest(ctxReq *http.Request, method, url string, statusCode int, duration time.Duration, err error, reqHeaders, respHeaders http.Header, reqBody, respBody []byte, authInjected bool, injectedHeaderName string) {
+func (p *Proxy) logRequest(ctxReq *http.Request, method, url string, statusCode int, duration time.Duration, err error, reqHeaders, respHeaders http.Header, reqBody, respBody []byte, injectedHeaders map[string]bool) {
 	if p.logger == nil {
 		return
 	}
@@ -188,18 +189,18 @@ func (p *Proxy) logRequest(ctxReq *http.Request, method, url string, statusCode 
 		}
 	}
 	p.logger(RequestLogData{
-		Method:             method,
-		URL:                url,
-		StatusCode:         statusCode,
-		Duration:           duration,
-		Err:                err,
-		RequestHeaders:     reqHeaders,
-		ResponseHeaders:    respHeaders,
-		RequestBody:        reqBody,
-		ResponseBody:       respBody,
-		AuthInjected:       authInjected,
-		InjectedHeaderName: injectedHeaderName,
-		RunID:              runID,
+		Method:          method,
+		URL:             url,
+		StatusCode:      statusCode,
+		Duration:        duration,
+		Err:             err,
+		RequestHeaders:  reqHeaders,
+		ResponseHeaders: respHeaders,
+		RequestBody:     reqBody,
+		ResponseBody:    respBody,
+		AuthInjected:    len(injectedHeaders) > 0,
+		InjectedHeaders: injectedHeaders,
+		RunID:           runID,
 	})
 }
 
@@ -247,7 +248,7 @@ func ParseHostPattern(pattern string) HostPattern {
 // RunContextData holds per-run credential data resolved by ContextResolver.
 type RunContextData struct {
 	RunID                string
-	Credentials          map[string]credentialHeader
+	Credentials          map[string][]credentialHeader
 	ExtraHeaders         map[string][]extraHeader
 	RemoveHeaders        map[string][]string
 	TokenSubstitutions   map[string]*tokenSubstitution
@@ -285,7 +286,7 @@ type ContextResolver func(token string) (*RunContextData, bool)
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials          map[string]credentialHeader                 // host -> credential header
+	credentials          map[string][]credentialHeader               // host -> credential headers
 	extraHeaders         map[string][]extraHeader                    // host -> additional headers to inject
 	responseTransformers map[string][]credential.ResponseTransformer // host -> response transformers
 	mu                   sync.RWMutex
@@ -308,7 +309,7 @@ type Proxy struct {
 // NewProxy creates a new auth proxy.
 func NewProxy() *Proxy {
 	return &Proxy{
-		credentials:          make(map[string]credentialHeader),
+		credentials:          make(map[string][]credentialHeader),
 		extraHeaders:         make(map[string][]extraHeader),
 		responseTransformers: make(map[string][]credential.ResponseTransformer),
 		removeHeaders:        make(map[string][]string),
@@ -401,6 +402,11 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 
 // SetCredentialWithGrant sets a credential header with grant info for logging.
 // Grant is used for structured logging to identify the credential source.
+// If a credential with the same grant and header name already exists for
+// the host, it is updated in place (upsert). Otherwise, a new entry is
+// appended. Matching on both grant and header name prevents empty-grant
+// collisions when SetCredentialHeader is called multiple times with
+// different headers.
 func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	if !isValidHost(host) {
 		log.Debug("ignoring invalid host for credential injection",
@@ -411,7 +417,14 @@ func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant stri
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.credentials[host] = credentialHeader{Name: headerName, Value: headerValue, Grant: grant}
+	entry := credentialHeader{Name: headerName, Value: headerValue, Grant: grant}
+	for i, existing := range p.credentials[host] {
+		if existing.Grant == grant && existing.Name == headerName {
+			p.credentials[host][i] = entry
+			return
+		}
+	}
+	p.credentials[host] = append(p.credentials[host], entry)
 }
 
 // AddExtraHeader adds an additional header to inject for a host.
@@ -592,19 +605,82 @@ func (p *Proxy) SetNetworkPolicyWithRules(policy string, allows []string, grants
 	}
 }
 
-// getCredential returns the credential header for a host.
-func (p *Proxy) getCredential(host string) (credentialHeader, bool) {
+// getCredentials returns all credential headers for a host.
+func (p *Proxy) getCredentials(host string) []credentialHeader {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if cred, ok := p.credentials[host]; ok {
-		return cred, true
+	if creds := p.credentials[host]; len(creds) > 0 {
+		return creds
 	}
 	h, _, _ := net.SplitHostPort(host)
 	if h != "" {
-		cred, ok := p.credentials[h]
-		return cred, ok
+		return p.credentials[h]
 	}
-	return credentialHeader{}, false
+	return nil
+}
+
+// injectCredentials replaces credential headers in the request. For each
+// credential, if the client already sent that header (e.g., a placeholder),
+// the proxy replaces it with the real value. When no placeholder matches,
+// credentials are injected unconditionally for transparent auth. If multiple
+// credentials share the same header name and no placeholder matched, the
+// "claude" grant is skipped in favor of the other — claude uses OAuth and
+// should only be injected when Claude Code explicitly sends a placeholder.
+// When credentials have different header names, all are auto-injected.
+// Returns a set of lower-cased header names that were injected, so callers
+// can protect them from RemoveHeaders stripping.
+func injectCredentials(req *http.Request, creds []credentialHeader, host, method, path string) map[string]bool {
+	if len(creds) == 0 {
+		return nil
+	}
+
+	injected := make(map[string]bool, len(creds))
+
+	// First pass: inject credentials where the client sent a matching
+	// placeholder header. This lets the client choose which credential
+	// to use when multiple grants target the same host.
+	for _, c := range creds {
+		if req.Header.Get(c.Name) != "" {
+			req.Header.Set(c.Name, c.Value)
+			injected[strings.ToLower(c.Name)] = true
+			log.Debug("credential injected",
+				"subsystem", "proxy",
+				"action", "inject",
+				"grant", c.Grant,
+				"host", host,
+				"header", c.Name,
+				"method", method,
+				"path", path)
+		}
+	}
+
+	// If no placeholder matched, inject unconditionally for transparent auth.
+	// When multiple credentials share the same header name, prefer the
+	// non-"claude" grant — the claude grant is for Claude Code's OAuth flow
+	// and should only be injected when explicitly requested via placeholder.
+	if len(injected) == 0 {
+		byHeader := make(map[string]credentialHeader, len(creds))
+		for _, c := range creds {
+			key := strings.ToLower(c.Name)
+			if existing, ok := byHeader[key]; !ok || existing.Grant == "claude" {
+				byHeader[key] = c
+			}
+		}
+		for _, c := range byHeader {
+			req.Header.Set(c.Name, c.Value)
+			injected[strings.ToLower(c.Name)] = true
+			log.Debug("credential auto-injected",
+				"subsystem", "proxy",
+				"action", "inject-auto",
+				"grant", c.Grant,
+				"host", host,
+				"header", c.Name,
+				"method", method,
+				"path", path)
+		}
+	}
+
+	return injected
 }
 
 // mergeExtraHeaders injects extra headers into a request. If the request
@@ -672,22 +748,25 @@ func getRunContext(r *http.Request) *RunContextData {
 	return nil
 }
 
-// getCredentialForRequest returns the credential for a host, checking
+// getCredentialsForRequest returns all credentials for a host, checking
 // RunContextData first, then falling back to the proxy's own map.
-func (p *Proxy) getCredentialForRequest(r *http.Request, host string) (credentialHeader, bool) {
+func (p *Proxy) getCredentialsForRequest(r *http.Request, host string) []credentialHeader {
 	if rc := getRunContext(r); rc != nil {
-		if cred, ok := rc.Credentials[host]; ok {
-			return cred, true
+		if creds := rc.Credentials[host]; len(creds) > 0 {
+			return creds
 		}
 		h, _, _ := net.SplitHostPort(host)
 		if h != "" {
-			if cred, ok := rc.Credentials[h]; ok {
-				return cred, true
+			if creds := rc.Credentials[h]; len(creds) > 0 {
+				return creds
 			}
 		}
-		return credentialHeader{}, false
+		return nil
 	}
-	return p.getCredential(host)
+	if creds := p.getCredentials(host); len(creds) > 0 {
+		return creds
+	}
+	return nil
 }
 
 // getExtraHeadersForRequest returns extra headers for a host, checking
@@ -1048,7 +1127,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract host and infer port from scheme
 	host := r.URL.Hostname()
-	cred, authInjected := p.getCredentialForRequest(r, host)
+	creds := p.getCredentialsForRequest(r, host)
 
 	// Capture request body and headers before forwarding
 	var reqBody []byte
@@ -1072,7 +1151,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if !p.checkNetworkPolicyForRequest(r, host, port, r.Method, r.URL.Path) {
 		duration := time.Since(start)
 		// Log blocked request
-		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, false, "")
+		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, nil)
 		p.logPolicy(r, "network", "http.request", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
 		p.writeBlockedResponse(w, host)
@@ -1092,17 +1171,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			outReq.Header.Add(key, value)
 		}
 	}
-	if authInjected {
-		outReq.Header.Set(cred.Name, cred.Value)
-		log.Debug("credential injected",
-			"subsystem", "proxy",
-			"action", "inject",
-			"grant", cred.Grant,
-			"host", host,
-			"header", cred.Name,
-			"method", r.Method,
-			"path", r.URL.Path)
-	}
+	injectedHeaders := injectCredentials(outReq, creds, host, r.Method, r.URL.Path)
+
 	// Inject any additional headers configured for this host.
 	// Merges with existing values (comma-separated) to preserve client
 	// headers like anthropic-beta that support multiple flags.
@@ -1111,8 +1181,15 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 
-	// Remove headers that should be stripped
+	// Remove headers that should be stripped, but never remove a
+	// credential header the proxy just injected. This prevents conflicts
+	// when multiple grants target the same host — e.g., "claude" registers
+	// RemoveRequestHeader("x-api-key") for OAuth, but if "anthropic" also
+	// injected x-api-key, the injected header must survive.
 	for _, headerName := range p.getRemoveHeadersForRequest(r, host) {
+		if injectedHeaders[strings.ToLower(headerName)] {
+			continue
+		}
 		outReq.Header.Del(headerName)
 	}
 	// Apply token substitution if configured.
@@ -1136,11 +1213,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		statusCode = resp.StatusCode
 	}
 
-	logCredHeaderName := ""
-	if authInjected {
-		logCredHeaderName = cred.Name
-	}
-	p.logRequest(r, r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
+	p.logRequest(r, r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, injectedHeaders)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -1176,7 +1249,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if !p.checkNetworkPolicyForRequest(r, host, port, "CONNECT", "") {
 		// Log blocked request
 		if p.logger != nil {
-			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, nil)
 		}
 		p.logPolicy(r, "network", "http.connect", "", "Host not in allow list: "+host)
 		// Send 407 response with policy headers
@@ -1249,7 +1322,7 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Request, host string) {
-	cred, authInjected := p.getCredentialForRequest(r, host)
+	creds := p.getCredentialsForRequest(r, host)
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -1326,7 +1399,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// Check request-level rules (method + path) for the inner HTTP request.
 		// The CONNECT request r carries the per-run context for rule lookup.
 		if !p.checkNetworkPolicyForRequest(r, host, connectPort, req.Method, req.URL.Path) {
-			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, false, "")
+			p.logRequest(r, req.Method, req.URL.String(), http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, nil)
 			p.logPolicy(r, "network", "http.request", "", req.Method+" "+host+req.URL.Path)
 			body := "Moat: request blocked by network policy.\nHost: " + host + "\nTo allow this request, update network.rules in moat.yaml.\n"
 			blockedResp := &http.Response{
@@ -1397,17 +1470,8 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// requests from the TLS stream don't carry the request context.
 		p.injectMCPCredentialsWithContext(r, req)
 
-		if authInjected {
-			req.Header.Set(cred.Name, cred.Value)
-			log.Debug("credential injected",
-				"subsystem", "proxy",
-				"action", "inject",
-				"grant", cred.Grant,
-				"host", host,
-				"header", cred.Name,
-				"method", req.Method,
-				"path", req.URL.Path)
-		}
+		injectedHeaders := injectCredentials(req, creds, host, req.Method, req.URL.Path)
+
 		// Inject any additional headers configured for this host.
 		// Merges with existing values (comma-separated) to preserve client
 		// headers like anthropic-beta that support multiple flags.
@@ -1415,8 +1479,13 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req.Header.Del("Proxy-Connection")
 		req.Header.Del("Proxy-Authorization")
 
-		// Remove headers that should be stripped for this host
+		// Remove headers that should be stripped for this host, but never
+		// remove a credential header the proxy just injected (see comment
+		// in handleHTTP for the multi-grant conflict scenario).
 		for _, headerName := range p.getRemoveHeadersForRequest(r, host) {
+			if injectedHeaders[strings.ToLower(headerName)] {
+				continue
+			}
 			req.Header.Del(headerName)
 		}
 		// Apply token substitution if configured for this host.
@@ -1547,11 +1616,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 			respBody, resp.Body = captureBody(resp.Body, resp.Header.Get("Content-Type"))
 		}
 
-		logCredHeaderName := ""
-		if authInjected {
-			logCredHeaderName = cred.Name
-		}
-		p.logRequest(r, req.Method, logURL, statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, authInjected, logCredHeaderName)
+		p.logRequest(r, req.Method, logURL, statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, injectedHeaders)
 
 		if err != nil {
 			errResp := &http.Response{

@@ -51,7 +51,7 @@ type RunContext struct {
 	ContainerID string `json:"container_id,omitempty"`
 	AuthToken   string `json:"auth_token"`
 
-	Credentials          map[string]CredentialEntry                  `json:"credentials"`
+	Credentials          map[string][]CredentialEntry                `json:"credentials"`
 	ExtraHeaders         map[string][]ExtraHeaderEntry               `json:"extra_headers"`
 	RemoveHeaders        map[string][]string                         `json:"remove_headers"`
 	TokenSubstitutions   map[string]TokenSubstitutionEntry           `json:"token_substitutions"`
@@ -78,7 +78,7 @@ type RunContext struct {
 func NewRunContext(runID string) *RunContext {
 	return &RunContext{
 		RunID:                runID,
-		Credentials:          make(map[string]CredentialEntry),
+		Credentials:          make(map[string][]CredentialEntry),
 		ExtraHeaders:         make(map[string][]ExtraHeaderEntry),
 		RemoveHeaders:        make(map[string][]string),
 		TokenSubstitutions:   make(map[string]TokenSubstitutionEntry),
@@ -151,10 +151,21 @@ func (rc *RunContext) SetCredentialHeader(host, headerName, headerValue string) 
 }
 
 // SetCredentialWithGrant implements credential.ProxyConfigurer.
+// When multiple grants target the same host (e.g., "claude" and "anthropic"
+// on api.anthropic.com), each is stored separately. If an entry with the same
+// grant and header name already exists for the host (e.g., during token
+// refresh), it is updated in place rather than duplicated.
 func (rc *RunContext) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	rc.Credentials[host] = CredentialEntry{Name: headerName, Value: headerValue, Grant: grant}
+	entry := CredentialEntry{Name: headerName, Value: headerValue, Grant: grant}
+	for i, existing := range rc.Credentials[host] {
+		if existing.Grant == grant && existing.Name == headerName {
+			rc.Credentials[host][i] = entry
+			return
+		}
+	}
+	rc.Credentials[host] = append(rc.Credentials[host], entry)
 }
 
 // AddExtraHeader implements credential.ProxyConfigurer.
@@ -185,19 +196,28 @@ func (rc *RunContext) SetTokenSubstitution(host, placeholder, realToken string) 
 	rc.TokenSubstitutions[host] = TokenSubstitutionEntry{Placeholder: placeholder, RealToken: realToken}
 }
 
-// GetCredential returns the credential for a host, checking host:port fallback.
+// GetCredential returns the first credential for a host, checking host:port fallback.
+// Use GetCredentials to retrieve all credentials when multiple grants target the same host.
 func (rc *RunContext) GetCredential(host string) (CredentialEntry, bool) {
+	creds := rc.GetCredentials(host)
+	if len(creds) > 0 {
+		return creds[0], true
+	}
+	return CredentialEntry{}, false
+}
+
+// GetCredentials returns all credentials for a host, checking host:port fallback.
+func (rc *RunContext) GetCredentials(host string) []CredentialEntry {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
-	if cred, ok := rc.Credentials[host]; ok {
-		return cred, true
+	if creds := rc.Credentials[host]; len(creds) > 0 {
+		return creds
 	}
 	h, _, _ := net.SplitHostPort(host)
 	if h != "" {
-		cred, ok := rc.Credentials[h]
-		return cred, ok
+		return rc.Credentials[h]
 	}
-	return CredentialEntry{}, false
+	return nil
 }
 
 // GetExtraHeaders returns extra headers for a host, checking host:port fallback.
@@ -269,9 +289,11 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	}
 
 	// Convert credentials.
-	d.Credentials = make(map[string]proxy.CredentialHeader, len(rc.Credentials))
-	for host, c := range rc.Credentials {
-		d.Credentials[host] = proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant}
+	d.Credentials = make(map[string][]proxy.CredentialHeader, len(rc.Credentials))
+	for host, creds := range rc.Credentials {
+		for _, c := range creds {
+			d.Credentials[host] = append(d.Credentials[host], proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant})
+		}
 	}
 
 	// Convert extra headers.

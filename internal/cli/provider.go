@@ -114,29 +114,17 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	cfg = wtOut.Config
 
 	// Build grants list with deduplication: credential grant first,
-	// then config grants, then flag grants.
-	grantSet := make(map[string]bool)
-	var grants []string
-	addGrant := func(g string) {
-		if !grantSet[g] {
-			grantSet[g] = true
-			grants = append(grants, g)
-		}
-	}
-
+	// then config grants, then flag grants. Auto-detected grants are
+	// suppressed when they conflict with an explicit grant.
+	var autoDetected string
 	if rc.GetCredentialGrant != nil {
-		if credName := rc.GetCredentialGrant(); credName != "" {
-			addGrant(credName)
-		}
+		autoDetected = rc.GetCredentialGrant()
 	}
+	var configGrants []string
 	if cfg != nil {
-		for _, g := range cfg.Grants {
-			addGrant(g)
-		}
+		configGrants = cfg.Grants
 	}
-	for _, g := range rc.Flags.Grants {
-		addGrant(g)
-	}
+	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants)
 	rc.Flags.Grants = grants
 
 	interactive := rc.PromptFlag == ""
@@ -232,4 +220,45 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	_, err = ExecuteRun(ctx, opts)
 	return err
+}
+
+// containsGrant reports whether grants contains the named grant.
+func containsGrant(grants []string, name string) bool {
+	for _, g := range grants {
+		if g == name {
+			return true
+		}
+	}
+	return false
+}
+
+// buildGrants assembles the final grants list from an auto-detected
+// credential grant, config grants, and flag grants. Auto-detected grants
+// are suppressed when they conflict with an explicit grant (e.g.,
+// "claude" conflicts with "anthropic" since both target the same host).
+func buildGrants(autoDetected string, configGrants, flagGrants []string) []string {
+	grantSet := make(map[string]bool)
+	var grants []string
+	addGrant := func(g string) {
+		if !grantSet[g] {
+			grantSet[g] = true
+			grants = append(grants, g)
+		}
+	}
+
+	explicitGrants := make([]string, 0, len(configGrants)+len(flagGrants))
+	explicitGrants = append(explicitGrants, configGrants...)
+	explicitGrants = append(explicitGrants, flagGrants...)
+
+	if autoDetected != "" {
+		suppressed := (autoDetected == "claude" && containsGrant(explicitGrants, "anthropic")) ||
+			(autoDetected == "anthropic" && containsGrant(explicitGrants, "claude"))
+		if !suppressed {
+			addGrant(autoDetected)
+		}
+	}
+	for _, g := range explicitGrants {
+		addGrant(g)
+	}
+	return grants
 }
