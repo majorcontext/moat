@@ -660,7 +660,7 @@ moat grant aws --role=<ARN> [flags]
 | `--region REGION` | AWS region for API calls | `us-east-1` |
 | `--session-duration DURATION` | Session duration (e.g., `1h`, `30m`, `15m`) | `15m` |
 | `--external-id ID` | External ID for cross-account role assumption | -- |
-| `--aws-profile PROFILE` | AWS shared config profile to use for role assumption | `AWS_PROFILE` env var |
+| `--aws-profile PROFILE` | AWS shared config profile for role assumption (falls back to `AWS_PROFILE` env var) | -- |
 
 ### Examples
 

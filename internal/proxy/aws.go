@@ -111,6 +111,7 @@ func NewAWSCredentialProvider(ctx context.Context, cfg AWSProviderConfig, sessio
 	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
 	if cfg.Profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(cfg.Profile))
+		log.Debug("AWS credential provider using named profile", "profile", cfg.Profile, "role_arn", cfg.RoleARN)
 	}
 	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
