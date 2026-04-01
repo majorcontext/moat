@@ -665,10 +665,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 					awsProvider, err := proxy.NewAWSCredentialProvider(
 						ctx,
-						awsCfg.RoleARN,
-						awsCfg.Region,
-						awsCfg.SessionDuration,
-						awsCfg.ExternalID,
+						proxy.AWSProviderConfig{
+							RoleARN:         awsCfg.RoleARN,
+							Region:          awsCfg.Region,
+							SessionDuration: awsCfg.SessionDuration,
+							ExternalID:      awsCfg.ExternalID,
+							Profile:         awsCfg.Profile,
+						},
 						"moat-"+r.ID,
 					)
 					if err != nil {
@@ -684,6 +687,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						Region:          awsCfg.Region,
 						SessionDuration: awsCfg.SessionDuration,
 						ExternalID:      awsCfg.ExternalID,
+						Profile:         awsCfg.Profile,
 					}
 				}
 			}
