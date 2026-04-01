@@ -7,5 +7,5 @@ RUN CGO_ENABLED=0 go build -o /gatekeeper ./cmd/gatekeeper
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=builder /gatekeeper /gatekeeper
-EXPOSE 8080
+EXPOSE 9080
 ENTRYPOINT ["/gatekeeper"]

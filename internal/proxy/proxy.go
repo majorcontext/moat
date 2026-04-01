@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -304,6 +305,7 @@ type Proxy struct {
 	relays               map[string]string             // name -> target URL for relay endpoints
 	contextResolver      ContextResolver               // optional per-run credential resolver
 	policyLogger         PolicyLogger                  // optional policy decision logger
+	upstreamCAs          *x509.CertPool                // optional CA pool for upstream TLS verification
 }
 
 // NewProxy creates a new auth proxy.
@@ -326,6 +328,14 @@ func (p *Proxy) SetAuthToken(token string) {
 // SetCA sets the CA for TLS interception.
 func (p *Proxy) SetCA(ca *CA) {
 	p.ca = ca
+}
+
+// SetUpstreamCAs sets a custom CA pool for verifying upstream (origin server)
+// TLS certificates during CONNECT interception. When nil (the default), the
+// system root certificates are used. This is useful for environments with
+// private PKI or for testing.
+func (p *Proxy) SetUpstreamCAs(pool *x509.CertPool) {
+	p.upstreamCAs = pool
 }
 
 // SetLogger sets the request logger.
@@ -606,17 +616,24 @@ func (p *Proxy) SetNetworkPolicyWithRules(policy string, allows []string, grants
 }
 
 // getCredentials returns all credential headers for a host.
+// Returns a copy of the slice to avoid data races with concurrent
+// SetCredentialWithGrant calls (e.g., token refresh).
 func (p *Proxy) getCredentials(host string) []credentialHeader {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if creds := p.credentials[host]; len(creds) > 0 {
-		return creds
+	creds := p.credentials[host]
+	if len(creds) == 0 {
+		h, _, _ := net.SplitHostPort(host)
+		if h != "" {
+			creds = p.credentials[h]
+		}
 	}
-	h, _, _ := net.SplitHostPort(host)
-	if h != "" {
-		return p.credentials[h]
+	if len(creds) == 0 {
+		return nil
 	}
-	return nil
+	out := make([]credentialHeader, len(creds))
+	copy(out, creds)
+	return out
 }
 
 // injectCredentials replaces credential headers in the request. For each
@@ -1359,7 +1376,10 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	defer tlsClientConn.Close()
 
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    p.upstreamCAs, // nil means system roots
+		},
 		MaxIdleConns:    100,
 		IdleConnTimeout: 90 * time.Second,
 		// Note: Do NOT set ForceAttemptHTTP2 here. This transport forwards

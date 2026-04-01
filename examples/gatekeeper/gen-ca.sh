@@ -19,4 +19,5 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
   -addext "keyUsage=critical,keyCertSign,cRLSign" \
   2>/dev/null
 
+chmod 0600 ca.key
 echo "Generated ca.crt and ca.key"

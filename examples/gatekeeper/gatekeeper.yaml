@@ -5,9 +5,10 @@
 # at startup from environment variables, static values, or secrets.
 #
 # Usage:
-#   ./run.sh                          # builds + starts the proxy
+#   export GITHUB_TOKEN="token ghp_yourtoken"  # full header value
+#   ./run.sh                                   # builds + starts the proxy
 #   export https_proxy=http://127.0.0.1:9080
-#   curl https://api.github.com/user  # Authorization header injected
+#   curl https://api.github.com/user           # Authorization header injected
 
 proxy:
   host: 127.0.0.1
@@ -23,7 +24,7 @@ credentials:
     grant: github
     source:
       type: env
-      var: GITHUB_TOKEN
+      var: GITHUB_TOKEN  # bare token (e.g. "ghp_...") — auth scheme auto-detected
 
 network:
   policy: permissive

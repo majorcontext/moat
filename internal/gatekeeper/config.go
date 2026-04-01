@@ -33,9 +33,16 @@ type TLSConfig struct {
 // Host specifies which requests receive the credential. Header names the
 // HTTP header to set (defaults to "Authorization"). Grant is an optional
 // label used for logging.
+//
+// When the header is "Authorization", the proxy needs a full header value
+// including the auth scheme (e.g., "Bearer token123"). If the source value
+// is a bare token without a scheme prefix, the gatekeeper auto-detects the
+// correct scheme from known token prefixes (GitHub ghp_/gho_/etc.) or
+// defaults to "Bearer". Set Prefix to override the auto-detected scheme.
 type CredentialConfig struct {
 	Host   string       `yaml:"host"`             // Target host (e.g., "api.github.com")
 	Header string       `yaml:"header,omitempty"` // Header name (default: "Authorization")
+	Prefix string       `yaml:"prefix,omitempty"` // Auth scheme prefix (e.g., "Bearer", "token"); auto-detected if omitted
 	Source SourceConfig `yaml:"source"`
 	Grant  string       `yaml:"grant,omitempty"` // Optional label for logging
 }

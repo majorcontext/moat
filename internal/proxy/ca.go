@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -18,9 +19,10 @@ import (
 )
 
 // CA represents a certificate authority for TLS interception.
+// The key field is a crypto.Signer so both RSA and EC CA keys are supported.
 type CA struct {
 	cert    *x509.Certificate
-	key     *rsa.PrivateKey
+	key     crypto.Signer
 	certPEM []byte
 	keyPEM  []byte
 
@@ -39,7 +41,7 @@ func NewCA(caDir string) (*CA, error) {
 	// Try to load existing CA
 	if certPEM, err := os.ReadFile(certPath); err == nil {
 		if keyPEM, err := os.ReadFile(keyPath); err == nil {
-			return loadCA(certPEM, keyPEM)
+			return LoadCA(certPEM, keyPEM)
 		}
 	}
 
@@ -63,8 +65,9 @@ func NewCA(caDir string) (*CA, error) {
 	return ca, nil
 }
 
-// loadCA loads a CA from PEM-encoded certificate and key.
-func loadCA(certPEM, keyPEM []byte) (*CA, error) {
+// LoadCA loads a CA from PEM-encoded certificate and key bytes.
+// Supports RSA (PKCS1, PKCS8) and EC (PKCS8, EC PRIVATE KEY) key formats.
+func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode CA certificate PEM")
@@ -78,7 +81,7 @@ func loadCA(certPEM, keyPEM []byte) (*CA, error) {
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode CA key PEM")
 	}
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	key, err := parsePrivateKey(block)
 	if err != nil {
 		return nil, fmt.Errorf("parsing CA key: %w", err)
 	}
@@ -90,6 +93,30 @@ func loadCA(certPEM, keyPEM []byte) (*CA, error) {
 		keyPEM:    keyPEM,
 		certCache: make(map[string]*tls.Certificate),
 	}, nil
+}
+
+// parsePrivateKey tries multiple key formats: PKCS1 (RSA), PKCS8 (RSA/EC/Ed25519),
+// and SEC 1 (EC). Returns a crypto.Signer or an error.
+func parsePrivateKey(block *pem.Block) (crypto.Signer, error) {
+	// Try PKCS8 first — handles RSA, EC, and Ed25519 keys.
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if signer, ok := key.(crypto.Signer); ok {
+			return signer, nil
+		}
+		return nil, fmt.Errorf("PKCS8 key does not implement crypto.Signer")
+	}
+
+	// Try PKCS1 (RSA only).
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	// Try SEC 1 / EC private key.
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	return nil, fmt.Errorf("unsupported key format (tried PKCS8, PKCS1, EC)")
 }
 
 // generateCA creates a new CA certificate and key.

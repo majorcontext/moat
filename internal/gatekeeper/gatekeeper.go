@@ -12,8 +12,11 @@ package gatekeeper
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,10 +65,49 @@ func New(cfg *Config) (*Server, error) {
 		cfg:   cfg,
 	}
 
+	// Load TLS CA for HTTPS interception. Without a CA, the proxy cannot
+	// inject credentials into HTTPS requests (CONNECT tunnels pass through).
+	if cfg.TLS.CACert != "" && cfg.TLS.CAKey != "" {
+		certPEM, err := os.ReadFile(cfg.TLS.CACert)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA cert: %w", err)
+		}
+		keyPEM, err := os.ReadFile(cfg.TLS.CAKey)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA key: %w", err)
+		}
+		ca, err := proxy.LoadCA(certPEM, keyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("loading CA: %w", err)
+		}
+		p.SetCA(ca)
+	}
+
 	// Load credentials from config and set directly on the proxy.
 	if err := s.loadCredentials(cfg); err != nil {
 		return nil, fmt.Errorf("loading credentials: %w", err)
 	}
+
+	// Set up request logging so proxied requests are visible.
+	p.SetLogger(func(data proxy.RequestLogData) {
+		attrs := []slog.Attr{
+			slog.String("method", data.Method),
+			slog.String("url", data.URL),
+			slog.Int("status", data.StatusCode),
+			slog.String("duration", data.Duration.Round(time.Millisecond).String()),
+		}
+		if data.AuthInjected {
+			attrs = append(attrs, slog.Bool("credential_injected", true))
+		}
+		if data.Err != nil {
+			attrs = append(attrs, slog.String("error", data.Err.Error()))
+		}
+		args := make([]any, len(attrs))
+		for i, a := range attrs {
+			args[i] = a
+		}
+		slog.Info("request", args...)
+	})
 
 	// Optional defense-in-depth: require a static token for proxy access.
 	// Clients provide it via Proxy-Authorization header or
@@ -105,9 +147,65 @@ func (s *Server) loadCredentials(cfg *Config) error {
 		if header == "" {
 			header = "Authorization"
 		}
+
+		// For Authorization headers, ensure the value includes an auth
+		// scheme prefix. In the CLI flow, providers handle this (e.g.,
+		// GitHub provider prepends "Bearer "). The gatekeeper bypasses
+		// providers, so we auto-detect the scheme from the token format.
+		if strings.EqualFold(header, "Authorization") {
+			val = ensureAuthScheme(val, cred.Prefix)
+		}
+
 		s.proxy.SetCredentialWithGrant(cred.Host, header, val, cred.Grant)
 	}
 	return nil
+}
+
+// ensureAuthScheme ensures a credential value has an auth scheme prefix
+// suitable for an Authorization header. If the value already contains a
+// scheme (e.g., "Bearer xxx", "token xxx"), it is returned unchanged.
+// If prefix is set explicitly, it is used. Otherwise the scheme is
+// auto-detected from known GitHub token prefixes, defaulting to "Bearer".
+func ensureAuthScheme(val, prefix string) string {
+	// If the value already has a scheme prefix, leave it alone.
+	// Auth schemes are a single token followed by a space (RFC 7235).
+	if i := strings.IndexByte(val, ' '); i > 0 {
+		scheme := val[:i]
+		// Looks like "Bearer xxx" or "token xxx" — already prefixed.
+		if isAuthScheme(scheme) {
+			return val
+		}
+	}
+
+	if prefix != "" {
+		return prefix + " " + val
+	}
+
+	// Auto-detect from known GitHub token prefixes.
+	switch {
+	case strings.HasPrefix(val, "ghp_"), strings.HasPrefix(val, "ghs_"):
+		// Classic PAT and App installation tokens use "token" scheme.
+		return "token " + val
+	case strings.HasPrefix(val, "gho_"), strings.HasPrefix(val, "github_pat_"):
+		// OAuth and fine-grained PAT tokens use "Bearer" scheme.
+		return "Bearer " + val
+	default:
+		return "Bearer " + val
+	}
+}
+
+// isAuthScheme returns true if s looks like a valid HTTP auth scheme.
+// Schemes are tokens per RFC 7235: 1*tchar (letters, digits, and a few symbols).
+func isAuthScheme(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // Start starts the proxy. It blocks until the context is canceled.
@@ -132,6 +230,8 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("starting proxy listener: %w", err)
 	}
+
+	slog.Info("gatekeeper listening", "addr", ln.Addr().String())
 
 	s.mu.Lock()
 	s.proxyLn = ln
