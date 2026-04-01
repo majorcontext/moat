@@ -63,7 +63,10 @@ func runGrantShow(cmd *cobra.Command, args []string) error {
 
 	cred, err := store.Get(credential.Provider(providerName))
 	if err != nil {
-		return fmt.Errorf("no credential found for %s\n\nRun 'moat grant %s' to store a credential", providerName, providerName)
+		if strings.Contains(err.Error(), "credential not found") {
+			return fmt.Errorf("no credential found for %s\n\nRun 'moat grant %s' to store a credential", providerName, providerName)
+		}
+		return err // surface decryption/permission errors directly
 	}
 
 	if jsonOut {
@@ -183,7 +186,10 @@ func showCredentialJSON(cred *credential.Credential) error {
 	// Include safe metadata (exclude secrets like refresh_token, client_secret)
 	out.Metadata = filterMetadata(cred.Metadata)
 
-	if showToken {
+	// AWS token is the role ARN (not a secret) — always include it
+	if cred.Provider == credential.ProviderAWS {
+		out.Token = cred.Token
+	} else if showToken {
 		out.Token = cred.Token
 	}
 
@@ -193,6 +199,7 @@ func showCredentialJSON(cred *credential.Credential) error {
 }
 
 // filterMetadata returns metadata with secret values removed.
+// NOTE: This denylist must be updated when new providers store secret metadata keys.
 func filterMetadata(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return nil
