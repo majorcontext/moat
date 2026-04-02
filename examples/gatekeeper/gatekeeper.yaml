@@ -1,0 +1,34 @@
+# Gate Keeper example configuration.
+#
+# The proxy injects credentials into matching HTTPS requests.
+# Credentials are pre-configured below; the proxy resolves them
+# at startup from environment variables, static values, or secrets.
+#
+# Usage:
+#   export GITHUB_TOKEN="token ghp_yourtoken"  # full header value
+#   ./run.sh                                   # builds + starts the proxy
+#   export https_proxy=http://127.0.0.1:9080
+#   curl https://api.github.com/user           # Authorization header injected
+
+proxy:
+  host: 127.0.0.1
+  port: 9080
+
+tls:
+  ca_cert: ca.crt
+  ca_key: ca.key
+
+credentials:
+  - host: api.github.com
+    header: Authorization
+    grant: github
+    source:
+      type: env
+      var: GITHUB_TOKEN  # bare token (e.g. "ghp_...") — auth scheme auto-detected
+
+network:
+  policy: permissive
+
+log:
+  level: info
+  format: text

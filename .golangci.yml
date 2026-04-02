@@ -129,6 +129,12 @@ linters:
           - revive
         text: "var-naming: avoid meaningless package names"
 
+      # Allow api package name for gatekeeper wire types
+      - path: internal/gatekeeper/api/
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+
 
     paths:
       - vendor

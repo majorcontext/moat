@@ -134,6 +134,13 @@ func (rc *RunContext) GetContainerID() string {
 	return rc.ContainerID
 }
 
+// SetContainerID updates the container ID safely.
+func (rc *RunContext) SetContainerID(id string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.ContainerID = id
+}
+
 // SetAWSHandler stores the AWS credential endpoint handler for this run.
 func (rc *RunContext) SetAWSHandler(h http.Handler) {
 	rc.mu.Lock()
