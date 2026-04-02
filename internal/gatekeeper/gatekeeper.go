@@ -28,7 +28,8 @@ import (
 const defaultProxyHost = "127.0.0.1"
 
 // configureLogging sets up slog based on the LogConfig.
-func configureLogging(cfg LogConfig) {
+// Returns a cleanup function to close any opened log file and an error.
+func configureLogging(cfg LogConfig) (func(), error) {
 	var level slog.Level
 	switch strings.ToLower(cfg.Level) {
 	case "debug":
@@ -41,9 +42,22 @@ func configureLogging(cfg LogConfig) {
 		level = slog.LevelInfo
 	}
 
-	w := os.Stderr
-	if cfg.Output == "stdout" {
+	var (
+		w       *os.File
+		cleanup func()
+	)
+	switch strings.ToLower(cfg.Output) {
+	case "", "stderr":
+		w = os.Stderr
+	case "stdout":
 		w = os.Stdout
+	default:
+		f, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("opening log output %q: %w", cfg.Output, err)
+		}
+		w = f
+		cleanup = func() { f.Close() }
 	}
 
 	opts := &slog.HandlerOptions{Level: level}
@@ -54,6 +68,7 @@ func configureLogging(cfg LogConfig) {
 		handler = slog.NewTextHandler(w, opts)
 	}
 	slog.SetDefault(slog.New(handler))
+	return cleanup, nil
 }
 
 // healthHandler wraps an HTTP handler to add a /healthz endpoint on the proxy port.
@@ -80,6 +95,7 @@ type Server struct {
 	proxyAddr   string // actual address after Start
 	proxyLn     net.Listener
 	proxyServer *http.Server
+	logCleanup  func() // closes log file if output is a file path
 
 	mu      sync.Mutex
 	started bool
@@ -90,13 +106,17 @@ type Server struct {
 // and can be used to cancel startup if the process receives a signal.
 func New(ctx context.Context, cfg *Config) (*Server, error) {
 	// Configure structured logging before anything else.
-	configureLogging(cfg.Log)
+	logCleanup, err := configureLogging(cfg.Log)
+	if err != nil {
+		return nil, err
+	}
 
 	p := proxy.NewProxy()
 
 	s := &Server{
-		proxy: p,
-		cfg:   cfg,
+		proxy:      p,
+		logCleanup: logCleanup,
+		cfg:        cfg,
 	}
 
 	// Load TLS CA for HTTPS interception. Without a CA, the proxy cannot
@@ -301,6 +321,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the proxy server.
 func (s *Server) Stop(ctx context.Context) error {
+	if s.logCleanup != nil {
+		defer s.logCleanup()
+	}
 	if s.proxyServer != nil {
 		return s.proxyServer.Shutdown(ctx)
 	}
