@@ -38,11 +38,6 @@ network:
   allow:
     - "*.github.com"
     - api.anthropic.com
-  rules:
-    - host: api.example.com
-      methods: [GET, POST]
-policy:
-  scope: tool-use
 log:
   level: debug
   format: json
@@ -112,21 +107,6 @@ log:
 	if cfg.Network.Allow[0] != "*.github.com" {
 		t.Errorf("Network.Allow[0] = %q, want *.github.com", cfg.Network.Allow[0])
 	}
-	if len(cfg.Network.Rules) != 1 {
-		t.Fatalf("len(Network.Rules) = %d, want 1", len(cfg.Network.Rules))
-	}
-	if cfg.Network.Rules[0].Host != "api.example.com" {
-		t.Errorf("Network.Rules[0].Host = %q, want api.example.com", cfg.Network.Rules[0].Host)
-	}
-	if len(cfg.Network.Rules[0].Methods) != 2 {
-		t.Fatalf("len(Network.Rules[0].Methods) = %d, want 2", len(cfg.Network.Rules[0].Methods))
-	}
-
-	// Policy
-	if cfg.Policy["scope"] != "tool-use" {
-		t.Errorf("Policy[scope] = %q, want tool-use", cfg.Policy["scope"])
-	}
-
 	// Log
 	if cfg.Log.Level != "debug" {
 		t.Errorf("Log.Level = %q, want debug", cfg.Log.Level)

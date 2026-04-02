@@ -29,14 +29,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv, err := gatekeeper.New(cfg)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	srv, err := gatekeeper.New(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating server: %v\n", err)
 		os.Exit(1)
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
 
 	if err := srv.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

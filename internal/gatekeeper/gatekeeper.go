@@ -27,6 +27,35 @@ import (
 // Binding to localhost prevents accidental exposure on all interfaces.
 const defaultProxyHost = "127.0.0.1"
 
+// configureLogging sets up slog based on the LogConfig.
+func configureLogging(cfg LogConfig) {
+	var level slog.Level
+	switch strings.ToLower(cfg.Level) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	w := os.Stderr
+	if cfg.Output == "stdout" {
+		w = os.Stdout
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if strings.ToLower(cfg.Format) == "json" {
+		handler = slog.NewJSONHandler(w, opts)
+	} else {
+		handler = slog.NewTextHandler(w, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
 // healthHandler wraps an HTTP handler to add a /healthz endpoint on the proxy port.
 type healthHandler struct {
 	next http.Handler
@@ -57,7 +86,12 @@ type Server struct {
 }
 
 // New creates a new Gate Keeper server from the given configuration.
-func New(cfg *Config) (*Server, error) {
+// The context is used for credential fetching (e.g., AWS Secrets Manager)
+// and can be used to cancel startup if the process receives a signal.
+func New(ctx context.Context, cfg *Config) (*Server, error) {
+	// Configure structured logging before anything else.
+	configureLogging(cfg.Log)
+
 	p := proxy.NewProxy()
 
 	s := &Server{
@@ -84,7 +118,9 @@ func New(cfg *Config) (*Server, error) {
 	}
 
 	// Load credentials from config and set directly on the proxy.
-	if err := s.loadCredentials(cfg); err != nil {
+	// Credentials are fetched once at startup. For sources like
+	// aws-secretsmanager, restart the process to pick up rotated values.
+	if err := s.loadCredentials(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("loading credentials: %w", err)
 	}
 
@@ -125,7 +161,7 @@ func New(cfg *Config) (*Server, error) {
 }
 
 // loadCredentials resolves each credential from config and sets it on the proxy.
-func (s *Server) loadCredentials(cfg *Config) error {
+func (s *Server) loadCredentials(ctx context.Context, cfg *Config) error {
 	for _, cred := range cfg.Credentials {
 		if cred.Host == "" {
 			return fmt.Errorf("credential %q: host is required", cred.Grant)
@@ -136,8 +172,8 @@ func (s *Server) loadCredentials(cfg *Config) error {
 			return fmt.Errorf("credential for %s: %w", cred.Host, err)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		val, err := src.Fetch(ctx)
+		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		val, err := src.Fetch(fetchCtx)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("credential for %s: fetch failed: %w", cred.Host, err)
@@ -195,12 +231,18 @@ func ensureAuthScheme(val, prefix string) string {
 }
 
 // isAuthScheme returns true if s looks like a valid HTTP auth scheme.
-// Schemes are tokens per RFC 7235: 1*tchar (letters, digits, and a few symbols).
+// Auth schemes start with a letter and contain only letters, digits, hyphens,
+// and underscores (token68 subset per RFC 7235).
 func isAuthScheme(s string) bool {
 	if len(s) == 0 {
 		return false
 	}
-	for _, c := range s {
+	// Must start with a letter.
+	c := s[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+		return false
+	}
+	for _, c := range s[1:] {
 		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
 			return false
 		}

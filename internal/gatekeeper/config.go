@@ -12,7 +12,6 @@ type Config struct {
 	TLS         TLSConfig          `yaml:"tls"`
 	Credentials []CredentialConfig `yaml:"credentials"`
 	Network     NetworkConfig      `yaml:"network"`
-	Policy      map[string]string  `yaml:"policy"` // Opaque policy settings (e.g., "scope": "tool-use")
 	Log         LogConfig          `yaml:"log"`
 }
 
@@ -58,15 +57,8 @@ type SourceConfig struct {
 
 // NetworkConfig configures network policy.
 type NetworkConfig struct {
-	Policy string        `yaml:"policy"`
-	Allow  []string      `yaml:"allow,omitempty"`
-	Rules  []NetworkRule `yaml:"rules,omitempty"`
-}
-
-// NetworkRule describes per-host request restrictions.
-type NetworkRule struct {
-	Host    string   `yaml:"host"`
-	Methods []string `yaml:"methods,omitempty"`
+	Policy string   `yaml:"policy"`
+	Allow  []string `yaml:"allow,omitempty"`
 }
 
 // LogConfig configures logging.

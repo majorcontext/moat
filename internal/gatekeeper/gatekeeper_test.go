@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestServerStartStop(t *testing.T) {
 		},
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestServerHealthEndpoint(t *testing.T) {
 	cfg := &Config{
 		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
 	}
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestCredentials(t *testing.T) {
 		Network: NetworkConfig{Policy: "permissive"},
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestDefaultHeader(t *testing.T) {
 	}
 
 	// Should succeed — header defaults to "Authorization" when omitted.
-	_, err := New(cfg)
+	_, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestMissingHost(t *testing.T) {
 		},
 	}
 
-	_, err := New(cfg)
+	_, err := New(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected error for credential without host")
 	}
@@ -206,7 +207,7 @@ func TestAuthToken(t *testing.T) {
 		},
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestDefaultProxyHost(t *testing.T) {
 		Proxy: ProxyConfig{Port: 0}, // no host specified
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -271,7 +272,7 @@ func TestTLSCALoading(t *testing.T) {
 		},
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New with TLS: %v", err)
 	}
@@ -290,7 +291,7 @@ func TestTLSCAMissingCert(t *testing.T) {
 		},
 	}
 
-	_, err := New(cfg)
+	_, err := New(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected error for missing CA cert")
 	}
@@ -308,7 +309,7 @@ func TestTLSCAPartialConfig(t *testing.T) {
 		},
 	}
 
-	_, err := New(cfg)
+	_, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New with partial TLS should succeed (no interception): %v", err)
 	}
@@ -347,8 +348,12 @@ func TestTLSCAWithECKey(t *testing.T) {
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 
-	os.WriteFile(certPath, certPEM, 0644)
-	os.WriteFile(keyPath, keyPEM, 0600)
+	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := &Config{
 		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
@@ -358,7 +363,7 @@ func TestTLSCAWithECKey(t *testing.T) {
 		},
 	}
 
-	_, err = New(cfg)
+	_, err = New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New with EC CA: %v", err)
 	}
@@ -376,9 +381,14 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 	}
 
 	// 2. Start an HTTPS backend that records the Authorization header.
-	var gotAuth string
+	var (
+		gotAuth string
+		authMu  sync.Mutex
+	)
 	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authMu.Lock()
 		gotAuth = r.Header.Get("Authorization")
+		authMu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
 	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -419,7 +429,7 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 		Network: NetworkConfig{Policy: "permissive"},
 	}
 
-	srv, err := New(cfg)
+	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -458,8 +468,11 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 	resp.Body.Close()
 
 	// 5. Verify the credential was injected.
-	if gotAuth != "Bearer secret123" {
-		t.Errorf("backend got Authorization = %q, want %q", gotAuth, "Bearer secret123")
+	authMu.Lock()
+	auth := gotAuth
+	authMu.Unlock()
+	if auth != "Bearer secret123" {
+		t.Errorf("backend got Authorization = %q, want %q", auth, "Bearer secret123")
 	}
 }
 
@@ -478,7 +491,7 @@ func TestTLSCAInvalidPEM(t *testing.T) {
 		},
 	}
 
-	_, err := New(cfg)
+	_, err := New(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected error for invalid PEM")
 	}
