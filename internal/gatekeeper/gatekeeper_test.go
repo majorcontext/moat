@@ -480,8 +480,12 @@ func TestTLSCAInvalidPEM(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "ca.crt")
 	keyPath := filepath.Join(dir, "ca.key")
-	os.WriteFile(certPath, []byte("not a cert"), 0644)
-	os.WriteFile(keyPath, []byte("not a key"), 0644)
+	if err := os.WriteFile(certPath, []byte("not a cert"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("not a key"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := &Config{
 		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},

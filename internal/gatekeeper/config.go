@@ -63,10 +63,9 @@ type NetworkConfig struct {
 
 // LogConfig configures logging.
 type LogConfig struct {
-	Level    string `yaml:"level"`    // Log level (e.g., "debug", "info", "warn", "error")
-	Format   string `yaml:"format"`   // Output format ("json" or "text")
-	Output   string `yaml:"output"`   // Destination ("stderr", "stdout", or file path)
-	Requests string `yaml:"requests"` // File path for proxied request logs (JSONL format)
+	Level  string `yaml:"level"`  // Log level (e.g., "debug", "info", "warn", "error")
+	Format string `yaml:"format"` // Output format ("json" or "text")
+	Output string `yaml:"output"` // Destination ("stderr" or "stdout"; default: stderr)
 }
 
 // ParseConfig parses a Gate Keeper config from YAML bytes.

@@ -42,7 +42,6 @@ log:
   level: debug
   format: json
   output: stderr
-  requests: /tmp/requests.jsonl
 `
 	cfg, err := ParseConfig([]byte(yaml))
 	if err != nil {
