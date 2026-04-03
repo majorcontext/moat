@@ -46,8 +46,6 @@ import (
 	"time"
 
 	keeplib "github.com/majorcontext/keep"
-
-	internalkeep "github.com/majorcontext/moat/internal/keep"
 )
 
 // contextKey is the type for request-scoped context values.
@@ -1471,8 +1469,9 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
 			scope := "http"
 			if eng, ok := rc.KeepEngines[scope]; ok {
-				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
-				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				call := keeplib.NewHTTPCall(req.Method, host, req.URL.Path)
+				call.Context.Scope = "http-" + host
+				result, evalErr := keeplib.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
 					slog.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
 						"host", host,

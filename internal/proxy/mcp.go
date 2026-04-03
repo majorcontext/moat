@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	keeplib "github.com/majorcontext/keep"
-
-	internalkeep "github.com/majorcontext/moat/internal/keep"
 )
 
 // findCredByGrant searches all credentials for one matching the given grant
@@ -251,8 +249,9 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 			}
 			if mcpReq.Method == "tools/call" && mcpReq.Params.Name != "" {
 				scope := "mcp-" + serverName
-				call := internalkeep.NormalizeMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments, scope)
-				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				call := keeplib.NewMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments)
+				call.Context.Scope = scope
+				result, evalErr := keeplib.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
 					slog.Warn("Keep evaluation error for MCP call, denying (fail-closed)",
 						"server", serverName,
