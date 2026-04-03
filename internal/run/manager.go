@@ -816,6 +816,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			}
 		}
 
+		// Get proxy host address — needed for registration, proxy URL, and firewall.
+		// Must be set before buildRegisterRequest so HostGateway is included.
+		hostAddr = m.runtime.GetHostAddress()
+		runCtx.HostGateway = hostAddr
+
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
 		regReq.PolicyYAML = policyYAML
@@ -832,12 +837,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		if regResp.Error != "" {
 			return nil, fmt.Errorf("policy compilation failed: %s", regResp.Error)
 		}
-
-		// Get proxy host address (needed for both proxy URL and firewall setup)
-		hostAddr = m.runtime.GetHostAddress()
-
-		// Set host gateway on run context for daemon registration updates
-		runCtx.HostGateway = hostAddr
 
 		// Store proxy details from daemon response
 		r.ProxyAuthToken = regResp.AuthToken
