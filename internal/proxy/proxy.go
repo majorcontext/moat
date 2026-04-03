@@ -56,7 +56,7 @@ const runContextKey contextKey = iota
 // ResponseTransformer transforms HTTP responses before body capture.
 // Cast to *http.Request and *http.Response in the transformer implementation.
 // Returns the modified response and true if transformed, or original and false.
-type ResponseTransformer func(req, resp interface{}) (interface{}, bool)
+type ResponseTransformer func(req, resp any) (any, bool)
 
 // CredentialStore retrieves tokens by provider name (grant).
 // The proxy uses this for MCP credential injection when credentials are

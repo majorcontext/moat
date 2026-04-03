@@ -342,7 +342,15 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		case "oauth-endpoint-workaround":
 			tf = newOAuthEndpointTransformer()
 		case "response-scrub":
-			if ts, ok := rc.TokenSubstitutions[spec.Host]; ok {
+			ts, ok := rc.TokenSubstitutions[spec.Host]
+			if !ok {
+				// Fall back to hostname without port (credentials are registered by
+				// hostname only, but spec.Host may include a port).
+				if h, _, _ := net.SplitHostPort(spec.Host); h != "" {
+					ts, ok = rc.TokenSubstitutions[h]
+				}
+			}
+			if ok {
 				tf = newResponseScrubber(ts.RealToken, ts.Placeholder)
 			} else {
 				log.Warn("response-scrub transformer has no matching token substitution",

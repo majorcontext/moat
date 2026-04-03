@@ -313,16 +313,17 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy headers
+	// Copy headers (except Content-Length, which http.NewRequestWithContext
+	// derives from r.Body; copying the original would be stale after redaction).
 	for key, values := range r.Header {
-		// Skip proxy-specific headers
-		if key == "Proxy-Authorization" || key == "Proxy-Connection" {
+		if key == "Proxy-Authorization" || key == "Proxy-Connection" || key == "Content-Length" {
 			continue
 		}
 		for _, value := range values {
 			proxyReq.Header.Add(key, value)
 		}
 	}
+	proxyReq.ContentLength = r.ContentLength
 
 	// Inject credentials.
 	// In daemon mode, credentials are pre-resolved in RunContextData.Credentials
