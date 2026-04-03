@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -501,6 +502,314 @@ func TestTLSCAInvalidPEM(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "loading CA") {
 		t.Errorf("error = %q, want to mention 'loading CA'", err)
+	}
+}
+
+func TestHTTPCredentialInjection(t *testing.T) {
+	// End-to-end test for the plain HTTP (non-CONNECT) path.
+	// The proxy intercepts HTTP requests and injects credentials directly.
+
+	// Start an HTTP backend that echoes the Authorization header.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Header.Get("Authorization"))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+
+	cfg := &Config{
+		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		Credentials: []CredentialConfig{
+			{
+				Host:   backendURL.Hostname(),
+				Grant:  "test",
+				Source: SourceConfig{Type: "static", Value: "Bearer http-secret"},
+			},
+		},
+		Network: NetworkConfig{Policy: "permissive"},
+	}
+
+	srv, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	resp, err := client.Get(backend.URL + "/test")
+	if err != nil {
+		t.Fatalf("GET through proxy: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if string(body) != "Bearer http-secret" {
+		t.Errorf("backend got Authorization = %q, want %q", body, "Bearer http-secret")
+	}
+}
+
+func TestHTTPSCustomHeaderInjection(t *testing.T) {
+	// Test injection of a custom header (x-api-key) via HTTPS CONNECT path.
+	caDir := t.TempDir()
+	ca, err := proxy.NewCA(caDir)
+	if err != nil {
+		t.Fatalf("NewCA: %v", err)
+	}
+
+	var (
+		gotHeader string
+		mu        sync.Mutex
+	)
+	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotHeader = r.Header.Get("x-api-key")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendCert, err := ca.GenerateCert("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsLn := tls.NewListener(backendLn, &tls.Config{
+		Certificates: []tls.Certificate{*backendCert},
+		MinVersion:   tls.VersionTLS12,
+	})
+	backendSrv := &http.Server{Handler: backend, ReadHeaderTimeout: 5 * time.Second}
+	go backendSrv.Serve(tlsLn)
+	defer backendSrv.Close()
+
+	_, backendPort, _ := net.SplitHostPort(backendLn.Addr().String())
+
+	cfg := &Config{
+		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		TLS: TLSConfig{
+			CACert: filepath.Join(caDir, "ca.crt"),
+			CAKey:  filepath.Join(caDir, "ca.key"),
+		},
+		Credentials: []CredentialConfig{
+			{
+				Host:   "127.0.0.1",
+				Header: "x-api-key",
+				Grant:  "anthropic",
+				Source: SourceConfig{Type: "static", Value: "sk-ant-test123"},
+			},
+		},
+		Network: NetworkConfig{Policy: "permissive"},
+	}
+
+	srv, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(ca.CertPEM())
+	srv.proxy.SetUpstreamCAs(caCertPool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caCertPool, MinVersion: tls.VersionTLS12},
+		},
+	}
+
+	resp, err := client.Get("https://127.0.0.1:" + backendPort + "/test")
+	if err != nil {
+		t.Fatalf("GET through proxy: %v", err)
+	}
+	resp.Body.Close()
+
+	mu.Lock()
+	got := gotHeader
+	mu.Unlock()
+	if got != "sk-ant-test123" {
+		t.Errorf("backend got x-api-key = %q, want %q", got, "sk-ant-test123")
+	}
+}
+
+func TestStrictNetworkPolicy(t *testing.T) {
+	// Verify that strict network policy blocks requests to disallowed hosts
+	// and allows requests to allowed hosts.
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+
+	cfg := &Config{
+		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		Network: NetworkConfig{
+			Policy: "strict",
+			// Allow the backend host:port — httptest servers run on high ports.
+			Allow: []string{backendURL.Host},
+		},
+	}
+
+	srv, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	// Allowed host should succeed.
+	resp, err := client.Get(backend.URL + "/allowed")
+	if err != nil {
+		t.Fatalf("GET allowed host: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("allowed host status = %d, want 200", resp.StatusCode)
+	}
+	if string(body) != "ok" {
+		t.Errorf("allowed host body = %q, want %q", body, "ok")
+	}
+
+	// Blocked host should fail. The proxy returns 407 Proxy Authentication
+	// Required for blocked hosts (network policy denial).
+	resp, err = client.Get("http://blocked.example.com/denied")
+	if err != nil {
+		t.Fatalf("GET blocked host: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("blocked host status = %d, want 407", resp.StatusCode)
+	}
+}
+
+func TestMultipleCredentialsSameHost(t *testing.T) {
+	// Multiple credentials for the same host (Authorization + x-api-key).
+	// Both should be injected into the same request.
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Header.Get("Authorization")+"|"+r.Header.Get("x-api-key"))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+
+	cfg := &Config{
+		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		Credentials: []CredentialConfig{
+			{
+				Host:   backendURL.Hostname(),
+				Grant:  "github",
+				Source: SourceConfig{Type: "static", Value: "Bearer gh-token"},
+			},
+			{
+				Host:   backendURL.Hostname(),
+				Header: "x-api-key",
+				Grant:  "anthropic",
+				Source: SourceConfig{Type: "static", Value: "sk-ant-key"},
+			},
+		},
+		Network: NetworkConfig{Policy: "permissive"},
+	}
+
+	srv, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	resp, err := client.Get(backend.URL + "/test")
+	if err != nil {
+		t.Fatalf("GET through proxy: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if string(body) != "Bearer gh-token|sk-ant-key" {
+		t.Errorf("backend got %q, want %q", body, "Bearer gh-token|sk-ant-key")
+	}
+}
+
+func TestAuthSchemeAutoDetectionThroughProxy(t *testing.T) {
+	// Verify that a bare GitHub PAT gets "token" prefix when injected.
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Header.Get("Authorization"))
+	}))
+	defer backend.Close()
+
+	backendURL, _ := url.Parse(backend.URL)
+
+	cfg := &Config{
+		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		Credentials: []CredentialConfig{
+			{
+				Host:  backendURL.Hostname(),
+				Grant: "github",
+				// Bare GitHub classic PAT — should auto-detect "token" prefix.
+				Source: SourceConfig{Type: "static", Value: "ghp_abc123def456"},
+			},
+		},
+		Network: NetworkConfig{Policy: "permissive"},
+	}
+
+	srv, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+
+	resp, err := client.Get(backend.URL + "/repos")
+	if err != nil {
+		t.Fatalf("GET through proxy: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	want := "token ghp_abc123def456"
+	if string(body) != want {
+		t.Errorf("backend got Authorization = %q, want %q", body, want)
 	}
 }
 
