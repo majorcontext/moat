@@ -143,7 +143,7 @@ func TestServerHealthEndpoint(t *testing.T) {
 	cancel()
 }
 
-func TestCredentials(t *testing.T) {
+func TestStaticCredentialsNoContextResolver(t *testing.T) {
 	t.Setenv("TEST_GH_TOKEN", "ghp_test_single_tenant")
 
 	cfg := &Config{
@@ -250,6 +250,20 @@ func TestAuthToken(t *testing.T) {
 	if resp.StatusCode != http.StatusProxyAuthRequired {
 		t.Errorf("no-auth status = %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
 	}
+
+	// Request WITH valid auth token should be accepted (not 407).
+	proxyURL, _ := url.Parse("http://moat:my-secret-token@" + srv.ProxyAddr())
+	authClient := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+	resp2, err := authClient.Get("http://api.example.com/test")
+	if err != nil {
+		t.Fatalf("GET with auth: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode == http.StatusProxyAuthRequired {
+		t.Error("request with valid auth token was rejected with 407")
+	}
 }
 
 func TestDefaultProxyHost(t *testing.T) {
@@ -263,6 +277,7 @@ func TestDefaultProxyHost(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() { _ = srv.Start(ctx) }()
 	waitForProxy(t, srv, 2*time.Second)
 
@@ -270,13 +285,6 @@ func TestDefaultProxyHost(t *testing.T) {
 	addr := srv.ProxyAddr()
 	if !strings.HasPrefix(addr, "127.0.0.1:") {
 		t.Errorf("proxy addr = %q, want 127.0.0.1:*", addr)
-	}
-
-	cancel()
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	if err := srv.Stop(stopCtx); err != nil {
-		t.Fatalf("Stop: %v", err)
 	}
 }
 
