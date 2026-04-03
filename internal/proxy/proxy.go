@@ -41,6 +41,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -295,6 +296,8 @@ type RunContextData struct {
 	AWSHandler           http.Handler
 	CredStore            CredentialStore
 	KeepEngines          map[string]*keeplib.Engine
+	HostGateway          string
+	AllowedHostPorts     []int
 }
 
 // ContextResolver resolves a proxy auth token to per-run context data.
@@ -886,6 +889,24 @@ func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) 
 	return p.getResponseTransformers(host)
 }
 
+// isHostGateway returns true if the given host matches the run's host gateway address.
+func isHostGateway(rc *RunContextData, host string) bool {
+	if rc == nil || rc.HostGateway == "" {
+		return false
+	}
+	return host == rc.HostGateway
+}
+
+// isAllowedHostPort returns true if the given port is in the run's allowed host ports list.
+func isAllowedHostPort(rc *RunContextData, port int) bool {
+	for _, p := range rc.AllowedHostPorts {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
 // checkNetworkPolicyForRequest checks network policy using RunContextData first,
 // then falling back to the proxy's own policy.
 //
@@ -893,6 +914,10 @@ func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) 
 // are enforced on the inner HTTP requests after TLS interception.
 func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port int, method, path string) bool {
 	if rc := getRunContext(r); rc != nil {
+		// Block host-gateway traffic unless the port is explicitly allowed.
+		if isHostGateway(rc, host) {
+			return isAllowedHostPort(rc, port)
+		}
 		if method != "CONNECT" && rc.RequestCheck != nil {
 			return rc.RequestCheck(host, port, method, path)
 		}
@@ -1167,6 +1192,17 @@ func (p *Proxy) writeBlockedResponse(w http.ResponseWriter, host string) {
 	_, _ = w.Write([]byte("Moat: request blocked by network policy.\nHost \"" + host + "\" is not in the allow list.\nAdd it to network.rules in moat.yaml or use policy: permissive.\n"))
 }
 
+// writeHostBlockedResponse writes a 407 response when a request to the host gateway is blocked.
+func (p *Proxy) writeHostBlockedResponse(w http.ResponseWriter, host string, port int) {
+	w.Header().Set("X-Moat-Blocked", "host-service")
+	w.Header().Set("Proxy-Authenticate", "Moat-Policy")
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusProxyAuthRequired)
+	fmt.Fprintf(w, "Moat: request blocked — host service access to %s:%d is not allowed by default.\n"+
+		"To allow port %d on the host, add to moat.yaml:\n\n"+
+		"  network:\n    host:\n      - %d\n", host, port, port, port)
+}
+
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -1197,9 +1233,14 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		duration := time.Since(start)
 		// Log blocked request
 		p.logRequest(r, r.Method, r.URL.String(), http.StatusProxyAuthRequired, duration, nil, originalReqHeaders, nil, reqBody, nil, nil)
-		p.logPolicy(r, "network", "http.request", "", "Host not in allow list: "+host)
-		// Send 407 response with policy headers
-		p.writeBlockedResponse(w, host)
+		rc := getRunContext(r)
+		if rc != nil && isHostGateway(rc, host) {
+			p.logPolicy(r, "network", "http.request", "", "Host service blocked: "+host+":"+strconv.Itoa(port))
+			p.writeHostBlockedResponse(w, host, port)
+		} else {
+			p.logPolicy(r, "network", "http.request", "", "Host not in allow list: "+host)
+			p.writeBlockedResponse(w, host)
+		}
 		return
 	}
 
@@ -1296,9 +1337,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if p.logger != nil {
 			p.logRequest(r, r.Method, r.Host, http.StatusProxyAuthRequired, 0, nil, nil, nil, nil, nil, nil)
 		}
-		p.logPolicy(r, "network", "http.connect", "", "Host not in allow list: "+host)
-		// Send 407 response with policy headers
-		p.writeBlockedResponse(w, host)
+		rc := getRunContext(r)
+		if rc != nil && isHostGateway(rc, host) {
+			p.logPolicy(r, "network", "http.connect", "", "Host service blocked: "+host+":"+strconv.Itoa(port))
+			p.writeHostBlockedResponse(w, host, port)
+		} else {
+			p.logPolicy(r, "network", "http.connect", "", "Host not in allow list: "+host)
+			p.writeBlockedResponse(w, host)
+		}
 		return
 	}
 
