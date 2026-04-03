@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1924,5 +1927,93 @@ func TestProxy_HostGatewayNoContext(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_HostGatewayBlockedCONNECT verifies that CONNECT requests to the host
+// gateway are blocked with the host-specific 407 response.
+func TestProxy_HostGatewayBlockedCONNECT(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "host.docker.internal",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+
+	conn, err := net.Dial("tcp", proxyURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT host.docker.internal:443 HTTP/1.1\r\n")
+	fmt.Fprintf(conn, "Host: host.docker.internal:443\r\n")
+	fmt.Fprintf(conn, "Proxy-Authorization: Bearer test_run\r\n")
+	fmt.Fprintf(conn, "\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Moat-Blocked") != "host-service" {
+		t.Errorf("expected X-Moat-Blocked: host-service, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+}
+
+// TestProxy_HostGatewayLocalhostBypass verifies that on Linux (gateway 127.0.0.1),
+// requests to "localhost" are also blocked as host-gateway traffic.
+func TestProxy_HostGatewayLocalhostBypass(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "127.0.0.1", // Linux gateway
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+	}}
+
+	// Request via "localhost" — should still be blocked
+	localhostURL := "http://localhost:" + strconv.Itoa(backendPort)
+	req, _ := http.NewRequest("GET", localhostURL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer test_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (localhost should match 127.0.0.1 gateway), got %d", resp.StatusCode)
 	}
 }

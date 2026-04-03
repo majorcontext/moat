@@ -147,6 +147,9 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
 	rc.HostGateway = req.HostGateway
-	rc.AllowedHostPorts = req.AllowedHostPorts
+	if len(req.AllowedHostPorts) > 0 {
+		rc.AllowedHostPorts = make([]int, len(req.AllowedHostPorts))
+		copy(rc.AllowedHostPorts, req.AllowedHostPorts)
+	}
 	return rc
 }

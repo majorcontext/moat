@@ -890,11 +890,20 @@ func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) 
 }
 
 // isHostGateway returns true if the given host matches the run's host gateway address.
+// On Linux (gateway "127.0.0.1"), also matches "localhost" and "::1" to prevent
+// bypass via alternate loopback address forms.
 func isHostGateway(rc *RunContextData, host string) bool {
 	if rc == nil || rc.HostGateway == "" {
 		return false
 	}
-	return host == rc.HostGateway
+	if host == rc.HostGateway {
+		return true
+	}
+	// On Linux, the gateway is 127.0.0.1. Match other loopback forms too.
+	if rc.HostGateway == "127.0.0.1" {
+		return host == "localhost" || host == "::1"
+	}
+	return false
 }
 
 // isAllowedHostPort returns true if the given port is in the run's allowed host ports list.
@@ -1198,7 +1207,7 @@ func (p *Proxy) writeHostBlockedResponse(w http.ResponseWriter, host string, por
 	w.Header().Set("Proxy-Authenticate", "Moat-Policy")
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusProxyAuthRequired)
-	fmt.Fprintf(w, "Moat: request blocked — host service access to %s:%d is not allowed by default.\n"+
+	_, _ = fmt.Fprintf(w, "Moat: request blocked — host service access to %s:%d is not allowed by default.\n"+
 		"To allow port %d on the host, add to moat.yaml:\n\n"+
 		"  network:\n    host:\n      - %d\n", host, port, port, port)
 }
