@@ -417,6 +417,13 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	// Propagate Keep policy engines.
 	d.KeepEngines = rc.KeepEngines
 
+	// Propagate host gateway config.
+	d.HostGateway = rc.HostGateway
+	if len(rc.AllowedHostPorts) > 0 {
+		d.AllowedHostPorts = make([]int, len(rc.AllowedHostPorts))
+		copy(d.AllowedHostPorts, rc.AllowedHostPorts)
+	}
+
 	return d
 }
 

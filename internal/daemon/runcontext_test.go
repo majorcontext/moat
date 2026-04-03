@@ -6,6 +6,21 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 )
 
+func TestRunContext_ToProxyContextData_HostGateway(t *testing.T) {
+	rc := NewRunContext("run_host_test")
+	rc.HostGateway = "host.docker.internal"
+	rc.AllowedHostPorts = []int{8288, 5432}
+
+	d := rc.ToProxyContextData()
+
+	if d.HostGateway != "host.docker.internal" {
+		t.Errorf("HostGateway = %q, want %q", d.HostGateway, "host.docker.internal")
+	}
+	if len(d.AllowedHostPorts) != 2 || d.AllowedHostPorts[0] != 8288 || d.AllowedHostPorts[1] != 5432 {
+		t.Errorf("AllowedHostPorts = %v, want [8288 5432]", d.AllowedHostPorts)
+	}
+}
+
 func TestRunContext_ImplementsProxyConfigurer(t *testing.T) {
 	var _ credential.ProxyConfigurer = (*RunContext)(nil)
 }
