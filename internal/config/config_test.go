@@ -2553,3 +2553,73 @@ dependencies:
 		t.Fatalf("Dependencies = %d, want 1", len(cfg.Dependencies))
 	}
 }
+
+func TestNetworkHostConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		want    []int
+		wantErr string
+	}{
+		{
+			name: "single port",
+			yaml: "agent: test\nnetwork:\n  host:\n    - 8288\n",
+			want: []int{8288},
+		},
+		{
+			name: "multiple ports",
+			yaml: "agent: test\nnetwork:\n  host:\n    - 8288\n    - 5432\n",
+			want: []int{8288, 5432},
+		},
+		{
+			name: "omitted means empty",
+			yaml: "agent: test\n",
+			want: nil,
+		},
+		{
+			name:    "port zero",
+			yaml:    "agent: test\nnetwork:\n  host:\n    - 0\n",
+			wantErr: "network.host",
+		},
+		{
+			name:    "port too high",
+			yaml:    "agent: test\nnetwork:\n  host:\n    - 70000\n",
+			wantErr: "network.host",
+		},
+		{
+			name:    "negative port",
+			yaml:    "agent: test\nnetwork:\n  host:\n    - -1\n",
+			wantErr: "network.host",
+		},
+		{
+			name:    "duplicate port",
+			yaml:    "agent: test\nnetwork:\n  host:\n    - 8288\n    - 8288\n",
+			wantErr: "network.host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			cfg, err := Load(dir)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cfg.Network.Host) != len(tt.want) {
+				t.Fatalf("got %d host ports, want %d", len(cfg.Network.Host), len(tt.want))
+			}
+			for i, p := range tt.want {
+				if cfg.Network.Host[i] != p {
+					t.Errorf("host[%d] = %d, want %d", i, cfg.Network.Host[i], p)
+				}
+			}
+		})
+	}
+}
