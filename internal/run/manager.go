@@ -703,6 +703,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				runCtx.NetworkRules = append(runCtx.NetworkRules, entry.HostRules)
 				runCtx.NetworkAllow = append(runCtx.NetworkAllow, entry.Host)
 			}
+			runCtx.AllowedHostPorts = opts.Config.Network.Host
 		}
 
 		// Configure MCP servers on the RunContext
@@ -835,6 +836,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Get proxy host address (needed for both proxy URL and firewall setup)
 		hostAddr = m.runtime.GetHostAddress()
 
+		// Set host gateway on run context for daemon registration updates
+		runCtx.HostGateway = hostAddr
+
 		// Store proxy details from daemon response
 		r.ProxyAuthToken = regResp.AuthToken
 		r.ProxyPort = regResp.ProxyPort
@@ -870,6 +874,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			"no_proxy=" + noProxy,
 			// Terminal settings for TUI applications
 			"TERM=xterm-256color",
+			// Host gateway address for reaching host services
+			"MOAT_HOST_GATEWAY=" + hostAddr,
 		}
 
 		// Mount CA certificate (not the private key) for container to trust.
@@ -3738,13 +3744,15 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 // suitable for sending to the daemon API.
 func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.RegisterRequest {
 	req := daemon.RegisterRequest{
-		RunID:         rc.RunID,
-		NetworkPolicy: rc.NetworkPolicy,
-		NetworkAllow:  rc.NetworkAllow,
-		NetworkRules:  rc.NetworkRules,
-		MCPServers:    rc.MCPServers,
-		Grants:        grants,
-		AWSConfig:     rc.AWSConfig,
+		RunID:            rc.RunID,
+		NetworkPolicy:    rc.NetworkPolicy,
+		NetworkAllow:     rc.NetworkAllow,
+		NetworkRules:     rc.NetworkRules,
+		HostGateway:      rc.HostGateway,
+		AllowedHostPorts: rc.AllowedHostPorts,
+		MCPServers:       rc.MCPServers,
+		Grants:           grants,
+		AWSConfig:        rc.AWSConfig,
 	}
 
 	for host, creds := range rc.Credentials {
