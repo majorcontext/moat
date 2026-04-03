@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,8 +14,6 @@ import (
 	"github.com/majorcontext/keep/llm"
 	"github.com/majorcontext/keep/llm/anthropic"
 	"github.com/majorcontext/keep/sse"
-
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // maxLLMResponseSize is the maximum response body size (10MB) the proxy will
@@ -51,7 +50,7 @@ func evaluateLLMResponse(eng *keeplib.Engine, body []byte, resp *http.Response) 
 	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
 		gr, err := gzip.NewReader(bytes.NewReader(body))
 		if err != nil {
-			log.Warn("LLM policy gzip decompression failed, denying (fail-closed)", "error", err)
+			slog.Warn("LLM policy gzip decompression failed, denying (fail-closed)", "error", err)
 			return llmPolicyResult{
 				Denied:  true,
 				Rule:    "evaluation-error",
@@ -61,7 +60,7 @@ func evaluateLLMResponse(eng *keeplib.Engine, body []byte, resp *http.Response) 
 		decompressed, err := io.ReadAll(gr)
 		gr.Close()
 		if err != nil {
-			log.Warn("LLM policy gzip read failed, denying (fail-closed)", "error", err)
+			slog.Warn("LLM policy gzip read failed, denying (fail-closed)", "error", err)
 			return llmPolicyResult{
 				Denied:  true,
 				Rule:    "evaluation-error",
@@ -81,7 +80,7 @@ func evaluateLLMResponse(eng *keeplib.Engine, body []byte, resp *http.Response) 
 func evaluateLLMJSON(eng *keeplib.Engine, body []byte) llmPolicyResult {
 	r, err := llm.EvaluateResponse(eng, llmCodec, body, "llm-gateway", llm.DecomposeConfig{})
 	if err != nil {
-		log.Warn("Keep LLM response evaluation error, denying (fail-closed)", "error", err)
+		slog.Warn("Keep LLM response evaluation error, denying (fail-closed)", "error", err)
 		return llmPolicyResult{
 			Denied:  true,
 			Rule:    "evaluation-error",
@@ -105,7 +104,7 @@ func evaluateLLMStream(eng *keeplib.Engine, body []byte) llmPolicyResult {
 			break
 		}
 		if err != nil {
-			log.Warn("Keep LLM SSE parse error, denying (fail-closed)", "error", err)
+			slog.Warn("Keep LLM SSE parse error, denying (fail-closed)", "error", err)
 			return llmPolicyResult{
 				Denied:  true,
 				Rule:    "evaluation-error",
@@ -120,7 +119,7 @@ func evaluateLLMStream(eng *keeplib.Engine, body []byte) llmPolicyResult {
 
 	sr, err := llm.EvaluateStream(eng, llmCodec, events, "llm-gateway", llm.DecomposeConfig{})
 	if err != nil {
-		log.Warn("Keep LLM stream evaluation error, denying (fail-closed)", "error", err)
+		slog.Warn("Keep LLM stream evaluation error, denying (fail-closed)", "error", err)
 		return llmPolicyResult{
 			Denied:  true,
 			Rule:    "evaluation-error",

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -12,8 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/ui"
 )
 
 // credentialRefreshBuffer is the time before expiration when credentials should be refreshed.
@@ -49,7 +48,7 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	creds, err := h.getCredentials(r.Context())
 	if err != nil {
 		// Log detailed error server-side but return generic message to prevent leaking sensitive info
-		log.Error("AWS credential fetch error", "error", err)
+		slog.Error("AWS credential fetch error", "error", err)
 		http.Error(w, "failed to get credentials", http.StatusInternalServerError)
 		return
 	}
@@ -67,7 +66,7 @@ func (h *AWSCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		// Response already started, can't send HTTP error. Log and continue.
-		ui.Warnf("Failed to encode AWS credentials response: %v", err)
+		slog.Warn("Failed to encode AWS credentials response", "error", err)
 	}
 }
 
@@ -111,7 +110,7 @@ func NewAWSCredentialProvider(ctx context.Context, cfg AWSProviderConfig, sessio
 	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
 	if cfg.Profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(cfg.Profile))
-		log.Debug("AWS credential provider using named profile", "profile", cfg.Profile, "role_arn", cfg.RoleARN)
+		slog.Debug("AWS credential provider using named profile", "profile", cfg.Profile, "role_arn", cfg.RoleARN)
 	}
 	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {

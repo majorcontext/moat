@@ -2,12 +2,11 @@ package proxy
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // relayClient is a reused HTTP client for relay requests. It bypasses proxy
@@ -113,7 +112,7 @@ func (p *Proxy) handleRelay(w http.ResponseWriter, r *http.Request) {
 	// Forward to target
 	resp, err := relayClient.Do(proxyReq)
 	if err != nil {
-		log.Debug("relay failed",
+		slog.Debug("relay failed",
 			"subsystem", "proxy",
 			"action", "relay-error",
 			"relay", name,

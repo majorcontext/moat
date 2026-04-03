@@ -38,6 +38,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -49,7 +50,6 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	internalkeep "github.com/majorcontext/moat/internal/keep"
-	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/netrules"
 )
 
@@ -419,7 +419,7 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 // different headers.
 func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for credential injection",
+		slog.Debug("ignoring invalid host for credential injection",
 			"subsystem", "proxy",
 			"host", host,
 			"header", headerName)
@@ -443,7 +443,7 @@ func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant stri
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for extra header injection", "host", host, "header", headerName)
+		slog.Debug("ignoring invalid host for extra header injection", "host", host, "header", headerName)
 		return
 	}
 	p.mu.Lock()
@@ -457,7 +457,7 @@ func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) AddResponseTransformer(host string, transformer credential.ResponseTransformer) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for response transformer", "host", host)
+		slog.Debug("ignoring invalid host for response transformer", "host", host)
 		return
 	}
 	p.mu.Lock()
@@ -660,7 +660,7 @@ func injectCredentials(req *http.Request, creds []credentialHeader, host, method
 		if req.Header.Get(c.Name) != "" {
 			req.Header.Set(c.Name, c.Value)
 			injected[strings.ToLower(c.Name)] = true
-			log.Debug("credential injected",
+			slog.Debug("credential injected",
 				"subsystem", "proxy",
 				"action", "inject",
 				"grant", c.Grant,
@@ -686,7 +686,7 @@ func injectCredentials(req *http.Request, creds []credentialHeader, host, method
 		for _, c := range byHeader {
 			req.Header.Set(c.Name, c.Value)
 			injected[strings.ToLower(c.Name)] = true
-			log.Debug("credential auto-injected",
+			slog.Debug("credential auto-injected",
 				"subsystem", "proxy",
 				"action", "inject-auto",
 				"grant", c.Grant,
@@ -719,7 +719,7 @@ func mergeExtraHeaders(req *http.Request, host string, headers []extraHeader) {
 		}
 	}
 	if len(headers) > 0 {
-		log.Debug("extra headers injected",
+		slog.Debug("extra headers injected",
 			"subsystem", "proxy",
 			"action", "inject-extra",
 			"host", host,
@@ -1057,7 +1057,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Log the proxied request
 	if r.Method == http.MethodConnect {
 		host, port, _ := net.SplitHostPort(r.Host)
-		log.Debug("proxy connect",
+		slog.Debug("proxy connect",
 			"subsystem", "proxy",
 			"action", "connect",
 			"host", host,
@@ -1066,7 +1066,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debug("proxy request",
+	slog.Debug("proxy request",
 		"subsystem", "proxy",
 		"action", "forward",
 		"method", r.Method,
@@ -1290,7 +1290,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Without TLS interception, per-path rules cannot be enforced on HTTPS
 	// traffic — only host-level allow/deny applies. Warn if rules exist.
 	if p.hasPathRulesForHost(r, host, port) {
-		log.Warn("per-path rules configured but TLS interception disabled; only host-level rules apply",
+		slog.Warn("per-path rules configured but TLS interception disabled; only host-level rules apply",
 			"subsystem", "proxy", "host", host)
 	}
 
@@ -1358,7 +1358,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 	cert, err := p.ca.GenerateCert(host)
 	if err != nil {
-		log.Debug("failed to generate cert for CONNECT interception",
+		slog.Debug("failed to generate cert for CONNECT interception",
 			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
@@ -1369,7 +1369,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	}
 	tlsClientConn := tls.Server(clientConn, tlsConfig)
 	if err := tlsClientConn.Handshake(); err != nil {
-		log.Debug("TLS handshake failed during CONNECT interception",
+		slog.Debug("TLS handshake failed during CONNECT interception",
 			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
@@ -1401,7 +1401,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req, err := http.ReadRequest(clientReader)
 		if err != nil {
 			if err != io.EOF {
-				log.Debug("failed to read request from intercepted connection",
+				slog.Debug("failed to read request from intercepted connection",
 					"subsystem", "proxy", "host", host, "error", err)
 			}
 			return
@@ -1444,7 +1444,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
 				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
-					log.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
+					slog.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
 						"host", host,
 						"method", req.Method,
 						"path", req.URL.Path,
@@ -1529,7 +1529,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize+1))
 					resp.Body.Close()
 					if readErr != nil {
-						log.Warn("failed to read response body for LLM policy, denying (fail-closed)",
+						slog.Warn("failed to read response body for LLM policy, denying (fail-closed)",
 							"host", host, "error", readErr)
 						p.logPolicy(r, "llm-gateway", "llm.read_error", "read-error", "Failed to read response body for policy evaluation")
 						errorBody := buildPolicyDeniedResponse("read-error", "Failed to read response body for policy evaluation.")
@@ -1545,7 +1545,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 						resp.Header.Set("X-Moat-Blocked", "llm-policy")
 					} else if int64(len(respBodyBytes)) > maxLLMResponseSize {
 						// Response exceeds size limit — deny (fail-closed).
-						log.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
+						slog.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
 							"size", len(respBodyBytes), "limit", maxLLMResponseSize)
 						p.logPolicy(r, "llm-gateway", "llm.response_too_large", "size-limit", "Response too large for policy evaluation")
 						errorBody := buildPolicyDeniedResponse("size-limit", "Response too large for policy evaluation.")
@@ -1562,7 +1562,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 					} else {
 						result := evaluateLLMResponse(eng, respBodyBytes, resp)
 						if result.Denied {
-							log.Info("LLM tool_use denied by policy",
+							slog.Info("LLM tool_use denied by policy",
 								"rule", result.Rule, "message", result.Message)
 							p.logPolicy(r, "llm-gateway", "llm.tool_use", result.Rule, result.Message)
 							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)
