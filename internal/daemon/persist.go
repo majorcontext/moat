@@ -15,7 +15,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
-	"github.com/majorcontext/moat/internal/proxy"
+	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 )
 
 // PersistedRun is the on-disk representation of a registered run.
@@ -229,9 +229,9 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 
 		// Set up AWS credential provider if configured.
 		if pr.AWSConfig != nil {
-			awsProvider, awsErr := proxy.NewAWSCredentialProvider(
+			awsProvider, awsErr := awsprov.NewCredentialProvider(
 				runCtx,
-				proxy.AWSProviderConfig{
+				awsprov.CredentialProviderConfig{
 					RoleARN:         pr.AWSConfig.RoleARN,
 					Region:          pr.AWSConfig.Region,
 					SessionDuration: pr.AWSConfig.SessionDuration,

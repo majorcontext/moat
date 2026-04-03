@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/majorcontext/moat/internal/netrules"
 )
 
 func TestProxy_ForwardsRequests(t *testing.T) {
@@ -1642,28 +1640,27 @@ func TestProxy_AutoInjectWithoutPlaceholder(t *testing.T) {
 // the host level so TLS interception can apply path rules to inner HTTP requests.
 func TestProxy_ConnectPreCheckSkipsPathRules(t *testing.T) {
 	p := NewProxy()
-	// Set up strict policy with a catch-all deny rule for httpbin.org.
-	// Without the CONNECT guard, "deny * /**" would block the tunnel itself.
-	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
-		{
-			Host: "httpbin.org",
-			Rules: []netrules.Rule{
-				{Action: "deny", Method: "*", PathPattern: "/**"},
-			},
-		},
-	})
+	// Set up strict policy with a RequestChecker that denies everything.
+	// Without the CONNECT guard, the checker would block the tunnel itself.
+	checker := func(host string, port int, method, path string) bool {
+		if host == "httpbin.org" {
+			return false // deny all
+		}
+		return false // strict: deny unknown hosts too
+	}
+	p.SetNetworkPolicyWithRules("strict", []string{"httpbin.org"}, nil, checker, nil)
 
 	req, _ := http.NewRequest("CONNECT", "http://httpbin.org:443", nil)
 
-	// CONNECT pre-check should allow the tunnel (host is listed).
+	// CONNECT pre-check should allow the tunnel (host is in allow list).
 	if !p.checkNetworkPolicyForRequest(req, "httpbin.org", 443, "CONNECT", "") {
-		t.Error("CONNECT to httpbin.org:443 should be allowed at tunnel stage despite deny * /** rule")
+		t.Error("CONNECT to httpbin.org:443 should be allowed at tunnel stage despite deny-all checker")
 	}
 
-	// A subsequent inner GET should be denied by the rule.
+	// A subsequent inner GET should be denied by the checker.
 	getReq, _ := http.NewRequest("GET", "http://httpbin.org/anything", nil)
 	if p.checkNetworkPolicyForRequest(getReq, "httpbin.org", 443, "GET", "/anything") {
-		t.Error("GET /anything should be denied by deny * /** rule")
+		t.Error("GET /anything should be denied by deny-all checker")
 	}
 
 	// Unlisted host should still be blocked under strict policy.
@@ -1673,38 +1670,33 @@ func TestProxy_ConnectPreCheckSkipsPathRules(t *testing.T) {
 	}
 }
 
-// TestProxy_SetNetworkPolicyClearsHostRules verifies that SetNetworkPolicy
-// clears any previously set hostRules to prevent stale rules.
-func TestProxy_SetNetworkPolicyClearsHostRules(t *testing.T) {
+// TestProxy_SetNetworkPolicyClearsCheckers verifies that SetNetworkPolicy
+// clears any previously set request checkers to prevent stale rules.
+func TestProxy_SetNetworkPolicyClearsCheckers(t *testing.T) {
 	p := NewProxy()
 
-	// First set rules via SetNetworkPolicyWithRules.
-	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
-		{Host: "example.com", Rules: []netrules.Rule{{Action: "deny", Method: "*", PathPattern: "/**"}}},
-	})
+	// First set a deny-all checker via SetNetworkPolicyWithRules.
+	checker := func(host string, port int, method, path string) bool {
+		return false
+	}
+	p.SetNetworkPolicyWithRules("strict", []string{"example.com"}, nil, checker, nil)
 
-	// Now switch to plain SetNetworkPolicy — hostRules should be cleared.
+	// Now switch to plain SetNetworkPolicy — checkers should be cleared.
 	p.SetNetworkPolicy("strict", []string{"example.com"}, nil)
 
-	// Without the fix, stale hostRules would cause GET to be denied.
+	// Without the fix, stale checker would cause GET to be denied.
 	req, _ := http.NewRequest("GET", "http://example.com/test", nil)
 	if !p.checkNetworkPolicyForRequest(req, "example.com", 443, "GET", "/test") {
-		t.Error("GET /test should be allowed after SetNetworkPolicy clears hostRules")
+		t.Error("GET /test should be allowed after SetNetworkPolicy clears checkers")
 	}
 }
 
 func TestProxy_HasPathRulesForHost(t *testing.T) {
 	p := NewProxy()
-	p.SetNetworkPolicyWithRules("strict", nil, nil, []netrules.HostRules{
-		{
-			Host:  "api.github.com",
-			Rules: []netrules.Rule{{Action: "allow", Method: "GET", PathPattern: "/repos/*"}},
-		},
-		{
-			Host: "example.com",
-			// No rules — host-only entry.
-		},
-	})
+	pathChecker := func(host string, port int) bool {
+		return host == "api.github.com"
+	}
+	p.SetNetworkPolicyWithRules("strict", []string{"api.github.com", "example.com"}, nil, nil, pathChecker)
 
 	req, _ := http.NewRequest("GET", "http://api.github.com/repos/foo", nil)
 

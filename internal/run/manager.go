@@ -41,7 +41,6 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
-	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -663,9 +662,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						return nil, fmt.Errorf("parsing AWS credential: %w", err)
 					}
 
-					awsProvider, err := proxy.NewAWSCredentialProvider(
+					awsProvider, err := awsprov.NewCredentialProvider(
 						ctx,
-						proxy.AWSProviderConfig{
+						awsprov.CredentialProviderConfig{
 							RoleARN:         awsCfg.RoleARN,
 							Region:          awsCfg.Region,
 							SessionDuration: awsCfg.SessionDuration,

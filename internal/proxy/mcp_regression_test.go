@@ -7,9 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
 )
 
 // TestMCPRelay_NilCredentialStore tests that handleMCPRelay fails gracefully
@@ -20,11 +17,11 @@ func TestMCPRelay_NilCredentialStore(t *testing.T) {
 	// RunContextData nor a legacy credStore provides credentials.
 	p := &Proxy{
 		credStore: nil,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "context7",
 				URL:  "https://mcp.context7.com/mcp",
-				Auth: &config.MCPAuthConfig{
+				Auth: &MCPAuthConfig{
 					Grant:  "mcp-context7",
 					Header: "API_KEY",
 				},
@@ -63,11 +60,11 @@ func TestMCPRelay_DaemonModeCredentials(t *testing.T) {
 
 	p := &Proxy{
 		credStore: nil, // No store — daemon mode
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "test-server",
 				URL:  backend.URL,
-				Auth: &config.MCPAuthConfig{
+				Auth: &MCPAuthConfig{
 					Grant:  "mcp-test",
 					Header: "X-Api-Key",
 				},
@@ -81,11 +78,11 @@ func TestMCPRelay_DaemonModeCredentials(t *testing.T) {
 		Credentials: map[string][]credentialHeader{
 			"example.com": {{Name: "X-Api-Key", Value: "real-secret", Grant: "mcp-test"}},
 		},
-		MCPServers: []config.MCPServerConfig{
+		MCPServers: []MCPServerConfig{
 			{
 				Name: "test-server",
 				URL:  backend.URL,
-				Auth: &config.MCPAuthConfig{
+				Auth: &MCPAuthConfig{
 					Grant:  "mcp-test",
 					Header: "X-Api-Key",
 				},
@@ -111,16 +108,16 @@ func TestMCPRelay_DaemonModeCredentials(t *testing.T) {
 func TestMCPRelay_MissingCredential(t *testing.T) {
 	// Create proxy with empty credential store
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	p := &Proxy{
 		credStore: mockStore,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "context7",
 				URL:  "https://mcp.context7.com/mcp",
-				Auth: &config.MCPAuthConfig{
+				Auth: &MCPAuthConfig{
 					Grant:  "mcp-context7",
 					Header: "API_KEY",
 				},
@@ -220,12 +217,12 @@ func TestMCPRelay_PathHandling(t *testing.T) {
 			defer backend.Close()
 
 			mockStore := &mockCredentialStore{
-				creds: map[credential.Provider]*credential.Credential{},
+				tokens: map[string]string{},
 			}
 
 			p := &Proxy{
 				credStore: mockStore,
-				mcpServers: []config.MCPServerConfig{
+				mcpServers: []MCPServerConfig{
 					{
 						Name: "test",
 						URL:  backend.URL + tt.serverPathSuffix,
@@ -256,8 +253,8 @@ func TestMCPRelay_PathHandling(t *testing.T) {
 // TestMCPRelay_ServerNotFound tests error handling for non-existent MCP servers.
 func TestMCPRelay_ServerNotFound(t *testing.T) {
 	p := &Proxy{
-		credStore:  &mockCredentialStore{creds: map[credential.Provider]*credential.Credential{}},
-		mcpServers: []config.MCPServerConfig{},
+		credStore:  &mockCredentialStore{tokens: map[string]string{}},
+		mcpServers: []MCPServerConfig{},
 	}
 
 	req := httptest.NewRequest("POST", "/mcp/nonexistent", strings.NewReader("{}"))
@@ -288,21 +285,18 @@ func TestMCPRelay_HeaderInjection(t *testing.T) {
 	defer backend.Close()
 
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"mcp-test": {
-				Provider: "mcp-test",
-				Token:    "secret-token-123",
-			},
+		tokens: map[string]string{
+			"mcp-test": "secret-token-123",
 		},
 	}
 
 	p := &Proxy{
 		credStore: mockStore,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "test",
 				URL:  backend.URL,
-				Auth: &config.MCPAuthConfig{
+				Auth: &MCPAuthConfig{
 					Grant:  "mcp-test",
 					Header: "X-API-Key",
 				},
@@ -341,12 +335,12 @@ func TestMCPRelay_SSEStreaming(t *testing.T) {
 	defer backend.Close()
 
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	p := &Proxy{
 		credStore: mockStore,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "sse-test",
 				URL:  backend.URL,
@@ -390,12 +384,12 @@ func TestMCPRelay_RequestBodyPreserved(t *testing.T) {
 	defer backend.Close()
 
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	p := &Proxy{
 		credStore: mockStore,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "test",
 				URL:  backend.URL,
@@ -430,12 +424,12 @@ func TestMCPRelay_ProxyHeadersFiltered(t *testing.T) {
 	defer backend.Close()
 
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	p := &Proxy{
 		credStore: mockStore,
-		mcpServers: []config.MCPServerConfig{
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "test",
 				URL:  backend.URL,
@@ -477,8 +471,8 @@ func TestMCPRelay_ProxyHeadersFiltered(t *testing.T) {
 // TestMCPRelay_InvalidServerURL tests error handling for malformed MCP server URLs.
 func TestMCPRelay_InvalidServerURL(t *testing.T) {
 	p := &Proxy{
-		credStore: &mockCredentialStore{creds: map[credential.Provider]*credential.Credential{}},
-		mcpServers: []config.MCPServerConfig{
+		credStore: &mockCredentialStore{tokens: map[string]string{}},
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "bad",
 				URL:  "://invalid-url",
@@ -512,8 +506,8 @@ func TestMCPRelay_NoAuth(t *testing.T) {
 	defer backend.Close()
 
 	p := &Proxy{
-		credStore: &mockCredentialStore{creds: map[credential.Provider]*credential.Credential{}},
-		mcpServers: []config.MCPServerConfig{
+		credStore: &mockCredentialStore{tokens: map[string]string{}},
+		mcpServers: []MCPServerConfig{
 			{
 				Name: "public",
 				URL:  backend.URL,
@@ -559,11 +553,11 @@ func TestServeHTTP_DirectMCPRelay(t *testing.T) {
 			Credentials: map[string][]credentialHeader{
 				backend.Listener.Addr().String(): {{Name: "X-Api-Key", Value: "real-secret", Grant: "mcp-test"}},
 			},
-			MCPServers: []config.MCPServerConfig{
+			MCPServers: []MCPServerConfig{
 				{
 					Name: "my-server",
 					URL:  backend.URL,
-					Auth: &config.MCPAuthConfig{Grant: "mcp-test", Header: "X-Api-Key"},
+					Auth: &MCPAuthConfig{Grant: "mcp-test", Header: "X-Api-Key"},
 				},
 			},
 		}, true

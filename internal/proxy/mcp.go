@@ -5,16 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	keeplib "github.com/majorcontext/keep"
-
-	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
-	internalkeep "github.com/majorcontext/moat/internal/keep"
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // findCredByGrant searches all credentials for one matching the given grant
@@ -85,7 +81,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	}
 
 	// Find matching MCP server by host
-	var matchedServer *config.MCPServerConfig
+	var matchedServer *MCPServerConfig
 	for i := range mcpServers {
 		server := &mcpServers[i]
 		if server.Auth == nil {
@@ -95,7 +91,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 		// Parse server URL to get host
 		serverURL, err := url.Parse(server.URL)
 		if err != nil {
-			log.Debug("Failed to parse MCP server URL",
+			slog.Debug("Failed to parse MCP server URL",
 				"server", server.Name,
 				"url", server.URL,
 				"error", err)
@@ -117,7 +113,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	headerValue := targetReq.Header.Get(matchedServer.Auth.Header)
 
 	if headerValue == "" {
-		log.Debug("MCP: header not present in request",
+		slog.Debug("MCP: header not present in request",
 			"server", matchedServer.Name,
 			"header", matchedServer.Auth.Header)
 		return // Header not present
@@ -129,13 +125,13 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 		// Not a stub - could be a real credential or different value
 		// Log debug if it looks like a stub but doesn't match
 		if strings.HasPrefix(headerValue, "moat-stub-") {
-			log.Debug("MCP request has stub-like header value that doesn't match expected grant",
+			slog.Debug("MCP request has stub-like header value that doesn't match expected grant",
 				"server", matchedServer.Name,
 				"header", matchedServer.Auth.Header,
 				"expected", expectedStub,
 				"got", headerValue[:min(20, len(headerValue))]+"...")
 		} else {
-			log.Debug("MCP header has non-stub value",
+			slog.Debug("MCP header has non-stub value",
 				"server", matchedServer.Name,
 				"header", matchedServer.Auth.Header,
 				"value", headerValue[:min(20, len(headerValue))]+"...")
@@ -150,13 +146,13 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 		credValue = findCredByGrant(rc.Credentials, matchedServer.Auth.Grant)
 	}
 	if credValue == "" && credStore != nil {
-		cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
+		token, err := credStore.GetToken(matchedServer.Auth.Grant)
 		if err == nil {
-			credValue = cred.Token
+			credValue = token
 		}
 	}
 	if credValue == "" {
-		log.Error("MCP credential load failed",
+		slog.Error("MCP credential load failed",
 			"subsystem", "proxy",
 			"action", "inject-error",
 			"server", matchedServer.Name,
@@ -169,7 +165,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	// Replace stub with real credential
 	targetReq.Header.Set(matchedServer.Auth.Header, formatCredValue(matchedServer.Auth.Grant, credValue))
 
-	log.Debug("credential injected",
+	slog.Debug("credential injected",
 		"subsystem", "proxy",
 		"action", "inject",
 		"grant", matchedServer.Auth.Grant,
@@ -193,7 +189,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 	credStore := p.getCredStoreForRequest(r)
 
 	// Find the MCP server config
-	var mcpServer *config.MCPServerConfig
+	var mcpServer *MCPServerConfig
 	for i := range mcpServers {
 		if mcpServers[i].Name == serverName {
 			mcpServer = &mcpServers[i]
@@ -246,17 +242,18 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 			}
 			if unmarshalErr := json.Unmarshal(bodyBytes, &mcpReq); unmarshalErr != nil {
 				// Fail-closed: deny non-JSON requests when a policy is configured.
-				log.Warn("MCP request body is not valid JSON, denying (fail-closed)",
+				slog.Warn("MCP request body is not valid JSON, denying (fail-closed)",
 					"server", serverName, "error", unmarshalErr)
 				http.Error(w, "Moat: MCP request blocked — invalid JSON body.", http.StatusForbidden)
 				return
 			}
 			if mcpReq.Method == "tools/call" && mcpReq.Params.Name != "" {
 				scope := "mcp-" + serverName
-				call := internalkeep.NormalizeMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments, scope)
-				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				call := keeplib.NewMCPCall(mcpReq.Params.Name, mcpReq.Params.Arguments)
+				call.Context.Scope = scope
+				result, evalErr := keeplib.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
-					log.Warn("Keep evaluation error for MCP call, denying (fail-closed)",
+					slog.Warn("Keep evaluation error for MCP call, denying (fail-closed)",
 						"server", serverName,
 						"tool", mcpReq.Params.Name,
 						"error", evalErr)
@@ -278,7 +275,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 					// Re-encode the body with mutated arguments.
 					var raw map[string]any
 					if unmarshalErr := json.Unmarshal(bodyBytes, &raw); unmarshalErr != nil {
-						log.Warn("failed to unmarshal MCP body for redaction, denying (fail-closed)",
+						slog.Warn("failed to unmarshal MCP body for redaction, denying (fail-closed)",
 							"server", serverName, "error", unmarshalErr)
 						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
 						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
@@ -286,7 +283,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 					}
 					params, ok := raw["params"].(map[string]any)
 					if !ok {
-						log.Warn("MCP body missing params map for redaction, denying (fail-closed)",
+						slog.Warn("MCP body missing params map for redaction, denying (fail-closed)",
 							"server", serverName)
 						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
 						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
@@ -295,7 +292,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 					params["arguments"] = mutated
 					mutatedBody, marshalErr := json.Marshal(raw)
 					if marshalErr != nil {
-						log.Warn("failed to marshal redacted MCP body, denying (fail-closed)",
+						slog.Warn("failed to marshal redacted MCP body, denying (fail-closed)",
 							"server", serverName, "error", marshalErr)
 						p.logPolicy(r, scope, "mcp.tool_call", "redaction-error", "Failed to redact request")
 						http.Error(w, "Moat: MCP tool call blocked — redaction failed.", http.StatusForbidden)
@@ -316,16 +313,17 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy headers
+	// Copy headers (except Content-Length, which http.NewRequestWithContext
+	// derives from r.Body; copying the original would be stale after redaction).
 	for key, values := range r.Header {
-		// Skip proxy-specific headers
-		if key == "Proxy-Authorization" || key == "Proxy-Connection" {
+		if key == "Proxy-Authorization" || key == "Proxy-Connection" || key == "Content-Length" {
 			continue
 		}
 		for _, value := range values {
 			proxyReq.Header.Add(key, value)
 		}
 	}
+	proxyReq.ContentLength = r.ContentLength
 
 	// Inject credentials.
 	// In daemon mode, credentials are pre-resolved in RunContextData.Credentials
@@ -340,9 +338,9 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 		// Fall back to credential store (legacy single-run mode).
 		if credValue == "" && credStore != nil {
-			cred, credErr := credStore.Get(credential.Provider(mcpServer.Auth.Grant))
+			token, credErr := credStore.GetToken(mcpServer.Auth.Grant)
 			if credErr == nil {
-				credValue = cred.Token
+				credValue = token
 			}
 		}
 
@@ -357,7 +355,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Header.Set(mcpServer.Auth.Header, formatCredValue(mcpServer.Auth.Grant, credValue))
 	}
 
-	log.Debug("MCP relay forwarding", "server", serverName, "method", proxyReq.Method, "url", targetURL.String())
+	slog.Debug("MCP relay forwarding", "server", serverName, "method", proxyReq.Method, "url", targetURL.String())
 
 	// Send request to actual MCP server using the reused client
 	resp, err := mcpRelayClient.Do(proxyReq)
@@ -368,7 +366,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	log.Debug("MCP relay response", "server", serverName, "status", resp.StatusCode)
+	slog.Debug("MCP relay response", "server", serverName, "status", resp.StatusCode)
 
 	// Copy response headers
 	for key, values := range resp.Header {

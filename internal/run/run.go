@@ -14,7 +14,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/provider"
-	"github.com/majorcontext/moat/internal/proxy"
+	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/majorcontext/moat/internal/storage"
@@ -96,7 +96,7 @@ type Run struct {
 	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
 
 	// AWS credential provider (set when using aws grant)
-	AWSCredentialProvider *proxy.AWSCredentialProvider
+	AWSCredentialProvider *awsprov.CredentialProvider
 
 	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
 	awsTempDir string

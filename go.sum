@@ -316,6 +316,8 @@ github.com/magiconair/properties v1.8.9 h1:nWcCbLq1N2v/cpNsy5WvQ37Fb+YElfq20WJ/a
 github.com/magiconair/properties v1.8.9/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/majorcontext/keep v0.2.3 h1:lrJOjHTYwPTh9iZc6w3BngNqlzEAOenbLT5yAwrh9g8=
 github.com/majorcontext/keep v0.2.3/go.mod h1:UNSZPfJrZ5i8zw5JYnVk92y4G3DI3VwcnDYvz+J8XXE=
+github.com/majorcontext/keep v0.3.0 h1:pHSZKFhlyBw0/VC7hA9uJZVrGw2xMa1f2QveS/JEXR8=
+github.com/majorcontext/keep v0.3.0/go.mod h1:UNSZPfJrZ5i8zw5JYnVk92y4G3DI3VwcnDYvz+J8XXE=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=

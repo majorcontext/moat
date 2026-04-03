@@ -13,7 +13,7 @@ import (
 	keeplib "github.com/majorcontext/keep"
 
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/proxy"
+	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/routing"
 )
 
@@ -225,9 +225,9 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// Create AWS credential provider if configured. Uses the pre-generated
 	// token for endpoint authentication.
 	if req.AWSConfig != nil {
-		awsProvider, awsErr := proxy.NewAWSCredentialProvider(
+		awsProvider, awsErr := awsprov.NewCredentialProvider(
 			runCtx,
-			proxy.AWSProviderConfig{
+			awsprov.CredentialProviderConfig{
 				RoleARN:         req.AWSConfig.RoleARN,
 				Region:          req.AWSConfig.Region,
 				SessionDuration: req.AWSConfig.SessionDuration,

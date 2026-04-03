@@ -38,6 +38,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -45,18 +46,45 @@ import (
 	"time"
 
 	keeplib "github.com/majorcontext/keep"
-
-	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
-	internalkeep "github.com/majorcontext/moat/internal/keep"
-	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/netrules"
 )
 
 // contextKey is the type for request-scoped context values.
 type contextKey int
 
 const runContextKey contextKey = iota
+
+// ResponseTransformer transforms HTTP responses before body capture.
+// Cast to *http.Request and *http.Response in the transformer implementation.
+// Returns the modified response and true if transformed, or original and false.
+type ResponseTransformer func(req, resp any) (any, bool)
+
+// CredentialStore retrieves tokens by provider name (grant).
+// The proxy uses this for MCP credential injection when credentials are
+// not pre-resolved in RunContextData.
+type CredentialStore interface {
+	GetToken(provider string) (string, error)
+}
+
+// MCPServerConfig holds the MCP server configuration needed by the proxy.
+type MCPServerConfig struct {
+	Name string
+	URL  string
+	Auth *MCPAuthConfig
+}
+
+// MCPAuthConfig defines authentication for an MCP server.
+type MCPAuthConfig struct {
+	Grant  string
+	Header string
+}
+
+// RequestChecker checks if a request to host:port with the given method and
+// path is allowed. Provided by the caller to encapsulate network rule evaluation.
+type RequestChecker func(host string, port int, method, path string) bool
+
+// PathRulesChecker reports whether path-level rules exist for a given host.
+// When true, the proxy intercepts CONNECT tunnels for path-level inspection.
+type PathRulesChecker func(host string, port int) bool
 
 // MaxBodySize is the maximum size of request/response bodies to capture (8KB).
 // Only this much is buffered for logging; the full body is always forwarded.
@@ -246,6 +274,11 @@ func ParseHostPattern(pattern string) HostPattern {
 	return parseHostPattern(pattern)
 }
 
+// MatchesHostPattern reports whether a host:port matches a parsed host pattern.
+func MatchesHostPattern(pattern HostPattern, host string, port int) bool {
+	return matchesPattern(pattern, host, port)
+}
+
 // RunContextData holds per-run credential data resolved by ContextResolver.
 type RunContextData struct {
 	RunID                string
@@ -253,13 +286,14 @@ type RunContextData struct {
 	ExtraHeaders         map[string][]extraHeader
 	RemoveHeaders        map[string][]string
 	TokenSubstitutions   map[string]*tokenSubstitution
-	ResponseTransformers map[string][]credential.ResponseTransformer
-	MCPServers           []config.MCPServerConfig
+	ResponseTransformers map[string][]ResponseTransformer
+	MCPServers           []MCPServerConfig
 	Policy               string
 	AllowedHosts         []hostPattern
-	HostRules            []netrules.HostRules
+	RequestCheck         RequestChecker
+	PathRulesCheck       PathRulesChecker
 	AWSHandler           http.Handler
-	CredStore            credential.Store
+	CredStore            CredentialStore
 	KeepEngines          map[string]*keeplib.Engine
 }
 
@@ -287,19 +321,20 @@ type ContextResolver func(token string) (*RunContextData, bool)
 // authentication is not required. For Apple containers, the proxy binds
 // to all interfaces with a cryptographically secure token for authentication.
 type Proxy struct {
-	credentials          map[string][]credentialHeader               // host -> credential headers
-	extraHeaders         map[string][]extraHeader                    // host -> additional headers to inject
-	responseTransformers map[string][]credential.ResponseTransformer // host -> response transformers
+	credentials          map[string][]credentialHeader    // host -> credential headers
+	extraHeaders         map[string][]extraHeader         // host -> additional headers to inject
+	responseTransformers map[string][]ResponseTransformer // host -> response transformers
 	mu                   sync.RWMutex
-	ca                   *CA                  // Optional CA for TLS interception
-	logger               RequestLogger        // Optional request logger
-	authToken            string               // Optional auth token required for proxy access
-	policy               string               // "permissive" or "strict"
-	allowedHosts         []hostPattern        // parsed allow patterns for strict policy
-	hostRules            []netrules.HostRules // per-host request rules
-	awsHandler           http.Handler         // Optional handler for AWS credential endpoint
-	credStore            credential.Store
-	mcpServers           []config.MCPServerConfig
+	ca                   *CA              // Optional CA for TLS interception
+	logger               RequestLogger    // Optional request logger
+	authToken            string           // Optional auth token required for proxy access
+	policy               string           // "permissive" or "strict"
+	allowedHosts         []hostPattern    // parsed allow patterns for strict policy
+	requestChecker       RequestChecker   // per-host request rules checker
+	pathRulesChecker     PathRulesChecker // checks if host has path-level rules
+	awsHandler           http.Handler     // Optional handler for AWS credential endpoint
+	credStore            CredentialStore
+	mcpServers           []MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
 	tokenSubstitutions   map[string]*tokenSubstitution // host -> substitution
 	relays               map[string]string             // name -> target URL for relay endpoints
@@ -313,7 +348,7 @@ func NewProxy() *Proxy {
 	return &Proxy{
 		credentials:          make(map[string][]credentialHeader),
 		extraHeaders:         make(map[string][]extraHeader),
-		responseTransformers: make(map[string][]credential.ResponseTransformer),
+		responseTransformers: make(map[string][]ResponseTransformer),
 		removeHeaders:        make(map[string][]string),
 		tokenSubstitutions:   make(map[string]*tokenSubstitution),
 		policy:               "permissive", // default to permissive
@@ -374,12 +409,12 @@ func (p *Proxy) SetAWSHandler(h http.Handler) {
 }
 
 // SetMCPServers configures MCP servers for credential injection.
-func (p *Proxy) SetMCPServers(servers []config.MCPServerConfig) {
+func (p *Proxy) SetMCPServers(servers []MCPServerConfig) {
 	p.mcpServers = servers
 }
 
 // SetCredentialStore sets the credential store for MCP credential retrieval.
-func (p *Proxy) SetCredentialStore(store credential.Store) {
+func (p *Proxy) SetCredentialStore(store CredentialStore) {
 	p.credStore = store
 }
 
@@ -419,7 +454,7 @@ func (p *Proxy) SetCredentialHeader(host, headerName, headerValue string) {
 // different headers.
 func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for credential injection",
+		slog.Debug("ignoring invalid host for credential injection",
 			"subsystem", "proxy",
 			"host", host,
 			"header", headerName)
@@ -443,7 +478,7 @@ func (p *Proxy) SetCredentialWithGrant(host, headerName, headerValue, grant stri
 // The host must be a valid hostname (not empty, no path components).
 func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for extra header injection", "host", host, "header", headerName)
+		slog.Debug("ignoring invalid host for extra header injection", "host", host, "header", headerName)
 		return
 	}
 	p.mu.Lock()
@@ -455,9 +490,9 @@ func (p *Proxy) AddExtraHeader(host, headerName, headerValue string) {
 // Transformers are called in registration order after receiving the upstream response.
 // Each transformer can inspect and optionally modify the response.
 // The host must be a valid hostname (not empty, no path components).
-func (p *Proxy) AddResponseTransformer(host string, transformer credential.ResponseTransformer) {
+func (p *Proxy) AddResponseTransformer(host string, transformer ResponseTransformer) {
 	if !isValidHost(host) {
-		log.Debug("ignoring invalid host for response transformer", "host", host)
+		slog.Debug("ignoring invalid host for response transformer", "host", host)
 		return
 	}
 	p.mu.Lock()
@@ -577,7 +612,8 @@ func (p *Proxy) SetNetworkPolicy(policy string, allows []string, grants []string
 
 	p.policy = policy
 	p.allowedHosts = nil
-	p.hostRules = nil
+	p.requestChecker = nil
+	p.pathRulesChecker = nil
 
 	// Parse explicit allow patterns
 	for _, pattern := range allows {
@@ -594,17 +630,17 @@ func (p *Proxy) SetNetworkPolicy(policy string, allows []string, grants []string
 }
 
 // SetNetworkPolicyWithRules sets the network policy with per-host request rules.
-func (p *Proxy) SetNetworkPolicyWithRules(policy string, allows []string, grants []string, rules []netrules.HostRules) {
+// The allows list should include hosts from rules (the caller extracts them).
+// checker evaluates per-request rules; pathChecker reports if path-level rules exist.
+func (p *Proxy) SetNetworkPolicyWithRules(policy string, allows []string, grants []string, checker RequestChecker, pathChecker PathRulesChecker) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.policy = policy
 	p.allowedHosts = nil
-	p.hostRules = rules
+	p.requestChecker = checker
+	p.pathRulesChecker = pathChecker
 
-	for _, hr := range rules {
-		p.allowedHosts = append(p.allowedHosts, parseHostPattern(hr.Host))
-	}
 	for _, pattern := range allows {
 		p.allowedHosts = append(p.allowedHosts, parseHostPattern(pattern))
 	}
@@ -660,7 +696,7 @@ func injectCredentials(req *http.Request, creds []credentialHeader, host, method
 		if req.Header.Get(c.Name) != "" {
 			req.Header.Set(c.Name, c.Value)
 			injected[strings.ToLower(c.Name)] = true
-			log.Debug("credential injected",
+			slog.Debug("credential injected",
 				"subsystem", "proxy",
 				"action", "inject",
 				"grant", c.Grant,
@@ -686,7 +722,7 @@ func injectCredentials(req *http.Request, creds []credentialHeader, host, method
 		for _, c := range byHeader {
 			req.Header.Set(c.Name, c.Value)
 			injected[strings.ToLower(c.Name)] = true
-			log.Debug("credential auto-injected",
+			slog.Debug("credential auto-injected",
 				"subsystem", "proxy",
 				"action", "inject-auto",
 				"grant", c.Grant,
@@ -719,7 +755,7 @@ func mergeExtraHeaders(req *http.Request, host string, headers []extraHeader) {
 		}
 	}
 	if len(headers) > 0 {
-		log.Debug("extra headers injected",
+		slog.Debug("extra headers injected",
 			"subsystem", "proxy",
 			"action", "inject-extra",
 			"host", host,
@@ -742,7 +778,7 @@ func (p *Proxy) getExtraHeaders(host string) []extraHeader {
 }
 
 // getResponseTransformers returns response transformers for a host.
-func (p *Proxy) getResponseTransformers(host string) []credential.ResponseTransformer {
+func (p *Proxy) getResponseTransformers(host string) []ResponseTransformer {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -836,7 +872,7 @@ func (p *Proxy) getTokenSubstitutionForRequest(r *http.Request, host string) *to
 
 // getResponseTransformersForRequest returns response transformers for a host,
 // checking RunContextData first, then falling back to the proxy's own map.
-func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) []credential.ResponseTransformer {
+func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) []ResponseTransformer {
 	if rc := getRunContext(r); rc != nil {
 		if transformers, ok := rc.ResponseTransformers[host]; ok {
 			return transformers
@@ -850,12 +886,6 @@ func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) 
 	return p.getResponseTransformers(host)
 }
 
-// hostMatchAdapter creates a netrules.HostMatcher from a host pattern string.
-func hostMatchAdapter(pattern, host string, port int) bool {
-	hp := parseHostPattern(pattern)
-	return matchesPattern(hp, host, port)
-}
-
 // checkNetworkPolicyForRequest checks network policy using RunContextData first,
 // then falling back to the proxy's own policy.
 //
@@ -863,8 +893,8 @@ func hostMatchAdapter(pattern, host string, port int) bool {
 // are enforced on the inner HTTP requests after TLS interception.
 func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port int, method, path string) bool {
 	if rc := getRunContext(r); rc != nil {
-		if method != "CONNECT" && len(rc.HostRules) > 0 {
-			return netrules.Check(rc.Policy, rc.HostRules, host, port, method, path, hostMatchAdapter)
+		if method != "CONNECT" && rc.RequestCheck != nil {
+			return rc.RequestCheck(host, port, method, path)
 		}
 		if rc.Policy != "strict" {
 			return true
@@ -873,37 +903,35 @@ func (p *Proxy) checkNetworkPolicyForRequest(r *http.Request, host string, port 
 	}
 
 	p.mu.RLock()
-	rules := p.hostRules
-	policy := p.policy
+	checker := p.requestChecker
 	p.mu.RUnlock()
 
-	if method != "CONNECT" && len(rules) > 0 {
-		return netrules.Check(policy, rules, host, port, method, path, hostMatchAdapter)
+	if method != "CONNECT" && checker != nil {
+		return checker(host, port, method, path)
 	}
 	return p.checkNetworkPolicy(host, port)
 }
 
 // hasPathRulesForHost returns true if any matching host entry has per-path rules.
 func (p *Proxy) hasPathRulesForHost(r *http.Request, host string, port int) bool {
-	var rules []netrules.HostRules
 	if rc := getRunContext(r); rc != nil {
-		rules = rc.HostRules
-	} else {
-		p.mu.RLock()
-		rules = p.hostRules
-		p.mu.RUnlock()
-	}
-	for _, hr := range rules {
-		if hostMatchAdapter(hr.Host, host, port) && len(hr.Rules) > 0 {
-			return true
+		if rc.PathRulesCheck != nil {
+			return rc.PathRulesCheck(host, port)
 		}
+		return false
+	}
+	p.mu.RLock()
+	checker := p.pathRulesChecker
+	p.mu.RUnlock()
+	if checker != nil {
+		return checker(host, port)
 	}
 	return false
 }
 
 // getMCPServersForRequest returns MCP servers from RunContextData or falls
 // back to the proxy's own list.
-func (p *Proxy) getMCPServersForRequest(r *http.Request) []config.MCPServerConfig {
+func (p *Proxy) getMCPServersForRequest(r *http.Request) []MCPServerConfig {
 	if rc := getRunContext(r); rc != nil {
 		return rc.MCPServers
 	}
@@ -912,7 +940,7 @@ func (p *Proxy) getMCPServersForRequest(r *http.Request) []config.MCPServerConfi
 
 // getCredStoreForRequest returns the credential store from RunContextData
 // or falls back to the proxy's own store.
-func (p *Proxy) getCredStoreForRequest(r *http.Request) credential.Store {
+func (p *Proxy) getCredStoreForRequest(r *http.Request) CredentialStore {
 	if rc := getRunContext(r); rc != nil && rc.CredStore != nil {
 		return rc.CredStore
 	}
@@ -1057,7 +1085,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Log the proxied request
 	if r.Method == http.MethodConnect {
 		host, port, _ := net.SplitHostPort(r.Host)
-		log.Debug("proxy connect",
+		slog.Debug("proxy connect",
 			"subsystem", "proxy",
 			"action", "connect",
 			"host", host,
@@ -1066,7 +1094,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debug("proxy request",
+	slog.Debug("proxy request",
 		"subsystem", "proxy",
 		"action", "forward",
 		"method", r.Method,
@@ -1290,7 +1318,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Without TLS interception, per-path rules cannot be enforced on HTTPS
 	// traffic — only host-level allow/deny applies. Warn if rules exist.
 	if p.hasPathRulesForHost(r, host, port) {
-		log.Warn("per-path rules configured but TLS interception disabled; only host-level rules apply",
+		slog.Warn("per-path rules configured but TLS interception disabled; only host-level rules apply",
 			"subsystem", "proxy", "host", host)
 	}
 
@@ -1358,7 +1386,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 
 	cert, err := p.ca.GenerateCert(host)
 	if err != nil {
-		log.Debug("failed to generate cert for CONNECT interception",
+		slog.Debug("failed to generate cert for CONNECT interception",
 			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
@@ -1369,7 +1397,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 	}
 	tlsClientConn := tls.Server(clientConn, tlsConfig)
 	if err := tlsClientConn.Handshake(); err != nil {
-		log.Debug("TLS handshake failed during CONNECT interception",
+		slog.Debug("TLS handshake failed during CONNECT interception",
 			"subsystem", "proxy", "host", host, "error", err)
 		return
 	}
@@ -1401,7 +1429,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		req, err := http.ReadRequest(clientReader)
 		if err != nil {
 			if err != io.EOF {
-				log.Debug("failed to read request from intercepted connection",
+				slog.Debug("failed to read request from intercepted connection",
 					"subsystem", "proxy", "host", host, "error", err)
 			}
 			return
@@ -1441,10 +1469,11 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		if rc := getRunContext(r); rc != nil && rc.KeepEngines != nil {
 			scope := "http"
 			if eng, ok := rc.KeepEngines[scope]; ok {
-				call := internalkeep.NormalizeHTTPCall(req.Method, host, req.URL.Path)
-				result, evalErr := internalkeep.SafeEvaluate(eng, call, scope)
+				call := keeplib.NewHTTPCall(req.Method, host, req.URL.Path)
+				call.Context.Scope = "http-" + host
+				result, evalErr := keeplib.SafeEvaluate(eng, call, scope)
 				if evalErr != nil {
-					log.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
+					slog.Warn("Keep evaluation error for HTTP request, denying (fail-closed)",
 						"host", host,
 						"method", req.Method,
 						"path", req.URL.Path,
@@ -1529,7 +1558,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 					respBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseSize+1))
 					resp.Body.Close()
 					if readErr != nil {
-						log.Warn("failed to read response body for LLM policy, denying (fail-closed)",
+						slog.Warn("failed to read response body for LLM policy, denying (fail-closed)",
 							"host", host, "error", readErr)
 						p.logPolicy(r, "llm-gateway", "llm.read_error", "read-error", "Failed to read response body for policy evaluation")
 						errorBody := buildPolicyDeniedResponse("read-error", "Failed to read response body for policy evaluation.")
@@ -1545,7 +1574,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 						resp.Header.Set("X-Moat-Blocked", "llm-policy")
 					} else if int64(len(respBodyBytes)) > maxLLMResponseSize {
 						// Response exceeds size limit — deny (fail-closed).
-						log.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
+						slog.Warn("LLM response exceeds max size for policy evaluation, denying (fail-closed)",
 							"size", len(respBodyBytes), "limit", maxLLMResponseSize)
 						p.logPolicy(r, "llm-gateway", "llm.response_too_large", "size-limit", "Response too large for policy evaluation")
 						errorBody := buildPolicyDeniedResponse("size-limit", "Response too large for policy evaluation.")
@@ -1562,7 +1591,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 					} else {
 						result := evaluateLLMResponse(eng, respBodyBytes, resp)
 						if result.Denied {
-							log.Info("LLM tool_use denied by policy",
+							slog.Info("LLM tool_use denied by policy",
 								"rule", result.Rule, "message", result.Message)
 							p.logPolicy(r, "llm-gateway", "llm.tool_use", result.Rule, result.Message)
 							errorBody := buildPolicyDeniedResponse(result.Rule, result.Message)

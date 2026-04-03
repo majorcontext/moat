@@ -13,7 +13,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/go-git/go-git/v5 v5.16.4
-	github.com/majorcontext/keep v0.2.3
+	github.com/majorcontext/keep v0.3.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/moby/buildkit v0.27.0
 	github.com/spf13/cobra v1.10.2
