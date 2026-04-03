@@ -899,7 +899,10 @@ func isHostGateway(rc *RunContextData, host string) bool {
 	if host == rc.HostGateway {
 		return true
 	}
-	// On Linux, the gateway is 127.0.0.1. Match other loopback forms too.
+	// On Linux, the gateway is 127.0.0.1. Match common loopback aliases so
+	// containers can't bypass blocking by using "localhost" or "::1". We don't
+	// match the full 127.0.0.0/8 range because containers practically never
+	// use addresses like 127.0.0.2; the firewall already restricts loopback.
 	if rc.HostGateway == "127.0.0.1" {
 		return host == "localhost" || host == "::1"
 	}

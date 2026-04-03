@@ -2017,3 +2017,44 @@ func TestProxy_HostGatewayLocalhostBypass(t *testing.T) {
 		t.Errorf("expected 407 (localhost should match 127.0.0.1 gateway), got %d", resp.StatusCode)
 	}
 }
+
+// TestProxy_HostGatewayLocalhostBypassCONNECT verifies that CONNECT requests to
+// "localhost" are also blocked when the gateway is 127.0.0.1.
+func TestProxy_HostGatewayLocalhostBypassCONNECT(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "127.0.0.1",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+
+	conn, err := net.Dial("tcp", proxyURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT localhost:443 HTTP/1.1\r\n")
+	fmt.Fprintf(conn, "Host: localhost:443\r\n")
+	fmt.Fprintf(conn, "Proxy-Authorization: Bearer test_run\r\n")
+	fmt.Fprintf(conn, "\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (localhost CONNECT should match 127.0.0.1 gateway), got %d", resp.StatusCode)
+	}
+}
