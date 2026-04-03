@@ -12,8 +12,6 @@ import (
 
 	keeplib "github.com/majorcontext/keep"
 
-	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
 	internalkeep "github.com/majorcontext/moat/internal/keep"
 )
 
@@ -85,7 +83,7 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 	}
 
 	// Find matching MCP server by host
-	var matchedServer *config.MCPServerConfig
+	var matchedServer *MCPServerConfig
 	for i := range mcpServers {
 		server := &mcpServers[i]
 		if server.Auth == nil {
@@ -150,9 +148,9 @@ func (p *Proxy) injectMCPCredentialsWithContext(ctxReq, targetReq *http.Request)
 		credValue = findCredByGrant(rc.Credentials, matchedServer.Auth.Grant)
 	}
 	if credValue == "" && credStore != nil {
-		cred, err := credStore.Get(credential.Provider(matchedServer.Auth.Grant))
+		token, err := credStore.GetToken(matchedServer.Auth.Grant)
 		if err == nil {
-			credValue = cred.Token
+			credValue = token
 		}
 	}
 	if credValue == "" {
@@ -193,7 +191,7 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 	credStore := p.getCredStoreForRequest(r)
 
 	// Find the MCP server config
-	var mcpServer *config.MCPServerConfig
+	var mcpServer *MCPServerConfig
 	for i := range mcpServers {
 		if mcpServers[i].Name == serverName {
 			mcpServer = &mcpServers[i]
@@ -340,9 +338,9 @@ func (p *Proxy) handleMCPRelay(w http.ResponseWriter, r *http.Request) {
 
 		// Fall back to credential store (legacy single-run mode).
 		if credValue == "" && credStore != nil {
-			cred, credErr := credStore.Get(credential.Provider(mcpServer.Auth.Grant))
+			token, credErr := credStore.GetToken(mcpServer.Auth.Grant)
 			if credErr == nil {
-				credValue = cred.Token
+				credValue = token
 			}
 		}
 

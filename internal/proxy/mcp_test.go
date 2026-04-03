@@ -5,9 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/credential"
 )
 
 // TestMCPCredentialInjection tests the injectMCPCredentials path in ServeHTTP,
@@ -17,11 +14,8 @@ import (
 func TestMCPCredentialInjection(t *testing.T) {
 	// Mock credential store
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"mcp-context7": {
-				Provider: "mcp-context7",
-				Token:    "real-api-key-123",
-			},
+		tokens: map[string]string{
+			"mcp-context7": "real-api-key-123",
 		},
 	}
 
@@ -32,11 +26,11 @@ func TestMCPCredentialInjection(t *testing.T) {
 	defer backend.Close()
 
 	// Configure MCP server
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "context7",
 			URL:  backend.URL, // Use test server URL
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "mcp-context7",
 				Header: "API_KEY",
 			},
@@ -65,7 +59,7 @@ func TestMCPCredentialInjection(t *testing.T) {
 func TestMCPCredentialInjection_NoMatch(t *testing.T) {
 	// Request to non-MCP server should pass through unchanged
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +69,7 @@ func TestMCPCredentialInjection_NoMatch(t *testing.T) {
 
 	p := &Proxy{
 		credStore:  mockStore,
-		mcpServers: []config.MCPServerConfig{},
+		mcpServers: []MCPServerConfig{},
 	}
 
 	req := httptest.NewRequest("GET", backend.URL, nil)
@@ -93,7 +87,7 @@ func TestMCPCredentialInjection_NoMatch(t *testing.T) {
 func TestMCPCredentialInjection_NoAuthConfig(t *testing.T) {
 	// MCP server without auth config should not inject
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +95,7 @@ func TestMCPCredentialInjection_NoAuthConfig(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "no-auth-server",
 			URL:  backend.URL,
@@ -129,7 +123,7 @@ func TestMCPCredentialInjection_NoAuthConfig(t *testing.T) {
 func TestMCPCredentialInjection_MissingCredential(t *testing.T) {
 	// Request with stub but missing credential should pass stub through
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{},
+		tokens: map[string]string{},
 	}
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -137,11 +131,11 @@ func TestMCPCredentialInjection_MissingCredential(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "context7",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "mcp-context7",
 				Header: "API_KEY",
 			},
@@ -168,11 +162,8 @@ func TestMCPCredentialInjection_MissingCredential(t *testing.T) {
 func TestMCPCredentialInjection_NoStubPattern(t *testing.T) {
 	// Request to MCP server without stub pattern should pass through
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"mcp-context7": {
-				Provider: "mcp-context7",
-				Token:    "real-api-key-123",
-			},
+		tokens: map[string]string{
+			"mcp-context7": "real-api-key-123",
 		},
 	}
 
@@ -181,11 +172,11 @@ func TestMCPCredentialInjection_NoStubPattern(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "context7",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "mcp-context7",
 				Header: "API_KEY",
 			},
@@ -212,11 +203,8 @@ func TestMCPCredentialInjection_NoStubPattern(t *testing.T) {
 func TestMCPCredentialInjection_NoHeader(t *testing.T) {
 	// Request to MCP server without the required header should not inject
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"mcp-context7": {
-				Provider: "mcp-context7",
-				Token:    "real-api-key-123",
-			},
+		tokens: map[string]string{
+			"mcp-context7": "real-api-key-123",
 		},
 	}
 
@@ -225,11 +213,11 @@ func TestMCPCredentialInjection_NoHeader(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "context7",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "mcp-context7",
 				Header: "API_KEY",
 			},
@@ -261,7 +249,7 @@ func TestMCPRelay_HostLocal(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "local-tools",
 			URL:  backend.URL, // http://127.0.0.1:PORT
@@ -295,7 +283,7 @@ func TestMCPRelay_HostLocalWithPath(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "local-server",
 			URL:  backend.URL + "/mcp",
@@ -323,11 +311,8 @@ func TestMCPRelay_HostLocalWithPath(t *testing.T) {
 func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
 	// Host-local MCP server with auth should inject credentials
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"local-api-key": {
-				Provider: "local-api-key",
-				Token:    "secret-local-token",
-			},
+		tokens: map[string]string{
+			"local-api-key": "secret-local-token",
 		},
 	}
 
@@ -336,11 +321,11 @@ func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "local-auth",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "local-api-key",
 				Header: "X-API-Key",
 			},
@@ -367,11 +352,8 @@ func TestMCPRelay_HostLocalWithAuth(t *testing.T) {
 func TestMCPOAuthCredentialInjection(t *testing.T) {
 	// OAuth grants should inject Bearer-prefixed tokens
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"oauth:notion": {
-				Provider: "oauth:notion",
-				Token:    "oauth-token-abc",
-			},
+		tokens: map[string]string{
+			"oauth:notion": "oauth-token-abc",
 		},
 	}
 
@@ -380,11 +362,11 @@ func TestMCPOAuthCredentialInjection(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "notion",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "oauth:notion",
 				Header: "Authorization",
 			},
@@ -411,11 +393,8 @@ func TestMCPOAuthCredentialInjection(t *testing.T) {
 func TestMCPOAuthRelayInjection(t *testing.T) {
 	// OAuth grants in relay path should inject Bearer-prefixed tokens
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"oauth:notion": {
-				Provider: "oauth:notion",
-				Token:    "oauth-relay-token",
-			},
+		tokens: map[string]string{
+			"oauth:notion": "oauth-relay-token",
 		},
 	}
 
@@ -424,11 +403,11 @@ func TestMCPOAuthRelayInjection(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "notion",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "oauth:notion",
 				Header: "Authorization",
 			},
@@ -456,11 +435,8 @@ func TestMCPOAuthRelayInjection(t *testing.T) {
 func TestMCPStaticCredentialStillRaw(t *testing.T) {
 	// Non-oauth grants should inject raw tokens without Bearer prefix
 	mockStore := &mockCredentialStore{
-		creds: map[credential.Provider]*credential.Credential{
-			"mcp-context7": {
-				Provider: "mcp-context7",
-				Token:    "raw-api-key-456",
-			},
+		tokens: map[string]string{
+			"mcp-context7": "raw-api-key-456",
 		},
 	}
 
@@ -469,11 +445,11 @@ func TestMCPStaticCredentialStillRaw(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mcpServers := []config.MCPServerConfig{
+	mcpServers := []MCPServerConfig{
 		{
 			Name: "context7",
 			URL:  backend.URL,
-			Auth: &config.MCPAuthConfig{
+			Auth: &MCPAuthConfig{
 				Grant:  "mcp-context7",
 				Header: "API_KEY",
 			},
@@ -511,30 +487,12 @@ func TestMCPStaticCredentialStillRaw(t *testing.T) {
 
 // mockCredentialStore for testing
 type mockCredentialStore struct {
-	creds map[credential.Provider]*credential.Credential
+	tokens map[string]string // provider -> token
 }
 
-func (m *mockCredentialStore) Get(p credential.Provider) (*credential.Credential, error) {
-	if cred, ok := m.creds[p]; ok {
-		return cred, nil
+func (m *mockCredentialStore) GetToken(provider string) (string, error) {
+	if token, ok := m.tokens[provider]; ok {
+		return token, nil
 	}
-	return nil, fmt.Errorf("credential not found")
-}
-
-func (m *mockCredentialStore) Save(c credential.Credential) error {
-	m.creds[c.Provider] = &c
-	return nil
-}
-
-func (m *mockCredentialStore) Delete(p credential.Provider) error {
-	delete(m.creds, p)
-	return nil
-}
-
-func (m *mockCredentialStore) List() ([]credential.Credential, error) {
-	list := make([]credential.Credential, 0, len(m.creds))
-	for _, c := range m.creds {
-		list = append(list, *c)
-	}
-	return list, nil
+	return "", fmt.Errorf("credential not found")
 }

@@ -328,9 +328,13 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	// In daemon mode, providers can't pass Go functions across the process boundary,
 	// so they register TransformerSpecs (kind + host) that the daemon reconstructs.
 	// The function-based ResponseTransformers map is also copied for non-daemon use.
-	d.ResponseTransformers = make(map[string][]credential.ResponseTransformer, len(rc.ResponseTransformers)+len(rc.TransformerSpecs))
+	d.ResponseTransformers = make(map[string][]proxy.ResponseTransformer, len(rc.ResponseTransformers)+len(rc.TransformerSpecs))
 	for host, transformers := range rc.ResponseTransformers {
-		d.ResponseTransformers[host] = append(d.ResponseTransformers[host], transformers...)
+		// credential.ResponseTransformer and proxy.ResponseTransformer have the
+		// same underlying type, so this loop converts element-by-element.
+		for _, tf := range transformers {
+			d.ResponseTransformers[host] = append(d.ResponseTransformers[host], proxy.ResponseTransformer(tf))
+		}
 	}
 	for _, spec := range rc.TransformerSpecs {
 		var tf credential.ResponseTransformer
@@ -346,24 +350,46 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 			}
 		}
 		if tf != nil {
-			d.ResponseTransformers[spec.Host] = append(d.ResponseTransformers[spec.Host], tf)
+			d.ResponseTransformers[spec.Host] = append(d.ResponseTransformers[spec.Host], proxy.ResponseTransformer(tf))
 		}
 	}
 
-	// Copy MCP servers (consistent with other fields being deep-copied).
+	// Copy MCP servers, converting from config types to proxy types.
 	if len(rc.MCPServers) > 0 {
-		d.MCPServers = make([]config.MCPServerConfig, len(rc.MCPServers))
-		copy(d.MCPServers, rc.MCPServers)
+		d.MCPServers = make([]proxy.MCPServerConfig, len(rc.MCPServers))
+		for i, s := range rc.MCPServers {
+			d.MCPServers[i] = proxy.MCPServerConfig{
+				Name: s.Name,
+				URL:  s.URL,
+			}
+			if s.Auth != nil {
+				d.MCPServers[i].Auth = &proxy.MCPAuthConfig{
+					Grant:  s.Auth.Grant,
+					Header: s.Auth.Header,
+				}
+			}
+		}
 	}
 
-	// Convert network allow list to AllowedHosts.
-	// If NetworkRules is populated (new CLI), use that as the primary source.
+	// Convert network rules to callback-based checkers.
+	// If NetworkRules is populated (new CLI), create RequestChecker and
+	// PathRulesChecker closures that wrap netrules.Check().
 	// Fall back to NetworkAllow (old CLI) for backwards compatibility.
 	if len(rc.NetworkRules) > 0 {
-		// Shallow copy: inner Rules slices share backing arrays, which is safe
-		// because these are never mutated after creation.
-		d.HostRules = make([]netrules.HostRules, len(rc.NetworkRules))
-		copy(d.HostRules, rc.NetworkRules)
+		rules := make([]netrules.HostRules, len(rc.NetworkRules))
+		copy(rules, rc.NetworkRules)
+		policy := rc.NetworkPolicy
+		d.RequestCheck = func(host string, port int, method, path string) bool {
+			return netrules.Check(policy, rules, host, port, method, path, hostMatchAdapter)
+		}
+		d.PathRulesCheck = func(host string, port int) bool {
+			for _, hr := range rules {
+				if hostMatchAdapter(hr.Host, host, port) && len(hr.Rules) > 0 {
+					return true
+				}
+			}
+			return false
+		}
 		// Also add rule hosts to AllowedHosts for host-level matching.
 		for _, hr := range rc.NetworkRules {
 			d.AllowedHosts = append(d.AllowedHosts, proxy.ParseHostPattern(hr.Host))
@@ -382,4 +408,11 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	d.KeepEngines = rc.KeepEngines
 
 	return d
+}
+
+// hostMatchAdapter bridges proxy host pattern matching with the netrules
+// HostMatcher interface. Used to create RequestChecker closures.
+func hostMatchAdapter(pattern, host string, port int) bool {
+	hp := proxy.ParseHostPattern(pattern)
+	return proxy.MatchesHostPattern(hp, host, port)
 }
