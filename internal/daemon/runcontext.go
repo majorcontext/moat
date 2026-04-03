@@ -66,6 +66,8 @@ type RunContext struct {
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 	Grants           []string          `json:"grants,omitempty"`
+	HostGateway      string            `json:"host_gateway,omitempty"`
+	AllowedHostPorts []int             `json:"allowed_host_ports,omitempty"`
 
 	RegisteredAt time.Time `json:"registered_at"`
 
