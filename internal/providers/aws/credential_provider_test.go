@@ -1,4 +1,4 @@
-package proxy
+package aws
 
 import (
 	"context"
@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 )
 
-func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
+func TestCredentialProviderHandler_ServeHTTP(t *testing.T) {
 	t.Run("returns credentials in credential_process format", func(t *testing.T) {
 		expiration := time.Now().Add(15 * time.Minute)
-		handler := &AWSCredentialHandler{
-			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
-				return &AWSCredentials{
+		handler := &credentialProviderHandler{
+			getCredentials: func(ctx context.Context) (*Credentials, error) {
+				return &Credentials{
 					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
 					SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 					SessionToken:    "FwoGZXIvYXdzEBY...",
@@ -37,12 +37,11 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 			t.Errorf("status = %d, want 200", w.Code)
 		}
 
-		var resp map[string]interface{}
+		var resp map[string]any
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		// Check Version field (required by credential_process)
 		if resp["Version"] != float64(1) {
 			t.Errorf("Version = %v, want 1", resp["Version"])
 		}
@@ -61,8 +60,8 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns 500 on provider error", func(t *testing.T) {
-		handler := &AWSCredentialHandler{
-			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
+		handler := &credentialProviderHandler{
+			getCredentials: func(ctx context.Context) (*Credentials, error) {
 				return nil, context.DeadlineExceeded
 			},
 		}
@@ -78,9 +77,9 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns 401 when auth token required but missing", func(t *testing.T) {
-		handler := &AWSCredentialHandler{
-			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
-				return &AWSCredentials{
+		handler := &credentialProviderHandler{
+			getCredentials: func(ctx context.Context) (*Credentials, error) {
+				return &Credentials{
 					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
 					SecretAccessKey: "secret",
 					SessionToken:    "token",
@@ -101,9 +100,9 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns 401 when auth token is invalid", func(t *testing.T) {
-		handler := &AWSCredentialHandler{
-			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
-				return &AWSCredentials{
+		handler := &credentialProviderHandler{
+			getCredentials: func(ctx context.Context) (*Credentials, error) {
+				return &Credentials{
 					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
 					SecretAccessKey: "secret",
 					SessionToken:    "token",
@@ -125,9 +124,9 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns credentials when auth token is valid", func(t *testing.T) {
-		handler := &AWSCredentialHandler{
-			getCredentials: func(ctx context.Context) (*AWSCredentials, error) {
-				return &AWSCredentials{
+		handler := &credentialProviderHandler{
+			getCredentials: func(ctx context.Context) (*Credentials, error) {
+				return &Credentials{
 					AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
 					SecretAccessKey: "secret",
 					SessionToken:    "token",
@@ -147,7 +146,7 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 			t.Errorf("status = %d, want 200", w.Code)
 		}
 
-		var resp map[string]interface{}
+		var resp map[string]any
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -157,7 +156,7 @@ func TestAWSCredentialHandler_ServeHTTP(t *testing.T) {
 	})
 }
 
-func TestAWSCredentialProvider_Caching(t *testing.T) {
+func TestCredentialProvider_Caching(t *testing.T) {
 	callCount := 0
 	expiration := time.Now().Add(15 * time.Minute)
 
@@ -166,16 +165,16 @@ func TestAWSCredentialProvider_Caching(t *testing.T) {
 			callCount++
 			return &sts.AssumeRoleOutput{
 				Credentials: &types.Credentials{
-					AccessKeyId:     aws.String("AKIA" + fmt.Sprintf("%d", callCount)),
-					SecretAccessKey: aws.String("secret"),
-					SessionToken:    aws.String("token"),
-					Expiration:      aws.Time(expiration),
+					AccessKeyId:     awssdk.String("AKIA" + fmt.Sprintf("%d", callCount)),
+					SecretAccessKey: awssdk.String("secret"),
+					SessionToken:    awssdk.String("token"),
+					Expiration:      awssdk.Time(expiration),
 				},
 			}, nil
 		},
 	}
 
-	provider := &AWSCredentialProvider{
+	provider := &CredentialProvider{
 		roleARN:         "arn:aws:iam::123456789012:role/Test",
 		region:          "us-east-1",
 		sessionDuration: 15 * time.Minute,
@@ -207,7 +206,7 @@ func TestAWSCredentialProvider_Caching(t *testing.T) {
 	}
 }
 
-func TestAWSCredentialProvider_RefreshesExpiredCredentials(t *testing.T) {
+func TestCredentialProvider_RefreshesExpiredCredentials(t *testing.T) {
 	callCount := 0
 
 	mockSTS := &mockSTSClient{
@@ -217,16 +216,16 @@ func TestAWSCredentialProvider_RefreshesExpiredCredentials(t *testing.T) {
 			expiration := time.Now().Add(3 * time.Minute)
 			return &sts.AssumeRoleOutput{
 				Credentials: &types.Credentials{
-					AccessKeyId:     aws.String("AKIA" + fmt.Sprintf("%d", callCount)),
-					SecretAccessKey: aws.String("secret"),
-					SessionToken:    aws.String("token"),
-					Expiration:      aws.Time(expiration),
+					AccessKeyId:     awssdk.String("AKIA" + fmt.Sprintf("%d", callCount)),
+					SecretAccessKey: awssdk.String("secret"),
+					SessionToken:    awssdk.String("token"),
+					Expiration:      awssdk.Time(expiration),
 				},
 			}, nil
 		},
 	}
 
-	provider := &AWSCredentialProvider{
+	provider := &CredentialProvider{
 		roleARN:         "arn:aws:iam::123456789012:role/Test",
 		region:          "us-east-1",
 		sessionDuration: 15 * time.Minute,
@@ -253,10 +252,4 @@ func TestAWSCredentialProvider_RefreshesExpiredCredentials(t *testing.T) {
 	}
 }
 
-type mockSTSClient struct {
-	assumeRoleFn func(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
-}
-
-func (m *mockSTSClient) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
-	return m.assumeRoleFn(ctx, params, optFns...)
-}
+// mockSTSClient is defined in provider_test.go — reused here.
