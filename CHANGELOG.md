@@ -6,8 +6,21 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Breaking
+
+- **Host traffic blocked by default** — containers can no longer reach services on the host machine without explicit configuration. This affects all network policy modes, including `permissive`. Add a `network.host` list to restore access:
+
+  ```yaml
+  network:
+    host:
+      - 11434   # Ollama
+      - 5432    # local Postgres
+  ```
+
 ### Added
 
+- **`network.host`** — list TCP ports on the host machine that the container may access; all host traffic is blocked by default even in permissive mode
+- **`MOAT_HOST_GATEWAY`** env var — set automatically in every container; resolves to the correct host IP across all runtimes (Docker, Apple containers, Rancher Desktop)
 - **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`
 - **LLM response policy** — evaluate tool_use blocks in Anthropic API responses against Keep rules before forwarding to the container, via `claude.llm-gateway`
 - **Starter packs** — built-in policy packs like `linear-readonly` for quick MCP server lockdown

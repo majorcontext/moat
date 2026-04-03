@@ -141,6 +141,11 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 
 	rc := req.ToRunContext()
 
+	// On Linux with Docker host networking, the host gateway is 127.0.0.1 and
+	// the proxy also listens on 127.0.0.1. Implicitly allow the proxy port so
+	// the proxy does not block its own traffic.
+	addProxyPortForLoopback(rc, s.proxyPort)
+
 	// Compile Keep policy engines from YAML and/or RuleSet specs.
 	totalPolicies := len(req.PolicyYAML) + len(req.PolicyRuleSets)
 	if totalPolicies > 0 {
@@ -379,6 +384,21 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	if s.onShutdown != nil {
 		go s.onShutdown()
 	}
+}
+
+// addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the host
+// gateway is 127.0.0.1 (Linux Docker with host networking). This prevents
+// the proxy from blocking its own traffic.
+func addProxyPortForLoopback(rc *RunContext, proxyPort int) {
+	if rc.HostGateway != "127.0.0.1" {
+		return
+	}
+	for _, p := range rc.AllowedHostPorts {
+		if p == proxyPort {
+			return
+		}
+	}
+	rc.AllowedHostPorts = append(rc.AllowedHostPorts, proxyPort)
 }
 
 // extractToken extracts the token from a URL path by stripping the prefix.
