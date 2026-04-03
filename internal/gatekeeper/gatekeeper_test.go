@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -24,6 +25,37 @@ import (
 
 	"github.com/majorcontext/moat/internal/proxy"
 )
+
+// startTLSBackend creates an HTTPS backend server using the provided CA.
+// Returns the server (for cleanup), the port it's listening on, and the CA cert pool.
+func startTLSBackend(t *testing.T, ca *proxy.CA, handler http.Handler) (srv *http.Server, port string, caCertPool *x509.CertPool) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := ca.GenerateCert("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsLn := tls.NewListener(ln, &tls.Config{
+		Certificates: []tls.Certificate{*cert},
+		MinVersion:   tls.VersionTLS12,
+	})
+	srv = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := srv.Serve(tlsLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("backend serve: %v", err)
+		}
+	}()
+	t.Cleanup(func() { srv.Close() })
+
+	_, port, _ = net.SplitHostPort(ln.Addr().String())
+	caCertPool = x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(ca.CertPEM())
+	return srv, port, caCertPool
+}
 
 // waitForProxy polls until the server's proxy is accepting connections.
 func waitForProxy(t *testing.T, srv *Server, timeout time.Duration) {
@@ -66,7 +98,7 @@ func TestServerStartStop(t *testing.T) {
 
 	waitForProxy(t, srv, 2*time.Second)
 
-	// Stop
+	// Canceling the context causes Start() to call Stop() internally.
 	cancel()
 	select {
 	case err := <-errCh:
@@ -75,12 +107,6 @@ func TestServerStartStop(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Start did not return after cancel")
-	}
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	if err := srv.Stop(stopCtx); err != nil {
-		t.Fatalf("Stop: %v", err)
 	}
 }
 
@@ -113,12 +139,8 @@ func TestServerHealthEndpoint(t *testing.T) {
 		t.Errorf("healthz body = %s, want JSON with ok", body)
 	}
 
+	// Canceling the context causes Start() to call Stop() internally.
 	cancel()
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	if err := srv.Stop(stopCtx); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
 }
 
 func TestCredentials(t *testing.T) {
@@ -253,33 +275,81 @@ func TestDefaultProxyHost(t *testing.T) {
 	cancel()
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
 	defer stopCancel()
-	srv.Stop(stopCtx)
+	if err := srv.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
 }
 
 func TestTLSCALoading(t *testing.T) {
-	// Generate a CA to test loading.
+	// Generate a CA and verify it's actually used for HTTPS interception
+	// by sending a request through the proxy.
 	dir := t.TempDir()
 	ca, err := proxy.NewCA(dir)
 	if err != nil {
 		t.Fatalf("NewCA: %v", err)
 	}
-	_ = ca
+
+	// Start an HTTPS backend signed by this CA.
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendCert, err := ca.GenerateCert("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendSrv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	tlsLn := tls.NewListener(backendLn, &tls.Config{
+		Certificates: []tls.Certificate{*backendCert},
+		MinVersion:   tls.VersionTLS12,
+	})
+	go func() {
+		if err := backendSrv.Serve(tlsLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("backend serve: %v", err)
+		}
+	}()
+	defer backendSrv.Close()
+	_, backendPort, _ := net.SplitHostPort(backendLn.Addr().String())
 
 	cfg := &Config{
-		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
-		TLS: TLSConfig{
-			CACert: filepath.Join(dir, "ca.crt"),
-			CAKey:  filepath.Join(dir, "ca.key"),
-		},
+		Proxy:   ProxyConfig{Port: 0, Host: "127.0.0.1"},
+		TLS:     TLSConfig{CACert: filepath.Join(dir, "ca.crt"), CAKey: filepath.Join(dir, "ca.key")},
+		Network: NetworkConfig{Policy: "permissive"},
 	}
 
 	srv, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New with TLS: %v", err)
 	}
-	// Verify the proxy has a CA set (it should be able to intercept HTTPS).
-	if srv.proxy == nil {
-		t.Fatal("proxy is nil")
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(ca.CertPEM())
+	srv.proxy.SetUpstreamCAs(caCertPool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+	waitForProxy(t, srv, 2*time.Second)
+
+	// If the CA loaded correctly, the proxy can MITM-intercept HTTPS.
+	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caCertPool, MinVersion: tls.VersionTLS12},
+		},
+	}
+
+	resp, err := client.Get("https://127.0.0.1:" + backendPort + "/tls-check")
+	if err != nil {
+		t.Fatalf("HTTPS through proxy failed (CA not loaded?): %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -374,45 +444,23 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 	// End-to-end test: start gatekeeper with TLS + credential,
 	// send HTTPS request through proxy, verify credential was injected.
 
-	// 1. Generate CA via proxy.NewCA (RSA).
 	caDir := t.TempDir()
 	ca, err := proxy.NewCA(caDir)
 	if err != nil {
 		t.Fatalf("NewCA: %v", err)
 	}
 
-	// 2. Start an HTTPS backend that records the Authorization header.
 	var (
 		gotAuth string
 		authMu  sync.Mutex
 	)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	_, backendPort, caCertPool := startTLSBackend(t, ca, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authMu.Lock()
 		gotAuth = r.Header.Get("Authorization")
 		authMu.Unlock()
 		w.WriteHeader(http.StatusOK)
-	})
-	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Backend uses a real TLS cert. The proxy will MITM and present its own,
-	// so the backend's cert doesn't need to be trusted by the client.
-	backendCert, err := ca.GenerateCert("127.0.0.1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tlsLn := tls.NewListener(backendLn, &tls.Config{
-		Certificates: []tls.Certificate{*backendCert},
-		MinVersion:   tls.VersionTLS12,
-	})
-	backendSrv := &http.Server{Handler: backend, ReadHeaderTimeout: 5 * time.Second}
-	go backendSrv.Serve(tlsLn)
-	defer backendSrv.Close()
+	}))
 
-	_, backendPort, _ := net.SplitHostPort(backendLn.Addr().String())
-
-	// 3. Start gatekeeper with the CA and a static credential for 127.0.0.1.
 	cfg := &Config{
 		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
 		TLS: TLSConfig{
@@ -439,8 +487,6 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 	// backend's cert. In production, upstream certs are signed by public CAs
 	// in the system roots. In this test, the backend uses a cert from our
 	// test CA.
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(ca.CertPEM())
 	srv.proxy.SetUpstreamCAs(caCertPool)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -448,27 +494,20 @@ func TestHTTPSCredentialInjection(t *testing.T) {
 	go func() { _ = srv.Start(ctx) }()
 	waitForProxy(t, srv, 2*time.Second)
 
-	// 4. Send HTTPS request through the proxy.
 	proxyURL, _ := url.Parse("http://" + srv.ProxyAddr())
-
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{
-				RootCAs:    caCertPool,
-				MinVersion: tls.VersionTLS12,
-			},
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caCertPool, MinVersion: tls.VersionTLS12},
 		},
 	}
 
-	targetURL := "https://127.0.0.1:" + backendPort + "/test"
-	resp, err := client.Get(targetURL)
+	resp, err := client.Get("https://127.0.0.1:" + backendPort + "/test")
 	if err != nil {
 		t.Fatalf("GET through proxy: %v", err)
 	}
 	resp.Body.Close()
 
-	// 5. Verify the credential was injected.
 	authMu.Lock()
 	auth := gotAuth
 	authMu.Unlock()
@@ -568,29 +607,12 @@ func TestHTTPSCustomHeaderInjection(t *testing.T) {
 		gotHeader string
 		mu        sync.Mutex
 	)
-	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	_, backendPort, caCertPool := startTLSBackend(t, ca, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		gotHeader = r.Header.Get("x-api-key")
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-	})
-	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	backendCert, err := ca.GenerateCert("127.0.0.1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tlsLn := tls.NewListener(backendLn, &tls.Config{
-		Certificates: []tls.Certificate{*backendCert},
-		MinVersion:   tls.VersionTLS12,
-	})
-	backendSrv := &http.Server{Handler: backend, ReadHeaderTimeout: 5 * time.Second}
-	go backendSrv.Serve(tlsLn)
-	defer backendSrv.Close()
-
-	_, backendPort, _ := net.SplitHostPort(backendLn.Addr().String())
+	}))
 
 	cfg := &Config{
 		Proxy: ProxyConfig{Port: 0, Host: "127.0.0.1"},
@@ -614,8 +636,6 @@ func TestHTTPSCustomHeaderInjection(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(ca.CertPEM())
 	srv.proxy.SetUpstreamCAs(caCertPool)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -694,8 +714,10 @@ func TestStrictNetworkPolicy(t *testing.T) {
 		t.Errorf("allowed host body = %q, want %q", body, "ok")
 	}
 
-	// Blocked host should fail. The proxy returns 407 Proxy Authentication
-	// Required for blocked hosts (network policy denial).
+	// Blocked host should fail. The proxy intentionally returns 407 (Proxy
+	// Authentication Required) for network policy denials rather than 403.
+	// This is by design: HTTP clients behind a proxy expect 407 for proxy-level
+	// rejections, and 403 would imply the origin server denied the request.
 	resp, err = client.Get("http://blocked.example.com/denied")
 	if err != nil {
 		t.Fatalf("GET blocked host: %v", err)
