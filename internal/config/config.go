@@ -239,6 +239,7 @@ type NetworkConfig struct {
 	Allow      []string                    `yaml:"allow,omitempty"`  // deprecated: hard error
 	Rules      []netrules.NetworkRuleEntry `yaml:"rules,omitempty"`
 	KeepPolicy *keep.PolicyConfig          `yaml:"keep_policy,omitempty"`
+	Host       []int                       `yaml:"host,omitempty"` // TCP ports on the host the container may access
 }
 
 // LLMGatewayConfig configures Keep LLM policy evaluation in the proxy.
@@ -534,6 +535,18 @@ func Load(dir string) (*Config, error) {
 
 	if len(cfg.Network.Allow) > 0 {
 		return nil, fmt.Errorf("\"network.allow\" is no longer supported, use \"network.rules\" instead\n\nExample:\n  network:\n    rules:\n      - \"api.github.com\"")
+	}
+
+	// Validate network.host ports
+	seen := make(map[int]bool, len(cfg.Network.Host))
+	for _, port := range cfg.Network.Host {
+		if port < 1 || port > 65535 {
+			return nil, fmt.Errorf("network.host: port %d is out of range (1-65535)", port)
+		}
+		if seen[port] {
+			return nil, fmt.Errorf("network.host: duplicate port %d", port)
+		}
+		seen[port] = true
 	}
 
 	// Validate sandbox setting

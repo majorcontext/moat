@@ -66,6 +66,8 @@ type RunContext struct {
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 	Grants           []string          `json:"grants,omitempty"`
+	HostGateway      string            `json:"host_gateway,omitempty"`
+	AllowedHostPorts []int             `json:"allowed_host_ports,omitempty"`
 
 	RegisteredAt time.Time `json:"registered_at"`
 
@@ -414,6 +416,13 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 
 	// Propagate Keep policy engines.
 	d.KeepEngines = rc.KeepEngines
+
+	// Propagate host gateway config.
+	d.HostGateway = rc.HostGateway
+	if len(rc.AllowedHostPorts) > 0 {
+		d.AllowedHostPorts = make([]int, len(rc.AllowedHostPorts))
+		copy(d.AllowedHostPorts, rc.AllowedHostPorts)
+	}
 
 	return d
 }

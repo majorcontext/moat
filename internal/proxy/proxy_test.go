@@ -1,11 +1,15 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1713,5 +1717,344 @@ func TestProxy_HasPathRulesForHost(t *testing.T) {
 	// Unlisted host.
 	if p.hasPathRulesForHost(req, "evil.com", 443) {
 		t.Error("unlisted host should not have path rules")
+	}
+}
+
+// TestProxy_HostGatewayBlocked verifies that requests to the host gateway
+// address are blocked by default, even in permissive mode.
+func TestProxy_HostGatewayBlocked(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendHost := backendURL.Hostname()
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "gw_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: backendHost,
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer gw_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (blocked), got %d", resp.StatusCode)
+	}
+
+	if resp.Header.Get("X-Moat-Blocked") != "host-service" {
+		t.Errorf("expected X-Moat-Blocked=host-service, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), strconv.Itoa(backendPort)) {
+		t.Errorf("expected body to mention port %d, got %q", backendPort, string(body))
+	}
+}
+
+// TestProxy_HostGatewayAllowedPort verifies that requests to the host gateway
+// on an explicitly allowed port are permitted.
+func TestProxy_HostGatewayAllowedPort(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendHost := backendURL.Hostname()
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "gw_allowed" {
+			return &RunContextData{
+				Policy:           "permissive",
+				HostGateway:      backendHost,
+				AllowedHostPorts: []int{backendPort},
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer gw_allowed")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_HostGatewayStrictModeAlsoBlocks verifies that the host gateway
+// check takes precedence over strict mode AllowedHosts — even if the host is
+// in AllowedHosts, it is still blocked unless AllowedHostPorts permits the port.
+func TestProxy_HostGatewayStrictModeAlsoBlocks(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendHost := backendURL.Hostname()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "strict_gw" {
+			return &RunContextData{
+				Policy:      "strict",
+				HostGateway: backendHost,
+				AllowedHosts: []hostPattern{
+					{host: backendHost, port: 0}, // wildcard port
+				},
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer strict_gw")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (blocked by host gateway), got %d", resp.StatusCode)
+	}
+
+	if resp.Header.Get("X-Moat-Blocked") != "host-service" {
+		t.Errorf("expected X-Moat-Blocked=host-service, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+}
+
+// TestProxy_NonHostGatewayUnaffected verifies that requests to non-host-gateway
+// addresses are unaffected by the host gateway blocking logic.
+func TestProxy_NonHostGatewayUnaffected(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "other_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "10.254.254.254", // some other address
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer other_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_HostGatewayNoContext verifies that without RunContextData (legacy mode),
+// no host gateway blocking is applied.
+func TestProxy_HostGatewayNoContext(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	p := NewProxy()
+	// No context resolver set — legacy mode
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", backend.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_HostGatewayBlockedCONNECT verifies that CONNECT requests to the host
+// gateway are blocked with the host-specific 407 response.
+func TestProxy_HostGatewayBlockedCONNECT(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "host.docker.internal",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+
+	conn, err := net.Dial("tcp", proxyURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT host.docker.internal:443 HTTP/1.1\r\n")
+	fmt.Fprintf(conn, "Host: host.docker.internal:443\r\n")
+	fmt.Fprintf(conn, "Proxy-Authorization: Bearer test_run\r\n")
+	fmt.Fprintf(conn, "\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Moat-Blocked") != "host-service" {
+		t.Errorf("expected X-Moat-Blocked: host-service, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+}
+
+// TestProxy_HostGatewayLocalhostBypass verifies that on Linux (gateway 127.0.0.1),
+// requests to "localhost" are also blocked as host-gateway traffic.
+func TestProxy_HostGatewayLocalhostBypass(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "127.0.0.1", // Linux gateway
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(proxyServer.URL)),
+	}}
+
+	// Request via "localhost" — should still be blocked
+	localhostURL := "http://localhost:" + strconv.Itoa(backendPort)
+	req, _ := http.NewRequest("GET", localhostURL, nil)
+	req.Header.Set("Proxy-Authorization", "Bearer test_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (localhost should match 127.0.0.1 gateway), got %d", resp.StatusCode)
+	}
+}
+
+// TestProxy_HostGatewayLocalhostBypassCONNECT verifies that CONNECT requests to
+// "localhost" are also blocked when the gateway is 127.0.0.1.
+func TestProxy_HostGatewayLocalhostBypassCONNECT(t *testing.T) {
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "test_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "127.0.0.1",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+
+	conn, err := net.Dial("tcp", proxyURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT localhost:443 HTTP/1.1\r\n")
+	fmt.Fprintf(conn, "Host: localhost:443\r\n")
+	fmt.Fprintf(conn, "Proxy-Authorization: Bearer test_run\r\n")
+	fmt.Fprintf(conn, "\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (localhost CONNECT should match 127.0.0.1 gateway), got %d", resp.StatusCode)
 	}
 }

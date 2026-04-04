@@ -77,6 +77,8 @@ type RegisterRequest struct {
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
 	PolicyYAML           map[string][]byte        `json:"policy_yaml,omitempty"`
 	PolicyRuleSets       []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
+	HostGateway          string                   `json:"host_gateway,omitempty"`
+	AllowedHostPorts     []int                    `json:"allowed_host_ports,omitempty"`
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.
@@ -144,5 +146,10 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.AWSConfig = req.AWSConfig
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
+	rc.HostGateway = req.HostGateway
+	if len(req.AllowedHostPorts) > 0 {
+		rc.AllowedHostPorts = make([]int, len(req.AllowedHostPorts))
+		copy(rc.AllowedHostPorts, req.AllowedHostPorts)
+	}
 	return rc
 }

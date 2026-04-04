@@ -562,6 +562,62 @@ func TestRegistry_RegisterWithToken(t *testing.T) {
 	}
 }
 
+func TestAddProxyPortForLoopback(t *testing.T) {
+	rc := NewRunContext("run_linux_test")
+	rc.HostGateway = "127.0.0.1"
+	rc.AllowedHostPorts = []int{8288}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 2 {
+		t.Fatalf("expected 2 ports, got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+	found := false
+	for _, p := range rc.AllowedHostPorts {
+		if p == 12345 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("proxy port 12345 not in AllowedHostPorts: %v", rc.AllowedHostPorts)
+	}
+}
+
+func TestAddProxyPortForLoopback_NonLoopback(t *testing.T) {
+	rc := NewRunContext("run_mac_test")
+	rc.HostGateway = "host.docker.internal"
+	rc.AllowedHostPorts = []int{8288}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 1 {
+		t.Fatalf("expected 1 port (unchanged), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+}
+
+func TestAddProxyPortForLoopback_AlreadyPresent(t *testing.T) {
+	rc := NewRunContext("run_dup_test")
+	rc.HostGateway = "127.0.0.1"
+	rc.AllowedHostPorts = []int{12345}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 1 {
+		t.Fatalf("expected 1 port (no duplicate), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+}
+
+func TestAddProxyPortForLoopback_EmptyGateway(t *testing.T) {
+	rc := NewRunContext("run_empty_test")
+	rc.AllowedHostPorts = []int{8288}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 1 {
+		t.Fatalf("expected 1 port (empty gateway, no change), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+}
+
 func TestServer_ShutdownEndpoint(t *testing.T) {
 	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)

@@ -246,6 +246,22 @@ func TestRegisterResponse_JSON(t *testing.T) {
 	}
 }
 
+func TestToRunContext_HostGateway(t *testing.T) {
+	req := RegisterRequest{
+		RunID:            "run_host_test",
+		HostGateway:      "host.docker.internal",
+		AllowedHostPorts: []int{8288, 5432},
+	}
+	rc := req.ToRunContext()
+
+	if rc.HostGateway != "host.docker.internal" {
+		t.Errorf("HostGateway = %q, want %q", rc.HostGateway, "host.docker.internal")
+	}
+	if len(rc.AllowedHostPorts) != 2 || rc.AllowedHostPorts[0] != 8288 || rc.AllowedHostPorts[1] != 5432 {
+		t.Errorf("AllowedHostPorts = %v, want [8288 5432]", rc.AllowedHostPorts)
+	}
+}
+
 func TestToRunContext(t *testing.T) {
 	req := RegisterRequest{
 		RunID: "run_test_42",

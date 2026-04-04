@@ -15,6 +15,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/storage"
@@ -1363,5 +1364,33 @@ func Test_grantToPlaceholder(t *testing.T) {
 				t.Errorf("grantToPlaceholder[%s]: got %q, want %q", tt.grant, got, tt.expectedPlaceholder)
 			}
 		})
+	}
+}
+
+func TestBuildRegisterRequest_HostGateway(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+	rc.HostGateway = "host.docker.internal"
+	rc.AllowedHostPorts = []int{8288}
+
+	req := buildRegisterRequest(rc, nil)
+
+	if req.HostGateway != "host.docker.internal" {
+		t.Errorf("HostGateway = %q, want %q", req.HostGateway, "host.docker.internal")
+	}
+	if len(req.AllowedHostPorts) != 1 || req.AllowedHostPorts[0] != 8288 {
+		t.Errorf("AllowedHostPorts = %v, want [8288]", req.AllowedHostPorts)
+	}
+}
+
+func TestBuildRegisterRequest_HostGatewayEmpty(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+
+	req := buildRegisterRequest(rc, nil)
+
+	if req.HostGateway != "" {
+		t.Errorf("HostGateway = %q, want empty", req.HostGateway)
+	}
+	if len(req.AllowedHostPorts) != 0 {
+		t.Errorf("AllowedHostPorts = %v, want empty", req.AllowedHostPorts)
 	}
 }

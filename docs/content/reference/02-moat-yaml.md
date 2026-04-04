@@ -685,6 +685,47 @@ network:
 
 **See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement) for the same rule format applied to MCP tool calls
 
+### network.host
+
+TCP ports on the host machine that the container may access.
+
+```yaml
+network:
+  host:
+    - 11434   # Ollama
+    - 5432    # Postgres running on host
+```
+
+- Type: `array[int]`
+- Default: `[]` (all host traffic blocked)
+
+By default, containers cannot reach any service running on the host machine — even in `permissive` mode. `network.policy` controls outbound internet access; `network.host` controls access to the host independently. You must list each port explicitly.
+
+Use the `MOAT_HOST_GATEWAY` environment variable (automatically set in every container) to reach the host:
+
+```sh
+curl http://$MOAT_HOST_GATEWAY:11434/api/tags
+```
+
+`MOAT_HOST_GATEWAY` resolves to the correct host IP regardless of runtime (Docker, Apple containers, Rancher Desktop).
+
+#### Example: agent with local Ollama
+
+```yaml
+network:
+  policy: strict
+  rules:
+    - "api.github.com"
+  host:
+    - 11434
+```
+
+Inside the container:
+
+```sh
+OLLAMA_HOST=http://$MOAT_HOST_GATEWAY:11434 ollama run llama3
+```
+
 ---
 
 ## Execution
