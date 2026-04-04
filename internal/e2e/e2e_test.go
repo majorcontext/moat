@@ -1307,7 +1307,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 
 		found := false
 		for _, entry := range logs {
-			if strings.Contains(entry.Line, "v20") {
+			if strings.Contains(entry.Line, "v22") {
 				found = true
 				t.Logf("Node version: %s", entry.Line)
 				break
@@ -1315,7 +1315,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+			t.Errorf("Node 22.x not found in output\nLogs: %v", logs)
 		}
 	})
 }
@@ -1496,7 +1496,7 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 		foundNode := false
 		foundPython := false
 		for _, entry := range logs {
-			if strings.Contains(entry.Line, "v20") {
+			if strings.Contains(entry.Line, "v22") {
 				foundNode = true
 				t.Logf("Node version: %s", entry.Line)
 			}
@@ -1507,7 +1507,7 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 		}
 
 		if !foundNode {
-			t.Errorf("Node 20.x not found in output\nLogs: %v", logs)
+			t.Errorf("Node 22.x not found in output\nLogs: %v", logs)
 		}
 		if !foundPython {
 			t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
