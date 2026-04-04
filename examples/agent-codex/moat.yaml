@@ -9,7 +9,7 @@
 name: codex-test
 
 dependencies:
-  - node@20
+  - node@22
   - codex-cli
   - git
 

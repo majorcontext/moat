@@ -240,7 +240,7 @@ name: my-gemini-agent
 agent: gemini-cli
 
 dependencies:
-  - node@20
+  - node@22
   - git
   - gemini-cli
 

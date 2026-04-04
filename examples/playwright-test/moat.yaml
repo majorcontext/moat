@@ -13,7 +13,7 @@
 name: playwright-test
 
 dependencies:
-  - node@20
+  - node@22
   - playwright
 
 command: ["sh", "/workspace/demo.sh"]

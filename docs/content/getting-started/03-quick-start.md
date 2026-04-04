@@ -130,7 +130,7 @@ Create `moat.yaml`:
 name: my-agent
 
 dependencies:
-  - node@20
+  - node@22
 
 grants:
   - github
@@ -173,7 +173,7 @@ $ moat run -- node check-repos.js
 ```
 
 Moat:
-1. Read `moat.yaml` and determined the base image (`node:20-slim` from `node@20`)
+1. Read `moat.yaml` and determined the base image (`node:22-slim` from `node@22`)
 2. Injected the GitHub credential (from `grants: [github]`)
 3. Set the environment variable `NODE_ENV=development`
 4. Ran `node check-repos.js`

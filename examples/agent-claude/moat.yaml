@@ -9,7 +9,7 @@
 name: claude-test
 
 dependencies:
-  - node@20
+  - node@22
   - claude-code
   - git
 

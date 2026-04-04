@@ -147,7 +147,7 @@ func runClaudeCode(cmd *cobra.Command, args []string) error {
 // DefaultDependencies returns the default dependencies for running Claude Code.
 func DefaultDependencies() []string {
 	return []string{
-		"node@20",
+		"node@22",
 		"git",
 		"claude-code",
 	}

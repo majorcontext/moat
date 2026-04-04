@@ -214,7 +214,7 @@ func TestHasDependency(t *testing.T) {
 		},
 		{
 			name:   "version match",
-			deps:   []string{"node@20", "python@3.11"},
+			deps:   []string{"node@22", "python@3.11"},
 			prefix: "node",
 			want:   true,
 		},

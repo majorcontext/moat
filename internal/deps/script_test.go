@@ -42,7 +42,7 @@ func TestGenerateInstallScript_SingleAptPackage(t *testing.T) {
 
 func TestGenerateInstallScript_SingleRuntime(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 	}
 
 	script, err := GenerateInstallScript(deps)
@@ -51,7 +51,7 @@ func TestGenerateInstallScript_SingleRuntime(t *testing.T) {
 	}
 
 	// Should contain Node.js setup
-	if !strings.Contains(script, "https://deb.nodesource.com/setup_20.x") {
+	if !strings.Contains(script, "https://deb.nodesource.com/setup_22.x") {
 		t.Error("script should contain Node.js setup URL")
 	}
 	if !strings.Contains(script, "apt-get install -y nodejs") {
@@ -70,7 +70,7 @@ func TestGenerateInstallScript_RuntimeDefaultVersion(t *testing.T) {
 	}
 
 	// Should use default version from registry (20)
-	if !strings.Contains(script, "setup_20.x") {
+	if !strings.Contains(script, "setup_22.x") {
 		t.Error("script should use default Node.js version 20")
 	}
 }
@@ -79,7 +79,7 @@ func TestGenerateInstallScript_MultipleDependencies(t *testing.T) {
 	deps := []Dependency{
 		{Name: "psql"},
 		{Name: "mysql-client"},
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "go", Version: "1.22"},
 		{Name: "protoc"},
 		{Name: "typescript"},
@@ -100,7 +100,7 @@ func TestGenerateInstallScript_MultipleDependencies(t *testing.T) {
 	}
 
 	// Check runtimes
-	if !strings.Contains(script, "setup_20.x") {
+	if !strings.Contains(script, "setup_22.x") {
 		t.Error("script should install Node.js")
 	}
 	// Go now detects architecture at build time via uname -m
@@ -275,7 +275,7 @@ func TestGenerateInstallScript_InstallOrder(t *testing.T) {
 
 	// Find positions in script
 	aptPos := strings.Index(script, "postgresql-client")
-	nodePos := strings.Index(script, "setup_20.x")
+	nodePos := strings.Index(script, "setup_22.x")
 	sqlcPos := strings.Index(script, "sqlc_")
 	tsPos := strings.Index(script, "typescript")
 	playwrightPos := strings.Index(script, "playwright")
@@ -301,7 +301,7 @@ func TestGenerateInstallScript_InstallOrder(t *testing.T) {
 
 func TestGenerateInstallScript_IdempotentCommands(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 	}
 
 	script, err := GenerateInstallScript(deps)
@@ -367,7 +367,7 @@ func TestGenerateInstallScript_Python(t *testing.T) {
 func TestGenerateInstallScript_Example(t *testing.T) {
 	deps := []Dependency{
 		{Name: "psql"},
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "protoc"},
 		{Name: "typescript"},
 		{Name: "yarn"},

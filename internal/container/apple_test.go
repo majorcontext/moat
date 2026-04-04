@@ -33,10 +33,10 @@ func TestBuildCreateArgs(t *testing.T) {
 		{
 			name: "with working directory",
 			cfg: Config{
-				Image:      "node:20",
+				Image:      "node:22",
 				WorkingDir: "/workspace",
 			},
-			want: []string{"create", "--memory", "4096MB", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:20"},
+			want: []string{"create", "--memory", "4096MB", "--workdir", "/workspace", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "node:22"},
 		},
 		{
 			name: "with environment variables",

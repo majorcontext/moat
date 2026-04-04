@@ -6,7 +6,7 @@ func TestDepSpecString(t *testing.T) {
 	spec := DepSpec{
 		Description: "Node.js runtime",
 		Type:        TypeRuntime,
-		Default:     "20",
+		Default:     "22",
 	}
 	if spec.Type != TypeRuntime {
 		t.Errorf("Type = %v, want %v", spec.Type, TypeRuntime)

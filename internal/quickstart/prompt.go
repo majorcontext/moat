@@ -32,7 +32,7 @@ func BuildPrompt(workspace string) string {
 	b.WriteString("```yaml\n")
 	b.WriteString("# Example 1: Node.js web app with PostgreSQL\n")
 	b.WriteString("name: my-app\n")
-	b.WriteString("dependencies: [node@20, postgres@17, psql, git]\n")
+	b.WriteString("dependencies: [node@22, postgres@17, psql, git]\n")
 	b.WriteString("grants: [github]\n")
 	b.WriteString("hooks:\n")
 	b.WriteString("  pre_run: \"npm install\"\n")

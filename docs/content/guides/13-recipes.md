@@ -20,7 +20,7 @@ Complete `moat.yaml` configurations for common project types. Each recipe is a w
 name: my-node-app
 
 dependencies:
-  - node@20
+  - node@22
   - claude-code
   - git
   - gh
@@ -118,7 +118,7 @@ What this demonstrates:
 name: fullstack-app
 
 dependencies:
-  - node@20
+  - node@22
   - python@3.12
   - uv
   - postgres@17
@@ -163,7 +163,7 @@ What this demonstrates:
 name: my-platform
 
 dependencies:
-  - node@20
+  - node@22
   - claude-code
   - git
 

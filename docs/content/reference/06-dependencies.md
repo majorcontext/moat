@@ -15,7 +15,7 @@ Add dependencies to the `dependencies` list in `moat.yaml`:
 
 ```yaml
 dependencies:
-  - node@20
+  - node@22
   - python@3.11
   - git
   - npm:lodash@4.17.21
@@ -25,7 +25,7 @@ dependencies:
 The `--dep` CLI flag adds dependencies for a single run without modifying `moat.yaml`:
 
 ```bash
-moat run --dep node@20 --dep git ./my-project
+moat run --dep node@22 --dep git ./my-project
 ```
 
 See the [moat.yaml reference](./02-moat-yaml.md) for the complete `dependencies` field specification.
@@ -40,7 +40,7 @@ Registry dependencies defined in Moat's internal registry. Includes language run
 
 ```yaml
 dependencies:
-  - node@20        # Runtime with version
+  - node@22        # Runtime with version
   - python         # Runtime with default version
   - git            # System package
   - claude-code    # Custom installer
@@ -135,7 +135,7 @@ Partial versions resolve to the latest matching release within the specified maj
 
 | You write | Resolves to |
 |-----------|-------------|
-| `node@20` | `node@20.11.0` |
+| `node@22` | `node@22.11.0` |
 | `go@1.22` | `go@1.22.12` |
 | `python@3.11` | `python@3.11.8` |
 | `node` | Default version for that runtime |
@@ -148,7 +148,7 @@ Moat selects the base image based on declared runtime dependencies.
 
 | Dependencies | Base image |
 |--------------|------------|
-| `node` only | `node:20-slim` |
+| `node` only | `node:22-slim` |
 | `python` only | `python:3.11-slim` |
 | `go` only | `golang:1.22` |
 | Mixed or none | `debian:bookworm-slim` |

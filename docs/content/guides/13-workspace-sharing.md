@@ -36,7 +36,7 @@ Because excludes use tmpfs, anything written to an excluded directory is lost wh
 
 ```yaml
 dependencies:
-  - node@20
+  - node@22
 
 mounts:
   - source: .

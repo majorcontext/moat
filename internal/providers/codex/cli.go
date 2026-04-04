@@ -32,7 +32,7 @@ func NetworkHosts() []string {
 // DefaultDependencies returns the default dependencies for running Codex CLI.
 func DefaultDependencies() []string {
 	return []string{
-		"node@20",
+		"node@22",
 		"git",
 		"codex-cli",
 	}

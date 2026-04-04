@@ -13,7 +13,7 @@ func TestParseDependency(t *testing.T) {
 		wantErr bool
 	}{
 		{"node", "node", "", false},
-		{"node@20", "node", "20", false},
+		{"node@22", "node", "22", false},
 		{"node@20.11", "node", "20.11", false},
 		{"protoc@25.1", "protoc", "25.1", false},
 		{"golangci-lint@1.55.2", "golangci-lint", "1.55.2", false},
@@ -56,7 +56,7 @@ func TestParseServiceType(t *testing.T) {
 	}
 
 	// Non-service dep should get its type from registry
-	dep2, err := Parse("node@20")
+	dep2, err := Parse("node@22")
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestParseServiceType(t *testing.T) {
 }
 
 func TestParseAll(t *testing.T) {
-	deps, err := ParseAll([]string{"node@20", "protoc", "typescript"})
+	deps, err := ParseAll([]string{"node@22", "protoc", "typescript"})
 	if err != nil {
 		t.Fatalf("ParseAll error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestValidate(t *testing.T) {
 		// Valid cases
 		{[]string{"node"}, false, ""},
 		{[]string{"node", "typescript"}, false, ""},
-		{[]string{"node@20", "yarn", "pnpm"}, false, ""},
+		{[]string{"node@22", "yarn", "pnpm"}, false, ""},
 
 		// Missing requirement
 		{[]string{"typescript"}, true, "requires node"},
@@ -143,7 +143,7 @@ func TestVersionValidation(t *testing.T) {
 		errMsg  string
 	}{
 		// Valid versions
-		{"node@20", false, ""},
+		{"node@22", false, ""},
 		{"node@20.11", false, ""},
 		{"go@1.22", false, ""},
 		{"protoc@25.1", false, ""},
@@ -151,12 +151,12 @@ func TestVersionValidation(t *testing.T) {
 		{"python@3_11", false, ""}, // underscore allowed
 
 		// Invalid versions (shell injection attempts)
-		{"node@20; rm -rf /", true, "invalid character"},
+		{"node@22; rm -rf /", true, "invalid character"},
 		{"node@$(whoami)", true, "invalid character"},
 		{"node@`id`", true, "invalid character"},
-		{"node@20|cat /etc/passwd", true, "invalid character"},
-		{"node@20&echo pwned", true, "invalid character"},
-		{"node@20\necho pwned", true, "invalid character"},
+		{"node@22|cat /etc/passwd", true, "invalid character"},
+		{"node@22&echo pwned", true, "invalid character"},
+		{"node@22\necho pwned", true, "invalid character"},
 	}
 
 	for _, tt := range tests {
@@ -264,7 +264,7 @@ func TestVersionConstraintValidation(t *testing.T) {
 		errMsg  string
 	}{
 		// Valid versions
-		{[]string{"node@20"}, false, ""},
+		{[]string{"node@22"}, false, ""},
 		{[]string{"node@18"}, false, ""},
 		{[]string{"node@22"}, false, ""},
 		{[]string{"node@24"}, false, ""},
@@ -570,7 +570,7 @@ func TestDynamicDepValidation(t *testing.T) {
 
 func TestParseAllWithDynamicDeps(t *testing.T) {
 	// Mix of registry and dynamic deps
-	deps, err := ParseAll([]string{"node@20", "npm:eslint", "npm:prettier", "git"})
+	deps, err := ParseAll([]string{"node@22", "npm:eslint", "npm:prettier", "git"})
 	if err != nil {
 		t.Fatalf("ParseAll error: %v", err)
 	}

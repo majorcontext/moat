@@ -15,7 +15,7 @@ agent: test-agent
 version: 1.0.0
 
 dependencies:
-  - node@20
+  - node@22
 
 grants:
   - github:repo
@@ -49,7 +49,7 @@ mounts:
 	if cfg.Version != "1.0.0" {
 		t.Errorf("Version = %q", cfg.Version)
 	}
-	if len(cfg.Dependencies) != 1 || cfg.Dependencies[0] != "node@20" {
+	if len(cfg.Dependencies) != 1 || cfg.Dependencies[0] != "node@22" {
 		t.Errorf("Dependencies = %v", cfg.Dependencies)
 	}
 	if len(cfg.Grants) != 1 || cfg.Grants[0] != "github:repo" {

@@ -8,7 +8,7 @@ import (
 // TestFullPipeline tests the complete dependency pipeline from parsing to image tag generation.
 func TestFullPipeline(t *testing.T) {
 	// Parse dependencies
-	depStrings := []string{"node@20", "typescript", "psql"}
+	depStrings := []string{"node@22", "typescript", "psql"}
 	depList, err := ParseAll(depStrings)
 	if err != nil {
 		t.Fatalf("ParseAll: %v", err)
@@ -25,8 +25,8 @@ func TestFullPipeline(t *testing.T) {
 		t.Fatalf("GenerateDockerfile: %v", err)
 	}
 	dockerfile := result.Dockerfile
-	if !strings.Contains(dockerfile, "FROM node:20-slim") {
-		t.Error("Dockerfile should use node:20-slim as base image")
+	if !strings.Contains(dockerfile, "FROM node:22-slim") {
+		t.Error("Dockerfile should use node:22-slim as base image")
 	}
 	// Node is provided by base image, not installed via apt
 	if !strings.Contains(dockerfile, "provided by base image") {
@@ -106,17 +106,17 @@ func TestErrorHandlingMissingRequirements(t *testing.T) {
 
 // TestOrderIndependentImageTags tests that image tags are deterministic regardless of dependency order.
 func TestOrderIndependentImageTags(t *testing.T) {
-	deps1, err := ParseAll([]string{"node@20", "typescript", "psql"})
+	deps1, err := ParseAll([]string{"node@22", "typescript", "psql"})
 	if err != nil {
 		t.Fatalf("ParseAll deps1: %v", err)
 	}
 
-	deps2, err := ParseAll([]string{"psql", "node@20", "typescript"})
+	deps2, err := ParseAll([]string{"psql", "node@22", "typescript"})
 	if err != nil {
 		t.Fatalf("ParseAll deps2: %v", err)
 	}
 
-	deps3, err := ParseAll([]string{"typescript", "psql", "node@20"})
+	deps3, err := ParseAll([]string{"typescript", "psql", "node@22"})
 	if err != nil {
 		t.Fatalf("ParseAll deps3: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestValidationAllDependencyTypes(t *testing.T) {
 		},
 		{
 			name:    "runtime with version",
-			deps:    []string{"node@20"},
+			deps:    []string{"node@22"},
 			wantErr: false,
 		},
 		{
@@ -154,12 +154,12 @@ func TestValidationAllDependencyTypes(t *testing.T) {
 		},
 		{
 			name:    "npm package with node",
-			deps:    []string{"node@20", "typescript"},
+			deps:    []string{"node@22", "typescript"},
 			wantErr: false,
 		},
 		{
 			name:    "multiple dependency types",
-			deps:    []string{"node@20", "typescript", "psql", "go@1.21"},
+			deps:    []string{"node@22", "typescript", "psql", "go@1.21"},
 			wantErr: false,
 		},
 		{
@@ -319,7 +319,7 @@ func TestGoInstallDependencies(t *testing.T) {
 // Note: Dockerfile uses official runtime images when possible (faster), while scripts always
 // include runtime install commands (for upgrading existing containers).
 func TestDockerfileAndScriptConsistency(t *testing.T) {
-	deps := []string{"node@20", "typescript", "psql"}
+	deps := []string{"node@22", "typescript", "psql"}
 	depList, err := ParseAll(deps)
 	if err != nil {
 		t.Fatalf("ParseAll: %v", err)
@@ -337,8 +337,8 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 	}
 
 	// Dockerfile uses node as base image, script installs nodejs via apt
-	if !strings.Contains(dockerfile, "FROM node:20-slim") {
-		t.Error("Dockerfile should use node:20-slim as base")
+	if !strings.Contains(dockerfile, "FROM node:22-slim") {
+		t.Error("Dockerfile should use node:22-slim as base")
 	}
 	if !strings.Contains(script, "nodejs") {
 		t.Error("Script missing nodejs install")

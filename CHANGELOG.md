@@ -17,6 +17,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
       - 5432    # local Postgres
   ```
 
+### Changed
+
+- Default Node.js version updated from 20 to 22 (current LTS) for all providers (Claude, Codex, Gemini) and the TypeScript language server
+
 ### Added
 
 - **`network.host`** — list TCP ports on the host machine that the container may access; all host traffic is blocked by default even in permissive mode

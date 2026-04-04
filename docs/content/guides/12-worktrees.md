@@ -177,7 +177,7 @@ Branch-specific configuration works as follows:
      - github
 
    dependencies:
-     - node@20
+     - node@22
      - git
      - claude-code
    ```

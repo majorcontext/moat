@@ -194,7 +194,7 @@ For encrypted parameters, also add:
 name: my-agent
 
 dependencies:
-  - node@20
+  - node@22
 
 secrets:
   DATABASE_URL: ssm:///production/database/url

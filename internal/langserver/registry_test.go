@@ -30,8 +30,8 @@ func TestGet(t *testing.T) {
 		if spec.Plugin != "typescript-lsp@claude-plugins-official" {
 			t.Errorf("Plugin = %q, want %q", spec.Plugin, "typescript-lsp@claude-plugins-official")
 		}
-		if len(spec.Dependencies) != 1 || spec.Dependencies[0] != "node@20" {
-			t.Errorf("Dependencies = %v, want [node@20]", spec.Dependencies)
+		if len(spec.Dependencies) != 1 || spec.Dependencies[0] != "node@22" {
+			t.Errorf("Dependencies = %v, want [node@22]", spec.Dependencies)
 		}
 		if len(spec.InstallDeps) != 2 {
 			t.Errorf("InstallDeps = %v, want 2 entries", spec.InstallDeps)
@@ -110,7 +110,7 @@ func TestAllDependencies(t *testing.T) {
 		hasTSServer := false
 		for _, d := range deps {
 			switch d {
-			case "node@20":
+			case "node@22":
 				hasNode = true
 			case "npm:typescript":
 				hasTS = true
@@ -119,7 +119,7 @@ func TestAllDependencies(t *testing.T) {
 			}
 		}
 		if !hasNode {
-			t.Error("typescript dependencies should include 'node@20'")
+			t.Error("typescript dependencies should include 'node@22'")
 		}
 		if !hasTS {
 			t.Error("typescript dependencies should include 'npm:typescript'")
