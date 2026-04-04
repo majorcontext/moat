@@ -45,7 +45,7 @@ Add configuration when complexity grows:
 ```yaml
 # moat.yaml
 dependencies:
-  - node@20
+  - node@22
 grants:
   - github
 network:
