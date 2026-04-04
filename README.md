@@ -107,7 +107,7 @@ Create `moat.yaml` when you need more control:
 name: my-agent
 
 dependencies:
-  - node@20
+  - node@22
   - git
 
 grants:
@@ -170,7 +170,7 @@ See the [CLI reference](docs/content/reference/01-cli.md) for all commands and f
 
 **SSH agent proxy**: For SSH grants, moat runs a filtering SSH agent proxy. Sign requests are forwarded to your SSH agent, but only for granted hosts. Private keys never enter the container.
 
-**Image selection**: The `dependencies` field determines the base image—`node@20` uses `node:20-slim`, `python@3.11` uses `python:3.11-slim`. No dependencies defaults to `ubuntu:22.04`.
+**Image selection**: The `dependencies` field determines the base image—`node@22` uses `node:22-slim`, `python@3.11` uses `python:3.11-slim`. No dependencies defaults to `ubuntu:22.04`.
 
 **Audit logging**: Events are hash-chained for tamper evidence. Ed25519 attestations provide cryptographic proof of authenticity.
 

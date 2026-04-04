@@ -435,7 +435,7 @@ Wait for the daemon to shut down (or remove the lock file), then start a new run
 ### `building image with dependencies`
 
 ```
-building image with dependencies [node@20, python@3.12]: ...
+building image with dependencies [node@22, python@3.12]: ...
 ```
 
 **Cause:** The Docker or Apple container image build failed. Common causes: network issues pulling base images, invalid dependency versions, or syntax errors in custom Dockerfile instructions.
@@ -447,7 +447,7 @@ building image with dependencies [node@20, python@3.12]: ...
 
    ```yaml
    dependencies:
-     - node@20
+     - node@22
      - python@3.12
    ```
 

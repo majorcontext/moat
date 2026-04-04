@@ -17,7 +17,7 @@ Access web servers and services running inside agent containers from your browse
 name: my-app
 
 dependencies:
-  - node@20
+  - node@22
 
 ports:
   web: 3000

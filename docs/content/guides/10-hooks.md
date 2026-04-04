@@ -97,7 +97,7 @@ Install project dependencies on every start. Package managers like `npm install`
 name: my-node-app
 
 dependencies:
-  - node@20
+  - node@22
   - git
 
 hooks:
@@ -161,7 +161,7 @@ hooks:
 name: my-agent
 
 dependencies:
-  - node@20
+  - node@22
   - claude-code
   - git
   - gh
@@ -231,7 +231,7 @@ The command must be available in the image at the time the hook runs. If a build
 
 ```yaml
 dependencies:
-  - node@20       # Installed before hooks run
+  - node@22       # Installed before hooks run
 
 hooks:
   post_build_root: apt-get update -qq && apt-get install -y -qq imagemagick

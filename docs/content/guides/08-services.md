@@ -24,7 +24,7 @@ Add a service to your dependencies and use the injected environment variables:
 name: my-app
 
 dependencies:
-  - node@20
+  - node@22
   - postgres@17
   - psql           # Client tools for the demo
 
@@ -279,7 +279,7 @@ Apple container networking requires macOS 26 or later.
 name: test-runner
 
 dependencies:
-  - node@20
+  - node@22
   - postgres@17
   - redis@7
 

@@ -148,7 +148,7 @@ Use backticks for:
 - Flags: `--grant`
 - File names: `moat.yaml`
 - Environment variables: `MOAT_PROXY_PORT`
-- Values: `true`, `strict`, `node@20`
+- Values: `true`, `strict`, `node@22`
 
 Don't use backticks for:
 - Product names: Moat, Docker, GitHub

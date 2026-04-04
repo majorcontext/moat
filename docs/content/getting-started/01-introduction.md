@@ -76,7 +76,7 @@ For repeated use, create a `moat.yaml` file:
 name: my-agent
 
 dependencies:
-  - node@20
+  - node@22
 
 grants:
   - github
@@ -93,7 +93,7 @@ Then run without flags:
 moat run ./my-project
 ```
 
-The `dependencies` field determines the base image (`node@20` → `node:20-slim`). The `grants` field specifies which credentials to inject. See [moat.yaml reference](../reference/02-moat-yaml.md) for all options.
+The `dependencies` field determines the base image (`node@22` → `node:22-slim`). The `grants` field specifies which credentials to inject. See [moat.yaml reference](../reference/02-moat-yaml.md) for all options.
 
 ## Container runtimes
 

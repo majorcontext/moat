@@ -21,7 +21,7 @@ version: 1.0.0
 
 # Runtime
 dependencies:
-  - node@20
+  - node@22
   - postgres@17
   - redis@7
 
@@ -238,7 +238,7 @@ List of runtime dependencies. The first dependency determines the base image.
 
 ```yaml
 dependencies:
-  - node@20
+  - node@22
   - python@3.11
 ```
 
@@ -252,7 +252,7 @@ When `git` is listed as a dependency, the host's git identity (`user.name` and `
 | Dependency | Base image |
 |------------|------------|
 | `node@18` | `node:18-slim` |
-| `node@20` | `node:20-slim` |
+| `node@22` | `node:22-slim` |
 | `node@22` | `node:22-slim` |
 | `python@3.10` | `python:3.10-slim` |
 | `python@3.11` | `python:3.11-slim` |
@@ -267,7 +267,7 @@ Service dependencies start sidecar containers that run alongside your agent. Moa
 
 ```yaml
 dependencies:
-  - node@20
+  - node@22
   - postgres@17
   - redis@7
 ```
