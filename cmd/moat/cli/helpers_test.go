@@ -177,7 +177,7 @@ func TestHasDependency(t *testing.T) {
 		},
 		{
 			name:   "with version",
-			deps:   []string{"node@20", "git"},
+			deps:   []string{"node@22", "git"},
 			prefix: "node",
 			want:   true,
 		},

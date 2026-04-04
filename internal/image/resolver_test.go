@@ -14,7 +14,7 @@ func TestResolveNoDeps(t *testing.T) {
 }
 
 func TestResolveWithDeps(t *testing.T) {
-	depList := []deps.Dependency{{Name: "node", Version: "20"}}
+	depList := []deps.Dependency{{Name: "node", Version: "22"}}
 	img := Resolve(depList, nil)
 	// Should return a generated image tag
 	if img == DefaultImage {
@@ -34,7 +34,7 @@ func TestResolveEmptyDeps(t *testing.T) {
 
 func TestResolveMultipleDeps(t *testing.T) {
 	depList := []deps.Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "python", Version: "3.11"},
 	}
 	img := Resolve(depList, nil)
@@ -111,7 +111,7 @@ func TestResolveWithBaseImageAffectsHash(t *testing.T) {
 }
 
 func TestResolveWithDepsAndSSH(t *testing.T) {
-	depList := []deps.Dependency{{Name: "node", Version: "20"}}
+	depList := []deps.Dependency{{Name: "node", Version: "22"}}
 	imgWithoutSSH := Resolve(depList, nil)
 	imgWithSSH := Resolve(depList, &deps.ImageSpec{NeedsSSH: true})
 

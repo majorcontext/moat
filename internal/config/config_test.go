@@ -21,7 +21,7 @@ agent: claude-code
 version: 1.0.46
 
 dependencies:
-  - node@20
+  - node@22
   - python@3.11
 
 grants:
@@ -321,7 +321,7 @@ name: myapp
 agent: test
 
 dependencies:
-  - node@20
+  - node@22
   - typescript
   - protoc@25.1
 `
@@ -334,8 +334,8 @@ dependencies:
 	if len(cfg.Dependencies) != 3 {
 		t.Fatalf("Dependencies = %d, want 3", len(cfg.Dependencies))
 	}
-	if cfg.Dependencies[0] != "node@20" {
-		t.Errorf("Dependencies[0] = %q, want %q", cfg.Dependencies[0], "node@20")
+	if cfg.Dependencies[0] != "node@22" {
+		t.Errorf("Dependencies[0] = %q, want %q", cfg.Dependencies[0], "node@22")
 	}
 }
 
@@ -391,7 +391,7 @@ container:
   cpus: 4
   dns: ["1.1.1.1", "8.8.8.8"]
 dependencies:
-  - node@20
+  - node@22
 `
 	os.WriteFile(configPath, []byte(content), 0644)
 
@@ -2009,7 +2009,7 @@ language_servers:
 		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
 dependencies:
-  - node@20
+  - node@22
   - go
 grants:
   - anthropic

@@ -1269,14 +1269,14 @@ func TestDependencyNodeRuntime(t *testing.T) {
 		}
 		defer mgr.Close()
 
-		workspace := createTestWorkspaceWithDeps(t, []string{"node@20"})
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@22"})
 
 		// Verify node is installed
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-dep-node",
 			Workspace: workspace,
 			Config: &config.Config{
-				Dependencies: []string{"node@20"},
+				Dependencies: []string{"node@22"},
 			},
 			Cmd: []string{"node", "--version"},
 		})
@@ -1458,13 +1458,13 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 		}
 		defer mgr.Close()
 
-		workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "python@3.11"})
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@22", "python@3.11"})
 
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-dep-multi-runtime",
 			Workspace: workspace,
 			Config: &config.Config{
-				Dependencies: []string{"node@20", "python@3.11"},
+				Dependencies: []string{"node@22", "python@3.11"},
 			},
 			Cmd: []string{"sh", "-c", "node --version && python --version"},
 		})
@@ -1527,13 +1527,13 @@ func TestDependencyNpmPackage(t *testing.T) {
 		}
 		defer mgr.Close()
 
-		workspace := createTestWorkspaceWithDeps(t, []string{"node@20", "typescript"})
+		workspace := createTestWorkspaceWithDeps(t, []string{"node@22", "typescript"})
 
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-dep-npm",
 			Workspace: workspace,
 			Config: &config.Config{
-				Dependencies: []string{"node@20", "typescript"},
+				Dependencies: []string{"node@22", "typescript"},
 			},
 			Cmd: []string{"tsc", "--version"},
 		})
@@ -1788,7 +1788,7 @@ func TestClaudePluginBaking(t *testing.T) {
 	}
 	plugins := []string{"test-plugin@test-marketplace"}
 
-	parsedDeps, err := deps.ParseAll([]string{"node@20", "claude-code"})
+	parsedDeps, err := deps.ParseAll([]string{"node@22", "claude-code"})
 	if err != nil {
 		t.Fatalf("ParseAll: %v", err)
 	}
@@ -1840,7 +1840,7 @@ func TestClaudePluginBakingOnlyMoatYaml(t *testing.T) {
 	}
 	plugins := []string{"agent-plugin@agent-marketplace"}
 
-	parsedDeps, err := deps.ParseAll([]string{"node@20", "claude-code"})
+	parsedDeps, err := deps.ParseAll([]string{"node@22", "claude-code"})
 	if err != nil {
 		t.Fatalf("ParseAll: %v", err)
 	}

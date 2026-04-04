@@ -25,7 +25,7 @@ func TestHasDockerDependency(t *testing.T) {
 		{
 			name: "no docker",
 			depList: []deps.Dependency{
-				{Name: "node", Version: "20"},
+				{Name: "node", Version: "22"},
 				{Name: "go", Version: "1.22"},
 			},
 			want: false,
@@ -33,7 +33,7 @@ func TestHasDockerDependency(t *testing.T) {
 		{
 			name: "docker present with mode",
 			depList: []deps.Dependency{
-				{Name: "node", Version: "20"},
+				{Name: "node", Version: "22"},
 				{Name: "docker", DockerMode: deps.DockerModeHost},
 			},
 			want: true,
@@ -87,7 +87,7 @@ func TestGetDockerDependency(t *testing.T) {
 		{
 			name: "no docker returns nil",
 			depList: []deps.Dependency{
-				{Name: "node", Version: "20"},
+				{Name: "node", Version: "22"},
 			},
 			wantNil: true,
 		},
@@ -239,7 +239,7 @@ func containsStringHelper(s, substr string) bool {
 // when docker is not in the dependency list.
 func TestResolveDockerDependency_NoDependency(t *testing.T) {
 	depList := []deps.Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 	}
 
 	cfg, err := ResolveDockerDependency(depList, container.RuntimeDocker)
@@ -302,7 +302,7 @@ func TestResolveDockerDependency_DockerRuntime_HostMode(t *testing.T) {
 	}
 
 	depList := []deps.Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "docker", DockerMode: deps.DockerModeHost},
 	}
 

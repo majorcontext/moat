@@ -45,7 +45,7 @@ var registry = map[string]ServerSpec{
 		Name:         "typescript",
 		Description:  "TypeScript/JavaScript language server (code intelligence, diagnostics)",
 		Plugin:       "typescript-lsp@claude-plugins-official",
-		Dependencies: []string{"node@20"},
+		Dependencies: []string{"node@22"},
 		InstallDeps:  []string{"npm:typescript", "npm:typescript-language-server"},
 	},
 	"python": {

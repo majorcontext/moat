@@ -11,7 +11,7 @@ func TestBuildFromConfig(t *testing.T) {
 	cfg := &config.Config{
 		Agent:        "claude",
 		Grants:       []string{"github", "anthropic"},
-		Dependencies: []string{"postgres@16", "redis", "node@20"},
+		Dependencies: []string{"postgres@16", "redis", "node@22"},
 		Network: config.NetworkConfig{
 			Policy: "strict",
 			Rules: []netrules.NetworkRuleEntry{

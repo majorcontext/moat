@@ -10,7 +10,7 @@ import (
 
 func TestGenerateDockerfile(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "typescript"},
 		{Name: "protoc", Version: "25.1"},
 		{Name: "psql"},
@@ -22,8 +22,8 @@ func TestGenerateDockerfile(t *testing.T) {
 	}
 
 	// With single runtime (node), should use official node image as base
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should start with FROM node:20-slim, got:\n%s", result.Dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Errorf("Dockerfile should start with FROM node:22-slim, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Check apt packages are batched
@@ -77,7 +77,7 @@ func TestGenerateDockerfileCustomBaseImage(t *testing.T) {
 func TestGenerateDockerfileCustomBaseImageWithDeps(t *testing.T) {
 	// Custom base image should override runtime-based selection
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "typescript"},
 	}
 	result, err := GenerateDockerfile(deps, &ImageSpec{BaseImage: "ghcr.io/test-org/custom-base:latest"})
@@ -174,7 +174,7 @@ func TestGenerateDockerfileNoBuildKitHasAptCleanup(t *testing.T) {
 
 func TestGenerateDockerfilePlaywright(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "playwright"},
 	}
 	result, err := GenerateDockerfile(deps, nil)
@@ -182,8 +182,8 @@ func TestGenerateDockerfilePlaywright(t *testing.T) {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 	// Should use node as base
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Errorf("Dockerfile should use node:22-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 	if !strings.Contains(result.Dockerfile, "npm install -g playwright") {
 		t.Error("Dockerfile should install playwright")
@@ -312,15 +312,15 @@ func TestGenerateDockerfileContextFiles(t *testing.T) {
 
 func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 	// Test combining regular deps with SSH
-	deps := []Dependency{{Name: "node", Version: "20"}}
+	deps := []Dependency{{Name: "node", Version: "22"}}
 	result, err := GenerateDockerfile(deps, &ImageSpec{NeedsSSH: true})
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
 
 	// Node should be provided by base image
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Errorf("Dockerfile should use node:22-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 	if !strings.Contains(result.Dockerfile, "provided by base image") {
 		t.Error("Dockerfile should note that node is provided by base image")
@@ -338,7 +338,7 @@ func TestGenerateDockerfileWithDepsAndSSH(t *testing.T) {
 func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 	// With multiple runtimes, should fall back to Debian and install both
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "python", Version: "3.10"},
 	}
 	result, err := GenerateDockerfile(deps, nil)
@@ -364,7 +364,7 @@ func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 
 func TestGenerateDockerfileDynamicNpm(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Type: TypeDynamicNpm, Package: "eslint", Name: "eslint"},
 		{Type: TypeDynamicNpm, Package: "@anthropic-ai/claude-code", Name: "@anthropic-ai/claude-code", Version: "1.0.0"},
 	}
@@ -479,7 +479,7 @@ func TestGenerateDockerfileDynamicGo(t *testing.T) {
 func TestGenerateDockerfileMixedDependencies(t *testing.T) {
 	// Test a realistic mix of registry and dynamic deps
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "typescript"},
 		{Name: "git"},
 		{Name: "gh"},
@@ -492,8 +492,8 @@ func TestGenerateDockerfileMixedDependencies(t *testing.T) {
 	}
 
 	// Check node base image
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Error("Dockerfile should use node:20-slim as base")
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Error("Dockerfile should use node:22-slim as base")
 	}
 
 	// Check registry npm packages are batched
@@ -758,7 +758,7 @@ func TestGenerateDockerfileMixedUserAndRootCustomDeps(t *testing.T) {
 func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 	// Test that Claude plugins are baked into the image via a script context file
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "claude-code"},
 	}
 
@@ -854,7 +854,7 @@ func TestGenerateDockerfileWithClaudePlugins(t *testing.T) {
 func TestGenerateDockerfilePluginsWithInitNeedsRoot(t *testing.T) {
 	// Verify USER root IS emitted after plugins when subsequent sections need root
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "claude-code"},
 	}
 
@@ -902,7 +902,7 @@ func TestGenerateDockerfilePluginsWithInitNeedsRoot(t *testing.T) {
 func TestGenerateDockerfileNoPlugins(t *testing.T) {
 	// Verify no plugin section when no plugins configured
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 	}
 
 	result, err := GenerateDockerfile(deps, &ImageSpec{})
@@ -920,7 +920,7 @@ func TestGenerateDockerfileNoPlugins(t *testing.T) {
 
 func TestGenerateDockerfilePluginValidation(t *testing.T) {
 	// Test that invalid plugin/marketplace names are rejected
-	deps := []Dependency{{Name: "node", Version: "20"}}
+	deps := []Dependency{{Name: "node", Version: "22"}}
 
 	t.Run("invalid marketplace repo", func(t *testing.T) {
 		marketplaces := []claude.MarketplaceConfig{
@@ -976,7 +976,7 @@ func TestGenerateDockerfilePluginValidation(t *testing.T) {
 func TestCategorizeDeps(t *testing.T) {
 	deps := []Dependency{
 		{Name: "git"},                 // apt
-		{Name: "node", Version: "20"}, // runtime
+		{Name: "node", Version: "22"}, // runtime
 		{Name: "gh"},                  // github binary
 		{Name: "typescript"},          // npm
 		{Name: "go", Version: "1.22"}, // runtime
@@ -1072,13 +1072,13 @@ func TestSelectBaseImage(t *testing.T) {
 	}{
 		{"empty", nil, "debian:bookworm-slim", false},
 		{"multiple", []Dependency{{Name: "node"}, {Name: "python"}}, "debian:bookworm-slim", false},
-		{"node only", []Dependency{{Name: "node", Version: "20"}}, "node:20-slim", true},
+		{"node only", []Dependency{{Name: "node", Version: "22"}}, "node:22-slim", true},
 		{"python only", []Dependency{{Name: "python", Version: "3.11"}}, "python:3.11-slim", true},
 		{"go only", []Dependency{{Name: "go", Version: "1.22"}}, "golang:1.22", true},
 		{"unknown runtime", []Dependency{{Name: "rust"}}, "debian:bookworm-slim", false},
 		// Resolved patch versions should use the original (floating) version for Docker tags
 		{"python resolved patch", []Dependency{{Name: "python", Version: "3.11.15", OriginalVersion: "3.11"}}, "python:3.11-slim", true},
-		{"node resolved patch", []Dependency{{Name: "node", Version: "20.18.3", OriginalVersion: "20"}}, "node:20-slim", true},
+		{"node resolved patch", []Dependency{{Name: "node", Version: "22.14.0", OriginalVersion: "22"}}, "node:22-slim", true},
 		{"go resolved patch", []Dependency{{Name: "go", Version: "1.22.12", OriginalVersion: "1.22"}}, "golang:1.22", true},
 		// When OriginalVersion is empty, Version is used directly (no resolution happened)
 		{"python no resolution", []Dependency{{Name: "python", Version: "3.11.5"}}, "python:3.11.5-slim", true},
@@ -1272,7 +1272,7 @@ func TestGenerateDockerfileWithDockerHost(t *testing.T) {
 func TestGenerateDockerfileDockerWithOtherDeps(t *testing.T) {
 	// Test docker dependency combined with other dependencies
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "docker", DockerMode: DockerModeHost},
 		{Name: "git"},
 	}
@@ -1282,8 +1282,8 @@ func TestGenerateDockerfileDockerWithOtherDeps(t *testing.T) {
 	}
 
 	// Should use node as base image
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Errorf("Dockerfile should use node:22-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Should install docker-ce-cli from Docker's official repo
@@ -1357,7 +1357,7 @@ func TestGenerateDockerfileDockerHost(t *testing.T) {
 func TestGenerateDockerfileDindWithOtherDeps(t *testing.T) {
 	// Test docker:dind combined with other dependencies
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "docker", DockerMode: DockerModeDind},
 		{Name: "git"},
 	}
@@ -1367,8 +1367,8 @@ func TestGenerateDockerfileDindWithOtherDeps(t *testing.T) {
 	}
 
 	// Should use node as base image
-	if !strings.HasPrefix(result.Dockerfile, "FROM node:20-slim") {
-		t.Errorf("Dockerfile should use node:20-slim as base, got:\n%s", result.Dockerfile[:100])
+	if !strings.HasPrefix(result.Dockerfile, "FROM node:22-slim") {
+		t.Errorf("Dockerfile should use node:22-slim as base, got:\n%s", result.Dockerfile[:100])
 	}
 
 	// Should install full docker suite for dind
@@ -1539,7 +1539,7 @@ func TestGenerateDockerfile_HooksPreRunTriggersInit(t *testing.T) {
 
 func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "typescript"},
 		{Name: "prettier"},
 		{Name: "eslint"},
@@ -1583,7 +1583,7 @@ func TestGenerateDockerfileNonInteractiveDeps(t *testing.T) {
 	// - corepack won't prompt to download package managers
 	// - project-local playwright finds pre-installed browsers
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "pnpm"},
 		{Name: "playwright"},
 	}

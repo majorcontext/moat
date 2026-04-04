@@ -87,7 +87,7 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 		Workspace: workspace,
 		Grants:    []string{"mcp-test"},
 		Config: &config.Config{
-			Dependencies: []string{"node@20"}, // Use node image which has curl
+			Dependencies: []string{"node@22"}, // Use node image which has curl
 			MCP: []config.MCPServerConfig{
 				{
 					Name: "test-server",
@@ -271,7 +271,7 @@ mcp:
 		Workspace: workspace,
 		Grants:    []string{"mcp-server1", "mcp-server2"},
 		Config: &config.Config{
-			Dependencies: []string{"node@20"}, // Use node image which has curl
+			Dependencies: []string{"node@22"}, // Use node image which has curl
 			MCP: []config.MCPServerConfig{
 				{
 					Name: "server1",

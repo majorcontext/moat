@@ -8,7 +8,7 @@ import (
 
 func TestImageTag(t *testing.T) {
 	deps := []Dependency{
-		{Name: "node", Version: "20"},
+		{Name: "node", Version: "22"},
 		{Name: "typescript"},
 	}
 	tag := ImageTag(deps, nil)
@@ -23,8 +23,8 @@ func TestImageTag(t *testing.T) {
 }
 
 func TestImageTagDifferent(t *testing.T) {
-	tag1 := ImageTag([]Dependency{{Name: "node", Version: "20"}}, nil)
-	tag2 := ImageTag([]Dependency{{Name: "node", Version: "22"}}, nil)
+	tag1 := ImageTag([]Dependency{{Name: "node", Version: "22"}}, nil)
+	tag2 := ImageTag([]Dependency{{Name: "node", Version: "24"}}, nil)
 	if tag1 == tag2 {
 		t.Error("different deps should have different tags")
 	}
