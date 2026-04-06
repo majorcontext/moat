@@ -245,7 +245,7 @@ func TestGetCustomCommands(t *testing.T) {
 		{"playwright", "", []string{"npm install -g playwright", "npx playwright install", "chromium-headless-shell"}, []string{"PLAYWRIGHT_BROWSERS_PATH"}},
 		{"aws", "", []string{"awscli", "uname -m", "unzip"}, nil},
 		{"gcloud", "", []string{"google-cloud", "tar", "install.sh"}, []string{"PATH"}},
-		{"rust", "", []string{"rustup", "sh -s --", "-y"}, []string{"PATH"}},
+		{"rust", "", []string{"rustup", "sh", "-y", "RUSTUP_HOME=/usr/local/rustup", "CARGO_HOME=/usr/local/cargo"}, []string{"PATH", "RUSTUP_HOME", "CARGO_HOME"}},
 		{"protoc", "25.1", []string{"protocolbuffers/protobuf", "protoc-25.1", "uname -m", "unzip", "/usr/local/include/"}, nil},
 		{"kubectl", "", []string{"dl.k8s.io", "uname -m", "chmod"}, nil},
 		{"terraform", "1.10.0", []string{"releases.hashicorp.com", "terraform_1.10.0", "unzip"}, nil},
