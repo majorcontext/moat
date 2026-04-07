@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -70,21 +71,34 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		}
 	}
 
+	// Resolve host home directory once for host config and remote-settings.
+	hostHome, hostHomeErr := os.UserHomeDir()
+
 	// Get host config - use provided or read from host's ~/.claude.json
 	var hostConfig map[string]any
 	if opts.HostConfig != nil {
 		hostConfig = opts.HostConfig
-	} else {
+	} else if hostHomeErr == nil {
 		// Read host config automatically
-		if hostHome, err := os.UserHomeDir(); err == nil {
-			hostConfig, _ = ReadHostConfig(filepath.Join(hostHome, ".claude.json"))
-			// Ignore errors - missing host config is OK
-		}
+		hostConfig, _ = ReadHostConfig(filepath.Join(hostHome, ".claude.json"))
+		// Ignore errors - missing host config is OK
 	}
 
 	// Write .claude.json config
 	if err := WriteClaudeConfig(tmpDir, mcpServers, hostConfig); err != nil {
 		return nil, fmt.Errorf("writing claude config: %w", err)
+	}
+
+	// Copy remote-settings.json from host's ~/.claude/ directory.
+	// This caches the server-managed settings so Claude Code doesn't prompt
+	// for managed settings approval on every container startup.
+	if hostHomeErr == nil {
+		remoteSettingsPath := filepath.Join(hostHome, ".claude", "remote-settings.json")
+		if data, readErr := os.ReadFile(remoteSettingsPath); readErr == nil {
+			if writeErr := os.WriteFile(filepath.Join(tmpDir, "remote-settings.json"), data, 0600); writeErr != nil {
+				log.Debug("failed to stage remote-settings.json", "error", writeErr)
+			}
+		}
 	}
 
 	// Write runtime context file if provided
