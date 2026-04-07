@@ -87,6 +87,16 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		return nil, fmt.Errorf("writing claude config: %w", err)
 	}
 
+	// Copy remote-settings.json from host's ~/.claude/ directory.
+	// This caches the server-managed settings so Claude Code doesn't prompt
+	// for managed settings approval on every container startup.
+	if hostHome, homeErr := os.UserHomeDir(); homeErr == nil {
+		remoteSettingsPath := filepath.Join(hostHome, ".claude", "remote-settings.json")
+		if data, readErr := os.ReadFile(remoteSettingsPath); readErr == nil {
+			_ = os.WriteFile(filepath.Join(tmpDir, "remote-settings.json"), data, 0600) //nolint:gosec // G703 false positive: tmpDir from MkdirTemp, filename is constant
+		}
+	}
+
 	// Write runtime context file if provided
 	if opts.RuntimeContext != "" {
 		if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte(opts.RuntimeContext), 0644); err != nil {

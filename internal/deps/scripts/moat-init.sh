@@ -86,6 +86,14 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
     chmod 600 "$TARGET_HOME/.claude/.credentials.json"
   fi
 
+  # Copy remote-settings.json if present (server-managed settings cache)
+  # This prevents Claude Code from prompting for managed settings approval
+  # on every container startup by providing the cached approval state.
+  if [ -f "$MOAT_CLAUDE_INIT/remote-settings.json" ]; then
+    cp -p "$MOAT_CLAUDE_INIT/remote-settings.json" "$TARGET_HOME/.claude/"
+    chmod 600 "$TARGET_HOME/.claude/remote-settings.json"
+  fi
+
   # Copy statsig directory if present (feature flags, preserve permissions)
   [ -d "$MOAT_CLAUDE_INIT/statsig" ] && \
     cp -rp "$MOAT_CLAUDE_INIT/statsig" "$TARGET_HOME/.claude/"
