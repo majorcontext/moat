@@ -10,7 +10,7 @@ v0.5 hardens network isolation and introduces operation-level policy enforcement
 
 ### Breaking
 
-- **Host traffic blocked by default** — containers can no longer reach services on the host machine without explicit configuration. This affects all network policy modes, including `permissive`. Add a `network.host` list to restore access ([#303](https://github.com/majorcontext/moat/pull/303)):
+- **Host traffic blocked by default** — containers can no longer reach services on the host machine without explicit configuration. This affects all network policy modes, including `permissive` ([#303](https://github.com/majorcontext/moat/pull/303)). Add a `network.host` list to restore access:
 
   ```yaml
   network:
@@ -50,9 +50,8 @@ v0.5 hardens network isolation and introduces operation-level policy enforcement
 - Surface actionable errors from the AWS provider and rename legacy `agentops` references ([#290](https://github.com/majorcontext/moat/pull/290))
 - Use `ConfigureProxy` for token refresh propagation in the daemon — previously, refreshed tokens weren't always picked up by in-flight requests ([#289](https://github.com/majorcontext/moat/pull/289))
 - SSH fallback for Claude marketplace clones with clearer error output — previously, HTTPS-only clones failed silently for private repos ([#285](https://github.com/majorcontext/moat/pull/285))
-- Correct SSH `known_hosts` ordering and surface clone fallback visibility ([#283](https://github.com/majorcontext/moat/pull/283))
+- Correct SSH `known_hosts` ordering and surface clone fallback visibility — previously, marketplace clones fell back to alternate transports without logging it, making failures hard to diagnose, and `known_hosts` entries were written in an order that could cause SSH host key verification to fail ([#283](https://github.com/majorcontext/moat/pull/283))
 - Disable interactive git credential prompts during host-side marketplace clones — previously, missing credentials caused the host clone step to hang ([#280](https://github.com/majorcontext/moat/pull/280))
-- Retry curl during e2e Apple container network startup to absorb cold-start delays ([#284](https://github.com/majorcontext/moat/pull/284))
 
 ## v0.4.0 — 2026-03-19
 
