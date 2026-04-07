@@ -347,13 +347,18 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 		}
 	case "rust":
-		// Install Rust via rustup
+		// Install Rust toolchain to shared location for non-root access
 		return InstallCommands{
 			Commands: []string{
-				"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable",
+				"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init",
+				"RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo sh /tmp/rustup-init -y --default-toolchain stable",
+				"chmod -R a+rX /usr/local/rustup /usr/local/cargo",
+				"rm /tmp/rustup-init",
 			},
 			EnvVars: map[string]string{
-				"PATH": "/root/.cargo/bin:$PATH",
+				"RUSTUP_HOME": "/usr/local/rustup",
+				"CARGO_HOME":  "/home/moatuser/.cargo",
+				"PATH":        "/usr/local/cargo/bin:$PATH",
 			},
 		}
 	case "claude-code":
