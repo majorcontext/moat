@@ -1,14 +1,16 @@
 # Changelog
 
-Moat runs AI coding agents in isolated containers with credential injection, network policy enforcement, and full observability. The core loop — declare what your agent needs in `moat.yaml`, run it in an isolated container, and audit everything it did — has stayed the same since v0.1. The runtime layer has broadened from Docker-only to Apple containers and Rancher Desktop, and the proxy now runs as a shared daemon that scopes credentials per run.
+Moat runs AI coding agents in isolated containers with credential injection, network policy enforcement, operation-level policy on tool calls and API traffic, and full observability. The core loop — declare what your agent needs in `moat.yaml`, run it in an isolated container, and audit everything it did — has stayed the same since v0.1. The runtime layer has broadened from Docker-only to Apple containers and Rancher Desktop, the proxy runs as a shared daemon that scopes credentials per run, and `gatekeeper` ships the credential-injecting proxy as a standalone binary for use outside the moat runtime.
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.5.0 — 2026-04-07
+
+v0.5 hardens network isolation and introduces operation-level policy enforcement on MCP tool calls and HTTP traffic. Host traffic is now blocked by default in every network policy mode — including `permissive` — and must be opted into per-port with `network.host`. Keep policy integration adds allow/deny/redact rules for MCP tool calls and REST API requests, with starter packs for common services and an LLM response policy that evaluates `tool_use` blocks before forwarding to the container. The credential-injecting proxy is now also available as a standalone `gatekeeper` binary that runs without the moat runtime. Other additions include multi-credential per host, custom base images, OAuth grants for MCP servers, sandbox-local MCP servers, and global mounts in `~/.moat/config.yaml`.
 
 ### Breaking
 
-- **Host traffic blocked by default** — containers can no longer reach services on the host machine without explicit configuration. This affects all network policy modes, including `permissive`. Add a `network.host` list to restore access:
+- **Host traffic blocked by default** — containers can no longer reach services on the host machine without explicit configuration. This affects all network policy modes, including `permissive`. Add a `network.host` list to restore access ([#303](https://github.com/majorcontext/moat/pull/303)):
 
   ```yaml
   network:
@@ -17,18 +19,40 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
       - 5432    # local Postgres
   ```
 
-### Changed
-
-- Default Node.js version updated from 20 to 22 (current LTS) for all providers (Claude, Codex, Gemini) and the TypeScript language server
-
 ### Added
 
-- **`network.host`** — list TCP ports on the host machine that the container may access; all host traffic is blocked by default even in permissive mode
-- **`MOAT_HOST_GATEWAY`** env var — set automatically in every container; resolves to the correct host IP across all runtimes (Docker, Apple containers, Rancher Desktop)
-- **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`
-- **LLM response policy** — evaluate tool_use blocks in Anthropic API responses against Keep rules before forwarding to the container, via `claude.llm-gateway`
-- **Starter packs** — built-in policy packs like `linear-readonly` for quick MCP server lockdown
-- **Multi-credential per host** — multiple grants (e.g., `claude` and `anthropic`) can now target the same host with different headers; clients that send placeholder headers choose which credential to use, otherwise the proxy auto-injects with `anthropic` preferred over `claude`
+- **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`; includes an LLM response policy that evaluates `tool_use` blocks in Anthropic API responses through `claude.llm-gateway` before forwarding to the container, plus starter packs like `linear-readonly` for quick MCP server lockdown ([#288](https://github.com/majorcontext/moat/pull/288))
+- **`gatekeeper` standalone proxy** — the credential-injecting proxy is now packaged as a standalone binary that runs without the moat runtime ([#299](https://github.com/majorcontext/moat/pull/299))
+- **`network.host`** — list TCP ports on the host machine that the container may access; all host traffic is blocked by default even in permissive mode ([#303](https://github.com/majorcontext/moat/pull/303))
+- **`MOAT_HOST_GATEWAY`** env var — set automatically in every container; resolves to the correct host IP across all runtimes (Docker, Apple containers, Rancher Desktop) ([#303](https://github.com/majorcontext/moat/pull/303))
+- **Multi-credential per host** — multiple grants (e.g., `claude` and `anthropic`) can now target the same host with different headers; clients that send placeholder headers choose which credential to use, otherwise the proxy auto-injects with `anthropic` preferred over `claude` ([#295](https://github.com/majorcontext/moat/pull/295))
+- **`moat grant show`** — inspect stored grants and the credentials they hold ([#297](https://github.com/majorcontext/moat/pull/297))
+- **Custom base image** — declare a prebuilt image as the base for the generated Dockerfile instead of inferring one from `dependencies` ([#292](https://github.com/majorcontext/moat/pull/292))
+- **OAuth grant provider for MCP servers** — authenticate to remote MCP servers via OAuth flows handled on the host ([#278](https://github.com/majorcontext/moat/pull/278))
+- **Sandbox-local MCP servers** — run MCP servers as processes inside the container under `claude.mcp` / `codex.mcp` ([#184](https://github.com/majorcontext/moat/pull/184))
+- **Settings passthrough** — `~/.moat/claude/settings.json` on the host is forwarded into the container's Claude configuration ([#281](https://github.com/majorcontext/moat/pull/281))
+- **Global mounts** in `~/.moat/config.yaml` — declare mounts that apply to every run without editing per-project `moat.yaml` ([#282](https://github.com/majorcontext/moat/pull/282))
+- **Host-side marketplace cloning** — clone private Claude plugin repos on the host (with SSH fallback) before injecting them into the container ([#240](https://github.com/majorcontext/moat/pull/240))
+- **Protobuf compiler and plugin dependencies** — `protoc` and language plugins are declarable in `dependencies` ([#276](https://github.com/majorcontext/moat/pull/276))
+- **Managed settings cache for Claude** — copy `~/.claude/remote-settings.json` into the container so Claude Code does not prompt for managed settings approval on every startup ([#306](https://github.com/majorcontext/moat/pull/306))
+- **AWS_PROFILE propagation** — the AWS profile selected at grant time is forwarded to the proxy daemon and used for credential resolution ([#296](https://github.com/majorcontext/moat/pull/296))
+
+### Changed
+
+- Default Node.js version updated from 20 to 22 (current LTS) for all providers (Claude, Codex, Gemini) and the TypeScript language server ([#304](https://github.com/majorcontext/moat/pull/304))
+- Homebrew tap moved to its new location ([#279](https://github.com/majorcontext/moat/pull/279))
+
+### Fixed
+
+- Install the Rust toolchain to a shared location (`/usr/local/cargo`) so non-root container users can use `cargo` and `rustc` — previously, rustup installed under `/root` and was unreadable to the default container user ([#305](https://github.com/majorcontext/moat/pull/305))
+- Add Anthropic and Gemini token placeholders so clients sending placeholder `Authorization` headers select the correct credential ([#293](https://github.com/majorcontext/moat/pull/293))
+- Skip plugin install when the `claude` CLI is absent — previously, image builds failed in containers that didn't include Claude Code ([#291](https://github.com/majorcontext/moat/pull/291))
+- Surface actionable errors from the AWS provider and rename legacy `agentops` references ([#290](https://github.com/majorcontext/moat/pull/290))
+- Use `ConfigureProxy` for token refresh propagation in the daemon — previously, refreshed tokens weren't always picked up by in-flight requests ([#289](https://github.com/majorcontext/moat/pull/289))
+- SSH fallback for Claude marketplace clones with clearer error output — previously, HTTPS-only clones failed silently for private repos ([#285](https://github.com/majorcontext/moat/pull/285))
+- Correct SSH `known_hosts` ordering and surface clone fallback visibility ([#283](https://github.com/majorcontext/moat/pull/283))
+- Disable interactive git credential prompts during host-side marketplace clones — previously, missing credentials caused the host clone step to hang ([#280](https://github.com/majorcontext/moat/pull/280))
+- Retry curl during e2e Apple container network startup to absorb cold-start delays ([#284](https://github.com/majorcontext/moat/pull/284))
 
 ## v0.4.0 — 2026-03-19
 
