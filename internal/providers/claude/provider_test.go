@@ -653,6 +653,38 @@ func TestWriteCredentialsFile(t *testing.T) {
 		}
 	})
 
+	t.Run("zero ExpiresAt uses far-future expiry", func(t *testing.T) {
+		stagingDir := t.TempDir()
+		cred := &provider.Credential{
+			Provider: "claude",
+			Token:    "sk-ant-oat01-abc123",
+			// ExpiresAt intentionally zero — simulates setup-token grants
+		}
+
+		err := WriteCredentialsFile(cred, stagingDir)
+		if err != nil {
+			t.Fatalf("WriteCredentialsFile() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".credentials.json"))
+		if err != nil {
+			t.Fatalf("failed to read credentials file: %v", err)
+		}
+
+		var creds oauthCredentials
+		if err := json.Unmarshal(data, &creds); err != nil {
+			t.Fatalf("failed to parse credentials file: %v", err)
+		}
+
+		if creds.ClaudeAiOauth == nil {
+			t.Fatal("ClaudeAiOauth should be present")
+		}
+		// expiresAt must be in the future, not the year 0001
+		if creds.ClaudeAiOauth.ExpiresAt <= time.Now().UnixMilli() {
+			t.Errorf("ExpiresAt = %d, want future timestamp (got past/zero)", creds.ClaudeAiOauth.ExpiresAt)
+		}
+	})
+
 	t.Run("anthropic provider does not create file", func(t *testing.T) {
 		stagingDir := t.TempDir()
 		cred := &provider.Credential{
