@@ -215,13 +215,10 @@ func TestOAuthProvider_ContainerEnv(t *testing.T) {
 
 	env := p.ContainerEnv(cred)
 
-	// OAuth should set CLAUDE_CODE_OAUTH_TOKEN with a placeholder
-	if len(env) != 1 {
-		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
-		return
-	}
-	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
+	// OAuth credentials rely on .credentials.json, not env vars.
+	// ContainerEnv should return nil for OAuth.
+	if len(env) != 0 {
+		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 0", len(env))
 	}
 }
 
@@ -249,11 +246,11 @@ func TestContainerEnvForCredential(t *testing.T) {
 		}
 	})
 
-	t.Run("claude provider uses CLAUDE_CODE_OAUTH_TOKEN", func(t *testing.T) {
+	t.Run("claude provider returns nil (uses .credentials.json)", func(t *testing.T) {
 		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc123"}
 		env := containerEnvForCredential(cred)
-		if len(env) != 1 || env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
-			t.Errorf("env = %v, want CLAUDE_CODE_OAUTH_TOKEN placeholder", env)
+		if len(env) != 0 {
+			t.Errorf("env = %v, want empty (OAuth uses .credentials.json)", env)
 		}
 	})
 
@@ -651,8 +648,8 @@ func TestWriteCredentialsFile(t *testing.T) {
 		if creds.ClaudeAiOauth == nil {
 			t.Fatal("ClaudeAiOauth should be present")
 		}
-		if creds.ClaudeAiOauth.AccessToken != ProxyInjectedPlaceholder {
-			t.Errorf("AccessToken = %q, want %q", creds.ClaudeAiOauth.AccessToken, ProxyInjectedPlaceholder)
+		if creds.ClaudeAiOauth.AccessToken != credential.ClaudeOAuthPlaceholder {
+			t.Errorf("AccessToken = %q, want %q", creds.ClaudeAiOauth.AccessToken, credential.ClaudeOAuthPlaceholder)
 		}
 	})
 

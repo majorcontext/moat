@@ -821,8 +821,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		hostAddr = m.runtime.GetHostAddress()
 		runCtx.HostGateway = hostAddr
 
-		// Build RegisterRequest from the RunContext
-		regReq := buildRegisterRequest(runCtx, opts.Grants)
+		// Build RegisterRequest from the RunContext.
+		// Pass Anthropic credential metadata (e.g., cached bootstrap) so the
+		// daemon can include it in the transformer spec.
+		var anthropicMeta map[string]string
+		if anthropicCred != nil {
+			anthropicMeta = anthropicCred.Metadata
+		}
+		regReq := buildRegisterRequest(runCtx, opts.Grants, anthropicMeta)
 		regReq.PolicyYAML = policyYAML
 		regReq.PolicyRuleSets = policyRuleSets
 
@@ -3741,7 +3747,7 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 
 // buildRegisterRequest converts a daemon.RunContext into a daemon.RegisterRequest
 // suitable for sending to the daemon API.
-func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.RegisterRequest {
+func buildRegisterRequest(rc *daemon.RunContext, grants []string, anthropicMeta map[string]string) daemon.RegisterRequest {
 	req := daemon.RegisterRequest{
 		RunID:            rc.RunID,
 		NetworkPolicy:    rc.NetworkPolicy,
@@ -3802,10 +3808,16 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		if _, hasTS := rc.TokenSubstitutions[host]; hasTS {
 			kind = "response-scrub"
 		}
-		req.ResponseTransformers = append(req.ResponseTransformers, daemon.TransformerSpec{
+		spec := daemon.TransformerSpec{
 			Host: host,
 			Kind: kind,
-		})
+		}
+		// Include credential metadata (e.g., cached bootstrap response) so the
+		// daemon can reconstruct the transformer with full context.
+		if kind == "oauth-endpoint-workaround" && len(anthropicMeta) > 0 {
+			spec.Metadata = anthropicMeta
+		}
+		req.ResponseTransformers = append(req.ResponseTransformers, spec)
 	}
 
 	return req
