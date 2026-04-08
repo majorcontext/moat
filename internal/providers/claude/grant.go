@@ -589,6 +589,12 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 // The cached bootstrap is stored in credential metadata and persists across runs
 // via the encrypted credential store. At run time, the proxy serves this cached
 // response instead of the limited response that setup-tokens receive.
+//
+// Staleness: the cached bootstrap reflects account capabilities at grant time.
+// If the user's subscription changes (e.g., downgrade), the cache becomes stale.
+// Re-run "moat grant claude" to refresh. The proxy prefers the live response
+// when it contains valid account data, so this only matters for setup-tokens
+// where the live response always returns account:null.
 func cacheBootstrapForCredential(cred *provider.Credential) {
 	// Try to get a full-scope token for the bootstrap fetch.
 	// For imported credentials, the token itself has full scopes.

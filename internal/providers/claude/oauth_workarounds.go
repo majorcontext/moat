@@ -2,6 +2,7 @@ package claude
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,14 +72,32 @@ func CreateOAuthEndpointTransformerWithMeta(meta map[string]string) func(req, re
 			return respInterface, false
 		}
 
-		// Handle /api/bootstrap: return cached response if available.
-		// This runs regardless of status code because the real response
-		// with a setup-token returns 200 but with account:null and
-		// default feature flags (no subscription context).
+		// Handle /api/bootstrap: prefer the real response when it contains
+		// account data (full-scope token), fall back to cached response when
+		// the real response is degraded (setup-token returns account:null).
 		if req.URL.Path == "/api/bootstrap" {
 			if cached, hasCached := meta[metaKeyCachedBootstrap]; hasCached && cached != "" {
-				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					realBody, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+					resp.Body.Close()
+					if err == nil && bootstrapHasAccount(realBody) {
+						log.Debug("bootstrap has account data, using real response",
+							"subsystem", "proxy")
+						//nolint:bodyclose // Response body will be closed by the HTTP handler
+						return &http.Response{
+							StatusCode:    resp.StatusCode,
+							Header:        resp.Header,
+							Body:          io.NopCloser(bytes.NewReader(realBody)),
+							ContentLength: int64(len(realBody)),
+							ProtoMajor:    1,
+							ProtoMinor:    1,
+						}, false
+					}
+				} else {
+					resp.Body.Close()
+				}
 
+				// Real response is degraded (account:null or non-200) — use cache
 				log.Debug("response transformed",
 					"subsystem", "proxy",
 					"action", "transform",
@@ -175,4 +194,17 @@ func createOAuthResponseWithMeta(path string, meta map[string]string) *http.Resp
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 	}
+}
+
+// bootstrapHasAccount checks whether a bootstrap response body contains
+// non-null account data. Setup-tokens return {"account":null,...} which
+// means Claude Code can't detect subscription capabilities.
+func bootstrapHasAccount(body []byte) bool {
+	var b struct {
+		Account json.RawMessage `json:"account"`
+	}
+	if err := json.Unmarshal(body, &b); err != nil {
+		return false
+	}
+	return len(b.Account) > 0 && string(b.Account) != "null"
 }

@@ -1,8 +1,11 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1087,4 +1090,107 @@ func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
 			t.Errorf("args should be omitted or empty, got %v", args)
 		}
 	}
+}
+
+func TestBootstrapHasAccount(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"null account", `{"account":null,"features":{}}`, false},
+		{"missing account", `{"features":{}}`, false},
+		{"empty object account", `{"account":{}}`, true},
+		{"real account", `{"account":{"id":"abc","name":"Test"},"features":{}}`, true},
+		{"invalid json", `not json`, false},
+		{"empty body", ``, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bootstrapHasAccount([]byte(tt.body)); got != tt.want {
+				t.Errorf("bootstrapHasAccount() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateOAuthEndpointTransformerWithMeta_Bootstrap(t *testing.T) {
+	cachedBootstrap := `{"account":{"id":"cached"},"features":{"max_context":1000000}}`
+
+	makeReq := func(path string) *http.Request {
+		req, _ := http.NewRequest("GET", "https://api.anthropic.com"+path, nil)
+		return req
+	}
+	makeResp := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode:    status,
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(bytes.NewReader([]byte(body))),
+			ContentLength: int64(len(body)),
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+		}
+	}
+
+	t.Run("uses cached when real response has null account", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(200, `{"account":null}`) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for null-account response")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != cachedBootstrap {
+			t.Errorf("body = %s, want cached bootstrap", body)
+		}
+	})
+
+	t.Run("prefers real response when it has account data", func(t *testing.T) {
+		realBody := `{"account":{"id":"real","plan":"max"},"features":{}}`
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(200, realBody) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if transformed {
+			t.Fatal("expected transformed=false when real response has account")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != realBody {
+			t.Errorf("body = %s, want real response", body)
+		}
+	})
+
+	t.Run("uses cached when real response is non-200", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(403, `{"error":"forbidden"}`) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for non-200 response")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != cachedBootstrap {
+			t.Errorf("body = %s, want cached bootstrap", body)
+		}
+	})
+
+	t.Run("no cache passes through unchanged", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		realBody := `{"account":null}`
+		origResp := makeResp(200, realBody) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false with no cached bootstrap")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
 }
