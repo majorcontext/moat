@@ -1194,3 +1194,139 @@ func TestCreateOAuthEndpointTransformerWithMeta_Bootstrap(t *testing.T) {
 		}
 	})
 }
+
+func TestCreateOAuthResponseWithMeta(t *testing.T) {
+	readBody := func(r *http.Response) map[string]any {
+		t.Helper()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("reading body: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err != nil {
+			t.Fatalf("parsing body %q: %v", body, err)
+		}
+		return m
+	}
+
+	t.Run("profile with subscription metadata", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", map[string]string{ //nolint:bodyclose // read by readBody
+			"subscriptionType": "claude_max",
+			"rateLimitTier":    "tier4",
+		})
+		m := readBody(resp)
+		if m["subscriptionType"] != "claude_max" {
+			t.Errorf("subscriptionType = %v, want claude_max", m["subscriptionType"])
+		}
+		if m["rateLimitTier"] != "tier4" {
+			t.Errorf("rateLimitTier = %v, want tier4", m["rateLimitTier"])
+		}
+		if resp.Header.Get("X-Moat-Transformed") != "oauth-scope-workaround" {
+			t.Error("missing X-Moat-Transformed header")
+		}
+	})
+
+	t.Run("profile without metadata omits subscription fields", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if _, ok := m["subscriptionType"]; ok {
+			t.Error("subscriptionType should be omitted when empty")
+		}
+		if _, ok := m["rateLimitTier"]; ok {
+			t.Error("rateLimitTier should be omitted when empty")
+		}
+		// Core fields still present
+		if _, ok := m["id"]; !ok {
+			t.Error("id field should be present")
+		}
+	})
+
+	t.Run("usage endpoint", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/usage", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if _, ok := m["usage"]; !ok {
+			t.Error("usage field should be present")
+		}
+	})
+
+	t.Run("unknown endpoint", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/unknown", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if len(m) != 0 {
+			t.Errorf("expected empty object, got %v", m)
+		}
+	})
+
+	t.Run("profile JSON is valid with special characters", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", map[string]string{ //nolint:bodyclose // read by readBody
+			"subscriptionType": `type"with<special>&chars`,
+			"rateLimitTier":    "tier1",
+		})
+		m := readBody(resp)
+		if m["subscriptionType"] != `type"with<special>&chars` {
+			t.Errorf("special chars not preserved: %v", m["subscriptionType"])
+		}
+	})
+}
+
+func TestOAuthEndpointTransformer_403Workarounds(t *testing.T) {
+	makeReq := func(path string) *http.Request {
+		req, _ := http.NewRequest("GET", "https://api.anthropic.com"+path, nil)
+		return req
+	}
+	makeResp := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode:    status,
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(bytes.NewReader([]byte(body))),
+			ContentLength: int64(len(body)),
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+		}
+	}
+
+	t.Run("transforms 403 on profile endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			"subscriptionType": "claude_teams",
+		})
+		inputResp := makeResp(403, `{"error":"permission_error"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/oauth/profile"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for 403 on profile")
+		}
+		r := resp.(*http.Response)
+		if r.StatusCode != 200 {
+			t.Errorf("status = %d, want 200", r.StatusCode)
+		}
+		body, _ := io.ReadAll(r.Body)
+		var m map[string]any
+		json.Unmarshal(body, &m) //nolint:errcheck
+		if m["subscriptionType"] != "claude_teams" {
+			t.Errorf("subscriptionType = %v, want claude_teams", m["subscriptionType"])
+		}
+	})
+
+	t.Run("passes through non-403 on profile endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		origResp := makeResp(200, `{"id":"user1"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/oauth/profile"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false for 200")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
+
+	t.Run("passes through 403 on non-workaround endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		origResp := makeResp(403, `{"error":"forbidden"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/messages"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false for non-workaround endpoint")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
+}

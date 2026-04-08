@@ -596,6 +596,10 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 // when it contains valid account data, so this only matters for setup-tokens
 // where the live response always returns account:null.
 func cacheBootstrapForCredential(cred *provider.Credential) {
+	if cred.Metadata == nil {
+		cred.Metadata = make(map[string]string)
+	}
+
 	// Try to get a full-scope token for the bootstrap fetch.
 	// For imported credentials, the token itself has full scopes.
 	// For setup-tokens, we need the host's short-lived token.
@@ -616,9 +620,6 @@ func cacheBootstrapForCredential(cred *provider.Credential) {
 		if err == nil && hostToken.AccessToken != "" && !hostToken.IsExpired() {
 			accessToken = hostToken.AccessToken
 			// Also grab subscription info from host credentials
-			if cred.Metadata == nil {
-				cred.Metadata = make(map[string]string)
-			}
 			if hostToken.SubscriptionType != "" && cred.Metadata["subscriptionType"] == "" {
 				cred.Metadata["subscriptionType"] = hostToken.SubscriptionType
 			}
@@ -633,10 +634,6 @@ func cacheBootstrapForCredential(cred *provider.Credential) {
 			"subsystem", "claude",
 		)
 		return
-	}
-
-	if cred.Metadata == nil {
-		cred.Metadata = make(map[string]string)
 	}
 
 	// Fetch subscription info if not already present

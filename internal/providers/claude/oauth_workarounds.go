@@ -3,12 +3,22 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/majorcontext/moat/internal/log"
 )
+
+// oauthProfileResponse is the synthetic profile returned for 403'd OAuth
+// profile requests. Subscription metadata is included when available so
+// Claude Code can determine the account tier.
+type oauthProfileResponse struct {
+	ID               string `json:"id"`
+	Email            string `json:"email"`
+	Name             string `json:"name"`
+	SubscriptionType string `json:"subscriptionType,omitempty"`
+	RateLimitTier    string `json:"rateLimitTier,omitempty"`
+}
 
 // OAuthEndpointWorkarounds defines OAuth API endpoints that require response
 // transformation to work around scope limitations in long-lived tokens.
@@ -164,17 +174,12 @@ func createOAuthResponseWithMeta(path string, meta map[string]string) *http.Resp
 	switch path {
 	case "/api/oauth/profile":
 		// Include subscription metadata so Claude Code can determine account tier.
-		subType := ""
-		rateTier := ""
+		profile := oauthProfileResponse{ID: "", Email: "", Name: ""}
 		if meta != nil {
-			subType = meta["subscriptionType"]
-			rateTier = meta["rateLimitTier"]
+			profile.SubscriptionType = meta["subscriptionType"]
+			profile.RateLimitTier = meta["rateLimitTier"]
 		}
-		if subType != "" {
-			body = []byte(fmt.Sprintf(`{"id":"","email":"","name":"","subscriptionType":%q,"rateLimitTier":%q}`, subType, rateTier))
-		} else {
-			body = []byte(`{"id":"","email":"","name":""}`)
-		}
+		body, _ = json.Marshal(profile)
 	case "/api/oauth/usage":
 		// Empty usage - status line will show no usage data
 		body = []byte(`{"usage":{}}`)
