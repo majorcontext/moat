@@ -14,6 +14,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/log"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
+	gcloudprov "github.com/majorcontext/moat/internal/providers/gcloud"
 	"github.com/majorcontext/moat/internal/routing"
 )
 
@@ -247,6 +248,24 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 		} else {
 			awsProvider.SetAuthToken(token)
 			rc.SetAWSHandler(awsProvider.Handler())
+		}
+	}
+
+	// Create gcloud credential provider if configured.
+	if req.GCloudConfig != nil {
+		gcloudCfg := &gcloudprov.Config{
+			ProjectID:     req.GCloudConfig.ProjectID,
+			Scopes:        req.GCloudConfig.Scopes,
+			ImpersonateSA: req.GCloudConfig.ImpersonateSA,
+			KeyFile:       req.GCloudConfig.KeyFile,
+			Email:         req.GCloudConfig.Email,
+		}
+		gcloudCP, gcloudErr := gcloudprov.NewCredentialProvider(runCtx, gcloudCfg)
+		if gcloudErr != nil {
+			log.Warn("failed to create gcloud credential provider for run",
+				"run_id", rc.RunID, "error", gcloudErr)
+		} else {
+			rc.SetGCloudHandler(gcloudprov.NewEndpointHandler(gcloudCP))
 		}
 	}
 

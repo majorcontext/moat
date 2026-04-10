@@ -45,6 +45,17 @@ type AWSConfig struct {
 	Profile         string        `json:"profile,omitempty"`
 }
 
+// GCloudConfig holds Google Cloud credential provider configuration.
+// All long-lived credential material stays on the host; the container
+// only sees short-lived access tokens served via metadata emulation.
+type GCloudConfig struct {
+	ProjectID     string   `json:"project_id"`
+	Scopes        []string `json:"scopes,omitempty"`
+	ImpersonateSA string   `json:"impersonate_service_account,omitempty"`
+	KeyFile       string   `json:"key_file,omitempty"`
+	Email         string   `json:"email,omitempty"`
+}
+
 // RunContext holds per-run proxy state. It implements credential.ProxyConfigurer
 // so providers can configure it identically to how they configure proxy.Proxy.
 type RunContext struct {
@@ -64,6 +75,7 @@ type RunContext struct {
 	NetworkRules  []netrules.HostRules     `json:"network_rules,omitempty"`
 
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
+	GCloudConfig     *GCloudConfig     `json:"gcloud_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 	Grants           []string          `json:"grants,omitempty"`
 	HostGateway      string            `json:"host_gateway,omitempty"`
@@ -74,6 +86,7 @@ type RunContext struct {
 	KeepEngines   map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
 	refreshCancel context.CancelFunc         `json:"-"` // cancels token refresh goroutine
 	awsHandler    http.Handler               `json:"-"` // AWS credential endpoint handler
+	gcloudHandler http.Handler               `json:"-"` // gcloud metadata endpoint handler
 	mu            sync.RWMutex
 }
 
@@ -148,6 +161,13 @@ func (rc *RunContext) SetAWSHandler(h http.Handler) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	rc.awsHandler = h
+}
+
+// SetGCloudHandler stores the gcloud metadata endpoint handler for this run.
+func (rc *RunContext) SetGCloudHandler(h http.Handler) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.gcloudHandler = h
 }
 
 // SetCredential implements credential.ProxyConfigurer.
@@ -413,6 +433,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 
 	// Include AWS handler if configured.
 	d.AWSHandler = rc.awsHandler
+
+	// Include gcloud handler if configured.
+	d.GCloudHandler = rc.gcloudHandler
 
 	// Propagate Keep policy engines.
 	d.KeepEngines = rc.KeepEngines

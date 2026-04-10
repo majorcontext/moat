@@ -74,6 +74,7 @@ type RegisterRequest struct {
 	NetworkRules         []netrules.HostRules     `json:"network_rules,omitempty"`
 	Grants               []string                 `json:"grants,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
+	GCloudConfig         *GCloudConfig            `json:"gcloud_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
 	PolicyYAML           map[string][]byte        `json:"policy_yaml,omitempty"`
 	PolicyRuleSets       []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
@@ -144,6 +145,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkAllow = req.NetworkAllow
 	rc.NetworkRules = req.NetworkRules
 	rc.AWSConfig = req.AWSConfig
+	rc.GCloudConfig = req.GCloudConfig
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
 	rc.HostGateway = req.HostGateway

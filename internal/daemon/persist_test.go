@@ -29,6 +29,7 @@ func TestRunPersister_SaveAndLoad(t *testing.T) {
 	rc2.ContainerID = "container-abc"
 	rc2.Grants = []string{"claude"}
 	rc2.AWSConfig = &AWSConfig{RoleARN: "arn:aws:iam::123:role/test", Region: "us-east-1"}
+	rc2.GCloudConfig = &GCloudConfig{ProjectID: "test-project", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}
 	rc2.TransformerSpecs = []TransformerSpec{
 		{Host: "api.github.com", Kind: "response-scrub"},
 		{Host: "api.anthropic.com", Kind: "oauth-endpoint-workaround"},
@@ -82,6 +83,9 @@ func TestRunPersister_SaveAndLoad(t *testing.T) {
 	}
 	if pr2.AWSConfig == nil || pr2.AWSConfig.RoleARN != "arn:aws:iam::123:role/test" {
 		t.Errorf("run-2 AWSConfig = %v, want role ARN arn:aws:iam::123:role/test", pr2.AWSConfig)
+	}
+	if pr2.GCloudConfig == nil || pr2.GCloudConfig.ProjectID != "test-project" {
+		t.Errorf("run-2 GCloudConfig = %v, want project test-project", pr2.GCloudConfig)
 	}
 	if len(pr2.TransformerSpecs) != 2 {
 		t.Errorf("run-2 TransformerSpecs len = %d, want 2", len(pr2.TransformerSpecs))
