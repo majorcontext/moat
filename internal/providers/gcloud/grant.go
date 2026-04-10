@@ -195,5 +195,16 @@ func ConfigFromCredential(cred *provider.Credential) (*Config, error) {
 
 // testCredentials verifies that credentials can be obtained for the given config.
 func testCredentials(ctx context.Context, cfg *Config) error {
+	cp, err := NewCredentialProvider(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	tok, err := cp.GetToken(ctx)
+	if err != nil {
+		return err
+	}
+	if tok.AccessToken == "" {
+		return fmt.Errorf("received empty access token")
+	}
 	return nil
 }
