@@ -1127,7 +1127,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// For 169.254.169.254, also check the path to avoid intercepting AWS IMDS
 	// requests when both gcloud and aws grants are active on the same run.
 	if r.Host == "metadata.google.internal" ||
-		(strings.HasPrefix(r.Host, "169.254.169.254") && strings.HasPrefix(r.URL.Path, "/computeMetadata/")) {
+		((r.Host == "169.254.169.254" || strings.HasPrefix(r.Host, "169.254.169.254:")) && strings.HasPrefix(r.URL.Path, "/computeMetadata/")) {
 		if h := p.getGCloudHandlerForRequest(r); h != nil {
 			h.ServeHTTP(w, r)
 			return

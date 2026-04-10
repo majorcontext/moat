@@ -116,6 +116,10 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 
 	if cfg.ImpersonateSA != "" {
 		cred.Metadata[MetaKeyImpersonate] = cfg.ImpersonateSA
+		// The SA email is known from the impersonation target.
+		if cfg.Email == "" {
+			cfg.Email = cfg.ImpersonateSA
+		}
 	}
 	if cfg.KeyFile != "" {
 		cred.Metadata[MetaKeyKeyFile] = cfg.KeyFile

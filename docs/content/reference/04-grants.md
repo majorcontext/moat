@@ -643,7 +643,6 @@ The following environment variables are set in the container:
 |----------|-------|
 | `GOOGLE_CLOUD_PROJECT` | Configured project ID |
 | `CLOUDSDK_CORE_PROJECT` | Configured project ID |
-| `CLOUDSDK_AUTH_DISABLE_CREDENTIALS_FILE` | `true` |
 
 ### Refresh behavior
 

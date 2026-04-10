@@ -151,6 +151,8 @@ func (h *EndpointHandler) serveToken(w http.ResponseWriter, r *http.Request) {
 }
 
 // classifyError returns a user-friendly error message for common token errors.
+// Note: matches against error message strings from golang.org/x/oauth2 and google SDK.
+// These are not part of a stable API — audit when bumping those dependencies.
 func classifyError(err error) string {
 	msg := err.Error()
 

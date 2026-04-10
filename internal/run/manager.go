@@ -1031,8 +1031,6 @@ region = %s
 			proxyEnv = append(proxyEnv,
 				"GOOGLE_CLOUD_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
 				"CLOUDSDK_CORE_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
-				// Prevent gcloud from trying to read local credential files.
-				"CLOUDSDK_AUTH_DISABLE_CREDENTIALS_FILE=true",
 			)
 			fmt.Printf("gcloud metadata emulation configured (project: %s)\n",
 				r.GCloudCredentialProvider.ProjectID())
