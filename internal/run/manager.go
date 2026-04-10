@@ -197,8 +197,10 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		}
 
 		// Runs already in a terminal state don't need a live container check.
+		// Pass stateConfirmed=true because the owning process authoritatively
+		// wrote this terminal state — it's safe to clean up stale routes.
 		if meta.State == string(StateStopped) || meta.State == string(StateFailed) {
-			m.registerPersistedRun(State(meta.State), meta, store, runID, nil)
+			m.registerPersistedRun(State(meta.State), true, meta, store, runID, nil)
 			continue
 		}
 
@@ -211,6 +213,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		type checkedRun struct {
 			info              persistedRunInfo
 			runState          State
+			stateConfirmed    bool // true when state was confirmed by a successful container check
 			serviceContainers map[string]string
 		}
 
@@ -226,29 +229,50 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				select {
 				case sem <- struct{}{}:
 				case <-ctx.Done():
-					results[idx] = checkedRun{info: info, runState: StateStopped}
+					results[idx] = checkedRun{
+						info:              info,
+						runState:          State(info.meta.State),
+						serviceContainers: info.meta.ServiceContainers,
+					}
 					return
 				}
 				defer func() { <-sem }()
+
+				// Skip container state check for runs created with a different runtime.
+				if info.meta.Runtime != "" && info.meta.Runtime != string(m.runtime.Type()) {
+					log.Debug("skipping cross-runtime container check, preserving persisted state", "id", info.runID, "run_runtime", info.meta.Runtime, "current_runtime", m.runtime.Type())
+					results[idx] = checkedRun{
+						info:              info,
+						runState:          State(info.meta.State),
+						serviceContainers: info.meta.ServiceContainers,
+					}
+					return
+				}
 
 				// 5-second timeout per container check.
 				callCtx, callCancel := context.WithTimeout(ctx, 5*time.Second)
 				defer callCancel()
 
 				var runState State
+				var confirmed bool
 				containerState, csErr := m.runtime.ContainerState(callCtx, info.meta.ContainerID)
 				if csErr != nil {
-					log.Debug("container state check failed, assuming stopped", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
-					runState = StateStopped
+					log.Debug("container state check failed, preserving persisted state", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
+					runState = State(info.meta.State)
 				} else {
 					switch containerState {
 					case "running":
+						confirmed = true
 						runState = StateRunning
 					case "exited", "dead", "stopped":
+						confirmed = true
 						runState = StateStopped
 					case "created", "restarting":
+						confirmed = true
 						runState = StateCreated
 					default:
+						// Unknown state (e.g. "paused") — can't confirm,
+						// fall back to persisted state.
 						runState = State(info.meta.State)
 					}
 				}
@@ -266,6 +290,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				results[idx] = checkedRun{
 					info:              info,
 					runState:          runState,
+					stateConfirmed:    confirmed,
 					serviceContainers: serviceContainers,
 				}
 			}(i, info)
@@ -274,7 +299,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		wg.Wait()
 
 		for _, cr := range results {
-			m.registerPersistedRun(cr.runState, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
+			m.registerPersistedRun(cr.runState, cr.stateConfirmed, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
 		}
 	}
 
@@ -282,9 +307,11 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 }
 
 // registerPersistedRun creates and registers a Run from persisted metadata.
+// stateConfirmed indicates whether runState was determined by a successful container
+// state check (true) or inferred from persisted state / error fallback (false).
 // If serviceContainers is nil, it is loaded directly from metadata (for terminal-state runs
 // that skip live container checks).
-func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
+func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
 	if serviceContainers == nil {
 		serviceContainers = meta.ServiceContainers
 	}
@@ -296,6 +323,7 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 		Grants:            meta.Grants,
 		Agent:             meta.Agent,
 		Image:             meta.Image,
+		Runtime:           meta.Runtime,
 		Ports:             meta.Ports,
 		State:             runState,
 		ContainerID:       meta.ContainerID,
@@ -314,10 +342,22 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 		WorktreeRepoID:    meta.WorktreeRepoID,
 	}
 
-	// If container is already stopped, close exitCh immediately
-	// so any Wait() calls don't hang, and clean up stale routes
-	// so the name can be reused without requiring "moat clean".
-	if runState == StateStopped || runState == StateFailed {
+	// If container is confirmed stopped by a live check or by authoritative
+	// persisted state, close exitCh so Wait() calls don't hang, and clean
+	// up stale routes so the name can be reused without "moat clean".
+	//
+	// Only perform route/daemon cleanup when stateConfirmed is true:
+	// either a successful container state check confirmed the container is
+	// gone, or the owning process wrote the terminal state to disk.
+	//
+	// When stateConfirmed is false (container check failed, context canceled,
+	// or unknown container state), routes are intentionally preserved even if
+	// the container is likely stopped. This avoids corrupting routes for runs
+	// that are actually still alive but temporarily unreachable. The tradeoff
+	// is that routes may become stale in error cases, requiring "moat clean"
+	// to reclaim names. This is preferable to the previous behavior where a
+	// single failed check permanently destroyed routes for live runs.
+	if stateConfirmed && (runState == StateStopped || runState == StateFailed) {
 		close(r.exitCh)
 		if r.Name != "" {
 			if err := m.routes.Remove(r.Name); err != nil {
@@ -329,12 +369,15 @@ func (m *Manager) registerPersistedRun(runState State, meta storage.Metadata, st
 				}
 			}
 		}
+	} else if runState == StateStopped || runState == StateFailed {
+		// Unconfirmed terminal state (e.g. container check failed) — close
+		// exitCh but skip route cleanup since we can't be sure the container
+		// is actually gone.
+		close(r.exitCh)
 	}
 
-	// Update metadata if state changed
-	if string(runState) != meta.State {
-		_ = r.SaveMetadata()
-	}
+	// Never write state back to disk during reconciliation.
+	// The owning process is responsible for its run's on-disk state.
 
 	m.mu.Lock()
 	m.runs[runID] = r
@@ -1491,6 +1534,7 @@ region = %s
 		r.Agent = opts.Config.Agent
 	}
 	r.Image = containerImage
+	r.Runtime = string(m.runtime.Type())
 
 	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)
 
