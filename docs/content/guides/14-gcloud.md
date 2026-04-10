@@ -27,7 +27,7 @@ Or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON key file.
 moat grant gcloud --project my-project
 ```
 
-The `--project` flag sets the GCP project ID for API calls. If omitted, Moat reads it from `gcloud config get-value project` or the `GOOGLE_CLOUD_PROJECT` environment variable.
+The `--project` flag sets the GCP project ID for API calls. If omitted, Moat checks `GOOGLE_CLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, then `gcloud config get-value project`.
 
 ### Service account impersonation
 

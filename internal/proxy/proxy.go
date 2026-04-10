@@ -1124,7 +1124,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Google client libraries make plain HTTP requests to metadata.google.internal
 	// (or 169.254.169.254) via HTTP_PROXY. The proxy receives these as proxied GETs
 	// with the host set. Route them to the per-run gcloud handler.
-	if r.Host == "metadata.google.internal" || strings.HasPrefix(r.Host, "169.254.169.254") {
+	// For 169.254.169.254, also check the path to avoid intercepting AWS IMDS
+	// requests when both gcloud and aws grants are active on the same run.
+	if r.Host == "metadata.google.internal" ||
+		(strings.HasPrefix(r.Host, "169.254.169.254") && strings.HasPrefix(r.URL.Path, "/computeMetadata/")) {
 		if h := p.getGCloudHandlerForRequest(r); h != nil {
 			h.ServeHTTP(w, r)
 			return

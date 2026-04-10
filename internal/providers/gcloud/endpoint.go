@@ -13,6 +13,9 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 )
 
+// DefaultEmail is the fallback email used when the authenticated identity is unknown.
+const DefaultEmail = "default@moat.local"
+
 // EndpointHandler serves GCE metadata server emulation routes.
 // It implements http.Handler and responds to the subset of metadata
 // endpoints that gcloud CLI and Google client libraries require.
@@ -28,7 +31,7 @@ type EndpointHandler struct {
 func NewEndpointHandler(cp *CredentialProvider) *EndpointHandler {
 	email := cp.Email()
 	if email == "" {
-		email = "default@moat.local"
+		email = DefaultEmail
 	}
 	return &EndpointHandler{
 		getToken:  cp.GetToken,
@@ -47,7 +50,7 @@ func NewEndpointHandlerFromTokenFunc(
 	email string,
 ) *EndpointHandler {
 	if email == "" {
-		email = "default@moat.local"
+		email = DefaultEmail
 	}
 	return &EndpointHandler{
 		getToken:  getToken,
@@ -127,9 +130,12 @@ func (h *EndpointHandler) serveToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresIn := int(time.Until(tok.Expiry).Seconds())
-	if expiresIn < 0 {
-		expiresIn = 0
+	expiresIn := 3600 // default for tokens without expiry
+	if !tok.Expiry.IsZero() {
+		expiresIn = int(time.Until(tok.Expiry).Seconds())
+		if expiresIn < 0 {
+			expiresIn = 0
+		}
 	}
 
 	resp := map[string]any{

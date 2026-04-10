@@ -78,7 +78,7 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 
 	// Detect project if not provided.
 	if cfg.ProjectID == "" {
-		project, err := detectProject()
+		project, err := detectProject(ctx)
 		if err != nil {
 			return nil, &provider.GrantError{
 				Provider: "gcloud",
@@ -145,7 +145,7 @@ func splitScopes(s string) []string {
 
 // detectProject attempts to detect the Google Cloud project from the environment.
 // It checks GOOGLE_CLOUD_PROJECT, CLOUDSDK_CORE_PROJECT, then gcloud CLI.
-func detectProject() (string, error) {
+func detectProject(ctx context.Context) (string, error) {
 	// Check environment variables first.
 	for _, env := range []string{"GOOGLE_CLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
 		if v := getenv(env); v != "" {
@@ -153,8 +153,8 @@ func detectProject() (string, error) {
 		}
 	}
 
-	// Try gcloud CLI.
-	out, err := exec.Command("gcloud", "config", "get-value", "project").Output()
+	// Try gcloud CLI with context for cancellation/timeout.
+	out, err := exec.CommandContext(ctx, "gcloud", "config", "get-value", "project").Output()
 	if err == nil {
 		project := strings.TrimSpace(string(out))
 		if project != "" && project != "(unset)" {

@@ -655,7 +655,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 
 				// Handle AWS endpoint provider
-				if ep := provider.GetEndpoint(string(credName)); ep != nil {
+				if string(credName) == "aws" {
 					// AWS credentials are handled via credential endpoint
 					// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
 					awsCfg, err := awsprov.ConfigFromCredential(provCred)

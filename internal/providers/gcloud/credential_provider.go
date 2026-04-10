@@ -114,9 +114,9 @@ func (p *CredentialProvider) ProjectID() string {
 	return p.cfg.ProjectID
 }
 
-// Scopes returns the configured OAuth scopes.
+// Scopes returns a copy of the configured OAuth scopes.
 func (p *CredentialProvider) Scopes() []string {
-	return p.cfg.Scopes
+	return append([]string(nil), p.cfg.Scopes...)
 }
 
 // Email returns the configured email identity.

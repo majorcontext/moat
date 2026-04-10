@@ -35,10 +35,11 @@ func (p *Provider) ConfigureProxy(pc provider.ProxyConfigurer, cred *provider.Cr
 	// No-op: gcloud uses metadata endpoint, not header injection.
 }
 
-// ContainerEnv returns nil; the run manager sets GCE_METADATA_HOST.
+// ContainerEnv returns nil; env vars are set by the run manager.
 func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
-	// Env vars are injected by the run manager since they depend on the
-	// per-run proxy host:port.
+	// Env vars (GOOGLE_CLOUD_PROJECT, CLOUDSDK_CORE_PROJECT, etc.) are
+	// injected by the run manager. Metadata requests reach the proxy via
+	// HTTP_PROXY and are routed to the per-run gcloud handler.
 	return nil
 }
 

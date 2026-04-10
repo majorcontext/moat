@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/aws"
+	"github.com/majorcontext/moat/internal/providers/gcloud"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -23,6 +24,14 @@ var (
 	awsSessionDuration string
 	awsExternalID      string
 	awsProfile         string
+)
+
+// gcloud grant flags - these need to be passed to the gcloud provider
+var (
+	gcloudProject       string
+	gcloudScopes        string
+	gcloudImpersonateSA string
+	gcloudKeyFile       string
 )
 
 var grantCmd = &cobra.Command{
@@ -48,6 +57,7 @@ Examples:
   moat grant anthropic                           # Grant Anthropic API key (for any agent)
   moat grant github                              # Grant GitHub access
   moat grant aws --role=arn:aws:...              # Grant AWS access via IAM role
+  moat grant gcloud --project my-project         # Grant Google Cloud access
   moat grant github --profile myproject          # Grant GitHub access in a profile
   moat grant providers                           # List all available providers
   moat run my-agent . --grant github             # Use credential in a run
@@ -63,6 +73,12 @@ func init() {
 	grantCmd.Flags().StringVar(&awsSessionDuration, "session-duration", "", "Session duration (default: 15m, max: 12h)")
 	grantCmd.Flags().StringVar(&awsExternalID, "external-id", "", "External ID for role assumption")
 	grantCmd.Flags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile for role assumption (falls back to AWS_PROFILE env var if not set)")
+
+	// gcloud flags
+	grantCmd.Flags().StringVar(&gcloudProject, "project", "", "Google Cloud project ID")
+	grantCmd.Flags().StringVar(&gcloudScopes, "scopes", "", "OAuth scopes (comma-separated, default: cloud-platform)")
+	grantCmd.Flags().StringVar(&gcloudImpersonateSA, "impersonate-service-account", "", "Service account email to impersonate via IAM")
+	grantCmd.Flags().StringVar(&gcloudKeyFile, "key-file", "", "Path to service account key file")
 }
 
 // saveCredential stores a credential and returns the file path.
@@ -126,6 +142,11 @@ Options:
 	// For AWS, pass the CLI flags via context
 	if providerName == "aws" {
 		ctx = aws.WithGrantOptions(ctx, awsRole, awsRegion, awsSessionDuration, awsExternalID, awsProfile)
+	}
+
+	// For gcloud, pass the CLI flags via context
+	if providerName == "gcloud" {
+		ctx = gcloud.WithGrantOptions(ctx, gcloudProject, gcloudScopes, gcloudImpersonateSA, gcloudKeyFile)
 	}
 
 	provCred, err := prov.Grant(ctx)
