@@ -44,6 +44,7 @@ type Run struct {
 	Grants            []string
 	Agent             string            // Agent type from config (e.g., "claude-code", "codex")
 	Image             string            // Container image used for this run
+	Runtime           string            // Container runtime type ("docker" or "apple")
 	ProviderMeta      map[string]string // Provider-specific metadata (e.g., claude_session_id)
 	Ports             map[string]int    // endpoint name -> container port
 	HostPorts         map[string]int    // endpoint name -> host port (after binding)
@@ -177,6 +178,7 @@ func (r *Run) SaveMetadata() error {
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,
 		WorktreeRepoID:      r.WorktreeRepoID,
+		Runtime:             r.Runtime,
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
 		ServiceContainers:   r.ServiceContainers,

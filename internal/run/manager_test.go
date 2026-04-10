@@ -1029,11 +1029,19 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	}
 }
 
-// TestLoadPersistedRunsCleansRoutesForMissingContainers verifies that
-// loadPersistedRuns removes routes when the container no longer exists at all
-// (e.g., was manually removed via docker rm).
-func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
-	tmpHome := t.TempDir()
+// TestLoadPersistedRunsPreservesStateOnContainerError verifies that when
+// ContainerState returns an error (container not found), the run preserves
+// its persisted state instead of being marked as stopped. Routes are also
+// preserved since the state was not confirmed by a live check.
+func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
+	// Use os.MkdirTemp because reconciliation preserves "running" state and
+	// spawns a monitor goroutine. The monitor blocks on WaitContainer (done
+	// is never closed) so it won't write to the filesystem, but we use
+	// os.MkdirTemp to avoid t.TempDir() cleanup racing with the goroutine.
+	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsPreservesState")
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", tmpHome)
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
@@ -1064,7 +1072,232 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Stub runtime with NO containers — ContainerState will return error
+	// Stub runtime with NO containers — ContainerState will return error.
+	// done is never closed, so the monitor goroutine blocks on WaitContainer
+	// indefinitely. This is intentional: the monitor's job IS to update state
+	// when a container exits, but here we only test that reconciliation itself
+	// doesn't corrupt state during the read path.
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   make(chan struct{}),
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Route should be preserved — container state was not confirmed
+	if !routes.AgentExists("gone-agent") {
+		t.Error("route should be preserved when container state check fails")
+	}
+
+	// Run should preserve its persisted "running" state
+	r := m.runs[runID]
+	if r.GetState() != StateRunning {
+		t.Errorf("expected run state %q (preserved from disk), got %q", StateRunning, r.GetState())
+	}
+}
+
+// TestLoadPersistedRunsDoesNotModifyMetadata verifies that loadPersistedRuns
+// never writes state changes back to disk. The owning process is responsible
+// for its run's on-disk state.
+func TestLoadPersistedRunsDoesNotModifyMetadata(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	runID := "run_nodeadbeef12"
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "test-agent",
+		ContainerID: "container-xyz",
+		State:       "running",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the original metadata file content
+	metaPath := filepath.Join(store.Dir(), "metadata.json")
+	originalContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Runtime reports container as exited — state differs from persisted "running"
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{"container-xyz": "exited"},
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// In-memory state should reflect the live check
+	r := m.runs[runID]
+	if r.GetState() != StateStopped {
+		t.Errorf("expected in-memory state %q, got %q", StateStopped, r.GetState())
+	}
+
+	// On-disk metadata must NOT be modified
+	afterContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterContent) != string(originalContent) {
+		t.Error("loadPersistedRuns modified metadata.json — reconciliation must be read-only")
+	}
+}
+
+// TestLoadPersistedRunsSkipsCrossRuntimeCheck verifies that runs created with
+// a different runtime preserve their persisted state without a container check,
+// and that no monitor goroutine is spawned (which would call WaitContainer on
+// the wrong runtime and corrupt state).
+func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	runID := "run_applerun1234"
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a run created with Apple containers
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "apple-agent",
+		ContainerID: "run_applerun1234",
+		State:       "running",
+		Runtime:     "apple",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+		StartedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read original metadata to verify it's not modified later.
+	metaPath := filepath.Join(store.Dir(), "metadata.json")
+	originalContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Docker runtime — should NOT query this Apple container.
+	// done is closed immediately so any accidentally-spawned monitor
+	// goroutine would return from WaitContainer and corrupt state.
+	done := make(chan struct{})
+	close(done)
+	m := &Manager{
+		runtime: &stubRuntime{
+			states: map[string]string{},
+			done:   done,
+		},
+		runs:   make(map[string]*Run),
+		routes: routes,
+	}
+
+	err = m.loadPersistedRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := m.runs[runID]
+	if r == nil {
+		t.Fatal("expected run to be loaded")
+	}
+	if r.GetState() != StateRunning {
+		t.Errorf("cross-runtime run should preserve persisted state %q, got %q", StateRunning, r.GetState())
+	}
+	if r.Runtime != "apple" {
+		t.Errorf("expected runtime %q, got %q", "apple", r.Runtime)
+	}
+
+	// Give any accidentally-spawned monitor goroutine time to corrupt state.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify in-memory state was not corrupted by a monitor goroutine.
+	if r.GetState() != StateRunning {
+		t.Errorf("cross-runtime run state was corrupted after reconciliation: got %q, want %q", r.GetState(), StateRunning)
+	}
+
+	// Verify on-disk metadata was not modified.
+	afterContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterContent) != string(originalContent) {
+		t.Error("cross-runtime run metadata was corrupted — monitorContainerExit should not have been spawned")
+	}
+}
+
+// TestLoadPersistedRunsCleansRoutesForPersistedTerminalState verifies that
+// runs persisted in a terminal state (stopped/failed) have their stale routes
+// cleaned up. The owning process authoritatively wrote the terminal state,
+// so route cleanup is safe.
+func TestLoadPersistedRunsCleansRoutesForPersistedTerminalState(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	baseDir := filepath.Join(tmpHome, ".moat", "runs")
+	runID := "run_stoppedbeef12"
+	store, err := storage.NewRunStore(baseDir, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveMetadata(storage.Metadata{
+		Name:        "done-agent",
+		ContainerID: "container-done",
+		State:       "stopped",
+		Workspace:   "/tmp/workspace",
+		CreatedAt:   time.Now().Add(-2 * time.Hour),
+		StartedAt:   time.Now().Add(-2 * time.Hour),
+		StoppedAt:   time.Now().Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routeDir := filepath.Join(tmpHome, ".moat", "routes")
+	routes, err := routing.NewRouteTable(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = routes.Add("done-agent", map[string]string{"default": "127.0.0.1:6060"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Runtime is irrelevant — persisted terminal state skips live container checks
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{},
@@ -1078,8 +1311,15 @@ func TestLoadPersistedRunsCleansRoutesForMissingContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if routes.AgentExists("gone-agent") {
-		t.Error("stale route for missing container should have been removed by loadPersistedRuns")
+	// Stale route should be cleaned for a persisted terminal state
+	if routes.AgentExists("done-agent") {
+		t.Error("stale route for persisted stopped run should have been removed by loadPersistedRuns")
+	}
+
+	// Run should be loaded with stopped state
+	r := m.runs[runID]
+	if r.GetState() != StateStopped {
+		t.Errorf("expected run state %q, got %q", StateStopped, r.GetState())
 	}
 }
 

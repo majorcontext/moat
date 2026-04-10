@@ -41,6 +41,10 @@ type Metadata struct {
 	// Service dependency fields
 	ServiceContainers map[string]string `json:"service_containers,omitempty"` // service name -> container ID
 
+	// Runtime records which container runtime was used ("docker" or "apple").
+	// Used during reconciliation to skip cross-runtime container state checks.
+	Runtime string `json:"runtime,omitempty"`
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
 	NetworkID           string `json:"network_id,omitempty"`
