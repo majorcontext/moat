@@ -377,12 +377,10 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta
 				}
 			}
 		}
-	} else if runState == StateStopped || runState == StateFailed {
-		// Unconfirmed terminal state (e.g. container check failed) — close
-		// exitCh but skip route cleanup since we can't be sure the container
-		// is actually gone.
-		close(r.exitCh)
 	}
+	// Note: no else branch for unconfirmed terminal states. All paths that
+	// reach here with stateConfirmed=false have runState=running/created
+	// (persisted terminal runs are caught early with stateConfirmed=true).
 
 	// Never write state back to disk during reconciliation.
 	// The owning process is responsible for its run's on-disk state.

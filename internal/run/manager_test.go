@@ -1034,8 +1034,10 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 // its persisted state instead of being marked as stopped. Routes are also
 // preserved since the state was not confirmed by a live check.
 func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
-	// Use os.MkdirTemp because loadPersistedRuns spawns a background
-	// monitorContainerExit goroutine for running containers.
+	// Use os.MkdirTemp because reconciliation preserves "running" state and
+	// spawns a monitor goroutine. The monitor blocks on WaitContainer (done
+	// is never closed) so it won't write to the filesystem, but we use
+	// os.MkdirTemp to avoid t.TempDir() cleanup racing with the goroutine.
 	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsPreservesState")
 	if err != nil {
 		t.Fatal(err)
@@ -1070,7 +1072,11 @@ func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Stub runtime with NO containers — ContainerState will return error
+	// Stub runtime with NO containers — ContainerState will return error.
+	// done is never closed, so the monitor goroutine blocks on WaitContainer
+	// indefinitely. This is intentional: the monitor's job IS to update state
+	// when a container exits, but here we only test that reconciliation itself
+	// doesn't corrupt state during the read path.
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{},
