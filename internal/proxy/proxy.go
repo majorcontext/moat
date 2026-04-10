@@ -294,6 +294,7 @@ type RunContextData struct {
 	RequestCheck         RequestChecker
 	PathRulesCheck       PathRulesChecker
 	AWSHandler           http.Handler
+	GCloudHandler        http.Handler
 	CredStore            CredentialStore
 	KeepEngines          map[string]*keeplib.Engine
 	HostGateway          string
@@ -336,6 +337,7 @@ type Proxy struct {
 	requestChecker       RequestChecker   // per-host request rules checker
 	pathRulesChecker     PathRulesChecker // checks if host has path-level rules
 	awsHandler           http.Handler     // Optional handler for AWS credential endpoint
+	gcloudHandler        http.Handler     // Optional handler for gcloud metadata emulation
 	credStore            CredentialStore
 	mcpServers           []MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
@@ -409,6 +411,11 @@ func (p *Proxy) logPolicy(ctxReq *http.Request, scope, operation, rule, message 
 // SetAWSHandler sets the handler for AWS credential requests.
 func (p *Proxy) SetAWSHandler(h http.Handler) {
 	p.awsHandler = h
+}
+
+// SetGCloudHandler sets the handler for gcloud metadata requests.
+func (p *Proxy) SetGCloudHandler(h http.Handler) {
+	p.gcloudHandler = h
 }
 
 // SetMCPServers configures MCP servers for credential injection.
@@ -993,6 +1000,15 @@ func (p *Proxy) getAWSHandlerForRequest(r *http.Request) http.Handler {
 	return p.awsHandler
 }
 
+// getGCloudHandlerForRequest returns the gcloud handler from RunContextData
+// if available, otherwise falls back to the proxy-level handler.
+func (p *Proxy) getGCloudHandlerForRequest(r *http.Request) http.Handler {
+	if rc := getRunContext(r); rc != nil && rc.GCloudHandler != nil {
+		return rc.GCloudHandler
+	}
+	return p.gcloudHandler
+}
+
 // handleDirectMCPRelay handles MCP relay requests that arrive directly (not through proxy).
 // URL format: /mcp/{token}/{server-name}[/path]
 // Extracts the auth token from the URL, resolves run context, rewrites the path
@@ -1102,6 +1118,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if p.authToken != "" && !p.checkAuth(r) {
 		http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 		return
+	}
+
+	// Handle gcloud metadata emulation.
+	// Google client libraries make plain HTTP requests to metadata.google.internal
+	// (or 169.254.169.254) via HTTP_PROXY. The proxy receives these as proxied GETs
+	// with the host set. Route them to the per-run gcloud handler.
+	if r.Host == "metadata.google.internal" || strings.HasPrefix(r.Host, "169.254.169.254") {
+		if h := p.getGCloudHandlerForRequest(r); h != nil {
+			h.ServeHTTP(w, r)
+			return
+		}
 	}
 
 	// Handle AWS credential endpoint
