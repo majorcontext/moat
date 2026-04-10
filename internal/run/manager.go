@@ -41,6 +41,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	gcloudprov "github.com/majorcontext/moat/internal/providers/gcloud"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -689,6 +690,30 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						Profile:         awsCfg.Profile,
 					}
 				}
+
+				// Handle gcloud credential provider
+				if string(credName) == "gcloud" {
+					gcloudCfg, err := gcloudprov.ConfigFromCredential(provCred)
+					if err != nil {
+						return nil, fmt.Errorf("parsing gcloud credential: %w", err)
+					}
+
+					gcloudCP, err := gcloudprov.NewCredentialProvider(ctx, gcloudCfg)
+					if err != nil {
+						return nil, fmt.Errorf("creating gcloud credential provider: %w", err)
+					}
+					r.GCloudCredentialProvider = gcloudCP
+
+					// Store config for daemon registration so the daemon can
+					// create its own credential provider.
+					runCtx.GCloudConfig = &daemon.GCloudConfig{
+						ProjectID:     gcloudCfg.ProjectID,
+						Scopes:        gcloudCfg.Scopes,
+						ImpersonateSA: gcloudCfg.ImpersonateSA,
+						KeyFile:       gcloudCfg.KeyFile,
+						Email:         gcloudCfg.Email,
+					}
+				}
 			}
 		}
 
@@ -999,6 +1024,18 @@ region = %s
 
 			fmt.Printf("AWS credential_process configured (role: %s)\n",
 				filepath.Base(r.AWSCredentialProvider.RoleARN()))
+		}
+
+		// Set up gcloud metadata emulation env vars
+		if r.GCloudCredentialProvider != nil {
+			proxyEnv = append(proxyEnv,
+				"GOOGLE_CLOUD_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
+				"CLOUDSDK_CORE_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
+				// Prevent gcloud from trying to read local credential files.
+				"CLOUDSDK_AUTH_DISABLE_CREDENTIALS_FILE=true",
+			)
+			fmt.Printf("gcloud metadata emulation configured (project: %s)\n",
+				r.GCloudCredentialProvider.ProjectID())
 		}
 	}
 
@@ -3752,6 +3789,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		MCPServers:       rc.MCPServers,
 		Grants:           grants,
 		AWSConfig:        rc.AWSConfig,
+		GCloudConfig:     rc.GCloudConfig,
 	}
 
 	for host, creds := range rc.Credentials {
