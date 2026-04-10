@@ -1166,14 +1166,11 @@ func TestLoadPersistedRunsDoesNotModifyMetadata(t *testing.T) {
 }
 
 // TestLoadPersistedRunsSkipsCrossRuntimeCheck verifies that runs created with
-// a different runtime preserve their persisted state without a container check.
+// a different runtime preserve their persisted state without a container check,
+// and that no monitor goroutine is spawned (which would call WaitContainer on
+// the wrong runtime and corrupt state).
 func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
-	// Use os.MkdirTemp because loadPersistedRuns spawns a background
-	// monitorContainerExit goroutine for running containers.
-	tmpHome, err := os.MkdirTemp("", "TestLoadPersistedRunsCrossRuntime")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
@@ -1196,17 +1193,28 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Read original metadata to verify it's not modified later.
+	metaPath := filepath.Join(store.Dir(), "metadata.json")
+	originalContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	routeDir := filepath.Join(tmpHome, ".moat", "routes")
 	routes, err := routing.NewRouteTable(routeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Docker runtime — should NOT query this Apple container
+	// Docker runtime — should NOT query this Apple container.
+	// done is closed immediately so any accidentally-spawned monitor
+	// goroutine would return from WaitContainer and corrupt state.
+	done := make(chan struct{})
+	close(done)
 	m := &Manager{
 		runtime: &stubRuntime{
 			states: map[string]string{},
-			done:   make(chan struct{}),
+			done:   done,
 		},
 		runs:   make(map[string]*Run),
 		routes: routes,
@@ -1226,6 +1234,23 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	}
 	if r.Runtime != "apple" {
 		t.Errorf("expected runtime %q, got %q", "apple", r.Runtime)
+	}
+
+	// Give any accidentally-spawned monitor goroutine time to corrupt state.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify in-memory state was not corrupted by a monitor goroutine.
+	if r.GetState() != StateRunning {
+		t.Errorf("cross-runtime run state was corrupted after reconciliation: got %q, want %q", r.GetState(), StateRunning)
+	}
+
+	// Verify on-disk metadata was not modified.
+	afterContent, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterContent) != string(originalContent) {
+		t.Error("cross-runtime run metadata was corrupted — monitorContainerExit should not have been spawned")
 	}
 }
 

@@ -258,23 +258,31 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				containerState, csErr := m.runtime.ContainerState(callCtx, info.meta.ContainerID)
 				if csErr != nil {
 					log.Debug("container state check failed, preserving persisted state", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
-					runState = State(info.meta.State)
-				} else {
-					switch containerState {
-					case "running":
-						confirmed = true
-						runState = StateRunning
-					case "exited", "dead", "stopped":
-						confirmed = true
-						runState = StateStopped
-					case "created", "restarting":
-						confirmed = true
-						runState = StateCreated
-					default:
-						// Unknown state (e.g. "paused") — can't confirm,
-						// fall back to persisted state.
-						runState = State(info.meta.State)
+					// Preserve both run state and service containers from
+					// persisted metadata — if the runtime is unavailable,
+					// service container checks would also fail.
+					results[idx] = checkedRun{
+						info:              info,
+						runState:          State(info.meta.State),
+						serviceContainers: info.meta.ServiceContainers,
 					}
+					return
+				}
+
+				switch containerState {
+				case "running":
+					confirmed = true
+					runState = StateRunning
+				case "exited", "dead", "stopped":
+					confirmed = true
+					runState = StateStopped
+				case "created", "restarting":
+					confirmed = true
+					runState = StateCreated
+				default:
+					// Unknown state (e.g. "paused") — can't confirm,
+					// fall back to persisted state.
+					runState = State(info.meta.State)
 				}
 
 				// Filter service containers to only those that still exist.
@@ -387,7 +395,12 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta
 	// These inherited monitors are NOT tracked by monitorWg — they may block
 	// indefinitely on long-running containers from previous CLI invocations.
 	// Only monitors started via Start() are tracked so Close() doesn't hang.
-	if runState == StateRunning {
+	//
+	// Skip cross-runtime runs: monitorContainerExit calls m.runtime.WaitContainer
+	// which would fail immediately for a container from a different runtime,
+	// then write "failed" state to disk — re-triggering the corruption bug.
+	crossRuntime := meta.Runtime != "" && meta.Runtime != string(m.runtime.Type())
+	if runState == StateRunning && !crossRuntime {
 		go m.monitorContainerExit(r)
 	}
 }
