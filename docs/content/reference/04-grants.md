@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "gcloud", "google cloud", "gcp", "ssh", "openai", "npm", "graphite", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -24,6 +24,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `meta` | `graph.facebook.com`, `graph.instagram.com` | `Authorization: Bearer ...` | `META_ACCESS_TOKEN` or prompt |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
+| `gcloud` | GCE metadata emulation (not header injection) | Access token via metadata endpoint | Application Default Credentials, service account key, or impersonation |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
 | `mcp-<name>` | Host from MCP server `url` field | Configured per-server header | Interactive prompt |
 | `gitlab` | `gitlab.com`, `*.gitlab.com` | `PRIVATE-TOKEN: ...` | `GITLAB_TOKEN`, `GL_TOKEN`, or prompt |
@@ -595,6 +596,83 @@ AWS credential saved
 
 $ moat run --grant aws ./my-project
 ```
+
+## Google Cloud (gcloud)
+
+### CLI command
+
+```bash
+moat grant gcloud [flags]
+```
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--project ID` | GCP project ID | From `gcloud config get-value project` |
+| `--key-file PATH` | Path to a service account JSON key file on the host | -- |
+| `--impersonate-service-account EMAIL` | Service account to impersonate via IAM | -- |
+| `--scopes SCOPES` | Comma-separated OAuth scopes | `https://www.googleapis.com/auth/cloud-platform` |
+
+### Credential source
+
+Moat uses your host's Application Default Credentials to mint short-lived access tokens. Your host must have valid credentials configured via one of:
+
+1. **`gcloud auth application-default login`** — user OAuth credentials
+2. **`GOOGLE_APPLICATION_CREDENTIALS`** — path to a service account JSON key
+3. **`--key-file`** — explicit service account key passed at grant time
+4. **Service account impersonation** — `--impersonate-service-account` delegates via IAM
+
+### What it injects
+
+Google Cloud credentials use metadata server emulation rather than HTTP header injection:
+
+1. The project ID and configuration are stored at grant time (not access tokens)
+2. When a run starts, the proxy serves a GCE metadata server emulator
+3. The container's `HTTP_PROXY` routes requests to `metadata.google.internal` through the proxy
+4. The gcloud CLI and all Google client libraries fetch access tokens from the emulated metadata endpoint
+5. Access tokens are short-lived and refreshed automatically by the proxy daemon
+
+No long-lived credentials (refresh tokens, service account keys) enter the container.
+
+### Container environment
+
+The following environment variables are set in the container:
+
+| Variable | Value |
+|----------|-------|
+| `GOOGLE_CLOUD_PROJECT` | Configured project ID |
+| `CLOUDSDK_CORE_PROJECT` | Configured project ID |
+| `CLOUDSDK_AUTH_DISABLE_CREDENTIALS_FILE` | `true` |
+
+### Refresh behavior
+
+The proxy daemon caches access tokens and refreshes them 5 minutes before expiry. Token refresh is transparent to the container.
+
+### moat.yaml
+
+```yaml
+grants:
+  - gcloud
+```
+
+> **Note:** gcloud-specific options (project, key file, impersonation, scopes) are configured at grant time with `moat grant gcloud`, not in `moat.yaml`.
+
+### Example
+
+```bash
+$ moat grant gcloud --project my-project
+
+gcloud credential saved
+
+$ moat run --grant gcloud ./my-project
+```
+
+### Troubleshooting
+
+**"no host credentials found"** — Run `gcloud auth application-default login` on the host, or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
+
+**"refresh token revoked or expired"** — Re-authenticate with `gcloud auth application-default login`.
 
 ## SSH
 
