@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/ui"
@@ -68,12 +69,12 @@ type healthItem struct {
 func showStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime (no sandbox needed for status queries)
-	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{Sandbox: false})
+	// Get runtime pool (no sandbox needed for status queries)
+	pool, err := container.NewRuntimePool(container.RuntimeOptions{Sandbox: false})
 	if err != nil {
 		return fmt.Errorf("initializing runtime: %w", err)
 	}
-	defer rt.Close()
+	defer pool.Close()
 
 	// Get runs (no sandbox needed for status queries)
 	noSandbox := true
@@ -90,11 +91,17 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 
-	// Get images
-	images, err := rt.ListImages(ctx)
-	if err != nil {
-		return fmt.Errorf("listing images: %w", err)
-	}
+	// Get images from all available runtimes
+	var images []container.ImageInfo
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		rtImages, err := rt.ListImages(ctx)
+		if err != nil {
+			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)
+			return nil
+		}
+		images = append(images, rtImages...)
+		return nil
+	})
 
 	// Calculate disk usage only for active runs (with timeout to prevent blocking on slow disks)
 	runDiskUsage := make(map[string]int64)
@@ -121,8 +128,13 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build output
+	var runtimeNames []string
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		runtimeNames = append(runtimeNames, string(rt.Type()))
+		return nil
+	})
 	output := statusOutput{
-		Runtime: string(rt.Type()),
+		Runtime: strings.Join(runtimeNames, ", "),
 	}
 
 	// Active runs section
@@ -174,31 +186,36 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Check for orphaned containers
-	containers, err := rt.ListContainers(ctx)
-	if err != nil {
-		// Add health warning so users know container checks are incomplete
-		output.Health = append(output.Health, healthItem{
-			Status:  "warning",
-			Message: fmt.Sprintf("Failed to list containers: %v", err),
-		})
-	} else {
-		knownRunIDs := make(map[string]bool)
-		for _, r := range runs {
-			knownRunIDs[r.ID] = true
-		}
-		orphanedCount := 0
-		for _, c := range containers {
-			if !knownRunIDs[c.Name] {
-				orphanedCount++
-			}
-		}
-		if orphanedCount > 0 {
+	// Check for orphaned containers across all runtimes
+	var allContainers []container.Info
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		cs, err := rt.ListContainers(ctx)
+		if err != nil {
 			output.Health = append(output.Health, healthItem{
 				Status:  "warning",
-				Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
+				Message: fmt.Sprintf("Failed to list %s containers: %v", rt.Type(), err),
 			})
+			return nil
 		}
+		allContainers = append(allContainers, cs...)
+		return nil
+	})
+
+	knownRunIDs := make(map[string]bool)
+	for _, r := range runs {
+		knownRunIDs[r.ID] = true
+	}
+	orphanedCount := 0
+	for _, c := range allContainers {
+		if !knownRunIDs[c.Name] {
+			orphanedCount++
+		}
+	}
+	if orphanedCount > 0 {
+		output.Health = append(output.Health, healthItem{
+			Status:  "warning",
+			Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
+		})
 	}
 
 	output.TotalDisk = totalImageSize + stoppedDisk
