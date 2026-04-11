@@ -147,6 +147,14 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		network container.NetworkInfo
 		rt      container.Runtime
 	}
+	// Build set of network IDs associated with known runs (once, not per-runtime).
+	knownNetworkIDs := make(map[string]bool)
+	for _, r := range runs {
+		if r.NetworkID != "" {
+			knownNetworkIDs[r.NetworkID] = true
+		}
+	}
+
 	var orphanedNetworks []runtimeNetwork
 	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		// Skip runtimes where container listing failed — we can't
@@ -162,13 +170,6 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		if netErr != nil {
 			ui.Warnf("Failed to list %s networks: %v", rt.Type(), netErr)
 			return nil
-		}
-		// Build set of network IDs associated with known runs
-		knownNetworkIDs := make(map[string]bool)
-		for _, r := range runs {
-			if r.NetworkID != "" {
-				knownNetworkIDs[r.NetworkID] = true
-			}
 		}
 		for _, n := range allNetworks {
 			if !knownNetworkIDs[n.ID] {

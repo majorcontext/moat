@@ -247,14 +247,14 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("%s: %d\n", ui.Bold("Active Runs"), len(activeRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  NAME\tRUN ID\tAGE\tDISK\tENDPOINTS")
+		fmt.Fprintln(w, "  NAME\tRUN ID\tRUNTIME\tAGE\tDISK\tENDPOINTS")
 		for _, r := range output.ActiveRuns {
 			diskStr := fmt.Sprintf("%d MB", r.DiskMB)
 			if r.DiskMB < 0 {
 				diskStr = "?"
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
-				r.Name, r.ID, r.Age, diskStr, r.Endpoints)
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
+				r.Name, r.ID, r.Runtime, r.Age, diskStr, r.Endpoints)
 		}
 		w.Flush()
 	}
