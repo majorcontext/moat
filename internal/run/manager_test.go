@@ -941,9 +941,9 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 
 	// Create a manager with a stub runtime that reports the container as exited
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{"container-abc": "exited"},
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}
@@ -1010,10 +1010,10 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 	}
 
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{"container-live": "running"},
 			done:   make(chan struct{}),
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}
@@ -1078,10 +1078,10 @@ func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
 	// when a container exits, but here we only test that reconciliation itself
 	// doesn't corrupt state during the read path.
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{},
 			done:   make(chan struct{}),
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}
@@ -1143,9 +1143,9 @@ func TestLoadPersistedRunsDoesNotModifyMetadata(t *testing.T) {
 
 	// Runtime reports container as exited — state differs from persisted "running"
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{"container-xyz": "exited"},
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}
@@ -1218,10 +1218,10 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{},
 			done:   done,
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}
@@ -1299,9 +1299,9 @@ func TestLoadPersistedRunsCleansRoutesForPersistedTerminalState(t *testing.T) {
 
 	// Runtime is irrelevant — persisted terminal state skips live container checks
 	m := &Manager{
-		runtime: &stubRuntime{
+		runtimePool: container.NewRuntimePoolWithDefault(&stubRuntime{
 			states: map[string]string{},
-		},
+		}),
 		runs:   make(map[string]*Run),
 		routes: routes,
 	}

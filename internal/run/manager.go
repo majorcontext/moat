@@ -207,7 +207,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		// Pass stateConfirmed=true because the owning process authoritatively
 		// wrote this terminal state — it's safe to clean up stale routes.
 		if meta.State == string(StateStopped) || meta.State == string(StateFailed) {
-			m.registerPersistedRun(State(meta.State), true, meta, store, runID, nil)
+			m.registerPersistedRun(State(meta.State), true, false, meta, store, runID, nil)
 			continue
 		}
 
@@ -221,6 +221,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			info              persistedRunInfo
 			runState          State
 			stateConfirmed    bool // true when state was confirmed by a successful container check
+			skipMonitor       bool // true when the runtime is unavailable (cross-runtime runs)
 			serviceContainers map[string]string
 		}
 
@@ -253,6 +254,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 					results[idx] = checkedRun{
 						info:              info,
 						runState:          State(info.meta.State),
+						skipMonitor:       true,
 						serviceContainers: info.meta.ServiceContainers,
 					}
 					return
@@ -316,7 +318,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		wg.Wait()
 
 		for _, cr := range results {
-			m.registerPersistedRun(cr.runState, cr.stateConfirmed, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
+			m.registerPersistedRun(cr.runState, cr.stateConfirmed, cr.skipMonitor, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
 		}
 	}
 
@@ -326,9 +328,11 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 // registerPersistedRun creates and registers a Run from persisted metadata.
 // stateConfirmed indicates whether runState was determined by a successful container
 // state check (true) or inferred from persisted state / error fallback (false).
+// skipMonitor prevents spawning a background monitor goroutine (used when the
+// runtime is unavailable, e.g. cross-runtime runs from a different host).
 // If serviceContainers is nil, it is loaded directly from metadata (for terminal-state runs
 // that skip live container checks).
-func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
+func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skipMonitor bool, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
 	if serviceContainers == nil {
 		serviceContainers = meta.ServiceContainers
 	}
@@ -404,7 +408,9 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta
 	// Only monitors started via Start() are tracked so Close() doesn't hang.
 	// monitorContainerExit resolves the correct runtime via runtimeForRun,
 	// so it works for runs from any runtime type.
-	if runState == StateRunning {
+	// skipMonitor is set for cross-runtime runs where the runtime is unavailable —
+	// spawning a monitor would immediately fail and corrupt the persisted state.
+	if runState == StateRunning && !skipMonitor {
 		go m.monitorContainerExit(r)
 	}
 }
