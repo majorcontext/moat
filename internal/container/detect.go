@@ -293,6 +293,23 @@ func startAppleContainerSystem() error {
 	return fmt.Errorf("system started but did not become ready within the allotted timeout")
 }
 
+// NewRuntimeByType creates a runtime of the specified type.
+// Returns an error if the runtime is not available on this system.
+func NewRuntimeByType(rt RuntimeType, opts RuntimeOptions) (Runtime, error) {
+	switch rt {
+	case RuntimeDocker:
+		return newDockerRuntimeWithPing(opts.Sandbox)
+	case RuntimeApple:
+		r, reason := tryAppleRuntime()
+		if r != nil {
+			return r, nil
+		}
+		return nil, fmt.Errorf("Apple container runtime not available: %s", reason)
+	default:
+		return nil, fmt.Errorf("unknown runtime type: %q", rt)
+	}
+}
+
 // appleContainerAvailable checks if Apple's container CLI is installed.
 // Requires macOS 26+ with the containerization framework.
 func appleContainerAvailable() bool {
