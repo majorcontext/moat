@@ -142,11 +142,6 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			unusedRuntimeImages = append(unusedRuntimeImages, ri)
 		}
 	}
-	unusedImages := make([]container.ImageInfo, len(unusedRuntimeImages))
-	for i, ri := range unusedRuntimeImages {
-		unusedImages[i] = ri.image
-	}
-
 	// Find orphaned networks (moat-managed networks not associated with any known run)
 	type runtimeNetwork struct {
 		network container.NetworkInfo
@@ -186,7 +181,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// Nothing to clean?
-	if len(stoppedRuns) == 0 && len(unusedImages) == 0 && len(orphanedNetworks) == 0 {
+	if len(stoppedRuns) == 0 && len(unusedRuntimeImages) == 0 && len(orphanedNetworks) == 0 {
 		fmt.Println("Nothing to clean.")
 		return nil
 	}
@@ -221,13 +216,14 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	if len(unusedImages) > 0 {
-		fmt.Printf("%s (%d):\n", ui.Bold("Unused images"), len(unusedImages))
+	if len(unusedRuntimeImages) > 0 {
+		fmt.Printf("%s (%d):\n", ui.Bold("Unused images"), len(unusedRuntimeImages))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		for _, img := range unusedImages {
+		for _, ri := range unusedRuntimeImages {
+			img := ri.image
 			sizeMB := img.Size / (1024 * 1024)
 			totalSize += img.Size
-			fmt.Fprintf(w, "  %s\t%s\t%d MB\n", img.Tag, formatAge(img.Created), sizeMB)
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%d MB\n", img.Tag, ri.rt.Type(), formatAge(img.Created), sizeMB)
 		}
 		w.Flush()
 		fmt.Println()
@@ -256,7 +252,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// worktreeRuns is a subset of stoppedRuns, so don't count them separately.
-	resourceCount := len(stoppedRuns) + len(unusedImages) + len(orphanedNetworks)
+	resourceCount := len(stoppedRuns) + len(unusedRuntimeImages) + len(orphanedNetworks)
 	fmt.Printf("Total: %d resources, %d MB\n\n", resourceCount, totalSize/(1024*1024))
 
 	// Dry run - just show, don't prompt

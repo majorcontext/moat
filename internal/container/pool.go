@@ -9,11 +9,12 @@ import (
 // It lazily initializes runtimes on first access and provides a default runtime
 // for new run creation. Thread-safe for concurrent access.
 type RuntimePool struct {
-	mu        sync.Mutex
-	runtimes  map[RuntimeType]Runtime
-	defaultRT Runtime
-	opts      RuntimeOptions
-	closed    bool
+	mu          sync.Mutex
+	runtimes    map[RuntimeType]Runtime
+	unavailable map[RuntimeType]struct{} // runtimes that failed initialization
+	defaultRT   Runtime
+	opts        RuntimeOptions
+	closed      bool
 }
 
 // NewRuntimePool creates a pool with the auto-detected default runtime.
@@ -72,8 +73,16 @@ func (p *RuntimePool) Get(typ RuntimeType) (Runtime, error) {
 		return rt, nil
 	}
 
+	if _, failed := p.unavailable[typ]; failed {
+		return nil, fmt.Errorf("runtime %s not available", typ)
+	}
+
 	rt, err := NewRuntimeByType(typ, p.opts)
 	if err != nil {
+		if p.unavailable == nil {
+			p.unavailable = make(map[RuntimeType]struct{})
+		}
+		p.unavailable[typ] = struct{}{}
 		return nil, fmt.Errorf("runtime %s not available: %w", typ, err)
 	}
 

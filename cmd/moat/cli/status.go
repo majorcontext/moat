@@ -39,7 +39,7 @@ func init() {
 }
 
 type statusOutput struct {
-	Runtime    string       `json:"runtime"`
+	Runtimes   []string     `json:"runtimes"`
 	ActiveRuns []runInfo    `json:"active_runs"`
 	Images     []imageInfo  `json:"images"`
 	Health     []healthItem `json:"health"`
@@ -58,6 +58,7 @@ type runInfo struct {
 
 type imageInfo struct {
 	Tag     string `json:"tag"`
+	Runtime string `json:"runtime"`
 	Created string `json:"created"`
 	SizeMB  int64  `json:"size_mb"`
 }
@@ -99,6 +100,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		for _, img := range rtImages {
 			images = append(images, imageInfo{
 				Tag:     img.Tag,
+				Runtime: string(rt.Type()),
 				Created: formatAge(img.Created),
 				SizeMB:  img.Size / (1024 * 1024),
 			})
@@ -141,7 +143,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		log.Debug("listing runtimes failed", "error", err)
 	}
 	output := statusOutput{
-		Runtime: strings.Join(runtimeNames, ", "),
+		Runtimes: runtimeNames,
 	}
 
 	// Active runs section
@@ -237,7 +239,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("%s: %s\n\n", ui.Bold("Runtime"), output.Runtime)
+	fmt.Printf("%s: %s\n\n", ui.Bold("Runtime"), strings.Join(output.Runtimes, ", "))
 
 	// Active runs table
 	if len(activeRuns) == 0 {
