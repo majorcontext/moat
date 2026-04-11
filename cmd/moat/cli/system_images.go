@@ -43,7 +43,7 @@ func listSystemImages(cmd *cobra.Command, args []string) error {
 		rtType container.RuntimeType
 	}
 	var all []runtimeImage
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		imgs, err := rt.ListImages(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s images: %v", rt.Type(), err)

@@ -93,7 +93,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Get images from all available runtimes
 	var images []container.ImageInfo
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		rtImages, err := rt.ListImages(ctx)
 		if err != nil {
 			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)
@@ -129,7 +129,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Build output
 	var runtimeNames []string
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		runtimeNames = append(runtimeNames, string(rt.Type()))
 		return nil
 	})
@@ -188,7 +188,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Check for orphaned containers across all runtimes
 	var allContainers []container.Info
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		cs, err := rt.ListContainers(ctx)
 		if err != nil {
 			output.Health = append(output.Health, healthItem{

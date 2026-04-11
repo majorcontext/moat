@@ -43,7 +43,7 @@ func listSystemContainers(cmd *cobra.Command, args []string) error {
 		rtType container.RuntimeType
 	}
 	var all []runtimeContainer
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		containers, err := rt.ListContainers(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)

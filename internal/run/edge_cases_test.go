@@ -867,6 +867,7 @@ func TestCaptureLogsSkipsInteractiveApple(t *testing.T) {
 		ID:          "run_apple_interactive",
 		Name:        "apple-interactive",
 		ContainerID: "ctr-apple",
+		Runtime:     string(container.RuntimeApple),
 		State:       StateStopped,
 		Interactive: true,
 		Store:       store,

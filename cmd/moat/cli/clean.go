@@ -82,7 +82,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		rt    container.Runtime
 	}
 	var allImages []runtimeImage
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		imgs, err := rt.ListImages(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s images: %v", rt.Type(), err)
@@ -106,7 +106,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// to match against image IDs for correctness.
 	runningImages := make(map[string]bool)
 	var containerListFailed bool
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		containers, err := rt.ListContainers(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)
@@ -146,7 +146,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		rt      container.Runtime
 	}
 	var orphanedNetworks []runtimeNetwork
-	pool.ForEachAvailable(func(rt container.Runtime) error {
+	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
 		netMgr := rt.NetworkManager()
 		if netMgr == nil {
 			return nil
