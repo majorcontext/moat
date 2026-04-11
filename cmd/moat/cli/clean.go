@@ -43,12 +43,12 @@ func init() {
 func cleanResources(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime (no sandbox needed for listing/cleaning)
-	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{Sandbox: false})
+	// Get runtime pool (no sandbox needed for listing/cleaning)
+	pool, err := container.NewRuntimePool(container.RuntimeOptions{Sandbox: false})
 	if err != nil {
 		return fmt.Errorf("initializing runtime: %w", err)
 	}
-	defer rt.Close()
+	defer pool.Close()
 
 	// Get runs (no sandbox needed for listing/cleaning)
 	noSandbox := true
@@ -76,27 +76,43 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find unused images (images not used by any running container)
-	// For now, we consider all moat images as candidates for cleanup.
-	// A more sophisticated approach would track which images are in use,
-	// but this is complex: we'd need to inspect each container's image tag.
-	images, err := rt.ListImages(ctx)
-	if err != nil {
-		return fmt.Errorf("listing images: %w", err)
+	// Collect images from all available runtimes, tracking which runtime owns each.
+	type runtimeImage struct {
+		image container.ImageInfo
+		rt    container.Runtime
 	}
+	var allImages []runtimeImage
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		imgs, err := rt.ListImages(ctx)
+		if err != nil {
+			ui.Warnf("Failed to list %s images: %v", rt.Type(), err)
+			return nil
+		}
+		for _, img := range imgs {
+			allImages = append(allImages, runtimeImage{image: img, rt: rt})
+		}
+		return nil
+	})
 
 	// Build a tag-to-ID mapping so we can track images by both identifiers.
 	// This handles cases where the same image ID has multiple tags.
 	tagToID := make(map[string]string)
-	for _, img := range images {
-		tagToID[img.Tag] = img.ID
+	for _, ri := range allImages {
+		tagToID[ri.image.Tag] = ri.image.ID
 	}
 
 	// Filter out images that might be in use by running containers.
 	// Track both tags and IDs since containers report tags but we need
 	// to match against image IDs for correctness.
-	containers, containerErr := rt.ListContainers(ctx)
 	runningImages := make(map[string]bool)
-	if containerErr == nil {
+	var containerListFailed bool
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		containers, err := rt.ListContainers(ctx)
+		if err != nil {
+			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)
+			containerListFailed = true
+			return nil
+		}
 		for _, c := range containers {
 			if c.Status == "running" {
 				runningImages[c.Image] = true
@@ -106,42 +122,54 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-	} else {
-		// Log the error so users know why we might not detect in-use images
-		ui.Warnf("Failed to list containers: %v", containerErr)
+		return nil
+	})
+	if containerListFailed {
 		ui.Info("Images will be skipped if running containers cannot be verified")
 	}
 
-	var unusedImages []container.ImageInfo
-	for _, img := range images {
+	var unusedRuntimeImages []runtimeImage
+	for _, ri := range allImages {
 		// Check both tag and ID since an image might be referenced either way
-		if !runningImages[img.Tag] && !runningImages[img.ID] {
-			unusedImages = append(unusedImages, img)
+		if !runningImages[ri.image.Tag] && !runningImages[ri.image.ID] {
+			unusedRuntimeImages = append(unusedRuntimeImages, ri)
 		}
+	}
+	unusedImages := make([]container.ImageInfo, len(unusedRuntimeImages))
+	for i, ri := range unusedRuntimeImages {
+		unusedImages[i] = ri.image
 	}
 
 	// Find orphaned networks (moat-managed networks not associated with any known run)
-	var orphanedNetworks []container.NetworkInfo
-	netMgr := rt.NetworkManager()
-	if netMgr != nil {
+	type runtimeNetwork struct {
+		network container.NetworkInfo
+		rt      container.Runtime
+	}
+	var orphanedNetworks []runtimeNetwork
+	pool.ForEachAvailable(func(rt container.Runtime) error {
+		netMgr := rt.NetworkManager()
+		if netMgr == nil {
+			return nil
+		}
 		allNetworks, netErr := netMgr.ListNetworks(ctx)
 		if netErr != nil {
-			ui.Warnf("Failed to list networks: %v", netErr)
-		} else {
-			// Build set of network IDs associated with known runs
-			knownNetworkIDs := make(map[string]bool)
-			for _, r := range runs {
-				if r.NetworkID != "" {
-					knownNetworkIDs[r.NetworkID] = true
-				}
-			}
-			for _, n := range allNetworks {
-				if !knownNetworkIDs[n.ID] {
-					orphanedNetworks = append(orphanedNetworks, n)
-				}
+			ui.Warnf("Failed to list %s networks: %v", rt.Type(), netErr)
+			return nil
+		}
+		// Build set of network IDs associated with known runs
+		knownNetworkIDs := make(map[string]bool)
+		for _, r := range runs {
+			if r.NetworkID != "" {
+				knownNetworkIDs[r.NetworkID] = true
 			}
 		}
-	}
+		for _, n := range allNetworks {
+			if !knownNetworkIDs[n.ID] {
+				orphanedNetworks = append(orphanedNetworks, runtimeNetwork{network: n, rt: rt})
+			}
+		}
+		return nil
+	})
 
 	// Nothing to clean?
 	if len(stoppedRuns) == 0 && len(unusedImages) == 0 && len(orphanedNetworks) == 0 {
@@ -193,8 +221,8 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	if len(orphanedNetworks) > 0 {
 		fmt.Printf("%s (%d):\n", ui.Bold("Orphaned networks"), len(orphanedNetworks))
-		for _, n := range orphanedNetworks {
-			fmt.Printf("  %s\n", n.Name)
+		for _, rn := range orphanedNetworks {
+			fmt.Printf("  %s\n", rn.network.Name)
 		}
 		fmt.Println()
 	}
@@ -255,16 +283,17 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Remove unused images
 	// Re-check each image before removal to handle race condition where
 	// a container might have started using the image since we listed them.
-	for _, img := range unusedImages {
+	for _, ri := range unusedRuntimeImages {
+		img := ri.image
 		fmt.Printf("Removing image %s... ", img.Tag)
 
 		// Re-check if image is now in use
-		if isImageInUse(ctx, rt, img.ID, img.Tag) {
+		if isImageInUse(ctx, ri.rt, img.ID, img.Tag) {
 			fmt.Println(ui.Yellow("skipped (now in use)"))
 			continue
 		}
 
-		if err := rt.RemoveImage(ctx, img.ID); err != nil {
+		if err := ri.rt.RemoveImage(ctx, img.ID); err != nil {
 			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
 			continue
@@ -275,17 +304,19 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	}
 
 	// Remove orphaned networks
-	if netMgr != nil {
-		for _, n := range orphanedNetworks {
-			fmt.Printf("Removing network %s... ", n.Name)
-			if err := netMgr.ForceRemoveNetwork(ctx, n.ID); err != nil {
-				fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
-				failedCount++
-				continue
-			}
-			fmt.Println(ui.Green("done"))
-			removedCount++
+	for _, rn := range orphanedNetworks {
+		fmt.Printf("Removing network %s... ", rn.network.Name)
+		netMgr := rn.rt.NetworkManager()
+		if netMgr == nil {
+			continue
 		}
+		if err := netMgr.ForceRemoveNetwork(ctx, rn.network.ID); err != nil {
+			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
+			failedCount++
+			continue
+		}
+		fmt.Println(ui.Green("done"))
+		removedCount++
 	}
 
 	// Clean worktree directories only for runs that were successfully destroyed.
