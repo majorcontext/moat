@@ -931,6 +931,7 @@ moat list
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique identifier |
+| RUNTIME | Container runtime (docker, apple) |
 | STATE | running, stopped, failed |
 | AGE | Time since run was created |
 | WORKTREE | Branch name (appears when any run has a worktree) |
@@ -950,7 +951,7 @@ moat status
 
 ### Output sections
 
-- **Runtime**: Docker or Apple containers
+- **Runtime**: Available container runtimes (shows all available, e.g., "docker, apple")
 - **Active Runs**: Currently running containers with age, disk usage, and endpoints
 - **Summary**: Counts and disk usage for stopped runs and cached images
 - **Health**: Warnings about stopped runs and orphaned containers
@@ -1331,19 +1332,39 @@ Low-level system commands.
 
 ### moat system images
 
-List moat-managed container images.
+List moat-managed container images across all available runtimes.
 
 ```
 moat system images
 ```
 
+#### Output columns
+
+| Column | Description |
+|--------|-------------|
+| IMAGE ID | Short image identifier |
+| TAG | Image tag |
+| RUNTIME | Container runtime (docker, apple) |
+| SIZE | Image size in MB |
+| CREATED | Time since image was created |
+
 ### moat system containers
 
-List moat containers.
+List moat containers across all available runtimes.
 
 ```
 moat system containers
 ```
+
+#### Output columns
+
+| Column | Description |
+|--------|-------------|
+| CONTAINER ID | Container identifier |
+| NAME | Container name |
+| RUNTIME | Container runtime (docker, apple) |
+| STATUS | Container status (running, exited, etc.) |
+| CREATED | Time since container was created |
 
 ### moat system clean-temp
 

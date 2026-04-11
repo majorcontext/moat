@@ -43,7 +43,7 @@ func listSystemImages(cmd *cobra.Command, args []string) error {
 		rtType container.RuntimeType
 	}
 	var all []runtimeImage
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		imgs, err := rt.ListImages(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s images: %v", rt.Type(), err)
@@ -53,14 +53,20 @@ func listSystemImages(cmd *cobra.Command, args []string) error {
 			all = append(all, runtimeImage{image: img, rtType: rt.Type()})
 		}
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning images: %v", err)
+	}
 
 	if jsonOut {
-		images := make([]container.ImageInfo, len(all))
-		for i, ri := range all {
-			images[i] = ri.image
+		type imageJSON struct {
+			container.ImageInfo
+			Runtime string `json:"runtime"`
 		}
-		return json.NewEncoder(os.Stdout).Encode(images)
+		out := make([]imageJSON, len(all))
+		for i, ri := range all {
+			out[i] = imageJSON{ImageInfo: ri.image, Runtime: string(ri.rtType)}
+		}
+		return json.NewEncoder(os.Stdout).Encode(out)
 	}
 
 	if len(all) == 0 {

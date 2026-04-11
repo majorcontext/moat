@@ -43,13 +43,6 @@ func init() {
 func cleanResources(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime pool (no sandbox needed for listing/cleaning)
-	pool, err := container.NewRuntimePool(container.RuntimeOptions{Sandbox: false})
-	if err != nil {
-		return fmt.Errorf("initializing runtime: %w", err)
-	}
-	defer pool.Close()
-
 	// Get runs (no sandbox needed for listing/cleaning)
 	noSandbox := true
 	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
@@ -57,6 +50,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating run manager: %w", err)
 	}
 	defer manager.Close()
+
+	// Use the manager's runtime pool to avoid creating a duplicate.
+	pool := manager.RuntimePool()
 
 	fmt.Println("Scanning for resources to clean...")
 	fmt.Println()
@@ -82,7 +78,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		rt    container.Runtime
 	}
 	var allImages []runtimeImage
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		imgs, err := rt.ListImages(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s images: %v", rt.Type(), err)
@@ -92,7 +88,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			allImages = append(allImages, runtimeImage{image: img, rt: rt})
 		}
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning images: %v", err)
+	}
 
 	// Build a tag-to-ID mapping so we can track images by both identifiers.
 	// This handles cases where the same image ID has multiple tags.
@@ -105,12 +103,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	// Track both tags and IDs since containers report tags but we need
 	// to match against image IDs for correctness.
 	runningImages := make(map[string]bool)
-	var containerListFailed bool
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	// Track which runtimes failed container listing — we must skip both
+	// image and network cleanup for those runtimes to avoid removing
+	// resources that may still be in use by containers we couldn't verify.
+	failedRuntimes := make(map[container.RuntimeType]bool)
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		containers, err := rt.ListContainers(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)
-			containerListFailed = true
+			failedRuntimes[rt.Type()] = true
 			return nil
 		}
 		for _, c := range containers {
@@ -123,13 +124,19 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			}
 		}
 		return nil
-	})
-	if containerListFailed {
-		ui.Info("Images will be skipped if running containers cannot be verified")
+	}); err != nil {
+		ui.Warnf("Error scanning containers: %v", err)
+	}
+	if len(failedRuntimes) > 0 {
+		ui.Info("Images and networks will be skipped for runtimes where containers cannot be verified")
 	}
 
 	var unusedRuntimeImages []runtimeImage
 	for _, ri := range allImages {
+		// Skip images from runtimes where we couldn't list containers
+		if failedRuntimes[ri.rt.Type()] {
+			continue
+		}
 		// Check both tag and ID since an image might be referenced either way
 		if !runningImages[ri.image.Tag] && !runningImages[ri.image.ID] {
 			unusedRuntimeImages = append(unusedRuntimeImages, ri)
@@ -146,7 +153,12 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		rt      container.Runtime
 	}
 	var orphanedNetworks []runtimeNetwork
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
+		// Skip runtimes where container listing failed — we can't
+		// reliably determine which networks are orphaned.
+		if failedRuntimes[rt.Type()] {
+			return nil
+		}
 		netMgr := rt.NetworkManager()
 		if netMgr == nil {
 			return nil
@@ -169,7 +181,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning networks: %v", err)
+	}
 
 	// Nothing to clean?
 	if len(stoppedRuns) == 0 && len(unusedImages) == 0 && len(orphanedNetworks) == 0 {

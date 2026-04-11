@@ -49,6 +49,7 @@ type statusOutput struct {
 type runInfo struct {
 	Name      string `json:"name"`
 	ID        string `json:"id"`
+	Runtime   string `json:"runtime"`
 	State     string `json:"state"`
 	Age       string `json:"age"`
 	DiskMB    int64  `json:"disk_mb"`
@@ -69,13 +70,6 @@ type healthItem struct {
 func showStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime pool (no sandbox needed for status queries)
-	pool, err := container.NewRuntimePool(container.RuntimeOptions{Sandbox: false})
-	if err != nil {
-		return fmt.Errorf("initializing runtime: %w", err)
-	}
-	defer pool.Close()
-
 	// Get runs (no sandbox needed for status queries)
 	noSandbox := true
 	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
@@ -83,6 +77,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating run manager: %w", err)
 	}
 	defer manager.Close()
+
+	// Use the manager's runtime pool to avoid creating a duplicate.
+	pool := manager.RuntimePool()
 
 	runs := manager.List()
 
@@ -92,16 +89,24 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	})
 
 	// Get images from all available runtimes
-	var images []container.ImageInfo
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	var images []imageInfo
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		rtImages, err := rt.ListImages(ctx)
 		if err != nil {
 			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)
 			return nil
 		}
-		images = append(images, rtImages...)
+		for _, img := range rtImages {
+			images = append(images, imageInfo{
+				Tag:     img.Tag,
+				Created: formatAge(img.Created),
+				SizeMB:  img.Size / (1024 * 1024),
+			})
+		}
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning images: %v", err)
+	}
 
 	// Calculate disk usage only for active runs (with timeout to prevent blocking on slow disks)
 	runDiskUsage := make(map[string]int64)
@@ -129,10 +134,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Build output
 	var runtimeNames []string
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		runtimeNames = append(runtimeNames, string(rt.Type()))
 		return nil
-	})
+	}); err != nil {
+		log.Debug("listing runtimes failed", "error", err)
+	}
 	output := statusOutput{
 		Runtime: strings.Join(runtimeNames, ", "),
 	}
@@ -159,6 +166,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		output.ActiveRuns = append(output.ActiveRuns, runInfo{
 			Name:      r.Name,
 			ID:        r.ID,
+			Runtime:   r.Runtime,
 			State:     string(r.GetState()),
 			Age:       age,
 			DiskMB:    diskMB,
@@ -166,16 +174,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Images section - only need count for summary
+	// Images section - calculate total size from image info
 	var totalImageSize int64
 	for _, img := range images {
-		totalImageSize += img.Size
-		output.Images = append(output.Images, imageInfo{
-			Tag:     img.Tag,
-			Created: formatAge(img.Created),
-			SizeMB:  img.Size / (1024 * 1024),
-		})
+		totalImageSize += img.SizeMB * (1024 * 1024)
 	}
+	output.Images = images
 
 	// Health section
 	if stoppedCount > 0 {
@@ -188,7 +192,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Check for orphaned containers across all runtimes
 	var allContainers []container.Info
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		cs, err := rt.ListContainers(ctx)
 		if err != nil {
 			output.Health = append(output.Health, healthItem{
@@ -199,7 +203,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		}
 		allContainers = append(allContainers, cs...)
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning containers: %v", err)
+	}
 
 	knownRunIDs := make(map[string]bool)
 	for _, r := range runs {

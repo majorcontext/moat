@@ -43,7 +43,7 @@ func listSystemContainers(cmd *cobra.Command, args []string) error {
 		rtType container.RuntimeType
 	}
 	var all []runtimeContainer
-	_ = pool.ForEachAvailable(func(rt container.Runtime) error {
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
 		containers, err := rt.ListContainers(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)
@@ -53,14 +53,20 @@ func listSystemContainers(cmd *cobra.Command, args []string) error {
 			all = append(all, runtimeContainer{info: c, rtType: rt.Type()})
 		}
 		return nil
-	})
+	}); err != nil {
+		ui.Warnf("Error scanning containers: %v", err)
+	}
 
 	if jsonOut {
-		containers := make([]container.Info, len(all))
-		for i, rc := range all {
-			containers[i] = rc.info
+		type containerJSON struct {
+			container.Info
+			Runtime string `json:"runtime"`
 		}
-		return json.NewEncoder(os.Stdout).Encode(containers)
+		out := make([]containerJSON, len(all))
+		for i, rc := range all {
+			out[i] = containerJSON{Info: rc.info, Runtime: string(rc.rtType)}
+		}
+		return json.NewEncoder(os.Stdout).Encode(out)
 	}
 
 	if len(all) == 0 {

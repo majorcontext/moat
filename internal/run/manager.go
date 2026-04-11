@@ -83,6 +83,7 @@ func getWorkspaceOwner(workspace string) (uid, gid int) {
 // Manager handles run lifecycle operations.
 type Manager struct {
 	runtimePool    *container.RuntimePool
+	runtimeType    string // Cached at init; safe to read after Close()
 	runs           map[string]*Run
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
@@ -104,6 +105,18 @@ type Manager struct {
 // For legacy runs without a Runtime field, falls back to the default runtime.
 func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
 	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
+}
+
+// defaultRuntime returns the default runtime for new run creation.
+// This is only called during Create/Start/StartAttached flows where the pool
+// is guaranteed to be open. Panics if the pool is closed, indicating a
+// programming error (these methods must not be called after Close).
+func (m *Manager) defaultRuntime() container.Runtime {
+	rt, err := m.runtimePool.Default()
+	if err != nil {
+		panic("bug: runtime pool closed during active operation: " + err.Error())
+	}
+	return rt
 }
 
 // ManagerOptions configures the run manager.
@@ -136,12 +149,15 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 
 	lifecycle, err := routing.NewLifecycle(proxyDir, proxyPort)
 	if err != nil {
+		_ = pool.Close()
 		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defaultRT, _ := pool.Default()
 	m := &Manager{
 		runtimePool:    pool,
+		runtimeType:    string(defaultRT.Type()),
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
@@ -272,9 +288,12 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 					// Preserve both run state and service containers from
 					// persisted metadata — if the runtime is unavailable,
 					// service container checks would also fail.
+					// Skip monitor: spawning one would also fail (same runtime issue)
+					// and incorrectly mark the run as failed.
 					results[idx] = checkedRun{
 						info:              info,
 						runState:          State(info.meta.State),
+						skipMonitor:       true,
 						serviceContainers: info.meta.ServiceContainers,
 					}
 					return
@@ -884,7 +903,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
 		// Must be set before buildRegisterRequest so HostGateway is included.
-		hostAddr = m.runtimePool.Default().GetHostAddress()
+		hostAddr = m.defaultRuntime().GetHostAddress()
 		runCtx.HostGateway = hostAddr
 
 		// Build RegisterRequest from the RunContext
@@ -1124,7 +1143,7 @@ region = %s
 		// For these cases, we use TCP instead: the host listens on TCP and the
 		// container's moat-init script uses socat to bridge TCP to a local Unix socket.
 		// For Docker on Linux, Unix sockets work fine via direct bind mounts.
-		usesTCP := !m.runtimePool.Default().SupportsHostNetwork()
+		usesTCP := !m.defaultRuntime().SupportsHostNetwork()
 
 		if usesTCP {
 			// Use TCP server - container will use socat to bridge.
@@ -1140,7 +1159,7 @@ region = %s
 			}
 
 			// Get the actual TCP address after binding.
-			// hostAddr is set earlier from m.runtimePool.Default().GetHostAddress() and may be
+			// hostAddr is set earlier from m.defaultRuntime().GetHostAddress() and may be
 			// rewritten later for custom networks (replaceHostInEnv).
 			tcpAddr := sshServer.TCPAddr()
 			containerSSHDir := "/run/moat/ssh"
@@ -1233,7 +1252,7 @@ region = %s
 	needsProxy := r.ProxyAuthToken != ""
 
 	if needsProxy || needsPorts {
-		if m.runtimePool.Default().SupportsHostNetwork() && !needsPorts {
+		if m.defaultRuntime().SupportsHostNetwork() && !needsPorts {
 			// Docker on Linux without ports: use host network so container can reach 127.0.0.1
 			networkMode = "host"
 		} else {
@@ -1244,7 +1263,7 @@ region = %s
 			// Desktop and Rancher Desktop resolve it via built-in DNS — adding
 			// host-gateway would override the correct IP with the bridge
 			// gateway (which is unreachable on Rancher Desktop).
-			if m.runtimePool.Default().Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
+			if m.defaultRuntime().Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}
@@ -1372,7 +1391,7 @@ region = %s
 	// Resolve docker dependency if present
 	// This validates that Apple containers are not used with docker:host dependency,
 	// and returns the appropriate config for the mode (socket mount for host, privileged for dind).
-	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.runtimePool.Default().Type())
+	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.defaultRuntime().Type())
 	if dockerErr != nil {
 		cleanupDaemonRun()
 		cleanupSSH(sshServer)
@@ -1557,16 +1576,16 @@ region = %s
 		r.Agent = opts.Config.Agent
 	}
 	r.Image = containerImage
-	r.Runtime = string(m.runtimePool.Default().Type())
+	r.Runtime = string(m.defaultRuntime().Type())
 
 	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
-		exists, _ := m.runtimePool.Default().BuildManager().ImageExists(ctx, containerImage)
+		exists, _ := m.defaultRuntime().BuildManager().ImageExists(ctx, containerImage)
 		if exists {
 			fmt.Printf("Removing cached image %s...\n", containerImage)
-			if err := m.runtimePool.Default().RemoveImage(ctx, containerImage); err != nil {
+			if err := m.defaultRuntime().RemoveImage(ctx, containerImage); err != nil {
 				ui.Warnf("Failed to remove image: %v", err)
 			}
 		}
@@ -1584,7 +1603,7 @@ region = %s
 		}
 		generatedDockerfile = result.Dockerfile
 
-		exists, err := m.runtimePool.Default().BuildManager().ImageExists(ctx, containerImage)
+		exists, err := m.defaultRuntime().BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
 			cleanupDaemonRun()
 			return nil, fmt.Errorf("checking image: %w", err)
@@ -1630,10 +1649,10 @@ region = %s
 				buildOpts.DNS = opts.Config.Container.DNS
 			}
 
-			buildMgr := m.runtimePool.Default().BuildManager()
+			buildMgr := m.defaultRuntime().BuildManager()
 			if buildMgr == nil {
 				cleanupDaemonRun()
-				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtimePool.Default().Type())
+				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.defaultRuntime().Type())
 			}
 
 			// Merge pre-cloned marketplace files into build context.
@@ -1662,7 +1681,7 @@ region = %s
 	// - anthropic grant is configured (automatic Claude Code integration)
 	var containerHome string
 	if hostHome, err := os.UserHomeDir(); err == nil {
-		imageHome := m.runtimePool.Default().BuildManager().GetImageHomeDir(ctx, containerImage)
+		imageHome := m.defaultRuntime().BuildManager().GetImageHomeDir(ctx, containerImage)
 		containerHome = resolveContainerHome(needsCustomImage, imageHome)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			claudeDir := claude.WorkspaceToClaudeDir(opts.Workspace)
@@ -1774,7 +1793,7 @@ region = %s
 			// the container cannot reach directly.
 			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
-				proxyAddr := fmt.Sprintf("%s:%d", m.runtimePool.Default().GetHostAddress(), r.ProxyPort)
+				proxyAddr := fmt.Sprintf("%s:%d", m.defaultRuntime().GetHostAddress(), r.ProxyPort)
 				for _, mcp := range opts.Config.MCP {
 					relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
 					mcpCfg := provider.MCPServerConfig{
@@ -2101,13 +2120,13 @@ region = %s
 	var networkID string
 	if buildkitCfg.Enabled {
 		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
-		netMgr := m.runtimePool.Default().NetworkManager()
+		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr == nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
-			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.runtimePool.Default().Type())
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.defaultRuntime().Type())
 		}
 		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
 		if netErr != nil {
@@ -2148,9 +2167,9 @@ region = %s
 			},
 		}
 
-		sidecarMgr := m.runtimePool.Default().SidecarManager()
+		sidecarMgr := m.defaultRuntime().SidecarManager()
 		if sidecarMgr == nil {
-			netMgr := m.runtimePool.Default().NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2158,12 +2177,12 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
-			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.runtimePool.Default().Type())
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.defaultRuntime().Type())
 		}
 		buildkitContainerID, sidecarErr := sidecarMgr.StartSidecar(ctx, sidecarCfg)
 		if sidecarErr != nil {
 			// Clean up network on failure
-			netMgr := m.runtimePool.Default().NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2186,8 +2205,8 @@ region = %s
 			}
 		}
 		if !ready {
-			_ = m.runtimePool.Default().StopContainer(ctx, buildkitContainerID) //nolint:errcheck
-			netMgr := m.runtimePool.Default().NetworkManager()
+			_ = m.defaultRuntime().StopContainer(ctx, buildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2208,7 +2227,7 @@ region = %s
 
 	// Start service dependencies
 	if len(serviceDeps) > 0 {
-		svcMgr := m.runtimePool.Default().ServiceManager()
+		svcMgr := m.defaultRuntime().ServiceManager()
 		if svcMgr == nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
@@ -2236,7 +2255,7 @@ region = %s
 
 		// Ensure network exists (share with BuildKit if present)
 		if networkID == "" {
-			netMgr := m.runtimePool.Default().NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr == nil {
 				cleanupDaemonRun()
 				cleanupSSH(sshServer)
@@ -2442,7 +2461,7 @@ region = %s
 	// all env vars that reference the old host address to use the custom
 	// network's gateway instead.
 	if networkID != "" && net.ParseIP(hostAddr) != nil {
-		netMgr := m.runtimePool.Default().NetworkManager()
+		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr != nil {
 			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
 				log.Debug("rewriting proxy host for custom network",
@@ -2482,13 +2501,13 @@ region = %s
 	// AI agent, use the agent default (8 GB). Apple's system default of 1 GB is
 	// too low for Claude Code, Codex, and Gemini CLI.
 	// Docker containers are left unlimited unless explicitly configured.
-	if memoryMB == 0 && m.runtimePool.Default().Type() == container.RuntimeApple && isAIAgent(opts.Config) {
+	if memoryMB == 0 && m.defaultRuntime().Type() == container.RuntimeApple && isAIAgent(opts.Config) {
 		memoryMB = container.DefaultAgentMemoryMB
 		log.Debug("using default agent memory for Apple container", "memoryMB", memoryMB)
 	}
 
 	// Create container
-	containerID, err := m.runtimePool.Default().CreateContainer(ctx, container.Config{
+	containerID, err := m.defaultRuntime().CreateContainer(ctx, container.Config{
 		Name:         r.ID,
 		Image:        containerImage,
 		Cmd:          cmd,
@@ -2513,9 +2532,9 @@ region = %s
 	if err != nil {
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.runtimePool.Default().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
-			_ = m.runtimePool.Default().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
-			netMgr := m.runtimePool.Default().NetworkManager()
+			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
+			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
 			}
@@ -2554,7 +2573,7 @@ region = %s
 		// Enable TLS on the routing proxy
 		if _, tlsErr := m.proxyLifecycle.EnableTLS(); tlsErr != nil {
 			// Clean up container
-			if rmErr := m.runtimePool.Default().RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2564,7 +2583,7 @@ region = %s
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
-			if rmErr := m.runtimePool.Default().RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2580,7 +2599,7 @@ region = %s
 		runStore, storeErr := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 		if storeErr != nil {
 			// Clean up container and proxy if storage creation fails
-			if rmErr := m.runtimePool.Default().RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2603,7 +2622,7 @@ region = %s
 	auditStore, err := audit.OpenStore(filepath.Join(r.Store.Dir(), "audit.db"))
 	if err != nil {
 		// Clean up container, proxy, and storage if audit store fails
-		if rmErr := m.runtimePool.Default().RemoveContainer(ctx, containerID); rmErr != nil {
+		if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
 		cleanupDaemonRun()
@@ -2727,7 +2746,7 @@ func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 	var bindings map[int]int
 	var err error
 	for i := 0; i < 5; i++ {
-		bindings, err = m.runtimePool.Default().GetPortBindings(ctx, r.ContainerID)
+		bindings, err = m.defaultRuntime().GetPortBindings(ctx, r.ContainerID)
 		if err != nil || len(bindings) >= len(r.Ports) {
 			break
 		}
@@ -2770,9 +2789,9 @@ func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
 	if !r.FirewallEnabled || r.ProxyPort <= 0 {
 		return nil
 	}
-	if err := m.runtimePool.Default().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
 		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-		if stopErr := m.runtimePool.Default().StopContainer(ctx, r.ContainerID); stopErr != nil {
+		if stopErr := m.defaultRuntime().StopContainer(ctx, r.ContainerID); stopErr != nil {
 			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 		}
 		return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
@@ -2792,7 +2811,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	r.SetState(StateStarting)
 	setLogContext(r)
 
-	if err := m.runtimePool.Default().StartContainer(ctx, r.ContainerID); err != nil {
+	if err := m.defaultRuntime().StartContainer(ctx, r.ContainerID); err != nil {
 		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
@@ -2905,7 +2924,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	attachDone := make(chan error, 1)
 
 	go func() {
-		attachDone <- m.runtimePool.Default().StartAttached(ctx, containerID, attachOpts)
+		attachDone <- m.defaultRuntime().StartAttached(ctx, containerID, attachOpts)
 	}()
 
 	// Give the container a moment to start before checking state.
@@ -2964,7 +2983,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// (Apple TTY output doesn't go through container runtime logs — captureLogs() returns
 	// early for Apple interactive runs, so this is the only path that writes logs.)
 	// Runs unconditionally: even on escape-stop the buffer holds all output up to that point.
-	if r.Interactive && r.Store != nil && m.runtimePool.Default().Type() == container.RuntimeApple {
+	if r.Interactive && r.Store != nil && container.RuntimeType(r.Runtime) == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
@@ -3683,8 +3702,16 @@ func lastNLines(s string, n int) string {
 }
 
 // RuntimeType returns the container runtime type (docker or apple).
+// Uses a value cached at init, so it is safe to call after Close().
 func (m *Manager) RuntimeType() string {
-	return string(m.runtimePool.Default().Type())
+	return m.runtimeType
+}
+
+// RuntimePool returns the manager's runtime pool. CLI commands that need
+// to query resources across runtimes (e.g., images, containers) should use
+// this instead of creating a separate pool.
+func (m *Manager) RuntimePool() *container.RuntimePool {
+	return m.runtimePool
 }
 
 // Close releases manager resources.
