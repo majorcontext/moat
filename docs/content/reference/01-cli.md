@@ -985,8 +985,8 @@ With `--json`, emits a single object:
 | images | object[] | Cached container images |
 | images[].tag | string | Image tag |
 | images[].runtime | string | Container runtime |
-| images[].created | string | Human-readable age |
-| images[].size_mb | integer | Image size in MB |
+| images[].size | integer | Image size in bytes |
+| images[].created | string | RFC 3339 timestamp |
 | health | object[] | Health warnings |
 | health[].status | string | "ok" or "warning" |
 | health[].message | string | Description |
@@ -1384,6 +1384,18 @@ moat system images
 | SIZE | Image size in MB |
 | CREATED | Time since image was created |
 
+#### JSON output
+
+With `--json`, emits an array of objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Full image ID |
+| tag | string | Image tag |
+| size | integer | Image size in bytes |
+| created | string | RFC 3339 timestamp |
+| runtime | string | Container runtime (docker, apple) |
+
 ### moat system containers
 
 List moat containers across all available runtimes.
@@ -1401,6 +1413,19 @@ moat system containers
 | RUNTIME | Container runtime (docker, apple) |
 | STATUS | Container status (running, exited, etc.) |
 | CREATED | Time since container was created |
+
+#### JSON output
+
+With `--json`, emits an array of objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Container ID |
+| name | string | Container name |
+| image | string | Image name |
+| status | string | Container status (running, exited, created) |
+| created | string | RFC 3339 timestamp |
+| runtime | string | Container runtime (docker, apple) |
 
 ### moat system clean-temp
 

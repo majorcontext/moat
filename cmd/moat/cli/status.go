@@ -57,10 +57,10 @@ type runInfo struct {
 }
 
 type imageInfo struct {
-	Tag     string `json:"tag"`
-	Runtime string `json:"runtime"`
-	Created string `json:"created"`
-	SizeMB  int64  `json:"size_mb"`
+	Tag     string    `json:"tag"`
+	Runtime string    `json:"runtime"`
+	Size    int64     `json:"size"`
+	Created time.Time `json:"created"`
 }
 
 type healthItem struct {
@@ -101,8 +101,8 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			images = append(images, imageInfo{
 				Tag:     img.Tag,
 				Runtime: string(rt.Type()),
-				Created: formatAge(img.Created),
-				SizeMB:  img.Size / (1024 * 1024),
+				Size:    img.Size,
+				Created: img.Created,
 			})
 		}
 		return nil
@@ -179,7 +179,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	// Images section - calculate total size from image info
 	var totalImageSize int64
 	for _, img := range images {
-		totalImageSize += img.SizeMB * (1024 * 1024)
+		totalImageSize += img.Size
 	}
 	output.Images = images
 
