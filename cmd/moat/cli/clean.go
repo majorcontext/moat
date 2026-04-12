@@ -92,22 +92,34 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		ui.Warnf("Error scanning images: %v", err)
 	}
 
-	// Build a tag-to-ID mapping so we can track images by both identifiers.
-	// This handles cases where the same image ID has multiple tags.
-	tagToID := make(map[string]string)
-	for _, ri := range allImages {
-		tagToID[ri.image.Tag] = ri.image.ID
+	// Build per-runtime maps of tag-to-ID and running images to avoid
+	// cross-runtime contamination (e.g., a Docker container using
+	// moat/claude:latest should not prevent Apple's moat/claude:latest
+	// from being cleaned up).
+	type runtimeImageState struct {
+		tagToID       map[string]string
+		runningImages map[string]bool
 	}
+	rtImageState := make(map[container.RuntimeType]*runtimeImageState)
 
-	// Filter out images that might be in use by running containers.
-	// Track both tags and IDs since containers report tags but we need
-	// to match against image IDs for correctness.
-	runningImages := make(map[string]bool)
 	// Track which runtimes failed container listing — we must skip both
 	// image and network cleanup for those runtimes to avoid removing
 	// resources that may still be in use by containers we couldn't verify.
 	failedRuntimes := make(map[container.RuntimeType]bool)
 	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
+		state := &runtimeImageState{
+			tagToID:       make(map[string]string),
+			runningImages: make(map[string]bool),
+		}
+		rtImageState[rt.Type()] = state
+
+		// Build tag-to-ID from this runtime's images only
+		for _, ri := range allImages {
+			if ri.rt.Type() == rt.Type() {
+				state.tagToID[ri.image.Tag] = ri.image.ID
+			}
+		}
+
 		containers, err := rt.ListContainers(ctx)
 		if err != nil {
 			ui.Warnf("Failed to list %s containers: %v", rt.Type(), err)
@@ -116,10 +128,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		}
 		for _, c := range containers {
 			if c.Status == "running" {
-				runningImages[c.Image] = true
-				// Also mark the image ID as in-use if we can resolve it
-				if id, ok := tagToID[c.Image]; ok {
-					runningImages[id] = true
+				state.runningImages[c.Image] = true
+				if id, ok := state.tagToID[c.Image]; ok {
+					state.runningImages[id] = true
 				}
 			}
 		}
@@ -137,10 +148,12 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		if failedRuntimes[ri.rt.Type()] {
 			continue
 		}
-		// Check both tag and ID since an image might be referenced either way
-		if !runningImages[ri.image.Tag] && !runningImages[ri.image.ID] {
-			unusedRuntimeImages = append(unusedRuntimeImages, ri)
+		// Check this image against its own runtime's running containers only
+		state := rtImageState[ri.rt.Type()]
+		if state != nil && (state.runningImages[ri.image.Tag] || state.runningImages[ri.image.ID]) {
+			continue
 		}
+		unusedRuntimeImages = append(unusedRuntimeImages, ri)
 	}
 	// Find orphaned networks (moat-managed networks not associated with any known run)
 	type runtimeNetwork struct {
