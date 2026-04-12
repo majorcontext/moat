@@ -956,6 +956,42 @@ moat status
 - **Summary**: Counts and disk usage for stopped runs and cached images
 - **Health**: Warnings about stopped runs and orphaned containers
 
+### Active Runs columns
+
+| Column | Description |
+|--------|-------------|
+| NAME | Run name |
+| RUN ID | Unique run identifier |
+| RUNTIME | Container runtime (docker or apple) |
+| AGE | Time since run was created |
+| DISK | Disk usage in MB |
+| ENDPOINTS | Exposed services (from ports) |
+
+### JSON output
+
+With `--json`, emits a single object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| runtimes | string[] | Available container runtimes |
+| active_runs | object[] | Currently active runs |
+| active_runs[].name | string | Run name |
+| active_runs[].id | string | Run ID |
+| active_runs[].runtime | string | Container runtime |
+| active_runs[].state | string | Run state |
+| active_runs[].age | string | Human-readable age |
+| active_runs[].disk_mb | integer | Disk usage in MB (-1 if unknown) |
+| active_runs[].endpoints | string | Comma-separated endpoint names |
+| images | object[] | Cached container images |
+| images[].tag | string | Image tag |
+| images[].runtime | string | Container runtime |
+| images[].created | string | Human-readable age |
+| images[].size_mb | integer | Image size in MB |
+| health | object[] | Health warnings |
+| health[].status | string | "ok" or "warning" |
+| health[].message | string | Description |
+| total_disk_bytes | integer | Total disk usage in bytes |
+
 For detailed information about all runs, use `moat list`.
 For image details, use `moat system images`
 

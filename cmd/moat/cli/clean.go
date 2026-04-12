@@ -232,9 +232,11 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	if len(orphanedNetworks) > 0 {
 		fmt.Printf("%s (%d):\n", ui.Bold("Orphaned networks"), len(orphanedNetworks))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		for _, rn := range orphanedNetworks {
-			fmt.Printf("  %s\n", rn.network.Name)
+			fmt.Fprintf(w, "  %s\t%s\n", rn.network.Name, rn.rt.Type())
 		}
+		w.Flush()
 		fmt.Println()
 	}
 

@@ -17,7 +17,7 @@ var systemContainersCmd = &cobra.Command{
 	Short: "List moat-managed containers",
 	Long: `List all containers created by moat.
 
-This is an escape hatch for debugging. Use 'agent status' for normal operations.
+This is an escape hatch for debugging. Use 'moat status' for normal operations.
 
 To remove a container, use the native container CLI:
   docker rm <container-id>

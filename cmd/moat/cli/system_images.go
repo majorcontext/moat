@@ -17,7 +17,7 @@ var systemImagesCmd = &cobra.Command{
 	Short: "List moat-managed images",
 	Long: `List all container images created by moat.
 
-This is an escape hatch for debugging. Use 'agent status' for normal operations.
+This is an escape hatch for debugging. Use 'moat status' for normal operations.
 
 To remove an image, use the native container CLI:
   docker rmi <image-id>
