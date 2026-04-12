@@ -196,6 +196,32 @@ func TestRuntimePoolForEachAvailable(t *testing.T) {
 	}
 }
 
+func TestRuntimePoolUnavailableCached(t *testing.T) {
+	pool := newStubPool()
+	defer pool.Close()
+
+	// First call: "apple" is not in the stub pool, so Get will try
+	// NewRuntimeByType, fail, and populate unavailable.
+	_, err1 := pool.Get(RuntimeApple)
+	if err1 == nil {
+		t.Fatal("expected error for unavailable runtime")
+	}
+
+	// Verify the unavailable map was populated.
+	pool.mu.Lock()
+	_, cached := pool.unavailable[RuntimeApple]
+	pool.mu.Unlock()
+	if !cached {
+		t.Fatal("failed runtime should be cached in unavailable map")
+	}
+
+	// Second call should return from cache (different error message — no wrapped cause).
+	_, err2 := pool.Get(RuntimeApple)
+	if err2 == nil {
+		t.Fatal("expected error on second Get for unavailable runtime")
+	}
+}
+
 func TestRuntimePoolForEachAvailablePropagatesError(t *testing.T) {
 	pool := newStubPool()
 	defer pool.Close()
