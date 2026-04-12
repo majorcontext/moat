@@ -981,7 +981,7 @@ With `--json`, emits a single object:
 | active_runs[].state | string | Run state |
 | active_runs[].age | string | Human-readable age |
 | active_runs[].disk_mb | integer | Disk usage in MB (-1 if unknown) |
-| active_runs[].endpoints | string | Comma-separated endpoint names |
+| active_runs[].endpoints | string | Comma-separated endpoint names (omitted when empty) |
 | images | object[] | Cached container images |
 | images[].tag | string | Image tag |
 | images[].runtime | string | Container runtime |

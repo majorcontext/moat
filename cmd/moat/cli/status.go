@@ -89,9 +89,11 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 
-	// Get images from all available runtimes
+	// Get images and runtime names from all available runtimes
 	var images []imageInfo
+	var runtimeNames []string
 	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
+		runtimeNames = append(runtimeNames, string(rt.Type()))
 		rtImages, err := rt.ListImages(ctx)
 		if err != nil {
 			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)
@@ -135,13 +137,6 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build output
-	var runtimeNames []string
-	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
-		runtimeNames = append(runtimeNames, string(rt.Type()))
-		return nil
-	}); err != nil {
-		log.Debug("listing runtimes failed", "error", err)
-	}
 	output := statusOutput{
 		Runtimes: runtimeNames,
 	}
