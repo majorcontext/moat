@@ -252,8 +252,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 			if r.DiskMB < 0 {
 				diskStr = "?"
 			}
+			rtLabel := r.Runtime
+			if rtLabel == "" {
+				rtLabel = "-"
+			}
 			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
-				r.Name, r.ID, r.Runtime, r.Age, diskStr, r.Endpoints)
+				r.Name, r.ID, rtLabel, r.Age, diskStr, r.Endpoints)
 		}
 		w.Flush()
 	}
