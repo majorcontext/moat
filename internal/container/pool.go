@@ -101,7 +101,7 @@ func (p *RuntimePool) ForEachAvailable(fn func(Runtime) error) error {
 	for _, typ := range AllRuntimeTypes() {
 		rt, err := p.Get(typ)
 		if err != nil {
-			continue // Runtime not available on this system
+			continue // Runtime not available (or pool closed)
 		}
 		if err := fn(rt); err != nil {
 			return err

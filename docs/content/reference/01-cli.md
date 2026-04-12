@@ -977,7 +977,7 @@ With `--json`, emits a single object:
 | active_runs | object[] | Currently active runs |
 | active_runs[].name | string | Run name |
 | active_runs[].id | string | Run ID |
-| active_runs[].runtime | string | Container runtime |
+| active_runs[].runtime | string | Container runtime (empty for legacy runs) |
 | active_runs[].state | string | Run state |
 | active_runs[].age | string | Human-readable age |
 | active_runs[].disk_mb | integer | Disk usage in MB (-1 if unknown) |
