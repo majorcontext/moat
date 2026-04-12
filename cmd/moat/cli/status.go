@@ -239,7 +239,11 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("%s: %s\n\n", ui.Bold("Runtime"), strings.Join(output.Runtimes, ", "))
+	runtimeLabel := "Runtime"
+	if len(output.Runtimes) > 1 {
+		runtimeLabel = "Runtimes"
+	}
+	fmt.Printf("%s: %s\n\n", ui.Bold(runtimeLabel), strings.Join(output.Runtimes, ", "))
 
 	// Active runs table
 	if len(activeRuns) == 0 {
