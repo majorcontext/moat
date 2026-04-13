@@ -64,8 +64,8 @@ jobs:
         with:
           images: ghcr.io/majorcontext/moat-gatekeeper
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref }}
             type=sha
 
       - uses: docker/build-push-action@v6
