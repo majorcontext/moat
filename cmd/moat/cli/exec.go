@@ -95,7 +95,10 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 		return nil, cleanup, stdout
 	}
 
-	runtimeType := manager.RuntimeType()
+	runtimeType := r.Runtime
+	if runtimeType == "" {
+		runtimeType = manager.RuntimeType()
+	}
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
 	bar.SetGrants(r.Grants)
 	if r.DaemonCommit != "" && r.DaemonCommit != commit {

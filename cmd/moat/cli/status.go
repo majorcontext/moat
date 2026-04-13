@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/ui"
@@ -38,7 +39,7 @@ func init() {
 }
 
 type statusOutput struct {
-	Runtime    string       `json:"runtime"`
+	Runtimes   []string     `json:"runtimes"`
 	ActiveRuns []runInfo    `json:"active_runs"`
 	Images     []imageInfo  `json:"images"`
 	Health     []healthItem `json:"health"`
@@ -48,6 +49,7 @@ type statusOutput struct {
 type runInfo struct {
 	Name      string `json:"name"`
 	ID        string `json:"id"`
+	Runtime   string `json:"runtime"`
 	State     string `json:"state"`
 	Age       string `json:"age"`
 	DiskMB    int64  `json:"disk_mb"`
@@ -55,9 +57,10 @@ type runInfo struct {
 }
 
 type imageInfo struct {
-	Tag     string `json:"tag"`
-	Created string `json:"created"`
-	SizeMB  int64  `json:"size_mb"`
+	Tag     string    `json:"tag"`
+	Runtime string    `json:"runtime"`
+	Size    int64     `json:"size"`
+	Created time.Time `json:"created"`
 }
 
 type healthItem struct {
@@ -68,13 +71,6 @@ type healthItem struct {
 func showStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runtime (no sandbox needed for status queries)
-	rt, err := container.NewRuntimeWithOptions(container.RuntimeOptions{Sandbox: false})
-	if err != nil {
-		return fmt.Errorf("initializing runtime: %w", err)
-	}
-	defer rt.Close()
-
 	// Get runs (no sandbox needed for status queries)
 	noSandbox := true
 	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
@@ -83,6 +79,9 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer manager.Close()
 
+	// Use the manager's runtime pool to avoid creating a duplicate.
+	pool := manager.RuntimePool()
+
 	runs := manager.List()
 
 	// Sort runs by age (newest first)
@@ -90,10 +89,27 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 
-	// Get images
-	images, err := rt.ListImages(ctx)
-	if err != nil {
-		return fmt.Errorf("listing images: %w", err)
+	// Get images and runtime names from all available runtimes
+	var images []imageInfo
+	var runtimeNames []string
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
+		runtimeNames = append(runtimeNames, string(rt.Type()))
+		rtImages, err := rt.ListImages(ctx)
+		if err != nil {
+			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)
+			return nil
+		}
+		for _, img := range rtImages {
+			images = append(images, imageInfo{
+				Tag:     img.Tag,
+				Runtime: string(rt.Type()),
+				Size:    img.Size,
+				Created: img.Created,
+			})
+		}
+		return nil
+	}); err != nil {
+		ui.Warnf("Error scanning images: %v", err)
 	}
 
 	// Calculate disk usage only for active runs (with timeout to prevent blocking on slow disks)
@@ -122,7 +138,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 
 	// Build output
 	output := statusOutput{
-		Runtime: string(rt.Type()),
+		Runtimes: runtimeNames,
 	}
 
 	// Active runs section
@@ -147,6 +163,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		output.ActiveRuns = append(output.ActiveRuns, runInfo{
 			Name:      r.Name,
 			ID:        r.ID,
+			Runtime:   r.Runtime,
 			State:     string(r.GetState()),
 			Age:       age,
 			DiskMB:    diskMB,
@@ -154,16 +171,12 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Images section - only need count for summary
+	// Images section - calculate total size from image info
 	var totalImageSize int64
 	for _, img := range images {
 		totalImageSize += img.Size
-		output.Images = append(output.Images, imageInfo{
-			Tag:     img.Tag,
-			Created: formatAge(img.Created),
-			SizeMB:  img.Size / (1024 * 1024),
-		})
 	}
+	output.Images = images
 
 	// Health section
 	if stoppedCount > 0 {
@@ -174,31 +187,38 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Check for orphaned containers
-	containers, err := rt.ListContainers(ctx)
-	if err != nil {
-		// Add health warning so users know container checks are incomplete
-		output.Health = append(output.Health, healthItem{
-			Status:  "warning",
-			Message: fmt.Sprintf("Failed to list containers: %v", err),
-		})
-	} else {
-		knownRunIDs := make(map[string]bool)
-		for _, r := range runs {
-			knownRunIDs[r.ID] = true
-		}
-		orphanedCount := 0
-		for _, c := range containers {
-			if !knownRunIDs[c.Name] {
-				orphanedCount++
-			}
-		}
-		if orphanedCount > 0 {
+	// Check for orphaned containers across all runtimes
+	var allContainers []container.Info
+	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
+		cs, err := rt.ListContainers(ctx)
+		if err != nil {
 			output.Health = append(output.Health, healthItem{
 				Status:  "warning",
-				Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
+				Message: fmt.Sprintf("Failed to list %s containers: %v", rt.Type(), err),
 			})
+			return nil
 		}
+		allContainers = append(allContainers, cs...)
+		return nil
+	}); err != nil {
+		ui.Warnf("Error scanning containers: %v", err)
+	}
+
+	knownRunIDs := make(map[string]bool)
+	for _, r := range runs {
+		knownRunIDs[r.ID] = true
+	}
+	orphanedCount := 0
+	for _, c := range allContainers {
+		if !knownRunIDs[c.Name] {
+			orphanedCount++
+		}
+	}
+	if orphanedCount > 0 {
+		output.Health = append(output.Health, healthItem{
+			Status:  "warning",
+			Message: fmt.Sprintf("%d orphaned containers", orphanedCount),
+		})
 	}
 
 	output.TotalDisk = totalImageSize + stoppedDisk
@@ -214,7 +234,11 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Printf("%s: %s\n\n", ui.Bold("Runtime"), output.Runtime)
+	runtimeLabel := "Runtime"
+	if len(output.Runtimes) > 1 {
+		runtimeLabel = "Runtimes"
+	}
+	fmt.Printf("%s: %s\n\n", ui.Bold(runtimeLabel), strings.Join(output.Runtimes, ", "))
 
 	// Active runs table
 	if len(activeRuns) == 0 {
@@ -222,14 +246,18 @@ func showStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("%s: %d\n", ui.Bold("Active Runs"), len(activeRuns))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  NAME\tRUN ID\tAGE\tDISK\tENDPOINTS")
+		fmt.Fprintln(w, "  NAME\tRUN ID\tRUNTIME\tAGE\tDISK\tENDPOINTS")
 		for _, r := range output.ActiveRuns {
 			diskStr := fmt.Sprintf("%d MB", r.DiskMB)
 			if r.DiskMB < 0 {
 				diskStr = "?"
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
-				r.Name, r.ID, r.Age, diskStr, r.Endpoints)
+			rtLabel := r.Runtime
+			if rtLabel == "" {
+				rtLabel = "-"
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
+				r.Name, r.ID, rtLabel, r.Age, diskStr, r.Endpoints)
 		}
 		w.Flush()
 	}

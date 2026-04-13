@@ -82,7 +82,8 @@ func getWorkspaceOwner(workspace string) (uid, gid int) {
 
 // Manager handles run lifecycle operations.
 type Manager struct {
-	runtime        container.Runtime
+	runtimePool    *container.RuntimePool
+	runtimeType    string // Cached at init; safe to read after Close()
 	runs           map[string]*Run
 	routes         *routing.RouteTable
 	proxyLifecycle *routing.Lifecycle
@@ -97,6 +98,25 @@ type Manager struct {
 	// Close() waits on this before closing the runtime so that
 	// monitors can finish capturing logs and updating state.
 	monitorWg sync.WaitGroup
+}
+
+// runtimeForRun returns the correct container runtime for an existing run.
+// It uses the run's Runtime field to look up the matching runtime from the pool.
+// For legacy runs without a Runtime field, falls back to the default runtime.
+func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
+	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
+}
+
+// defaultRuntime returns the default runtime for new run creation.
+// This is only called during Create/Start/StartAttached flows where the pool
+// is guaranteed to be open. Panics if the pool is closed, indicating a
+// programming error (these methods must not be called after Close).
+func (m *Manager) defaultRuntime() container.Runtime {
+	rt, err := m.runtimePool.Default()
+	if err != nil {
+		panic("bug: runtime pool closed during active operation: " + err.Error())
+	}
+	return rt
 }
 
 // ManagerOptions configures the run manager.
@@ -117,7 +137,7 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		runtimeOpts = container.DefaultRuntimeOptions()
 	}
 
-	rt, err := container.NewRuntimeWithOptions(runtimeOpts)
+	pool, err := container.NewRuntimePool(runtimeOpts)
 	if err != nil {
 		return nil, fmt.Errorf("initializing container runtime: %w", err)
 	}
@@ -129,12 +149,15 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 
 	lifecycle, err := routing.NewLifecycle(proxyDir, proxyPort)
 	if err != nil {
+		_ = pool.Close()
 		return nil, fmt.Errorf("initializing proxy lifecycle: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defaultRT, _ := pool.Default()
 	m := &Manager{
-		runtime:        rt,
+		runtimePool:    pool,
+		runtimeType:    string(defaultRT.Type()),
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
@@ -200,7 +223,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		// Pass stateConfirmed=true because the owning process authoritatively
 		// wrote this terminal state — it's safe to clean up stale routes.
 		if meta.State == string(StateStopped) || meta.State == string(StateFailed) {
-			m.registerPersistedRun(State(meta.State), true, meta, store, runID, nil)
+			m.registerPersistedRun(State(meta.State), true, false, meta, store, runID, nil)
 			continue
 		}
 
@@ -214,6 +237,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 			info              persistedRunInfo
 			runState          State
 			stateConfirmed    bool // true when state was confirmed by a successful container check
+			skipMonitor       bool // true when the runtime is unavailable (cross-runtime runs)
 			serviceContainers map[string]string
 		}
 
@@ -238,12 +262,15 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				}
 				defer func() { <-sem }()
 
-				// Skip container state check for runs created with a different runtime.
-				if info.meta.Runtime != "" && info.meta.Runtime != string(m.runtime.Type()) {
-					log.Debug("skipping cross-runtime container check, preserving persisted state", "id", info.runID, "run_runtime", info.meta.Runtime, "current_runtime", m.runtime.Type())
+				// Look up the runtime for this run (lazy-init if needed).
+				rt, rtErr := m.runtimePool.Get(container.RuntimeType(info.meta.Runtime))
+				if rtErr != nil {
+					log.Debug("runtime not available, preserving persisted state",
+						"id", info.runID, "runtime", info.meta.Runtime, "error", rtErr)
 					results[idx] = checkedRun{
 						info:              info,
 						runState:          State(info.meta.State),
+						skipMonitor:       true,
 						serviceContainers: info.meta.ServiceContainers,
 					}
 					return
@@ -255,15 +282,18 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 
 				var runState State
 				var confirmed bool
-				containerState, csErr := m.runtime.ContainerState(callCtx, info.meta.ContainerID)
+				containerState, csErr := rt.ContainerState(callCtx, info.meta.ContainerID)
 				if csErr != nil {
 					log.Debug("container state check failed, preserving persisted state", "id", info.runID, "container", info.meta.ContainerID, "error", csErr)
 					// Preserve both run state and service containers from
 					// persisted metadata — if the runtime is unavailable,
 					// service container checks would also fail.
+					// Skip monitor: spawning one would also fail (same runtime issue)
+					// and incorrectly mark the run as failed.
 					results[idx] = checkedRun{
 						info:              info,
 						runState:          State(info.meta.State),
+						skipMonitor:       true,
 						serviceContainers: info.meta.ServiceContainers,
 					}
 					return
@@ -289,7 +319,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				serviceContainers := make(map[string]string, len(info.meta.ServiceContainers))
 				for svcName, id := range info.meta.ServiceContainers {
 					svcCtx, svcCancel := context.WithTimeout(ctx, 5*time.Second)
-					if _, scErr := m.runtime.ContainerState(svcCtx, id); scErr == nil {
+					if _, scErr := rt.ContainerState(svcCtx, id); scErr == nil {
 						serviceContainers[svcName] = id
 					}
 					svcCancel()
@@ -307,7 +337,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 		wg.Wait()
 
 		for _, cr := range results {
-			m.registerPersistedRun(cr.runState, cr.stateConfirmed, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
+			m.registerPersistedRun(cr.runState, cr.stateConfirmed, cr.skipMonitor, cr.info.meta, cr.info.store, cr.info.runID, cr.serviceContainers)
 		}
 	}
 
@@ -317,9 +347,11 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 // registerPersistedRun creates and registers a Run from persisted metadata.
 // stateConfirmed indicates whether runState was determined by a successful container
 // state check (true) or inferred from persisted state / error fallback (false).
+// skipMonitor prevents spawning a background monitor goroutine (used when the
+// runtime is unavailable, e.g. cross-runtime runs from a different host).
 // If serviceContainers is nil, it is loaded directly from metadata (for terminal-state runs
 // that skip live container checks).
-func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
+func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skipMonitor bool, meta storage.Metadata, store *storage.RunStore, runID string, serviceContainers map[string]string) {
 	if serviceContainers == nil {
 		serviceContainers = meta.ServiceContainers
 	}
@@ -393,12 +425,11 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, meta
 	// These inherited monitors are NOT tracked by monitorWg — they may block
 	// indefinitely on long-running containers from previous CLI invocations.
 	// Only monitors started via Start() are tracked so Close() doesn't hang.
-	//
-	// Skip cross-runtime runs: monitorContainerExit calls m.runtime.WaitContainer
-	// which would fail immediately for a container from a different runtime,
-	// then write "failed" state to disk — re-triggering the corruption bug.
-	crossRuntime := meta.Runtime != "" && meta.Runtime != string(m.runtime.Type())
-	if runState == StateRunning && !crossRuntime {
+	// monitorContainerExit resolves the correct runtime via runtimeForRun,
+	// so it works for runs from any runtime type.
+	// skipMonitor is set for cross-runtime runs where the runtime is unavailable —
+	// spawning a monitor would immediately fail and corrupt the persisted state.
+	if runState == StateRunning && !skipMonitor {
 		go m.monitorContainerExit(r)
 	}
 }
@@ -872,7 +903,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
 		// Must be set before buildRegisterRequest so HostGateway is included.
-		hostAddr = m.runtime.GetHostAddress()
+		hostAddr = m.defaultRuntime().GetHostAddress()
 		runCtx.HostGateway = hostAddr
 
 		// Build RegisterRequest from the RunContext
@@ -1112,7 +1143,7 @@ region = %s
 		// For these cases, we use TCP instead: the host listens on TCP and the
 		// container's moat-init script uses socat to bridge TCP to a local Unix socket.
 		// For Docker on Linux, Unix sockets work fine via direct bind mounts.
-		usesTCP := !m.runtime.SupportsHostNetwork()
+		usesTCP := !m.defaultRuntime().SupportsHostNetwork()
 
 		if usesTCP {
 			// Use TCP server - container will use socat to bridge.
@@ -1128,7 +1159,7 @@ region = %s
 			}
 
 			// Get the actual TCP address after binding.
-			// hostAddr is set earlier from m.runtime.GetHostAddress() and may be
+			// hostAddr is set earlier from m.defaultRuntime().GetHostAddress() and may be
 			// rewritten later for custom networks (replaceHostInEnv).
 			tcpAddr := sshServer.TCPAddr()
 			containerSSHDir := "/run/moat/ssh"
@@ -1221,7 +1252,7 @@ region = %s
 	needsProxy := r.ProxyAuthToken != ""
 
 	if needsProxy || needsPorts {
-		if m.runtime.SupportsHostNetwork() && !needsPorts {
+		if m.defaultRuntime().SupportsHostNetwork() && !needsPorts {
 			// Docker on Linux without ports: use host network so container can reach 127.0.0.1
 			networkMode = "host"
 		} else {
@@ -1232,7 +1263,7 @@ region = %s
 			// Desktop and Rancher Desktop resolve it via built-in DNS — adding
 			// host-gateway would override the correct IP with the bridge
 			// gateway (which is unreachable on Rancher Desktop).
-			if m.runtime.Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
+			if m.defaultRuntime().Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}
@@ -1360,7 +1391,7 @@ region = %s
 	// Resolve docker dependency if present
 	// This validates that Apple containers are not used with docker:host dependency,
 	// and returns the appropriate config for the mode (socket mount for host, privileged for dind).
-	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.runtime.Type())
+	dockerConfig, dockerErr := ResolveDockerDependency(depList, m.defaultRuntime().Type())
 	if dockerErr != nil {
 		cleanupDaemonRun()
 		cleanupSSH(sshServer)
@@ -1545,16 +1576,16 @@ region = %s
 		r.Agent = opts.Config.Agent
 	}
 	r.Image = containerImage
-	r.Runtime = string(m.runtime.Type())
+	r.Runtime = string(m.defaultRuntime().Type())
 
 	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)
 
 	// Handle --rebuild: delete existing image to force fresh build
 	if opts.Rebuild && needsCustomImage {
-		exists, _ := m.runtime.BuildManager().ImageExists(ctx, containerImage)
+		exists, _ := m.defaultRuntime().BuildManager().ImageExists(ctx, containerImage)
 		if exists {
 			fmt.Printf("Removing cached image %s...\n", containerImage)
-			if err := m.runtime.RemoveImage(ctx, containerImage); err != nil {
+			if err := m.defaultRuntime().RemoveImage(ctx, containerImage); err != nil {
 				ui.Warnf("Failed to remove image: %v", err)
 			}
 		}
@@ -1572,7 +1603,7 @@ region = %s
 		}
 		generatedDockerfile = result.Dockerfile
 
-		exists, err := m.runtime.BuildManager().ImageExists(ctx, containerImage)
+		exists, err := m.defaultRuntime().BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
 			cleanupDaemonRun()
 			return nil, fmt.Errorf("checking image: %w", err)
@@ -1618,10 +1649,10 @@ region = %s
 				buildOpts.DNS = opts.Config.Container.DNS
 			}
 
-			buildMgr := m.runtime.BuildManager()
+			buildMgr := m.defaultRuntime().BuildManager()
 			if buildMgr == nil {
 				cleanupDaemonRun()
-				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.runtime.Type())
+				return nil, fmt.Errorf("cannot build image: runtime %s does not support building", m.defaultRuntime().Type())
 			}
 
 			// Merge pre-cloned marketplace files into build context.
@@ -1650,7 +1681,7 @@ region = %s
 	// - anthropic grant is configured (automatic Claude Code integration)
 	var containerHome string
 	if hostHome, err := os.UserHomeDir(); err == nil {
-		imageHome := m.runtime.BuildManager().GetImageHomeDir(ctx, containerImage)
+		imageHome := m.defaultRuntime().BuildManager().GetImageHomeDir(ctx, containerImage)
 		containerHome = resolveContainerHome(needsCustomImage, imageHome)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			claudeDir := claude.WorkspaceToClaudeDir(opts.Workspace)
@@ -1762,7 +1793,7 @@ region = %s
 			// the container cannot reach directly.
 			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
-				proxyAddr := fmt.Sprintf("%s:%d", m.runtime.GetHostAddress(), r.ProxyPort)
+				proxyAddr := fmt.Sprintf("%s:%d", m.defaultRuntime().GetHostAddress(), r.ProxyPort)
 				for _, mcp := range opts.Config.MCP {
 					relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
 					mcpCfg := provider.MCPServerConfig{
@@ -2089,13 +2120,13 @@ region = %s
 	var networkID string
 	if buildkitCfg.Enabled {
 		log.Debug("creating network for buildkit sidecar", "network", buildkitCfg.NetworkName)
-		netMgr := m.runtime.NetworkManager()
+		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr == nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
-			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.runtime.Type())
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.defaultRuntime().Type())
 		}
 		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
 		if netErr != nil {
@@ -2136,9 +2167,9 @@ region = %s
 			},
 		}
 
-		sidecarMgr := m.runtime.SidecarManager()
+		sidecarMgr := m.defaultRuntime().SidecarManager()
 		if sidecarMgr == nil {
-			netMgr := m.runtime.NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2146,12 +2177,12 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
-			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.runtime.Type())
+			return nil, fmt.Errorf("BuildKit requires Docker runtime (sidecars not supported by %s)", m.defaultRuntime().Type())
 		}
 		buildkitContainerID, sidecarErr := sidecarMgr.StartSidecar(ctx, sidecarCfg)
 		if sidecarErr != nil {
 			// Clean up network on failure
-			netMgr := m.runtime.NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2174,8 +2205,8 @@ region = %s
 			}
 		}
 		if !ready {
-			_ = m.runtime.StopContainer(ctx, buildkitContainerID) //nolint:errcheck
-			netMgr := m.runtime.NetworkManager()
+			_ = m.defaultRuntime().StopContainer(ctx, buildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, networkID) //nolint:errcheck
 			}
@@ -2196,7 +2227,7 @@ region = %s
 
 	// Start service dependencies
 	if len(serviceDeps) > 0 {
-		svcMgr := m.runtime.ServiceManager()
+		svcMgr := m.defaultRuntime().ServiceManager()
 		if svcMgr == nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
@@ -2224,7 +2255,7 @@ region = %s
 
 		// Ensure network exists (share with BuildKit if present)
 		if networkID == "" {
-			netMgr := m.runtime.NetworkManager()
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr == nil {
 				cleanupDaemonRun()
 				cleanupSSH(sshServer)
@@ -2430,7 +2461,7 @@ region = %s
 	// all env vars that reference the old host address to use the custom
 	// network's gateway instead.
 	if networkID != "" && net.ParseIP(hostAddr) != nil {
-		netMgr := m.runtime.NetworkManager()
+		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr != nil {
 			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
 				log.Debug("rewriting proxy host for custom network",
@@ -2470,13 +2501,13 @@ region = %s
 	// AI agent, use the agent default (8 GB). Apple's system default of 1 GB is
 	// too low for Claude Code, Codex, and Gemini CLI.
 	// Docker containers are left unlimited unless explicitly configured.
-	if memoryMB == 0 && m.runtime.Type() == container.RuntimeApple && isAIAgent(opts.Config) {
+	if memoryMB == 0 && m.defaultRuntime().Type() == container.RuntimeApple && isAIAgent(opts.Config) {
 		memoryMB = container.DefaultAgentMemoryMB
 		log.Debug("using default agent memory for Apple container", "memoryMB", memoryMB)
 	}
 
 	// Create container
-	containerID, err := m.runtime.CreateContainer(ctx, container.Config{
+	containerID, err := m.defaultRuntime().CreateContainer(ctx, container.Config{
 		Name:         r.ID,
 		Image:        containerImage,
 		Cmd:          cmd,
@@ -2501,9 +2532,9 @@ region = %s
 	if err != nil {
 		// Clean up BuildKit resources on failure
 		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.runtime.StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
-			_ = m.runtime.RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
-			netMgr := m.runtime.NetworkManager()
+			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
+			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
 			if netMgr != nil {
 				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
 			}
@@ -2542,7 +2573,7 @@ region = %s
 		// Enable TLS on the routing proxy
 		if _, tlsErr := m.proxyLifecycle.EnableTLS(); tlsErr != nil {
 			// Clean up container
-			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2552,7 +2583,7 @@ region = %s
 		}
 		if proxyErr := m.proxyLifecycle.EnsureRunning(); proxyErr != nil {
 			// Clean up container
-			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2568,7 +2599,7 @@ region = %s
 		runStore, storeErr := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
 		if storeErr != nil {
 			// Clean up container and proxy if storage creation fails
-			if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
 			cleanupDaemonRun()
@@ -2591,7 +2622,7 @@ region = %s
 	auditStore, err := audit.OpenStore(filepath.Join(r.Store.Dir(), "audit.db"))
 	if err != nil {
 		// Clean up container, proxy, and storage if audit store fails
-		if rmErr := m.runtime.RemoveContainer(ctx, containerID); rmErr != nil {
+		if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
 		cleanupDaemonRun()
@@ -2715,7 +2746,7 @@ func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 	var bindings map[int]int
 	var err error
 	for i := 0; i < 5; i++ {
-		bindings, err = m.runtime.GetPortBindings(ctx, r.ContainerID)
+		bindings, err = m.defaultRuntime().GetPortBindings(ctx, r.ContainerID)
 		if err != nil || len(bindings) >= len(r.Ports) {
 			break
 		}
@@ -2758,9 +2789,9 @@ func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
 	if !r.FirewallEnabled || r.ProxyPort <= 0 {
 		return nil
 	}
-	if err := m.runtime.SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
 		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
-		if stopErr := m.runtime.StopContainer(ctx, r.ContainerID); stopErr != nil {
+		if stopErr := m.defaultRuntime().StopContainer(ctx, r.ContainerID); stopErr != nil {
 			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)
 		}
 		return fmt.Errorf("firewall setup failed (required for strict network policy): %w", err)
@@ -2780,7 +2811,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	r.SetState(StateStarting)
 	setLogContext(r)
 
-	if err := m.runtime.StartContainer(ctx, r.ContainerID); err != nil {
+	if err := m.defaultRuntime().StartContainer(ctx, r.ContainerID); err != nil {
 		r.SetStateFailedAt(err.Error(), time.Now())
 		return err
 	}
@@ -2893,7 +2924,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	attachDone := make(chan error, 1)
 
 	go func() {
-		attachDone <- m.runtime.StartAttached(ctx, containerID, attachOpts)
+		attachDone <- m.defaultRuntime().StartAttached(ctx, containerID, attachOpts)
 	}()
 
 	// Give the container a moment to start before checking state.
@@ -2952,7 +2983,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	// (Apple TTY output doesn't go through container runtime logs — captureLogs() returns
 	// early for Apple interactive runs, so this is the only path that writes logs.)
 	// Runs unconditionally: even on escape-stop the buffer holds all output up to that point.
-	if r.Interactive && r.Store != nil && m.runtime.Type() == container.RuntimeApple {
+	if r.Interactive && r.Store != nil && container.RuntimeType(r.Runtime) == container.RuntimeApple {
 		// Use CompareAndSwap to ensure single write
 		if r.logsCaptured.CompareAndSwap(false, true) {
 			if lw, err := r.Store.LogWriter(); err == nil {
@@ -3012,8 +3043,13 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r.SetState(StateStopping)
 	m.mu.Unlock()
 
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+
 	// Stop the main container
-	if err := m.runtime.StopContainer(ctx, r.ContainerID); err != nil {
+	if err := rt.StopContainer(ctx, r.ContainerID); err != nil {
 		ui.Warnf("%v", err)
 		log.Debug("failed to stop container", "container_id", r.ContainerID, "error", err)
 	}
@@ -3098,7 +3134,7 @@ func (m *Manager) captureLogs(r *Run) {
 	// - Docker: Container runtime logs work even in TTY mode, so use ContainerLogsAll
 	// - Apple: TTY output doesn't go to container logs, so StartAttached uses tee
 	// Only skip container logs for Apple containers in interactive mode.
-	if r.Interactive && m.runtime.Type() == container.RuntimeApple {
+	if r.Interactive && container.RuntimeType(r.Runtime) == container.RuntimeApple {
 		return
 	}
 
@@ -3127,7 +3163,12 @@ func (m *Manager) captureLogs(r *Run) {
 	// Use a background context with timeout since the container may already be stopped.
 	logCtx, logCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer logCancel()
-	allLogs, logErr := m.runtime.ContainerLogsAll(logCtx, r.ContainerID)
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		log.Warn("cannot resolve runtime for log capture", "runID", r.ID, "error", rtErr)
+		return
+	}
+	allLogs, logErr := rt.ContainerLogsAll(logCtx, r.ContainerID)
 	if logErr != nil {
 		log.Warn("failed to fetch container logs - creating empty logs.jsonl for audit", "runID", r.ID, "error", logErr)
 		// Still create empty logs.jsonl for audit completeness
@@ -3211,6 +3252,13 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 	m.mu.RUnlock()
 
 	r.cleanupOnce.Do(func() {
+		// Resolve runtime for this run. If unavailable, skip container cleanup
+		// but still clean up proxy, SSH, routes, and temp dirs.
+		rt, rtErr := m.runtimeForRun(r)
+		if rtErr != nil {
+			log.Debug("cleanup: cannot resolve runtime, skipping container cleanup", "run", r.ID, "error", rtErr)
+		}
+
 		// Cancel token refresh and unregister run from proxy daemon
 		if err := r.stopProxyServer(ctx); err != nil {
 			log.Debug("cleanup: stopping proxy", "error", err)
@@ -3227,8 +3275,8 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 		}
 
 		// Stop service containers
-		if len(r.ServiceContainers) > 0 {
-			svcMgr := m.runtime.ServiceManager()
+		if rt != nil && len(r.ServiceContainers) > 0 {
+			svcMgr := rt.ServiceManager()
 			if svcMgr != nil {
 				for svcName, svcContainerID := range r.ServiceContainers {
 					log.Debug("cleanup: stopping service", "service", svcName, "container_id", svcContainerID)
@@ -3241,26 +3289,26 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 
 		// Remove BuildKit sidecar before network (Docker requires containers
 		// disconnected before network removal, see #131).
-		if r.BuildkitContainerID != "" {
+		if rt != nil && r.BuildkitContainerID != "" {
 			log.Debug("cleanup: removing buildkit sidecar", "container_id", r.BuildkitContainerID)
-			if err := m.runtime.StopContainer(ctx, r.BuildkitContainerID); err != nil {
+			if err := rt.StopContainer(ctx, r.BuildkitContainerID); err != nil {
 				log.Debug("cleanup: failed to stop buildkit sidecar", "error", err)
 			}
-			if err := m.runtime.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
+			if err := rt.RemoveContainer(ctx, r.BuildkitContainerID); err != nil {
 				log.Debug("cleanup: failed to remove buildkit sidecar", "error", err)
 			}
 		}
 
 		// Remove main container unless --keep was specified
-		if !r.KeepContainer {
-			if err := m.runtime.RemoveContainer(ctx, r.ContainerID); err != nil {
+		if rt != nil && !r.KeepContainer {
+			if err := rt.RemoveContainer(ctx, r.ContainerID); err != nil {
 				log.Debug("cleanup: failed to remove container", "error", err)
 			}
 		}
 
 		// Remove network (with force-disconnect fallback)
-		if r.NetworkID != "" {
-			netMgr := m.runtime.NetworkManager()
+		if rt != nil && r.NetworkID != "" {
+			netMgr := rt.NetworkManager()
 			if netMgr != nil {
 				if err := netMgr.RemoveNetwork(ctx, r.NetworkID); err != nil {
 					log.Debug("cleanup: network removal failed, trying force", "network", r.NetworkID, "error", err)
@@ -3305,11 +3353,21 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 // (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
 func (m *Manager) monitorContainerExit(r *Run) {
+	// Resolve the correct runtime for this run.
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		log.Debug("cannot resolve runtime for container monitor", "run", r.ID, "error", rtErr)
+		r.SetStateFailedAt("runtime unavailable: "+rtErr.Error(), time.Now())
+		_ = r.SaveMetadata()
+		close(r.exitCh)
+		return
+	}
+
 	// Wait for container to exit (no timeout - let it run as long as needed).
 	// This is the ONLY place that calls WaitContainer to avoid race conditions.
 	// Uses context.Background() so this goroutine is not canceled by Close().
 	// Close() waits on monitorWg before closing the runtime.
-	exitCode, err := m.runtime.WaitContainer(context.Background(), r.ContainerID)
+	exitCode, err := rt.WaitContainer(context.Background(), r.ContainerID)
 
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
@@ -3491,7 +3549,11 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	return m.runtime.ResizeTTY(ctx, containerID, height, width)
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+	return rt.ResizeTTY(ctx, containerID, height, width)
 }
 
 // validXclipTargets is the set of X selection targets allowed in shell commands.
@@ -3541,7 +3603,12 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []
 		return fmt.Errorf("run %s is not running (state: %s)", runID, state)
 	}
 
-	execErr := m.runtime.Exec(ctx, containerID, cmd, stdin, stdout, stderr)
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+
+	execErr := rt.Exec(ctx, containerID, cmd, stdin, stdout, stderr)
 
 	if auditStore != nil {
 		exitCode := 0
@@ -3571,7 +3638,12 @@ func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) err
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
-	logs, err := m.runtime.ContainerLogs(ctx, containerID)
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+
+	logs, err := rt.ContainerLogs(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("getting container logs: %w", err)
 	}
@@ -3593,8 +3665,13 @@ func (m *Manager) RecentLogs(runID string, lines int) (string, error) {
 	containerID := r.ContainerID
 	m.mu.RUnlock()
 
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return "", fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+
 	// Get all logs (non-following)
-	allLogs, err := m.runtime.ContainerLogsAll(context.Background(), containerID)
+	allLogs, err := rt.ContainerLogsAll(context.Background(), containerID)
 	if err != nil {
 		return "", err
 	}
@@ -3625,8 +3702,16 @@ func lastNLines(s string, n int) string {
 }
 
 // RuntimeType returns the container runtime type (docker or apple).
+// Uses a value cached at init, so it is safe to call after Close().
 func (m *Manager) RuntimeType() string {
-	return string(m.runtime.Type())
+	return m.runtimeType
+}
+
+// RuntimePool returns the manager's runtime pool. CLI commands that need
+// to query resources across runtimes (e.g., images, containers) should use
+// this instead of creating a separate pool.
+func (m *Manager) RuntimePool() *container.RuntimePool {
+	return m.runtimePool
 }
 
 // Close releases manager resources.
@@ -3665,7 +3750,7 @@ func (m *Manager) Close() error {
 	}
 	m.mu.RUnlock()
 
-	return m.runtime.Close()
+	return m.runtimePool.Close()
 }
 
 // isAIAgent returns true if the config specifies an AI coding agent

@@ -27,6 +27,11 @@ const (
 	RuntimeApple  RuntimeType = "apple"
 )
 
+// AllRuntimeTypes returns all known runtime types.
+func AllRuntimeTypes() []RuntimeType {
+	return []RuntimeType{RuntimeDocker, RuntimeApple}
+}
+
 // DefaultAgentMemoryMB is the default memory limit for AI agent containers
 // (Claude Code, Codex, Gemini CLI) on Apple containers. Apple's system default
 // of 1024 MB is too low for AI coding agents. Applied only when moat.yaml
@@ -359,19 +364,19 @@ type TmpfsMount struct {
 
 // ImageInfo contains information about a container image.
 type ImageInfo struct {
-	ID      string
-	Tag     string
-	Size    int64
-	Created time.Time
+	ID      string    `json:"id"`
+	Tag     string    `json:"tag"`
+	Size    int64     `json:"size"`
+	Created time.Time `json:"created"`
 }
 
 // Info contains information about a container.
 type Info struct {
-	ID      string
-	Name    string
-	Image   string
-	Status  string // "running", "exited", "created"
-	Created time.Time
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Image   string    `json:"image"`
+	Status  string    `json:"status"` // "running", "exited", "created"
+	Created time.Time `json:"created"`
 }
 
 // BuildOptions configures image building.

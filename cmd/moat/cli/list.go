@@ -64,9 +64,9 @@ func listRuns(cmd *cobra.Command, args []string) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	if hasWorktree {
-		fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tWORKTREE\tENDPOINTS")
+		fmt.Fprintln(w, "NAME\tRUN ID\tRUNTIME\tSTATE\tAGE\tWORKTREE\tENDPOINTS")
 	} else {
-		fmt.Fprintln(w, "NAME\tRUN ID\tSTATE\tAGE\tENDPOINTS")
+		fmt.Fprintln(w, "NAME\tRUN ID\tRUNTIME\tSTATE\tAGE\tENDPOINTS")
 	}
 	for _, r := range runs {
 		endpoints := ""
@@ -78,23 +78,29 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			sort.Strings(names)
 			endpoints = strings.Join(names, ", ")
 		}
+		rtLabel := r.Runtime
+		if rtLabel == "" {
+			rtLabel = "-"
+		}
 		if hasWorktree {
 			wt := ""
 			if r.WorktreeBranch != "" {
 				wt = r.WorktreeBranch
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.Name,
 				r.ID,
+				rtLabel,
 				r.GetState(),
 				formatAge(r.CreatedAt),
 				wt,
 				endpoints,
 			)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.Name,
 				r.ID,
+				rtLabel,
 				r.GetState(),
 				formatAge(r.CreatedAt),
 				endpoints,

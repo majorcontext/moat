@@ -931,6 +931,7 @@ moat list
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique identifier |
+| RUNTIME | Container runtime (docker, apple) |
 | STATE | running, stopped, failed |
 | AGE | Time since run was created |
 | WORKTREE | Branch name (appears when any run has a worktree) |
@@ -950,10 +951,46 @@ moat status
 
 ### Output sections
 
-- **Runtime**: Docker or Apple containers
+- **Runtime**: Available container runtimes (shows all available, e.g., "docker, apple")
 - **Active Runs**: Currently running containers with age, disk usage, and endpoints
 - **Summary**: Counts and disk usage for stopped runs and cached images
 - **Health**: Warnings about stopped runs and orphaned containers
+
+### Active Runs columns
+
+| Column | Description |
+|--------|-------------|
+| NAME | Run name |
+| RUN ID | Unique run identifier |
+| RUNTIME | Container runtime (docker or apple) |
+| AGE | Time since run was created |
+| DISK | Disk usage in MB |
+| ENDPOINTS | Exposed services (from ports) |
+
+### JSON output
+
+With `--json`, emits a single object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| runtimes | string[] | Available container runtimes |
+| active_runs | object[] | Currently active runs |
+| active_runs[].name | string | Run name |
+| active_runs[].id | string | Run ID |
+| active_runs[].runtime | string | Container runtime (empty for legacy runs) |
+| active_runs[].state | string | Run state |
+| active_runs[].age | string | Human-readable age |
+| active_runs[].disk_mb | integer | Disk usage in MB (-1 if unknown) |
+| active_runs[].endpoints | string | Comma-separated endpoint names (omitted when empty) |
+| images | object[] | Cached container images |
+| images[].tag | string | Image tag |
+| images[].runtime | string | Container runtime |
+| images[].size | integer | Image size in bytes |
+| images[].created | string | RFC 3339 timestamp |
+| health | object[] | Health warnings |
+| health[].status | string | "ok" or "warning" |
+| health[].message | string | Description |
+| total_disk_bytes | integer | Total disk usage in bytes |
 
 For detailed information about all runs, use `moat list`.
 For image details, use `moat system images`
@@ -1331,19 +1368,64 @@ Low-level system commands.
 
 ### moat system images
 
-List moat-managed container images.
+List moat-managed container images across all available runtimes.
 
 ```
 moat system images
 ```
 
+#### Output columns
+
+| Column | Description |
+|--------|-------------|
+| IMAGE ID | Short image identifier |
+| TAG | Image tag |
+| RUNTIME | Container runtime (docker, apple) |
+| SIZE | Image size in MB |
+| CREATED | Time since image was created |
+
+#### JSON output
+
+With `--json`, emits an array of objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Full image ID |
+| tag | string | Image tag |
+| size | integer | Image size in bytes |
+| created | string | RFC 3339 timestamp |
+| runtime | string | Container runtime (docker, apple) |
+
 ### moat system containers
 
-List moat containers.
+List moat containers across all available runtimes.
 
 ```
 moat system containers
 ```
+
+#### Output columns
+
+| Column | Description |
+|--------|-------------|
+| CONTAINER ID | Container identifier |
+| NAME | Container name |
+| RUNTIME | Container runtime (docker, apple) |
+| STATUS | Container status (running, exited, etc.) |
+| CREATED | Time since container was created |
+
+#### JSON output
+
+With `--json`, emits an array of objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Container ID |
+| name | string | Container name |
+| image | string | Image name |
+| status | string | Container status (running, exited, created) |
+| created | string | RFC 3339 timestamp |
+| runtime | string | Container runtime (docker, apple) |
 
 ### moat system clean-temp
 

@@ -140,9 +140,9 @@ func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 		t.Fatal(err)
 	}
 	return &Manager{
-		runtime: rt,
-		runs:    make(map[string]*Run),
-		routes:  routes,
+		runtimePool: container.NewRuntimePoolWithDefault(rt),
+		runs:        make(map[string]*Run),
+		routes:      routes,
 	}
 }
 
@@ -867,6 +867,7 @@ func TestCaptureLogsSkipsInteractiveApple(t *testing.T) {
 		ID:          "run_apple_interactive",
 		Name:        "apple-interactive",
 		ContainerID: "ctr-apple",
+		Runtime:     string(container.RuntimeApple),
 		State:       StateStopped,
 		Interactive: true,
 		Store:       store,
