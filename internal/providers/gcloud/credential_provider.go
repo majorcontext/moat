@@ -53,7 +53,8 @@ func buildTokenSource(ctx context.Context, cfg *Config) (oauth2.TokenSource, err
 		scopes = []string{DefaultScope}
 	}
 
-	// Key file takes precedence.
+	// Key file takes precedence. If ImpersonateSA is also set, it is ignored —
+	// impersonation using a key file as the caller is not currently supported.
 	if cfg.KeyFile != "" {
 		data, err := os.ReadFile(cfg.KeyFile)
 		if err != nil {
