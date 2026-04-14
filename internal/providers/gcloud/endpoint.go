@@ -114,7 +114,11 @@ func (h *EndpointHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Service accounts listing.
 	case "/computeMetadata/v1/instance/service-accounts/",
 		"/computeMetadata/v1/instance/service-accounts":
-		fmt.Fprintf(w, "default/\n%s/\n", h.email)
+		if h.email != DefaultEmail {
+			fmt.Fprintf(w, "default/\n%s/\n", h.email)
+		} else {
+			fmt.Fprint(w, "default/\n")
+		}
 
 	// Project ID.
 	case "/computeMetadata/v1/project/project-id":

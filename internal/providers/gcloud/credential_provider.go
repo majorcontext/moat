@@ -96,7 +96,8 @@ func (p *CredentialProvider) GetToken(ctx context.Context) (*oauth2.Token, error
 	defer p.mu.Unlock()
 
 	// Return cached if still valid with buffer.
-	if p.cached != nil && p.cached.Valid() && time.Now().Add(credentialRefreshBuffer).Before(p.cached.Expiry) {
+	if p.cached != nil && p.cached.Valid() &&
+		(p.cached.Expiry.IsZero() || time.Now().Add(credentialRefreshBuffer).Before(p.cached.Expiry)) {
 		return p.cached, nil
 	}
 

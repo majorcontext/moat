@@ -49,6 +49,16 @@ moat grant gcloud \
 
 The key file stays on the host. The daemon reads it to mint access tokens — the file is never mounted into the container.
 
+### Custom scopes
+
+```bash
+moat grant gcloud \
+  --project my-project \
+  --scopes https://www.googleapis.com/auth/bigquery,https://www.googleapis.com/auth/cloud-platform
+```
+
+Use `--scopes` to override the default OAuth2 scope (`https://www.googleapis.com/auth/cloud-platform`) with a comma-separated list of specific scopes.
+
 ## Run with gcloud access
 
 ```bash

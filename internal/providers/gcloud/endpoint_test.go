@@ -282,6 +282,26 @@ func TestNormalizeSAPathRecursiveIntegration(t *testing.T) {
 	}
 }
 
+func TestMetadataServiceAccountsListingDefaultEmail(t *testing.T) {
+	h := NewEndpointHandlerFromTokenFunc(
+		func(ctx context.Context) (*oauth2.Token, error) {
+			return &oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}, nil
+		},
+		"proj",
+		[]string{DefaultScope},
+		"", // empty email → DefaultEmail
+	)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, metadataRequest("GET", "/computeMetadata/v1/instance/service-accounts/"))
+	body := w.Body.String()
+	if !strings.Contains(body, "default/") {
+		t.Errorf("body missing default/: %q", body)
+	}
+	if strings.Contains(body, DefaultEmail) {
+		t.Errorf("body should not list synthetic email %q: %q", DefaultEmail, body)
+	}
+}
+
 func TestMetadataDefaultEmail(t *testing.T) {
 	h := NewEndpointHandlerFromTokenFunc(
 		func(ctx context.Context) (*oauth2.Token, error) {

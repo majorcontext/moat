@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,7 +74,11 @@ func grant(ctx context.Context) (*provider.Credential, error) {
 		cfg.ImpersonateSA = v
 	}
 	if v, ok := ctx.Value(ctxKeyKeyFile).(string); ok && v != "" {
-		cfg.KeyFile = v
+		if abs, err := filepath.Abs(v); err == nil {
+			cfg.KeyFile = abs
+		} else {
+			cfg.KeyFile = v
+		}
 	}
 
 	// Detect project if not provided.
