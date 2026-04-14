@@ -16,6 +16,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
+	gcloudprov "github.com/majorcontext/moat/internal/providers/gcloud"
 )
 
 // PersistedRun is the on-disk representation of a registered run.
@@ -32,6 +33,7 @@ type PersistedRun struct {
 	NetworkPolicy    string                   `json:"network_policy,omitempty"`
 	NetworkAllow     []string                 `json:"network_allow,omitempty"`
 	AWSConfig        *AWSConfig               `json:"aws_config,omitempty"`
+	GCloudConfig     *GCloudConfig            `json:"gcloud_config,omitempty"`
 	TransformerSpecs []TransformerSpec        `json:"transformer_specs,omitempty"`
 }
 
@@ -77,6 +79,7 @@ func (p *RunPersister) Save() error {
 			NetworkPolicy:    rc.NetworkPolicy,
 			NetworkAllow:     rc.NetworkAllow,
 			AWSConfig:        rc.AWSConfig,
+			GCloudConfig:     rc.GCloudConfig,
 			TransformerSpecs: rc.TransformerSpecs,
 		}
 		rc.mu.RUnlock()
@@ -206,6 +209,7 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		rc.NetworkPolicy = pr.NetworkPolicy
 		rc.NetworkAllow = pr.NetworkAllow
 		rc.AWSConfig = pr.AWSConfig
+		rc.GCloudConfig = pr.GCloudConfig
 		rc.TransformerSpecs = pr.TransformerSpecs
 
 		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store); err != nil {
@@ -246,6 +250,24 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 			} else {
 				awsProvider.SetAuthToken(pr.AuthToken)
 				rc.SetAWSHandler(awsProvider.Handler())
+			}
+		}
+
+		// Set up gcloud credential provider if configured.
+		if pr.GCloudConfig != nil {
+			gcloudCfg := &gcloudprov.Config{
+				ProjectID:     pr.GCloudConfig.ProjectID,
+				Scopes:        pr.GCloudConfig.Scopes,
+				ImpersonateSA: pr.GCloudConfig.ImpersonateSA,
+				KeyFile:       pr.GCloudConfig.KeyFile,
+				Email:         pr.GCloudConfig.Email,
+			}
+			gcloudCP, gcloudErr := gcloudprov.NewCredentialProvider(runCtx, gcloudCfg)
+			if gcloudErr != nil {
+				log.Warn("restore: failed to create gcloud credential provider",
+					"run_id", pr.RunID, "error", gcloudErr)
+			} else {
+				rc.SetGCloudHandler(gcloudprov.NewEndpointHandler(gcloudCP))
 			}
 		}
 

@@ -4,6 +4,12 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+### Added
+
+- **gcloud credential provider** — authenticate the Google Cloud CLI and client libraries inside a moat sandbox without leaking refresh tokens or service account keys. The host daemon mints short-lived access tokens via Application Default Credentials and serves them through an emulated GCE metadata server. Use `moat grant gcloud` then `moat run --grant gcloud`.
+
 ## v0.5.0 — 2026-04-07
 
 v0.5 hardens network isolation and introduces operation-level policy enforcement on MCP tool calls and HTTP traffic. Host traffic is now blocked by default in every network policy mode — including `permissive` — and must be opted into per-port with `network.host`. Keep policy integration adds allow/deny/redact rules for MCP tool calls and REST API requests, with starter packs for common services and an LLM response policy that evaluates `tool_use` blocks before forwarding to the container. The credential-injecting proxy is now also available as a standalone `gatekeeper` binary that runs without the moat runtime. Other additions include multi-credential per host, custom base images, OAuth grants for MCP servers, sandbox-local MCP servers, and global mounts in `~/.moat/config.yaml`.

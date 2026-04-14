@@ -15,6 +15,7 @@ import (
 	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
+	gcloudprov "github.com/majorcontext/moat/internal/providers/gcloud"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/majorcontext/moat/internal/storage"
@@ -98,6 +99,9 @@ type Run struct {
 
 	// AWS credential provider (set when using aws grant)
 	AWSCredentialProvider *awsprov.CredentialProvider
+
+	// gcloud credential provider (set when using gcloud grant)
+	GCloudCredentialProvider *gcloudprov.CredentialProvider
 
 	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
 	awsTempDir string

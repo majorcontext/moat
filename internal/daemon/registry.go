@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/http"
 	"sync"
 )
 
@@ -115,6 +116,37 @@ func (r *Registry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.runs)
+}
+
+// FindGCloudHandler returns the gcloud metadata handler for direct metadata
+// requests (via GCE_METADATA_HOST) where no proxy auth token is available
+// to identify the run.
+//
+// When multiple runs have gcloud configured, the handler is returned only if
+// all runs share the same credential profile — same profile means same
+// underlying credentials, so any handler is equivalent. Returns nil if runs
+// use different profiles to prevent cross-run credential leakage.
+func (r *Registry) FindGCloudHandler() http.Handler {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var found http.Handler
+	var foundProfile string
+	first := true
+	for _, rc := range r.runs {
+		if h := rc.GCloudHandler(); h != nil {
+			profile := rc.GCloudProfile()
+			if first {
+				found = h
+				foundProfile = profile
+				first = false
+			} else if profile != foundProfile {
+				// Different profiles — refuse to serve to prevent
+				// cross-run credential leakage.
+				return nil
+			}
+		}
+	}
+	return found
 }
 
 // generateToken returns a 32-byte cryptographically random hex string.

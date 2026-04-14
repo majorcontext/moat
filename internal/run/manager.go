@@ -41,6 +41,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	gcloudprov "github.com/majorcontext/moat/internal/providers/gcloud"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -739,7 +740,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 
 				// Handle AWS endpoint provider
-				if ep := provider.GetEndpoint(string(credName)); ep != nil {
+				if string(credName) == "aws" {
 					// AWS credentials are handled via credential endpoint
 					// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
 					awsCfg, err := awsprov.ConfigFromCredential(provCred)
@@ -772,6 +773,31 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						SessionDuration: awsCfg.SessionDuration,
 						ExternalID:      awsCfg.ExternalID,
 						Profile:         awsCfg.Profile,
+					}
+				}
+
+				// Handle gcloud credential provider
+				if string(credName) == "gcloud" {
+					gcloudCfg, err := gcloudprov.ConfigFromCredential(provCred)
+					if err != nil {
+						return nil, fmt.Errorf("parsing gcloud credential: %w", err)
+					}
+
+					gcloudCP, err := gcloudprov.NewCredentialProvider(ctx, gcloudCfg)
+					if err != nil {
+						return nil, fmt.Errorf("creating gcloud credential provider: %w", err)
+					}
+					r.GCloudCredentialProvider = gcloudCP
+
+					// Store config for daemon registration so the daemon can
+					// create its own credential provider.
+					runCtx.GCloudConfig = &daemon.GCloudConfig{
+						ProjectID:     gcloudCfg.ProjectID,
+						Scopes:        gcloudCfg.Scopes,
+						ImpersonateSA: gcloudCfg.ImpersonateSA,
+						KeyFile:       gcloudCfg.KeyFile,
+						Email:         gcloudCfg.Email,
+						Profile:       credential.ActiveProfile,
 					}
 				}
 			}
@@ -1084,6 +1110,32 @@ region = %s
 
 			fmt.Printf("AWS credential_process configured (role: %s)\n",
 				filepath.Base(r.AWSCredentialProvider.RoleARN()))
+		}
+
+		// Set up gcloud metadata emulation env vars
+		if r.GCloudCredentialProvider != nil {
+			email := r.GCloudCredentialProvider.Email()
+			if email == "" {
+				email = gcloudprov.DefaultEmail
+			}
+			proxyEnv = append(proxyEnv,
+				"GOOGLE_CLOUD_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
+				"CLOUDSDK_CORE_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
+				// Point metadata env vars directly at the proxy so that
+				// GCE detection can reach the metadata emulator without
+				// going through HTTP_PROXY. Two env vars are needed:
+				//   GCE_METADATA_HOST  — used by google-auth (client libraries)
+				//   GCE_METADATA_ROOT  — used by gcloud CLI (ReadNoProxy)
+				// Both explicitly bypass HTTP_PROXY, so they must point
+				// directly at the proxy's host:port.
+				"GCE_METADATA_HOST="+proxyHost,
+				"GCE_METADATA_ROOT="+proxyHost,
+				// Set the active account so gcloud CLI doesn't bail with
+				// "no active account selected" before trying metadata.
+				"CLOUDSDK_CORE_ACCOUNT="+email,
+			)
+			fmt.Printf("gcloud metadata emulation configured (project: %s)\n",
+				r.GCloudCredentialProvider.ProjectID())
 		}
 	}
 
@@ -3892,6 +3944,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		MCPServers:       rc.MCPServers,
 		Grants:           grants,
 		AWSConfig:        rc.AWSConfig,
+		GCloudConfig:     rc.GCloudConfig,
 	}
 
 	for host, creds := range rc.Credentials {

@@ -392,6 +392,7 @@ grants:
 
 | Format | Description |
 |--------|-------------|
+| `gcloud` | Google Cloud (gcloud CLI + client libraries) |
 | `github` | GitHub API |
 | `anthropic` | Anthropic API |
 | `openai` | OpenAI API |

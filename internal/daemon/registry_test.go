@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net/http"
 	"testing"
 )
 
@@ -121,5 +122,106 @@ func TestRegistry_UniqueTokens(t *testing.T) {
 	}
 	if len(token2) != 64 {
 		t.Errorf("token2 length = %d, want 64", len(token2))
+	}
+}
+
+func dummyHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestRegistry_FindGCloudHandler_SingleRun(t *testing.T) {
+	reg := NewRegistry()
+	rc := NewRunContext("run-1")
+	rc.GCloudConfig = &GCloudConfig{Profile: "dev"}
+	rc.SetGCloudHandler(dummyHandler())
+	reg.Register(rc)
+
+	if h := reg.FindGCloudHandler(); h == nil {
+		t.Error("FindGCloudHandler returned nil for single gcloud run")
+	}
+}
+
+func TestRegistry_FindGCloudHandler_SameProfile(t *testing.T) {
+	reg := NewRegistry()
+
+	rc1 := NewRunContext("run-1")
+	rc1.GCloudConfig = &GCloudConfig{Profile: "dev"}
+	rc1.SetGCloudHandler(dummyHandler())
+	reg.Register(rc1)
+
+	rc2 := NewRunContext("run-2")
+	rc2.GCloudConfig = &GCloudConfig{Profile: "dev"}
+	rc2.SetGCloudHandler(dummyHandler())
+	reg.Register(rc2)
+
+	if h := reg.FindGCloudHandler(); h == nil {
+		t.Error("FindGCloudHandler returned nil for multiple runs with same profile")
+	}
+}
+
+func TestRegistry_FindGCloudHandler_DifferentProfiles(t *testing.T) {
+	reg := NewRegistry()
+
+	rc1 := NewRunContext("run-1")
+	rc1.GCloudConfig = &GCloudConfig{Profile: "dev"}
+	rc1.SetGCloudHandler(dummyHandler())
+	reg.Register(rc1)
+
+	rc2 := NewRunContext("run-2")
+	rc2.GCloudConfig = &GCloudConfig{Profile: "prod"}
+	rc2.SetGCloudHandler(dummyHandler())
+	reg.Register(rc2)
+
+	if h := reg.FindGCloudHandler(); h != nil {
+		t.Error("FindGCloudHandler should return nil for runs with different profiles")
+	}
+}
+
+func TestRegistry_FindGCloudHandler_DefaultProfile(t *testing.T) {
+	reg := NewRegistry()
+
+	// Two runs with default (empty) profile — should succeed.
+	rc1 := NewRunContext("run-1")
+	rc1.GCloudConfig = &GCloudConfig{}
+	rc1.SetGCloudHandler(dummyHandler())
+	reg.Register(rc1)
+
+	rc2 := NewRunContext("run-2")
+	rc2.GCloudConfig = &GCloudConfig{}
+	rc2.SetGCloudHandler(dummyHandler())
+	reg.Register(rc2)
+
+	if h := reg.FindGCloudHandler(); h == nil {
+		t.Error("FindGCloudHandler returned nil for multiple runs with default profile")
+	}
+}
+
+func TestRegistry_FindGCloudHandler_MixedGCloudAndNon(t *testing.T) {
+	reg := NewRegistry()
+
+	// One run with gcloud, one without — should return the gcloud handler.
+	rc1 := NewRunContext("run-1")
+	rc1.GCloudConfig = &GCloudConfig{Profile: "dev"}
+	rc1.SetGCloudHandler(dummyHandler())
+	reg.Register(rc1)
+
+	rc2 := NewRunContext("run-2")
+	// No gcloud config
+	reg.Register(rc2)
+
+	if h := reg.FindGCloudHandler(); h == nil {
+		t.Error("FindGCloudHandler returned nil when only one run has gcloud")
+	}
+}
+
+func TestRegistry_FindGCloudHandler_NoGCloud(t *testing.T) {
+	reg := NewRegistry()
+	rc := NewRunContext("run-1")
+	reg.Register(rc)
+
+	if h := reg.FindGCloudHandler(); h != nil {
+		t.Error("FindGCloudHandler should return nil when no runs have gcloud")
 	}
 }
