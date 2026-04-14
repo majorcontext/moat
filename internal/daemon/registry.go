@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/http"
 	"sync"
 )
 
@@ -115,6 +116,21 @@ func (r *Registry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.runs)
+}
+
+// FindGCloudHandler returns the gcloud metadata handler from the first run
+// that has one configured. This is used for direct metadata requests (via
+// GCE_METADATA_HOST) where no proxy auth token is available to identify
+// the run. When multiple runs have gcloud configured, the first match wins.
+func (r *Registry) FindGCloudHandler() http.Handler {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, rc := range r.runs {
+		if h := rc.GCloudHandler(); h != nil {
+			return h
+		}
+	}
+	return nil
 }
 
 // generateToken returns a 32-byte cryptographically random hex string.

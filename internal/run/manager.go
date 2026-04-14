@@ -1028,9 +1028,25 @@ region = %s
 
 		// Set up gcloud metadata emulation env vars
 		if r.GCloudCredentialProvider != nil {
+			email := r.GCloudCredentialProvider.Email()
+			if email == "" {
+				email = "default@moat.local"
+			}
 			proxyEnv = append(proxyEnv,
 				"GOOGLE_CLOUD_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
 				"CLOUDSDK_CORE_PROJECT="+r.GCloudCredentialProvider.ProjectID(),
+				// Point metadata env vars directly at the proxy so that
+				// GCE detection can reach the metadata emulator without
+				// going through HTTP_PROXY. Two env vars are needed:
+				//   GCE_METADATA_HOST  — used by google-auth (client libraries)
+				//   GCE_METADATA_ROOT  — used by gcloud CLI (ReadNoProxy)
+				// Both explicitly bypass HTTP_PROXY, so they must point
+				// directly at the proxy's host:port.
+				"GCE_METADATA_HOST="+proxyHost,
+				"GCE_METADATA_ROOT="+proxyHost,
+				// Set the active account so gcloud CLI doesn't bail with
+				// "no active account selected" before trying metadata.
+				"CLOUDSDK_CORE_ACCOUNT="+email,
 			)
 			fmt.Printf("gcloud metadata emulation configured (project: %s)\n",
 				r.GCloudCredentialProvider.ProjectID())

@@ -329,15 +329,16 @@ type Proxy struct {
 	extraHeaders         map[string][]extraHeader         // host -> additional headers to inject
 	responseTransformers map[string][]ResponseTransformer // host -> response transformers
 	mu                   sync.RWMutex
-	ca                   *CA              // Optional CA for TLS interception
-	logger               RequestLogger    // Optional request logger
-	authToken            string           // Optional auth token required for proxy access
-	policy               string           // "permissive" or "strict"
-	allowedHosts         []hostPattern    // parsed allow patterns for strict policy
-	requestChecker       RequestChecker   // per-host request rules checker
-	pathRulesChecker     PathRulesChecker // checks if host has path-level rules
-	awsHandler           http.Handler     // Optional handler for AWS credential endpoint
-	gcloudHandler        http.Handler     // Optional handler for gcloud metadata emulation
+	ca                   *CA                 // Optional CA for TLS interception
+	logger               RequestLogger       // Optional request logger
+	authToken            string              // Optional auth token required for proxy access
+	policy               string              // "permissive" or "strict"
+	allowedHosts         []hostPattern       // parsed allow patterns for strict policy
+	requestChecker       RequestChecker      // per-host request rules checker
+	pathRulesChecker     PathRulesChecker    // checks if host has path-level rules
+	awsHandler           http.Handler        // Optional handler for AWS credential endpoint
+	gcloudHandler        http.Handler        // Optional handler for gcloud metadata emulation
+	gcloudDirectResolver func() http.Handler // Resolves gcloud handler for direct (non-proxied) metadata requests
 	credStore            CredentialStore
 	mcpServers           []MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
@@ -416,6 +417,16 @@ func (p *Proxy) SetAWSHandler(h http.Handler) {
 // SetGCloudHandler sets the handler for gcloud metadata requests.
 func (p *Proxy) SetGCloudHandler(h http.Handler) {
 	p.gcloudHandler = h
+}
+
+// SetGCloudDirectResolver sets a resolver for direct (non-proxied) metadata
+// requests. Google client libraries and the gcloud CLI use Python's bare
+// http.client for metadata detection, which does NOT respect HTTP_PROXY.
+// When GCE_METADATA_HOST points directly at the proxy, these arrive as
+// direct requests without Proxy-Authorization. The resolver finds the
+// appropriate gcloud handler by iterating registered runs.
+func (p *Proxy) SetGCloudDirectResolver(fn func() http.Handler) {
+	p.gcloudDirectResolver = fn
 }
 
 // SetMCPServers configures MCP servers for credential injection.
@@ -1009,6 +1020,19 @@ func (p *Proxy) getGCloudHandlerForRequest(r *http.Request) http.Handler {
 	return p.gcloudHandler
 }
 
+// resolveDirectGCloudHandler finds a gcloud handler for direct (non-proxied)
+// metadata requests. Falls back to the proxy-level handler, then tries the
+// direct resolver (which searches the daemon registry).
+func (p *Proxy) resolveDirectGCloudHandler() http.Handler {
+	if p.gcloudHandler != nil {
+		return p.gcloudHandler
+	}
+	if p.gcloudDirectResolver != nil {
+		return p.gcloudDirectResolver()
+	}
+	return nil
+}
+
 // handleDirectMCPRelay handles MCP relay requests that arrive directly (not through proxy).
 // URL format: /mcp/{token}/{server-name}[/path]
 // Extracts the auth token from the URL, resolves run context, rewrites the path
@@ -1096,6 +1120,20 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.contextResolver != nil && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/_aws/") {
 		p.handleDirectAWSCredentials(w, r)
 		return
+	}
+
+	// Direct GCE metadata requests from containers (via GCE_METADATA_HOST).
+	// Python's google-auth library uses bare http.client for metadata detection,
+	// which does NOT respect HTTP_PROXY. When the container's GCE_METADATA_HOST
+	// points at the proxy, these arrive as direct requests without Proxy-Authorization.
+	// We route them to the gcloud handler without requiring proxy auth.
+	if r.URL.Host == "" && r.Header.Get("Metadata-Flavor") == "Google" &&
+		(r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/computeMetadata/")) {
+		h := p.resolveDirectGCloudHandler()
+		if h != nil {
+			h.ServeHTTP(w, r)
+			return
+		}
 	}
 
 	// Authentication and context resolution.

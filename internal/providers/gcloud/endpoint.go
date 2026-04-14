@@ -72,7 +72,20 @@ func (h *EndpointHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// All responses include the Metadata-Flavor header.
 	w.Header().Set("Metadata-Flavor", "Google")
 
-	switch r.URL.Path {
+	// Normalize path: replace email-based service account identifiers with
+	// "default". The gcloud CLI uses the account email in the path (e.g.,
+	// /service-accounts/user@project.iam.gserviceaccount.com/) instead of
+	// /service-accounts/default/. Normalize to simplify routing.
+	path := h.normalizeSAPath(r.URL.Path)
+
+	// Handle ?recursive=true on service account paths. The gcloud CLI
+	// requests this to get all account details in a single JSON response.
+	if r.URL.Query().Get("recursive") == "true" && strings.HasPrefix(path, saPrefix) {
+		h.serveRecursive(w)
+		return
+	}
+
+	switch path {
 	// Liveness probes.
 	case "/", "/computeMetadata/", "/computeMetadata/v1/":
 		w.WriteHeader(http.StatusOK)
@@ -117,6 +130,46 @@ func (h *EndpointHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+const saPrefix = "/computeMetadata/v1/instance/service-accounts/"
+
+// normalizeSAPath replaces email-based service account identifiers with
+// "default" so routing can use a simple switch. For example:
+//
+//	/computeMetadata/v1/instance/service-accounts/user@proj.iam.gserviceaccount.com/token
+//
+// becomes:
+//
+//	/computeMetadata/v1/instance/service-accounts/default/token
+func (h *EndpointHandler) normalizeSAPath(path string) string {
+	if !strings.HasPrefix(path, saPrefix) {
+		return path
+	}
+	rest := path[len(saPrefix):]
+	// Empty or "default" — already normalized.
+	if rest == "" || rest == "default" || strings.HasPrefix(rest, "default/") {
+		return path
+	}
+	// Replace the email (or any identifier) with "default".
+	if idx := strings.IndexByte(rest, '/'); idx >= 0 {
+		return saPrefix + "default" + rest[idx:]
+	}
+	return saPrefix + "default"
+}
+
+// serveRecursive returns service account details as JSON, used by
+// gcloud's ?recursive=true query.
+func (h *EndpointHandler) serveRecursive(w http.ResponseWriter) {
+	resp := map[string]any{
+		"aliases": []string{"default"},
+		"email":   h.email,
+		"scopes":  h.scopes,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Error("failed to encode recursive response", "error", err)
 	}
 }
 

@@ -170,6 +170,13 @@ func (rc *RunContext) SetGCloudHandler(h http.Handler) {
 	rc.gcloudHandler = h
 }
 
+// GCloudHandler returns the gcloud metadata endpoint handler, if configured.
+func (rc *RunContext) GCloudHandler() http.Handler {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	return rc.gcloudHandler
+}
+
 // SetCredential implements credential.ProxyConfigurer.
 func (rc *RunContext) SetCredential(host, value string) {
 	rc.SetCredentialHeader(host, "Authorization", value)

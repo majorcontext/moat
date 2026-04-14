@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -69,6 +70,13 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 			return nil, false
 		}
 		return rc.ToProxyContextData(), true
+	})
+
+	// Wire the gcloud direct resolver for metadata requests that bypass HTTP_PROXY.
+	// Python's google-auth uses bare http.client for GCE detection, so when
+	// GCE_METADATA_HOST points at the proxy, these arrive without Proxy-Authorization.
+	p.SetGCloudDirectResolver(func() http.Handler {
+		return apiServer.Registry().FindGCloudHandler()
 	})
 
 	// Wire network request logging. The proxy is shared across runs, so
