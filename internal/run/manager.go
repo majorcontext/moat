@@ -904,7 +904,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
 		// Must be set before buildRegisterRequest so HostGateway is included.
 		hostAddr = m.defaultRuntime().GetHostAddress()
-		runCtx.HostGateway = hostAddr
+		// Use synthetic hostname "moat-host" so host-bound traffic flows through the
+		// proxy for network policy enforcement. The container resolves "moat-host"
+		// via --add-host to the actual host-gateway IP.
+		runCtx.HostGateway = "moat-host"
 
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
@@ -933,34 +936,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			r.FirewallEnabled = true
 		}
 
-		// Determine proxy URL based on runtime's host address
-		proxyPortStr := strconv.Itoa(regResp.ProxyPort)
-		proxyHost := hostAddr + ":" + proxyPortStr
-		var proxyURL string
-		if regResp.AuthToken != "" {
-			// Include auth credentials in URL: http://moat:token@host:port
-			proxyURL = "http://moat:" + regResp.AuthToken + "@" + proxyHost
-		} else {
-			proxyURL = "http://" + proxyHost
-		}
-
-		// Exclude proxy's own address from proxying to prevent circular references
-		// This is critical for MCP relay endpoint which is on the proxy itself
-		// Also exclude BuildKit sidecar hostname to allow direct gRPC connections
-		noProxy := hostAddr + ",localhost,127.0.0.1,buildkit"
-
-		proxyEnv = []string{
-			"HTTP_PROXY=" + proxyURL,
-			"HTTPS_PROXY=" + proxyURL,
-			"http_proxy=" + proxyURL,
-			"https_proxy=" + proxyURL,
-			"NO_PROXY=" + noProxy,
-			"no_proxy=" + noProxy,
-			// Terminal settings for TUI applications
-			"TERM=xterm-256color",
-			// Host gateway address for reaching host services
-			"MOAT_HOST_GATEWAY=" + hostAddr,
-		}
+		// Build proxy environment using synthetic hostnames:
+		// - "moat-proxy" for the proxy itself (in NO_PROXY so relay/AWS traffic connects directly)
+		// - "moat-host" for host services (NOT in NO_PROXY so traffic goes through proxy for policy)
+		// Both resolve to the host-gateway IP via --add-host in the container.
+		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort)
+		proxyHost := "moat-proxy:" + strconv.Itoa(regResp.ProxyPort)
 
 		// Mount CA certificate (not the private key) for container to trust.
 		// We mount a directory (not just the file) because Apple container
@@ -1267,6 +1248,11 @@ region = %s
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}
+		// Add synthetic hostnames that resolve to the host-gateway IP.
+		// "moat-proxy" is used for proxy traffic (in NO_PROXY).
+		// "moat-host" is used for host service traffic (NOT in NO_PROXY,
+		// so it flows through the proxy for network policy enforcement).
+		extraHosts = append(extraHosts, "moat-proxy:host-gateway", "moat-host:host-gateway")
 	}
 
 	// Add config env vars
@@ -3877,6 +3863,41 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	}
 
 	return nil
+}
+
+// buildProxyEnv constructs the environment variables that configure the container's
+// HTTP proxy settings. It uses synthetic hostnames:
+//   - "moat-proxy" for the proxy address (included in NO_PROXY so relay/AWS traffic
+//     connects directly without going through CONNECT tunnel)
+//   - "moat-host" as the MOAT_HOST_GATEWAY value (NOT in NO_PROXY, so host-bound
+//     traffic flows through the proxy for network policy enforcement)
+//
+// Both hostnames resolve to the host-gateway IP via --add-host in the container.
+func buildProxyEnv(authToken string, proxyPort int) []string {
+	proxyHost := "moat-proxy:" + strconv.Itoa(proxyPort)
+	var proxyURL string
+	if authToken != "" {
+		proxyURL = "http://moat:" + authToken + "@" + proxyHost
+	} else {
+		proxyURL = "http://" + proxyHost
+	}
+
+	// Only exclude the proxy hostname and buildkit from proxying.
+	// Notably, "moat-host" is NOT in NO_PROXY — this ensures that container
+	// traffic to host services (via MOAT_HOST_GATEWAY=moat-host) goes through
+	// the proxy where network policy can allow/deny it.
+	noProxy := "moat-proxy,localhost,127.0.0.1,buildkit"
+
+	return []string{
+		"HTTP_PROXY=" + proxyURL,
+		"HTTPS_PROXY=" + proxyURL,
+		"http_proxy=" + proxyURL,
+		"https_proxy=" + proxyURL,
+		"NO_PROXY=" + noProxy,
+		"no_proxy=" + noProxy,
+		"TERM=xterm-256color",
+		"MOAT_HOST_GATEWAY=moat-host",
+	}
 }
 
 // buildRegisterRequest converts a daemon.RunContext into a daemon.RegisterRequest

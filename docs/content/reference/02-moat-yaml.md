@@ -707,7 +707,7 @@ Use the `MOAT_HOST_GATEWAY` environment variable (automatically set in every con
 curl http://$MOAT_HOST_GATEWAY:11434/api/tags
 ```
 
-`MOAT_HOST_GATEWAY` resolves to the correct host IP regardless of runtime (Docker, Apple containers, Rancher Desktop).
+`MOAT_HOST_GATEWAY` is a synthetic hostname that resolves to the host gateway address regardless of runtime (Docker, Apple containers, Rancher Desktop). Always use `$MOAT_HOST_GATEWAY` rather than hardcoding addresses like `host.docker.internal` or `127.0.0.1`.
 
 #### Example: agent with local Ollama
 

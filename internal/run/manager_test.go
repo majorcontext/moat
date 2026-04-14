@@ -1634,3 +1634,81 @@ func TestBuildRegisterRequest_HostGatewayEmpty(t *testing.T) {
 		t.Errorf("AllowedHostPorts = %v, want empty", req.AllowedHostPorts)
 	}
 }
+
+// TestBuildProxyEnv_MoatHostnames verifies that buildProxyEnv uses synthetic
+// hostnames: "moat-proxy" for the proxy address (in NO_PROXY) and "moat-host"
+// for the host gateway env var (NOT in NO_PROXY). This ensures host traffic
+// flows through the proxy for policy enforcement.
+func TestBuildProxyEnv_MoatHostnames(t *testing.T) {
+	env := buildProxyEnv("test-token", 19080)
+
+	// Helper to find env var value
+	findEnv := func(prefix string) string {
+		for _, e := range env {
+			if strings.HasPrefix(e, prefix) {
+				return strings.TrimPrefix(e, prefix)
+			}
+		}
+		return ""
+	}
+
+	// Proxy URL must use moat-proxy hostname
+	httpProxy := findEnv("HTTP_PROXY=")
+	if !strings.Contains(httpProxy, "moat-proxy:19080") {
+		t.Errorf("HTTP_PROXY should use moat-proxy hostname, got %q", httpProxy)
+	}
+	httpsProxy := findEnv("HTTPS_PROXY=")
+	if !strings.Contains(httpsProxy, "moat-proxy:19080") {
+		t.Errorf("HTTPS_PROXY should use moat-proxy hostname, got %q", httpsProxy)
+	}
+
+	// NO_PROXY must include moat-proxy (so proxy doesn't proxy itself)
+	// but must NOT include moat-host (so host traffic goes through proxy)
+	noProxy := findEnv("NO_PROXY=")
+	if !strings.Contains(noProxy, "moat-proxy") {
+		t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
+	}
+	if strings.Contains(noProxy, "moat-host") {
+		t.Errorf("NO_PROXY must NOT contain moat-host (host traffic must go through proxy), got %q", noProxy)
+	}
+
+	// MOAT_HOST_GATEWAY must be moat-host
+	hostGW := findEnv("MOAT_HOST_GATEWAY=")
+	if hostGW != "moat-host" {
+		t.Errorf("MOAT_HOST_GATEWAY = %q, want %q", hostGW, "moat-host")
+	}
+}
+
+// TestBuildProxyEnv_AuthTokenInURL verifies the proxy URL includes auth credentials.
+func TestBuildProxyEnv_AuthTokenInURL(t *testing.T) {
+	env := buildProxyEnv("secret-token", 19080)
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "HTTP_PROXY=") {
+			want := "http://moat:secret-token@moat-proxy:19080"
+			got := strings.TrimPrefix(e, "HTTP_PROXY=")
+			if got != want {
+				t.Errorf("HTTP_PROXY = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Error("HTTP_PROXY not found in env")
+}
+
+// TestBuildProxyEnv_NoToken verifies proxy URL without auth token.
+func TestBuildProxyEnv_NoToken(t *testing.T) {
+	env := buildProxyEnv("", 19080)
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "HTTP_PROXY=") {
+			want := "http://moat-proxy:19080"
+			got := strings.TrimPrefix(e, "HTTP_PROXY=")
+			if got != want {
+				t.Errorf("HTTP_PROXY = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Error("HTTP_PROXY not found in env")
+}

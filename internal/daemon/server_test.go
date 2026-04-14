@@ -607,6 +607,27 @@ func TestAddProxyPortForLoopback_AlreadyPresent(t *testing.T) {
 	}
 }
 
+func TestAddProxyPortForLoopback_MoatHost(t *testing.T) {
+	rc := NewRunContext("run_moathost_test")
+	rc.HostGateway = "moat-host"
+	rc.AllowedHostPorts = []int{8288}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 2 {
+		t.Fatalf("expected 2 ports (moat-host should add proxy port), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+	found := false
+	for _, p := range rc.AllowedHostPorts {
+		if p == 12345 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("proxy port 12345 not in AllowedHostPorts: %v", rc.AllowedHostPorts)
+	}
+}
+
 func TestAddProxyPortForLoopback_EmptyGateway(t *testing.T) {
 	rc := NewRunContext("run_empty_test")
 	rc.AllowedHostPorts = []int{8288}

@@ -24,7 +24,7 @@ v0.5 hardens network isolation and introduces operation-level policy enforcement
 - **Keep policy integration** — enforce operation-level allow/deny/redact on MCP tool calls and REST API requests via `mcp[].policy` and `network.keep_policy`; includes an LLM response policy that evaluates `tool_use` blocks in Anthropic API responses through `claude.llm-gateway` before forwarding to the container, plus starter packs like `linear-readonly` for quick MCP server lockdown ([#288](https://github.com/majorcontext/moat/pull/288))
 - **`gatekeeper` standalone proxy** — the credential-injecting proxy is now packaged as a standalone binary that runs without the moat runtime ([#299](https://github.com/majorcontext/moat/pull/299))
 - **`network.host`** — list TCP ports on the host machine that the container may access; all host traffic is blocked by default even in permissive mode ([#303](https://github.com/majorcontext/moat/pull/303))
-- **`MOAT_HOST_GATEWAY`** env var — set automatically in every container; resolves to the correct host IP across all runtimes (Docker, Apple containers, Rancher Desktop) ([#303](https://github.com/majorcontext/moat/pull/303))
+- **`MOAT_HOST_GATEWAY`** env var — set automatically in every container; resolves to the host gateway address across all runtimes (Docker, Apple containers, Rancher Desktop). Always use `$MOAT_HOST_GATEWAY` rather than hardcoding addresses ([#303](https://github.com/majorcontext/moat/pull/303))
 - **Multi-credential per host** — multiple grants (e.g., `claude` and `anthropic`) can now target the same host with different headers; clients that send placeholder headers choose which credential to use, otherwise the proxy auto-injects with `anthropic` preferred over `claude` ([#295](https://github.com/majorcontext/moat/pull/295))
 - **`moat grant show`** — inspect stored grants and the credentials they hold ([#297](https://github.com/majorcontext/moat/pull/297))
 - **Custom base image** — declare a prebuilt image as the base for the generated Dockerfile instead of inferring one from `dependencies` ([#292](https://github.com/majorcontext/moat/pull/292))
@@ -44,6 +44,7 @@ v0.5 hardens network isolation and introduces operation-level policy enforcement
 
 ### Fixed
 
+- Fix `network.host` bypass — previously, `MOAT_HOST_GATEWAY` was included in `NO_PROXY`, causing host traffic to bypass the proxy entirely and skip network policy enforcement. Host traffic now flows through the proxy using synthetic hostnames (`moat-host` for host services, `moat-proxy` for proxy access). Run `moat proxy restart` after upgrading to pick up this fix.
 - Install the Rust toolchain to a shared location (`/usr/local/cargo`) so non-root container users can use `cargo` and `rustc` — previously, rustup installed under `/root` and was unreadable to the default container user ([#305](https://github.com/majorcontext/moat/pull/305))
 - Add Anthropic and Gemini token placeholders so clients sending placeholder `Authorization` headers select the correct credential ([#293](https://github.com/majorcontext/moat/pull/293))
 - Skip plugin install when the `claude` CLI is absent — previously, image builds failed in containers that didn't include Claude Code ([#291](https://github.com/majorcontext/moat/pull/291))

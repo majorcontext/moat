@@ -2058,3 +2058,95 @@ func TestProxy_HostGatewayLocalhostBypassCONNECT(t *testing.T) {
 		t.Errorf("expected 407 (localhost CONNECT should match 127.0.0.1 gateway), got %d", resp.StatusCode)
 	}
 }
+
+// TestProxy_HostGatewayMoatHost verifies that when HostGateway is "moat-host"
+// (the synthetic hostname used to separate proxy access from host service access),
+// requests to "moat-host" are blocked by the host-gateway check.
+func TestProxy_HostGatewayMoatHost(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "moat_host_run" {
+			return &RunContextData{
+				Policy:      "permissive",
+				HostGateway: "moat-host",
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	// Request to moat-host:<port> should be blocked
+	req, _ := http.NewRequest("GET", fmt.Sprintf("http://moat-host:%d/", backendPort), nil)
+	req.Header.Set("Proxy-Authorization", "Bearer moat_host_run")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("expected 407 (blocked), got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Moat-Blocked") != "host-service" {
+		t.Errorf("expected X-Moat-Blocked=host-service, got %q", resp.Header.Get("X-Moat-Blocked"))
+	}
+}
+
+// TestProxy_HostGatewayMoatHostAllowedPort verifies that requests to "moat-host"
+// on an explicitly allowed port are permitted.
+func TestProxy_HostGatewayMoatHostAllowedPort(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	backendURL := mustParseURL(backend.URL)
+	backendPort, _ := strconv.Atoi(backendURL.Port())
+
+	p := NewProxy()
+	p.SetContextResolver(func(token string) (*RunContextData, bool) {
+		if token == "moat_host_allowed" {
+			return &RunContextData{
+				Policy:           "permissive",
+				HostGateway:      "moat-host",
+				AllowedHostPorts: []int{backendPort},
+			}, true
+		}
+		return nil, false
+	})
+
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	proxyURL := mustParseURL(proxyServer.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+
+	req, _ := http.NewRequest("GET", fmt.Sprintf("http://moat-host:%d/", backendPort), nil)
+	req.Header.Set("Proxy-Authorization", "Bearer moat_host_allowed")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// moat-host resolves to the httptest server's loopback address,
+	// but the proxy forwards to the Host header value. This test verifies
+	// the policy check passes — the actual connection may fail (DNS) which is OK.
+	// What matters: we did NOT get 407.
+	if resp.StatusCode == http.StatusProxyAuthRequired {
+		t.Errorf("expected request to be allowed (port %d in AllowedHostPorts), got 407", backendPort)
+	}
+}

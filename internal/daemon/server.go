@@ -387,10 +387,12 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 }
 
 // addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the host
-// gateway is 127.0.0.1 (Linux Docker with host networking). This prevents
-// the proxy from blocking its own traffic.
+// gateway shares the same address as the proxy. This prevents the proxy from
+// blocking its own traffic. Applies when the gateway is "127.0.0.1" (legacy
+// Linux host-mode) or "moat-host" (synthetic hostname that resolves to the
+// same address as the proxy).
 func addProxyPortForLoopback(rc *RunContext, proxyPort int) {
-	if rc.HostGateway != "127.0.0.1" {
+	if rc.HostGateway != "127.0.0.1" && rc.HostGateway != "moat-host" {
 		return
 	}
 	for _, p := range rc.AllowedHostPorts {
