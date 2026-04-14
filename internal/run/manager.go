@@ -1030,7 +1030,7 @@ region = %s
 		if r.GCloudCredentialProvider != nil {
 			email := r.GCloudCredentialProvider.Email()
 			if email == "" {
-				email = "default@moat.local"
+				email = gcloudprov.DefaultEmail
 			}
 			proxyEnv = append(proxyEnv,
 				"GOOGLE_CLOUD_PROJECT="+r.GCloudCredentialProvider.ProjectID(),

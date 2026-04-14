@@ -225,6 +225,63 @@ func TestMetadataUnknownPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeSAPath(t *testing.T) {
+	h := newTestHandler(&oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}, nil)
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		// Already normalized — should pass through unchanged.
+		{"default with subpath", saPrefix + "default/token", saPrefix + "default/token"},
+		{"default bare", saPrefix + "default", saPrefix + "default"},
+		{"default trailing slash", saPrefix + "default/", saPrefix + "default/"},
+		{"empty after prefix", saPrefix, saPrefix},
+
+		// Email-based identifiers — should normalize to "default".
+		{"email with token", saPrefix + "user@proj.iam.gserviceaccount.com/token", saPrefix + "default/token"},
+		{"email with scopes", saPrefix + "user@proj.iam.gserviceaccount.com/scopes", saPrefix + "default/scopes"},
+		{"email bare", saPrefix + "user@proj.iam.gserviceaccount.com", saPrefix + "default"},
+		{"email with trailing slash", saPrefix + "user@proj.iam.gserviceaccount.com/", saPrefix + "default/"},
+
+		// Non-SA paths — should pass through unchanged.
+		{"project path", "/computeMetadata/v1/project/project-id", "/computeMetadata/v1/project/project-id"},
+		{"root", "/", "/"},
+		{"liveness", "/computeMetadata/v1/", "/computeMetadata/v1/"},
+
+		// Recursive query path (path portion only, query handled separately).
+		{"email recursive path", saPrefix + "user@proj.iam.gserviceaccount.com/?recursive=true", saPrefix + "default/?recursive=true"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := h.normalizeSAPath(tt.path)
+			if got != tt.want {
+				t.Errorf("normalizeSAPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeSAPathRecursiveIntegration(t *testing.T) {
+	h := newTestHandler(&oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}, nil)
+
+	// Request with email-based SA path and ?recursive=true — should return JSON.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, metadataRequest("GET", saPrefix+"user@proj.iam.gserviceaccount.com/?recursive=true"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["email"] != "sa@test.iam.gserviceaccount.com" {
+		t.Errorf("email = %v, want sa@test.iam.gserviceaccount.com", resp["email"])
+	}
+}
+
 func TestMetadataDefaultEmail(t *testing.T) {
 	h := NewEndpointHandlerFromTokenFunc(
 		func(ctx context.Context) (*oauth2.Token, error) {

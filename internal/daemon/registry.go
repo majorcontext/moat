@@ -118,19 +118,26 @@ func (r *Registry) Count() int {
 	return len(r.runs)
 }
 
-// FindGCloudHandler returns the gcloud metadata handler from the first run
-// that has one configured. This is used for direct metadata requests (via
+// FindGCloudHandler returns the gcloud metadata handler when exactly one run
+// has gcloud configured. This is used for direct metadata requests (via
 // GCE_METADATA_HOST) where no proxy auth token is available to identify
-// the run. When multiple runs have gcloud configured, the first match wins.
+// the run. Returns nil if zero or multiple runs have gcloud — refusing to
+// serve prevents cross-run credential leakage in multi-run scenarios.
 func (r *Registry) FindGCloudHandler() http.Handler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	var found http.Handler
 	for _, rc := range r.runs {
 		if h := rc.GCloudHandler(); h != nil {
-			return h
+			if found != nil {
+				// Multiple gcloud runs — refuse to serve to prevent
+				// cross-run credential leakage.
+				return nil
+			}
+			found = h
 		}
 	}
-	return nil
+	return found
 }
 
 // generateToken returns a 32-byte cryptographically random hex string.
