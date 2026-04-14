@@ -2443,17 +2443,34 @@ region = %s
 
 	// When a custom network is used (for services or BuildKit), the container
 	// is on a different subnet than the default network. The proxy host address
-	// (derived from the default network gateway) may be unreachable. Rewrite
-	// all env vars that reference the old host address to use the custom
-	// network's gateway instead.
+	// (derived from the default network gateway) may be unreachable.
+	//
+	// With synthetic hostnames, the proxy env vars use "moat-proxy" instead of
+	// an IP, so replaceHostInEnv no longer rewrites them. Instead, update the
+	// --add-host entries so "moat-proxy" and "moat-host" resolve to the custom
+	// network's gateway IP (which can reach the host) instead of "host-gateway"
+	// (which resolves to the docker0 bridge IP, unreachable from custom networks).
+	//
+	// Also rewrite any remaining IP-based env vars (e.g., MOAT_SSH_TCP_ADDR)
+	// that still reference the old hostAddr.
 	if networkID != "" && net.ParseIP(hostAddr) != nil {
 		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr != nil {
 			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
 				log.Debug("rewriting proxy host for custom network",
 					"old", hostAddr, "new", gw, "network", networkID)
+				// Rewrite IP-based env vars (e.g., MOAT_SSH_TCP_ADDR).
 				proxyEnv = replaceHostInEnv(proxyEnv, hostAddr, gw)
 				r.ProxyHost = gw
+				// Rewrite --add-host entries so synthetic hostnames resolve
+				// to the custom network gateway instead of host-gateway.
+				for i, h := range extraHosts {
+					if h == "moat-proxy:host-gateway" {
+						extraHosts[i] = "moat-proxy:" + gw
+					} else if h == "moat-host:host-gateway" {
+						extraHosts[i] = "moat-host:" + gw
+					}
+				}
 			}
 		}
 	}
