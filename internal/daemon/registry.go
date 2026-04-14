@@ -118,23 +118,32 @@ func (r *Registry) Count() int {
 	return len(r.runs)
 }
 
-// FindGCloudHandler returns the gcloud metadata handler when exactly one run
-// has gcloud configured. This is used for direct metadata requests (via
-// GCE_METADATA_HOST) where no proxy auth token is available to identify
-// the run. Returns nil if zero or multiple runs have gcloud — refusing to
-// serve prevents cross-run credential leakage in multi-run scenarios.
+// FindGCloudHandler returns the gcloud metadata handler for direct metadata
+// requests (via GCE_METADATA_HOST) where no proxy auth token is available
+// to identify the run.
+//
+// When multiple runs have gcloud configured, the handler is returned only if
+// all runs share the same credential profile — same profile means same
+// underlying credentials, so any handler is equivalent. Returns nil if runs
+// use different profiles to prevent cross-run credential leakage.
 func (r *Registry) FindGCloudHandler() http.Handler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var found http.Handler
+	var foundProfile string
+	first := true
 	for _, rc := range r.runs {
 		if h := rc.GCloudHandler(); h != nil {
-			if found != nil {
-				// Multiple gcloud runs — refuse to serve to prevent
+			profile := rc.GCloudProfile()
+			if first {
+				found = h
+				foundProfile = profile
+				first = false
+			} else if profile != foundProfile {
+				// Different profiles — refuse to serve to prevent
 				// cross-run credential leakage.
 				return nil
 			}
-			found = h
 		}
 	}
 	return found

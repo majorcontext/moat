@@ -54,6 +54,7 @@ type GCloudConfig struct {
 	ImpersonateSA string   `json:"impersonate_service_account,omitempty"`
 	KeyFile       string   `json:"key_file,omitempty"`
 	Email         string   `json:"email,omitempty"`
+	Profile       string   `json:"profile,omitempty"`
 }
 
 // RunContext holds per-run proxy state. It implements credential.ProxyConfigurer
@@ -175,6 +176,17 @@ func (rc *RunContext) GCloudHandler() http.Handler {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
 	return rc.gcloudHandler
+}
+
+// GCloudProfile returns the credential profile for this run's gcloud config.
+// Returns "" for the default (unscoped) profile.
+func (rc *RunContext) GCloudProfile() string {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	if rc.GCloudConfig != nil {
+		return rc.GCloudConfig.Profile
+	}
+	return ""
 }
 
 // SetCredential implements credential.ProxyConfigurer.

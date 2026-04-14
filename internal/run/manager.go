@@ -712,6 +712,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 						ImpersonateSA: gcloudCfg.ImpersonateSA,
 						KeyFile:       gcloudCfg.KeyFile,
 						Email:         gcloudCfg.Email,
+						Profile:       credential.ActiveProfile,
 					}
 				}
 			}
