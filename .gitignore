@@ -37,6 +37,8 @@ go.work.sum
 
 # Claude Code local settings (user-specific permissions)
 .claude/*.local.json
+.claude/scheduled_tasks.lock
+.context/
 
 # Conductor
 .conductor/
