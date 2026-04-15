@@ -1712,3 +1712,118 @@ func TestBuildProxyEnv_NoToken(t *testing.T) {
 	}
 	t.Error("HTTP_PROXY not found in env")
 }
+
+// TestBuildProxyEnv_UsesConstants verifies that buildProxyEnv uses the
+// package-level syntheticProxyHost constant internally and accepts
+// syntheticHostGateway as the MOAT_HOST_GATEWAY value.
+func TestBuildProxyEnv_UsesConstants(t *testing.T) {
+	env := buildProxyEnv("tok", 8080)
+
+	findEnv := func(prefix string) string {
+		for _, e := range env {
+			if strings.HasPrefix(e, prefix) {
+				return strings.TrimPrefix(e, prefix)
+			}
+		}
+		return ""
+	}
+
+	httpProxy := findEnv("HTTP_PROXY=")
+	if !strings.Contains(httpProxy, syntheticProxyHost+":8080") {
+		t.Errorf("HTTP_PROXY should use syntheticProxyHost constant, got %q", httpProxy)
+	}
+
+	noProxy := findEnv("NO_PROXY=")
+	if !strings.Contains(noProxy, syntheticProxyHost) {
+		t.Errorf("NO_PROXY should contain syntheticProxyHost, got %q", noProxy)
+	}
+	if strings.Contains(noProxy, syntheticHostGateway) {
+		t.Errorf("NO_PROXY must NOT contain syntheticHostGateway, got %q", noProxy)
+	}
+
+	hostGW := findEnv("MOAT_HOST_GATEWAY=")
+	if hostGW != syntheticHostGateway {
+		t.Errorf("MOAT_HOST_GATEWAY = %q, want %q", hostGW, syntheticHostGateway)
+	}
+}
+
+// TestIsProxyEnvVar verifies that proxy-related env var names are detected.
+func TestIsProxyEnvVar(t *testing.T) {
+	blocked := []string{
+		"HTTP_PROXY", "http_proxy", "Http_Proxy",
+		"HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy",
+		"MOAT_HOST_GATEWAY", "moat_host_gateway",
+		"MOAT_EXTRA_HOSTS", "moat_extra_hosts",
+	}
+	for _, name := range blocked {
+		if !isProxyEnvVar(name) {
+			t.Errorf("isProxyEnvVar(%q) = false, want true", name)
+		}
+	}
+
+	allowed := []string{
+		"PATH", "HOME", "CUSTOM_VAR", "MOAT_PRE_RUN",
+		"MOAT_CLIPBOARD", "TERM",
+	}
+	for _, name := range allowed {
+		if isProxyEnvVar(name) {
+			t.Errorf("isProxyEnvVar(%q) = true, want false", name)
+		}
+	}
+}
+
+// TestRewriteExtraHostsForCustomNetwork verifies that synthetic hostname
+// entries in extraHosts are rewritten when a custom network gateway differs.
+// Tests both Docker-style (host-gateway pseudo-address) and Apple-style (actual IP).
+func TestRewriteExtraHostsForCustomNetwork(t *testing.T) {
+	tests := []struct {
+		name  string
+		hosts []string
+	}{
+		{
+			name: "docker host-gateway",
+			hosts: []string{
+				"host.docker.internal:host-gateway",
+				syntheticProxyHost + ":host-gateway",
+				syntheticHostGateway + ":host-gateway",
+			},
+		},
+		{
+			name: "apple actual IP",
+			hosts: []string{
+				"host.docker.internal:host-gateway",
+				syntheticProxyHost + ":192.168.64.1",
+				syntheticHostGateway + ":192.168.64.1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extraHosts := make([]string, len(tt.hosts))
+			copy(extraHosts, tt.hosts)
+			gw := "172.20.0.1"
+
+			proxyPrefix := syntheticProxyHost + ":"
+			hostPrefix := syntheticHostGateway + ":"
+			for i, h := range extraHosts {
+				if strings.HasPrefix(h, proxyPrefix) {
+					extraHosts[i] = proxyPrefix + gw
+				} else if strings.HasPrefix(h, hostPrefix) {
+					extraHosts[i] = hostPrefix + gw
+				}
+			}
+
+			if extraHosts[0] != tt.hosts[0] {
+				t.Errorf("non-synthetic entry should be unchanged, got %q", extraHosts[0])
+			}
+			if extraHosts[1] != syntheticProxyHost+":"+gw {
+				t.Errorf("moat-proxy entry not rewritten, got %q", extraHosts[1])
+			}
+			if extraHosts[2] != syntheticHostGateway+":"+gw {
+				t.Errorf("moat-host entry not rewritten, got %q", extraHosts[2])
+			}
+		})
+	}
+}

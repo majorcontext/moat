@@ -2122,6 +2122,7 @@ func TestProxy_HostGatewayMoatHostAllowedPort(t *testing.T) {
 			return &RunContextData{
 				Policy:           "permissive",
 				HostGateway:      "moat-host",
+				HostGatewayIP:    backendURL.Hostname(), // actual IP so proxy can forward
 				AllowedHostPorts: []int{backendPort},
 			}, true
 		}
@@ -2142,11 +2143,12 @@ func TestProxy_HostGatewayMoatHostAllowedPort(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// moat-host resolves to the httptest server's loopback address,
-	// but the proxy forwards to the Host header value. This test verifies
-	// the policy check passes — the actual connection may fail (DNS) which is OK.
-	// What matters: we did NOT get 407.
+	// The proxy should rewrite "moat-host" to the actual IP (HostGatewayIP)
+	// and forward the request to the backend successfully.
 	if resp.StatusCode == http.StatusProxyAuthRequired {
 		t.Errorf("expected request to be allowed (port %d in AllowedHostPorts), got 407", backendPort)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
 }

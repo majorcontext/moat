@@ -297,6 +297,7 @@ type RunContextData struct {
 	CredStore            CredentialStore
 	KeepEngines          map[string]*keeplib.Engine
 	HostGateway          string
+	HostGatewayIP        string // actual IP to forward allowed host-gateway requests to
 	AllowedHostPorts     []int
 }
 
@@ -1256,8 +1257,16 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Rewrite synthetic host-gateway hostname to actual IP for forwarding.
+	// The container uses "moat-host" (which only exists in its /etc/hosts),
+	// but the proxy runs on the host where that name doesn't resolve.
+	outURL := r.URL.String()
+	if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" && isHostGateway(rc, host) {
+		outURL = strings.Replace(outURL, host, rc.HostGatewayIP, 1)
+	}
+
 	// Create outgoing request
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
+	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -1314,6 +1323,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.logRequest(r, r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, injectedHeaders)
 
 	if err != nil {
+		slog.Warn("proxy forward failed",
+			"subsystem", "proxy",
+			"method", r.Method,
+			"in_url", r.URL.String(),
+			"out_url", outURL,
+			"error", err.Error())
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -1384,7 +1399,15 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
-	targetConn, err := net.Dial("tcp", r.Host)
+	// Rewrite synthetic host-gateway hostname to actual IP for dialing.
+	dialAddr := r.Host
+	if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" {
+		host, _, _ := net.SplitHostPort(r.Host)
+		if isHostGateway(rc, host) {
+			dialAddr = strings.Replace(r.Host, host, rc.HostGatewayIP, 1)
+		}
+	}
+	targetConn, err := net.Dial("tcp", dialAddr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -1499,7 +1522,12 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		originalReqHeaders := req.Header.Clone()
 
 		req.URL.Scheme = "https"
-		req.URL.Host = r.Host
+		// Rewrite synthetic host-gateway hostname to actual IP for forwarding.
+		connectHost := r.Host
+		if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" && isHostGateway(rc, host) {
+			connectHost = strings.Replace(r.Host, host, rc.HostGatewayIP, 1)
+		}
+		req.URL.Host = connectHost
 		req.RequestURI = ""
 
 		// Check request-level rules (method + path) for the inner HTTP request.

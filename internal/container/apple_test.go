@@ -190,6 +190,16 @@ func TestBuildCreateArgs(t *testing.T) {
 			},
 			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "--tmpfs", "/workspace/node_modules", "--tmpfs", "/workspace/.venv", "ubuntu:22.04"},
 		},
+		{
+			// Apple's container CLI has no --add-host equivalent. ExtraHosts must
+			// be silently ignored — callers configure addresses directly via env.
+			name: "extra hosts are silently dropped",
+			cfg: Config{
+				Image:      "ubuntu:22.04",
+				ExtraHosts: []string{"moat-proxy:host-gateway", "moat-host:host-gateway"},
+			},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "ubuntu:22.04"},
+		},
 	}
 
 	for _, tt := range tests {

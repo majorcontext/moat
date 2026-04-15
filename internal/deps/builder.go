@@ -52,6 +52,24 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 		hashInput += ",clipboard:xvfb"
 	}
 
+	// When the moat-init entrypoint is used, hash the script contents so that
+	// changes to moat-init.sh (e.g. adding /etc/hosts injection for synthetic
+	// hostnames) invalidate cached images. Without this, users on runtimes
+	// without --add-host (Apple) can end up running stale images that lack
+	// critical initialization logic. Mirror the conditions in needsInit() plus
+	// any dep-driven DockerMode.
+	dockerModePresent := false
+	for _, d := range deps {
+		if d.DockerMode != "" {
+			dockerModePresent = true
+			break
+		}
+	}
+	if dockerModePresent || opts.needsInit("") {
+		scriptHash := sha256.Sum256([]byte(MoatInitScript))
+		hashInput += ",moat-init:" + hex.EncodeToString(scriptHash[:])[:8]
+	}
+
 	// Include plugins in hash (different plugins = different image).
 	// Note: Plugin format validation happens in claude.GenerateDockerfileSnippet()
 	// during Dockerfile generation. Invalid plugins will cause the build to fail

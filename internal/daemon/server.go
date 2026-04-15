@@ -17,6 +17,10 @@ import (
 	"github.com/majorcontext/moat/internal/routing"
 )
 
+// syntheticHostGateway is the hostname used for host service traffic in containers.
+// Must match the constant in internal/run/manager.go.
+const syntheticHostGateway = "moat-host"
+
 // BuildCommit is the git commit hash of the running binary. Set by the CLI
 // at startup so the health endpoint can report the daemon's version. This
 // allows diagnosing version skew between daemon and CLI.
@@ -392,7 +396,7 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 // Linux host-mode) or "moat-host" (synthetic hostname that resolves to the
 // same address as the proxy).
 func addProxyPortForLoopback(rc *RunContext, proxyPort int) {
-	if rc.HostGateway != "127.0.0.1" && rc.HostGateway != "moat-host" {
+	if rc.HostGateway != "127.0.0.1" && rc.HostGateway != syntheticHostGateway {
 		return
 	}
 	for _, p := range rc.AllowedHostPorts {
