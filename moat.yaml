@@ -20,7 +20,7 @@ dependencies:
   - node@20
   - python
   - bats
-  # - docker:dind
+  - docker:dind
 
 grants:
   - claude
