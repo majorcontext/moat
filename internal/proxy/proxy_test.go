@@ -2152,3 +2152,58 @@ func TestProxy_HostGatewayMoatHostAllowedPort(t *testing.T) {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
 }
+
+// TestIsHostGatewayAliases verifies that loopback aliases (localhost, ::1,
+// 127.0.0.1) are treated as host-gateway when HostGateway is either the
+// synthetic hostname or the legacy 127.0.0.1 form. A container that issues
+// "CONNECT localhost:8080" must not slip past the host-service block by
+// using a loopback alias instead of the canonical synthetic hostname.
+func TestIsHostGatewayAliases(t *testing.T) {
+	cases := []struct {
+		name    string
+		gateway string
+		host    string
+		want    bool
+	}{
+		{"synthetic matches self", "moat-host", "moat-host", true},
+		{"synthetic matches localhost", "moat-host", "localhost", true},
+		{"synthetic matches 127.0.0.1", "moat-host", "127.0.0.1", true},
+		{"synthetic matches ::1", "moat-host", "::1", true},
+		{"synthetic rejects unrelated", "moat-host", "api.example.com", false},
+		{"legacy 127 matches localhost", "127.0.0.1", "localhost", true},
+		{"legacy 127 matches ::1", "127.0.0.1", "::1", true},
+		{"legacy 127 matches 127.0.0.1", "127.0.0.1", "127.0.0.1", true},
+		{"empty gateway never matches", "", "localhost", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &RunContextData{HostGateway: tc.gateway}
+			if got := isHostGateway(rc, tc.host); got != tc.want {
+				t.Errorf("isHostGateway(gw=%q, host=%q) = %v, want %v",
+					tc.gateway, tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactURLUserinfo verifies that the proxy's per-run auth token in URL
+// userinfo is masked before it reaches debug logs.
+func TestRedactURLUserinfo(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"http://moat:secrettoken@host:1234/path", "http://***@host:1234/path"},
+		{"https://user:pw@example.com/", "https://***@example.com/"},
+		{"http://example.com/path", "http://example.com/path"},
+		{"", ""},
+		{"not-a-url", "not-a-url"},
+		// Userinfo only inside the authority; an @ in a path must be left alone.
+		{"http://example.com/a@b", "http://example.com/a@b"},
+	}
+	for _, tc := range cases {
+		if got := redactURLUserinfo(tc.in); got != tc.want {
+			t.Errorf("redactURLUserinfo(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

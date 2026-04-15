@@ -17,10 +17,6 @@ import (
 	"github.com/majorcontext/moat/internal/routing"
 )
 
-// syntheticHostGateway is the hostname used for host service traffic in containers.
-// Must match the constant in internal/run/manager.go.
-const syntheticHostGateway = "moat-host"
-
 // BuildCommit is the git commit hash of the running binary. Set by the CLI
 // at startup so the health endpoint can report the daemon's version. This
 // allows diagnosing version skew between daemon and CLI.
@@ -130,7 +126,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		RunCount:     s.registry.Count(),
 		StartedAt:    s.startedAt.Format(time.RFC3339),
 		Commit:       BuildCommit,
-		Capabilities: []string{"keep-policy"},
+		Capabilities: []string{"keep-policy", "host-gateway-v2"},
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -390,13 +386,15 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the host
-// gateway shares the same address as the proxy. This prevents the proxy from
-// blocking its own traffic. Applies when the gateway is "127.0.0.1" (legacy
-// Linux host-mode) or "moat-host" (synthetic hostname that resolves to the
-// same address as the proxy).
+// addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the
+// host gateway shares the loopback interface with the proxy. This prevents the
+// proxy's own firewall rules from blocking the proxy's outbound traffic.
+// Applies only to legacy Linux host-mode where HostGateway is "127.0.0.1".
+// The synthetic hostname path ("moat-host") routes container traffic through
+// the proxy itself (reached via the separate "moat-proxy" name), so this
+// helper does not apply there.
 func addProxyPortForLoopback(rc *RunContext, proxyPort int) {
-	if rc.HostGateway != "127.0.0.1" && rc.HostGateway != syntheticHostGateway {
+	if rc.HostGateway != "127.0.0.1" {
 		return
 	}
 	for _, p := range rc.AllowedHostPorts {

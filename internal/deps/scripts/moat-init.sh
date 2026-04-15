@@ -19,12 +19,23 @@ DIND_TIMEOUT_SECONDS=30      # timeout for Docker daemon startup in dind mode
 # /etc/hosts. Used on runtimes (Apple containers) that lack a --add-host flag
 # at container-create time. Must run before any process that resolves these
 # hostnames (e.g. the user's command, which sees MOAT_HOST_GATEWAY).
-if [ -n "$MOAT_EXTRA_HOSTS" ] && [ "$(id -u)" = "0" ]; then
+#
+# Fail-closed: if we cannot write to /etc/hosts (non-root container without
+# CAP_DAC_OVERRIDE), we must not start the user command. Silent failure would
+# leave moat-proxy/moat-host unresolvable, HTTP_PROXY broken, and network
+# policy silently degraded. The clear error here is preferable to a seemingly
+# working container that bypasses policy.
+if [ -n "$MOAT_EXTRA_HOSTS" ]; then
   for entry in $MOAT_EXTRA_HOSTS; do
     name=${entry%%:*}
     ip=${entry#*:}
     if [ -n "$name" ] && [ -n "$ip" ] && [ "$name" != "$ip" ]; then
-      printf '%s %s\n' "$ip" "$name" >> /etc/hosts 2>/dev/null || true
+      if ! printf '%s %s\n' "$ip" "$name" >> /etc/hosts 2>/dev/null; then
+        echo "Error: moat-init.sh cannot write $name to /etc/hosts (required for moat proxy resolution)." >&2
+        echo "The container user (UID $(id -u)) lacks permission to modify /etc/hosts." >&2
+        echo "Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE." >&2
+        exit 1
+      fi
     fi
   done
 fi

@@ -75,13 +75,19 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 // needsInit returns whether the moat-init entrypoint script is required.
 // dockerMode must be passed separately because it comes from dependency
 // categorization, not from ImageSpec.
+//
+// NeedsFirewall is included because strict network.policy on Apple containers
+// relies on moat-init.sh to write synthetic hostnames (moat-proxy, moat-host)
+// to /etc/hosts via MOAT_EXTRA_HOSTS. Without the entrypoint, HTTP_PROXY
+// points at an unresolvable hostname and the policy fails open.
 func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	if s == nil {
 		return dockerMode != ""
 	}
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
-		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles
+		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
+		s.NeedsFirewall
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.

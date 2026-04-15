@@ -47,6 +47,8 @@ import (
 	"time"
 
 	keeplib "github.com/majorcontext/keep"
+
+	"github.com/majorcontext/moat/internal/hostnames"
 )
 
 // contextKey is the type for request-scoped context values.
@@ -890,9 +892,39 @@ func (p *Proxy) getResponseTransformersForRequest(r *http.Request, host string) 
 	return p.getResponseTransformers(host)
 }
 
+// redactURLUserinfo removes userinfo (user:password@) from a URL-ish string
+// before logging. The proxy URL carries a per-run auth token in the userinfo
+// component (http://moat:TOKEN@host:port/...) and logging it verbatim would
+// expose the token in debug output. Returns the input unchanged if there is
+// no '@' before the first '/'.
+func redactURLUserinfo(s string) string {
+	schemeEnd := strings.Index(s, "://")
+	if schemeEnd < 0 {
+		return s
+	}
+	rest := s[schemeEnd+3:]
+	slash := strings.IndexByte(rest, '/')
+	authority := rest
+	if slash >= 0 {
+		authority = rest[:slash]
+	}
+	at := strings.IndexByte(authority, '@')
+	if at < 0 {
+		return s
+	}
+	return s[:schemeEnd+3] + "***@" + rest[at+1:]
+}
+
 // isHostGateway returns true if the given host matches the run's host gateway address.
-// On Linux (gateway "127.0.0.1"), also matches "localhost" and "::1" to prevent
-// bypass via alternate loopback address forms.
+//
+// Matches are:
+//   - The literal HostGateway value (synthetic "moat-host" or the legacy
+//     IP form "127.0.0.1" for pre-synthetic-hostname daemons).
+//   - Loopback aliases ("localhost", "127.0.0.1", "::1") whenever HostGateway
+//     is either the synthetic hostname or the legacy loopback IP. In both
+//     configurations HostGatewayIP is 127.0.0.1, so a container CONNECT to
+//     "localhost:8080" or "127.0.0.1:8080" would otherwise slip past the
+//     host-service check and be dialed as-is, bypassing the per-port allowlist.
 func isHostGateway(rc *RunContextData, host string) bool {
 	if rc == nil || rc.HostGateway == "" {
 		return false
@@ -900,12 +932,10 @@ func isHostGateway(rc *RunContextData, host string) bool {
 	if host == rc.HostGateway {
 		return true
 	}
-	// On Linux, the gateway is 127.0.0.1. Match common loopback aliases so
-	// containers can't bypass blocking by using "localhost" or "::1". We don't
-	// match the full 127.0.0.0/8 range because containers practically never
-	// use addresses like 127.0.0.2; the firewall already restricts loopback.
-	if rc.HostGateway == "127.0.0.1" {
-		return host == "localhost" || host == "::1"
+	// Synthetic hostname or legacy loopback IP — both route to 127.0.0.1 on
+	// the host side, so loopback aliases must be caught here.
+	if rc.HostGateway == hostnames.HostGateway || rc.HostGateway == "127.0.0.1" {
+		return host == "localhost" || host == "127.0.0.1" || host == "::1"
 	}
 	return false
 }
@@ -1323,13 +1353,17 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	p.logRequest(r, r.Method, r.URL.String(), statusCode, duration, err, originalReqHeaders, respHeaders, reqBody, respBody, injectedHeaders)
 
 	if err != nil {
+		// Redact proxy userinfo from logged URLs so the per-run auth token
+		// never lands in debug logs verbatim.
 		slog.Warn("proxy forward failed",
 			"subsystem", "proxy",
 			"method", r.Method,
-			"in_url", r.URL.String(),
-			"out_url", outURL,
+			"in_url", redactURLUserinfo(r.URL.String()),
+			"out_url", redactURLUserinfo(outURL),
 			"error", err.Error())
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// Don't echo the upstream error verbatim to the container — it can
+		// leak internal hostnames/IPs and is rarely useful to the agent.
+		http.Error(w, "moat proxy: upstream request failed", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -1398,6 +1432,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	p.handleConnectTunnel(w, r)
 }
 
+// connectTunnelDialTimeout bounds how long the proxy waits to connect to the
+// upstream on behalf of a CONNECT request. An unreachable HostGatewayIP (e.g.
+// daemon-version-skew sends an empty IP and the fallback resolves nowhere)
+// would otherwise cause the container to stall indefinitely.
+const connectTunnelDialTimeout = 10 * time.Second
+
 func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 	// Rewrite synthetic host-gateway hostname to actual IP for dialing.
 	dialAddr := r.Host
@@ -1407,9 +1447,9 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 			dialAddr = strings.Replace(r.Host, host, rc.HostGatewayIP, 1)
 		}
 	}
-	targetConn, err := net.Dial("tcp", dialAddr)
+	targetConn, err := net.DialTimeout("tcp", dialAddr, connectTunnelDialTimeout)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, "moat proxy: dial upstream failed", http.StatusBadGateway)
 		return
 	}
 

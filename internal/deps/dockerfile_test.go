@@ -1638,7 +1638,9 @@ func TestImageSpecNeedsInit(t *testing.T) {
 		{"docker dind", &ImageSpec{}, DockerModeDind, true},
 		{"pre_run hook", &ImageSpec{Hooks: &HooksConfig{PreRun: "npm install"}}, "", true},
 		{"post_build only", &ImageSpec{Hooks: &HooksConfig{PostBuild: "echo hi"}}, "", false},
-		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", false},
+		// NeedsFirewall requires moat-init.sh because strict-policy Apple runs
+		// rely on MOAT_EXTRA_HOSTS to write synthetic hostnames to /etc/hosts.
+		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", true},
 		{"clipboard", &ImageSpec{NeedsClipboard: true}, "", true},
 	}
 

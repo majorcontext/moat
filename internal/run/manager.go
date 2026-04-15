@@ -31,6 +31,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/hostnames"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -60,14 +61,14 @@ const (
 	// The value is chosen to be long enough for the attach to establish but
 	// short enough to not noticeably delay state updates.
 	containerStartDelay = 100 * time.Millisecond
+)
 
-	// syntheticProxyHost is the hostname containers use to reach the proxy.
-	// It is included in NO_PROXY so relay/AWS traffic connects directly.
-	syntheticProxyHost = "moat-proxy"
-
-	// syntheticHostGateway is the hostname containers use to reach host services.
-	// It is NOT in NO_PROXY, so traffic flows through the proxy for policy enforcement.
-	syntheticHostGateway = "moat-host"
+// Aliases to the shared hostnames package so existing callsites in this file
+// keep their current names. Canonical definitions live in internal/hostnames
+// so that the daemon, proxy, and manager all agree on the exact strings.
+const (
+	syntheticProxyHost   = hostnames.Proxy
+	syntheticHostGateway = hostnames.HostGateway
 )
 
 // getWorkspaceOwner returns the UID and GID of the workspace directory owner.
@@ -618,6 +619,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy if we have grants (for credential injection) or strict network policy
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+	// Start proxy for any feature that the proxy is responsible for enforcing
+	// or relaying, even when there are no grants and the policy is permissive.
+	// Without this, setting `network.host`, `network.rules`, MCP servers, or
+	// Keep policies on a grant-less run would silently do nothing.
+	needsProxyForConfig := false
+	if opts.Config != nil {
+		needsProxyForConfig = len(opts.Config.Network.Host) > 0 ||
+			len(opts.Config.Network.Rules) > 0 ||
+			len(opts.Config.MCP) > 0 ||
+			opts.Config.Network.KeepPolicy != nil ||
+			(opts.Config.Claude.LLMGateway != nil && opts.Config.Claude.LLMGateway.Policy != nil)
+		for _, mcp := range opts.Config.MCP {
+			if mcp.Policy != nil {
+				needsProxyForConfig = true
+				break
+			}
+		}
+	}
 
 	// Clipboard bridging is resolved by the caller (ExecuteRun).
 	needsClipboard := opts.Clipboard
@@ -650,7 +669,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	if needsProxyForGrants || needsProxyForFirewall {
+	if needsProxyForGrants || needsProxyForFirewall || needsProxyForConfig {
 		// Daemon directory for proxy state (CA certs, lock file, socket)
 		daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
 
@@ -907,6 +926,23 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			if !hasKeepPolicy {
 				return nil, fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy restart' to upgrade")
 			}
+		}
+
+		// Verify the daemon supports the synthetic-hostname gateway semantics.
+		// All runs that register with the proxy now rely on HostGateway=moat-host
+		// and a separate HostGatewayIP — older daemons ignore HostGatewayIP and
+		// don't route moat-host traffic correctly, which silently breaks host
+		// access and the network-host bypass fix. Fail fast with an actionable
+		// message rather than letting the run register and misbehave.
+		hasHostGatewayV2 := false
+		for _, cap := range daemonCapabilities {
+			if cap == "host-gateway-v2" {
+				hasHostGatewayV2 = true
+				break
+			}
+		}
+		if !hasHostGatewayV2 {
+			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
 		}
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
@@ -1283,7 +1319,7 @@ region = %s
 	// override moat's proxy settings and re-open the host traffic bypass.
 	if opts.Config != nil {
 		for k, v := range opts.Config.Env {
-			if needsProxy && isProxyEnvVar(k) {
+			if needsProxy && isMoatOwnedProxyVar(k) {
 				ui.Warn(fmt.Sprintf("ignoring %s in moat.yaml env — overriding proxy settings would bypass network policy enforcement", k))
 				continue
 			}
@@ -1327,7 +1363,7 @@ region = %s
 	// but filter proxy-related vars when proxy is active.
 	for _, e := range opts.Env {
 		if needsProxy {
-			if idx := strings.IndexByte(e, '='); idx >= 0 && isProxyEnvVar(e[:idx]) {
+			if idx := strings.IndexByte(e, '='); idx >= 0 && isMoatOwnedProxyVar(e[:idx]) {
 				ui.Warn(fmt.Sprintf("ignoring %s in env — overriding proxy settings would bypass network policy enforcement", e[:idx]))
 				continue
 			}
@@ -3959,14 +3995,23 @@ func buildProxyEnv(authToken string, proxyPort int) []string {
 	}
 }
 
-// isProxyEnvVar returns true if the given environment variable name is a
-// proxy-related variable that moat manages internally. User-provided values
-// for these variables would override moat's proxy configuration and could
-// bypass network policy enforcement.
-func isProxyEnvVar(name string) bool {
+// isMoatOwnedProxyVar returns true if the given environment variable name is
+// one that moat owns and sets for the container. User-supplied values for any
+// of these would override moat's proxy configuration and could bypass network
+// policy enforcement, so they are filtered (with a warning) from moat.yaml env
+// and -e flags.
+//
+// The ALL_PROXY / all_proxy / CURL_ALL_PROXY family is included because curl,
+// wget, python-requests, and other libcurl-based tools honor those as a fallback
+// or override of HTTP_PROXY/HTTPS_PROXY. Leaving them user-controllable would
+// let a moat.yaml env: { ALL_PROXY: socks5://attacker:1080 } entry route all
+// traffic around the moat proxy.
+func isMoatOwnedProxyVar(name string) bool {
 	upper := strings.ToUpper(name)
 	switch upper {
-	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "MOAT_HOST_GATEWAY", "MOAT_EXTRA_HOSTS":
+	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+		"ALL_PROXY", "CURL_ALL_PROXY",
+		"MOAT_HOST_GATEWAY", "MOAT_EXTRA_HOSTS":
 		return true
 	}
 	return false

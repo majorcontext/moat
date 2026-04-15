@@ -1747,18 +1747,23 @@ func TestBuildProxyEnv_UsesConstants(t *testing.T) {
 	}
 }
 
-// TestIsProxyEnvVar verifies that proxy-related env var names are detected.
-func TestIsProxyEnvVar(t *testing.T) {
+// TestIsMoatOwnedProxyVar verifies that proxy-related env var names are detected.
+func TestIsMoatOwnedProxyVar(t *testing.T) {
 	blocked := []string{
 		"HTTP_PROXY", "http_proxy", "Http_Proxy",
 		"HTTPS_PROXY", "https_proxy",
 		"NO_PROXY", "no_proxy",
+		// ALL_PROXY / CURL_ALL_PROXY are honored by curl/wget/libcurl as
+		// HTTP_PROXY fallbacks; filtering them prevents a proxy bypass via
+		// moat.yaml env: { ALL_PROXY: socks5://attacker:1080 }.
+		"ALL_PROXY", "all_proxy",
+		"CURL_ALL_PROXY", "curl_all_proxy",
 		"MOAT_HOST_GATEWAY", "moat_host_gateway",
 		"MOAT_EXTRA_HOSTS", "moat_extra_hosts",
 	}
 	for _, name := range blocked {
-		if !isProxyEnvVar(name) {
-			t.Errorf("isProxyEnvVar(%q) = false, want true", name)
+		if !isMoatOwnedProxyVar(name) {
+			t.Errorf("isMoatOwnedProxyVar(%q) = false, want true", name)
 		}
 	}
 
@@ -1767,8 +1772,8 @@ func TestIsProxyEnvVar(t *testing.T) {
 		"MOAT_CLIPBOARD", "TERM",
 	}
 	for _, name := range allowed {
-		if isProxyEnvVar(name) {
-			t.Errorf("isProxyEnvVar(%q) = true, want false", name)
+		if isMoatOwnedProxyVar(name) {
+			t.Errorf("isMoatOwnedProxyVar(%q) = true, want false", name)
 		}
 	}
 }
