@@ -98,6 +98,12 @@ func TestMain(m *testing.M) {
 		os.Setenv("MOAT_EXECUTABLE", moatBin)
 	}
 
+	// Kill any pre-existing daemon so the tests spawn a fresh one from the
+	// just-built binary. Without this, a daemon left behind by a previous
+	// session (or a different checkout) serves the tests, which can produce
+	// confusing failures when the daemon API surface has changed.
+	killTestDaemon()
+
 	code := m.Run()
 
 	// Kill any daemon process spawned during the test run.
@@ -410,7 +416,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 			}
 			t.Errorf("Network trace did not capture request to api.github.com\n"+
 				"Captured requests: %v\n"+
-				"Container logs: %v", requests, logLines)
+				"Container logs:%s", requests, formatLogLines(logLines))
 		}
 	})
 }
@@ -570,7 +576,7 @@ func TestLogsAreCaptured(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Logs did not contain expected output %q\nLogs: %v", testOutput, logs)
+			t.Errorf("Logs did not contain expected output %q\nLogs:%s", testOutput, formatLogEntries(logs))
 		}
 	})
 }
@@ -638,7 +644,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Container did not read workspace file correctly\nExpected: %q\nLogs: %v", testContent, logs)
+			t.Errorf("Container did not read workspace file correctly\nExpected: %q\nLogs:%s", testContent, formatLogEntries(logs))
 		}
 	})
 }
@@ -705,7 +711,7 @@ func TestConfigEnvironmentVariables(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Environment variable was not set correctly\nLogs: %v", logs)
+			t.Errorf("Environment variable was not set correctly\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -873,7 +879,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 	}
 
 	if !found {
-		t.Errorf("Container output not captured\nExpected: %q\nLogs: %v", testOutput, logs)
+		t.Errorf("Container output not captured\nExpected: %q\nLogs:%s", testOutput, formatLogEntries(logs))
 	}
 }
 
@@ -963,7 +969,7 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	}
 
 	if !foundProxy {
-		t.Errorf("HTTP_PROXY not found in logs: %v", logs)
+		t.Errorf("HTTP_PROXY not found in logs:%s", formatLogEntries(logs))
 	}
 }
 
@@ -1186,7 +1192,7 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 		}
 
 		if !foundSSHSock {
-			t.Errorf("SSH_AUTH_SOCK not set correctly in container\nLogs: %v", logs)
+			t.Errorf("SSH_AUTH_SOCK not set correctly in container\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1315,7 +1321,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Node 22.x not found in output\nLogs: %v", logs)
+			t.Errorf("Node 22.x not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1377,7 +1383,7 @@ func TestDependencyPythonRuntime(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+			t.Errorf("Python 3.11 not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1439,7 +1445,7 @@ func TestDependencyGoRuntime(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Go 1.22 not found in output\nLogs: %v", logs)
+			t.Errorf("Go 1.22 not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1507,10 +1513,10 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 		}
 
 		if !foundNode {
-			t.Errorf("Node 22.x not found in output\nLogs: %v", logs)
+			t.Errorf("Node 22.x not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 		if !foundPython {
-			t.Errorf("Python 3.11 not found in output\nLogs: %v", logs)
+			t.Errorf("Python 3.11 not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1572,7 +1578,7 @@ func TestDependencyNpmPackage(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("TypeScript not found in output\nLogs: %v", logs)
+			t.Errorf("TypeScript not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1634,7 +1640,7 @@ func TestDependencyGitHubBinary(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("jq not found in output\nLogs: %v", logs)
+			t.Errorf("jq not found in output\nLogs:%s", formatLogEntries(logs))
 		}
 	})
 }
@@ -1706,8 +1712,8 @@ func TestDependencyMetaBundle(t *testing.T) {
 		}
 
 		if !foundJq || !foundFzf || !foundRg {
-			t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs: %v",
-				foundJq, foundFzf, foundRg, logs)
+			t.Errorf("Meta bundle tools not found\njq: %v, fzf: %v, rg: %v\nLogs:%s",
+				foundJq, foundFzf, foundRg, formatLogEntries(logs))
 		}
 	})
 }

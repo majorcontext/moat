@@ -253,7 +253,7 @@ func TestDaemonNetworkLogging(t *testing.T) {
 			t.Errorf("Network request to api.github.com not captured in daemon mode.\n"+
 				"Runtime: %s, ProxyHost: %s, ProxyPort: %d\n"+
 				"Captured requests (%d): %v\n"+
-				"Container logs: %v", mgr.RuntimeType(), r.ProxyHost, r.ProxyPort, len(requests), requests, logLines)
+				"Container logs:%s", mgr.RuntimeType(), r.ProxyHost, r.ProxyPort, len(requests), requests, formatLogLines(logLines))
 		}
 	})
 }

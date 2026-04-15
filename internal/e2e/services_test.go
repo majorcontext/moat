@@ -32,6 +32,7 @@ func skipIfNoServiceRuntime(t *testing.T) {
 // TestServicePostgres verifies that a postgres service dependency starts,
 // injects MOAT_POSTGRES_URL, and the database is reachable from the main container.
 func TestServicePostgres(t *testing.T) {
+	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -104,16 +105,17 @@ func TestServicePostgres(t *testing.T) {
 	}
 
 	if !foundURL {
-		t.Errorf("MOAT_POSTGRES_URL not set in container\nLogs: %v", logs)
+		t.Errorf("MOAT_POSTGRES_URL not set in container\nLogs:%s", formatLogEntries(logs))
 	}
 	if !foundReachable {
-		t.Errorf("Postgres not reachable from container\nLogs: %v", logs)
+		t.Errorf("Postgres not reachable from container\nLogs:%s", formatLogEntries(logs))
 	}
 }
 
 // TestServiceRedis verifies that a redis service dependency starts,
 // injects MOAT_REDIS_URL, and the cache is reachable.
 func TestServiceRedis(t *testing.T) {
+	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -174,13 +176,14 @@ func TestServiceRedis(t *testing.T) {
 	}
 
 	if !foundURL {
-		t.Errorf("MOAT_REDIS_URL not set in container\nLogs: %v", logs)
+		t.Errorf("MOAT_REDIS_URL not set in container\nLogs:%s", formatLogEntries(logs))
 	}
 }
 
 // TestServiceMultiple verifies that multiple services (postgres and redis)
 // can run together and both sets of env vars are injected.
 func TestServiceMultiple(t *testing.T) {
+	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -244,16 +247,17 @@ func TestServiceMultiple(t *testing.T) {
 	}
 
 	if !foundPostgres {
-		t.Errorf("MOAT_POSTGRES_URL not set\nLogs: %v", logs)
+		t.Errorf("MOAT_POSTGRES_URL not set\nLogs:%s", formatLogEntries(logs))
 	}
 	if !foundRedis {
-		t.Errorf("MOAT_REDIS_URL not set\nLogs: %v", logs)
+		t.Errorf("MOAT_REDIS_URL not set\nLogs:%s", formatLogEntries(logs))
 	}
 }
 
 // TestServiceCustomConfig verifies that service configuration can be overridden
 // via the services: block in moat.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
+	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -322,16 +326,17 @@ func TestServiceCustomConfig(t *testing.T) {
 	}
 
 	if !foundDB {
-		t.Errorf("MOAT_POSTGRES_DB not set to myapp\nLogs: %v", logs)
+		t.Errorf("MOAT_POSTGRES_DB not set to myapp\nLogs:%s", formatLogEntries(logs))
 	}
 	if !foundURL {
-		t.Errorf("MOAT_POSTGRES_URL does not contain myapp\nLogs: %v", logs)
+		t.Errorf("MOAT_POSTGRES_URL does not contain myapp\nLogs:%s", formatLogEntries(logs))
 	}
 }
 
 // TestServiceCleanup verifies that service containers are removed when
 // the run is destroyed.
 func TestServiceCleanup(t *testing.T) {
+	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 

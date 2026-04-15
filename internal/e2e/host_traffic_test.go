@@ -55,15 +55,21 @@ func startHostHTTPServer(t *testing.T) (net.Listener, int) {
 
 // hostTrafficCmd builds a shell command that:
 // 1. Dumps the network environment (MOAT_HOST_GATEWAY, NO_PROXY, HTTP_PROXY) for diagnosis
-// 2. Curls the given host:port and reports the HTTP status
+// 2. Curls the given host:port and reports the HTTP status and response body
+//
+// The body is captured so proxy error messages (e.g. the upstream dial error that
+// accompanies a 502) are visible in test logs instead of being silently dropped.
 func hostTrafficCmd(host string, port int, label string) string {
 	return fmt.Sprintf(
 		`echo "DIAG_GATEWAY=$MOAT_HOST_GATEWAY" && `+
 			`echo "DIAG_NO_PROXY=$NO_PROXY" && `+
 			`echo "DIAG_HTTP_PROXY=$HTTP_PROXY" && `+
-			`STATUS=$(curl -s -o /dev/null -w '%%{http_code}' --connect-timeout 5 http://%s:%d/ 2>&1 || true) && `+
-			`echo %s=$STATUS`,
-		host, port, label,
+			`BODY=$(curl -s --connect-timeout 5 -w $'\n%%{http_code}' http://%s:%d/ 2>&1 || true) && `+
+			`STATUS=$(printf '%%s' "$BODY" | tail -n 1) && `+
+			`RESP=$(printf '%%s' "$BODY" | sed '$d') && `+
+			`echo %s=$STATUS && `+
+			`echo %s_BODY=$RESP`,
+		host, port, label, label,
 	)
 }
 
@@ -315,9 +321,16 @@ func TestHostTrafficStrictPolicyWithRules(t *testing.T) {
 					// No Host ports — host gateway blocked.
 				},
 			},
+			// The leading sleep keeps the container alive long enough for the
+			// post-start firewall setup (exec into running container for iptables)
+			// to attach before the main process exits. Without it, a fast
+			// echo/curl pipeline can finish in the window between StartContainer
+			// returning and the firewall exec attaching, producing a spurious
+			// "write init-p: broken pipe" failure. The firewall race itself is
+			// orthogonal to what this test asserts and is tracked separately.
 			Cmd: []string{
 				"sh", "-c",
-				hostTrafficCmd("$MOAT_HOST_GATEWAY", port, "HOST_STATUS"),
+				"sleep 1 && " + hostTrafficCmd("$MOAT_HOST_GATEWAY", port, "HOST_STATUS"),
 			},
 		})
 		if err != nil {
