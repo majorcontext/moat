@@ -2207,3 +2207,55 @@ func TestRedactURLUserinfo(t *testing.T) {
 		}
 	}
 }
+
+// TestRewriteURLHost verifies that URL host rewriting preserves port, path,
+// query, and fragment and emits a valid URL for IPv6 loopback aliases. The
+// naive strings.Replace approach used prior to this helper produced
+// "http://[127.0.0.1]:8080/path" — an IPv4 address inside IPv6 brackets,
+// which is an invalid URL.
+func TestRewriteURLHost(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		newHost string
+		want    string
+	}{
+		{"ipv6 loopback with port", "http://[::1]:8080/path", "127.0.0.1", "http://127.0.0.1:8080/path"},
+		{"ipv6 loopback no port", "http://[::1]/path", "127.0.0.1", "http://127.0.0.1/path"},
+		{"synthetic hostname with port", "http://moat-host:8080/api", "127.0.0.1", "http://127.0.0.1:8080/api"},
+		{"preserves query and fragment", "http://moat-host:8080/x?q=moat-host#moat-host", "127.0.0.1", "http://127.0.0.1:8080/x?q=moat-host#moat-host"},
+		{"preserves https scheme", "https://moat-host/path", "127.0.0.1", "https://127.0.0.1/path"},
+		{"ipv6 target host brackets correctly", "http://moat-host:8080/x", "::1", "http://[::1]:8080/x"},
+		{"malformed URL returns input", "not a url", "127.0.0.1", "not a url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rewriteURLHost(tc.in, tc.newHost); got != tc.want {
+				t.Errorf("rewriteURLHost(%q, %q) = %q, want %q", tc.in, tc.newHost, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRewriteHostPort verifies that host:port rewriting handles bracketed
+// IPv6 inputs correctly and emits bracketed form when the target is IPv6.
+func TestRewriteHostPort(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		newHost string
+		want    string
+	}{
+		{"ipv6 loopback to ipv4", "[::1]:8080", "127.0.0.1", "127.0.0.1:8080"},
+		{"synthetic hostname to ipv4", "moat-host:8080", "127.0.0.1", "127.0.0.1:8080"},
+		{"ipv4 to ipv6 adds brackets", "moat-host:8080", "::1", "[::1]:8080"},
+		{"missing port returns input unchanged", "moat-host", "127.0.0.1", "moat-host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rewriteHostPort(tc.in, tc.newHost); got != tc.want {
+				t.Errorf("rewriteHostPort(%q, %q) = %q, want %q", tc.in, tc.newHost, got, tc.want)
+			}
+		})
+	}
+}

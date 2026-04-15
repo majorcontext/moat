@@ -41,6 +41,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -915,6 +916,36 @@ func redactURLUserinfo(s string) string {
 	return s[:schemeEnd+3] + "***@" + rest[at+1:]
 }
 
+// rewriteURLHost replaces the host in rawURL with newHost, preserving scheme,
+// port, path, query, and fragment. Falls back to the original string on parse
+// failure. Uses url.Parse rather than strings.Replace so bracketed IPv6 hosts
+// like "http://[::1]:8080/path" rewrite to a valid URL (e.g. "http://127.0.0.1:8080/path"
+// rather than "http://[127.0.0.1]:8080/path"), and so path or query text that
+// happens to match the host literal is not corrupted.
+func rewriteURLHost(rawURL, newHost string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(newHost, port)
+	} else {
+		u.Host = newHost
+	}
+	return u.String()
+}
+
+// rewriteHostPort replaces the host portion of a "host:port" address with
+// newHost, emitting bracketed form for IPv6 when necessary. Falls back to the
+// original string on parse failure.
+func rewriteHostPort(hostPort, newHost string) string {
+	_, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return hostPort
+	}
+	return net.JoinHostPort(newHost, port)
+}
+
 // isHostGateway returns true if the given host matches the run's host gateway address.
 //
 // Matches are:
@@ -1292,7 +1323,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// but the proxy runs on the host where that name doesn't resolve.
 	outURL := r.URL.String()
 	if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" && isHostGateway(rc, host) {
-		outURL = strings.Replace(outURL, host, rc.HostGatewayIP, 1)
+		outURL = rewriteURLHost(outURL, rc.HostGatewayIP)
 	}
 
 	// Create outgoing request
@@ -1444,7 +1475,7 @@ func (p *Proxy) handleConnectTunnel(w http.ResponseWriter, r *http.Request) {
 	if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" {
 		host, _, _ := net.SplitHostPort(r.Host)
 		if isHostGateway(rc, host) {
-			dialAddr = strings.Replace(r.Host, host, rc.HostGatewayIP, 1)
+			dialAddr = rewriteHostPort(r.Host, rc.HostGatewayIP)
 		}
 	}
 	targetConn, err := net.DialTimeout("tcp", dialAddr, connectTunnelDialTimeout)
@@ -1565,7 +1596,7 @@ func (p *Proxy) handleConnectWithInterception(w http.ResponseWriter, r *http.Req
 		// Rewrite synthetic host-gateway hostname to actual IP for forwarding.
 		connectHost := r.Host
 		if rc := getRunContext(r); rc != nil && rc.HostGatewayIP != "" && isHostGateway(rc, host) {
-			connectHost = strings.Replace(r.Host, host, rc.HostGatewayIP, 1)
+			connectHost = rewriteHostPort(r.Host, rc.HostGatewayIP)
 		}
 		req.URL.Host = connectHost
 		req.RequestURI = ""
