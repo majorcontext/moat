@@ -2226,6 +2226,7 @@ func TestRewriteURLHost(t *testing.T) {
 		{"preserves query and fragment", "http://moat-host:8080/x?q=moat-host#moat-host", "127.0.0.1", "http://127.0.0.1:8080/x?q=moat-host#moat-host"},
 		{"preserves https scheme", "https://moat-host/path", "127.0.0.1", "https://127.0.0.1/path"},
 		{"ipv6 target host brackets correctly", "http://moat-host:8080/x", "::1", "http://[::1]:8080/x"},
+		{"ipv6 target host no port brackets correctly", "http://moat-host/x", "::1", "http://[::1]/x"},
 		{"malformed URL returns input", "not a url", "127.0.0.1", "not a url"},
 	}
 	for _, tc := range cases {

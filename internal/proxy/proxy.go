@@ -929,6 +929,9 @@ func rewriteURLHost(rawURL, newHost string) string {
 	}
 	if port := u.Port(); port != "" {
 		u.Host = net.JoinHostPort(newHost, port)
+	} else if strings.Contains(newHost, ":") {
+		// Bracket bare IPv6 hosts; url.URL.Host expects "[::1]", not "::1".
+		u.Host = "[" + newHost + "]"
 	} else {
 		u.Host = newHost
 	}
