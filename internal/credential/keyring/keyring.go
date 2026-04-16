@@ -332,11 +332,17 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	slog.Info("system keychain unavailable, using file-based key storage",
 		"fallback", fallback.Name())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
+		// fallback.Name() returns a display string like "file (/path/to/key)",
+		// so extract the raw directory from the concrete backend when possible.
+		dir := "moat key directory"
+		if fb, ok := fallback.(*fileBackend); ok {
+			dir = filepath.Dir(fb.path)
+		}
 		return nil, fmt.Errorf("storing encryption key failed.\n"+
 			"  Keychain (%s): %v\n"+
 			"  File (%s): %v\n"+
 			"Remediation: Ensure %s is writable and check system keychain access settings",
-			primary.Name(), primaryErr, fallback.Name(), fallbackErr, filepath.Dir(fallback.Name()))
+			primary.Name(), primaryErr, fallback.Name(), fallbackErr, dir)
 	}
 
 	// Re-read the key from fallback to ensure we return the actual stored key.
