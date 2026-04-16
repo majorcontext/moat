@@ -483,9 +483,33 @@ func readRunLogs(t *testing.T, runID string) string {
 		return ""
 	}
 
-	var lines []string
-	for _, entry := range entries {
-		lines = append(lines, entry.Line)
+	return formatLogEntries(entries)
+}
+
+// formatLogEntries renders log entries as newline-separated, indented lines
+// suitable for embedding in a test error message. Use with %s, e.g.:
+//
+//	t.Errorf("expected marker not found\nLogs:%s", formatLogEntries(logs))
+//
+// Compared to printing []storage.LogEntry with %v, this avoids emitting a
+// single giant line containing timestamps and escaped content.
+func formatLogEntries(entries []storage.LogEntry) string {
+	if len(entries) == 0 {
+		return "\n  (no log entries)"
 	}
-	return strings.Join(lines, "\n")
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString("\n  ")
+		b.WriteString(e.Line)
+	}
+	return b.String()
+}
+
+// formatLogLines is the equivalent of formatLogEntries for an already-extracted
+// []string. Use with %s.
+func formatLogLines(lines []string) string {
+	if len(lines) == 0 {
+		return "\n  (no log entries)"
+	}
+	return "\n  " + strings.Join(lines, "\n  ")
 }

@@ -93,8 +93,16 @@ func TestServer_HealthEndpointCapabilities(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if len(health.Capabilities) != 1 || health.Capabilities[0] != "keep-policy" {
-		t.Errorf("expected capabilities [keep-policy], got %v", health.Capabilities)
+	wantCaps := map[string]bool{"keep-policy": false, "host-gateway-v2": false}
+	for _, c := range health.Capabilities {
+		if _, ok := wantCaps[c]; ok {
+			wantCaps[c] = true
+		}
+	}
+	for name, saw := range wantCaps {
+		if !saw {
+			t.Errorf("expected capability %q in %v", name, health.Capabilities)
+		}
 	}
 }
 
@@ -604,6 +612,21 @@ func TestAddProxyPortForLoopback_AlreadyPresent(t *testing.T) {
 
 	if len(rc.AllowedHostPorts) != 1 {
 		t.Fatalf("expected 1 port (no duplicate), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+}
+
+func TestAddProxyPortForLoopback_MoatHost(t *testing.T) {
+	// moat-host is the synthetic hostname for host services reached via the
+	// proxy. The proxy itself is reached via the separate moat-proxy name, so
+	// the moat-host path must NOT add the proxy port to AllowedHostPorts.
+	rc := NewRunContext("run_moathost_test")
+	rc.HostGateway = "moat-host"
+	rc.AllowedHostPorts = []int{8288}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 1 {
+		t.Fatalf("expected 1 port (moat-host path must not add proxy port), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
 	}
 }
 

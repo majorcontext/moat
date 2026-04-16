@@ -106,10 +106,10 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 			}
 		}
 		if !foundWriteOK {
-			t.Fatalf("Run 1: volume write failed\nLogs: %v", logs1)
+			t.Fatalf("Run 1: volume write failed\nLogs:%s", formatLogEntries(logs1))
 		}
 		if !foundMarker {
-			t.Fatalf("Run 1: marker not found in output\nLogs: %v", logs1)
+			t.Fatalf("Run 1: marker not found in output\nLogs:%s", formatLogEntries(logs1))
 		}
 
 		// Destroy run 1 (volume should persist)
@@ -163,7 +163,7 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 		}
 		if !foundInRun2 {
 			t.Errorf("Run 2 could not read marker from volume (data did not persist)\n"+
-				"Expected: %q\nLogs: %v", marker, logs2)
+				"Expected: %q\nLogs:%s", marker, formatLogEntries(logs2))
 		}
 	})
 }
@@ -229,7 +229,7 @@ func TestVolumeReadOnly(t *testing.T) {
 
 		for _, entry := range logs {
 			if strings.Contains(entry.Line, "WRITE_OK") {
-				t.Errorf("Write succeeded on readonly volume — expected failure\nLogs: %v", logs)
+				t.Errorf("Write succeeded on readonly volume — expected failure\nLogs:%s", formatLogEntries(logs))
 				return
 			}
 		}
@@ -324,7 +324,7 @@ func TestVolumeIsolation(t *testing.T) {
 		}
 	}
 	if !writeSucceeded {
-		t.Fatalf("Agent1 failed to write to volume\nLogs: %v", logs1)
+		t.Fatalf("Agent1 failed to write to volume\nLogs:%s", formatLogEntries(logs1))
 	}
 
 	if err := mgr.Destroy(ctx, r1.ID); err != nil {
@@ -369,7 +369,7 @@ func TestVolumeIsolation(t *testing.T) {
 
 	for _, entry := range logs2 {
 		if strings.Contains(entry.Line, "agent1-secret") {
-			t.Errorf("Agent 2 could read agent 1's volume data — isolation violated\nLogs: %v", logs2)
+			t.Errorf("Agent 2 could read agent 1's volume data — isolation violated\nLogs:%s", formatLogEntries(logs2))
 			return
 		}
 	}

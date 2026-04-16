@@ -78,6 +78,7 @@ type RegisterRequest struct {
 	PolicyYAML           map[string][]byte        `json:"policy_yaml,omitempty"`
 	PolicyRuleSets       []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
 	HostGateway          string                   `json:"host_gateway,omitempty"`
+	HostGatewayIP        string                   `json:"host_gateway_ip,omitempty"`
 	AllowedHostPorts     []int                    `json:"allowed_host_ports,omitempty"`
 }
 
@@ -147,6 +148,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
 	rc.HostGateway = req.HostGateway
+	rc.HostGatewayIP = req.HostGatewayIP
 	if len(req.AllowedHostPorts) > 0 {
 		rc.AllowedHostPorts = make([]int, len(req.AllowedHostPorts))
 		copy(rc.AllowedHostPorts, req.AllowedHostPorts)

@@ -126,7 +126,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		RunCount:     s.registry.Count(),
 		StartedAt:    s.startedAt.Format(time.RFC3339),
 		Commit:       BuildCommit,
-		Capabilities: []string{"keep-policy"},
+		Capabilities: []string{"keep-policy", "host-gateway-v2"},
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -386,9 +386,13 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the host
-// gateway is 127.0.0.1 (Linux Docker with host networking). This prevents
-// the proxy from blocking its own traffic.
+// addProxyPortForLoopback adds the proxy port to AllowedHostPorts when the
+// host gateway shares the loopback interface with the proxy. This prevents the
+// proxy's own firewall rules from blocking the proxy's outbound traffic.
+// Applies only to legacy Linux host-mode where HostGateway is "127.0.0.1".
+// The synthetic hostname path ("moat-host") routes container traffic through
+// the proxy itself (reached via the separate "moat-proxy" name), so this
+// helper does not apply there.
 func addProxyPortForLoopback(rc *RunContext, proxyPort int) {
 	if rc.HostGateway != "127.0.0.1" {
 		return

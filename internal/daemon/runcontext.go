@@ -67,6 +67,7 @@ type RunContext struct {
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 	Grants           []string          `json:"grants,omitempty"`
 	HostGateway      string            `json:"host_gateway,omitempty"`
+	HostGatewayIP    string            `json:"host_gateway_ip,omitempty"` // actual IP for forwarding allowed host traffic
 	AllowedHostPorts []int             `json:"allowed_host_ports,omitempty"`
 
 	RegisteredAt time.Time `json:"registered_at"`
@@ -419,6 +420,7 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 
 	// Propagate host gateway config.
 	d.HostGateway = rc.HostGateway
+	d.HostGatewayIP = rc.HostGatewayIP
 	if len(rc.AllowedHostPorts) > 0 {
 		d.AllowedHostPorts = make([]int, len(rc.AllowedHostPorts))
 		copy(d.AllowedHostPorts, rc.AllowedHostPorts)

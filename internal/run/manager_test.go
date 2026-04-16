@@ -1634,3 +1634,201 @@ func TestBuildRegisterRequest_HostGatewayEmpty(t *testing.T) {
 		t.Errorf("AllowedHostPorts = %v, want empty", req.AllowedHostPorts)
 	}
 }
+
+// TestBuildProxyEnv_MoatHostnames verifies that buildProxyEnv uses synthetic
+// hostnames: "moat-proxy" for the proxy address (in NO_PROXY) and "moat-host"
+// for the host gateway env var (NOT in NO_PROXY). This ensures host traffic
+// flows through the proxy for policy enforcement.
+func TestBuildProxyEnv_MoatHostnames(t *testing.T) {
+	env := buildProxyEnv("test-token", 19080)
+
+	// Helper to find env var value
+	findEnv := func(prefix string) string {
+		for _, e := range env {
+			if strings.HasPrefix(e, prefix) {
+				return strings.TrimPrefix(e, prefix)
+			}
+		}
+		return ""
+	}
+
+	// Proxy URL must use moat-proxy hostname
+	httpProxy := findEnv("HTTP_PROXY=")
+	if !strings.Contains(httpProxy, "moat-proxy:19080") {
+		t.Errorf("HTTP_PROXY should use moat-proxy hostname, got %q", httpProxy)
+	}
+	httpsProxy := findEnv("HTTPS_PROXY=")
+	if !strings.Contains(httpsProxy, "moat-proxy:19080") {
+		t.Errorf("HTTPS_PROXY should use moat-proxy hostname, got %q", httpsProxy)
+	}
+
+	// NO_PROXY must include moat-proxy (so proxy doesn't proxy itself)
+	// but must NOT include moat-host (so host traffic goes through proxy)
+	noProxy := findEnv("NO_PROXY=")
+	if !strings.Contains(noProxy, "moat-proxy") {
+		t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
+	}
+	if strings.Contains(noProxy, "moat-host") {
+		t.Errorf("NO_PROXY must NOT contain moat-host (host traffic must go through proxy), got %q", noProxy)
+	}
+
+	// MOAT_HOST_GATEWAY must be moat-host
+	hostGW := findEnv("MOAT_HOST_GATEWAY=")
+	if hostGW != "moat-host" {
+		t.Errorf("MOAT_HOST_GATEWAY = %q, want %q", hostGW, "moat-host")
+	}
+}
+
+// TestBuildProxyEnv_AuthTokenInURL verifies the proxy URL includes auth credentials.
+func TestBuildProxyEnv_AuthTokenInURL(t *testing.T) {
+	env := buildProxyEnv("secret-token", 19080)
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "HTTP_PROXY=") {
+			want := "http://moat:secret-token@moat-proxy:19080"
+			got := strings.TrimPrefix(e, "HTTP_PROXY=")
+			if got != want {
+				t.Errorf("HTTP_PROXY = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Error("HTTP_PROXY not found in env")
+}
+
+// TestBuildProxyEnv_NoToken verifies proxy URL without auth token.
+func TestBuildProxyEnv_NoToken(t *testing.T) {
+	env := buildProxyEnv("", 19080)
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "HTTP_PROXY=") {
+			want := "http://moat-proxy:19080"
+			got := strings.TrimPrefix(e, "HTTP_PROXY=")
+			if got != want {
+				t.Errorf("HTTP_PROXY = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Error("HTTP_PROXY not found in env")
+}
+
+// TestBuildProxyEnv_UsesConstants verifies that buildProxyEnv uses the
+// package-level syntheticProxyHost constant internally and accepts
+// syntheticHostGateway as the MOAT_HOST_GATEWAY value.
+func TestBuildProxyEnv_UsesConstants(t *testing.T) {
+	env := buildProxyEnv("tok", 8080)
+
+	findEnv := func(prefix string) string {
+		for _, e := range env {
+			if strings.HasPrefix(e, prefix) {
+				return strings.TrimPrefix(e, prefix)
+			}
+		}
+		return ""
+	}
+
+	httpProxy := findEnv("HTTP_PROXY=")
+	if !strings.Contains(httpProxy, syntheticProxyHost+":8080") {
+		t.Errorf("HTTP_PROXY should use syntheticProxyHost constant, got %q", httpProxy)
+	}
+
+	noProxy := findEnv("NO_PROXY=")
+	if !strings.Contains(noProxy, syntheticProxyHost) {
+		t.Errorf("NO_PROXY should contain syntheticProxyHost, got %q", noProxy)
+	}
+	if strings.Contains(noProxy, syntheticHostGateway) {
+		t.Errorf("NO_PROXY must NOT contain syntheticHostGateway, got %q", noProxy)
+	}
+
+	hostGW := findEnv("MOAT_HOST_GATEWAY=")
+	if hostGW != syntheticHostGateway {
+		t.Errorf("MOAT_HOST_GATEWAY = %q, want %q", hostGW, syntheticHostGateway)
+	}
+}
+
+// TestIsMoatOwnedProxyVar verifies that proxy-related env var names are detected.
+func TestIsMoatOwnedProxyVar(t *testing.T) {
+	blocked := []string{
+		"HTTP_PROXY", "http_proxy", "Http_Proxy",
+		"HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy",
+		// ALL_PROXY / CURL_ALL_PROXY are honored by curl/wget/libcurl as
+		// HTTP_PROXY fallbacks; filtering them prevents a proxy bypass via
+		// moat.yaml env: { ALL_PROXY: socks5://attacker:1080 }.
+		"ALL_PROXY", "all_proxy",
+		"CURL_ALL_PROXY", "curl_all_proxy",
+		"MOAT_HOST_GATEWAY", "moat_host_gateway",
+		"MOAT_EXTRA_HOSTS", "moat_extra_hosts",
+	}
+	for _, name := range blocked {
+		if !isMoatOwnedProxyVar(name) {
+			t.Errorf("isMoatOwnedProxyVar(%q) = false, want true", name)
+		}
+	}
+
+	allowed := []string{
+		"PATH", "HOME", "CUSTOM_VAR", "MOAT_PRE_RUN",
+		"MOAT_CLIPBOARD", "TERM",
+	}
+	for _, name := range allowed {
+		if isMoatOwnedProxyVar(name) {
+			t.Errorf("isMoatOwnedProxyVar(%q) = true, want false", name)
+		}
+	}
+}
+
+// TestRewriteExtraHostsForCustomNetwork verifies that synthetic hostname
+// entries in extraHosts are rewritten when a custom network gateway differs.
+// Tests both Docker-style (host-gateway pseudo-address) and Apple-style (actual IP).
+func TestRewriteExtraHostsForCustomNetwork(t *testing.T) {
+	tests := []struct {
+		name  string
+		hosts []string
+	}{
+		{
+			name: "docker host-gateway",
+			hosts: []string{
+				"host.docker.internal:host-gateway",
+				syntheticProxyHost + ":host-gateway",
+				syntheticHostGateway + ":host-gateway",
+			},
+		},
+		{
+			name: "apple actual IP",
+			hosts: []string{
+				"host.docker.internal:host-gateway",
+				syntheticProxyHost + ":192.168.64.1",
+				syntheticHostGateway + ":192.168.64.1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extraHosts := make([]string, len(tt.hosts))
+			copy(extraHosts, tt.hosts)
+			gw := "172.20.0.1"
+
+			proxyPrefix := syntheticProxyHost + ":"
+			hostPrefix := syntheticHostGateway + ":"
+			for i, h := range extraHosts {
+				if strings.HasPrefix(h, proxyPrefix) {
+					extraHosts[i] = proxyPrefix + gw
+				} else if strings.HasPrefix(h, hostPrefix) {
+					extraHosts[i] = hostPrefix + gw
+				}
+			}
+
+			if extraHosts[0] != tt.hosts[0] {
+				t.Errorf("non-synthetic entry should be unchanged, got %q", extraHosts[0])
+			}
+			if extraHosts[1] != syntheticProxyHost+":"+gw {
+				t.Errorf("moat-proxy entry not rewritten, got %q", extraHosts[1])
+			}
+			if extraHosts[2] != syntheticHostGateway+":"+gw {
+				t.Errorf("moat-host entry not rewritten, got %q", extraHosts[2])
+			}
+		})
+	}
+}

@@ -289,6 +289,10 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--env", env)
 	}
 
+	// Apple's container CLI does not support --add-host. Any cfg.ExtraHosts
+	// entries are silently dropped here; callers should configure addresses
+	// directly via env vars (e.g. proxy URL, MOAT_HOST_GATEWAY) on Apple.
+
 	// Volume mounts
 	for _, m := range cfg.Mounts {
 		mountStr := m.Source + ":" + m.Target

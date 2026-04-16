@@ -31,6 +31,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/hostnames"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -60,6 +61,14 @@ const (
 	// The value is chosen to be long enough for the attach to establish but
 	// short enough to not noticeably delay state updates.
 	containerStartDelay = 100 * time.Millisecond
+)
+
+// Aliases to the shared hostnames package so existing callsites in this file
+// keep their current names. Canonical definitions live in internal/hostnames
+// so that the daemon, proxy, and manager all agree on the exact strings.
+const (
+	syntheticProxyHost   = hostnames.Proxy
+	syntheticHostGateway = hostnames.HostGateway
 )
 
 // getWorkspaceOwner returns the UID and GID of the workspace directory owner.
@@ -610,6 +619,18 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Start proxy if we have grants (for credential injection) or strict network policy
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+	// Start proxy for any feature that the proxy is responsible for enforcing
+	// or relaying, even when there are no grants and the policy is permissive.
+	// Without this, setting `network.host`, `network.rules`, MCP servers, or
+	// Keep policies on a grant-less run would silently do nothing.
+	needsProxyForConfig := false
+	if opts.Config != nil {
+		needsProxyForConfig = len(opts.Config.Network.Host) > 0 ||
+			len(opts.Config.Network.Rules) > 0 ||
+			len(opts.Config.MCP) > 0 ||
+			opts.Config.Network.KeepPolicy != nil ||
+			(opts.Config.Claude.LLMGateway != nil && opts.Config.Claude.LLMGateway.Policy != nil)
+	}
 
 	// Clipboard bridging is resolved by the caller (ExecuteRun).
 	needsClipboard := opts.Clipboard
@@ -642,7 +663,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	if needsProxyForGrants || needsProxyForFirewall {
+	if needsProxyForGrants || needsProxyForFirewall || needsProxyForConfig {
 		// Daemon directory for proxy state (CA certs, lock file, socket)
 		daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
 
@@ -901,10 +922,36 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			}
 		}
 
+		// Verify the daemon supports the synthetic-hostname gateway semantics.
+		// All runs that register with the proxy now rely on HostGateway=moat-host
+		// and a separate HostGatewayIP — older daemons ignore HostGatewayIP and
+		// don't route moat-host traffic correctly, which silently breaks host
+		// access and the network-host bypass fix. Fail fast with an actionable
+		// message rather than letting the run register and misbehave.
+		hasHostGatewayV2 := false
+		for _, cap := range daemonCapabilities {
+			if cap == "host-gateway-v2" {
+				hasHostGatewayV2 = true
+				break
+			}
+		}
+		if !hasHostGatewayV2 {
+			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
+		}
+
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
 		// Must be set before buildRegisterRequest so HostGateway is included.
 		hostAddr = m.defaultRuntime().GetHostAddress()
-		runCtx.HostGateway = hostAddr
+		// Always use synthetic hostnames so that user-supplied NO_PROXY=<ip>
+		// cannot bypass the proxy. On Docker they resolve via --add-host; on
+		// Apple they resolve via /etc/hosts entries written by moat-init.sh
+		// (see MOAT_EXTRA_HOSTS below).
+		runCtx.HostGateway = syntheticHostGateway
+		// HostGatewayIP is the address the proxy itself uses to forward allowed
+		// host-bound traffic. Since the proxy runs on the host, host services
+		// are reachable via 127.0.0.1 regardless of how the container reaches
+		// the host.
+		runCtx.HostGatewayIP = "127.0.0.1"
 
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
@@ -933,33 +980,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			r.FirewallEnabled = true
 		}
 
-		// Determine proxy URL based on runtime's host address
-		proxyPortStr := strconv.Itoa(regResp.ProxyPort)
-		proxyHost := hostAddr + ":" + proxyPortStr
-		var proxyURL string
-		if regResp.AuthToken != "" {
-			// Include auth credentials in URL: http://moat:token@host:port
-			proxyURL = "http://moat:" + regResp.AuthToken + "@" + proxyHost
-		} else {
-			proxyURL = "http://" + proxyHost
-		}
+		// Build proxy environment using synthetic hostnames on all runtimes.
+		// Docker resolves them via --add-host; Apple via moat-init.sh writing
+		// to /etc/hosts (MOAT_EXTRA_HOSTS, set below).
+		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort)
+		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
-		// Exclude proxy's own address from proxying to prevent circular references
-		// This is critical for MCP relay endpoint which is on the proxy itself
-		// Also exclude BuildKit sidecar hostname to allow direct gRPC connections
-		noProxy := hostAddr + ",localhost,127.0.0.1,buildkit"
-
-		proxyEnv = []string{
-			"HTTP_PROXY=" + proxyURL,
-			"HTTPS_PROXY=" + proxyURL,
-			"http_proxy=" + proxyURL,
-			"https_proxy=" + proxyURL,
-			"NO_PROXY=" + noProxy,
-			"no_proxy=" + noProxy,
-			// Terminal settings for TUI applications
-			"TERM=xterm-256color",
-			// Host gateway address for reaching host services
-			"MOAT_HOST_GATEWAY=" + hostAddr,
+		// On runtimes without --add-host (Apple), pass the host map via env so
+		// moat-init.sh can write /etc/hosts before the user command runs.
+		if m.defaultRuntime().Type() != container.RuntimeDocker {
+			proxyEnv = append(proxyEnv, "MOAT_EXTRA_HOSTS="+syntheticProxyHost+":"+hostAddr+" "+syntheticHostGateway+":"+hostAddr)
 		}
 
 		// Mount CA certificate (not the private key) for container to trust.
@@ -1267,11 +1297,26 @@ region = %s
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}
+		// Add synthetic hostnames that resolve to the host-gateway IP, only on
+		// runtimes that support --add-host. Apple's container CLI has no
+		// equivalent flag, so on Apple we configured the proxy URL above to use
+		// the actual gateway IP instead.
+		// "moat-proxy" is used for proxy traffic (in NO_PROXY).
+		// "moat-host" is used for host service traffic (NOT in NO_PROXY,
+		// so it flows through the proxy for network policy enforcement).
+		if m.defaultRuntime().Type() == container.RuntimeDocker {
+			extraHosts = append(extraHosts, syntheticProxyHost+":host-gateway", syntheticHostGateway+":host-gateway")
+		}
 	}
 
-	// Add config env vars
+	// Add config env vars, filtering out proxy-related variables that would
+	// override moat's proxy settings and re-open the host traffic bypass.
 	if opts.Config != nil {
 		for k, v := range opts.Config.Env {
+			if needsProxy && isMoatOwnedProxyVar(k) {
+				ui.Warn(fmt.Sprintf("ignoring %s in moat.yaml env — overriding proxy settings would bypass network policy enforcement", k))
+				continue
+			}
 			proxyEnv = append(proxyEnv, k+"="+v)
 		}
 	}
@@ -1308,8 +1353,17 @@ region = %s
 		proxyEnv = append(proxyEnv, "MOAT_CLIPBOARD=1", "DISPLAY=:99")
 	}
 
-	// Add explicit env vars (highest priority - can override config)
-	proxyEnv = append(proxyEnv, opts.Env...)
+	// Add explicit env vars (highest priority - can override config),
+	// but filter proxy-related vars when proxy is active.
+	for _, e := range opts.Env {
+		if needsProxy {
+			if idx := strings.IndexByte(e, '='); idx >= 0 && isMoatOwnedProxyVar(e[:idx]) {
+				ui.Warn(fmt.Sprintf("ignoring %s in env — overriding proxy settings would bypass network policy enforcement", e[:idx]))
+				continue
+			}
+		}
+		proxyEnv = append(proxyEnv, e)
+	}
 
 	// Build port bindings for exposed services
 	// Use 0.0.0.0 to let Docker bind to all interfaces, then it assigns a random host port.
@@ -2457,17 +2511,40 @@ region = %s
 
 	// When a custom network is used (for services or BuildKit), the container
 	// is on a different subnet than the default network. The proxy host address
-	// (derived from the default network gateway) may be unreachable. Rewrite
-	// all env vars that reference the old host address to use the custom
-	// network's gateway instead.
+	// (derived from the default network gateway) may be unreachable.
+	//
+	// With synthetic hostnames, the proxy env vars use "moat-proxy" instead of
+	// an IP, so replaceHostInEnv no longer rewrites them. Instead, update the
+	// --add-host entries so "moat-proxy" and "moat-host" resolve to the custom
+	// network's gateway IP (which can reach the host) instead of "host-gateway"
+	// (which resolves to the docker0 bridge IP, unreachable from custom networks).
+	//
+	// Also rewrite any remaining IP-based env vars (e.g., MOAT_SSH_TCP_ADDR)
+	// that still reference the old hostAddr.
 	if networkID != "" && net.ParseIP(hostAddr) != nil {
 		netMgr := m.defaultRuntime().NetworkManager()
-		if netMgr != nil {
-			if gw := netMgr.NetworkGateway(ctx, networkID); gw != "" && gw != hostAddr {
-				log.Debug("rewriting proxy host for custom network",
-					"old", hostAddr, "new", gw, "network", networkID)
-				proxyEnv = replaceHostInEnv(proxyEnv, hostAddr, gw)
-				r.ProxyHost = gw
+		if netMgr == nil {
+			ui.Warn(fmt.Sprintf("cannot resolve gateway for custom network %q — proxy may be unreachable from container", networkID))
+		} else if gw := netMgr.NetworkGateway(ctx, networkID); gw == "" {
+			ui.Warn(fmt.Sprintf("custom network %q has no gateway — proxy may be unreachable from container", networkID))
+		} else if gw != hostAddr {
+			log.Debug("rewriting proxy host for custom network",
+				"old", hostAddr, "new", gw, "network", networkID)
+			// Rewrite IP-based env vars (e.g., MOAT_SSH_TCP_ADDR).
+			proxyEnv = replaceHostInEnv(proxyEnv, hostAddr, gw)
+			r.ProxyHost = gw
+			// Rewrite --add-host entries so synthetic hostnames resolve
+			// to the custom network gateway instead of the default gateway.
+			// Match on hostname prefix to handle both "host-gateway" (Docker)
+			// and IP-based targets (Apple containers).
+			proxyPrefix := syntheticProxyHost + ":"
+			hostPrefix := syntheticHostGateway + ":"
+			for i, h := range extraHosts {
+				if strings.HasPrefix(h, proxyPrefix) {
+					extraHosts[i] = proxyPrefix + gw
+				} else if strings.HasPrefix(h, hostPrefix) {
+					extraHosts[i] = hostPrefix + gw
+				}
 			}
 		}
 	}
@@ -3879,6 +3956,61 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	return nil
 }
 
+// buildProxyEnv constructs the environment variables that configure the container's
+// HTTP proxy settings.
+//
+// The proxy is always addressed as syntheticProxyHost ("moat-proxy"), and
+// MOAT_HOST_GATEWAY is always syntheticHostGateway ("moat-host"). On Docker
+// these are resolved via --add-host; on Apple they are resolved via /etc/hosts
+// injection from moat-init.sh. syntheticProxyHost is included in NO_PROXY so
+// that relay/AWS traffic connects directly without going through the CONNECT
+// tunnel, while syntheticHostGateway is intentionally NOT in NO_PROXY so
+// host-bound traffic flows through the proxy for network policy enforcement.
+func buildProxyEnv(authToken string, proxyPort int) []string {
+	proxyAddr := syntheticProxyHost + ":" + strconv.Itoa(proxyPort)
+	var proxyURL string
+	if authToken != "" {
+		proxyURL = "http://moat:" + authToken + "@" + proxyAddr
+	} else {
+		proxyURL = "http://" + proxyAddr
+	}
+
+	noProxy := syntheticProxyHost + ",localhost,127.0.0.1,buildkit"
+
+	return []string{
+		"HTTP_PROXY=" + proxyURL,
+		"HTTPS_PROXY=" + proxyURL,
+		"http_proxy=" + proxyURL,
+		"https_proxy=" + proxyURL,
+		"NO_PROXY=" + noProxy,
+		"no_proxy=" + noProxy,
+		"TERM=xterm-256color",
+		"MOAT_HOST_GATEWAY=" + syntheticHostGateway,
+	}
+}
+
+// isMoatOwnedProxyVar returns true if the given environment variable name is
+// one that moat owns and sets for the container. User-supplied values for any
+// of these would override moat's proxy configuration and could bypass network
+// policy enforcement, so they are filtered (with a warning) from moat.yaml env
+// and -e flags.
+//
+// The ALL_PROXY / all_proxy / CURL_ALL_PROXY family is included because curl,
+// wget, python-requests, and other libcurl-based tools honor those as a fallback
+// or override of HTTP_PROXY/HTTPS_PROXY. Leaving them user-controllable would
+// let a moat.yaml env: { ALL_PROXY: socks5://attacker:1080 } entry route all
+// traffic around the moat proxy.
+func isMoatOwnedProxyVar(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+		"ALL_PROXY", "CURL_ALL_PROXY",
+		"MOAT_HOST_GATEWAY", "MOAT_EXTRA_HOSTS":
+		return true
+	}
+	return false
+}
+
 // buildRegisterRequest converts a daemon.RunContext into a daemon.RegisterRequest
 // suitable for sending to the daemon API.
 func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.RegisterRequest {
@@ -3888,6 +4020,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		NetworkAllow:     rc.NetworkAllow,
 		NetworkRules:     rc.NetworkRules,
 		HostGateway:      rc.HostGateway,
+		HostGatewayIP:    rc.HostGatewayIP,
 		AllowedHostPorts: rc.AllowedHostPorts,
 		MCPServers:       rc.MCPServers,
 		Grants:           grants,
