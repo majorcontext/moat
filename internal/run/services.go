@@ -217,11 +217,7 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 	// Resolve cache host path
 	var cacheHostPath string
 	if spec.Service.CachePath != "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return container.ServiceConfig{}, fmt.Errorf("resolving home directory for cache: %w", err)
-		}
-		cacheHostPath = filepath.Join(homeDir, ".moat", "cache", dep.Name)
+		cacheHostPath = filepath.Join(config.GlobalConfigDir(), "cache", dep.Name)
 	}
 
 	var memoryMB int

@@ -366,6 +366,7 @@ func TestLoadAllSettingsSkipHostSettings(t *testing.T) {
 
 	// Redirect HOME so LoadAllSettings would find the host settings.
 	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", "")
 
 	// Without skip: host settings should be loaded.
 	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
@@ -922,6 +923,7 @@ func TestLoadAllSettingsPreservesMoatUserExtras(t *testing.T) {
 	// Set up fake home with moat-user settings containing unknown fields.
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", "")
 	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
 
 	moatClaudeDir := filepath.Join(fakeHome, ".moat", "claude")

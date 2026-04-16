@@ -582,11 +582,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
-	// Add global mounts from ~/.moat/config.yaml.
+	// Add global mounts from <MOAT_HOME>/config.yaml.
 	// These are personal read-only mounts that apply to every run.
 	globalCfg, globalErr := config.LoadGlobal()
 	if globalErr != nil {
-		ui.Warnf("Failed to load global config (~/.moat/config.yaml): %v", globalErr)
+		ui.Warnf("Failed to load global config (%s): %v", filepath.Join(config.GlobalConfigDir(), "config.yaml"), globalErr)
 	} else if len(globalCfg.Mounts) > 0 {
 		for _, gm := range globalCfg.Mounts {
 			mounts = append(mounts, container.MountConfig{
@@ -1218,8 +1218,7 @@ region = %s
 				"keys", len(sshMappings))
 		} else {
 			// Use Unix socket - can be mounted directly
-			homeDir, _ := os.UserHomeDir()
-			sshSocketDir = filepath.Join(homeDir, ".moat", "sockets", r.ID)
+			sshSocketDir = filepath.Join(config.GlobalConfigDir(), "sockets", r.ID)
 			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
 				upstreamAgent.Close()
 				cleanupDaemonRun()

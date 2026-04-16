@@ -5,13 +5,15 @@
 //   - Linux: Requires libsecret (GNOME), kwallet (KDE), or pass (CLI)
 //   - Windows: Uses Windows Credential Manager (works out of the box)
 //   - Headless/CI: Automatically falls back to file-based storage at ~/.moat/encryption.key
+//     (or $MOAT_HOME/encryption.key when MOAT_HOME is set)
 //
 // The package attempts to store keys in the system keychain first for better security.
 // If the keychain is unavailable (e.g., in CI, headless servers, or containers),
 // it silently falls back to file-based storage with restricted permissions (0600).
 //
 // Concurrency: All key creation operations are protected by a global file lock
-// (~/.moat/key.lock) to prevent race conditions when multiple processes attempt
+// (~/.moat/key.lock, or $MOAT_HOME/key.lock when MOAT_HOME is set) to prevent race
+// conditions when multiple processes attempt
 // to create a key simultaneously. Both keychain and file backends check for
 // existing keys before writing to avoid overwriting keys created by other processes.
 // On Windows, file locking is a no-op, but Windows Credential Manager is the primary
@@ -217,6 +219,12 @@ func DefaultKeyFilePath() (string, error) {
 		filename = name + ".key"
 	}
 
+	// MOAT_HOME overrides the default ~/.moat location. Set by tests and
+	// multi-version setups; treated as the complete moat directory.
+	if override := os.Getenv("MOAT_HOME"); override != "" {
+		return filepath.Join(override, filename), nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// UserHomeDir failed - try $HOME directly (Unix).
@@ -242,27 +250,37 @@ func generateKey() ([]byte, error) {
 // globalLockPath returns the path for the global key operation lock file.
 // This lock is used to serialize all key creation operations across both
 // keychain and file backends, preventing race conditions.
-func globalLockPath() string {
+// Mirrors DefaultKeyFilePath's MOAT_HOME-aware resolution and refuses to
+// fall back to os.TempDir when home is unreachable — a stray lock file
+// in /tmp would mask a real misconfiguration and create cross-user
+// synchronization hazards.
+func globalLockPath() (string, error) {
+	// MOAT_HOME overrides the default ~/.moat location (tests, multi-version).
+	if override := os.Getenv("MOAT_HOME"); override != "" {
+		return filepath.Join(override, "key.lock"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		if envHome := os.Getenv("HOME"); envHome != "" {
-			home = envHome
-		} else {
-			home = os.TempDir()
+			return filepath.Join(envHome, ".moat", "key.lock"), nil
 		}
+		return "", fmt.Errorf("%w: set $HOME environment variable or ensure user home is configured", ErrNoHomeDirectory)
 	}
-	return filepath.Join(home, ".moat", "key.lock")
+	return filepath.Join(home, ".moat", "key.lock"), nil
 }
 
 // withGlobalKeyLock executes fn while holding the global key lock.
 // This ensures that only one process at a time can create or modify the encryption key,
 // preventing race conditions between keychain and file backend operations.
 func withGlobalKeyLock(fn func() ([]byte, error)) ([]byte, error) {
-	lockPath := globalLockPath()
+	lockPath, err := globalLockPath()
+	if err != nil {
+		return nil, err
+	}
 
 	// Ensure lock directory exists
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
-		return nil, fmt.Errorf("creating lock directory: %w", err)
+	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0700); mkErr != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", mkErr)
 	}
 
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
@@ -314,11 +332,17 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 	slog.Info("system keychain unavailable, using file-based key storage",
 		"fallback", fallback.Name())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
+		// fallback.Name() returns a display string like "file (/path/to/key)",
+		// so extract the raw directory from the concrete backend when possible.
+		dir := "moat key directory"
+		if fb, ok := fallback.(*fileBackend); ok {
+			dir = filepath.Dir(fb.path)
+		}
 		return nil, fmt.Errorf("storing encryption key failed.\n"+
 			"  Keychain (%s): %v\n"+
 			"  File (%s): %v\n"+
-			"Remediation: Ensure ~/.moat directory is writable and check system keychain access settings",
-			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
+			"Remediation: Ensure %s is writable and check system keychain access settings",
+			primary.Name(), primaryErr, fallback.Name(), fallbackErr, dir)
 	}
 
 	// Re-read the key from fallback to ensure we return the actual stored key.

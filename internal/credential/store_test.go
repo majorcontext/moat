@@ -119,6 +119,9 @@ func TestNewFileStore_InvalidKeyLength(t *testing.T) {
 }
 
 func TestDefaultStoreDir_NoProfile(t *testing.T) {
+	// Clear MOAT_HOME so the default ~/.moat/credentials path is exercised.
+	t.Setenv("MOAT_HOME", "")
+
 	orig := ActiveProfile
 	ActiveProfile = ""
 	defer func() { ActiveProfile = orig }()
@@ -133,6 +136,9 @@ func TestDefaultStoreDir_NoProfile(t *testing.T) {
 }
 
 func TestDefaultStoreDir_WithProfile(t *testing.T) {
+	// Clear MOAT_HOME so the default ~/.moat/credentials path is exercised.
+	t.Setenv("MOAT_HOME", "")
+
 	orig := ActiveProfile
 	ActiveProfile = "myproject"
 	defer func() { ActiveProfile = orig }()
@@ -226,6 +232,7 @@ func TestListProfiles(t *testing.T) {
 	// Create temp home with profile directories
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	// No profiles dir yet
 	profiles, err := ListProfiles()
@@ -284,6 +291,8 @@ func TestDefaultStoreDir_BackwardCompatibility(t *testing.T) {
 	// When no profile is set, credentials stored in the default directory
 	// must remain accessible. This verifies the zero-value of ActiveProfile
 	// produces the same directory path that a pre-profiles installation uses.
+	t.Setenv("MOAT_HOME", "")
+
 	orig := ActiveProfile
 	defer func() { ActiveProfile = orig }()
 
@@ -457,6 +466,7 @@ func TestListProfiles_IgnoresFiles(t *testing.T) {
 	// ListProfiles should only return directories, not regular files.
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	profilesDir := filepath.Join(tmpHome, ".moat", "credentials", "profiles")
 	os.MkdirAll(filepath.Join(profilesDir, "real-profile"), 0700)
@@ -550,6 +560,8 @@ func TestValidateProfile_SingleChar(t *testing.T) {
 
 func TestDefaultStoreDir_ProfileSubdirectoryStructure(t *testing.T) {
 	// Verify the exact directory structure for profiles.
+	t.Setenv("MOAT_HOME", "")
+
 	orig := ActiveProfile
 	defer func() { ActiveProfile = orig }()
 

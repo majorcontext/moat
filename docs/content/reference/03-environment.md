@@ -112,6 +112,21 @@ See [Credential profiles](./04-grants.md#credential-profiles) for details.
 
 Override the default worktree base path (`~/.moat/worktrees/`).
 
+### MOAT_HOME
+
+Override the Moat configuration directory. By default, Moat stores runs, credentials, and daemon state under `~/.moat/`. Set `MOAT_HOME` to an absolute path to relocate everything — the value is used as the complete directory (no `.moat` suffix is appended).
+
+```bash
+export MOAT_HOME=/tmp/moat-test
+```
+
+Primarily useful for:
+
+- Hermetic test runs that must not share a daemon or credential store with the developer's live install.
+- Running two versions of Moat side-by-side, where each version must see only its own state.
+
+`MOAT_HOME` is inherited by spawned daemon processes, so the daemon socket, lock file, and logs all land under the override path. The real `$HOME` is still used for reading third-party state like `~/.claude/` and `~/.config/gh/`.
+
 ### AWS credentials
 
 For AWS SSM secrets, standard AWS environment variables are used:

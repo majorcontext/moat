@@ -8,6 +8,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -64,11 +65,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find run directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("finding home directory: %w", err)
-	}
-	runDir := filepath.Join(homeDir, ".moat", "runs", runID)
+	runDir := filepath.Join(storage.DefaultBaseDir(), runID)
 	dbPath := filepath.Join(runDir, "audit.db")
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {

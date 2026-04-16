@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -121,12 +122,13 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 	}
 
 	if cfg == nil {
+		cfgPath := filepath.Join(oauth.DefaultConfigDir(), name+".yaml")
 		return fmt.Errorf("no OAuth configuration found for %q\n\n"+
 			"Provide one of:\n"+
 			"  1. CLI flags: --auth-url, --token-url, --client-id\n"+
-			"  2. Config file: ~/.moat/oauth/%s.yaml\n"+
+			"  2. Config file: %s\n"+
 			"  3. MCP server URL: --url <mcp-server-url>\n\n"+
-			"See: https://majorcontext.com/moat/guides/mcp", name, name)
+			"See: https://majorcontext.com/moat/guides/mcp", name, cfgPath)
 	}
 
 	// Run the OAuth flow (includes DCR if RegistrationEndpoint is set)

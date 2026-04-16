@@ -21,10 +21,13 @@ type SettingSource string
 
 const (
 	SourceClaudeUser SettingSource = "~/.claude/settings.json"
-	SourceMoatUser   SettingSource = "~/.moat/claude/settings.json"
-	SourceProject    SettingSource = ".claude/settings.json"
-	SourceMoatYAML   SettingSource = "moat.yaml"
-	SourceUnknown    SettingSource = "unknown"
+	// SourceMoatUser is a stable attribution label, not a live path. The
+	// actual file lives at <MOAT_HOME>/claude/settings.json, which defaults
+	// to ~/.moat/claude/settings.json but relocates when MOAT_HOME is set.
+	SourceMoatUser SettingSource = "moat user settings"
+	SourceProject  SettingSource = ".claude/settings.json"
+	SourceMoatYAML SettingSource = "moat.yaml"
+	SourceUnknown  SettingSource = "unknown"
 )
 
 // Settings represents Claude's native settings.json format.
@@ -414,8 +417,8 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 		}
 		result = MergeSettings(result, claudeUserSettings, SourceClaudeUser)
 
-		// 3. Load moat-specific user defaults from ~/.moat/claude/settings.json
-		moatUserSettingsPath := filepath.Join(homeDir, ".moat", "claude", "settings.json")
+		// 3. Load moat-specific user defaults from <MOAT_HOME>/claude/settings.json
+		moatUserSettingsPath := filepath.Join(config.GlobalConfigDir(), "claude", "settings.json")
 		moatUserSettings, loadErr := LoadSettings(moatUserSettingsPath)
 		if loadErr != nil {
 			return nil, loadErr

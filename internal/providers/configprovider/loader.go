@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
@@ -67,18 +68,13 @@ func loadEmbedded() map[string]ProviderDef {
 	return defs
 }
 
-// loadUserDir loads provider definitions from ~/.moat/providers/.
+// loadUserDir loads provider definitions from <MOAT_HOME>/providers/ (default ~/.moat/providers/).
 // User definitions override embedded defaults with the same name.
 // Returns the set of provider names that came from the user directory.
 func loadUserDir(defs map[string]ProviderDef) map[string]bool {
 	userNames := make(map[string]bool)
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return userNames
-	}
-
-	userDir := filepath.Join(homeDir, ".moat", "providers")
+	userDir := filepath.Join(config.GlobalConfigDir(), "providers")
 	entries, err := os.ReadDir(userDir)
 	if err != nil {
 		// Directory doesn't exist — normal case

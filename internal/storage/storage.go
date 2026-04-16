@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/majorcontext/moat/internal/config"
 )
 
 // Metadata holds information about an agent run.
@@ -110,14 +112,10 @@ func (s *RunStore) LoadMetadata() (Metadata, error) {
 }
 
 // DefaultBaseDir returns the default base directory for run storage.
-// This is ~/.moat/runs.
+// This is <GlobalConfigDir>/runs — by default ~/.moat/runs, or $MOAT_HOME/runs
+// when MOAT_HOME is set.
 func DefaultBaseDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to current directory if home dir cannot be determined
-		return filepath.Join(".", ".moat", "runs")
-	}
-	return filepath.Join(homeDir, ".moat", "runs")
+	return filepath.Join(config.GlobalConfigDir(), "runs")
 }
 
 // ListRunDirs returns all run IDs that have stored metadata.

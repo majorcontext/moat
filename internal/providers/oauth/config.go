@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/majorcontext/moat/internal/config"
 )
 
 // Config holds the OAuth provider configuration for a named grant.
@@ -56,13 +58,11 @@ func requireHTTPS(raw, field string) error {
 	return nil
 }
 
-// DefaultConfigDir returns the default directory for OAuth configs (~/.moat/oauth/).
+// DefaultConfigDir returns the default directory for OAuth configs
+// (<moat-home>/oauth/). See config.GlobalConfigDir for how MOAT_HOME
+// overrides the default ~/.moat location.
 func DefaultConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".moat", "oauth")
-	}
-	return filepath.Join(home, ".moat", "oauth")
+	return filepath.Join(config.GlobalConfigDir(), "oauth")
 }
 
 // LoadConfig loads an OAuth config from <dir>/<name>.yaml.

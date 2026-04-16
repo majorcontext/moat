@@ -394,6 +394,9 @@ func TestFileBackendTrimsWhitespace(t *testing.T) {
 }
 
 func TestDefaultKeyFilePath(t *testing.T) {
+	// Clear MOAT_HOME so the default ~/.moat/encryption.key path is exercised.
+	t.Setenv("MOAT_HOME", "")
+
 	path, err := DefaultKeyFilePath()
 	if err != nil {
 		t.Fatalf("DefaultKeyFilePath failed: %v", err)
@@ -413,6 +416,21 @@ func TestDefaultKeyFilePath(t *testing.T) {
 	dir := filepath.Dir(path)
 	if filepath.Base(dir) != ".moat" {
 		t.Errorf("path should be in .moat directory, got %s", dir)
+	}
+}
+
+func TestDefaultKeyFilePath_MoatHomeOverride(t *testing.T) {
+	override := t.TempDir()
+	t.Setenv("MOAT_HOME", override)
+
+	path, err := DefaultKeyFilePath()
+	if err != nil {
+		t.Fatalf("DefaultKeyFilePath failed: %v", err)
+	}
+
+	expected := filepath.Join(override, "encryption.key")
+	if path != expected {
+		t.Errorf("DefaultKeyFilePath = %q, want %q", path, expected)
 	}
 }
 

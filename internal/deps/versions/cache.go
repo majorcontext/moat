@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/majorcontext/moat/internal/config"
 )
 
 // DefaultCacheTTL is the default time-to-live for cached version resolutions.
@@ -206,15 +208,11 @@ func (c *Cache) saveData(data []byte) error {
 	return os.Rename(tmpFile, c.path)
 }
 
-// DefaultCache returns a cache using the default moat cache directory.
+// DefaultCache returns a cache using the default moat cache directory
+// (<moat-home>/cache/versions.json). See config.GlobalConfigDir for how
+// MOAT_HOME overrides the default ~/.moat location.
 func DefaultCache() *Cache {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fall back to in-memory only
-		return NewCache(DefaultCacheTTL, "")
-	}
-
-	path := filepath.Join(home, ".moat", "cache", "versions.json")
+	path := filepath.Join(config.GlobalConfigDir(), "cache", "versions.json")
 	return NewCache(DefaultCacheTTL, path)
 }
 

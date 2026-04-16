@@ -76,6 +76,29 @@ func TestMain(m *testing.M) {
 	// isn't available in test containers.
 	os.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
 
+	// Isolate tests from the developer's real ~/.moat directory. Without this,
+	// tests share the user's daemon, credential store, run storage, and locks
+	// with any live moat session — which means an older daemon from a previous
+	// install can serve test requests (and fail on missing capabilities), and
+	// the test's cleanup (killTestDaemon) can kill the user's working daemon.
+	// MOAT_HOME is inherited by the spawned daemon subprocess so all state
+	// lands in the same isolated directory.
+	tmpMoatHome, err := os.MkdirTemp("", "moat-e2e-home-*")
+	if err != nil {
+		os.Stderr.WriteString("Failed to create temp MOAT_HOME for E2E tests: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	os.Setenv("MOAT_HOME", tmpMoatHome)
+
+	// Tell the routing proxy to bind an OS-assigned port instead of the
+	// default 8080. MOAT_HOME isolates state but the routing proxy's listen
+	// port is still global: if the developer has a live moat routing proxy
+	// on 8080, the test's fresh proxy cannot bind it. The tests read the
+	// actual port back from the routing proxy lock file (getRoutingProxyPort),
+	// so any port is fine. The daemon's credential proxy (19080 default)
+	// already has its own fallback-to-OS-port logic, so it doesn't need this.
+	os.Setenv("MOAT_PROXY_PORT", "0")
+
 	// Build the moat binary so the daemon can self-exec.
 	// Test binaries don't have the _daemon cobra command, so
 	// EnsureRunning needs a real moat binary (via MOAT_EXECUTABLE).
@@ -112,6 +135,9 @@ func TestMain(m *testing.M) {
 
 	if tmpBinDir != "" {
 		os.RemoveAll(tmpBinDir)
+	}
+	if tmpMoatHome != "" {
+		os.RemoveAll(tmpMoatHome)
 	}
 
 	os.Exit(code)

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential/keyring"
 	"github.com/majorcontext/moat/internal/log"
 )
@@ -144,16 +145,11 @@ func (s *FileStore) List() ([]Credential, error) {
 var ActiveProfile string
 
 // DefaultStoreDir returns the credential store directory for the active profile.
-// When ActiveProfile is set, returns ~/.moat/credentials/profiles/<name>/.
-// Otherwise returns the default ~/.moat/credentials/.
+// When ActiveProfile is set, returns <moat-home>/credentials/profiles/<name>/.
+// Otherwise returns the default <moat-home>/credentials/. See config.GlobalConfigDir
+// for how MOAT_HOME overrides the default ~/.moat location.
 func DefaultStoreDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fall back to temp directory to avoid dumping credentials in the working directory.
-		log.Warn("could not determine home directory, using temp directory for credentials", "error", err)
-		home = os.TempDir()
-	}
-	base := filepath.Join(home, ".moat", "credentials")
+	base := filepath.Join(config.GlobalConfigDir(), "credentials")
 	if ActiveProfile != "" {
 		return filepath.Join(base, "profiles", ActiveProfile)
 	}
@@ -176,12 +172,7 @@ func ValidateProfile(name string) error {
 // ListProfiles returns the names of all credential profiles.
 // Does not include the default (unscoped) profile.
 func ListProfiles() ([]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Warn("cannot determine home directory for credential profiles", "error", err)
-		return nil, nil
-	}
-	profilesDir := filepath.Join(home, ".moat", "credentials", "profiles")
+	profilesDir := filepath.Join(config.GlobalConfigDir(), "credentials", "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
 		if os.IsNotExist(err) {

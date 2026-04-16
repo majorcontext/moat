@@ -903,6 +903,7 @@ func (s *stubRuntime) Exec(context.Context, string, []string, []byte, io.Writer,
 func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	// Set up persisted run metadata on disk
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
@@ -981,6 +982,7 @@ func TestLoadPersistedRunsKeepsRoutesForRunningContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
 	store, err := storage.NewRunStore(baseDir, "run_livebeef1234")
@@ -1043,6 +1045,7 @@ func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
 	runID := "run_gone12345678"
@@ -1109,6 +1112,7 @@ func TestLoadPersistedRunsPreservesStateOnContainerError(t *testing.T) {
 func TestLoadPersistedRunsDoesNotModifyMetadata(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
 	runID := "run_nodeadbeef12"
@@ -1178,6 +1182,7 @@ func TestLoadPersistedRunsDoesNotModifyMetadata(t *testing.T) {
 func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
 	runID := "run_applerun1234"
@@ -1267,6 +1272,7 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 func TestLoadPersistedRunsCleansRoutesForPersistedTerminalState(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	baseDir := filepath.Join(tmpHome, ".moat", "runs")
 	runID := "run_stoppedbeef12"
