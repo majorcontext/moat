@@ -250,31 +250,37 @@ func generateKey() ([]byte, error) {
 // globalLockPath returns the path for the global key operation lock file.
 // This lock is used to serialize all key creation operations across both
 // keychain and file backends, preventing race conditions.
-func globalLockPath() string {
+// Mirrors DefaultKeyFilePath's MOAT_HOME-aware resolution and refuses to
+// fall back to os.TempDir when home is unreachable — a stray lock file
+// in /tmp would mask a real misconfiguration and create cross-user
+// synchronization hazards.
+func globalLockPath() (string, error) {
 	// MOAT_HOME overrides the default ~/.moat location (tests, multi-version).
 	if override := os.Getenv("MOAT_HOME"); override != "" {
-		return filepath.Join(override, "key.lock")
+		return filepath.Join(override, "key.lock"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		if envHome := os.Getenv("HOME"); envHome != "" {
-			home = envHome
-		} else {
-			home = os.TempDir()
+			return filepath.Join(envHome, ".moat", "key.lock"), nil
 		}
+		return "", fmt.Errorf("%w: set $HOME environment variable or ensure user home is configured", ErrNoHomeDirectory)
 	}
-	return filepath.Join(home, ".moat", "key.lock")
+	return filepath.Join(home, ".moat", "key.lock"), nil
 }
 
 // withGlobalKeyLock executes fn while holding the global key lock.
 // This ensures that only one process at a time can create or modify the encryption key,
 // preventing race conditions between keychain and file backend operations.
 func withGlobalKeyLock(fn func() ([]byte, error)) ([]byte, error) {
-	lockPath := globalLockPath()
+	lockPath, err := globalLockPath()
+	if err != nil {
+		return nil, err
+	}
 
 	// Ensure lock directory exists
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
-		return nil, fmt.Errorf("creating lock directory: %w", err)
+	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0700); mkErr != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", mkErr)
 	}
 
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)

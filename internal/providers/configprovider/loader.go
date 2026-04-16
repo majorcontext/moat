@@ -68,7 +68,7 @@ func loadEmbedded() map[string]ProviderDef {
 	return defs
 }
 
-// loadUserDir loads provider definitions from ~/.moat/providers/.
+// loadUserDir loads provider definitions from <MOAT_HOME>/providers/ (default ~/.moat/providers/).
 // User definitions override embedded defaults with the same name.
 // Returns the set of provider names that came from the user directory.
 func loadUserDir(defs map[string]ProviderDef) map[string]bool {
