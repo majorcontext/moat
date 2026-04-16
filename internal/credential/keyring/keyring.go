@@ -327,8 +327,8 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 		return nil, fmt.Errorf("storing encryption key failed.\n"+
 			"  Keychain (%s): %v\n"+
 			"  File (%s): %v\n"+
-			"Remediation: Ensure ~/.moat directory is writable and check system keychain access settings",
-			primary.Name(), primaryErr, fallback.Name(), fallbackErr)
+			"Remediation: Ensure %s is writable and check system keychain access settings",
+			primary.Name(), primaryErr, fallback.Name(), fallbackErr, filepath.Dir(fallback.Name()))
 	}
 
 	// Re-read the key from fallback to ensure we return the actual stored key.

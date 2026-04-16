@@ -414,8 +414,8 @@ func LoadAllSettings(workspacePath string, cfg *config.Config) (*Settings, error
 		}
 		result = MergeSettings(result, claudeUserSettings, SourceClaudeUser)
 
-		// 3. Load moat-specific user defaults from ~/.moat/claude/settings.json
-		moatUserSettingsPath := filepath.Join(homeDir, ".moat", "claude", "settings.json")
+		// 3. Load moat-specific user defaults from <MOAT_HOME>/claude/settings.json
+		moatUserSettingsPath := filepath.Join(config.GlobalConfigDir(), "claude", "settings.json")
 		moatUserSettings, loadErr := LoadSettings(moatUserSettingsPath)
 		if loadErr != nil {
 			return nil, loadErr
