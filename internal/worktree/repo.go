@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/majorcontext/moat/internal/config"
 )
 
 // FindRepoRoot returns the root of the git repository containing dir.
@@ -63,16 +65,13 @@ func ParseRemoteURL(rawURL string) (string, error) {
 }
 
 // BasePath returns the root directory for worktrees.
-// Checks MOAT_WORKTREE_BASE env var, defaults to ~/.moat/worktrees.
+// MOAT_WORKTREE_BASE takes precedence; otherwise worktrees live under the
+// moat state directory (respecting MOAT_HOME via config.GlobalConfigDir).
 func BasePath() string {
 	if base := os.Getenv("MOAT_WORKTREE_BASE"); base != "" {
 		return base
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".moat", "worktrees")
-	}
-	return filepath.Join(home, ".moat", "worktrees")
+	return filepath.Join(config.GlobalConfigDir(), "worktrees")
 }
 
 // Path returns the expected path for a worktree given a repo ID and branch.

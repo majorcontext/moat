@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/spf13/cobra"
 )
@@ -93,7 +95,7 @@ func runGrantProviders(cmd *cobra.Command, args []string) error {
 	}
 	w.Flush()
 
-	fmt.Println("\nCustom providers can be added at ~/.moat/providers/")
+	fmt.Printf("\nCustom providers can be added at %s\n", filepath.Join(config.GlobalConfigDir(), "providers"))
 
 	return nil
 }
