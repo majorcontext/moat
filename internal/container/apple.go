@@ -534,12 +534,15 @@ func (r *AppleRuntime) Close() error {
 	return nil
 }
 
-// SetupFirewall configures iptables to block all outbound traffic except to the proxy.
+// SetupFirewall configures iptables and ip6tables to block all outbound traffic
+// except to the proxy, covering both IPv4 and IPv6.
 // The proxyHost parameter is accepted for interface consistency but not used in the
 // iptables rules. This is intentional: the gateway IP can vary between container
 // networks. The security model relies on per-run proxy authentication (cryptographic
 // token in HTTP_PROXY URL) rather than IP filtering. This is more robust than IP-based
 // filtering and prevents unauthorized access even if another service runs on the same port.
+// If ip6tables is not available (minimal images), a warning is emitted to stderr
+// but the setup does not fail — the container may not have IPv6 connectivity.
 func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
 	// Validate port range
 	if proxyPort < 1 || proxyPort > 65535 {
@@ -578,7 +581,26 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 
 		# Drop all other outbound traffic
 		$IPT -w -A OUTPUT -j DROP
-	`, proxyPort)
+
+		# Mirror rules for IPv6 to prevent bypass via AAAA records.
+		# Prefer ip6tables-legacy on Apple containers for the same nf_tables reason.
+		if command -v ip6tables-legacy >/dev/null 2>&1; then
+			IP6T=ip6tables-legacy
+		elif command -v ip6tables >/dev/null 2>&1; then
+			IP6T=ip6tables
+		else
+			echo "WARN: ip6tables not found - IPv6 traffic will not be firewalled" >&2
+			IP6T=""
+		fi
+		if [ -n "$IP6T" ]; then
+			$IP6T -w -F OUTPUT 2>/dev/null || true
+			$IP6T -w -A OUTPUT -o lo -j ACCEPT
+			$IP6T -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+			$IP6T -w -A OUTPUT -p udp --dport 53 -j ACCEPT
+			$IP6T -w -A OUTPUT -p tcp --dport %d -j ACCEPT
+			$IP6T -w -A OUTPUT -j DROP
+		fi
+	`, proxyPort, proxyPort)
 
 	// Run as root since iptables requires root privileges
 	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)
