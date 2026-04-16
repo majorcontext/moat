@@ -630,12 +630,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			len(opts.Config.MCP) > 0 ||
 			opts.Config.Network.KeepPolicy != nil ||
 			(opts.Config.Claude.LLMGateway != nil && opts.Config.Claude.LLMGateway.Policy != nil)
-		for _, mcp := range opts.Config.MCP {
-			if mcp.Policy != nil {
-				needsProxyForConfig = true
-				break
-			}
-		}
 	}
 
 	// Clipboard bridging is resolved by the caller (ExecuteRun).
