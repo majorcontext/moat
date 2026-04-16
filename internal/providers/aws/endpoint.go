@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	moatconfig "github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/ui"
@@ -193,6 +195,7 @@ func (h *EndpointHandler) RoleARN() string {
 // user to diagnose the problem without leaking sensitive details.
 func classifyAWSError(err error, roleARN string) string {
 	msg := err.Error()
+	daemonLog := filepath.Join(moatconfig.GlobalConfigDir(), "debug", "daemon.log")
 
 	switch {
 	case strings.Contains(msg, "AccessDenied"):
@@ -204,7 +207,7 @@ Check that:
   2. Your IAM user/role has sts:AssumeRole permission
 
 Run 'moat grant aws' to reconfigure, or check the daemon log:
-  ~/.moat/debug/daemon.log`, roleARN)
+  %s`, roleARN, daemonLog)
 
 	case strings.Contains(msg, "no EC2 IMDS role found") ||
 		strings.Contains(msg, "failed to refresh cached credentials"):
@@ -234,6 +237,6 @@ Then retry — the daemon will pick up the new credentials automatically.`
 		return "AWS credential error: request canceled or timed out. Retry or check network connectivity."
 
 	default:
-		return "AWS credential error: unexpected error assuming role.\n\nCheck the daemon log for details: ~/.moat/debug/daemon.log"
+		return fmt.Sprintf("AWS credential error: unexpected error assuming role.\n\nCheck the daemon log for details: %s", daemonLog)
 	}
 }

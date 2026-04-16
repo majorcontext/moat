@@ -5,13 +5,15 @@
 //   - Linux: Requires libsecret (GNOME), kwallet (KDE), or pass (CLI)
 //   - Windows: Uses Windows Credential Manager (works out of the box)
 //   - Headless/CI: Automatically falls back to file-based storage at ~/.moat/encryption.key
+//     (or $MOAT_HOME/encryption.key when MOAT_HOME is set)
 //
 // The package attempts to store keys in the system keychain first for better security.
 // If the keychain is unavailable (e.g., in CI, headless servers, or containers),
 // it silently falls back to file-based storage with restricted permissions (0600).
 //
 // Concurrency: All key creation operations are protected by a global file lock
-// (~/.moat/key.lock) to prevent race conditions when multiple processes attempt
+// (~/.moat/key.lock, or $MOAT_HOME/key.lock when MOAT_HOME is set) to prevent race
+// conditions when multiple processes attempt
 // to create a key simultaneously. Both keychain and file backends check for
 // existing keys before writing to avoid overwriting keys created by other processes.
 // On Windows, file locking is a no-op, but Windows Credential Manager is the primary
