@@ -217,6 +217,12 @@ func DefaultKeyFilePath() (string, error) {
 		filename = name + ".key"
 	}
 
+	// MOAT_HOME overrides the default ~/.moat location. Set by tests and
+	// multi-version setups; treated as the complete moat directory.
+	if override := os.Getenv("MOAT_HOME"); override != "" {
+		return filepath.Join(override, filename), nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// UserHomeDir failed - try $HOME directly (Unix).
@@ -243,6 +249,10 @@ func generateKey() ([]byte, error) {
 // This lock is used to serialize all key creation operations across both
 // keychain and file backends, preventing race conditions.
 func globalLockPath() string {
+	// MOAT_HOME overrides the default ~/.moat location (tests, multi-version).
+	if override := os.Getenv("MOAT_HOME"); override != "" {
+		return filepath.Join(override, "key.lock")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		if envHome := os.Getenv("HOME"); envHome != "" {

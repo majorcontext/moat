@@ -107,6 +107,7 @@ func TestShowSSHCredential(t *testing.T) {
 	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("MOAT_HOME", "")
 
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
@@ -146,6 +147,7 @@ func TestGrantShowEmptySSHHost(t *testing.T) {
 	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("MOAT_HOME", "")
 
 	cmd := rootCmd
 	cmd.SetArgs([]string{"grant", "show", "ssh:"})
@@ -162,6 +164,7 @@ func TestGrantShowNotFound(t *testing.T) {
 	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("MOAT_HOME", "")
 
 	cmd := rootCmd
 	cmd.SetArgs([]string{"grant", "show", "nonexistent"})
@@ -181,6 +184,7 @@ func TestGrantShowIntegration(t *testing.T) {
 	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("MOAT_HOME", "")
 
 	// Store a credential
 	key, err := credential.DefaultEncryptionKey()

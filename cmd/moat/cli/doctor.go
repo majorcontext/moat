@@ -19,6 +19,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/doctor"
 	"github.com/majorcontext/moat/internal/providers/codex"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -410,7 +411,7 @@ func (s *claudeSection) Print(w io.Writer) error {
 	}
 
 	// 3. Moat-specific user defaults
-	moatUserSettingsPath := filepath.Join(home, ".moat", "claude", "settings.json")
+	moatUserSettingsPath := filepath.Join(config.GlobalConfigDir(), "claude", "settings.json")
 	if _, err := os.Stat(moatUserSettingsPath); err == nil {
 		fmt.Fprintf(tw, "  3. Moat user defaults:\t%s %s\n", moatUserSettingsPath, ui.OKTag())
 	} else {
@@ -452,13 +453,8 @@ type storageSection struct{}
 func (s *storageSection) Name() string { return "Storage" }
 
 func (s *storageSection) Print(w io.Writer) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	moatDir := filepath.Join(home, ".moat")
+	moatDir := config.GlobalConfigDir()
 	fmt.Fprintf(tw, "Moat directory:\t%s\n", moatDir)
 
 	if info, err := os.Stat(moatDir); err == nil {
@@ -495,12 +491,7 @@ type runsSection struct{}
 func (s *runsSection) Name() string { return "Recent Runs" }
 
 func (s *runsSection) Print(w io.Writer) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-
-	runsDir := filepath.Join(home, ".moat", "runs")
+	runsDir := storage.DefaultBaseDir()
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		if os.IsNotExist(err) {

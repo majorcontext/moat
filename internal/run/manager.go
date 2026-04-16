@@ -1218,8 +1218,7 @@ region = %s
 				"keys", len(sshMappings))
 		} else {
 			// Use Unix socket - can be mounted directly
-			homeDir, _ := os.UserHomeDir()
-			sshSocketDir = filepath.Join(homeDir, ".moat", "sockets", r.ID)
+			sshSocketDir = filepath.Join(config.GlobalConfigDir(), "sockets", r.ID)
 			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
 				upstreamAgent.Close()
 				cleanupDaemonRun()

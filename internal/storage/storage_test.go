@@ -61,6 +61,10 @@ func TestRunStoreDir(t *testing.T) {
 }
 
 func TestDefaultBaseDir(t *testing.T) {
+	// Clear MOAT_HOME so the default ~/.moat/runs path is exercised regardless
+	// of the shell environment.
+	t.Setenv("MOAT_HOME", "")
+
 	baseDir := DefaultBaseDir()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -68,6 +72,17 @@ func TestDefaultBaseDir(t *testing.T) {
 	}
 
 	expected := filepath.Join(homeDir, ".moat", "runs")
+	if baseDir != expected {
+		t.Errorf("DefaultBaseDir = %q, want %q", baseDir, expected)
+	}
+}
+
+func TestDefaultBaseDir_MoatHomeOverride(t *testing.T) {
+	override := t.TempDir()
+	t.Setenv("MOAT_HOME", override)
+
+	baseDir := DefaultBaseDir()
+	expected := filepath.Join(override, "runs")
 	if baseDir != expected {
 		t.Errorf("DefaultBaseDir = %q, want %q", baseDir, expected)
 	}

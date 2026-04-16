@@ -33,6 +33,7 @@ func TestGrantMCP(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("MOAT_HOME", "")
 
 	// Run grant command
 	cmd := rootCmd

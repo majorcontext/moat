@@ -13,6 +13,7 @@ func TestLoadGlobalConfig(t *testing.T) {
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpHome)
 	defer os.Setenv("HOME", origHome)
+	t.Setenv("MOAT_HOME", "")
 
 	// Create config file
 	configDir := filepath.Join(tmpHome, ".moat")
@@ -40,6 +41,7 @@ func TestLoadGlobalConfigDefaults(t *testing.T) {
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpHome)
 	defer os.Setenv("HOME", origHome)
+	t.Setenv("MOAT_HOME", "")
 
 	cfg, err := LoadGlobal()
 	if err != nil {
@@ -55,6 +57,7 @@ func TestLoadGlobalConfigEnvOverride(t *testing.T) {
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpHome)
 	defer os.Setenv("HOME", origHome)
+	t.Setenv("MOAT_HOME", "")
 
 	os.Setenv("MOAT_PROXY_PORT", "7000")
 	defer os.Unsetenv("MOAT_PROXY_PORT")
@@ -81,6 +84,7 @@ func TestLoadGlobal_DebugConfig(t *testing.T) {
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
+	t.Setenv("MOAT_HOME", "")
 
 	// Create .moat directory and move config
 	moatDir := filepath.Join(tmpDir, ".moat")
@@ -100,6 +104,7 @@ func TestLoadGlobal_DebugConfig(t *testing.T) {
 func TestLoadGlobal_Mounts(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(moatDir, 0755)
@@ -145,6 +150,7 @@ mounts:
 func TestLoadGlobal_MountsRelativeSourceRejected(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(moatDir, 0755)
@@ -168,6 +174,7 @@ mounts:
 func TestLoadGlobal_MountsExcludeRejected(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(moatDir, 0755)
@@ -193,6 +200,7 @@ mounts:
 func TestLoadGlobal_MountsTildeExpansion(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(moatDir, 0755)
@@ -222,6 +230,7 @@ mounts:
 func TestLoadGlobal_MountsEnforcesReadOnly(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
 	os.MkdirAll(moatDir, 0755)

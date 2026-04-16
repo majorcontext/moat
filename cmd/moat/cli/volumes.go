@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -60,12 +62,7 @@ func listVolumes(cmd *cobra.Command, args []string) error {
 }
 
 func listVolumeDirs() error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("getting home directory: %w", err)
-	}
-
-	volumesDir := homeDir + "/.moat/volumes"
+	volumesDir := filepath.Join(config.GlobalConfigDir(), "volumes")
 	agents, err := os.ReadDir(volumesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -100,12 +97,7 @@ func removeVolumes(cmd *cobra.Command, args []string) error {
 }
 
 func removeVolumeDirs(agentName string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("getting home directory: %w", err)
-	}
-
-	agentDir := homeDir + "/.moat/volumes/" + agentName
+	agentDir := filepath.Join(config.GlobalConfigDir(), "volumes", agentName)
 	if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 		fmt.Printf("No volumes found for agent %q.\n", agentName)
 		return nil
@@ -135,12 +127,7 @@ func removeVolumeDirs(agentName string) error {
 }
 
 func pruneVolumes(cmd *cobra.Command, args []string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("getting home directory: %w", err)
-	}
-
-	volumesDir := homeDir + "/.moat/volumes"
+	volumesDir := filepath.Join(config.GlobalConfigDir(), "volumes")
 	agents, err := os.ReadDir(volumesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
