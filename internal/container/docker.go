@@ -548,8 +548,8 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		iptables -w -A OUTPUT -j DROP
 
 		# Mirror rules for IPv6 to prevent bypass via AAAA records.
-		# Prefer ip6tables-legacy for the same nf_tables compatibility reason
-		# as the IPv4 path on some container kernels.
+		# Prefer ip6tables-legacy for nf_tables compatibility on some
+		# container kernels that lack nf_tables modules.
 		# The DROP-all rule also blocks ICMPv6 Neighbor Solicitation, which
 		# effectively disables IPv6 for the container — this is intentional;
 		# fully blocked is better than partially open.
