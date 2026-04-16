@@ -548,17 +548,26 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		iptables -w -A OUTPUT -j DROP
 
 		# Mirror rules for IPv6 to prevent bypass via AAAA records.
-		# ip6tables may be absent in minimal images — warn but don't fail,
-		# since the container may not have IPv6 connectivity at all.
-		if command -v ip6tables >/dev/null 2>&1; then
-			ip6tables -w -F OUTPUT 2>/dev/null || true
-			ip6tables -w -A OUTPUT -o lo -j ACCEPT
-			ip6tables -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-			ip6tables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
-			ip6tables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
-			ip6tables -w -A OUTPUT -j DROP
+		# Prefer ip6tables-legacy for the same nf_tables compatibility reason
+		# as the IPv4 path on some container kernels.
+		# The DROP-all rule also blocks ICMPv6 Neighbor Solicitation, which
+		# effectively disables IPv6 for the container — this is intentional;
+		# fully blocked is better than partially open.
+		if command -v ip6tables-legacy >/dev/null 2>&1; then
+			IP6T=ip6tables-legacy
+		elif command -v ip6tables >/dev/null 2>&1; then
+			IP6T=ip6tables
 		else
 			echo "WARN: ip6tables not found - IPv6 traffic will not be firewalled" >&2
+			IP6T=""
+		fi
+		if [ -n "$IP6T" ]; then
+			$IP6T -w -F OUTPUT 2>/dev/null || true
+			$IP6T -w -A OUTPUT -o lo -j ACCEPT
+			$IP6T -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+			$IP6T -w -A OUTPUT -p udp --dport 53 -j ACCEPT
+			$IP6T -w -A OUTPUT -p tcp --dport %d -j ACCEPT
+			$IP6T -w -A OUTPUT -j DROP
 		fi
 	`, proxyPort, proxyPort)
 
@@ -592,6 +601,11 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 
 	if inspect.ExitCode != 0 {
 		return fmt.Errorf("firewall setup failed with exit code %d: %s", inspect.ExitCode, output.String())
+	}
+
+	// Surface ip6tables warnings so they appear in moat's diagnostic logs.
+	if strings.Contains(output.String(), "WARN: ip6tables not found") {
+		log.Warn("ip6tables not found in container — IPv6 egress is not firewalled", "container", containerID)
 	}
 
 	return nil

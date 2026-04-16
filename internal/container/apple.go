@@ -584,6 +584,9 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 
 		# Mirror rules for IPv6 to prevent bypass via AAAA records.
 		# Prefer ip6tables-legacy on Apple containers for the same nf_tables reason.
+		# The DROP-all rule also blocks ICMPv6 Neighbor Solicitation, which
+		# effectively disables IPv6 for the container — this is intentional;
+		# fully blocked is better than partially open.
 		if command -v ip6tables-legacy >/dev/null 2>&1; then
 			IP6T=ip6tables-legacy
 		elif command -v ip6tables >/dev/null 2>&1; then
@@ -609,6 +612,11 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("firewall setup failed: %w: %s (iptables may not be available)", err, stderr.String())
+	}
+
+	// Surface ip6tables warnings so they appear in moat's diagnostic logs.
+	if strings.Contains(stderr.String(), "WARN: ip6tables not found") {
+		log.Warn("ip6tables not found in container — IPv6 egress is not firewalled", "container", containerID)
 	}
 
 	return nil
