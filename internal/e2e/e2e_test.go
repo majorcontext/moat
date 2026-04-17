@@ -32,6 +32,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -102,8 +103,10 @@ func TestMain(m *testing.M) {
 	// Build the moat binary so the daemon can self-exec.
 	// Test binaries don't have the _daemon cobra command, so
 	// EnsureRunning needs a real moat binary (via MOAT_EXECUTABLE).
+	// In CI, the binary is pre-built and MOAT_EXECUTABLE is set to skip this.
 	var tmpBinDir string
 	if os.Getenv("MOAT_EXECUTABLE") == "" {
+		fmt.Fprintln(os.Stderr, "e2e: building moat binary...")
 		var err error
 		tmpBinDir, err = os.MkdirTemp("", "moat-e2e-bin-*")
 		if err != nil {
@@ -119,6 +122,9 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		os.Setenv("MOAT_EXECUTABLE", moatBin)
+		fmt.Fprintln(os.Stderr, "e2e: moat binary built")
+	} else {
+		fmt.Fprintf(os.Stderr, "e2e: using pre-built moat binary: %s\n", os.Getenv("MOAT_EXECUTABLE"))
 	}
 
 	// Kill any pre-existing daemon so the tests spawn a fresh one from the
@@ -127,6 +133,7 @@ func TestMain(m *testing.M) {
 	// confusing failures when the daemon API surface has changed.
 	killTestDaemon()
 
+	fmt.Fprintln(os.Stderr, "e2e: starting tests")
 	code := m.Run()
 
 	// Kill any daemon process spawned during the test run.

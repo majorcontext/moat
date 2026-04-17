@@ -70,6 +70,7 @@ jobs:
     name: E2E Tests
     if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -100,8 +101,16 @@ jobs:
           docker pull golang:1.22
           docker pull ubuntu:22.04
 
+      - name: Pre-build moat binary
+        run: |
+          # Build the moat binary ahead of time so TestMain doesn't need to
+          # compile it (which produces no output and can appear to hang).
+          mkdir -p /tmp/moat-e2e-bin
+          go build -o /tmp/moat-e2e-bin/moat github.com/majorcontext/moat/cmd/moat
+          echo "MOAT_EXECUTABLE=/tmp/moat-e2e-bin/moat" >> "$GITHUB_ENV"
+
       - name: Run E2E tests
-        run: go test -tags=e2e -timeout=15m -p=1 ./internal/e2e/
+        run: go test -tags=e2e -v -timeout=15m -p=1 ./internal/e2e/
         env:
           MOAT_DISABLE_BUILDKIT: "1"
           MOAT_NO_SANDBOX: "1"
