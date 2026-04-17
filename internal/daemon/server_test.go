@@ -630,18 +630,17 @@ func TestAddProxyPortForLoopback_MoatHost(t *testing.T) {
 	}
 }
 
-func TestAddProxyPortForLoopback_MoatHostAlreadyPresent(t *testing.T) {
-	// When HostGateway is "moat-host", the function returns early without
-	// adding the proxy port. Verify no duplicate is added even when the
-	// proxy port is already in AllowedHostPorts.
-	rc := NewRunContext("run_moathost_dup_test")
-	rc.HostGateway = "moat-host"
-	rc.AllowedHostPorts = []int{12345, 8288}
+func TestAddProxyPortForLoopback_AlreadyPresentAmongOthers(t *testing.T) {
+	// Verify dedup works when the proxy port is already in a multi-port
+	// AllowedHostPorts slice — existing ports must be preserved.
+	rc := NewRunContext("run_dedup_multi_test")
+	rc.HostGateway = "127.0.0.1"
+	rc.AllowedHostPorts = []int{5432, 12345, 8080}
 
 	addProxyPortForLoopback(rc, 12345)
 
-	if len(rc.AllowedHostPorts) != 2 {
-		t.Fatalf("expected 2 ports (no change for moat-host), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	if len(rc.AllowedHostPorts) != 3 {
+		t.Fatalf("expected 3 ports (no duplicate), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
 	}
 }
 
