@@ -10,6 +10,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 - **IPv6 egress firewall** — containers on dual-stack hosts could bypass `network.policy: strict` by using IPv6 addresses (e.g. AAAA DNS records). The firewall now installs ip6tables rules mirroring the existing iptables rules. No user action required; the fix applies automatically on upgrade. If ip6tables is unavailable in the container image, a diagnostic warning is logged. ([#324](https://github.com/majorcontext/moat/pull/324))
 
+### Fixed
+
+- Fix ip6tables hanging indefinitely on hosts without the `ip6_tables` kernel module — previously, `ip6tables -w` (wait forever) blocked the firewall setup, hanging the container start and E2E tests on CI. Now uses a 5-second timeout and treats ip6tables failure as non-fatal with partial-rule cleanup. ([#325](https://github.com/majorcontext/moat/pull/325))
+
 ## v0.5.0 — 2026-04-07
 
 v0.5 hardens network isolation and introduces operation-level policy enforcement on MCP tool calls and HTTP traffic. Host traffic is now blocked by default in every network policy mode — including `permissive` — and must be opted into per-port with `network.host`. Keep policy integration adds allow/deny/redact rules for MCP tool calls and REST API requests, with starter packs for common services and an LLM response policy that evaluates `tool_use` blocks before forwarding to the container. The credential-injecting proxy is now also available as a standalone `gatekeeper` binary that runs without the moat runtime. Other additions include multi-credential per host, custom base images, OAuth grants for MCP servers, sandbox-local MCP servers, and global mounts in `~/.moat/config.yaml`.
