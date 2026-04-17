@@ -409,12 +409,12 @@ func TestValidateMCPGrants(t *testing.T) {
 	}
 }
 
-// TestProxyURLCircularPrevention verifies that the proxy's own synthetic
-// hostname is in NO_PROXY (preventing infinite loops) while loopback
-// addresses are NOT in NO_PROXY (so they flow through the proxy for
-// network.host enforcement under Docker host-network mode).
-func TestProxyURLCircularPrevention(t *testing.T) {
-	env := buildProxyEnv("test-token", 19080)
+// TestBuildProxyEnv_LoopbackNotBypassed verifies that under host-network mode,
+// loopback addresses are NOT in NO_PROXY (so they flow through the proxy for
+// network.host enforcement), while moat-proxy IS in NO_PROXY (preventing
+// infinite proxy loops).
+func TestBuildProxyEnv_LoopbackNotBypassed(t *testing.T) {
+	env := buildProxyEnv("test-token", 19080, true)
 
 	var noProxy string
 	for _, e := range env {
@@ -433,13 +433,13 @@ func TestProxyURLCircularPrevention(t *testing.T) {
 		t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
 	}
 
-	// localhost and 127.0.0.1 must NOT be in NO_PROXY — under Docker
-	// host-network mode they share the host loopback, and excluding them
-	// lets container processes bypass network.host enforcement.
+	// In host-network mode, localhost and 127.0.0.1 must NOT be in NO_PROXY
+	// because the container shares the host loopback — excluding them lets
+	// container processes bypass network.host enforcement.
 	if strings.Contains(noProxy, "localhost") {
-		t.Errorf("NO_PROXY must NOT contain localhost (loopback bypass under host networking), got %q", noProxy)
+		t.Errorf("NO_PROXY must NOT contain localhost in host-network mode, got %q", noProxy)
 	}
 	if strings.Contains(noProxy, "127.0.0.1") {
-		t.Errorf("NO_PROXY must NOT contain 127.0.0.1 (loopback bypass under host networking), got %q", noProxy)
+		t.Errorf("NO_PROXY must NOT contain 127.0.0.1 in host-network mode, got %q", noProxy)
 	}
 }

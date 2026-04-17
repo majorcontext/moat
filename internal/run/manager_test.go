@@ -1378,7 +1378,7 @@ func TestReplaceHostInEnv(t *testing.T) {
 	env := []string{
 		"HTTP_PROXY=http://moat:token@192.168.64.1:19080",
 		"HTTPS_PROXY=http://moat:token@192.168.64.1:19080",
-		"NO_PROXY=192.168.64.1,buildkit",
+		"NO_PROXY=192.168.64.1,buildkit,localhost,127.0.0.1",
 		"ANTHROPIC_BASE_URL=http://192.168.64.1:19080/relay/anthropic",
 		"MOAT_SSH_TCP_ADDR=192.168.64.1:62098",
 		"SOME_UNRELATED_VAR=hello",
@@ -1389,7 +1389,7 @@ func TestReplaceHostInEnv(t *testing.T) {
 	want := []string{
 		"HTTP_PROXY=http://moat:token@192.168.72.1:19080",
 		"HTTPS_PROXY=http://moat:token@192.168.72.1:19080",
-		"NO_PROXY=192.168.72.1,buildkit",
+		"NO_PROXY=192.168.72.1,buildkit,localhost,127.0.0.1",
 		"ANTHROPIC_BASE_URL=http://192.168.72.1:19080/relay/anthropic",
 		"MOAT_SSH_TCP_ADDR=192.168.72.1:62098",
 		"SOME_UNRELATED_VAR=hello",
@@ -1646,10 +1646,7 @@ func TestBuildRegisterRequest_HostGatewayEmpty(t *testing.T) {
 // for the host gateway env var (NOT in NO_PROXY). This ensures host traffic
 // flows through the proxy for policy enforcement.
 func TestBuildProxyEnv_MoatHostnames(t *testing.T) {
-	env := buildProxyEnv("test-token", 19080)
-
-	// Helper to find env var value
-	findEnv := func(prefix string) string {
+	findEnv := func(env []string, prefix string) string {
 		for _, e := range env {
 			if strings.HasPrefix(e, prefix) {
 				return strings.TrimPrefix(e, prefix)
@@ -1658,36 +1655,55 @@ func TestBuildProxyEnv_MoatHostnames(t *testing.T) {
 		return ""
 	}
 
-	// Proxy URL must use moat-proxy hostname
-	httpProxy := findEnv("HTTP_PROXY=")
+	t.Run("host-network mode excludes loopback", func(t *testing.T) {
+		env := buildProxyEnv("test-token", 19080, true)
+
+		noProxy := findEnv(env, "NO_PROXY=")
+		if !strings.Contains(noProxy, "moat-proxy") {
+			t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
+		}
+		if strings.Contains(noProxy, "moat-host") {
+			t.Errorf("NO_PROXY must NOT contain moat-host, got %q", noProxy)
+		}
+		if strings.Contains(noProxy, "localhost") {
+			t.Errorf("NO_PROXY must NOT contain localhost in host-network mode, got %q", noProxy)
+		}
+		if strings.Contains(noProxy, "127.0.0.1") {
+			t.Errorf("NO_PROXY must NOT contain 127.0.0.1 in host-network mode, got %q", noProxy)
+		}
+	})
+
+	t.Run("bridge mode includes loopback", func(t *testing.T) {
+		env := buildProxyEnv("test-token", 19080, false)
+
+		noProxy := findEnv(env, "NO_PROXY=")
+		if !strings.Contains(noProxy, "moat-proxy") {
+			t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
+		}
+		if strings.Contains(noProxy, "moat-host") {
+			t.Errorf("NO_PROXY must NOT contain moat-host, got %q", noProxy)
+		}
+		if !strings.Contains(noProxy, "localhost") {
+			t.Errorf("NO_PROXY should contain localhost in bridge mode, got %q", noProxy)
+		}
+		if !strings.Contains(noProxy, "127.0.0.1") {
+			t.Errorf("NO_PROXY should contain 127.0.0.1 in bridge mode, got %q", noProxy)
+		}
+	})
+
+	// Common assertions across both modes
+	env := buildProxyEnv("test-token", 19080, false)
+
+	httpProxy := findEnv(env, "HTTP_PROXY=")
 	if !strings.Contains(httpProxy, "moat-proxy:19080") {
 		t.Errorf("HTTP_PROXY should use moat-proxy hostname, got %q", httpProxy)
 	}
-	httpsProxy := findEnv("HTTPS_PROXY=")
+	httpsProxy := findEnv(env, "HTTPS_PROXY=")
 	if !strings.Contains(httpsProxy, "moat-proxy:19080") {
 		t.Errorf("HTTPS_PROXY should use moat-proxy hostname, got %q", httpsProxy)
 	}
 
-	// NO_PROXY must include moat-proxy (so proxy doesn't proxy itself)
-	// but must NOT include moat-host (so host traffic goes through proxy)
-	// and must NOT include localhost/127.0.0.1 (so loopback traffic in
-	// host-network mode goes through proxy for network.host enforcement)
-	noProxy := findEnv("NO_PROXY=")
-	if !strings.Contains(noProxy, "moat-proxy") {
-		t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
-	}
-	if strings.Contains(noProxy, "moat-host") {
-		t.Errorf("NO_PROXY must NOT contain moat-host (host traffic must go through proxy), got %q", noProxy)
-	}
-	if strings.Contains(noProxy, "localhost") {
-		t.Errorf("NO_PROXY must NOT contain localhost (loopback bypass under host networking), got %q", noProxy)
-	}
-	if strings.Contains(noProxy, "127.0.0.1") {
-		t.Errorf("NO_PROXY must NOT contain 127.0.0.1 (loopback bypass under host networking), got %q", noProxy)
-	}
-
-	// MOAT_HOST_GATEWAY must be moat-host
-	hostGW := findEnv("MOAT_HOST_GATEWAY=")
+	hostGW := findEnv(env, "MOAT_HOST_GATEWAY=")
 	if hostGW != "moat-host" {
 		t.Errorf("MOAT_HOST_GATEWAY = %q, want %q", hostGW, "moat-host")
 	}
@@ -1695,7 +1711,7 @@ func TestBuildProxyEnv_MoatHostnames(t *testing.T) {
 
 // TestBuildProxyEnv_AuthTokenInURL verifies the proxy URL includes auth credentials.
 func TestBuildProxyEnv_AuthTokenInURL(t *testing.T) {
-	env := buildProxyEnv("secret-token", 19080)
+	env := buildProxyEnv("secret-token", 19080, false)
 
 	for _, e := range env {
 		if strings.HasPrefix(e, "HTTP_PROXY=") {
@@ -1712,7 +1728,7 @@ func TestBuildProxyEnv_AuthTokenInURL(t *testing.T) {
 
 // TestBuildProxyEnv_NoToken verifies proxy URL without auth token.
 func TestBuildProxyEnv_NoToken(t *testing.T) {
-	env := buildProxyEnv("", 19080)
+	env := buildProxyEnv("", 19080, false)
 
 	for _, e := range env {
 		if strings.HasPrefix(e, "HTTP_PROXY=") {
@@ -1731,7 +1747,7 @@ func TestBuildProxyEnv_NoToken(t *testing.T) {
 // package-level syntheticProxyHost constant internally and accepts
 // syntheticHostGateway as the MOAT_HOST_GATEWAY value.
 func TestBuildProxyEnv_UsesConstants(t *testing.T) {
-	env := buildProxyEnv("tok", 8080)
+	env := buildProxyEnv("tok", 8080, false)
 
 	findEnv := func(prefix string) string {
 		for _, e := range env {
