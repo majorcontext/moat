@@ -562,12 +562,19 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 			IP6T=""
 		fi
 		if [ -n "$IP6T" ]; then
-			$IP6T -w -F OUTPUT 2>/dev/null || true
-			$IP6T -w -A OUTPUT -o lo -j ACCEPT
-			$IP6T -w -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-			$IP6T -w -A OUTPUT -p udp --dport 53 -j ACCEPT
-			$IP6T -w -A OUTPUT -p tcp --dport %d -j ACCEPT
-			$IP6T -w -A OUTPUT -j DROP
+			# Use -w 5 (5-second timeout) instead of bare -w (wait forever).
+			# On some CI hosts the ip6_tables kernel module is absent, causing
+			# ip6tables to block indefinitely on the xtables lock.
+			if $IP6T -w 5 -F OUTPUT 2>/dev/null &&
+			   $IP6T -w 5 -A OUTPUT -o lo -j ACCEPT &&
+			   $IP6T -w 5 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT &&
+			   $IP6T -w 5 -A OUTPUT -p udp --dport 53 -j ACCEPT &&
+			   $IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&
+			   $IP6T -w 5 -A OUTPUT -j DROP; then
+				: # IPv6 firewall installed
+			else
+				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
+			fi
 		fi
 	`, proxyPort, proxyPort)
 
@@ -604,8 +611,8 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	}
 
 	// Surface ip6tables warnings so they appear in moat's diagnostic logs.
-	if strings.Contains(output.String(), "WARN: ip6tables not found") {
-		log.Warn("ip6tables not found in container — IPv6 egress is not firewalled", "container", containerID)
+	if strings.Contains(output.String(), "WARN: ip6tables") {
+		log.Warn("ip6tables unavailable in container — IPv6 egress is not firewalled", "container", containerID)
 	}
 
 	return nil
