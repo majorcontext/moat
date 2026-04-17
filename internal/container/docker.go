@@ -573,6 +573,9 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 			   $IP6T -w 5 -A OUTPUT -j DROP; then
 				: # IPv6 firewall installed
 			else
+				# Flush partial rules so the container isn't left with an
+				# incomplete policy (e.g. ACCEPT lo without a final DROP).
+				$IP6T -w 5 -F OUTPUT 2>/dev/null || true
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
