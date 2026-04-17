@@ -630,6 +630,20 @@ func TestAddProxyPortForLoopback_MoatHost(t *testing.T) {
 	}
 }
 
+func TestAddProxyPortForLoopback_AlreadyPresentAmongOthers(t *testing.T) {
+	// Verify dedup works when the proxy port is already in a multi-port
+	// AllowedHostPorts slice — existing ports must be preserved.
+	rc := NewRunContext("run_dedup_multi_test")
+	rc.HostGateway = "127.0.0.1"
+	rc.AllowedHostPorts = []int{5432, 12345, 8080}
+
+	addProxyPortForLoopback(rc, 12345)
+
+	if len(rc.AllowedHostPorts) != 3 {
+		t.Fatalf("expected 3 ports (no duplicate), got %d: %v", len(rc.AllowedHostPorts), rc.AllowedHostPorts)
+	}
+}
+
 func TestAddProxyPortForLoopback_EmptyGateway(t *testing.T) {
 	rc := NewRunContext("run_empty_test")
 	rc.AllowedHostPorts = []int{8288}
