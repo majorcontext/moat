@@ -101,16 +101,28 @@ jobs:
           docker pull golang:1.22
           docker pull ubuntu:22.04
 
-      - name: Pre-build moat binary
+      - name: Pre-build moat binary and test binary
         run: |
           # Build the moat binary ahead of time so TestMain doesn't need to
           # compile it (which produces no output and can appear to hang).
           mkdir -p /tmp/moat-e2e-bin
           go build -o /tmp/moat-e2e-bin/moat github.com/majorcontext/moat/cmd/moat
           echo "MOAT_EXECUTABLE=/tmp/moat-e2e-bin/moat" >> "$GITHUB_ENV"
+          # Pre-compile the test binary so `go test` doesn't hang during
+          # compilation (which produces no output and bypasses -timeout).
+          go test -tags=e2e -c -o /tmp/moat-e2e-bin/e2e.test ./internal/e2e/
 
       - name: Run E2E tests
-        run: go test -tags=e2e -v -timeout=15m -p=1 ./internal/e2e/
+        run: |
+          /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m 2>&1 | tee /tmp/e2e-output.log
         env:
           MOAT_DISABLE_BUILDKIT: "1"
           MOAT_NO_SANDBOX: "1"
+
+      - name: Upload E2E test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-logs
+          path: /tmp/e2e-output.log
+          retention-days: 7
