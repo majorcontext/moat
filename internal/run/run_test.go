@@ -2,7 +2,6 @@ package run
 
 import (
 	"crypto/rand"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -410,97 +409,37 @@ func TestValidateMCPGrants(t *testing.T) {
 	}
 }
 
-// TestProxyURLCircularPrevention tests that NO_PROXY is correctly set to prevent
-// circular proxy issues when the proxy relay connects to MCP servers.
-// This is a regression test for the critical bug where MCP relay requests would
-// loop back through the proxy.
-func TestProxyURLCircularPrevention(t *testing.T) {
-	tests := []struct {
-		name          string
-		proxyURL      string
-		expectedHost  string
-		shouldContain []string
-	}{
-		{
-			name:         "localhost proxy",
-			proxyURL:     "http://127.0.0.1:8888",
-			expectedHost: "127.0.0.1:8888",
-			shouldContain: []string{
-				"127.0.0.1:8888",
-				"localhost",
-				"127.0.0.1",
-			},
-		},
-		{
-			name:         "host IP proxy",
-			proxyURL:     "http://192.168.1.100:9999",
-			expectedHost: "192.168.1.100:9999",
-			shouldContain: []string{
-				"192.168.1.100:9999",
-				"localhost",
-				"127.0.0.1",
-			},
-		},
-		{
-			name:         "proxy with auth",
-			proxyURL:     "http://moat:token123@10.0.0.50:8080",
-			expectedHost: "10.0.0.50:8080",
-			shouldContain: []string{
-				"10.0.0.50:8080",
-				"localhost",
-				"127.0.0.1",
-			},
-		},
+// TestBuildProxyEnv_LoopbackNotBypassed verifies that under host-network mode,
+// loopback addresses are NOT in NO_PROXY (so they flow through the proxy for
+// network.host enforcement), while moat-proxy IS in NO_PROXY (preventing
+// infinite proxy loops).
+func TestBuildProxyEnv_LoopbackNotBypassed(t *testing.T) {
+	env := buildProxyEnv("test-token", 19080, true)
+
+	var noProxy string
+	for _, e := range env {
+		if strings.HasPrefix(e, "NO_PROXY=") {
+			noProxy = strings.TrimPrefix(e, "NO_PROXY=")
+			break
+		}
+	}
+	if noProxy == "" {
+		t.Fatal("NO_PROXY not found in env")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Parse the proxy URL to get the host
-			u, err := url.Parse(tt.proxyURL)
-			if err != nil {
-				t.Fatalf("failed to parse proxy URL: %v", err)
-			}
+	// moat-proxy must be in NO_PROXY so relay traffic reaches the proxy
+	// directly without looping through the CONNECT tunnel.
+	if !strings.Contains(noProxy, "moat-proxy") {
+		t.Errorf("NO_PROXY should contain moat-proxy, got %q", noProxy)
+	}
 
-			// Build NO_PROXY value (simulating manager.go logic)
-			hostAddr := u.Host
-			noProxy := hostAddr + ",localhost,127.0.0.1"
-
-			// Verify the host is extracted correctly
-			if hostAddr != tt.expectedHost {
-				t.Errorf("hostAddr = %q, want %q", hostAddr, tt.expectedHost)
-			}
-
-			// Verify NO_PROXY contains all expected values
-			for _, expected := range tt.shouldContain {
-				if !strings.Contains(noProxy, expected) {
-					t.Errorf("NO_PROXY should contain %q, got: %s", expected, noProxy)
-				}
-			}
-
-			// Verify NO_PROXY would prevent proxy for localhost
-			noproxyList := strings.Split(noProxy, ",")
-			hasLocalhost := false
-			for _, entry := range noproxyList {
-				if strings.TrimSpace(entry) == "localhost" {
-					hasLocalhost = true
-					break
-				}
-			}
-			if !hasLocalhost {
-				t.Error("NO_PROXY should include localhost to prevent circular proxy")
-			}
-
-			// Verify NO_PROXY would prevent proxy for the proxy's own address
-			hasProxyHost := false
-			for _, entry := range noproxyList {
-				if strings.TrimSpace(entry) == hostAddr {
-					hasProxyHost = true
-					break
-				}
-			}
-			if !hasProxyHost {
-				t.Errorf("NO_PROXY should include proxy's own address (%s) to prevent circular proxy", hostAddr)
-			}
-		})
+	// In host-network mode, localhost and 127.0.0.1 must NOT be in NO_PROXY
+	// because the container shares the host loopback — excluding them lets
+	// container processes bypass network.host enforcement.
+	if strings.Contains(noProxy, "localhost") {
+		t.Errorf("NO_PROXY must NOT contain localhost in host-network mode, got %q", noProxy)
+	}
+	if strings.Contains(noProxy, "127.0.0.1") {
+		t.Errorf("NO_PROXY must NOT contain 127.0.0.1 in host-network mode, got %q", noProxy)
 	}
 }

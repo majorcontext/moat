@@ -983,7 +983,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// Build proxy environment using synthetic hostnames on all runtimes.
 		// Docker resolves them via --add-host; Apple via moat-init.sh writing
 		// to /etc/hosts (MOAT_EXTRA_HOSTS, set below).
-		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort)
+		// Host-network mode is used on Docker Linux when no ports need publishing.
+		// In that mode, the container shares the host loopback, so localhost
+		// must NOT be in NO_PROXY (otherwise it bypasses network.host enforcement).
+		isHostNet := m.defaultRuntime().SupportsHostNetwork() && (opts.Config == nil || len(opts.Config.Ports) == 0)
+		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
 		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
 		// On runtimes without --add-host (Apple), pass the host map via env so
@@ -3965,7 +3969,18 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 // that relay/AWS traffic connects directly without going through the CONNECT
 // tunnel, while syntheticHostGateway is intentionally NOT in NO_PROXY so
 // host-bound traffic flows through the proxy for network policy enforcement.
-func buildProxyEnv(authToken string, proxyPort int) []string {
+//
+// In host-network mode (Docker on Linux without ports), localhost and
+// 127.0.0.1 are intentionally NOT in NO_PROXY because the container
+// shares the host loopback — excluding them would let container processes
+// bypass the proxy (and network.host enforcement) by connecting to
+// localhost:<port> directly.
+//
+// In bridge/Apple mode the container has an isolated network namespace,
+// so its localhost is private. Keeping loopback in NO_PROXY lets
+// intra-container HTTP (e.g., a dev server on localhost:3000 consumed by
+// the same container) work without routing through the proxy.
+func buildProxyEnv(authToken string, proxyPort int, hostNetworkMode bool) []string {
 	proxyAddr := syntheticProxyHost + ":" + strconv.Itoa(proxyPort)
 	var proxyURL string
 	if authToken != "" {
@@ -3974,7 +3989,13 @@ func buildProxyEnv(authToken string, proxyPort int) []string {
 		proxyURL = "http://" + proxyAddr
 	}
 
-	noProxy := syntheticProxyHost + ",localhost,127.0.0.1,buildkit"
+	noProxy := syntheticProxyHost + ",buildkit"
+	if !hostNetworkMode {
+		// In bridge/Apple mode the container's loopback is isolated from
+		// the host, so keep localhost out of the proxy to allow
+		// intra-container HTTP traffic.
+		noProxy += ",localhost,127.0.0.1"
+	}
 
 	return []string{
 		"HTTP_PROXY=" + proxyURL,
