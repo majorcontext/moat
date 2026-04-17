@@ -3965,6 +3965,11 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 // that relay/AWS traffic connects directly without going through the CONNECT
 // tunnel, while syntheticHostGateway is intentionally NOT in NO_PROXY so
 // host-bound traffic flows through the proxy for network policy enforcement.
+//
+// localhost and 127.0.0.1 are intentionally NOT in NO_PROXY. Under Docker
+// host-network mode the container shares the host loopback, so excluding
+// them would let container processes bypass the proxy (and network.host
+// enforcement) by connecting to localhost:<port> directly.
 func buildProxyEnv(authToken string, proxyPort int) []string {
 	proxyAddr := syntheticProxyHost + ":" + strconv.Itoa(proxyPort)
 	var proxyURL string
@@ -3974,7 +3979,7 @@ func buildProxyEnv(authToken string, proxyPort int) []string {
 		proxyURL = "http://" + proxyAddr
 	}
 
-	noProxy := syntheticProxyHost + ",localhost,127.0.0.1,buildkit"
+	noProxy := syntheticProxyHost + ",buildkit"
 
 	return []string{
 		"HTTP_PROXY=" + proxyURL,

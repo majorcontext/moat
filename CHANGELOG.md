@@ -12,6 +12,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Fixed
 
+- Fix `network.host` bypass via raw loopback addresses — previously, containers running under Docker host-network mode could bypass `network.host` enforcement by connecting to `localhost` or `127.0.0.1` directly, since those addresses were in `NO_PROXY` and skipped the proxy entirely. Loopback addresses are no longer excluded from proxy routing. ([#327](https://github.com/majorcontext/moat/pull/327))
 - Fix ip6tables hanging indefinitely on hosts without the `ip6_tables` kernel module — previously, `ip6tables -w` (wait forever) blocked the firewall setup, hanging the container start and E2E tests on CI. Now uses a 5-second timeout and treats ip6tables failure as non-fatal with partial-rule cleanup. ([#325](https://github.com/majorcontext/moat/pull/325))
 
 ## v0.5.0 — 2026-04-07
