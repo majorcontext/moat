@@ -115,13 +115,37 @@ jobs:
       - name: Run E2E tests
         timeout-minutes: 25
         run: |
-          # Use shell timeout as primary kill mechanism — GitHub Actions
-          # timeout-minutes is unreliable when processes block in kernel space.
-          # SIGTERM at 18m, SIGKILL at 18m+30s. The Go -test.timeout=15m should
-          # fire first with goroutine stacks, but this ensures we never hang.
-          timeout --signal=TERM --kill-after=30s 18m \
-            /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m 2>&1 \
-            | tee /tmp/e2e-output.log || true
+          # Run test in its own process group (set -m). On timeout, kill the
+          # process group and all Docker containers to ensure the step exits.
+          # Previous approaches that failed:
+          #   - tee pipe: Docker children held pipe FDs open indefinitely
+          #   - timeout(1): only kills direct child, not grandchildren
+          #   - setsid: $! captures setsid PID, not the test; poll loop breaks
+          set +em
+          /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m \
+            > /tmp/e2e-output.log 2>&1 &
+          TEST_PID=$!
+          echo "Test PID: $TEST_PID"
+          # Poll for completion with 18-minute deadline
+          SECONDS=0
+          while kill -0 $TEST_PID 2>/dev/null; do
+            if [ $SECONDS -ge 1080 ]; then
+              echo "::warning::Test timed out after 18 minutes"
+              # Kill test process tree
+              pkill -KILL -P $TEST_PID 2>/dev/null || true
+              kill -KILL $TEST_PID 2>/dev/null || true
+              # Kill any containers the tests may have left running
+              docker ps -q | xargs -r docker kill 2>/dev/null || true
+              sleep 2
+              break
+            fi
+            sleep 5
+          done
+          wait $TEST_PID 2>/dev/null
+          EC=$?
+          echo "Test exited with code $EC"
+          echo "---last 20 lines of output---"
+          tail -20 /tmp/e2e-output.log
         env:
           MOAT_DISABLE_BUILDKIT: "1"
           MOAT_NO_SANDBOX: "1"
