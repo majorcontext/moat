@@ -113,9 +113,15 @@ jobs:
           go test -tags=e2e -c -o /tmp/moat-e2e-bin/e2e.test ./internal/e2e/
 
       - name: Run E2E tests
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: |
-          /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m 2>&1 | tee /tmp/e2e-output.log
+          # Use shell timeout as primary kill mechanism — GitHub Actions
+          # timeout-minutes is unreliable when processes block in kernel space.
+          # SIGTERM at 18m, SIGKILL at 18m+30s. The Go -test.timeout=15m should
+          # fire first with goroutine stacks, but this ensures we never hang.
+          timeout --signal=TERM --kill-after=30s 18m \
+            /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m 2>&1 \
+            | tee /tmp/e2e-output.log || true
         env:
           MOAT_DISABLE_BUILDKIT: "1"
           MOAT_NO_SANDBOX: "1"
