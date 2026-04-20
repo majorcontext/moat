@@ -75,7 +75,7 @@ The credential-injecting proxy has different security configurations per runtime
 - **Docker:** Proxy binds to `127.0.0.1` (localhost only). Containers reach it via `host.docker.internal` or host network mode.
 - **Apple containers:** Proxy binds to `0.0.0.0` (all interfaces) because containers access host via gateway IP. Security is maintained via per-run cryptographic token authentication (32 bytes from `crypto/rand`). Token is passed to container in `HTTP_PROXY=http://moat:token@host:port` URL format.
 
-See [`internal/proxy/proxy.go`](internal/proxy/proxy.go) for the full security model documentation.
+See [`proxy.go` in the gatekeeper module](https://github.com/majorcontext/gatekeeper/blob/main/proxy/proxy.go) for the full security model documentation.
 
 ## Manual Testing
 

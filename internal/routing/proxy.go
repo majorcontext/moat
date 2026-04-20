@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/gatekeeper/proxy"
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/proxy"
 )
 
 // ReverseProxy routes requests based on Host header to container services.

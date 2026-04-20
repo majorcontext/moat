@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/majorcontext/moat/internal/proxy"
+	"github.com/majorcontext/gatekeeper/proxy"
 )
 
 // Lifecycle manages the shared reverse proxy lifecycle.

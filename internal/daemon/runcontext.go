@@ -10,11 +10,11 @@ import (
 
 	keeplib "github.com/majorcontext/keep"
 
+	"github.com/majorcontext/gatekeeper/proxy"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/netrules"
-	"github.com/majorcontext/moat/internal/proxy"
 )
 
 // CredentialEntry holds a credential header for proxy injection.

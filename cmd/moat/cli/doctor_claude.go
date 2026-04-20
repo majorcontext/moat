@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/gatekeeper/proxy"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
-	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/ui"

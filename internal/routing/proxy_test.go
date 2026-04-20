@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/majorcontext/moat/internal/proxy"
+	"github.com/majorcontext/gatekeeper/proxy"
 )
 
 func TestReverseProxy(t *testing.T) {
