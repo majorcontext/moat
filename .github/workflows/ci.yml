@@ -112,13 +112,27 @@ jobs:
           # compilation (which produces no output and bypasses -timeout).
           go test -tags=e2e -c -o /tmp/moat-e2e-bin/e2e.test ./internal/e2e/
 
-      - name: Run E2E tests
+      - name: Run E2E tests (bisect – host traffic tests only)
         run: |
-          /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=15m \
-            -test.run TestLogsAreCaptured \
-            > /tmp/e2e-output.log 2>&1 || true
-          echo "Test exited with code $?"
-          cat /tmp/e2e-output.log
+          /tmp/moat-e2e-bin/e2e.test -test.v -test.timeout=10m \
+            -test.run "TestHostTraffic" \
+            > /tmp/e2e-output.log 2>&1 &
+          TEST_PID=$!
+          # Poll for completion with hard wall-clock cutoff
+          SECONDS=0
+          while kill -0 $TEST_PID 2>/dev/null; do
+            if [ $SECONDS -ge 720 ]; then
+              echo "::error::Tests exceeded 12-minute wall-clock limit, killing"
+              kill -9 $TEST_PID 2>/dev/null || true
+              sleep 2
+              break
+            fi
+            sleep 10
+          done
+          wait $TEST_PID 2>/dev/null
+          EXIT_CODE=$?
+          echo "Test exited with code $EXIT_CODE"
+          cat /tmp/e2e-output.log || echo "(no output file)"
         env:
           MOAT_DISABLE_BUILDKIT: "1"
           MOAT_NO_SANDBOX: "1"
