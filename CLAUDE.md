@@ -34,7 +34,6 @@ internal/
     claude/            Claude Code CLI, grants, and config generation
     codex/             Codex CLI, grants, and config generation
     github/            GitHub token management and refresh
-  proxy/             TLS-intercepting proxy (now in github.com/majorcontext/gatekeeper/proxy)
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
   ui/                TTY-aware colored output and formatting helpers
