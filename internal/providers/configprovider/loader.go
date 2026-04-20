@@ -10,11 +10,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/majorcontext/gatekeeper/proxy"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
-	"github.com/majorcontext/moat/internal/proxy"
 )
 
 //go:embed defaults/*.yaml

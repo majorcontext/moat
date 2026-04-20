@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/majorcontext/gatekeeper/proxy"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"

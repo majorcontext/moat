@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Changed
+
+- **Gatekeeper extracted to standalone module** — `internal/proxy/` and `cmd/gatekeeper/` have moved to [github.com/majorcontext/gatekeeper](https://github.com/majorcontext/gatekeeper). The `ghcr.io/majorcontext/moat-gatekeeper` image is no longer published from this repository. ([#333](https://github.com/majorcontext/moat/pull/333))
+
 ### Security
 
 - **IPv6 egress firewall** — containers on dual-stack hosts could bypass `network.policy: strict` by using IPv6 addresses (e.g. AAAA DNS records). The firewall now installs ip6tables rules mirroring the existing iptables rules. No user action required; the fix applies automatically on upgrade. If ip6tables is unavailable in the container image, a diagnostic warning is logged. ([#324](https://github.com/majorcontext/moat/pull/324))

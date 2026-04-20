@@ -34,7 +34,7 @@ internal/
     claude/            Claude Code CLI, grants, and config generation
     codex/             Codex CLI, grants, and config generation
     github/            GitHub token management and refresh
-  proxy/             TLS-intercepting proxy for credential injection, MCP relay, and routing
+  proxy/             TLS-intercepting proxy (now in github.com/majorcontext/gatekeeper/proxy)
   run/               Run lifecycle management (create/start/stop/destroy)
   storage/           Per-run storage for logs, traces, network requests
   ui/                TTY-aware colored output and formatting helpers
@@ -65,7 +65,7 @@ The credential-injecting proxy runs as a shared daemon process that outlives the
 - **Lock file:** `~/.moat/proxy/daemon.lock` records PID, ports, and build commit.
 - **Backwards compatibility:** The daemon API (`internal/daemon/api.go`) **must remain backwards-compatible across binary versions**. The daemon process outlives the CLI that spawned it, so older daemons serve newer CLIs and vice versa. Rules: additive-only fields, no removed/renamed fields, new endpoints must handle 404 gracefully. See the package doc in `api.go`.
 
-See `internal/proxy/proxy.go` and `internal/daemon/` for implementation.
+See `github.com/majorcontext/gatekeeper/proxy` and `internal/daemon/` for implementation.
 
 ### MCP (Model Context Protocol) Support
 
@@ -83,7 +83,7 @@ The proxy relay pattern works around Claude Code's HTTP client not respecting `H
 - Circular proxy prevented via `NO_PROXY` env var and `http.Transport{Proxy: nil}`
 
 **Key Implementation Files:**
-- `internal/proxy/mcp.go` - Relay handler and credential injection
+- `github.com/majorcontext/gatekeeper/proxy` - Relay handler and credential injection
 - `internal/providers/claude/config.go` - `.claude.json` generation
 - `internal/run/manager.go` - MCP setup during container creation
 - `internal/config/config.go` - `MCPServerConfig` (remote) and `MCPServerSpec` (local) types
