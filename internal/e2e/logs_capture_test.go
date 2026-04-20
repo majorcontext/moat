@@ -224,9 +224,7 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 // This test is skipped in CI because container startup timing is unpredictable
 // on shared runners, making it inherently flaky.
 func TestLogsCapturedAfterStop(t *testing.T) {
-	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Skip("Skipping: timing-sensitive test is flaky in CI")
-	}
+	skipIfCI(t, "timing-sensitive test is flaky in CI")
 
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
