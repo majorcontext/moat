@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,22 @@ import (
 //
 // All tests use a real HTTP server on the host and verify reachability from
 // inside a container. They require grants so the proxy daemon is active.
+//
+// NOTE: These tests are skipped on CI (GitHub Actions) because they cause the
+// test process to enter kernel D-state (uninterruptible sleep), making it
+// unkillable and freezing the runner. The root cause appears to be related to
+// Docker bridge networking + host-gateway + proxy interactions on the CI host
+// kernel. Tracked in https://github.com/majorcontext/moat/issues/315.
 // =============================================================================
+
+// skipHostTrafficOnCI skips host traffic tests on CI environments where they
+// freeze the runner. See comment block above.
+func skipHostTrafficOnCI(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping: host traffic tests freeze CI runner — see #315")
+	}
+}
 
 // startHostHTTPServer starts an HTTP server on a random port on 0.0.0.0.
 // Returns the listener and the port. The server responds "host-ok" to any request.
@@ -77,6 +93,7 @@ func hostTrafficCmd(host string, port int, label string) string {
 // host service when network.host does not include the port.
 // The container uses $MOAT_HOST_GATEWAY to address the host.
 func TestHostTrafficBlockedByDefault(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
@@ -162,6 +179,7 @@ func TestHostTrafficBlockedByDefault(t *testing.T) {
 // TestHostTrafficAllowedWithNetworkHost verifies that a container CAN reach a
 // host service when the port is in network.host.
 func TestHostTrafficAllowedWithNetworkHost(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
@@ -221,6 +239,7 @@ func TestHostTrafficAllowedWithNetworkHost(t *testing.T) {
 // TestHostTrafficWrongPortBlocked verifies that allowing one port does not
 // open access to a different port on the host.
 func TestHostTrafficWrongPortBlocked(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
@@ -284,6 +303,7 @@ func TestHostTrafficWrongPortBlocked(t *testing.T) {
 // gateway address is whitelisted in network.rules, traffic to it should be
 // blocked unless the port is in network.host.
 func TestHostTrafficStrictPolicyWithRules(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
@@ -359,6 +379,7 @@ func TestHostTrafficStrictPolicyWithRules(t *testing.T) {
 // TestHostTrafficMultiplePorts verifies that multiple ports can be allowed
 // simultaneously via network.host.
 func TestHostTrafficMultiplePorts(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
@@ -430,6 +451,7 @@ func TestHostTrafficMultiplePorts(t *testing.T) {
 // This is a regression test — if MOAT_HOST_GATEWAY is in NO_PROXY, the
 // proxy's host-gateway blocking is completely bypassed.
 func TestHostTrafficProxyBypass(t *testing.T) {
+	skipHostTrafficOnCI(t)
 	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
