@@ -183,6 +183,15 @@ func killTestDaemon() {
 	daemon.RemoveLockFile(daemonDir)
 }
 
+// skipIfCI skips the test when running in a CI environment (GitHub Actions or
+// any system that sets CI=true).
+func skipIfCI(t *testing.T, reason string) {
+	t.Helper()
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skipf("Skipping on CI: %s", reason)
+	}
+}
+
 // skipIfNoAppleContainer skips the test if Apple container is not available.
 // Apple container requires macOS 15+ on Apple Silicon.
 func skipIfNoAppleContainer(t *testing.T) {
