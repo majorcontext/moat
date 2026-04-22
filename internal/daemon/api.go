@@ -56,8 +56,9 @@ type RemoveHeaderSpec struct {
 // Since transformers are Go functions (not serializable), this spec allows
 // the daemon to reconstruct them from well-known kinds.
 type TransformerSpec struct {
-	Host string `json:"host"`
-	Kind string `json:"kind"` // "oauth-endpoint-workaround" or "response-scrub"
+	Host     string            `json:"host"`
+	Kind     string            `json:"kind"`               // "oauth-endpoint-workaround" or "response-scrub"
+	Metadata map[string]string `json:"metadata,omitempty"` // Optional metadata for transformer reconstruction
 }
 
 // RegisterRequest is sent to POST /v1/runs.

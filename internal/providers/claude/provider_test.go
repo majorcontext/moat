@@ -1,8 +1,11 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -215,13 +218,10 @@ func TestOAuthProvider_ContainerEnv(t *testing.T) {
 
 	env := p.ContainerEnv(cred)
 
-	// OAuth should set CLAUDE_CODE_OAUTH_TOKEN with a placeholder
-	if len(env) != 1 {
-		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 1", len(env))
-		return
-	}
-	if env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
-		t.Errorf("env[0] = %q, want %q", env[0], "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder)
+	// OAuth credentials rely on .credentials.json, not env vars.
+	// ContainerEnv should return nil for OAuth.
+	if len(env) != 0 {
+		t.Errorf("ContainerEnv() for OAuth returned %d vars, want 0", len(env))
 	}
 }
 
@@ -249,11 +249,11 @@ func TestContainerEnvForCredential(t *testing.T) {
 		}
 	})
 
-	t.Run("claude provider uses CLAUDE_CODE_OAUTH_TOKEN", func(t *testing.T) {
+	t.Run("claude provider returns nil (uses .credentials.json)", func(t *testing.T) {
 		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc123"}
 		env := containerEnvForCredential(cred)
-		if len(env) != 1 || env[0] != "CLAUDE_CODE_OAUTH_TOKEN="+ProxyInjectedPlaceholder {
-			t.Errorf("env = %v, want CLAUDE_CODE_OAUTH_TOKEN placeholder", env)
+		if len(env) != 0 {
+			t.Errorf("env = %v, want empty (OAuth uses .credentials.json)", env)
 		}
 	})
 
@@ -651,8 +651,40 @@ func TestWriteCredentialsFile(t *testing.T) {
 		if creds.ClaudeAiOauth == nil {
 			t.Fatal("ClaudeAiOauth should be present")
 		}
-		if creds.ClaudeAiOauth.AccessToken != ProxyInjectedPlaceholder {
-			t.Errorf("AccessToken = %q, want %q", creds.ClaudeAiOauth.AccessToken, ProxyInjectedPlaceholder)
+		if creds.ClaudeAiOauth.AccessToken != credential.ClaudeOAuthPlaceholder {
+			t.Errorf("AccessToken = %q, want %q", creds.ClaudeAiOauth.AccessToken, credential.ClaudeOAuthPlaceholder)
+		}
+	})
+
+	t.Run("zero ExpiresAt uses far-future expiry", func(t *testing.T) {
+		stagingDir := t.TempDir()
+		cred := &provider.Credential{
+			Provider: "claude",
+			Token:    "sk-ant-oat01-abc123",
+			// ExpiresAt intentionally zero — simulates setup-token grants
+		}
+
+		err := WriteCredentialsFile(cred, stagingDir)
+		if err != nil {
+			t.Fatalf("WriteCredentialsFile() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(stagingDir, ".credentials.json"))
+		if err != nil {
+			t.Fatalf("failed to read credentials file: %v", err)
+		}
+
+		var creds oauthCredentials
+		if err := json.Unmarshal(data, &creds); err != nil {
+			t.Fatalf("failed to parse credentials file: %v", err)
+		}
+
+		if creds.ClaudeAiOauth == nil {
+			t.Fatal("ClaudeAiOauth should be present")
+		}
+		// expiresAt must be in the future, not the year 0001
+		if creds.ClaudeAiOauth.ExpiresAt <= time.Now().UnixMilli() {
+			t.Errorf("ExpiresAt = %d, want future timestamp (got past/zero)", creds.ClaudeAiOauth.ExpiresAt)
 		}
 	})
 
@@ -1058,4 +1090,243 @@ func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
 			t.Errorf("args should be omitted or empty, got %v", args)
 		}
 	}
+}
+
+func TestBootstrapHasAccount(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"null account", `{"account":null,"features":{}}`, false},
+		{"missing account", `{"features":{}}`, false},
+		{"empty object account", `{"account":{}}`, true},
+		{"real account", `{"account":{"id":"abc","name":"Test"},"features":{}}`, true},
+		{"invalid json", `not json`, false},
+		{"empty body", ``, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bootstrapHasAccount([]byte(tt.body)); got != tt.want {
+				t.Errorf("bootstrapHasAccount() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateOAuthEndpointTransformerWithMeta_Bootstrap(t *testing.T) {
+	cachedBootstrap := `{"account":{"id":"cached"},"features":{"max_context":1000000}}`
+
+	makeReq := func(path string) *http.Request {
+		req, _ := http.NewRequest("GET", "https://api.anthropic.com"+path, nil)
+		return req
+	}
+	makeResp := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode:    status,
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(bytes.NewReader([]byte(body))),
+			ContentLength: int64(len(body)),
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+		}
+	}
+
+	t.Run("uses cached when real response has null account", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(200, `{"account":null}`) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for null-account response")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != cachedBootstrap {
+			t.Errorf("body = %s, want cached bootstrap", body)
+		}
+	})
+
+	t.Run("prefers real response when it has account data", func(t *testing.T) {
+		realBody := `{"account":{"id":"real","plan":"max"},"features":{}}`
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(200, realBody) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if transformed {
+			t.Fatal("expected transformed=false when real response has account")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != realBody {
+			t.Errorf("body = %s, want real response", body)
+		}
+	})
+
+	t.Run("uses cached when real response is non-200", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			metaKeyCachedBootstrap: cachedBootstrap,
+		})
+		inputResp := makeResp(403, `{"error":"forbidden"}`) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for non-200 response")
+		}
+		r := resp.(*http.Response)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != cachedBootstrap {
+			t.Errorf("body = %s, want cached bootstrap", body)
+		}
+	})
+
+	t.Run("no cache passes through unchanged", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		realBody := `{"account":null}`
+		origResp := makeResp(200, realBody) //nolint:bodyclose // test helper with NopCloser
+		resp, transformed := tf(makeReq("/api/bootstrap"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false with no cached bootstrap")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
+}
+
+func TestCreateOAuthResponseWithMeta(t *testing.T) {
+	readBody := func(r *http.Response) map[string]any {
+		t.Helper()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("reading body: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err != nil {
+			t.Fatalf("parsing body %q: %v", body, err)
+		}
+		return m
+	}
+
+	t.Run("profile with subscription metadata", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", map[string]string{ //nolint:bodyclose // read by readBody
+			"subscriptionType": "claude_max",
+			"rateLimitTier":    "tier4",
+		})
+		m := readBody(resp)
+		if m["subscriptionType"] != "claude_max" {
+			t.Errorf("subscriptionType = %v, want claude_max", m["subscriptionType"])
+		}
+		if m["rateLimitTier"] != "tier4" {
+			t.Errorf("rateLimitTier = %v, want tier4", m["rateLimitTier"])
+		}
+		if resp.Header.Get("X-Moat-Transformed") != "oauth-scope-workaround" {
+			t.Error("missing X-Moat-Transformed header")
+		}
+	})
+
+	t.Run("profile without metadata omits subscription fields", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if _, ok := m["subscriptionType"]; ok {
+			t.Error("subscriptionType should be omitted when empty")
+		}
+		if _, ok := m["rateLimitTier"]; ok {
+			t.Error("rateLimitTier should be omitted when empty")
+		}
+		// Core fields still present
+		if _, ok := m["id"]; !ok {
+			t.Error("id field should be present")
+		}
+	})
+
+	t.Run("usage endpoint", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/usage", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if _, ok := m["usage"]; !ok {
+			t.Error("usage field should be present")
+		}
+	})
+
+	t.Run("unknown endpoint", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/unknown", nil) //nolint:bodyclose // read by readBody
+		m := readBody(resp)
+		if len(m) != 0 {
+			t.Errorf("expected empty object, got %v", m)
+		}
+	})
+
+	t.Run("profile JSON is valid with special characters", func(t *testing.T) {
+		resp := createOAuthResponseWithMeta("/api/oauth/profile", map[string]string{ //nolint:bodyclose // read by readBody
+			"subscriptionType": `type"with<special>&chars`,
+			"rateLimitTier":    "tier1",
+		})
+		m := readBody(resp)
+		if m["subscriptionType"] != `type"with<special>&chars` {
+			t.Errorf("special chars not preserved: %v", m["subscriptionType"])
+		}
+	})
+}
+
+func TestOAuthEndpointTransformer_403Workarounds(t *testing.T) {
+	makeReq := func(path string) *http.Request {
+		req, _ := http.NewRequest("GET", "https://api.anthropic.com"+path, nil)
+		return req
+	}
+	makeResp := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode:    status,
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(bytes.NewReader([]byte(body))),
+			ContentLength: int64(len(body)),
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+		}
+	}
+
+	t.Run("transforms 403 on profile endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(map[string]string{
+			"subscriptionType": "claude_teams",
+		})
+		inputResp := makeResp(403, `{"error":"permission_error"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/oauth/profile"), inputResp)
+		if !transformed {
+			t.Fatal("expected transformed=true for 403 on profile")
+		}
+		r := resp.(*http.Response)
+		if r.StatusCode != 200 {
+			t.Errorf("status = %d, want 200", r.StatusCode)
+		}
+		body, _ := io.ReadAll(r.Body)
+		var m map[string]any
+		json.Unmarshal(body, &m) //nolint:errcheck
+		if m["subscriptionType"] != "claude_teams" {
+			t.Errorf("subscriptionType = %v, want claude_teams", m["subscriptionType"])
+		}
+	})
+
+	t.Run("passes through non-403 on profile endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		origResp := makeResp(200, `{"id":"user1"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/oauth/profile"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false for 200")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
+
+	t.Run("passes through 403 on non-workaround endpoint", func(t *testing.T) {
+		tf := CreateOAuthEndpointTransformerWithMeta(nil)
+		origResp := makeResp(403, `{"error":"forbidden"}`) //nolint:bodyclose // test helper
+		resp, transformed := tf(makeReq("/api/messages"), origResp)
+		if transformed {
+			t.Fatal("expected transformed=false for non-workaround endpoint")
+		}
+		if resp != origResp {
+			t.Error("expected original response to pass through")
+		}
+	})
 }

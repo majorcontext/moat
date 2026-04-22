@@ -40,6 +40,12 @@ func (p *OAuthProvider) Name() string {
 
 // ConfigureProxy sets up proxy headers for OAuth tokens on the Anthropic API.
 func (p *OAuthProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
+	// Enrich credential with cached bootstrap and subscription metadata from
+	// the host's OAuth token. This allows the proxy to return a full bootstrap
+	// response (with account info and feature flags) even when the setup-token
+	// can't fetch one itself.
+	enrichCredentialFromHost(cred)
+
 	// OAuth token - use Bearer auth with the real token
 	proxy.SetCredentialWithGrant("api.anthropic.com", "Authorization", "Bearer "+cred.Token, "claude")
 
@@ -53,17 +59,16 @@ func (p *OAuthProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *pro
 	// not supported."
 	proxy.AddExtraHeader("api.anthropic.com", "anthropic-beta", "oauth-2025-04-20")
 
-	// Register response transformer to handle 403s on OAuth endpoints
-	// that require scopes not available in long-lived tokens
-	proxy.AddResponseTransformer("api.anthropic.com", CreateOAuthEndpointTransformer())
+	// Register response transformer to handle OAuth endpoint workarounds
+	// and cached bootstrap responses
+	proxy.AddResponseTransformer("api.anthropic.com", CreateOAuthEndpointTransformerWithMeta(cred.Metadata))
 }
 
 // ContainerEnv returns environment variables for OAuth token injection.
 func (p *OAuthProvider) ContainerEnv(cred *provider.Credential) []string {
-	// Set CLAUDE_CODE_OAUTH_TOKEN with a placeholder.
-	// This tells Claude Code it's authenticated (skips login prompts).
-	// The real token is injected by the proxy at the network layer.
-	return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+	// OAuth credentials rely on .credentials.json instead of env var.
+	// See containerEnvForCredential() in agent.go for explanation.
+	return nil
 }
 
 // ContainerMounts returns mounts needed for Claude Code.
@@ -136,10 +141,11 @@ func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential
 
 	switch cred.Provider {
 	case "claude":
+		enrichCredentialFromHost(cred)
 		p.SetCredentialWithGrant(host, "Authorization", "Bearer "+cred.Token, "claude")
 		p.RemoveRequestHeader(host, "x-api-key")
 		p.AddExtraHeader(host, "anthropic-beta", "oauth-2025-04-20")
-		p.AddResponseTransformer(host, CreateOAuthEndpointTransformer())
+		p.AddResponseTransformer(host, CreateOAuthEndpointTransformerWithMeta(cred.Metadata))
 	default:
 		// API key (anthropic or unknown provider)
 		p.SetCredentialWithGrant(host, "x-api-key", cred.Token, "anthropic")

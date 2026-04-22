@@ -19,8 +19,8 @@ const maxScrubBodySize = 512 * 1024
 //
 // Delegates to providers/claude.CreateOAuthEndpointTransformer to avoid duplicating
 // the endpoint list and response logic.
-func newOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, bool) {
-	return claude.CreateOAuthEndpointTransformer()
+func newOAuthEndpointTransformer(meta map[string]string) func(req, resp interface{}) (interface{}, bool) {
+	return claude.CreateOAuthEndpointTransformerWithMeta(meta)
 }
 
 // newResponseScrubber creates a response transformer that replaces real tokens

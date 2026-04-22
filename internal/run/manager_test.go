@@ -1618,7 +1618,7 @@ func TestBuildRegisterRequest_HostGateway(t *testing.T) {
 	rc.HostGateway = "host.docker.internal"
 	rc.AllowedHostPorts = []int{8288}
 
-	req := buildRegisterRequest(rc, nil)
+	req := buildRegisterRequest(rc, nil, nil)
 
 	if req.HostGateway != "host.docker.internal" {
 		t.Errorf("HostGateway = %q, want %q", req.HostGateway, "host.docker.internal")
@@ -1631,7 +1631,7 @@ func TestBuildRegisterRequest_HostGateway(t *testing.T) {
 func TestBuildRegisterRequest_HostGatewayEmpty(t *testing.T) {
 	rc := daemon.NewRunContext("run_test")
 
-	req := buildRegisterRequest(rc, nil)
+	req := buildRegisterRequest(rc, nil, nil)
 
 	if req.HostGateway != "" {
 		t.Errorf("HostGateway = %q, want empty", req.HostGateway)

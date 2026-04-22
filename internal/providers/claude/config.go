@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -157,11 +159,23 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	// the proxy at the network layer. Claude Code needs this file to exist
 	// with valid structure to function, but the actual authentication is
 	// handled transparently by the TLS-intercepting proxy.
+	//
+	// ExpiresAt handling: Setup-tokens are long-lived and don't carry an expiry,
+	// so cred.ExpiresAt is zero. The zero time.Time produces a large negative
+	// Unix millisecond value (-62135596800000, year 0001) which Claude Code
+	// interprets as an expired credential, causing "not logged in" and
+	// "API Usage Billing" in the status line. Use a far-future expiry instead.
+	expiresAtMs := cred.ExpiresAt.UnixMilli()
+	if cred.ExpiresAt.IsZero() {
+		expiresAtMs = time.Now().Add(365 * 24 * time.Hour).UnixMilli()
+	}
 	creds := oauthCredentials{
 		ClaudeAiOauth: &oauthToken{
-			AccessToken: ProxyInjectedPlaceholder,
-			ExpiresAt:   cred.ExpiresAt.UnixMilli(),
-			Scopes:      cred.Scopes,
+			AccessToken:      credential.ClaudeOAuthPlaceholder,
+			ExpiresAt:        expiresAtMs,
+			Scopes:           cred.Scopes,
+			SubscriptionType: cred.Metadata["subscriptionType"],
+			RateLimitTier:    cred.Metadata["rateLimitTier"],
 		},
 	}
 

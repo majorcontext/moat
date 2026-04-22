@@ -343,7 +343,7 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		var tf credential.ResponseTransformer
 		switch spec.Kind {
 		case "oauth-endpoint-workaround":
-			tf = newOAuthEndpointTransformer()
+			tf = newOAuthEndpointTransformer(spec.Metadata)
 		case "response-scrub":
 			ts, ok := rc.TokenSubstitutions[spec.Host]
 			if !ok {

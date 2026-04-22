@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
@@ -223,6 +224,11 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 		CreatedAt: time.Now(),
 	}
 
+	// Cache bootstrap and subscription info while the host's OAuth token is
+	// fresh. The setup-token itself lacks scopes for bootstrap, but the host's
+	// short-lived token (from a recent Claude Code session) has them.
+	cacheBootstrapForCredential(cred)
+
 	fmt.Println("\nClaude credential acquired via setup-token.")
 	fmt.Println("You can now run 'moat claude' to start Claude Code.")
 	return cred, nil
@@ -267,6 +273,8 @@ func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, erro
 		Token:     token,
 		CreatedAt: time.Now(),
 	}
+
+	cacheBootstrapForCredential(cred)
 
 	fmt.Println("\nClaude credential acquired.")
 	fmt.Println("You can now run 'moat claude' to start Claude Code.")
@@ -548,6 +556,19 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 		CreatedAt: time.Now(),
 	}
 
+	// For imported credentials, the token itself has full scopes.
+	// Store subscription info directly from the host token, then cache bootstrap.
+	if token.SubscriptionType != "" || token.RateLimitTier != "" {
+		cred.Metadata = make(map[string]string)
+		if token.SubscriptionType != "" {
+			cred.Metadata["subscriptionType"] = token.SubscriptionType
+		}
+		if token.RateLimitTier != "" {
+			cred.Metadata["rateLimitTier"] = token.RateLimitTier
+		}
+	}
+	cacheBootstrapForCredential(cred)
+
 	fmt.Println("\nClaude Code credentials imported.")
 	fmt.Println("You can now run 'moat claude' to start Claude Code.")
 	if !expiresAt.IsZero() {
@@ -559,6 +580,82 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 		}
 	}
 	return cred, nil
+}
+
+// cacheBootstrapForCredential attempts to fetch and cache the /api/bootstrap
+// response at grant time. This is the most reliable time to cache it because
+// the host's short-lived OAuth token is likely fresh (the user just authenticated).
+//
+// The cached bootstrap is stored in credential metadata and persists across runs
+// via the encrypted credential store. At run time, the proxy serves this cached
+// response instead of the limited response that setup-tokens receive.
+//
+// Staleness: the cached bootstrap reflects account capabilities at grant time.
+// If the user's subscription changes (e.g., downgrade), the cache becomes stale.
+// Re-run "moat grant claude" to refresh. The proxy prefers the live response
+// when it contains valid account data, so this only matters for setup-tokens
+// where the live response always returns account:null.
+func cacheBootstrapForCredential(cred *provider.Credential) {
+	if cred.Metadata == nil {
+		cred.Metadata = make(map[string]string)
+	}
+
+	// Try to get a full-scope token for the bootstrap fetch.
+	// For imported credentials, the token itself has full scopes.
+	// For setup-tokens, we need the host's short-lived token.
+	var accessToken string
+
+	// If the credential itself is a full OAuth token (not a setup-token),
+	// use it directly. Setup-tokens are long-lived and lack bootstrap scopes.
+	// Full OAuth tokens from "import existing creds" have the right scopes.
+	if credential.IsOAuthToken(cred.Token) && !cred.ExpiresAt.IsZero() && time.Until(cred.ExpiresAt) < 24*time.Hour {
+		// Short-lived token (< 24h) — likely a full OAuth token with scopes
+		accessToken = cred.Token
+	}
+
+	// Fall back to host's credentials file (has full-scope short-lived token)
+	if accessToken == "" {
+		cc := &credential.ClaudeCodeCredentials{}
+		hostToken, err := cc.GetClaudeCodeCredentials()
+		if err == nil && hostToken.AccessToken != "" && !hostToken.IsExpired() {
+			accessToken = hostToken.AccessToken
+			// Also grab subscription info from host credentials
+			if hostToken.SubscriptionType != "" && cred.Metadata["subscriptionType"] == "" {
+				cred.Metadata["subscriptionType"] = hostToken.SubscriptionType
+			}
+			if hostToken.RateLimitTier != "" && cred.Metadata["rateLimitTier"] == "" {
+				cred.Metadata["rateLimitTier"] = hostToken.RateLimitTier
+			}
+		}
+	}
+
+	if accessToken == "" {
+		log.Debug("no valid token available for bootstrap caching at grant time",
+			"subsystem", "claude",
+		)
+		return
+	}
+
+	// Fetch subscription info if not already present
+	if cred.Metadata["subscriptionType"] == "" {
+		subType, rateTier := fetchProfileSubscription(accessToken)
+		if subType != "" {
+			cred.Metadata["subscriptionType"] = subType
+			if rateTier != "" {
+				cred.Metadata["rateLimitTier"] = rateTier
+			}
+		}
+	}
+
+	// Fetch full bootstrap response
+	bootstrap := fetchBootstrapResponse(accessToken)
+	if bootstrap != "" {
+		cred.Metadata[metaKeyCachedBootstrap] = bootstrap
+		log.Debug("cached bootstrap response at grant time",
+			"subsystem", "claude",
+			"bootstrap_len", len(bootstrap),
+		)
+	}
 }
 
 // hasClaudeCodeCredentials checks if Claude Code credentials are available.
