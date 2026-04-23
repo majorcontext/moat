@@ -3977,6 +3977,16 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 //     sentinel. Docker's daemon substitutes the host's gateway IP at
 //     container-create time, and Linux's routing reaches it from any bridge.
 //
+//     NOTE: "Docker on Linux" here means native Docker Engine. Docker
+//     Desktop for Linux runs Docker Engine inside a VM and exhibits the
+//     same docker0-unreachable-from-custom-network behavior as Docker
+//     Desktop on macOS/Windows — those users would still hit the bug this
+//     strategy exists to avoid. Distinguishing Docker Desktop from native
+//     Engine requires a `docker info` probe (Docker Desktop reports
+//     OperatingSystem "Docker Desktop") or a host-side resolvability
+//     check for host.docker.internal; both are out of scope here. Known
+//     gap — tracked as a follow-up.
+//
 //   - Docker Desktop on macOS / Windows — entries via MOAT_EXTRA_HOSTS,
 //     processed by moat-init.sh at container start. --add-host:host-gateway
 //     resolves to the docker0 bridge gateway (e.g. 172.17.0.1), which is
