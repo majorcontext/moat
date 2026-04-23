@@ -11,31 +11,79 @@
 set -e
 
 # Configuration constants
-SSH_SOCKET_WAIT_ITERS=20     # iterations * 0.1s = 2 second timeout for SSH socket
-DIND_TIMEOUT_SECONDS=30      # timeout for Docker daemon startup in dind mode
+SSH_SOCKET_WAIT_ITERS=20        # iterations * 0.1s = 2 second timeout for SSH socket
+DIND_TIMEOUT_SECONDS=30         # timeout for Docker daemon startup in dind mode
+MOAT_DNS_WAIT_ITERS=25          # iterations * 0.2s = 5 second timeout for container DNS
 
 # Synthetic Host Entries
-# When MOAT_EXTRA_HOSTS is set, append space-separated "name:ip" pairs to
-# /etc/hosts. Used on runtimes (Apple containers) that lack a --add-host flag
-# at container-create time. Must run before any process that resolves these
-# hostnames (e.g. the user's command, which sees MOAT_HOST_GATEWAY).
+# When MOAT_EXTRA_HOSTS is set, append space-separated "name:target" pairs to
+# /etc/hosts. Used on runtimes where the host side cannot supply a usable IP
+# via --add-host: Apple containers (no such flag) and Docker Desktop on
+# macOS/Windows (host-gateway resolves to the docker0 bridge, which is
+# unreachable from custom bridge networks created for services).
 #
-# Fail-closed: if we cannot write to /etc/hosts (non-root container without
-# CAP_DAC_OVERRIDE), we must not start the user command. Silent failure would
-# leave moat-proxy/moat-host unresolvable, HTTP_PROXY broken, and network
-# policy silently degraded. The clear error here is preferable to a seemingly
+# target may be a literal IP (e.g. "192.168.64.1") or a hostname prefixed
+# with "@" (e.g. "@host.docker.internal"). The "@" form tells us to resolve
+# the hostname via the container's DNS at startup — this is how we reach
+# Docker Desktop's host, which is only addressable by the container-only
+# DNS name host.docker.internal. DNS resolution is retried briefly because
+# Docker Desktop's embedded DNS may not be ready the instant the ENTRYPOINT
+# runs.
+#
+# Must run before any process that resolves these hostnames (e.g. the user's
+# command, which sees MOAT_HOST_GATEWAY).
+#
+# Fail-closed: if we cannot resolve the target or write to /etc/hosts, we
+# must not start the user command. Silent failure would leave
+# moat-proxy/moat-host unresolvable, HTTP_PROXY broken, and network policy
+# silently degraded. The clear error here is preferable to a seemingly
 # working container that bypasses policy.
 if [ -n "$MOAT_EXTRA_HOSTS" ]; then
   for entry in $MOAT_EXTRA_HOSTS; do
     name=${entry%%:*}
-    ip=${entry#*:}
-    if [ -n "$name" ] && [ -n "$ip" ] && [ "$name" != "$ip" ]; then
-      if ! printf '%s %s\n' "$ip" "$name" >> /etc/hosts 2>/dev/null; then
-        echo "Error: moat-init.sh cannot write $name to /etc/hosts (required for moat proxy resolution)." >&2
-        echo "The container user (UID $(id -u)) lacks permission to modify /etc/hosts." >&2
-        echo "Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE." >&2
-        exit 1
-      fi
+    target=${entry#*:}
+    if [ -z "$name" ] || [ -z "$target" ] || [ "$name" = "$target" ]; then
+      continue
+    fi
+
+    case "$target" in
+      @*)
+        hostname=${target#@}
+        ip=""
+        i=0
+        while [ "$i" -lt "$MOAT_DNS_WAIT_ITERS" ]; do
+          # Prefer IPv4 because the host is reached via Docker Desktop's
+          # IPv4-only mapping; an IPv6 entry like "::1" would resolve to the
+          # container's own loopback and silently not reach the host. Fall
+          # back to any address if the name has only IPv6 records.
+          candidate=$(getent ahostsv4 "$hostname" 2>/dev/null | awk '{print $1; exit}')
+          if [ -z "$candidate" ]; then
+            candidate=$(getent hosts "$hostname" 2>/dev/null | awk '{print $1; exit}')
+          fi
+          if [ -n "$candidate" ]; then
+            ip="$candidate"
+            break
+          fi
+          sleep 0.2
+          i=$((i + 1))
+        done
+        if [ -z "$ip" ]; then
+          echo "Error: moat-init.sh could not resolve '$hostname' for /etc/hosts entry '$name'." >&2
+          echo "The container's DNS should answer this name. On Docker Desktop, verify that" >&2
+          echo "'getent hosts $hostname' works inside this container." >&2
+          exit 1
+        fi
+        ;;
+      *)
+        ip=$target
+        ;;
+    esac
+
+    if ! printf '%s %s\n' "$ip" "$name" >> /etc/hosts 2>/dev/null; then
+      echo "Error: moat-init.sh cannot write $name to /etc/hosts (required for moat proxy resolution)." >&2
+      echo "The container user (UID $(id -u)) lacks permission to modify /etc/hosts." >&2
+      echo "Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE." >&2
+      exit 1
     fi
   done
 fi

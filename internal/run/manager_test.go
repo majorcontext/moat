@@ -1808,6 +1808,92 @@ func TestIsMoatOwnedProxyVar(t *testing.T) {
 	}
 }
 
+// TestSynthHostStrategy verifies that the per-runtime mapping strategy for
+// the synthetic moat-proxy/moat-host hostnames produces the correct outputs:
+//
+//   - Docker on Linux uses --add-host (the kernel routes docker0 → host
+//     correctly even across custom bridge networks).
+//   - Docker Desktop on macOS/Windows uses MOAT_EXTRA_HOSTS with a resolve
+//     sentinel so moat-init.sh resolves host.docker.internal inside the
+//     container, where Docker Desktop's embedded DNS can answer. Using
+//     --add-host:host-gateway here resolves to docker0 bridge's gateway
+//     (unreachable from custom bridge networks created for services).
+//   - Apple runtime has no --add-host equivalent and already receives a
+//     literal IP from GetHostAddress(), so MOAT_EXTRA_HOSTS uses the IP
+//     directly — no resolve sentinel.
+func TestSynthHostStrategy(t *testing.T) {
+	tests := []struct {
+		name           string
+		runtimeType    container.RuntimeType
+		goos           string
+		hostAddr       string
+		wantExtraHosts []string
+		wantEnv        string
+	}{
+		{
+			name:        "docker linux uses --add-host",
+			runtimeType: container.RuntimeDocker,
+			goos:        "linux",
+			hostAddr:    "127.0.0.1",
+			wantExtraHosts: []string{
+				syntheticProxyHost + ":host-gateway",
+				syntheticHostGateway + ":host-gateway",
+			},
+			wantEnv: "",
+		},
+		{
+			name:           "docker darwin uses env with resolve sentinel",
+			runtimeType:    container.RuntimeDocker,
+			goos:           "darwin",
+			hostAddr:       "host.docker.internal",
+			wantExtraHosts: nil,
+			wantEnv:        syntheticProxyHost + ":@host.docker.internal " + syntheticHostGateway + ":@host.docker.internal",
+		},
+		{
+			name:           "docker windows uses env with resolve sentinel",
+			runtimeType:    container.RuntimeDocker,
+			goos:           "windows",
+			hostAddr:       "host.docker.internal",
+			wantExtraHosts: nil,
+			wantEnv:        syntheticProxyHost + ":@host.docker.internal " + syntheticHostGateway + ":@host.docker.internal",
+		},
+		{
+			name:           "apple uses env with literal IP",
+			runtimeType:    container.RuntimeApple,
+			goos:           "darwin",
+			hostAddr:       "192.168.64.1",
+			wantExtraHosts: nil,
+			wantEnv:        syntheticProxyHost + ":192.168.64.1 " + syntheticHostGateway + ":192.168.64.1",
+		},
+		{
+			name:           "docker darwin with IP hostAddr skips sentinel",
+			runtimeType:    container.RuntimeDocker,
+			goos:           "darwin",
+			hostAddr:       "10.0.0.5",
+			wantExtraHosts: nil,
+			wantEnv:        syntheticProxyHost + ":10.0.0.5 " + syntheticHostGateway + ":10.0.0.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotExtraHosts, gotEnv := synthHostStrategy(tt.runtimeType, tt.goos, tt.hostAddr)
+			if gotEnv != tt.wantEnv {
+				t.Errorf("env = %q, want %q", gotEnv, tt.wantEnv)
+			}
+			if len(gotExtraHosts) != len(tt.wantExtraHosts) {
+				t.Errorf("extraHosts len = %d, want %d (got %v)", len(gotExtraHosts), len(tt.wantExtraHosts), gotExtraHosts)
+				return
+			}
+			for i := range gotExtraHosts {
+				if gotExtraHosts[i] != tt.wantExtraHosts[i] {
+					t.Errorf("extraHosts[%d] = %q, want %q", i, gotExtraHosts[i], tt.wantExtraHosts[i])
+				}
+			}
+		})
+	}
+}
+
 // TestRewriteExtraHostsForCustomNetwork verifies that synthetic hostname
 // entries in extraHosts are rewritten when a custom network gateway differs.
 // Tests both Docker-style (host-gateway pseudo-address) and Apple-style (actual IP).
