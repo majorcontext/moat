@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -1873,6 +1874,19 @@ func TestSynthHostStrategy(t *testing.T) {
 			wantExtraHosts: nil,
 			wantEnv:        syntheticProxyHost + ":10.0.0.5 " + syntheticHostGateway + ":10.0.0.5",
 		},
+		{
+			// Documents behavior if GetHostAddress() ever returns empty on a
+			// runtime that uses the env path: we emit "name:@" pairs. The
+			// empty hostname will fail resolution inside moat-init.sh, which
+			// fails closed with an explicit error — preferable to silently
+			// writing bad /etc/hosts entries.
+			name:           "empty hostAddr on env path fails closed via sentinel",
+			runtimeType:    container.RuntimeDocker,
+			goos:           "darwin",
+			hostAddr:       "",
+			wantExtraHosts: nil,
+			wantEnv:        syntheticProxyHost + ":@ " + syntheticHostGateway + ":@",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1881,14 +1895,8 @@ func TestSynthHostStrategy(t *testing.T) {
 			if gotEnv != tt.wantEnv {
 				t.Errorf("env = %q, want %q", gotEnv, tt.wantEnv)
 			}
-			if len(gotExtraHosts) != len(tt.wantExtraHosts) {
-				t.Errorf("extraHosts len = %d, want %d (got %v)", len(gotExtraHosts), len(tt.wantExtraHosts), gotExtraHosts)
-				return
-			}
-			for i := range gotExtraHosts {
-				if gotExtraHosts[i] != tt.wantExtraHosts[i] {
-					t.Errorf("extraHosts[%d] = %q, want %q", i, gotExtraHosts[i], tt.wantExtraHosts[i])
-				}
+			if !reflect.DeepEqual(gotExtraHosts, tt.wantExtraHosts) {
+				t.Errorf("extraHosts = %#v, want %#v", gotExtraHosts, tt.wantExtraHosts)
 			}
 		})
 	}
