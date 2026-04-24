@@ -153,6 +153,18 @@ hooks:
   pre_run: npm install && npm run build
 ```
 
+YAML block scalars also work. Lines are joined with `&&` automatically:
+
+```yaml
+hooks:
+  post_build_root: |
+    apt-get update -qq
+    apt-get install -y -qq figlet
+    apt-get clean
+```
+
+This produces a single `RUN` instruction equivalent to `apt-get update -qq && apt-get install -y -qq figlet && apt-get clean`. Each non-empty line becomes one command in the chain.
+
 > **Note:** Git identity (`user.name` and `user.email`) is imported automatically from the host when `git` is listed as a dependency. Use a `post_build` hook only if you need to override the host identity or set other git configuration.
 
 ### Claude Code agent with setup
