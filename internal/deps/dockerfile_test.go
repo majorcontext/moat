@@ -1537,6 +1537,107 @@ func TestGenerateDockerfile_HooksPreRunTriggersInit(t *testing.T) {
 	}
 }
 
+func TestFormatHookCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{
+			name: "single line unchanged",
+			cmd:  "apt-get install -y figlet",
+			want: "apt-get install -y figlet",
+		},
+		{
+			name: "multi-line joined with &&",
+			cmd:  "touch ~/foo\ntouch ~/bar",
+			want: "touch ~/foo && \\\n    touch ~/bar",
+		},
+		{
+			name: "trailing newline stripped",
+			cmd:  "touch ~/foo\ntouch ~/bar\n",
+			want: "touch ~/foo && \\\n    touch ~/bar",
+		},
+		{
+			name: "blank lines filtered",
+			cmd:  "touch ~/foo\n\ntouch ~/bar\n",
+			want: "touch ~/foo && \\\n    touch ~/bar",
+		},
+		{
+			name: "leading/trailing whitespace trimmed",
+			cmd:  "  touch ~/foo  \n  touch ~/bar  \n",
+			want: "touch ~/foo && \\\n    touch ~/bar",
+		},
+		{
+			name: "three lines",
+			cmd:  "apt-get update\napt-get install -y curl\napt-get clean",
+			want: "apt-get update && \\\n    apt-get install -y curl && \\\n    apt-get clean",
+		},
+		{
+			name: "trailing && stripped to avoid double join",
+			cmd:  "apt-get update &&\napt-get install -y curl",
+			want: "apt-get update && \\\n    apt-get install -y curl",
+		},
+		{
+			name: "trailing semicolon stripped",
+			cmd:  "echo hello;\necho world",
+			want: "echo hello && \\\n    echo world",
+		},
+		{
+			name: "trailing backslash stripped",
+			cmd:  "echo hello \\\necho world",
+			want: "echo hello && \\\n    echo world",
+		},
+		{
+			name: "trailing && backslash combination stripped",
+			cmd:  "apt-get update && \\\napt-get install -y curl",
+			want: "apt-get update && \\\n    apt-get install -y curl",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatHookCommand(tt.cmd)
+			if got != tt.want {
+				t.Errorf("formatHookCommand(%q)\ngot:  %q\nwant: %q", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateDockerfile_HooksMultiLine(t *testing.T) {
+	// Multi-line hooks (e.g., YAML block scalars) should produce valid Dockerfiles.
+	t.Run("PostBuild", func(t *testing.T) {
+		result, err := GenerateDockerfile(nil, &ImageSpec{
+			Hooks: &HooksConfig{
+				PostBuild: "touch ~/foo\ntouch ~/bar\n",
+			},
+		})
+		if err != nil {
+			t.Fatalf("GenerateDockerfile: %v", err)
+		}
+		// Verify a single RUN instruction with && joining.
+		want := "RUN touch ~/foo && \\\n    touch ~/bar\n"
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("expected Dockerfile to contain:\n%s\ngot:\n%s", want, result.Dockerfile)
+		}
+	})
+
+	t.Run("PostBuildRoot", func(t *testing.T) {
+		result, err := GenerateDockerfile(nil, &ImageSpec{
+			Hooks: &HooksConfig{
+				PostBuildRoot: "apt-get update\napt-get install -y curl\n",
+			},
+		})
+		if err != nil {
+			t.Fatalf("GenerateDockerfile: %v", err)
+		}
+		want := "RUN apt-get update && \\\n    apt-get install -y curl\n"
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("expected Dockerfile to contain:\n%s\ngot:\n%s", want, result.Dockerfile)
+		}
+	})
+}
+
 func TestGenerateDockerfileYarnPnpmCorepack(t *testing.T) {
 	deps := []Dependency{
 		{Name: "node", Version: "22"},
