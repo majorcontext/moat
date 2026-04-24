@@ -538,17 +538,17 @@ func writeBuildHooks(b *strings.Builder, hooks *HooksConfig) {
 		return
 	}
 
-	if hooks.PostBuildRoot != "" {
+	if cmd := formatHookCommand(hooks.PostBuildRoot); cmd != "" {
 		b.WriteString("# Build hook: post_build_root\n")
 		b.WriteString("WORKDIR /workspace\n")
-		b.WriteString("RUN " + formatHookCommand(hooks.PostBuildRoot) + "\n\n")
+		b.WriteString("RUN " + cmd + "\n\n")
 	}
 
-	if hooks.PostBuild != "" {
+	if cmd := formatHookCommand(hooks.PostBuild); cmd != "" {
 		b.WriteString("# Build hook: post_build\n")
 		b.WriteString(fmt.Sprintf("USER %s\n", containerUser))
 		b.WriteString("WORKDIR /workspace\n")
-		b.WriteString("RUN " + formatHookCommand(hooks.PostBuild) + "\n")
+		b.WriteString("RUN " + cmd + "\n")
 		b.WriteString("USER root\n\n")
 	}
 }
