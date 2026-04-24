@@ -471,6 +471,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Auto-include MCP auth grants so the credential processing loop loads
+	// them into the RunContext. Without this, users would need to duplicate
+	// each mcp[].auth.grant in the top-level grants: list.
+	opts.Grants = appendMCPGrants(opts.Grants, opts.Config)
+
 	// Validate grants before allocating any resources (proxy, container, etc.)
 	needsGrantValidation := len(opts.Grants) > 0 || (opts.Config != nil && len(opts.Config.MCP) > 0)
 	if needsGrantValidation {

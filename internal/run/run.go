@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -316,6 +317,24 @@ func grantToCommand(grant string) string {
 		return "mcp " + after
 	}
 	return grant
+}
+
+// appendMCPGrants adds any MCP auth grants that are not already present in
+// the grant list. This ensures credentials for remote MCP servers are loaded
+// without requiring users to duplicate grant names in the top-level grants: list.
+func appendMCPGrants(grants []string, cfg *config.Config) []string {
+	if cfg == nil {
+		return grants
+	}
+	// Copy to avoid mutating the caller's backing array.
+	result := make([]string, len(grants), len(grants)+len(cfg.MCP))
+	copy(result, grants)
+	for _, mcp := range cfg.MCP {
+		if mcp.Auth != nil && mcp.Auth.Grant != "" && !slices.Contains(result, mcp.Auth.Grant) {
+			result = append(result, mcp.Auth.Grant)
+		}
+	}
+	return result
 }
 
 // validateMCPGrants checks that all required MCP grants exist.

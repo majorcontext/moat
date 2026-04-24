@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential/keyring"
@@ -75,6 +76,9 @@ func (s *FileStore) Save(cred Credential) error {
 
 // Get retrieves a credential for the given provider.
 func (s *FileStore) Get(provider Provider) (*Credential, error) {
+	if strings.ContainsAny(string(provider), "/\\") || strings.Contains(string(provider), "..") {
+		return nil, fmt.Errorf("invalid provider name: %s", provider)
+	}
 	encrypted, err := os.ReadFile(s.path(provider))
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -409,6 +409,146 @@ func TestValidateMCPGrants(t *testing.T) {
 	}
 }
 
+func TestAppendMCPGrants(t *testing.T) {
+	tests := []struct {
+		name   string
+		grants []string
+		cfg    *config.Config
+		want   []string
+	}{
+		{
+			name:   "nil config",
+			grants: []string{"github"},
+			cfg:    nil,
+			want:   []string{"github"},
+		},
+		{
+			name:   "no MCP servers",
+			grants: []string{"github"},
+			cfg:    &config.Config{},
+			want:   []string{"github"},
+		},
+		{
+			name:   "MCP server without auth",
+			grants: []string{"github"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{Name: "public", URL: "https://public.example.com"},
+				},
+			},
+			want: []string{"github"},
+		},
+		{
+			name:   "MCP auth with empty grant",
+			grants: []string{"github"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "svc",
+						URL:  "https://example.com",
+						Auth: &config.MCPAuthConfig{Grant: "", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"github"},
+		},
+		{
+			name:   "MCP auth grant auto-included",
+			grants: []string{"github"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "render",
+						URL:  "https://mcp.render.com/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-render", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"github", "mcp-render"},
+		},
+		{
+			name:   "MCP auth grant already present",
+			grants: []string{"github", "mcp-render"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "render",
+						URL:  "https://mcp.render.com/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-render", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"github", "mcp-render"},
+		},
+		{
+			name:   "multiple MCP servers",
+			grants: []string{"claude"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "render",
+						URL:  "https://mcp.render.com/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-render", Header: "Authorization"},
+					},
+					{
+						Name: "linear",
+						URL:  "https://mcp.linear.app/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-linear", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"claude", "mcp-render", "mcp-linear"},
+		},
+		{
+			name:   "duplicate grant across MCP servers",
+			grants: []string{"claude"},
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "render",
+						URL:  "https://mcp.render.com/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-shared", Header: "Authorization"},
+					},
+					{
+						Name: "linear",
+						URL:  "https://mcp.linear.app/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-shared", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"claude", "mcp-shared"},
+		},
+		{
+			name:   "empty grants with MCP",
+			grants: nil,
+			cfg: &config.Config{
+				MCP: []config.MCPServerConfig{
+					{
+						Name: "render",
+						URL:  "https://mcp.render.com/mcp",
+						Auth: &config.MCPAuthConfig{Grant: "mcp-render", Header: "Authorization"},
+					},
+				},
+			},
+			want: []string{"mcp-render"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendMCPGrants(tt.grants, tt.cfg)
+			if len(got) != len(tt.want) {
+				t.Fatalf("appendMCPGrants() = %v, want %v", got, tt.want)
+			}
+			for i, g := range got {
+				if g != tt.want[i] {
+					t.Errorf("appendMCPGrants()[%d] = %q, want %q", i, g, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestBuildProxyEnv_LoopbackNotBypassed verifies that under host-network mode,
 // loopback addresses are NOT in NO_PROXY (so they flow through the proxy for
 // network.host enforcement), while moat-proxy IS in NO_PROXY (preventing
