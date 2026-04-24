@@ -1588,6 +1588,11 @@ func TestFormatHookCommand(t *testing.T) {
 			cmd:  "echo hello \\\necho world",
 			want: "echo hello && \\\n    echo world",
 		},
+		{
+			name: "trailing && backslash combination stripped",
+			cmd:  "apt-get update && \\\napt-get install -y curl",
+			want: "apt-get update && \\\n    apt-get install -y curl",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

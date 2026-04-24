@@ -568,11 +568,18 @@ func formatHookCommand(cmd string) string {
 			continue
 		}
 		// Strip trailing shell operators so joining with && is idempotent.
-		line = strings.TrimRight(line, " ")
-		line = strings.TrimSuffix(line, "&&")
-		line = strings.TrimSuffix(line, ";")
-		line = strings.TrimSuffix(line, `\`)
-		line = strings.TrimRight(line, " ")
+		// Loop until stable to handle combinations like "&& \".
+		for {
+			trimmed := strings.TrimRight(line, " ")
+			trimmed = strings.TrimSuffix(trimmed, "&&")
+			trimmed = strings.TrimSuffix(trimmed, ";")
+			trimmed = strings.TrimSuffix(trimmed, `\`)
+			trimmed = strings.TrimRight(trimmed, " ")
+			if trimmed == line {
+				break
+			}
+			line = trimmed
+		}
 		if line != "" {
 			lines = append(lines, line)
 		}
