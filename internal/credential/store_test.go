@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,59 @@ func TestNewFileStore_InvalidKeyLength(t *testing.T) {
 	_, err := NewFileStore(dir, []byte("short-key"))
 	if err == nil {
 		t.Error("expected error for invalid key length")
+	}
+}
+
+func TestValidateProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider Provider
+		wantErr  bool
+	}{
+		{"valid name", Provider("mcp-render"), false},
+		{"valid with colon", Provider("oauth:notion"), false},
+		{"forward slash", Provider("../evil"), true},
+		{"deep traversal", Provider("../../etc/passwd"), true},
+		{"backslash", Provider(`..\..\etc`), true},
+		{"dot-dot only", Provider(".."), true},
+		{"embedded traversal", Provider("foo/../bar"), true},
+		{"absolute path", Provider("/etc/passwd"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateProvider(tt.provider)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateProvider(%q) should return error", tt.provider)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("validateProvider(%q) unexpected error: %v", tt.provider, err)
+			}
+		})
+	}
+}
+
+func TestFileStore_PathTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	key := make([]byte, 32)
+	rand.Read(key)
+	store, _ := NewFileStore(dir, key)
+
+	// Get should reject traversal
+	_, err := store.Get(Provider("../evil"))
+	if err == nil {
+		t.Error("Get with path traversal should return error")
+	}
+
+	// Save should reject traversal
+	err = store.Save(Credential{Provider: Provider("../evil"), Token: "x"})
+	if err == nil {
+		t.Error("Save with path traversal should return error")
+	}
+
+	// Delete should reject traversal
+	err = store.Delete(Provider("../evil"))
+	if err == nil {
+		t.Error("Delete with path traversal should return error")
 	}
 }
 

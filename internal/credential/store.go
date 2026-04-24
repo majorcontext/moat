@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential/keyring"
@@ -53,8 +54,21 @@ func (s *FileStore) path(provider Provider) string {
 	return filepath.Join(s.dir, string(provider)+".enc")
 }
 
+// validateProvider rejects provider names that contain path separators
+// or ".." components to prevent path traversal in file operations.
+func validateProvider(provider Provider) error {
+	name := string(provider)
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid provider name: %s", provider)
+	}
+	return nil
+}
+
 // Save stores a credential encrypted on disk.
 func (s *FileStore) Save(cred Credential) error {
+	if err := validateProvider(cred.Provider); err != nil {
+		return err
+	}
 	data, err := json.Marshal(cred)
 	if err != nil {
 		return fmt.Errorf("marshaling credential: %w", err)
@@ -75,6 +89,9 @@ func (s *FileStore) Save(cred Credential) error {
 
 // Get retrieves a credential for the given provider.
 func (s *FileStore) Get(provider Provider) (*Credential, error) {
+	if err := validateProvider(provider); err != nil {
+		return nil, err
+	}
 	encrypted, err := os.ReadFile(s.path(provider))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -107,6 +124,9 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 
 // Delete removes a credential for the given provider.
 func (s *FileStore) Delete(provider Provider) error {
+	if err := validateProvider(provider); err != nil {
+		return err
+	}
 	if err := os.Remove(s.path(provider)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("deleting credential: %w", err)
 	}

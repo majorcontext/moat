@@ -85,7 +85,7 @@ mcp:
 moat claude ./my-project
 ```
 
-No additional flags are needed. Moat reads the `mcp:` section from `moat.yaml` and configures the proxy relay automatically.
+No additional flags are needed. Moat reads the `mcp:` section from `moat.yaml` and configures the proxy relay automatically. Grants referenced by `mcp[].auth.grant` are included automatically -- you do not need to list them in the top-level `grants:` field.
 
 ### Multiple remote servers
 
