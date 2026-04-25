@@ -484,6 +484,45 @@ func (w *Writer) renderCompositorLocked() {
 	w.out.Write(buf.Bytes()) //nolint:errcheck
 }
 
+// Reset attempts to recover the terminal from a corrupted state. It exits
+// alternate screen mode if active, drops the VT emulator, emits a soft
+// terminal reset (DECSTR), clears the screen, and re-establishes the scroll
+// region and footer.
+//
+// Soft reset (ESC[!p) is used rather than full RIS (ESC c) so the user's
+// scrollback is preserved. The caller is responsible for nudging the child
+// process to redraw (typically via a no-op TTY resize).
+func (w *Writer) Reset() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.footerTimer != nil {
+		w.footerTimer.Stop()
+		w.footerTimer = nil
+	}
+
+	var buf bytes.Buffer
+
+	if w.altScreen {
+		w.stopRenderLoop()
+		w.emulator = nil
+		w.altScreen = false
+		buf.WriteString("\x1b[?1049l")
+	}
+
+	w.escBuf = nil
+
+	buf.WriteString("\x1b[!p")       // DECSTR soft reset
+	buf.WriteString("\x1b[2J\x1b[H") // clear and home
+	buf.WriteString("\x1b[?25h")     // show cursor
+
+	if _, err := w.out.Write(buf.Bytes()); err != nil {
+		return err
+	}
+
+	return w.setupScrollRegionLocked()
+}
+
 // Cleanup resets the terminal state.
 func (w *Writer) Cleanup() error {
 	w.mu.Lock()
