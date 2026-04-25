@@ -633,7 +633,7 @@ func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWrite
 	}
 
 	if statusWriter == nil {
-		flash("tui reset: no status writer")
+		log.Warn("ctrl+/ r pressed but no status writer; skipping reset")
 		return
 	}
 	if err := statusWriter.Reset(); err != nil {
