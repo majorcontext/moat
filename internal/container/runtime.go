@@ -38,6 +38,12 @@ func AllRuntimeTypes() []RuntimeType {
 // does not set container.memory. Docker containers remain unlimited.
 const DefaultAgentMemoryMB = 8192
 
+// networkCreateTimeout bounds CreateNetwork so an unresponsive runtime fails
+// fast instead of hanging indefinitely. On Apple this manifests when the IP
+// allocation pool is exhausted by leaked networks; on Docker, when the daemon
+// is wedged. See https://github.com/majorcontext/moat/issues/315.
+const networkCreateTimeout = 30 * time.Second
+
 // Runtime is the interface for container runtime operations.
 type Runtime interface {
 	// Type returns the runtime type (Docker or Apple).

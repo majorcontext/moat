@@ -195,8 +195,9 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 	// If neither is set, detect.go checks MOAT_RUNTIME env var, then auto-detects
 
-	// Create manager
-	var managerOpts run.ManagerOptions
+	// Create manager. ReapOrphanNetworks=true because this path creates a
+	// new network — best moment to clean up leaks from prior crashed runs.
+	managerOpts := run.ManagerOptions{ReapOrphanNetworks: true}
 	if opts.Flags.NoSandbox {
 		noSandbox := true
 		managerOpts.NoSandbox = &noSandbox

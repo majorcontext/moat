@@ -143,6 +143,28 @@ func ListRunDirs(baseDir string) ([]string, error) {
 	return runIDs, nil
 }
 
+// ListRunDirNames returns the set of subdirectory names under baseDir.
+// Unlike ListRunDirs, it does NOT require metadata.json — Create() makes the
+// directory before writing metadata, so this catches in-flight runs that
+// ListRunDirs would miss. Used by orphan resource sweeps where it's important
+// to treat newly-created (but not yet persisted) runs as alive.
+func ListRunDirNames(baseDir string) (map[string]struct{}, error) {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]struct{}{}, nil
+		}
+		return nil, err
+	}
+	names := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			names[e.Name()] = struct{}{}
+		}
+	}
+	return names, nil
+}
+
 // LogEntry represents a single log line with timestamp.
 type LogEntry struct {
 	Timestamp time.Time `json:"ts"`

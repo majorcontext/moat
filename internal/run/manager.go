@@ -32,6 +32,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/hostnames"
+	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -140,6 +141,12 @@ type ManagerOptions struct {
 	// NoSandbox disables gVisor sandbox for Docker containers.
 	// If nil, uses platform-aware defaults (gVisor on Linux, standard on macOS/Windows).
 	NoSandbox *bool
+
+	// ReapOrphanNetworks enables a one-shot sweep of moat-managed networks whose
+	// run directories no longer exist. Set by commands that create networks
+	// (`moat run`) or explicitly clean up (`moat clean`). Read-only commands
+	// leave it false to avoid the per-invocation cost of listing networks.
+	ReapOrphanNetworks bool
 }
 
 // NewManagerWithOptions creates a new run manager with the given options.
@@ -193,7 +200,85 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		// Non-fatal - continue with empty runs map
 	}
 
+	// Reap orphan moat networks left behind by killed/crashed runs. Each leaked
+	// network on Apple's container runtime keeps a vmnet daemon alive and
+	// consumes a /24 from the IP pool; eventually `container network create`
+	// hangs. See https://github.com/majorcontext/moat/issues/315.
+	//
+	// Only sweep when explicitly requested (commands that create networks or
+	// clean up). Read-only commands skip it to avoid the per-invocation cost.
+	// Long-term this belongs in the daemon — see
+	// https://github.com/majorcontext/moat/issues/341.
+	if opts.ReapOrphanNetworks {
+		reapCtx, reapCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		m.cleanOrphanNetworks(reapCtx)
+		reapCancel()
+	}
+
 	return m, nil
+}
+
+// cleanOrphanNetworks removes moat-managed networks whose run directory has
+// been deleted from disk. Best-effort: errors are logged but do not fail
+// manager initialization. Only sweeps the default runtime to avoid eagerly
+// initializing other runtimes.
+//
+// Networks are listed BEFORE run dirs to close the race with concurrent
+// Create() calls in another process: Create() makes the run dir before any
+// network op, so if a network exists at list time but its dir wasn't seen at
+// the later snapshot, the dir genuinely doesn't exist.
+//
+// Networks whose suffix isn't a valid run ID are skipped — protects users
+// who happen to have a network named e.g. "moat-shared".
+func (m *Manager) cleanOrphanNetworks(ctx context.Context) {
+	rt, err := m.runtimePool.Default()
+	if err != nil {
+		return
+	}
+	netMgr := rt.NetworkManager()
+	if netMgr == nil {
+		return
+	}
+
+	networks, err := netMgr.ListNetworks(ctx)
+	if err != nil {
+		log.Debug("orphan sweep: listing networks failed", "error", err)
+		return
+	}
+
+	known, err := storage.ListRunDirNames(storage.DefaultBaseDir())
+	if err != nil {
+		log.Debug("orphan sweep: scanning run dirs failed", "error", err)
+		return
+	}
+
+	var reaped int
+	for _, n := range networks {
+		runID, ok := strings.CutPrefix(n.Name, "moat-")
+		if !ok {
+			continue
+		}
+		if !id.IsValid(runID, "run") {
+			continue
+		}
+		if _, alive := known[runID]; alive {
+			continue
+		}
+		// Bound each removal individually so one wedged network doesn't burn
+		// the whole sweep budget.
+		rmCtx, rmCancel := context.WithTimeout(ctx, 5*time.Second)
+		log.Debug("removing orphan network", "name", n.Name, "id", n.ID)
+		if rmErr := netMgr.ForceRemoveNetwork(rmCtx, n.ID); rmErr != nil {
+			log.Debug("orphan sweep: failed to remove network", "name", n.Name, "error", rmErr)
+			rmCancel()
+			continue
+		}
+		rmCancel()
+		reaped++
+	}
+	if reaped > 0 {
+		log.Info("reaped orphan moat networks", "count", reaped)
+	}
 }
 
 // NewManager creates a new run manager with default options.
@@ -522,6 +607,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		Interactive:   opts.Interactive,
 		CreatedAt:     time.Now(),
 		exitCh:        make(chan struct{}),
+	}
+
+	// Create the run directory before any network/container operations so that
+	// concurrent orphan sweeps (in another process's NewManager) treat this
+	// run's network as alive even before metadata.json is written.
+	if err := os.MkdirAll(filepath.Join(storage.DefaultBaseDir(), r.ID), 0o700); err != nil {
+		return nil, fmt.Errorf("creating run directory: %w", err)
 	}
 
 	// Default command
