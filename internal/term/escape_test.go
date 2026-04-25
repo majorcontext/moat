@@ -20,7 +20,7 @@ func TestEscapeProxy_PassThrough(t *testing.T) {
 	}
 }
 
-func TestEscapeProxy_DPassesThrough(t *testing.T) {
+func TestEscapeProxy_UnrecognizedKeyPassesThrough(t *testing.T) {
 	// Ctrl-/ q is not an escape sequence; both bytes should pass through
 	input := []byte{EscapePrefix, 'q', 'x', 'y', 'z'}
 	r := NewEscapeProxy(bytes.NewReader(input))

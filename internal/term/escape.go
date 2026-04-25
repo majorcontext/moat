@@ -71,8 +71,10 @@ const (
 // EscapeProxy wraps a reader and watches for escape sequences.
 //
 // Escape sequences are: Ctrl-/ followed by:
-//   - k: stop the run (returns EscapeError to unwind Read)
 //   - s: take a snapshot (invokes onAction callback, continues reading)
+//   - k: stop the run (returns EscapeError to unwind Read)
+//   - d: dump TTY history (invokes onAction callback, continues reading)
+//   - r: reset terminal (invokes onAction callback, continues reading)
 //
 // If Ctrl-/ is followed by an unrecognized key, both bytes are passed through.
 // If Ctrl-/ is followed by another Ctrl-/, a single Ctrl-/ is passed through
