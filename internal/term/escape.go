@@ -16,6 +16,10 @@ const (
 	EscapeStop
 	// EscapeSnapshot means the user wants to take a manual snapshot.
 	EscapeSnapshot
+	// EscapeDumpTUI means the user wants to dump the TUI state for debugging.
+	EscapeDumpTUI
+	// EscapeResetTUI means the user wants to reset the TUI.
+	EscapeResetTUI
 )
 
 // EscapeError is returned when an escape sequence is detected.
@@ -29,6 +33,10 @@ func (e EscapeError) Error() string {
 		return "escape: stop"
 	case EscapeSnapshot:
 		return "escape: snapshot"
+	case EscapeDumpTUI:
+		return "escape: dump-tui"
+	case EscapeResetTUI:
+		return "escape: reset-tui"
 	default:
 		return "escape: unknown"
 	}
@@ -56,6 +64,8 @@ const (
 	// Command keys (after the prefix)
 	escapeKeyStop     byte = 'k'
 	escapeKeySnapshot byte = 's'
+	escapeKeyDumpTUI  byte = 'd'
+	escapeKeyResetTUI byte = 'r'
 )
 
 // EscapeProxy wraps a reader and watches for escape sequences.
@@ -181,6 +191,16 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 					e.onAction(EscapeSnapshot)
 				}
 
+			case escapeKeyDumpTUI:
+				if e.onAction != nil {
+					e.onAction(EscapeDumpTUI)
+				}
+
+			case escapeKeyResetTUI:
+				if e.onAction != nil {
+					e.onAction(EscapeResetTUI)
+				}
+
 			case EscapePrefix:
 				// Ctrl-/ Ctrl-/ sends a single Ctrl-/
 				out = append(out, EscapePrefix)
@@ -253,6 +273,16 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 				e.onAction(EscapeSnapshot)
 			}
 			return 0, nil
+		case escapeKeyDumpTUI:
+			if e.onAction != nil {
+				e.onAction(EscapeDumpTUI)
+			}
+			return 0, nil
+		case escapeKeyResetTUI:
+			if e.onAction != nil {
+				e.onAction(EscapeResetTUI)
+			}
+			return 0, nil
 		case EscapePrefix:
 			// Send single prefix
 			p[0] = EscapePrefix
@@ -291,5 +321,5 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 
 // EscapeHelpText returns help text explaining the escape sequences.
 func EscapeHelpText() string {
-	return "ctrl+/ s (snapshot) · k (stop)"
+	return "ctrl+/ s (snapshot) · k (stop) · d (dump tui) · r (reset tui)"
 }
