@@ -103,9 +103,16 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// monitorCtx/monitorCancel control monitorContainerExit goroutines.
+	// Separate from the main ctx so monitors can outlive general operations
+	// but still be canceled by Close(). Close() cancels monitorCtx first,
+	// then waits on monitorWg with a bounded timeout to prevent deadlocks
+	// when WaitContainer blocks (e.g., Docker daemon slow on custom networks).
+	monitorCtx    context.Context
+	monitorCancel context.CancelFunc
+
 	// monitorWg tracks active monitorContainerExit goroutines.
-	// Close() waits on this before closing the runtime so that
-	// monitors can finish capturing logs and updating state.
+	// Close() waits on this (with a timeout) after canceling monitorCtx.
 	monitorWg sync.WaitGroup
 }
 
@@ -163,6 +170,7 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	defaultRT, _ := pool.Default()
 	m := &Manager{
 		runtimePool:    pool,
@@ -172,6 +180,8 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		proxyLifecycle: lifecycle,
 		ctx:            ctx,
 		cancel:         cancel,
+		monitorCtx:     monitorCtx,
+		monitorCancel:  monitorCancel,
 	}
 
 	// Load existing runs from disk and reconcile with container state.
@@ -439,7 +449,10 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 	// skipMonitor is set for cross-runtime runs where the runtime is unavailable —
 	// spawning a monitor would immediately fail and corrupt the persisted state.
 	if runState == StateRunning && !skipMonitor {
-		go m.monitorContainerExit(r)
+		// Inherited monitors from persisted runs are NOT tracked by monitorWg
+		// and use context.Background() — they may block indefinitely on
+		// long-running containers from previous CLI invocations.
+		go m.monitorContainerExit(context.Background(), r)
 	}
 }
 
@@ -2915,11 +2928,12 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 
 	// Start background monitor to capture logs when container exits.
-	// Tracked by monitorWg so Close() waits for completion.
+	// Tracked by monitorWg so Close() waits for completion. Uses monitorCtx
+	// so Close() can cancel stuck monitors (prevents deadlock on custom networks).
 	m.monitorWg.Add(1)
 	go func() {
 		defer m.monitorWg.Done()
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(m.monitorCtx, r)
 	}()
 
 	// Start proxy health monitor to re-register the run if the daemon restarts.
@@ -3432,7 +3446,12 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 // exitCh is closed, and resources are cleaned up regardless of which path
 // (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
-func (m *Manager) monitorContainerExit(r *Run) {
+//
+// The ctx parameter controls the WaitContainer call. Close() cancels this
+// context to unblock the monitor when the manager is shutting down, preventing
+// deadlocks when WaitContainer blocks indefinitely (e.g., Docker daemon slow
+// to report exit on custom networks — see #315).
+func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Resolve the correct runtime for this run.
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
@@ -3443,11 +3462,10 @@ func (m *Manager) monitorContainerExit(r *Run) {
 		return
 	}
 
-	// Wait for container to exit (no timeout - let it run as long as needed).
-	// This is the ONLY place that calls WaitContainer to avoid race conditions.
-	// Uses context.Background() so this goroutine is not canceled by Close().
-	// Close() waits on monitorWg before closing the runtime.
-	exitCode, err := rt.WaitContainer(context.Background(), r.ContainerID)
+	// Wait for container to exit. This is the ONLY place that calls
+	// WaitContainer to avoid race conditions. The context is typically
+	// monitorCtx, which Close() cancels to unblock stuck monitors.
+	exitCode, err := rt.WaitContainer(ctx, r.ContainerID)
 
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
@@ -3795,19 +3813,37 @@ func (m *Manager) RuntimePool() *container.RuntimePool {
 }
 
 // Close releases manager resources.
-// It waits for active monitorContainerExit goroutines to finish so that
-// logs are captured and state is updated before the runtime is closed.
+// It cancels monitor goroutines and waits (with a bounded timeout) for them
+// to finish capturing logs and updating state before closing the runtime.
 func (m *Manager) Close() error {
 	// Cancel the manager context.
 	if m.cancel != nil {
 		m.cancel()
 	}
 
-	// Wait for all monitor goroutines to finish. This ensures log capture
-	// and state updates complete before we close the runtime connection.
-	// monitorContainerExit uses context.Background() so it is not
-	// affected by the cancel above.
-	m.monitorWg.Wait()
+	// Cancel monitor goroutines so WaitContainer unblocks. This prevents
+	// Close() from deadlocking when the Docker daemon is slow to report
+	// container exit (e.g., on custom networks with service dependencies).
+	// See https://github.com/majorcontext/moat/issues/315
+	if m.monitorCancel != nil {
+		m.monitorCancel()
+	}
+
+	// Wait for monitor goroutines to finish with a bounded timeout.
+	// Normally monitors complete quickly after context cancellation.
+	// The timeout is a safety net for cases where even a canceled
+	// WaitContainer doesn't return (e.g., Docker daemon unresponsive).
+	monitorDone := make(chan struct{})
+	go func() {
+		m.monitorWg.Wait()
+		close(monitorDone)
+	}()
+	select {
+	case <-monitorDone:
+		// All monitors finished cleanly.
+	case <-time.After(10 * time.Second):
+		log.Warn("timed out waiting for container monitors to finish; proceeding with shutdown")
+	}
 
 	// Stop all proxy/SSH servers and unregister runs from daemon,
 	// with a 10-second overall timeout.

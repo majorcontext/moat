@@ -32,7 +32,6 @@ func skipIfNoServiceRuntime(t *testing.T) {
 // TestServicePostgres verifies that a postgres service dependency starts,
 // injects MOAT_POSTGRES_URL, and the database is reachable from the main container.
 func TestServicePostgres(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -115,7 +114,6 @@ func TestServicePostgres(t *testing.T) {
 // TestServiceRedis verifies that a redis service dependency starts,
 // injects MOAT_REDIS_URL, and the cache is reachable.
 func TestServiceRedis(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -183,7 +181,6 @@ func TestServiceRedis(t *testing.T) {
 // TestServiceMultiple verifies that multiple services (postgres and redis)
 // can run together and both sets of env vars are injected.
 func TestServiceMultiple(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -257,7 +254,6 @@ func TestServiceMultiple(t *testing.T) {
 // TestServiceCustomConfig verifies that service configuration can be overridden
 // via the services: block in moat.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -336,7 +332,6 @@ func TestServiceCustomConfig(t *testing.T) {
 // TestServiceCleanup verifies that service containers are removed when
 // the run is destroyed.
 func TestServiceCleanup(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 

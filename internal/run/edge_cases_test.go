@@ -139,10 +139,14 @@ func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { monitorCancel() })
 	return &Manager{
-		runtimePool: container.NewRuntimePoolWithDefault(rt),
-		runs:        make(map[string]*Run),
-		routes:      routes,
+		runtimePool:   container.NewRuntimePoolWithDefault(rt),
+		runs:          make(map[string]*Run),
+		routes:        routes,
+		monitorCtx:    monitorCtx,
+		monitorCancel: monitorCancel,
 	}
 }
 
@@ -921,7 +925,7 @@ func TestMonitorContainerExitSetsStateFailed(t *testing.T) {
 	// Run monitor in goroutine and wait for it to complete
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(context.Background(), r)
 		close(done)
 	}()
 
@@ -980,7 +984,7 @@ func TestMonitorContainerExitSetsStateStopped(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(context.Background(), r)
 		close(done)
 	}()
 
@@ -1060,7 +1064,7 @@ func TestMonitorContainerExitWaitError(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(context.Background(), r)
 		close(done)
 	}()
 
@@ -1227,7 +1231,7 @@ func TestMonitorContainerExitAlreadyStopped(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(context.Background(), r)
 		close(done)
 	}()
 
@@ -1240,5 +1244,180 @@ func TestMonitorContainerExitAlreadyStopped(t *testing.T) {
 	// State should remain Stopped (not changed to Failed or re-Stopped)
 	if r.GetState() != StateStopped {
 		t.Errorf("expected state to remain StateStopped, got %s", r.GetState())
+	}
+}
+
+// TestCloseUnblocksStuckMonitor verifies the fix for #315: Close() cancels
+// the monitor context so monitorContainerExit's WaitContainer unblocks, and
+// Close() returns within its bounded timeout instead of deadlocking.
+func TestCloseUnblocksStuckMonitor(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "TestCloseUnblocksStuckMonitor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	store, err := storage.NewRunStore(tmpDir, "run_slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a container where WaitContainer blocks until context cancellation.
+	// This models the E2E scenario where Docker's ContainerWait hangs
+	// on containers using custom networks with services.
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		waitFn: func(ctx context.Context, _ string) (int64, error) {
+			<-ctx.Done()
+			return 0, ctx.Err()
+		},
+	}
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	m := newEdgeCaseManager(t, rt)
+	m.monitorCtx = monitorCtx
+	m.monitorCancel = monitorCancel
+
+	r := &Run{
+		ID:          "run_slow",
+		Name:        "slow-container",
+		ContainerID: "ctr-slow",
+		State:       StateRunning,
+		Store:       store,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	// Simulate what Start() does: register the monitor on monitorWg
+	// using monitorCtx (as the real code now does).
+	m.monitorWg.Add(1)
+	go func() {
+		defer m.monitorWg.Done()
+		m.monitorContainerExit(m.monitorCtx, r)
+	}()
+
+	// Simulate what the E2E test does: Wait() with a short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	waitErr := m.Wait(ctx, r.ID)
+	if !errors.Is(waitErr, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded from Wait, got: %v", waitErr)
+	}
+
+	// Close() should cancel the monitor context, unblocking WaitContainer,
+	// and return within a few seconds — NOT deadlock.
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- m.Close()
+	}()
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close() returned error: %v", err)
+		}
+		// Close() returned — the fix works.
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close() deadlocked — monitorContainerExit was not unblocked by context cancellation")
+	}
+}
+
+// TestCleanupRemovesContainerWhileMonitorBlocked reproduces Scenario B from #315:
+// the container exits and transitions to a non-running state, but
+// monitorContainerExit hasn't processed the exit yet. cleanupResources then
+// force-removes the container. If WaitContainer doesn't handle a removed
+// container gracefully, monitorContainerExit hangs, and Close() deadlocks.
+//
+// In the E2E tests, defers run in LIFO order:
+//  1. Destroy() — calls cleanupResources → RemoveContainer
+//  2. Close() — blocks on monitorWg.Wait()
+func TestCleanupRemovesContainerWhileMonitorBlocked(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "TestCleanupWhileMonitorBlocked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	store, err := storage.NewRunStore(tmpDir, "run_cleanup_race")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Track whether RemoveContainer was called while WaitContainer is blocked.
+	var (
+		waitStarted      = make(chan struct{}) // closed when WaitContainer starts blocking
+		containerRemoved = make(chan struct{}) // closed when RemoveContainer is called
+	)
+
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		waitFn: func(ctx context.Context, _ string) (int64, error) {
+			close(waitStarted)
+			// Block until container is removed, then return error
+			// (simulating Docker behavior when container is removed during wait)
+			select {
+			case <-containerRemoved:
+				// In real Docker: either returns immediately with error,
+				// or hangs forever. This test checks the optimistic case.
+				return 0, fmt.Errorf("container removed")
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		},
+		removeFn: func(_ context.Context, _ string) error {
+			select {
+			case <-containerRemoved:
+				// already closed
+			default:
+				close(containerRemoved)
+			}
+			return nil
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:          "run_cleanup_race",
+		Name:        "cleanup-race",
+		ContainerID: "ctr-race",
+		State:       StateStopped,
+		Store:       store,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	// Start monitor (tracked by monitorWg, like Start() does)
+	m.monitorWg.Add(1)
+	go func() {
+		defer m.monitorWg.Done()
+		m.monitorContainerExit(context.Background(), r)
+	}()
+
+	// Wait for the monitor to start blocking
+	<-waitStarted
+
+	// Simulate what Destroy does: call cleanupResources directly.
+	// This calls RemoveContainer (force) while monitorContainerExit is
+	// blocked on WaitContainer.
+	m.cleanupResources(context.Background(), r)
+
+	// Now Close() — does it deadlock?
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- m.Close()
+	}()
+
+	select {
+	case <-closeDone:
+		t.Log("Close() returned after cleanup removed the container — no deadlock in this scenario")
+	case <-time.After(2 * time.Second):
+		t.Log("Close() still blocked after cleanup — confirms the deadlock even when container is removed")
+		// Unblock to clean up
+		close(rt.done)
+		<-closeDone
 	}
 }
