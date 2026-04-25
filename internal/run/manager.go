@@ -923,7 +923,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 			}
 			if !hasKeepPolicy {
-				return nil, fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy restart' to upgrade")
+				return nil, fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy stop' to upgrade (the next command will start a fresh daemon)")
 			}
 		}
 
@@ -941,7 +941,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			}
 		}
 		if !hasHostGatewayV2 {
-			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
+			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy stop' to upgrade (the next command will start a fresh daemon)")
 		}
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
