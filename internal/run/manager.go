@@ -986,8 +986,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 
 		// Build proxy environment using synthetic hostnames on all runtimes.
-		// Docker resolves them via --add-host; Apple via moat-init.sh writing
-		// to /etc/hosts (MOAT_EXTRA_HOSTS, set below).
 		// Host-network mode is used on Docker Linux when no ports need publishing.
 		// In that mode, the container shares the host loopback, so localhost
 		// must NOT be in NO_PROXY (otherwise it bypasses network.host enforcement).
@@ -995,10 +993,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
 		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
-		// On runtimes without --add-host (Apple), pass the host map via env so
-		// moat-init.sh can write /etc/hosts before the user command runs.
-		if m.defaultRuntime().Type() != container.RuntimeDocker {
-			proxyEnv = append(proxyEnv, "MOAT_EXTRA_HOSTS="+syntheticProxyHost+":"+hostAddr+" "+syntheticHostGateway+":"+hostAddr)
+		// Docker-on-Linux resolves the synthetic hostnames via --add-host (set
+		// further down). Every other runtime (Apple; Docker Desktop on macOS
+		// and Windows) cannot use --add-host for this: Apple has no such flag,
+		// and on Docker Desktop --add-host:host-gateway resolves to the
+		// docker0 bridge IP which is unreachable from a custom bridge network
+		// (created whenever moat.yaml defines services). For those runtimes
+		// we pass the host map via env so moat-init.sh writes /etc/hosts.
+		if _, env := synthHostStrategy(m.defaultRuntime().Type(), goruntime.GOOS, hostAddr); env != "" {
+			proxyEnv = append(proxyEnv, "MOAT_EXTRA_HOSTS="+env)
 		}
 
 		// Mount CA certificate (not the private key) for container to trust.
@@ -1305,16 +1308,19 @@ region = %s
 				extraHosts = []string{"host.docker.internal:host-gateway"}
 			}
 		}
-		// Add synthetic hostnames that resolve to the host-gateway IP, only on
-		// runtimes that support --add-host. Apple's container CLI has no
-		// equivalent flag, so on Apple we configured the proxy URL above to use
-		// the actual gateway IP instead.
+		// Add synthetic hostnames to --add-host on runtimes where Docker's
+		// "host-gateway" substitution produces a reachable IP (Docker on
+		// Linux). Apple has no --add-host equivalent, and Docker Desktop on
+		// macOS/Windows must not use this path — "host-gateway" resolves to
+		// the docker0 bridge gateway, which is unreachable from containers on
+		// custom networks (those created by `services:`). Those runtimes
+		// instead rely on MOAT_EXTRA_HOSTS written by moat-init.sh (see above).
+		//
 		// "moat-proxy" is used for proxy traffic (in NO_PROXY).
 		// "moat-host" is used for host service traffic (NOT in NO_PROXY,
 		// so it flows through the proxy for network policy enforcement).
-		if m.defaultRuntime().Type() == container.RuntimeDocker {
-			extraHosts = append(extraHosts, syntheticProxyHost+":host-gateway", syntheticHostGateway+":host-gateway")
-		}
+		synthHosts, _ := synthHostStrategy(m.defaultRuntime().Type(), goruntime.GOOS, hostAddr)
+		extraHosts = append(extraHosts, synthHosts...)
 	}
 
 	// Add config env vars, filtering out proxy-related variables that would
@@ -3962,6 +3968,61 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	}
 
 	return nil
+}
+
+// synthHostStrategy decides how the container learns the IP addresses for
+// the synthetic moat-proxy and moat-host hostnames. It returns the entries
+// to append to Docker's --add-host flag and, separately, the value for the
+// MOAT_EXTRA_HOSTS env var (empty when not used). Exactly one of the two is
+// non-empty per call.
+//
+// Strategy by runtime + OS:
+//
+//   - Docker on Linux — entries via --add-host with the "host-gateway"
+//     sentinel. Docker's daemon substitutes the host's gateway IP at
+//     container-create time, and Linux's routing reaches it from any bridge.
+//
+//     NOTE: "Docker on Linux" here means native Docker Engine. Docker
+//     Desktop for Linux runs Docker Engine inside a VM and exhibits the
+//     same docker0-unreachable-from-custom-network behavior as Docker
+//     Desktop on macOS/Windows — those users would still hit the bug this
+//     strategy exists to avoid. Distinguishing Docker Desktop from native
+//     Engine requires a `docker info` probe (Docker Desktop reports
+//     OperatingSystem "Docker Desktop") or a host-side resolvability
+//     check for host.docker.internal; both are out of scope here. Known
+//     gap — tracked as a follow-up.
+//
+//   - Docker Desktop on macOS / Windows — entries via MOAT_EXTRA_HOSTS,
+//     processed by moat-init.sh at container start. --add-host:host-gateway
+//     resolves to the docker0 bridge gateway (e.g. 172.17.0.1), which is
+//     unreachable from a custom bridge network (one is created whenever the
+//     moat.yaml defines `services:`). host.docker.internal is the correct
+//     target, but it is a container-only DNS name — the host side cannot
+//     resolve it, so --add-host cannot consume it. We pass the name through
+//     with an "@" prefix; moat-init.sh resolves it inside the container
+//     where Docker Desktop's embedded DNS answers.
+//
+//   - Apple runtime — entries via MOAT_EXTRA_HOSTS. Apple's container CLI
+//     has no --add-host equivalent, and Apple's GetHostAddress() already
+//     returns a literal IP, so the env carries it directly (no sentinel).
+//
+// hostAddr is whatever the runtime's GetHostAddress() returns; it may be an
+// IP or a hostname. If it's an IP we emit it literally; if it's a hostname
+// we prefix it with "@" so moat-init.sh knows to resolve it.
+func synthHostStrategy(runtimeType container.RuntimeType, goos, hostAddr string) (dockerExtraHosts []string, extraHostsEnv string) {
+	if runtimeType == container.RuntimeDocker && goos == "linux" {
+		return []string{
+			syntheticProxyHost + ":host-gateway",
+			syntheticHostGateway + ":host-gateway",
+		}, ""
+	}
+	// For MOAT_EXTRA_HOSTS: literal IPs pass through, hostnames get the
+	// resolve sentinel so moat-init.sh defers resolution to container DNS.
+	target := hostAddr
+	if net.ParseIP(hostAddr) == nil {
+		target = "@" + hostAddr
+	}
+	return nil, syntheticProxyHost + ":" + target + " " + syntheticHostGateway + ":" + target
 }
 
 // buildProxyEnv constructs the environment variables that configure the container's
