@@ -211,8 +211,8 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 	// https://github.com/majorcontext/moat/issues/341.
 	if opts.ReapOrphanNetworks {
 		reapCtx, reapCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer reapCancel()
 		m.cleanOrphanNetworks(reapCtx)
-		reapCancel()
 	}
 
 	return m, nil
@@ -612,9 +612,20 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Create the run directory before any network/container operations so that
 	// concurrent orphan sweeps (in another process's NewManager) treat this
 	// run's network as alive even before metadata.json is written.
-	if err := os.MkdirAll(filepath.Join(storage.DefaultBaseDir(), r.ID), 0o700); err != nil {
+	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating run directory: %w", err)
 	}
+	// Remove the empty run dir if Create fails before successfully returning —
+	// otherwise we'd leak `~/.moat/runs/<id>/` directories with no metadata.json
+	// that don't surface in `moat list` or `moat clean`. Set to false on
+	// the success path before returning.
+	cleanupRunDir := true
+	defer func() {
+		if cleanupRunDir {
+			_ = os.RemoveAll(runDir)
+		}
+	}()
 
 	// Default command
 	cmd := opts.Cmd
@@ -2884,6 +2895,7 @@ region = %s
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
+	cleanupRunDir = false
 	return r, nil
 }
 
