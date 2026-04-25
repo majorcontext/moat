@@ -41,10 +41,11 @@ func TestRingRecorder_AddAndDump(t *testing.T) {
 }
 
 func TestRingRecorder_Eviction(t *testing.T) {
-	r := NewRingRecorder("run_test", nil, nil, Size{}, 100)
-	payload := bytes.Repeat([]byte("x"), 30)
+	// Each event is 1 byte; budget 4 bytes; write 10 events with payload byte = i.
+	// Survivors must be the last N events (FIFO eviction).
+	r := NewRingRecorder("run_test", nil, nil, Size{}, 4)
 	for i := 0; i < 10; i++ {
-		r.AddEvent(EventStdout, payload)
+		r.AddEvent(EventStdout, []byte{byte(i)})
 	}
 
 	path := filepath.Join(t.TempDir(), "dump.json")
@@ -60,14 +61,27 @@ func TestRingRecorder_Eviction(t *testing.T) {
 	for _, e := range loaded.Events {
 		total += len(e.Data)
 	}
-	if total > 100 {
-		t.Errorf("retained %d bytes, want <= 100", total)
+	if total > 4 {
+		t.Errorf("retained %d bytes, want <= 4", total)
+	}
+	if len(loaded.Events) == 0 {
+		t.Fatalf("evicted everything: ring is empty")
 	}
 	if len(loaded.Events) == 10 {
 		t.Errorf("no eviction occurred: still have all 10 events")
 	}
-	if len(loaded.Events) == 0 {
-		t.Errorf("evicted everything: ring is empty")
+
+	// Survivors must be the most recent — last byte must be 9, and the sequence
+	// must be a contiguous tail of [0..9].
+	want := byte(10 - len(loaded.Events))
+	for i, e := range loaded.Events {
+		if len(e.Data) != 1 {
+			t.Fatalf("event %d data len = %d, want 1", i, len(e.Data))
+		}
+		if e.Data[0] != want {
+			t.Errorf("event %d byte = %d, want %d (LIFO instead of FIFO?)", i, e.Data[0], want)
+		}
+		want++
 	}
 }
 
