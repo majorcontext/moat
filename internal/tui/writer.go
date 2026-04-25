@@ -638,7 +638,7 @@ func (w *Writer) ClearMessage() {
 func (w *Writer) SetupEscapeHints(proxy *term.EscapeProxy) {
 	proxy.OnPrefixChange(func(active bool) {
 		if active {
-			w.SetMessage("s (snapshot) · k (stop) · ctrl+/ (cancel)")
+			w.SetMessage("s (snapshot) · k (stop) · d (dump tui) · r (reset tui) · ctrl+/ (cancel)")
 		} else {
 			w.ClearMessage()
 		}

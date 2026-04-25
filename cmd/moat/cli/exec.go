@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/trace"
 	"github.com/majorcontext/moat/internal/tui"
@@ -28,6 +31,11 @@ const (
 	// ttyStartupDelay is how long to wait before resizing TTY after container starts.
 	// This allows the container process to initialize before we resize.
 	ttyStartupDelay = 200 * time.Millisecond
+
+	// defaultRingBytes is the default byte budget for the always-on TUI debug ring
+	// buffer. ~5–15 minutes of typical terminal output. Override with
+	// MOAT_TTY_RING_BYTES.
+	defaultRingBytes = 8 * 1024 * 1024
 )
 
 // Re-export types from internal/cli for backward compatibility
@@ -358,6 +366,23 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	tracer := setupTTYTracer(tracePath, r, command)
 	defer tracer.save()
 
+	// Always-on bounded ring buffer for on-demand TUI debug dumps.
+	ringBytes := defaultRingBytes
+	if env := os.Getenv("MOAT_TTY_RING_BYTES"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil && n > 0 {
+			ringBytes = n
+		} else {
+			log.Warn("invalid MOAT_TTY_RING_BYTES, using default", "value", env, "default", defaultRingBytes)
+		}
+	}
+	ringWidth, ringHeight := 80, 24
+	if term.IsTerminal(os.Stdout) {
+		if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
+			ringWidth, ringHeight = w, h
+		}
+	}
+	ringRecorder := trace.NewRingRecorder(r.ID, command, trace.GetTraceEnv(), trace.Size{Width: ringWidth, Height: ringHeight}, ringBytes)
+
 	// Put terminal in raw mode to capture escape sequences without echo
 	var rawState *term.RawModeState
 	if term.IsTerminal(os.Stdin) {
@@ -386,6 +411,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if tracer != nil {
 		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
 	}
+	stdout = trace.NewRecordingWriter(stdout, ringRecorder, trace.EventStdout)
 
 	// Wrap stdin with escape proxy to detect stop sequences
 	escapeProxy := term.NewEscapeProxy(os.Stdin)
@@ -395,12 +421,17 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		statusWriter.SetupEscapeHints(escapeProxy)
 	}
 
-	// Set up callback for non-disruptive escape actions (snapshot)
+	// Set up callback for non-disruptive escape actions (snapshot, dump, reset)
 	var flashMu sync.Mutex
 	var flashTimer *time.Timer
 	escapeProxy.OnAction(func(action term.EscapeAction) {
-		if action == term.EscapeSnapshot {
+		switch action {
+		case term.EscapeSnapshot:
 			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeDumpTUI:
+			go dumpTUI(r, ringRecorder, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeResetTUI:
+			go resetTUI(ctx, manager, r, statusWriter, &flashMu, &flashTimer)
 		}
 	})
 
@@ -429,6 +460,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if tracer != nil {
 		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}
+	stdin = trace.NewRecordingReader(stdin, ringRecorder, trace.EventStdin)
 
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
@@ -475,6 +507,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 						if tracer != nil {
 							tracer.recorder.AddResize(width, height)
 						}
+						ringRecorder.AddResize(width, height)
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY
 						// #nosec G115 -- width/height are validated positive above
@@ -548,4 +581,75 @@ func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, fla
 	}
 
 	flash("Snapshot saved: " + snap.ID)
+}
+
+// dumpTUI saves the in-memory TTY ring buffer to disk and flashes the path.
+func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) {
+		if statusWriter == nil {
+			return
+		}
+		flashMu.Lock()
+		defer flashMu.Unlock()
+		if *flashTimer != nil {
+			(*flashTimer).Stop()
+		}
+		statusWriter.SetMessage(msg)
+		_ = statusWriter.UpdateStatus()
+		*flashTimer = time.AfterFunc(2*time.Second, func() {
+			statusWriter.ClearMessage()
+			_ = statusWriter.UpdateStatus()
+		})
+	}
+
+	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
+	path := filepath.Join(runDir, fmt.Sprintf("tui-debug-%d.json", time.Now().Unix()))
+	if err := ringRecorder.Dump(path); err != nil {
+		log.Error("tui dump failed", "path", path, "error", err)
+		flash("tui dump failed: " + err.Error())
+		return
+	}
+	log.Info("tui dump saved", "path", path)
+	flash("tui dump saved: " + path)
+}
+
+// resetTUI emits a soft terminal reset and nudges the container to redraw.
+func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) {
+		if statusWriter == nil {
+			return
+		}
+		flashMu.Lock()
+		defer flashMu.Unlock()
+		if *flashTimer != nil {
+			(*flashTimer).Stop()
+		}
+		statusWriter.SetMessage(msg)
+		_ = statusWriter.UpdateStatus()
+		*flashTimer = time.AfterFunc(2*time.Second, func() {
+			statusWriter.ClearMessage()
+			_ = statusWriter.UpdateStatus()
+		})
+	}
+
+	if statusWriter == nil {
+		flash("tui reset: no status writer")
+		return
+	}
+	if err := statusWriter.Reset(); err != nil {
+		log.Error("tui reset failed", "error", err)
+		flash("tui reset failed: " + err.Error())
+		return
+	}
+
+	if term.IsTerminal(os.Stdout) {
+		if width, height := term.GetSize(os.Stdout); width > 0 && height > 0 {
+			// #nosec G115 -- width/height validated positive
+			if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+				log.Debug("post-reset resize nudge failed", "error", err)
+			}
+		}
+	}
+
+	flash("tui reset")
 }
