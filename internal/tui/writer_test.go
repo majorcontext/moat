@@ -844,6 +844,11 @@ func TestWriter_Reset_ScrollMode(t *testing.T) {
 	if !strings.Contains(written, "\x1b[1;23r") {
 		t.Errorf("expected DECSTBM 1;23r, got %q", written)
 	}
+	softIdx := strings.Index(written, "\x1b[!p")
+	stbmIdx := strings.Index(written, "\x1b[1;23r")
+	if softIdx < 0 || stbmIdx < 0 || softIdx >= stbmIdx {
+		t.Errorf("soft reset must precede DECSTBM, got positions %d and %d in %q", softIdx, stbmIdx, written)
+	}
 }
 
 func TestWriter_Reset_StopsFooterTimer(t *testing.T) {
@@ -896,6 +901,11 @@ func TestWriter_Reset_ExitsAltScreen(t *testing.T) {
 	written := out.String()
 	if !strings.Contains(written, "\x1b[?1049l") {
 		t.Errorf("expected alt-screen exit (ESC[?1049l), got %q", written)
+	}
+	exitIdx := strings.Index(written, "\x1b[?1049l")
+	softIdx := strings.Index(written, "\x1b[!p")
+	if exitIdx < 0 || softIdx < 0 || exitIdx >= softIdx {
+		t.Errorf("alt-screen exit must precede soft reset, got positions %d and %d in %q", exitIdx, softIdx, written)
 	}
 
 	w.mu.Lock()

@@ -492,6 +492,11 @@ func (w *Writer) renderCompositorLocked() {
 // Soft reset (ESC[!p) is used rather than full RIS (ESC c) so the user's
 // scrollback is preserved. The caller is responsible for nudging the child
 // process to redraw (typically via a no-op TTY resize).
+//
+// Reset is best-effort. If the terminal write fails partway through, internal
+// state (altScreen, emulator, footerTimer, escBuf) has already been cleared,
+// so the Writer is left in a valid scroll-mode initial state from which the
+// caller may retry. The scroll region/footer redraw may not have completed.
 func (w *Writer) Reset() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -510,6 +515,8 @@ func (w *Writer) Reset() error {
 		buf.WriteString("\x1b[?1049l")
 	}
 
+	// Discard any partial alt-screen escape sequence buffered from a previous
+	// Write — carrying it forward could re-trigger a phantom mode transition.
 	w.escBuf = nil
 
 	buf.WriteString("\x1b[!p")       // DECSTR soft reset
