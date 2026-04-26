@@ -43,9 +43,13 @@ func init() {
 func cleanResources(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get runs (no sandbox needed for listing/cleaning)
+	// Get runs (no sandbox needed for listing/cleaning).
+	// `moat clean` is the explicit cleanup command, so reap orphan networks too.
 	noSandbox := true
-	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{
+		NoSandbox:          &noSandbox,
+		ReapOrphanNetworks: true,
+	})
 	if err != nil {
 		return fmt.Errorf("creating run manager: %w", err)
 	}

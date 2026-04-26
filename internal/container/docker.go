@@ -875,13 +875,21 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 // dockerNetworkManager methods
 
 // CreateNetwork creates a Docker network for inter-container communication.
-// Returns the network ID.
+// Returns the network ID. Bounded by networkCreateTimeout so a wedged Docker
+// daemon surfaces as a clear error instead of an indefinite hang.
 func (m *dockerNetworkManager) CreateNetwork(ctx context.Context, name string) (string, error) {
-	resp, err := m.cli.NetworkCreate(ctx, name, network.CreateOptions{
+	callCtx, cancel := context.WithTimeout(ctx, networkCreateTimeout)
+	defer cancel()
+
+	resp, err := m.cli.NetworkCreate(callCtx, name, network.CreateOptions{
 		Driver: "bridge", // Bridge network for inter-container communication
 		Labels: map[string]string{"moat.managed": "true"},
 	})
 	if err != nil {
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			return "", fmt.Errorf("creating network %s: timed out after %s — Docker daemon may be unresponsive. List moat networks with `docker network ls --filter label=moat.managed=true` and remove unused entries with `docker network rm <id>`",
+				name, networkCreateTimeout)
+		}
 		return "", fmt.Errorf("creating network: %w", err)
 	}
 	return resp.ID, nil

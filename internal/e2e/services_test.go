@@ -29,10 +29,27 @@ func skipIfNoServiceRuntime(t *testing.T) {
 	t.Skip("No container runtime with service support available")
 }
 
+// cleanupRun stops then destroys a run, ignoring errors. Registered via
+// t.Cleanup so it runs even when assertions fail. Destroy refuses to remove
+// a Running run, so the explicit Stop is required to avoid leaking the
+// container's network and run dir on test failure (see #315).
+func cleanupRun(t *testing.T, mgr *run.Manager, runID string) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := mgr.Stop(ctx, runID); err != nil {
+			t.Logf("cleanup: stop run %s: %v", runID, err)
+		}
+		if err := mgr.Destroy(ctx, runID); err != nil {
+			t.Logf("cleanup: destroy run %s: %v", runID, err)
+		}
+	})
+}
+
 // TestServicePostgres verifies that a postgres service dependency starts,
 // injects MOAT_POSTGRES_URL, and the database is reachable from the main container.
 func TestServicePostgres(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -43,7 +60,7 @@ func TestServicePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	workspace := createTestWorkspaceWithDeps(t, []string{"postgres@17"})
 
@@ -71,7 +88,7 @@ func TestServicePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	cleanupRun(t, mgr, r.ID)
 
 	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -115,7 +132,6 @@ func TestServicePostgres(t *testing.T) {
 // TestServiceRedis verifies that a redis service dependency starts,
 // injects MOAT_REDIS_URL, and the cache is reachable.
 func TestServiceRedis(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -126,7 +142,7 @@ func TestServiceRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	workspace := createTestWorkspaceWithDeps(t, []string{"redis@7"})
 
@@ -145,7 +161,7 @@ func TestServiceRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	cleanupRun(t, mgr, r.ID)
 
 	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -183,7 +199,6 @@ func TestServiceRedis(t *testing.T) {
 // TestServiceMultiple verifies that multiple services (postgres and redis)
 // can run together and both sets of env vars are injected.
 func TestServiceMultiple(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -194,7 +209,7 @@ func TestServiceMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	workspace := createTestWorkspaceWithDeps(t, []string{"postgres@17", "redis@7"})
 
@@ -212,7 +227,7 @@ func TestServiceMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	cleanupRun(t, mgr, r.ID)
 
 	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -257,7 +272,6 @@ func TestServiceMultiple(t *testing.T) {
 // TestServiceCustomConfig verifies that service configuration can be overridden
 // via the services: block in moat.yaml (e.g., custom database name).
 func TestServiceCustomConfig(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -268,7 +282,7 @@ func TestServiceCustomConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	workspace := createTestWorkspaceWithDeps(t, []string{"postgres@17"})
 
@@ -291,7 +305,7 @@ func TestServiceCustomConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	cleanupRun(t, mgr, r.ID)
 
 	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -336,7 +350,6 @@ func TestServiceCustomConfig(t *testing.T) {
 // TestServiceCleanup verifies that service containers are removed when
 // the run is destroyed.
 func TestServiceCleanup(t *testing.T) {
-	t.Skip("skipped: hangs intermittently — see https://github.com/majorcontext/moat/issues/315")
 	skipIfNoServiceRuntime(t)
 	skipIfNestedDind(t)
 
@@ -347,7 +360,7 @@ func TestServiceCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	defer mgr.Close()
+	t.Cleanup(func() { _ = mgr.Close() })
 
 	workspace := createTestWorkspaceWithDeps(t, []string{"postgres@17"})
 
@@ -362,6 +375,10 @@ func TestServiceCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// Safety net: even though this test deliberately destroys the run mid-test,
+	// register cleanup in case an assertion fails before the explicit Destroy.
+	// Stop+Destroy on an already-destroyed run is a harmless no-op.
+	cleanupRun(t, mgr, r.ID)
 
 	runID := r.ID
 

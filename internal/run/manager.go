@@ -32,6 +32,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/hostnames"
+	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -103,9 +104,16 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// monitorCtx/monitorCancel control monitorContainerExit goroutines.
+	// Separate from the main ctx so monitors can outlive general operations
+	// but still be canceled by Close(). Close() cancels monitorCtx first,
+	// then waits on monitorWg with a bounded timeout to prevent deadlocks
+	// when WaitContainer blocks (e.g., Docker daemon slow on custom networks).
+	monitorCtx    context.Context
+	monitorCancel context.CancelFunc
+
 	// monitorWg tracks active monitorContainerExit goroutines.
-	// Close() waits on this before closing the runtime so that
-	// monitors can finish capturing logs and updating state.
+	// Close() waits on this (with a timeout) after canceling monitorCtx.
 	monitorWg sync.WaitGroup
 }
 
@@ -133,6 +141,12 @@ type ManagerOptions struct {
 	// NoSandbox disables gVisor sandbox for Docker containers.
 	// If nil, uses platform-aware defaults (gVisor on Linux, standard on macOS/Windows).
 	NoSandbox *bool
+
+	// ReapOrphanNetworks enables a one-shot sweep of moat-managed networks whose
+	// run directories no longer exist. Set by commands that create networks
+	// (`moat run`) or explicitly clean up (`moat clean`). Read-only commands
+	// leave it false to avoid the per-invocation cost of listing networks.
+	ReapOrphanNetworks bool
 }
 
 // NewManagerWithOptions creates a new run manager with the given options.
@@ -163,6 +177,7 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	defaultRT, _ := pool.Default()
 	m := &Manager{
 		runtimePool:    pool,
@@ -172,6 +187,8 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		proxyLifecycle: lifecycle,
 		ctx:            ctx,
 		cancel:         cancel,
+		monitorCtx:     monitorCtx,
+		monitorCancel:  monitorCancel,
 	}
 
 	// Load existing runs from disk and reconcile with container state.
@@ -183,7 +200,85 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		// Non-fatal - continue with empty runs map
 	}
 
+	// Reap orphan moat networks left behind by killed/crashed runs. Each leaked
+	// network on Apple's container runtime keeps a vmnet daemon alive and
+	// consumes a /24 from the IP pool; eventually `container network create`
+	// hangs. See https://github.com/majorcontext/moat/issues/315.
+	//
+	// Only sweep when explicitly requested (commands that create networks or
+	// clean up). Read-only commands skip it to avoid the per-invocation cost.
+	// Long-term this belongs in the daemon — see
+	// https://github.com/majorcontext/moat/issues/341.
+	if opts.ReapOrphanNetworks {
+		reapCtx, reapCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer reapCancel()
+		m.cleanOrphanNetworks(reapCtx)
+	}
+
 	return m, nil
+}
+
+// cleanOrphanNetworks removes moat-managed networks whose run directory has
+// been deleted from disk. Best-effort: errors are logged but do not fail
+// manager initialization. Only sweeps the default runtime to avoid eagerly
+// initializing other runtimes.
+//
+// Networks are listed BEFORE run dirs to close the race with concurrent
+// Create() calls in another process: Create() makes the run dir before any
+// network op, so if a network exists at list time but its dir wasn't seen at
+// the later snapshot, the dir genuinely doesn't exist.
+//
+// Networks whose suffix isn't a valid run ID are skipped — protects users
+// who happen to have a network named e.g. "moat-shared".
+func (m *Manager) cleanOrphanNetworks(ctx context.Context) {
+	rt, err := m.runtimePool.Default()
+	if err != nil {
+		return
+	}
+	netMgr := rt.NetworkManager()
+	if netMgr == nil {
+		return
+	}
+
+	networks, err := netMgr.ListNetworks(ctx)
+	if err != nil {
+		log.Debug("orphan sweep: listing networks failed", "error", err)
+		return
+	}
+
+	known, err := storage.ListRunDirNames(storage.DefaultBaseDir())
+	if err != nil {
+		log.Debug("orphan sweep: scanning run dirs failed", "error", err)
+		return
+	}
+
+	var reaped int
+	for _, n := range networks {
+		runID, ok := strings.CutPrefix(n.Name, "moat-")
+		if !ok {
+			continue
+		}
+		if !id.IsValid(runID, "run") {
+			continue
+		}
+		if _, alive := known[runID]; alive {
+			continue
+		}
+		// Bound each removal individually so one wedged network doesn't burn
+		// the whole sweep budget.
+		rmCtx, rmCancel := context.WithTimeout(ctx, 5*time.Second)
+		log.Debug("removing orphan network", "name", n.Name, "id", n.ID)
+		if rmErr := netMgr.ForceRemoveNetwork(rmCtx, n.ID); rmErr != nil {
+			log.Debug("orphan sweep: failed to remove network", "name", n.Name, "error", rmErr)
+			rmCancel()
+			continue
+		}
+		rmCancel()
+		reaped++
+	}
+	if reaped > 0 {
+		log.Info("reaped orphan moat networks", "count", reaped)
+	}
 }
 
 // NewManager creates a new run manager with default options.
@@ -439,7 +534,10 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 	// skipMonitor is set for cross-runtime runs where the runtime is unavailable —
 	// spawning a monitor would immediately fail and corrupt the persisted state.
 	if runState == StateRunning && !skipMonitor {
-		go m.monitorContainerExit(r)
+		// Inherited monitors from persisted runs are NOT tracked by monitorWg
+		// and use context.Background() — they may block indefinitely on
+		// long-running containers from previous CLI invocations.
+		go m.monitorContainerExit(context.Background(), r)
 	}
 }
 
@@ -515,6 +613,24 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		CreatedAt:     time.Now(),
 		exitCh:        make(chan struct{}),
 	}
+
+	// Create the run directory before any network/container operations so that
+	// concurrent orphan sweeps (in another process's NewManager) treat this
+	// run's network as alive even before metadata.json is written.
+	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return nil, fmt.Errorf("creating run directory: %w", err)
+	}
+	// Remove the empty run dir if Create fails before successfully returning —
+	// otherwise we'd leak `~/.moat/runs/<id>/` directories with no metadata.json
+	// that don't surface in `moat list` or `moat clean`. Set to false on
+	// the success path before returning.
+	cleanupRunDir := true
+	defer func() {
+		if cleanupRunDir {
+			_ = os.RemoveAll(runDir)
+		}
+	}()
 
 	// Default command
 	cmd := opts.Cmd
@@ -2790,6 +2906,7 @@ region = %s
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
+	cleanupRunDir = false
 	return r, nil
 }
 
@@ -2926,11 +3043,12 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	}
 
 	// Start background monitor to capture logs when container exits.
-	// Tracked by monitorWg so Close() waits for completion.
+	// Tracked by monitorWg so Close() waits for completion. Uses monitorCtx
+	// so Close() can cancel stuck monitors (prevents deadlock on custom networks).
 	m.monitorWg.Add(1)
 	go func() {
 		defer m.monitorWg.Done()
-		m.monitorContainerExit(r)
+		m.monitorContainerExit(m.monitorCtx, r)
 	}()
 
 	// Start proxy health monitor to re-register the run if the daemon restarts.
@@ -3443,7 +3561,12 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 // exitCh is closed, and resources are cleaned up regardless of which path
 // (interactive, non-interactive, Stop) caused the container to exit.
 // It's safe to call multiple times - captureLogs is idempotent.
-func (m *Manager) monitorContainerExit(r *Run) {
+//
+// The ctx parameter controls the WaitContainer call. Close() cancels this
+// context to unblock the monitor when the manager is shutting down, preventing
+// deadlocks when WaitContainer blocks indefinitely (e.g., Docker daemon slow
+// to report exit on custom networks — see #315).
+func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	// Resolve the correct runtime for this run.
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
@@ -3454,11 +3577,10 @@ func (m *Manager) monitorContainerExit(r *Run) {
 		return
 	}
 
-	// Wait for container to exit (no timeout - let it run as long as needed).
-	// This is the ONLY place that calls WaitContainer to avoid race conditions.
-	// Uses context.Background() so this goroutine is not canceled by Close().
-	// Close() waits on monitorWg before closing the runtime.
-	exitCode, err := rt.WaitContainer(context.Background(), r.ContainerID)
+	// Wait for container to exit. This is the ONLY place that calls
+	// WaitContainer to avoid race conditions. The context is typically
+	// monitorCtx, which Close() cancels to unblock stuck monitors.
+	exitCode, err := rt.WaitContainer(ctx, r.ContainerID)
 
 	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
 	// Docker may start removing/cleaning the container at any moment after exit.
@@ -3806,19 +3928,37 @@ func (m *Manager) RuntimePool() *container.RuntimePool {
 }
 
 // Close releases manager resources.
-// It waits for active monitorContainerExit goroutines to finish so that
-// logs are captured and state is updated before the runtime is closed.
+// It cancels monitor goroutines and waits (with a bounded timeout) for them
+// to finish capturing logs and updating state before closing the runtime.
 func (m *Manager) Close() error {
 	// Cancel the manager context.
 	if m.cancel != nil {
 		m.cancel()
 	}
 
-	// Wait for all monitor goroutines to finish. This ensures log capture
-	// and state updates complete before we close the runtime connection.
-	// monitorContainerExit uses context.Background() so it is not
-	// affected by the cancel above.
-	m.monitorWg.Wait()
+	// Cancel monitor goroutines so WaitContainer unblocks. This prevents
+	// Close() from deadlocking when the Docker daemon is slow to report
+	// container exit (e.g., on custom networks with service dependencies).
+	// See https://github.com/majorcontext/moat/issues/315
+	if m.monitorCancel != nil {
+		m.monitorCancel()
+	}
+
+	// Wait for monitor goroutines to finish with a bounded timeout.
+	// Normally monitors complete quickly after context cancellation.
+	// The timeout is a safety net for cases where even a canceled
+	// WaitContainer doesn't return (e.g., Docker daemon unresponsive).
+	monitorDone := make(chan struct{})
+	go func() {
+		m.monitorWg.Wait()
+		close(monitorDone)
+	}()
+	select {
+	case <-monitorDone:
+		// All monitors finished cleanly.
+	case <-time.After(10 * time.Second):
+		log.Warn("timed out waiting for container monitors to finish; proceeding with shutdown")
+	}
 
 	// Stop all proxy/SSH servers and unregister runs from daemon,
 	// with a 10-second overall timeout.
