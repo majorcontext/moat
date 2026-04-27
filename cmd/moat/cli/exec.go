@@ -367,12 +367,14 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	defer tracer.save()
 
 	// Always-on bounded ring buffer for on-demand TUI debug dumps.
+	// MOAT_TTY_RING_BYTES overrides the default; 0 disables eviction (unbounded);
+	// non-numeric or negative values fall back to the default with a user-visible warning.
 	ringBytes := defaultRingBytes
 	if env := os.Getenv("MOAT_TTY_RING_BYTES"); env != "" {
-		if n, err := strconv.Atoi(env); err == nil && n > 0 {
+		if n, err := strconv.Atoi(env); err == nil && n >= 0 {
 			ringBytes = n
 		} else {
-			log.Warn("invalid MOAT_TTY_RING_BYTES, using default", "value", env, "default", defaultRingBytes)
+			ui.Warnf("MOAT_TTY_RING_BYTES=%q is not a non-negative integer; using default %d", env, defaultRingBytes)
 		}
 	}
 	ringWidth, ringHeight := 80, 24
@@ -554,26 +556,41 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}
 }
 
-// takeSnapshot creates a manual snapshot and shows the result in the status bar.
-// The flashMu/flashTimer pair are shared across calls to prevent rapid snapshots
-// from clearing each other's flash message.
-func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
-	flash := func(msg string) {
-		if statusWriter == nil {
-			return
-		}
+// flashMessage briefly shows a message in the status bar, replacing any prior
+// flash. The flashMu/flashTimer pair are shared across all flash callers so
+// rapid calls don't clear each other's messages.
+//
+// The auto-clear callback re-acquires flashMu and verifies it is still the
+// current owner before clearing, so a new flash that arrives while the old
+// timer is firing isn't immediately wiped.
+func flashMessage(statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer, msg string) {
+	if statusWriter == nil {
+		return
+	}
+	flashMu.Lock()
+	defer flashMu.Unlock()
+	if *flashTimer != nil {
+		(*flashTimer).Stop()
+	}
+	statusWriter.SetMessage(msg)
+	_ = statusWriter.UpdateStatus()
+
+	var thisTimer *time.Timer
+	thisTimer = time.AfterFunc(2*time.Second, func() {
 		flashMu.Lock()
 		defer flashMu.Unlock()
-		if *flashTimer != nil {
-			(*flashTimer).Stop()
+		if *flashTimer != thisTimer {
+			return // a newer flash has taken over
 		}
-		statusWriter.SetMessage(msg)
+		statusWriter.ClearMessage()
 		_ = statusWriter.UpdateStatus()
-		*flashTimer = time.AfterFunc(2*time.Second, func() {
-			statusWriter.ClearMessage()
-			_ = statusWriter.UpdateStatus()
-		})
-	}
+	})
+	*flashTimer = thisTimer
+}
+
+// takeSnapshot creates a manual snapshot and shows the result in the status bar.
+func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
 
 	if r.SnapEngine == nil {
 		flash("Snapshots not configured")
@@ -592,24 +609,14 @@ func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, fla
 
 // dumpTUI saves the in-memory TTY ring buffer to disk and flashes the path.
 func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
-	flash := func(msg string) {
-		if statusWriter == nil {
-			return
-		}
-		flashMu.Lock()
-		defer flashMu.Unlock()
-		if *flashTimer != nil {
-			(*flashTimer).Stop()
-		}
-		statusWriter.SetMessage(msg)
-		_ = statusWriter.UpdateStatus()
-		*flashTimer = time.AfterFunc(2*time.Second, func() {
-			statusWriter.ClearMessage()
-			_ = statusWriter.UpdateStatus()
-		})
-	}
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
 
 	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		log.Error("tui dump mkdir failed", "dir", runDir, "error", err)
+		flash("tui dump failed: " + err.Error())
+		return
+	}
 	path := filepath.Join(runDir, fmt.Sprintf("tui-debug-%d.json", time.Now().Unix()))
 	if err := ringRecorder.Dump(path); err != nil {
 		log.Error("tui dump failed", "path", path, "error", err)
@@ -625,22 +632,7 @@ func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Wri
 // many TUIs treat that as a redraw command. A SIGWINCH is also fired as a
 // belt-and-suspenders nudge for TUIs that ignore Ctrl+L.
 func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWriter *tui.Writer, injectable *term.InjectableReader, flashMu *sync.Mutex, flashTimer **time.Timer) {
-	flash := func(msg string) {
-		if statusWriter == nil {
-			return
-		}
-		flashMu.Lock()
-		defer flashMu.Unlock()
-		if *flashTimer != nil {
-			(*flashTimer).Stop()
-		}
-		statusWriter.SetMessage(msg)
-		_ = statusWriter.UpdateStatus()
-		*flashTimer = time.AfterFunc(2*time.Second, func() {
-			statusWriter.ClearMessage()
-			_ = statusWriter.UpdateStatus()
-		})
-	}
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
 
 	if statusWriter == nil {
 		log.Warn("ctrl+/ r pressed but no status writer; skipping reset")

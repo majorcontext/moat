@@ -39,7 +39,11 @@ func NewRingRecorder(runID string, command []string, env map[string]string, init
 	}
 }
 
-// AddEvent records an I/O event, evicting oldest events if the byte budget is exceeded.
+// AddEvent records an I/O event, evicting oldest events if the byte budget is
+// exceeded. A single event larger than maxBytes is appended and then evicted
+// in the same call — the budget is a hard ceiling, not a per-event cap, so
+// oversized payloads are intentionally dropped rather than silently retained.
+// Callers should size maxBytes with the largest expected event in mind.
 func (r *RingRecorder) AddEvent(eventType EventType, data []byte) {
 	if len(data) == 0 {
 		return
@@ -103,7 +107,19 @@ func (r *RingRecorder) evictLocked() {
 		r.curBytes -= len(r.trace.Events[drop].Data)
 		drop++
 	}
-	if drop > 0 {
-		r.trace.Events = r.trace.Events[drop:]
+	if drop == 0 {
+		return
 	}
+	remaining := r.trace.Events[drop:]
+	// Re-slicing keeps the original backing array alive, so dropped events
+	// stay reachable until the slice is reallocated. Once we've dropped more
+	// than we kept, copy survivors into a fresh slice to release the old
+	// array back to the GC.
+	if drop > len(remaining) {
+		fresh := make([]Event, len(remaining))
+		copy(fresh, remaining)
+		r.trace.Events = fresh
+		return
+	}
+	r.trace.Events = remaining
 }

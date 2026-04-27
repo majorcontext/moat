@@ -174,20 +174,20 @@ func TestInjectableReader_PropagatesError(t *testing.T) {
 
 func TestInjectableReader_CloseUnblocksInject(t *testing.T) {
 	// Inject blocks until Read consumes the bytes — or until Close. Verify
-	// that Close releases a parked Inject with io.ErrClosedPipe rather than
-	// hanging.
+	// that Close releases Inject with io.ErrClosedPipe rather than hanging,
+	// regardless of the race between the two calls.
 	pr, pw := io.Pipe()
 	defer pw.Close()
 	r := NewInjectableReader(pr)
 
+	started := make(chan struct{})
 	injectErr := make(chan error, 1)
 	go func() {
+		close(started)
 		injectErr <- r.Inject([]byte{0x0C})
 	}()
 
-	// Give Inject a moment to park in pw.Write.
-	time.Sleep(10 * time.Millisecond)
-
+	<-started
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}

@@ -85,6 +85,39 @@ func TestRingRecorder_Eviction(t *testing.T) {
 	}
 }
 
+func TestRingRecorder_OversizedEventEvictsItself(t *testing.T) {
+	// A single payload larger than maxBytes is appended and then immediately
+	// evicted — the budget is a hard ceiling, not a per-event cap. Document
+	// the behavior so a future tweak doesn't silently change it.
+	r := NewRingRecorder("run_test", nil, nil, Size{}, 4)
+	r.AddEvent(EventStdout, bytes.Repeat([]byte("X"), 100))
+
+	path := filepath.Join(t.TempDir(), "dump.json")
+	if err := r.Dump(path); err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded.Events) != 0 {
+		t.Errorf("oversized event retained: %+v", loaded.Events)
+	}
+
+	// Recorder must remain usable after the oversized drop.
+	r.AddEvent(EventStdout, []byte{'a'})
+	if err := r.Dump(path); err != nil {
+		t.Fatalf("Dump after recovery: %v", err)
+	}
+	loaded, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load after recovery: %v", err)
+	}
+	if len(loaded.Events) != 1 || !bytes.Equal(loaded.Events[0].Data, []byte{'a'}) {
+		t.Errorf("recovery state wrong: %+v", loaded.Events)
+	}
+}
+
 func TestRingRecorder_MonotonicTimestamps(t *testing.T) {
 	r := NewRingRecorder("run_test", nil, nil, Size{}, 50)
 	for i := 0; i < 5; i++ {
