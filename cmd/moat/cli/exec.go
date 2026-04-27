@@ -421,22 +421,15 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		statusWriter.SetupEscapeHints(escapeProxy)
 	}
 
-	// Set up callback for non-disruptive escape actions (snapshot, dump, reset)
-	var flashMu sync.Mutex
-	var flashTimer *time.Timer
-	escapeProxy.OnAction(func(action term.EscapeAction) {
-		switch action {
-		case term.EscapeSnapshot:
-			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
-		case term.EscapeDumpTUI:
-			go dumpTUI(r, ringRecorder, statusWriter, &flashMu, &flashTimer)
-		case term.EscapeResetTUI:
-			go resetTUI(ctx, manager, r, statusWriter, &flashMu, &flashTimer)
-		}
-	})
-
-	// Build stdin reader chain: escape proxy -> clipboard proxy (optional) -> tracer (optional)
+	// Build stdin reader chain. Layering, from upstream to downstream:
+	//   os.Stdin -> escapeProxy -> injectable -> clipboard? -> tracer? -> ring
+	// The injectable reader sits just below the escape proxy so synthetic
+	// keystrokes (e.g. Ctrl+L from resetTUI) flow through the recorders and
+	// appear in trace dumps.
 	var stdin io.Reader = escapeProxy
+	injectable := term.NewInjectableReader(stdin)
+	defer injectable.Close()
+	stdin = injectable
 	if r.Clipboard {
 		stdin = term.NewClipboardProxy(stdin, func() {
 			done := make(chan struct{})
@@ -461,6 +454,20 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}
 	stdin = trace.NewRecordingReader(stdin, ringRecorder, trace.EventStdin)
+
+	// Set up callback for non-disruptive escape actions (snapshot, dump, reset).
+	var flashMu sync.Mutex
+	var flashTimer *time.Timer
+	escapeProxy.OnAction(func(action term.EscapeAction) {
+		switch action {
+		case term.EscapeSnapshot:
+			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeDumpTUI:
+			go dumpTUI(r, ringRecorder, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeResetTUI:
+			go resetTUI(ctx, manager, r, statusWriter, injectable, &flashMu, &flashTimer)
+		}
+	})
 
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
@@ -614,7 +621,10 @@ func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Wri
 }
 
 // resetTUI emits a soft terminal reset and nudges the container to redraw.
-func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+// injectable, if non-nil, is used to splice Ctrl+L into the child's stdin —
+// many TUIs treat that as a redraw command. A SIGWINCH is also fired as a
+// belt-and-suspenders nudge for TUIs that ignore Ctrl+L.
+func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWriter *tui.Writer, injectable *term.InjectableReader, flashMu *sync.Mutex, flashTimer **time.Timer) {
 	flash := func(msg string) {
 		if statusWriter == nil {
 			return
@@ -640,6 +650,18 @@ func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWrite
 		log.Error("tui reset failed", "error", err)
 		flash("tui reset failed: " + err.Error())
 		return
+	}
+
+	// Send Ctrl+L (form feed) — the de facto redraw convention for terminal
+	// UIs. Inject blocks until the byte is consumed by the child, so run
+	// it in a goroutine to avoid stalling the reset path if the child is
+	// slow to read.
+	if injectable != nil {
+		go func() {
+			if err := injectable.Inject([]byte{0x0C}); err != nil {
+				log.Debug("post-reset Ctrl+L inject failed", "error", err)
+			}
+		}()
 	}
 
 	if term.IsTerminal(os.Stdout) {
