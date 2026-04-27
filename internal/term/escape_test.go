@@ -20,9 +20,9 @@ func TestEscapeProxy_PassThrough(t *testing.T) {
 	}
 }
 
-func TestEscapeProxy_DPassesThrough(t *testing.T) {
-	// Ctrl-/ d is not an escape sequence; both bytes should pass through
-	input := []byte{EscapePrefix, 'd', 'x', 'y', 'z'}
+func TestEscapeProxy_UnrecognizedKeyPassesThrough(t *testing.T) {
+	// Ctrl-/ q is not an escape sequence; both bytes should pass through
+	input := []byte{EscapePrefix, 'q', 'x', 'y', 'z'}
 	r := NewEscapeProxy(bytes.NewReader(input))
 
 	out, err := io.ReadAll(r)
@@ -30,7 +30,7 @@ func TestEscapeProxy_DPassesThrough(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := []byte{EscapePrefix, 'd', 'x', 'y', 'z'}
+	expected := []byte{EscapePrefix, 'q', 'x', 'y', 'z'}
 	if !bytes.Equal(out, expected) {
 		t.Errorf("got %v, want %v", out, expected)
 	}
@@ -86,7 +86,7 @@ func TestEscapeProxy_UnrecognizedEscape(t *testing.T) {
 
 func TestEscapeProxy_MixedContent(t *testing.T) {
 	// Normal content with unrecognized escape in the middle - both bytes pass through
-	input := []byte{'a', 'b', EscapePrefix, 'd', 'c'}
+	input := []byte{'a', 'b', EscapePrefix, 'q', 'c'}
 	r := NewEscapeProxy(bytes.NewReader(input))
 
 	out, err := io.ReadAll(r)
@@ -94,7 +94,7 @@ func TestEscapeProxy_MixedContent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := []byte{'a', 'b', EscapePrefix, 'd', 'c'}
+	expected := []byte{'a', 'b', EscapePrefix, 'q', 'c'}
 	if !bytes.Equal(out, expected) {
 		t.Errorf("got %v, want %v", out, expected)
 	}
@@ -159,6 +159,8 @@ func TestEscapeError_Error(t *testing.T) {
 	}{
 		{EscapeStop, "escape: stop"},
 		{EscapeSnapshot, "escape: snapshot"},
+		{EscapeDumpTUI, "escape: dump-tui"},
+		{EscapeResetTUI, "escape: reset-tui"},
 		{EscapeNone, "escape: unknown"},
 	}
 
@@ -256,8 +258,8 @@ func TestEscapeProxy_OnPrefixChange(t *testing.T) {
 		wantFinalState bool
 	}{
 		{
-			name:           "prefix detected then canceled with unrecognized d",
-			input:          []byte{EscapePrefix, 'd'},
+			name:           "prefix detected then canceled with unrecognized q",
+			input:          []byte{EscapePrefix, 'q'},
 			wantCallbacks:  []bool{true, false},
 			wantFinalState: false,
 		},
@@ -341,5 +343,65 @@ func TestEscapeProxy_OnPrefixChange_SplitReads(t *testing.T) {
 		t.Errorf("after prefix read: got %d callbacks %v, want 2 callbacks [true, false]", len(callbacks), callbacks)
 	} else if callbacks[0] != true || callbacks[1] != false {
 		t.Errorf("after prefix read: got callbacks %v, want [true, false]", callbacks)
+	}
+}
+
+func TestEscapeProxy_DumpTUI(t *testing.T) {
+	input := []byte{EscapePrefix, 'd'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var gotAction EscapeAction
+	r.OnAction(func(action EscapeAction) {
+		gotAction = action
+	})
+
+	buf := make([]byte, 10)
+	_, err := r.Read(buf)
+	if IsEscapeError(err) {
+		t.Fatalf("dump should not return EscapeError, got: %v", err)
+	}
+	if gotAction != EscapeDumpTUI {
+		t.Errorf("expected EscapeDumpTUI callback, got: %v", gotAction)
+	}
+}
+
+func TestEscapeProxy_ResetTUI(t *testing.T) {
+	input := []byte{EscapePrefix, 'r'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var gotAction EscapeAction
+	r.OnAction(func(action EscapeAction) {
+		gotAction = action
+	})
+
+	buf := make([]byte, 10)
+	_, err := r.Read(buf)
+	if IsEscapeError(err) {
+		t.Fatalf("reset should not return EscapeError, got: %v", err)
+	}
+	if gotAction != EscapeResetTUI {
+		t.Errorf("expected EscapeResetTUI callback, got: %v", gotAction)
+	}
+}
+
+func TestEscapeProxy_DumpAndResetContinueReading(t *testing.T) {
+	input := []byte{'a', EscapePrefix, 'd', 'b', EscapePrefix, 'r', 'c'}
+	r := NewEscapeProxy(bytes.NewReader(input))
+
+	var actions []EscapeAction
+	r.OnAction(func(action EscapeAction) {
+		actions = append(actions, action)
+	})
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := []byte{'a', 'b', 'c'}
+	if !bytes.Equal(out, expected) {
+		t.Errorf("got %q, want %q", out, expected)
+	}
+	if len(actions) != 2 || actions[0] != EscapeDumpTUI || actions[1] != EscapeResetTUI {
+		t.Errorf("expected [EscapeDumpTUI, EscapeResetTUI], got %v", actions)
 	}
 }
