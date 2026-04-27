@@ -228,7 +228,9 @@ func TestRegistryGithubBinaryPlaceholders(t *testing.T) {
 
 // TestRegistryGithubBinaryURLsExist validates that all github-binary download URLs
 // are reachable. This catches version/asset naming errors before e2e tests.
-// Skipped by default; run with: go test -run TestRegistryGithubBinaryURLsExist -urls
+// Skipped in short mode. Transient network errors and 5xx responses skip the
+// individual subtest rather than failing — only 404/410 (which indicate a
+// genuinely wrong asset URL) are reported as failures.
 func TestRegistryGithubBinaryURLsExist(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping URL validation in short mode")
@@ -270,13 +272,16 @@ func TestRegistryGithubBinaryURLsExist(t *testing.T) {
 
 					resp, err := client.Do(req)
 					if err != nil {
-						t.Fatalf("failed to reach %s: %v", url, err)
+						t.Skipf("transient network error reaching %s: %v", url, err)
 					}
 					defer resp.Body.Close()
 
-					if resp.StatusCode == http.StatusNotFound {
-						t.Errorf("URL returns 404: %s", url)
-					} else if resp.StatusCode >= 400 {
+					switch {
+					case resp.StatusCode == http.StatusNotFound, resp.StatusCode == http.StatusGone:
+						t.Errorf("URL returns %d (asset missing): %s", resp.StatusCode, url)
+					case resp.StatusCode >= 500:
+						t.Skipf("transient %d from %s", resp.StatusCode, url)
+					case resp.StatusCode >= 400:
 						t.Errorf("URL returns %d: %s", resp.StatusCode, url)
 					}
 				})
