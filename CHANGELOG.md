@@ -8,7 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Added
 
-- **TUI debug shortcuts** — `Ctrl-/ d` dumps a snapshot of recent terminal I/O to `~/.moat/runs/<id>/tui-debug-<unix-ts>.json` for offline analysis or feeding into a Claude session; `Ctrl-/ r` issues a soft terminal reset and nudges the child to redraw, recovering wedged sessions. The dump uses the same JSON format as `--tty-trace` and works with `moat tty-trace analyze`. Ring buffer size is 8 MB by default, tunable via `MOAT_TTY_RING_BYTES`. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- **TUI debug shortcuts** — `Ctrl-/ d` dumps a snapshot of recent terminal I/O to `~/.moat/runs/<id>/tui-debug-<unix-ts>.json` for offline analysis or feeding into a Claude session; `Ctrl-/ r` issues a soft terminal reset and nudges the child to redraw, recovering wedged sessions. The dump uses the same JSON format as `--tty-trace` and works with `moat tty-trace analyze`. Ring buffer size is 8 MB by default, tunable via `MOAT_TTY_RING_BYTES`. ([#343](https://github.com/majorcontext/moat/pull/343))
 
 ### Changed
 
