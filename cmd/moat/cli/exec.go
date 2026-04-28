@@ -440,10 +440,19 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	attachCtx, attachCancel := context.WithCancel(ctx)
 	defer attachCancel()
 
+	// Reserve one terminal row for the status bar so the child process is
+	// told the PTY is one row shorter than the host terminal. Without this,
+	// the child draws its own bottom-pinned UI on the same row as moat's
+	// footer and the two interleave on every redraw.
+	var reservedRows uint
+	if statusWriter != nil {
+		reservedRows = 1
+	}
+
 	// Start with attachment - this ensures TTY is connected before process starts
 	attachDone := make(chan error, 1)
 	go func() {
-		attachDone <- manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr)
+		attachDone <- manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr, reservedRows)
 	}()
 
 	// Give container a moment to start, then resize TTY to match terminal.
@@ -456,8 +465,12 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		if term.IsTerminal(os.Stdout) {
 			width, height := term.GetSize(os.Stdout)
 			if width > 0 && height > 0 {
-				// #nosec G115 -- width/height are validated positive above
-				if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+				childHeight := uint(height) // #nosec G115 -- validated positive above
+				if childHeight > reservedRows {
+					childHeight -= reservedRows
+				}
+				// #nosec G115 -- width is validated positive above
+				if err := manager.ResizeTTY(ctx, r.ID, childHeight, uint(width)); err != nil {
 					log.Debug("failed to resize TTY", "error", err)
 				}
 			}
@@ -477,9 +490,14 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 							tracer.recorder.AddResize(width, height)
 						}
 						_ = statusWriter.Resize(width, height)
-						// Also resize container TTY
-						// #nosec G115 -- width/height are validated positive above
-						_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+						// Resize the container TTY to the host height minus
+						// the rows reserved for moat's status bar.
+						childHeight := uint(height) // #nosec G115 -- validated positive above
+						if childHeight > reservedRows {
+							childHeight -= reservedRows
+						}
+						// #nosec G115 -- width is validated positive above
+						_ = manager.ResizeTTY(ctx, r.ID, childHeight, uint(width))
 					}
 				}
 				continue // Don't break out of loop
