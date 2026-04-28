@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/trace"
 	"github.com/majorcontext/moat/internal/tui"
@@ -28,6 +31,11 @@ const (
 	// ttyStartupDelay is how long to wait before resizing TTY after container starts.
 	// This allows the container process to initialize before we resize.
 	ttyStartupDelay = 200 * time.Millisecond
+
+	// defaultRingBytes is the default byte budget for the always-on TUI debug ring
+	// buffer. ~5–15 minutes of typical terminal output. Override with
+	// MOAT_TTY_RING_BYTES.
+	defaultRingBytes = 8 * 1024 * 1024
 )
 
 // Re-export types from internal/cli for backward compatibility
@@ -359,6 +367,25 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	tracer := setupTTYTracer(tracePath, r, command)
 	defer tracer.save()
 
+	// Always-on bounded ring buffer for on-demand TUI debug dumps.
+	// MOAT_TTY_RING_BYTES overrides the default; 0 disables eviction (unbounded);
+	// non-numeric or negative values fall back to the default with a user-visible warning.
+	ringBytes := defaultRingBytes
+	if env := os.Getenv("MOAT_TTY_RING_BYTES"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil && n >= 0 {
+			ringBytes = n
+		} else {
+			ui.Warnf("MOAT_TTY_RING_BYTES=%q is not a non-negative integer; using default %d", env, defaultRingBytes)
+		}
+	}
+	ringWidth, ringHeight := 80, 24
+	if term.IsTerminal(os.Stdout) {
+		if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
+			ringWidth, ringHeight = w, h
+		}
+	}
+	ringRecorder := trace.NewRingRecorder(r.ID, command, trace.GetTraceEnv(), trace.Size{Width: ringWidth, Height: ringHeight}, ringBytes)
+
 	// Put terminal in raw mode to capture escape sequences without echo
 	var rawState *term.RawModeState
 	if term.IsTerminal(os.Stdin) {
@@ -387,6 +414,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if tracer != nil {
 		stdout = trace.NewRecordingWriter(stdout, tracer.recorder, trace.EventStdout)
 	}
+	stdout = trace.NewRecordingWriter(stdout, ringRecorder, trace.EventStdout)
 
 	// Wrap stdin with escape proxy to detect stop sequences
 	escapeProxy := term.NewEscapeProxy(os.Stdin)
@@ -396,17 +424,15 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		statusWriter.SetupEscapeHints(escapeProxy)
 	}
 
-	// Set up callback for non-disruptive escape actions (snapshot)
-	var flashMu sync.Mutex
-	var flashTimer *time.Timer
-	escapeProxy.OnAction(func(action term.EscapeAction) {
-		if action == term.EscapeSnapshot {
-			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
-		}
-	})
-
-	// Build stdin reader chain: escape proxy -> clipboard proxy (optional) -> tracer (optional)
+	// Build stdin reader chain. Layering, from upstream to downstream:
+	//   os.Stdin -> escapeProxy -> injectable -> clipboard? -> tracer? -> ring
+	// The injectable reader sits just below the escape proxy so synthetic
+	// keystrokes (e.g. Ctrl+L from resetTUI) flow through the recorders and
+	// appear in trace dumps.
 	var stdin io.Reader = escapeProxy
+	injectable := term.NewInjectableReader(stdin)
+	defer injectable.Close()
+	stdin = injectable
 	if r.Clipboard {
 		stdin = term.NewClipboardProxy(stdin, func() {
 			done := make(chan struct{})
@@ -430,6 +456,21 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if tracer != nil {
 		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}
+	stdin = trace.NewRecordingReader(stdin, ringRecorder, trace.EventStdin)
+
+	// Set up callback for non-disruptive escape actions (snapshot, dump, reset).
+	var flashMu sync.Mutex
+	var flashTimer *time.Timer
+	escapeProxy.OnAction(func(action term.EscapeAction) {
+		switch action {
+		case term.EscapeSnapshot:
+			go takeSnapshot(r, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeDumpTUI:
+			go dumpTUI(r, ringRecorder, statusWriter, &flashMu, &flashTimer)
+		case term.EscapeResetTUI:
+			go resetTUI(ctx, manager, r, statusWriter, injectable, &flashMu, &flashTimer)
+		}
+	})
 
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
@@ -476,6 +517,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 						if tracer != nil {
 							tracer.recorder.AddResize(width, height)
 						}
+						ringRecorder.AddResize(width, height)
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY
 						// #nosec G115 -- width/height are validated positive above
@@ -515,26 +557,41 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}
 }
 
-// takeSnapshot creates a manual snapshot and shows the result in the status bar.
-// The flashMu/flashTimer pair are shared across calls to prevent rapid snapshots
-// from clearing each other's flash message.
-func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
-	flash := func(msg string) {
-		if statusWriter == nil {
-			return
-		}
+// flashMessage briefly shows a message in the status bar, replacing any prior
+// flash. The flashMu/flashTimer pair are shared across all flash callers so
+// rapid calls don't clear each other's messages.
+//
+// The auto-clear callback re-acquires flashMu and verifies it is still the
+// current owner before clearing, so a new flash that arrives while the old
+// timer is firing isn't immediately wiped.
+func flashMessage(statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer, msg string) {
+	if statusWriter == nil {
+		return
+	}
+	flashMu.Lock()
+	defer flashMu.Unlock()
+	if *flashTimer != nil {
+		(*flashTimer).Stop()
+	}
+	statusWriter.SetMessage(msg)
+	_ = statusWriter.UpdateStatus()
+
+	var thisTimer *time.Timer
+	thisTimer = time.AfterFunc(2*time.Second, func() {
 		flashMu.Lock()
 		defer flashMu.Unlock()
-		if *flashTimer != nil {
-			(*flashTimer).Stop()
+		if *flashTimer != thisTimer {
+			return // a newer flash has taken over
 		}
-		statusWriter.SetMessage(msg)
+		statusWriter.ClearMessage()
 		_ = statusWriter.UpdateStatus()
-		*flashTimer = time.AfterFunc(2*time.Second, func() {
-			statusWriter.ClearMessage()
-			_ = statusWriter.UpdateStatus()
-		})
-	}
+	})
+	*flashTimer = thisTimer
+}
+
+// takeSnapshot creates a manual snapshot and shows the result in the status bar.
+func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
 
 	if r.SnapEngine == nil {
 		flash("Snapshots not configured")
@@ -549,4 +606,65 @@ func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, fla
 	}
 
 	flash("Snapshot saved: " + snap.ID)
+}
+
+// dumpTUI saves the in-memory TTY ring buffer to disk and flashes the path.
+func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Writer, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
+
+	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		log.Error("tui dump mkdir failed", "dir", runDir, "error", err)
+		flash("tui dump failed: " + err.Error())
+		return
+	}
+	path := filepath.Join(runDir, fmt.Sprintf("tui-debug-%d.json", time.Now().Unix()))
+	if err := ringRecorder.Dump(path); err != nil {
+		log.Error("tui dump failed", "path", path, "error", err)
+		flash("tui dump failed: " + err.Error())
+		return
+	}
+	log.Info("tui dump saved", "path", path)
+	flash("tui dump saved: " + path)
+}
+
+// resetTUI emits a soft terminal reset and nudges the container to redraw.
+// injectable, if non-nil, is used to splice Ctrl+L into the child's stdin —
+// many TUIs treat that as a redraw command. A SIGWINCH is also fired as a
+// belt-and-suspenders nudge for TUIs that ignore Ctrl+L.
+func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWriter *tui.Writer, injectable *term.InjectableReader, flashMu *sync.Mutex, flashTimer **time.Timer) {
+	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
+
+	if statusWriter == nil {
+		log.Warn("ctrl+/ r pressed but no status writer; skipping reset")
+		return
+	}
+	if err := statusWriter.Reset(); err != nil {
+		log.Error("tui reset failed", "error", err)
+		flash("tui reset failed: " + err.Error())
+		return
+	}
+
+	// Send Ctrl+L (form feed) — the de facto redraw convention for terminal
+	// UIs. Inject blocks until the byte is consumed by the child, so run
+	// it in a goroutine to avoid stalling the reset path if the child is
+	// slow to read.
+	if injectable != nil {
+		go func() {
+			if err := injectable.Inject([]byte{0x0C}); err != nil {
+				log.Debug("post-reset Ctrl+L inject failed", "error", err)
+			}
+		}()
+	}
+
+	if term.IsTerminal(os.Stdout) {
+		if width, height := term.GetSize(os.Stdout); width > 0 && height > 0 {
+			// #nosec G115 -- width/height validated positive
+			if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+				log.Debug("post-reset resize nudge failed", "error", err)
+			}
+		}
+	}
+
+	flash("tui reset")
 }

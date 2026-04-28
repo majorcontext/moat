@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Added
+
+- **TUI debug shortcuts** — `Ctrl-/ d` dumps a snapshot of recent terminal I/O to `~/.moat/runs/<id>/tui-debug-<unix-ts>.json` for offline analysis or feeding into a Claude session; `Ctrl-/ r` issues a soft terminal reset and nudges the child to redraw, recovering wedged sessions. The dump uses the same JSON format as `--tty-trace` and works with `moat tty-trace analyze`. Ring buffer size is 8 MB by default, tunable via `MOAT_TTY_RING_BYTES`. ([#343](https://github.com/majorcontext/moat/pull/343))
+
 ### Changed
 
 - **Gatekeeper extracted to standalone module** — `internal/proxy/` and `cmd/gatekeeper/` have moved to [github.com/majorcontext/gatekeeper](https://github.com/majorcontext/gatekeeper). The `ghcr.io/majorcontext/moat-gatekeeper` image is no longer published from this repository. ([#333](https://github.com/majorcontext/moat/pull/333))
