@@ -138,7 +138,17 @@ moat run [flags] [path] [-- command]
 moat run ./my-project
 ```
 
-**Interactive (`-i`):** The run owns the terminal with stdin/stdout/stderr connected and a TTY allocated. Press `Ctrl-/ k` to stop the run. `Ctrl+C` is forwarded to the container process.
+**Interactive (`-i`):** The run owns the terminal with stdin/stdout/stderr connected and a TTY allocated. `Ctrl+C` is forwarded to the container process. The Ctrl-/ menu offers the following actions:
+
+| Key | Action |
+| --- | --- |
+| `Ctrl-/ s` | Take a manual workspace snapshot |
+| `Ctrl-/ k` | Stop the run |
+| `Ctrl-/ d` | Dump the in-memory TTY history to `~/.moat/runs/<id>/tui-debug-<unix-ts>.json` for offline analysis with `moat tty-trace analyze` |
+| `Ctrl-/ r` | Soft-reset the terminal (recover from rendering corruption) |
+| `Ctrl-/ Ctrl-/` | Cancel the menu |
+
+The TTY history is captured into a bounded ring buffer (default 8 MB, override with `MOAT_TTY_RING_BYTES`) for every interactive session, so `Ctrl-/ d` can be used retroactively after a rendering bug appears.
 
 ```bash
 moat run -i -- bash

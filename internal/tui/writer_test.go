@@ -982,3 +982,101 @@ func TestWriter_PassthroughANSI(t *testing.T) {
 
 	w.Cleanup()
 }
+
+func TestWriter_Reset_ScrollMode(t *testing.T) {
+	var out bytes.Buffer
+	bar := NewStatusBar("run_test", "test-agent", "docker")
+	bar.SetDimensions(80, 24)
+	w := NewWriter(&out, bar, "docker")
+
+	if err := w.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	out.Reset()
+
+	if err := w.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	written := out.String()
+	if !strings.Contains(written, "\x1b[!p") {
+		t.Errorf("expected soft reset (ESC[!p), got %q", written)
+	}
+	if !strings.Contains(written, "\x1b[1;23r") {
+		t.Errorf("expected DECSTBM 1;23r, got %q", written)
+	}
+	softIdx := strings.Index(written, "\x1b[!p")
+	stbmIdx := strings.Index(written, "\x1b[1;23r")
+	if softIdx < 0 || stbmIdx < 0 || softIdx >= stbmIdx {
+		t.Errorf("soft reset must precede DECSTBM, got positions %d and %d in %q", softIdx, stbmIdx, written)
+	}
+}
+
+func TestWriter_Reset_StopsFooterTimer(t *testing.T) {
+	var out bytes.Buffer
+	bar := NewStatusBar("run_test", "test-agent", "docker")
+	bar.SetDimensions(80, 24)
+	w := NewWriter(&out, bar, "docker")
+
+	if err := w.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	// Trigger footer redraw schedule by writing some output.
+	if _, err := w.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if err := w.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	w.mu.Lock()
+	timerActive := w.footerTimer != nil
+	w.mu.Unlock()
+	if timerActive {
+		t.Errorf("footerTimer should be cleared after Reset")
+	}
+}
+
+func TestWriter_Reset_ExitsAltScreen(t *testing.T) {
+	var out bytes.Buffer
+	bar := NewStatusBar("run_test", "test-agent", "docker")
+	bar.SetDimensions(80, 24)
+	w := NewWriter(&out, bar, "docker")
+
+	if err := w.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+
+	// Enter alt screen by writing the enter sequence.
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("Write alt-screen enter: %v", err)
+	}
+	out.Reset()
+
+	if err := w.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	written := out.String()
+	if !strings.Contains(written, "\x1b[?1049l") {
+		t.Errorf("expected alt-screen exit (ESC[?1049l), got %q", written)
+	}
+	exitIdx := strings.Index(written, "\x1b[?1049l")
+	softIdx := strings.Index(written, "\x1b[!p")
+	if exitIdx < 0 || softIdx < 0 || exitIdx >= softIdx {
+		t.Errorf("alt-screen exit must precede soft reset, got positions %d and %d in %q", exitIdx, softIdx, written)
+	}
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	hasEmu := w.emulator != nil
+	w.mu.Unlock()
+	if inAlt {
+		t.Errorf("altScreen should be false after Reset")
+	}
+	if hasEmu {
+		t.Errorf("emulator should be nil after Reset")
+	}
+}

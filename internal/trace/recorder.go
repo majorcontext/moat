@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// EventRecorder is the minimal surface used by RecordingWriter/RecordingReader.
+// Both *Recorder (unbounded) and *RingRecorder (bounded) satisfy it.
+type EventRecorder interface {
+	AddEvent(eventType EventType, data []byte)
+	AddResize(width, height int)
+	AddSignal(sig string)
+}
+
 // Recorder captures I/O events to a trace.
 type Recorder struct {
 	trace     *Trace
@@ -85,12 +93,12 @@ func (r *Recorder) Save(path string) error {
 // RecordingWriter wraps an io.Writer and records all writes to the trace.
 type RecordingWriter struct {
 	w         io.Writer
-	recorder  *Recorder
+	recorder  EventRecorder
 	eventType EventType
 }
 
 // NewRecordingWriter creates a writer that records to the trace.
-func NewRecordingWriter(w io.Writer, recorder *Recorder, eventType EventType) io.Writer {
+func NewRecordingWriter(w io.Writer, recorder EventRecorder, eventType EventType) io.Writer {
 	return &RecordingWriter{
 		w:         w,
 		recorder:  recorder,
@@ -109,12 +117,12 @@ func (rw *RecordingWriter) Write(p []byte) (n int, err error) {
 // RecordingReader wraps an io.Reader and records all reads to the trace.
 type RecordingReader struct {
 	r         io.Reader
-	recorder  *Recorder
+	recorder  EventRecorder
 	eventType EventType
 }
 
 // NewRecordingReader creates a reader that records to the trace.
-func NewRecordingReader(r io.Reader, recorder *Recorder, eventType EventType) io.Reader {
+func NewRecordingReader(r io.Reader, recorder EventRecorder, eventType EventType) io.Reader {
 	return &RecordingReader{
 		r:         r,
 		recorder:  recorder,
