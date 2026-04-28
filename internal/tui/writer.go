@@ -37,6 +37,17 @@ var altScreenExit = [][]byte{
 	[]byte("\x1b[?1047l"),
 }
 
+// decstbmReset is the DECSTBM "reset scroll region to full screen" escape
+// sequence. Some node-based TUIs (Claude Code among them) emit this once
+// during startup as part of TTY normalization. When that happens, moat's
+// scroll region — which reserves the bottom row for the footer — is wiped
+// out, and any subsequent footer redraw at row H becomes regular text that
+// scrolls up with content. We detect this sequence in the data stream, let
+// it pass through, then immediately reassert moat's scroll region. The
+// trace evidence is one reset at startup and one at exit per session, so
+// this is a one-shot restore — not an ongoing fight with the child.
+var decstbmReset = []byte("\x1b[r")
+
 // renderInterval is the compositor render tick rate (~60fps).
 const renderInterval = 16 * time.Millisecond
 
@@ -241,8 +252,25 @@ func (w *Writer) processDataLocked(data []byte) error {
 			continue
 		}
 
+		// Detect DECSTBM "reset scroll region" — pass it through, then
+		// immediately reassert moat's scroll region so the footer keeps a
+		// home. Only meaningful in scroll mode; in compositor mode the
+		// emulator owns its own scroll state.
+		if bytes.HasPrefix(data, decstbmReset) {
+			if err := w.outputLocked(data[:len(decstbmReset)]); err != nil {
+				return err
+			}
+			data = data[len(decstbmReset):]
+			if !w.altScreen && w.height > 1 {
+				if err := w.reassertScrollRegionLocked(); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
 		// Check if this could be a partial match at the end of the buffer
-		if w.isPrefixOfAltScreen(data) && len(data) < maxAltScreenSeqLen() {
+		if w.isPrefixOfKnownSequence(data) && len(data) < maxKnownSeqLen() {
 			// Buffer it for the next Write call
 			w.escBuf = append(w.escBuf[:0], data...)
 			return nil
@@ -291,8 +319,10 @@ func (w *Writer) matchAltScreen(data []byte) (matched bool, enter bool, length i
 	return false, false, 0
 }
 
-// isPrefixOfAltScreen returns true if data is a prefix of any alt screen sequence.
-func (w *Writer) isPrefixOfAltScreen(data []byte) bool {
+// isPrefixOfKnownSequence returns true if data is a prefix of any sequence
+// the writer recognizes (alt screen enter/exit or DECSTBM reset). Used to
+// defer processing of sequences that may be split across Write calls.
+func (w *Writer) isPrefixOfKnownSequence(data []byte) bool {
 	for _, seq := range altScreenEnter {
 		if len(data) < len(seq) && bytes.HasPrefix(seq, data) {
 			return true
@@ -303,11 +333,14 @@ func (w *Writer) isPrefixOfAltScreen(data []byte) bool {
 			return true
 		}
 	}
+	if len(data) < len(decstbmReset) && bytes.HasPrefix(decstbmReset, data) {
+		return true
+	}
 	return false
 }
 
-// maxAltScreenSeqLen returns the length of the longest alt screen sequence.
-func maxAltScreenSeqLen() int {
+// maxKnownSeqLen returns the length of the longest sequence the writer recognizes.
+func maxKnownSeqLen() int {
 	max := 0
 	for _, seq := range altScreenEnter {
 		if len(seq) > max {
@@ -319,7 +352,25 @@ func maxAltScreenSeqLen() int {
 			max = len(seq)
 		}
 	}
+	if len(decstbmReset) > max {
+		max = len(decstbmReset)
+	}
 	return max
+}
+
+// reassertScrollRegionLocked re-establishes moat's DECSTBM scroll region
+// without disturbing the cursor. Used after the child process resets the
+// scroll region (e.g., via `\x1b[r` during TTY normalization). The save
+// and restore are needed because setting DECSTBM moves the cursor to the
+// home position by default.
+// Caller must hold the mutex.
+func (w *Writer) reassertScrollRegionLocked() error {
+	var buf bytes.Buffer
+	buf.WriteString("\x1b7") // DECSC: save cursor + attrs
+	fmt.Fprintf(&buf, "\x1b[1;%dr", w.height-1)
+	buf.WriteString("\x1b8") // DECRC: restore cursor + attrs
+	_, err := w.out.Write(buf.Bytes())
+	return err
 }
 
 // enterCompositorLocked switches from scroll mode to compositor mode.

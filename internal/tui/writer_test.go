@@ -797,6 +797,103 @@ func TestWriter_Apple_BufferFullFallback(t *testing.T) {
 	w.Cleanup()
 }
 
+func TestWriter_DECSTBMReset_ReassertsScrollRegion(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Child sends DECSTBM reset (\x1b[r). The writer must pass it through
+	// to the terminal AND immediately reassert moat's scroll region so the
+	// footer keeps a home below the content area.
+	_, err := w.Write([]byte("hello\x1b[rworld"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Original ESC[r must reach the terminal — Claude (or its libs) may
+	// have side effects on it that we don't want to suppress.
+	if !strings.Contains(output, "\x1b[r") {
+		t.Errorf("expected DECSTBM reset to pass through, got %q", output)
+	}
+
+	// Following the reset, the writer should have reasserted the scroll
+	// region for height=24 (so [1;23]).
+	if !strings.Contains(output, "\x1b[1;23r") {
+		t.Errorf("expected scroll region reassert (ESC[1;23r) after reset, got %q", output)
+	}
+
+	// Reassertion must be wrapped in DECSC/DECRC so the cursor isn't moved.
+	if !strings.Contains(output, "\x1b7") || !strings.Contains(output, "\x1b8") {
+		t.Errorf("expected DECSC/DECRC around reassert, got %q", output)
+	}
+
+	// Surrounding content still passes through.
+	if !strings.Contains(output, "hello") || !strings.Contains(output, "world") {
+		t.Errorf("expected surrounding content to pass through, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_DECSTBMReset_NoReassertInCompositorMode(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter alt screen — switch to compositor mode.
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+	buf.Reset()
+
+	// While in alt-screen, DECSTBM reset is meaningful only inside the
+	// emulator's screen; the real terminal already has its own scroll
+	// region untouched. We must NOT emit our reassert to the real terminal
+	// here, since the compositor's render loop owns that surface.
+	_, err := w.Write([]byte("\x1b[r"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// No reassert should hit the real terminal.
+	if strings.Contains(output, "\x1b[1;23r") {
+		t.Errorf("expected NO scroll region reassert in compositor mode, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_DECSTBMReset_SplitAcrossWrites(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Send "\x1b[r" in two pieces — the writer should buffer the partial
+	// prefix and detect the sequence on the next Write.
+	_, _ = w.Write([]byte("\x1b["))
+	_, _ = w.Write([]byte("r"))
+
+	output := buf.String()
+	if !strings.Contains(output, "\x1b[1;23r") {
+		t.Errorf("expected scroll region reassert after split DECSTBM reset, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
 func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
