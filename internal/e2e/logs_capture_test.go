@@ -188,7 +188,7 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 		// verify that StartAttached captures logs when the container exits
 		doneCh := make(chan error, 1)
 		go func() {
-			doneCh <- mgr.StartAttached(ctx, r.ID, os.Stdin, os.Stdout, os.Stderr)
+			doneCh <- mgr.StartAttached(ctx, r.ID, os.Stdin, os.Stdout, os.Stderr, 0)
 		}()
 
 		// Wait for completion

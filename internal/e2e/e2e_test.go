@@ -1807,7 +1807,7 @@ func TestInteractiveContainer(t *testing.T) {
 
 	// Run StartAttached - this should send input to cat and get it echoed back
 	// Note: cat exits when stdin reaches EOF, so this will complete
-	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf)
+	err = mgr.StartAttached(ctx, r.ID, stdinReader, &stdoutBuf, &stdoutBuf, 0)
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}

@@ -468,6 +468,20 @@ run_pre_run_hook() {
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
 run_pre_run_hook
+
+# Clear the terminal so the user's command starts on a fresh screen.
+# Without this, output from pre_run hooks (e.g. "pnpm install") and from
+# moat-init's own setup steps remains on screen. TUIs that paint with
+# relative cursor advances (\x1b[NC) instead of overwriting cells — Claude
+# Code's startup banner among them — leave those characters bleeding
+# through their layout. Clearing once at the boundary between init and the
+# user's command avoids that. moat's CLI redraws its footer on the next
+# debounce tick, so the brief disappearance is invisible in practice.
+# `set -e` aborts above on hook failure, so a clear here only runs on success.
+if [ -t 1 ]; then
+  printf '\033[2J\033[H'
+fi
+
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)
   exec "$@"

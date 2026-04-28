@@ -69,7 +69,7 @@ func TestAppleTUIWriterPassthrough(t *testing.T) {
 	defer writer.Cleanup()
 
 	// Route container output through the tui.Writer
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, 0)
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestAppleTUIWriterAltScreenDuringInit(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, 0)
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAppleTUIWriterMultipleWrites(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, 0)
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
