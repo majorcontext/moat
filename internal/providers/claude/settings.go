@@ -156,23 +156,27 @@ func LoadSettings(path string) (*Settings, error) {
 		return nil, err
 	}
 
-	// Normalize GitHub "repo" format to git URLs.
-	// Claude Code's native settings.json uses {"source": "github", "repo": "owner/repo"}
-	// but the rest of moat expects {"source": "git", "url": "https://..."}.
-	// Claude Code accepts both formats, so the normalized output is safe to write back.
+	// Validate marketplace entries but preserve their original source shape.
+	// Claude Code's strictKnownMarketplaces (in remote-settings.json) matches by
+	// exact {source, repo|url} shape, so {source: github, repo: X} and
+	// {source: git, url: https://github.com/X.git} are NOT interchangeable —
+	// emitting a different shape than the user (or host) registered with breaks
+	// allowlist matching even when both forms refer to the same repository.
+	// Drop entries with no usable source identity or invalid repo format.
 	for name, entry := range settings.ExtraKnownMarketplaces {
-		if entry.Source.Source == "github" && entry.Source.URL == "" {
+		switch entry.Source.Source {
+		case "github":
 			if entry.Source.Repo == "" {
-				log.Debug("removing marketplace with empty repo and url from settings", "name", name)
+				log.Debug("removing github marketplace with empty repo from settings", "name", name)
 				delete(settings.ExtraKnownMarketplaces, name)
-			} else if validRepoFormat.MatchString(entry.Source.Repo) {
-				entry.Source.URL = "https://github.com/" + entry.Source.Repo + ".git"
-				entry.Source.Source = "git"
-				entry.Source.Repo = ""
-				settings.ExtraKnownMarketplaces[name] = entry
-			} else {
+			} else if !validRepoFormat.MatchString(entry.Source.Repo) {
 				log.Debug("removing marketplace with invalid repo format from settings",
 					"name", name, "repo", entry.Source.Repo)
+				delete(settings.ExtraKnownMarketplaces, name)
+			}
+		case "git":
+			if entry.Source.URL == "" {
+				log.Debug("removing git marketplace with empty url from settings", "name", name)
 				delete(settings.ExtraKnownMarketplaces, name)
 			}
 		}
@@ -214,10 +218,10 @@ type KnownMarketplaceSource struct {
 // This file contains marketplace URLs that Claude Code has registered via
 // `claude plugin marketplace add`. Returns nil, nil if the file doesn't exist.
 //
-// URL normalization:
-// - "github" sources are normalized to git URLs (https://github.com/owner/repo.git)
-// - We assume repos don't contain trailing slashes or .git suffixes (Claude CLI standard)
-// - Git URLs are used as-is without normalization
+// The original source shape is preserved: a "github" source keeps its repo
+// field, a "git" source keeps its url field. Strict marketplace allowlists
+// (strictKnownMarketplaces in remote-settings.json) match by exact source
+// shape, so converting between forms breaks allowlist matching.
 //
 // Entries are skipped (with debug logging) if they have:
 // - Empty repo/URL fields
@@ -237,7 +241,7 @@ func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
 		return nil, err
 	}
 
-	// Convert to our MarketplaceEntry format
+	// Convert to our MarketplaceEntry format, preserving the original source shape.
 	result := make(map[string]MarketplaceEntry)
 	for name, km := range raw {
 		entry := MarketplaceEntry{
@@ -246,27 +250,30 @@ func LoadKnownMarketplaces(path string) (map[string]MarketplaceEntry, error) {
 			},
 		}
 
-		// Convert source to git URL format
 		switch km.Source.Source {
 		case "github":
-			// Validate repo format before URL construction (defense-in-depth)
-			if km.Source.Repo != "" && validRepoFormat.MatchString(km.Source.Repo) {
-				entry.Source.Source = "git"
-				entry.Source.URL = "https://github.com/" + km.Source.Repo + ".git"
-			} else if km.Source.Repo != "" {
+			if km.Source.Repo == "" {
+				log.Debug("skipping github marketplace with empty repo", "name", name)
+				continue
+			}
+			if !validRepoFormat.MatchString(km.Source.Repo) {
 				log.Debug("skipping marketplace with invalid repo format",
 					"name", name, "repo", km.Source.Repo)
 				continue
 			}
+			entry.Source.Repo = km.Source.Repo
 		case "git":
+			if km.Source.URL == "" {
+				log.Debug("skipping git marketplace with empty URL", "name", name)
+				continue
+			}
 			entry.Source.URL = km.Source.URL
+		default:
+			log.Debug("skipping marketplace with unknown source", "name", name, "source", km.Source.Source)
+			continue
 		}
 
-		if entry.Source.URL != "" {
-			result[name] = entry
-		} else {
-			log.Debug("skipping marketplace with empty URL", "name", name)
-		}
+		result[name] = entry
 	}
 
 	return result, nil
@@ -474,11 +481,12 @@ func ConfigToSettings(cfg *config.Config) *Settings {
 				},
 			}
 
+			// Preserve the source shape the user wrote in moat.yaml so
+			// strictKnownMarketplaces allowlist matching works (it compares
+			// {source, repo|url} as exact pairs, not by canonical URL).
 			switch spec.Source {
 			case "github":
-				// Convert github owner/repo to git URL
-				entry.Source.Source = "git"
-				entry.Source.URL = "https://github.com/" + spec.Repo + ".git"
+				entry.Source.Repo = spec.Repo
 			case "git":
 				entry.Source.URL = spec.URL
 			case "directory":
