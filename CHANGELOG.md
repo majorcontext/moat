@@ -6,9 +6,16 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+## v0.5.1 — 2026-04-28
+
+Patch release with one security fix (IPv6 egress firewall) and a batch of run-lifecycle and proxy fixes. Adds `MOAT_HOME` for relocating moat state, a multi-runtime manager so Docker and Apple containers can coexist in one install, TUI debug shortcuts, and Python 3.13/3.14 support. Gatekeeper is extracted to its own repository.
+
 ### Added
 
 - **TUI debug shortcuts** — `Ctrl-/ d` dumps a snapshot of recent terminal I/O to `~/.moat/runs/<id>/tui-debug-<unix-ts>.json` for offline analysis or feeding into a Claude session; `Ctrl-/ r` issues a soft terminal reset and nudges the child to redraw, recovering wedged sessions. The dump uses the same JSON format as `--tty-trace` and works with `moat tty-trace analyze`. Ring buffer size is 8 MB by default, tunable via `MOAT_TTY_RING_BYTES`. ([#343](https://github.com/majorcontext/moat/pull/343))
+- **`MOAT_HOME`** — single env var to relocate the moat configuration directory (default `~/.moat`); when set, it replaces `~/.moat` as the root for runs, credentials, daemon socket/lock, keyring key file, per-run SSH sockets, and routing proxy state. Third-party state (`~/.claude`, `~/.config/gh`, etc.) still resolves against `$HOME`. ([#323](https://github.com/majorcontext/moat/pull/323))
+- **Multi-runtime manager** — Docker and Apple containers can now coexist in a single install. New runs use the default runtime; operations on existing runs (`status`, `clean`, `list`, `system images`, `system containers`) resolve the correct runtime automatically. Adds a `RUNTIME` column to the relevant tables and a `runtime` field to `--json` output. ([#311](https://github.com/majorcontext/moat/pull/311))
+- Python 3.13 and 3.14 added to supported versions; bundled `uv` updated from 0.5.14 to 0.11.6 to support modern `pyproject.toml` features ([#316](https://github.com/majorcontext/moat/pull/316))
 
 ### Changed
 
@@ -22,6 +29,12 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 - Fix `network.host` bypass via raw loopback addresses — previously, containers running under Docker host-network mode could bypass `network.host` enforcement by connecting to `localhost` or `127.0.0.1` directly, since those addresses were in `NO_PROXY` and skipped the proxy entirely. Loopback addresses are no longer excluded from proxy routing. ([#327](https://github.com/majorcontext/moat/pull/327))
 - Fix ip6tables hanging indefinitely on hosts without the `ip6_tables` kernel module — previously, `ip6tables -w` (wait forever) blocked the firewall setup, hanging the container start and E2E tests on CI. Now uses a 5-second timeout and treats ip6tables failure as non-fatal with partial-rule cleanup. ([#325](https://github.com/majorcontext/moat/pull/325))
+- Fix `moat status` and `moat list` corrupting persisted run state — previously, reconciliation could overwrite metadata for active runs (e.g. mark them stopped) when a status check ran with the wrong runtime, causing active runs to disappear from `moat status`. Read-only commands no longer write metadata, and reconciliation skips cross-runtime container checks. ([#309](https://github.com/majorcontext/moat/pull/309))
+- Fix host unreachable from custom networks on Docker Desktop — previously, runs on user-defined Docker networks could not reach the host, breaking proxy access and producing `Unable to connect to API (ConnectionRefused)` errors. ([#337](https://github.com/majorcontext/moat/pull/337))
+- Fix MCP servers with `auth.grant` failing to load credentials — previously, grant names listed under `mcp[].auth.grant` were validated but never appended to the credential-loading list, so auth headers were never injected. The grant list is now merged before credential processing, and `FileStore.Get()` is hardened against path traversal via crafted provider names. ([#338](https://github.com/majorcontext/moat/pull/338))
+- Fix multi-line YAML block scalars in `post_build` and `post_build_root` hooks producing invalid Dockerfiles — previously, raw newlines from `|` block scalars were interpolated directly into `RUN` commands. Lines are now joined with `&&`, with trailing shell operators (`&&`, `;`, `\`) stripped before joining. ([#339](https://github.com/majorcontext/moat/pull/339))
+- Fix E2E service tests intermittently hanging due to orphan `moat-*` Docker networks accumulating without cleanup. `Close()` is now bounded so a stuck monitor goroutine can't deadlock teardown, and orphan networks are reaped on startup. ([#342](https://github.com/majorcontext/moat/pull/342))
+- Fix capability-mismatch error message pointing at a nonexistent command — error paths suggested `moat proxy restart`, but the proxy command only registers `start`, `stop`, and `status`. Messages now point at `moat proxy stop` followed by re-running `moat run`. ([#336](https://github.com/majorcontext/moat/pull/336))
 
 ## v0.5.0 — 2026-04-07
 

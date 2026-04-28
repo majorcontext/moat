@@ -165,7 +165,7 @@ Documentation is part of the feature. A feature without docs is incomplete.
 
 ### Changelog
 
-`CHANGELOG.md` tracks major and minor releases (skip patch releases). When adding an entry:
+`CHANGELOG.md` tracks every released version, including patch releases. When adding an entry:
 
 - **Added/Changed/Fixed/Security/Breaking** — use these section headings per [Keep a Changelog](https://keepachangelog.com)
 - **Breaking changes** go under a dedicated `### Breaking` heading with migration steps (what command to run, what to rename)
@@ -173,7 +173,7 @@ Documentation is part of the feature. A feature without docs is incomplete.
 - **Fix entries** follow the pattern: "Fix X — previously, Y happened when Z" so users can tell if they were affected
 - **Bold the feature name** for major additions; leave minor entries plain
 - **Link every entry** to its PR: `([#NNN](https://github.com/majorcontext/moat/pull/NNN))`
-- **Each minor release** gets a 1–2 sentence summary paragraph under the version heading
+- **Each release** gets a 1–2 sentence summary paragraph under the version heading
 - Follow `docs/STYLE-GUIDE.md` — no marketing language, no passive voice, no filler
 
 ## Git Commits
