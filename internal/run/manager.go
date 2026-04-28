@@ -1627,28 +1627,35 @@ region = %s
 	marketplaceRepos := make(map[string]string)
 
 	if claudeSettings != nil && hasClaudeCode {
-		// Build a map of marketplace name -> repo URL from merged settings.
-		// The claude CLI accepts marketplace repos in several formats:
-		// - GitHub shorthand: owner/repo
-		// - HTTPS URLs: https://github.com/owner/repo.git
-		// - SSH URLs: git@github.com:owner/repo.git
-		// We normalize GitHub HTTPS URLs to owner/repo format for cleaner output.
-		// Other URL formats are passed through unchanged.
+		// Build a map of marketplace name -> repo identity from merged settings.
+		// MarketplaceConfig.Repo carries the value matching the source shape:
+		// an "owner/repo" shorthand for source "github", a full URL for source
+		// "git". Preserving the original shape lets GenerateKnownMarketplaces
+		// emit the same {source, repo|url} pair the entry was registered with,
+		// which matters for strictKnownMarketplaces allowlist matching (the
+		// allowlist compares source/repo and source/url as exact pairs).
 		for name, entry := range claudeSettings.ExtraKnownMarketplaces {
-			if entry.Source.URL != "" {
-				// Convert GitHub HTTPS URL to owner/repo format
-				repo := entry.Source.URL
-				if strings.HasPrefix(repo, "https://github.com/") {
-					repo = strings.TrimPrefix(repo, "https://github.com/")
-					repo = strings.TrimSuffix(strings.TrimSuffix(repo, "/"), ".git")
+			var repo string
+			switch entry.Source.Source {
+			case "github":
+				if entry.Source.Repo == "" {
+					continue
 				}
-				marketplaceRepos[name] = repo
-				claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
-					Name:   name,
-					Source: entry.Source.Source,
-					Repo:   repo,
-				})
+				repo = entry.Source.Repo
+			case "git":
+				if entry.Source.URL == "" {
+					continue
+				}
+				repo = entry.Source.URL
+			default:
+				continue
 			}
+			marketplaceRepos[name] = repo
+			claudeMarketplaces = append(claudeMarketplaces, claude.MarketplaceConfig{
+				Name:   name,
+				Source: entry.Source.Source,
+				Repo:   repo,
+			})
 		}
 
 		// Extract enabled plugins, but only those with known marketplace URLs.

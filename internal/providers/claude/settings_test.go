@@ -60,8 +60,10 @@ func TestLoadSettings(t *testing.T) {
 }
 
 func TestLoadSettingsGitHubRepoFormat(t *testing.T) {
-	// Claude Code's native settings.json uses "repo" for GitHub marketplaces,
-	// not "url". LoadSettings must handle this format.
+	// Claude Code's native settings.json uses {source: github, repo: owner/repo}.
+	// LoadSettings must preserve that shape so strictKnownMarketplaces allowlist
+	// matching (which compares source/repo and source/url as exact pairs) still
+	// works inside the moat container.
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "settings.json")
 
@@ -106,28 +108,26 @@ func TestLoadSettingsGitHubRepoFormat(t *testing.T) {
 		t.Fatalf("ExtraKnownMarketplaces = %d, want 3", len(settings.ExtraKnownMarketplaces))
 	}
 
-	// GitHub "repo" format should be normalized to git URL
+	// GitHub "repo" format must be preserved verbatim.
 	superpowers := settings.ExtraKnownMarketplaces["superpowers-marketplace"]
-	if superpowers.Source.Source != "git" {
-		t.Errorf("superpowers.Source.Source = %q, want %q", superpowers.Source.Source, "git")
+	if superpowers.Source.Source != "github" {
+		t.Errorf("superpowers.Source.Source = %q, want %q", superpowers.Source.Source, "github")
 	}
-	if superpowers.Source.URL != "https://github.com/obra/superpowers-marketplace.git" {
-		t.Errorf("superpowers.Source.URL = %q, want %q", superpowers.Source.URL, "https://github.com/obra/superpowers-marketplace.git")
+	if superpowers.Source.Repo != "obra/superpowers-marketplace" {
+		t.Errorf("superpowers.Source.Repo = %q, want %q", superpowers.Source.Repo, "obra/superpowers-marketplace")
+	}
+	if superpowers.Source.URL != "" {
+		t.Errorf("superpowers.Source.URL should be empty for github source, got %q", superpowers.Source.URL)
 	}
 
 	gpSkills := settings.ExtraKnownMarketplaces["gp-claude-skills"]
-	if gpSkills.Source.URL != "https://github.com/thegpvc/gp-claude-skills.git" {
-		t.Errorf("gp-claude-skills.Source.URL = %q, want %q", gpSkills.Source.URL, "https://github.com/thegpvc/gp-claude-skills.git")
+	if gpSkills.Source.Source != "github" || gpSkills.Source.Repo != "thegpvc/gp-claude-skills" {
+		t.Errorf("gp-claude-skills source = %+v, want {github, thegpvc/gp-claude-skills}", gpSkills.Source)
 	}
 
 	compound := settings.ExtraKnownMarketplaces["compound-engineering-plugin"]
-	if compound.Source.URL != "https://github.com/EveryInc/compound-engineering-plugin.git" {
-		t.Errorf("compound.Source.URL = %q, want %q", compound.Source.URL, "https://github.com/EveryInc/compound-engineering-plugin.git")
-	}
-
-	// Repo field should be cleared after normalization
-	if superpowers.Source.Repo != "" {
-		t.Errorf("Repo should be cleared after normalization, got %q", superpowers.Source.Repo)
+	if compound.Source.Source != "github" || compound.Source.Repo != "EveryInc/compound-engineering-plugin" {
+		t.Errorf("compound source = %+v, want {github, EveryInc/compound-engineering-plugin}", compound.Source)
 	}
 
 	// All plugins should be loaded
@@ -165,7 +165,7 @@ func TestLoadSettingsInvalidRepoFormat(t *testing.T) {
 		t.Fatalf("LoadSettings: %v", err)
 	}
 
-	// Malicious entry should be removed, valid one should be normalized
+	// Malicious entry should be removed, valid one preserved as-is.
 	if _, ok := settings.ExtraKnownMarketplaces["malicious"]; ok {
 		t.Error("malicious marketplace should have been removed")
 	}
@@ -175,11 +175,11 @@ func TestLoadSettingsInvalidRepoFormat(t *testing.T) {
 	}
 
 	valid := settings.ExtraKnownMarketplaces["valid"]
-	if valid.Source.Source != "git" {
-		t.Errorf("valid.Source.Source = %q, want %q", valid.Source.Source, "git")
+	if valid.Source.Source != "github" {
+		t.Errorf("valid.Source.Source = %q, want %q", valid.Source.Source, "github")
 	}
-	if valid.Source.URL != "https://github.com/owner/valid-repo.git" {
-		t.Errorf("valid.Source.URL = %q, want %q", valid.Source.URL, "https://github.com/owner/valid-repo.git")
+	if valid.Source.Repo != "owner/valid-repo" {
+		t.Errorf("valid.Source.Repo = %q, want %q", valid.Source.Repo, "owner/valid-repo")
 	}
 }
 
@@ -450,13 +450,16 @@ func TestConfigToSettings(t *testing.T) {
 		t.Errorf("ExtraKnownMarketplaces = %d, want 3", len(settings.ExtraKnownMarketplaces))
 	}
 
-	// github source should be converted to git with HTTPS URL
+	// github source should be preserved as {source: github, repo: owner/repo}
 	ghMarket := settings.ExtraKnownMarketplaces["github-market"]
-	if ghMarket.Source.Source != "git" {
-		t.Errorf("github-market.Source.Source = %q, want %q", ghMarket.Source.Source, "git")
+	if ghMarket.Source.Source != "github" {
+		t.Errorf("github-market.Source.Source = %q, want %q", ghMarket.Source.Source, "github")
 	}
-	if ghMarket.Source.URL != "https://github.com/acme/plugins.git" {
-		t.Errorf("github-market.Source.URL = %q, want %q", ghMarket.Source.URL, "https://github.com/acme/plugins.git")
+	if ghMarket.Source.Repo != "acme/plugins" {
+		t.Errorf("github-market.Source.Repo = %q, want %q", ghMarket.Source.Repo, "acme/plugins")
+	}
+	if ghMarket.Source.URL != "" {
+		t.Errorf("github-market.Source.URL should be empty, got %q", ghMarket.Source.URL)
 	}
 
 	// git source should be preserved
@@ -606,19 +609,22 @@ func TestLoadKnownMarketplaces(t *testing.T) {
 		t.Errorf("got %d marketplaces, want 2", len(result))
 	}
 
-	// Check claude-plugins-official
+	// github sources must be preserved as {source: github, repo: owner/repo}
+	// so strictKnownMarketplaces matching against the host's registration form works.
 	official := result["claude-plugins-official"]
-	if official.Source.Source != "git" {
-		t.Errorf("official.Source.Source = %q, want %q", official.Source.Source, "git")
+	if official.Source.Source != "github" {
+		t.Errorf("official.Source.Source = %q, want %q", official.Source.Source, "github")
 	}
-	if official.Source.URL != "https://github.com/anthropics/claude-plugins-official.git" {
-		t.Errorf("official.Source.URL = %q, want %q", official.Source.URL, "https://github.com/anthropics/claude-plugins-official.git")
+	if official.Source.Repo != "anthropics/claude-plugins-official" {
+		t.Errorf("official.Source.Repo = %q, want %q", official.Source.Repo, "anthropics/claude-plugins-official")
+	}
+	if official.Source.URL != "" {
+		t.Errorf("official.Source.URL should be empty for github source, got %q", official.Source.URL)
 	}
 
-	// Check aws-agent-skills
 	aws := result["aws-agent-skills"]
-	if aws.Source.URL != "https://github.com/itsmostafa/aws-agent-skills.git" {
-		t.Errorf("aws.Source.URL = %q, want %q", aws.Source.URL, "https://github.com/itsmostafa/aws-agent-skills.git")
+	if aws.Source.Source != "github" || aws.Source.Repo != "itsmostafa/aws-agent-skills" {
+		t.Errorf("aws source = %+v, want {github, itsmostafa/aws-agent-skills}", aws.Source)
 	}
 }
 
