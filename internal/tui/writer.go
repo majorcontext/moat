@@ -48,6 +48,14 @@ var altScreenExit = [][]byte{
 // this is a one-shot restore — not an ongoing fight with the child.
 var decstbmReset = []byte("\x1b[r")
 
+// eraseScreen is the "erase entire display" sequence. moat-init.sh emits
+// this between pre_run hooks and the user's command so the agent starts
+// on a clean screen. After it lands, moat's footer at row H is gone too,
+// and the 50ms debounce isn't reliable during a busy agent startup. We
+// detect the sequence, pass it through, then immediately redraw the
+// footer so it doesn't disappear for the duration of the splash sequence.
+var eraseScreen = []byte("\x1b[2J")
+
 // renderInterval is the compositor render tick rate (~60fps).
 const renderInterval = 16 * time.Millisecond
 
@@ -269,6 +277,20 @@ func (w *Writer) processDataLocked(data []byte) error {
 			continue
 		}
 
+		// Detect "erase entire screen". Pass it through, then redraw the
+		// footer immediately — the 50ms debounce isn't reliable during the
+		// agent's startup splash. Compositor mode owns its own surface.
+		if bytes.HasPrefix(data, eraseScreen) {
+			if err := w.outputLocked(data[:len(eraseScreen)]); err != nil {
+				return err
+			}
+			data = data[len(eraseScreen):]
+			if !w.altScreen && w.height > 1 {
+				w.redrawFooterLocked()
+			}
+			continue
+		}
+
 		// Check if this could be a partial match at the end of the buffer
 		if w.isPrefixOfKnownSequence(data) && len(data) < maxKnownSeqLen() {
 			// Buffer it for the next Write call
@@ -336,6 +358,9 @@ func (w *Writer) isPrefixOfKnownSequence(data []byte) bool {
 	if len(data) < len(decstbmReset) && bytes.HasPrefix(decstbmReset, data) {
 		return true
 	}
+	if len(data) < len(eraseScreen) && bytes.HasPrefix(eraseScreen, data) {
+		return true
+	}
 	return false
 }
 
@@ -354,6 +379,9 @@ func maxKnownSeqLen() int {
 	}
 	if len(decstbmReset) > max {
 		max = len(decstbmReset)
+	}
+	if len(eraseScreen) > max {
+		max = len(eraseScreen)
 	}
 	return max
 }

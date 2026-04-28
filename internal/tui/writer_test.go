@@ -894,6 +894,70 @@ func TestWriter_DECSTBMReset_SplitAcrossWrites(t *testing.T) {
 	w.Cleanup()
 }
 
+func TestWriter_EraseScreen_RedrawsFooterImmediately(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// moat-init.sh sends \x1b[2J\x1b[H between pre_run hooks and the user's
+	// command so the agent paints on a clean screen. The writer must redraw
+	// the footer immediately afterward — the 50ms debounce isn't reliable
+	// during a busy startup.
+	_, err := w.Write([]byte("\x1b[2J\x1b[H"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// The erase sequence itself must reach the terminal.
+	if !strings.Contains(output, "\x1b[2J") {
+		t.Errorf("expected erase screen to pass through, got %q", output)
+	}
+
+	// The footer must have been redrawn — look for the cursor-to-row-H move
+	// that redrawFooterLocked emits and the run name in the bar text.
+	if !strings.Contains(output, "\x1b[24;1H") {
+		t.Errorf("expected footer redraw at row 24, got %q", output)
+	}
+	if !strings.Contains(output, "run_abc123") {
+		t.Errorf("expected status bar text after erase, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
+func TestWriter_EraseScreen_NoRedrawInCompositorMode(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Switch to compositor mode.
+	_, _ = w.Write([]byte("\x1b[?1049h"))
+	buf.Reset()
+
+	// In compositor mode, the emulator owns the surface. We must NOT issue
+	// a footer redraw to the real terminal here.
+	_, _ = w.Write([]byte("\x1b[2J"))
+
+	output := buf.String()
+
+	// Footer redraw goes through redrawFooterLocked which writes ESC[24;1H.
+	// In compositor mode that path is skipped.
+	if strings.Contains(output, "\x1b[24;1H") {
+		t.Errorf("expected NO footer redraw in compositor mode, got %q", output)
+	}
+
+	w.Cleanup()
+}
+
 func TestWriter_PassthroughANSI(t *testing.T) {
 	var buf bytes.Buffer
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
