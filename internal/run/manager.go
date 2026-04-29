@@ -3073,7 +3073,14 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 // This is required for TUI applications (like Codex CLI) that need the terminal
 // connected before the process starts to properly detect terminal capabilities.
 // Unlike Start + Attach, this ensures the TTY is ready when the container command begins.
-func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
+// StartAttached attaches stdio to the run's container and blocks until the
+// process exits.
+//
+// reservedRows tells the manager how many rows of the host terminal are
+// reserved by the CLI (e.g., for a status bar) and must NOT be advertised
+// to the child process. The auto-detected initial PTY height is reduced
+// by this amount; pass 0 when no rows are reserved.
+func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer, reservedRows uint) error {
 	m.mu.Lock()
 	r, ok := m.runs[runID]
 	if !ok {
@@ -3120,12 +3127,21 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	// Pass initial terminal size so the container can be resized immediately
 	// after starting, before the process queries terminal dimensions.
+	//
+	// reservedRows is subtracted so the child sees only the rows it can
+	// actually paint into. Otherwise the child draws its own bottom-pinned
+	// UI (e.g., Claude Code's input prompt and status lines) at the same
+	// row as moat's status bar, producing character-interleaved artifacts.
 	if useTTY && term.IsTerminal(os.Stdout) {
 		width, height := term.GetSize(os.Stdout)
 		if width > 0 && height > 0 {
 			// #nosec G115 -- width/height are validated positive above
 			attachOpts.InitialWidth = uint(width)
-			attachOpts.InitialHeight = uint(height)
+			usableHeight := uint(height)
+			if usableHeight > reservedRows {
+				usableHeight -= reservedRows
+			}
+			attachOpts.InitialHeight = usableHeight
 		}
 	}
 
