@@ -947,8 +947,10 @@ func TestWriter_InterceptsDECSTBM_NoArgs(t *testing.T) {
 	if strings.Contains(out, "\x1b[r") {
 		t.Errorf("expected bare ESC[r to be swallowed, got %q", out)
 	}
-	if !strings.Contains(out, "\x1b[1;23r") {
-		t.Errorf("expected moat's DECSTBM (ESC[1;23r) to be re-emitted, got %q", out)
+	// Exactly one re-emit — a regression that double-emitted or skipped
+	// the replacement would slip past a Contains check.
+	if got := strings.Count(out, "\x1b[1;23r"); got != 1 {
+		t.Errorf("expected moat's DECSTBM emitted exactly once, got %d in %q", got, out)
 	}
 	w.Cleanup()
 }
@@ -998,8 +1000,8 @@ func TestWriter_InterceptsDECSTBM_SurroundedByText(t *testing.T) {
 	if strings.Contains(out, "\x1b[r") {
 		t.Errorf("expected ESC[r to be swallowed, got %q", out)
 	}
-	if !strings.Contains(out, "\x1b[1;23r") {
-		t.Errorf("expected moat's DECSTBM to be re-emitted, got %q", out)
+	if got := strings.Count(out, "\x1b[1;23r"); got != 1 {
+		t.Errorf("expected moat's DECSTBM emitted exactly once, got %d in %q", got, out)
 	}
 	w.Cleanup()
 }
