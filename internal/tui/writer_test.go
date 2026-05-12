@@ -1055,14 +1055,55 @@ func TestWriter_DECSTR_PassesThroughWithDECSTBMRestored(t *testing.T) {
 	out := buf.String()
 	softIdx := strings.Index(out, "\x1b[!p")
 	stbmIdx := strings.Index(out, "\x1b[1;23r")
+	decsc := strings.Index(out, "\x1b7")
+	decrc := strings.Index(out, "\x1b8")
 	if softIdx < 0 {
 		t.Errorf("expected DECSTR (ESC[!p) to pass through, got %q", out)
 	}
 	if stbmIdx < 0 {
 		t.Errorf("expected DECSTBM re-assertion after DECSTR, got %q", out)
 	}
-	if softIdx >= 0 && stbmIdx >= 0 && softIdx >= stbmIdx {
-		t.Errorf("DECSTR must precede DECSTBM re-emit, got positions %d and %d", softIdx, stbmIdx)
+	// The handler wraps DECSTBM in DECSC/DECRC so the cursor (preserved
+	// by DECSTR, moved by DECSTBM) ends up where the child expects.
+	// Verify the full ordering: DECSTR -> DECSC -> DECSTBM -> DECRC.
+	if !(softIdx >= 0 && decsc >= 0 && stbmIdx >= 0 && decrc >= 0 &&
+		softIdx < decsc && decsc < stbmIdx && stbmIdx < decrc) {
+		t.Errorf("expected order DECSTR -> DECSC -> DECSTBM -> DECRC, got positions %d, %d, %d, %d in %q",
+			softIdx, decsc, stbmIdx, decrc, out)
+	}
+	w.Cleanup()
+}
+
+// Splitting after the bare ESC byte exercises the len(data)==1 needsMore
+// branch in matchControlSeq — Write 1 is just \x1b, Write 2 completes the
+// DECSTBM. The bare ESC must be buffered (not leaked to the terminal),
+// and on Write 2 the combined sequence is intercepted.
+func TestWriter_InterceptsDECSTBM_SplitAfterBareESC(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	if _, err := w.Write([]byte("\x1b")); err != nil {
+		t.Fatalf("Write 1: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("bare ESC must be buffered, but %d bytes leaked: %q", buf.Len(), buf.String())
+	}
+
+	if _, err := w.Write([]byte("[24r")); err != nil {
+		t.Fatalf("Write 2: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[24r") {
+		t.Errorf("child's DECSTBM must be swallowed across the split, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM after the split, got %q", out)
 	}
 	w.Cleanup()
 }
