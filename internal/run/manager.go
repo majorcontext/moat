@@ -3120,11 +3120,20 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	// Pass initial terminal size so the container can be resized immediately
 	// after starting, before the process queries terminal dimensions.
+	//
+	// In interactive mode the CLI reserves the bottom row for a status bar
+	// (see internal/tui.Writer). Subtract 1 from the reported height so the
+	// child renders in rows 1..height-1 and can't collide with the footer
+	// slot. Subsequent ResizeTTY calls from the CLI use the same adjustment.
 	if useTTY && term.IsTerminal(os.Stdout) {
 		width, height := term.GetSize(os.Stdout)
 		if width > 0 && height > 0 {
-			// #nosec G115 -- width/height are validated positive above
+			if r.Interactive && height > 1 {
+				height--
+			}
+			// #nosec G115 -- width is validated positive above
 			attachOpts.InitialWidth = uint(width)
+			// #nosec G115 -- height is validated positive above (and only decremented when > 1)
 			attachOpts.InitialHeight = uint(height)
 		}
 	}

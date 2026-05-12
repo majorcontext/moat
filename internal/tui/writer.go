@@ -248,6 +248,25 @@ func (w *Writer) processDataLocked(data []byte) error {
 			return nil
 		}
 
+		// In scroll mode, intercept terminal-state escapes that would
+		// clobber moat's scroll region (DECSTBM, DECSTR, RIS). The
+		// emulator owns its own scroll region in compositor mode, so we
+		// don't intercept there.
+		if !w.altScreen {
+			res := matchControlSeq(data)
+			if res.needsMore && len(data) <= maxControlSeqBufLen {
+				w.escBuf = append(w.escBuf[:0], data...)
+				return nil
+			}
+			if res.kind != ctrlNone {
+				if err := w.handleControlSeqLocked(res, data[:res.length]); err != nil {
+					return err
+				}
+				data = data[res.length:]
+				continue
+			}
+		}
+
 		// Not an alt screen sequence - output the ESC and continue
 		if err := w.outputLocked(data[:1]); err != nil {
 			return err
@@ -255,6 +274,163 @@ func (w *Writer) processDataLocked(data []byte) error {
 		data = data[1:]
 	}
 	return nil
+}
+
+// maxControlSeqBufLen bounds how much of a partial DECSTBM/DECSTR sequence
+// we'll buffer before giving up and passing the bytes through. Realistic
+// DECSTBMs are 3–8 bytes; the generous cap leaves room for the pathological
+// case of many-paramed sequences split across Write boundaries while
+// preventing a malformed never-terminating sequence from pinning memory.
+const maxControlSeqBufLen = 256
+
+// Assumes 7-bit ANSI input (ESC [, not the 8-bit C1 byte 0x9B). All real
+// children writing through this Writer emit UTF-8, where 0x9B can only
+// appear as a continuation byte. If we ever support a non-UTF-8 child
+// encoding, matchControlSeq will need to grow a C1 branch.
+
+// controlSeqKind tags terminal-state sequences that affect the scroll region.
+// In scroll mode, moat owns the scroll region; the child can't be allowed to
+// change it directly.
+type controlSeqKind int
+
+const (
+	ctrlNone    controlSeqKind = iota
+	ctrlDECSTBM                // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
+	ctrlDECSTR                 // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
+	ctrlRIS                    // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
+)
+
+// controlSeqResult is the outcome of matchControlSeq.
+type controlSeqResult struct {
+	kind      controlSeqKind
+	length    int  // bytes consumed; 0 when no match or partial
+	needsMore bool // true if data is a viable prefix of DECSTBM/DECSTR and more data may complete it
+}
+
+// matchControlSeq checks whether data starts with a DECSTBM, DECSTR, or RIS
+// sequence. Returns needsMore=true if the buffer holds a prefix that could
+// still resolve into one of these; caller should buffer and retry.
+//
+// CSI sequences that share the same final byte but have different syntax
+// (e.g. CSI ? 2026 r, a DEC private mode restore) are explicitly NOT matched
+// — they pass through to the terminal unmodified.
+func matchControlSeq(data []byte) controlSeqResult {
+	if len(data) == 0 || data[0] != 0x1b {
+		return controlSeqResult{}
+	}
+	if len(data) == 1 {
+		// Bare ESC at end of buffer — anything could follow.
+		return controlSeqResult{needsMore: true}
+	}
+	// RIS: ESC c
+	if data[1] == 'c' {
+		return controlSeqResult{kind: ctrlRIS, length: 2}
+	}
+	// Everything else we care about starts with CSI (ESC [).
+	if data[1] != '[' {
+		return controlSeqResult{}
+	}
+
+	i := 2
+	paramStart := i
+	onlyDigitsAndSemi := true
+	for i < len(data) && data[i] >= 0x30 && data[i] <= 0x3F {
+		b := data[i]
+		if !((b >= '0' && b <= '9') || b == ';') {
+			onlyDigitsAndSemi = false
+		}
+		i++
+	}
+	paramLen := i - paramStart
+
+	intStart := i
+	var firstIntermediate byte
+	for i < len(data) && data[i] >= 0x20 && data[i] <= 0x2F {
+		if i == intStart {
+			firstIntermediate = data[i]
+		}
+		i++
+	}
+	intLen := i - intStart
+
+	if i >= len(data) {
+		// Incomplete CSI. Could it still be DECSTBM or DECSTR?
+		if intLen == 0 && onlyDigitsAndSemi {
+			return controlSeqResult{needsMore: true} // could be DECSTBM
+		}
+		if paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
+			return controlSeqResult{needsMore: true} // could be DECSTR
+		}
+		return controlSeqResult{}
+	}
+
+	final := data[i]
+	if final < 0x40 || final > 0x7E {
+		// Not a valid CSI final byte — let the original parser handle it.
+		return controlSeqResult{}
+	}
+	length := i + 1
+
+	// DECSTBM: digit/semi params (or none), no intermediates, final 'r'.
+	if final == 'r' && intLen == 0 && onlyDigitsAndSemi {
+		return controlSeqResult{kind: ctrlDECSTBM, length: length}
+	}
+	// DECSTR: no params, single '!' intermediate, final 'p'.
+	if final == 'p' && paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
+		return controlSeqResult{kind: ctrlDECSTR, length: length}
+	}
+	return controlSeqResult{}
+}
+
+// handleControlSeqLocked applies the policy for a matched DECSTBM/DECSTR/RIS:
+//   - DECSTBM (any args from the child) is swallowed; moat's own scroll
+//     region command is emitted in its place.
+//   - DECSTR passes through (other resets may be intended), and moat's
+//     DECSTBM is re-asserted right after so the footer slot stays reserved.
+//     The pair is wrapped in DECSC/DECRC so the cursor — which DECSTR
+//     preserves but DECSTBM moves — is restored.
+//   - RIS passes through (it clears the screen and homes the cursor), then
+//     moat re-establishes its scroll region and footer and returns the
+//     cursor to home so the child can resume drawing.
+//
+// Caller passes raw bytes of the matched sequence so RIS/DECSTR can be
+// forwarded verbatim.
+func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error {
+	switch res.kind {
+	case ctrlDECSTBM:
+		return w.outputLocked(w.scrollRegionBytes())
+	case ctrlDECSTR:
+		// Deviation: DECSTR resets the DECSC slot to home (1,1). Our
+		// DECSC here overwrites that with the live cursor instead. No
+		// known TUI relies on DECSTR's saved-cursor reset; we accept the
+		// trade to keep the visible cursor stable across the re-emit.
+		var buf bytes.Buffer
+		buf.Write(raw)
+		buf.WriteString("\x1b7") // save cursor (DECSTR preserves it)
+		buf.Write(w.scrollRegionBytes())
+		buf.WriteString("\x1b8") // restore cursor (DECSTBM moves it)
+		return w.outputLocked(buf.Bytes())
+	case ctrlRIS:
+		var buf bytes.Buffer
+		buf.Write(raw)
+		buf.Write(w.scrollRegionBytes())
+		// RIS cleared the screen; redraw the footer.
+		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
+		buf.WriteString(w.bar.Render())
+		// Return cursor to home so child resumes drawing where RIS left it.
+		buf.WriteString("\x1b[H")
+		return w.outputLocked(buf.Bytes())
+	}
+	return nil
+}
+
+// scrollRegionBytes returns the DECSTBM command that pins moat's footer at
+// the bottom row. Empty when the terminal is too short to have a region.
+func (w *Writer) scrollRegionBytes() []byte {
+	if w.height <= 1 {
+		return nil
+	}
+	return []byte(fmt.Sprintf("\x1b[1;%dr", w.height-1))
 }
 
 // outputLocked sends data to either the real terminal (scroll mode) or the

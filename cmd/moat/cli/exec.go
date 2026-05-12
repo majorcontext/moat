@@ -86,6 +86,18 @@ func executeRunWrapper(ctx context.Context, opts intcli.ExecOptions) (*intcli.Ex
 	}, nil
 }
 
+// containerTTYHeight returns the height to report to the container, reserving
+// the bottom row for the status bar when one is active. Keeping the child's
+// view of the terminal one row shorter prevents it from drawing on (or
+// scrolling content over) the footer line. Paired with DECSTBM ownership in
+// tui.Writer to fully isolate the child from moat's chrome.
+func containerTTYHeight(statusWriter *tui.Writer, actual int) int {
+	if statusWriter != nil && actual > 1 {
+		return actual - 1
+	}
+	return actual
+}
+
 // setupStatusBar creates a status bar for interactive container sessions.
 // Returns the writer (which wraps stdout with status bar compositing), a cleanup
 // function that must be deferred, and the output writer to use for container output.
@@ -497,8 +509,9 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		if term.IsTerminal(os.Stdout) {
 			width, height := term.GetSize(os.Stdout)
 			if width > 0 && height > 0 {
+				h := containerTTYHeight(statusWriter, height)
 				// #nosec G115 -- width/height are validated positive above
-				if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+				if err := manager.ResizeTTY(ctx, r.ID, uint(h), uint(width)); err != nil {
 					log.Debug("failed to resize TTY", "error", err)
 				}
 			}
@@ -519,9 +532,10 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 						}
 						ringRecorder.AddResize(width, height)
 						_ = statusWriter.Resize(width, height)
-						// Also resize container TTY
+						// Also resize container TTY, reserving the footer row.
+						h := containerTTYHeight(statusWriter, height)
 						// #nosec G115 -- width/height are validated positive above
-						_ = manager.ResizeTTY(ctx, r.ID, uint(height), uint(width))
+						_ = manager.ResizeTTY(ctx, r.ID, uint(h), uint(width))
 					}
 				}
 				continue // Don't break out of loop
@@ -659,8 +673,9 @@ func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWrite
 
 	if term.IsTerminal(os.Stdout) {
 		if width, height := term.GetSize(os.Stdout); width > 0 && height > 0 {
+			h := containerTTYHeight(statusWriter, height)
 			// #nosec G115 -- width/height validated positive
-			if err := manager.ResizeTTY(ctx, r.ID, uint(height), uint(width)); err != nil {
+			if err := manager.ResizeTTY(ctx, r.ID, uint(h), uint(width)); err != nil {
 				log.Debug("post-reset resize nudge failed", "error", err)
 			}
 		}
