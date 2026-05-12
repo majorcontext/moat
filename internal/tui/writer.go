@@ -241,7 +241,13 @@ func (w *Writer) processDataLocked(data []byte) error {
 			continue
 		}
 
-		// Check if this could be a partial match at the end of the buffer
+		// Check if this could be a partial match at the end of the buffer.
+		// This runs before the DECSTBM/DECSTR matcher below; both paths
+		// share w.escBuf, but the priority ordering is safe: a 2-byte
+		// ESC[ prefix matches alt-screen first and gets buffered, then on
+		// the next Write the combined buffer is re-classified by both
+		// matchers in turn — if it turns out to be DECSTBM, the second
+		// pass routes it correctly.
 		if w.isPrefixOfAltScreen(data) && len(data) < maxAltScreenSeqLen() {
 			// Buffer it for the next Write call
 			w.escBuf = append(w.escBuf[:0], data...)
@@ -265,6 +271,12 @@ func (w *Writer) processDataLocked(data []byte) error {
 				data = data[res.length:]
 				continue
 			}
+			// If needsMore but data exceeded maxControlSeqBufLen, we fall
+			// through and emit the ESC byte. The remaining bytes pass to
+			// the terminal in order, which reassembles the original
+			// CSI — interception silently fails, but real DECSTBMs are
+			// well under 10 bytes, so this only fires for pathological
+			// input. Memory bound > correctness coverage here.
 		}
 
 		// Not an alt screen sequence - output the ESC and continue
@@ -404,6 +416,13 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// DECSC here overwrites that with the live cursor instead. No
 		// known TUI relies on DECSTR's saved-cursor reset; we accept the
 		// trade to keep the visible cursor stable across the re-emit.
+		//
+		// We intentionally do NOT redraw the footer here. DECSTR
+		// preserves on-screen content (only modes/state are reset), so
+		// the existing footer pixels remain. The debounced redraw fires
+		// shortly after this Write returns and repairs the row in case
+		// the child writes content immediately afterward. Inline redraw
+		// would risk clobbering the child's mid-frame rendering.
 		var buf bytes.Buffer
 		buf.Write(raw)
 		buf.WriteString("\x1b7") // save cursor (DECSTR preserves it)
@@ -411,16 +430,19 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		buf.WriteString("\x1b8") // restore cursor (DECSTBM moves it)
 		return w.outputLocked(buf.Bytes())
 	case ctrlRIS:
+		// Unlike DECSTR, RIS clears the screen — the footer pixels are
+		// gone. Redraw it inline rather than waiting for the debounce so
+		// the row isn't visibly blank in the gap.
 		var buf bytes.Buffer
 		buf.Write(raw)
 		buf.Write(w.scrollRegionBytes())
-		// RIS cleared the screen; redraw the footer.
 		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
 		buf.WriteString(w.bar.Render())
 		// Return cursor to home so child resumes drawing where RIS left it.
 		buf.WriteString("\x1b[H")
 		return w.outputLocked(buf.Bytes())
 	}
+	// Unreachable: callers gate this on res.kind != ctrlNone.
 	return nil
 }
 

@@ -1225,6 +1225,58 @@ func TestWriter_InkStartupSequence_PreservesScrollRegion(t *testing.T) {
 	if !strings.Contains(out, "\x1b[1;23r") {
 		t.Errorf("expected moat's DECSTBM to be re-emitted in place, got %q", out)
 	}
+	// Ordering: the child's DECSC/DECRC must still bracket moat's
+	// DECSTBM, so the cursor preservation the child intended still works.
+	decsc := strings.Index(out, "\x1b7")
+	stbm := strings.Index(out, "\x1b[1;23r")
+	decrc := strings.Index(out, "\x1b8")
+	if !(decsc >= 0 && stbm >= 0 && decrc >= 0 && decsc < stbm && stbm < decrc) {
+		t.Errorf("expected order DECSC -> DECSTBM -> DECRC, got positions %d, %d, %d in %q",
+			decsc, stbm, decrc, out)
+	}
+	w.Cleanup()
+}
+
+// Exiting compositor mode followed immediately by the child's defensive
+// ESC[r in the same Write exercises the mode-flip path: alt-screen exit
+// triggers exitCompositorLocked (which re-emits scroll region + footer),
+// then the DECSTBM matcher needs to fire on the trailing bytes now that
+// w.altScreen is false. Both must be handled in one Write.
+func TestWriter_AltScreenExit_ThenDECSTBMInSameWrite(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode.
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("Write enter: %v", err)
+	}
+	buf.Reset()
+
+	// Exit + Ink-style DECSTBM reset in one Write.
+	if _, err := w.Write([]byte("\x1b[?1049l\x1b[r")); err != nil {
+		t.Fatalf("Write exit+reset: %v", err)
+	}
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	w.mu.Unlock()
+	if inAlt {
+		t.Error("expected altScreen=false after exit")
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[r") {
+		t.Errorf("child's DECSTBM reset must be swallowed in scroll mode, got %q", out)
+	}
+	// exitCompositorLocked emits one DECSTBM and the post-exit intercept
+	// emits another. We don't pin the count; just require at least one.
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM after the mode flip, got %q", out)
+	}
 	w.Cleanup()
 }
 
