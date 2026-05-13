@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -918,4 +919,433 @@ func TestWriter_Reset_ExitsAltScreen(t *testing.T) {
 	if hasEmu {
 		t.Errorf("emulator should be nil after Reset")
 	}
+}
+
+// --- DECSTBM/DECSTR/RIS interception in scroll mode ---
+//
+// In scroll mode, the child must not be allowed to clobber moat's scroll
+// region. Bare DECSTBM resets (`ESC[r`) and arbitrary scroll-region changes
+// (`ESC[Pt;Pb r`) are swallowed; moat's `ESC[1;height-1 r` is re-emitted in
+// their place. DECSTR (`ESC[!p`) and RIS (`ESC c`) pass through but are
+// followed by re-asserted DECSTBM so the footer slot stays reserved.
+
+func TestWriter_InterceptsDECSTBM_NoArgs(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Child sends a bare DECSTBM reset.
+	if _, err := w.Write([]byte("\x1b[r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[r") {
+		t.Errorf("expected bare ESC[r to be swallowed, got %q", out)
+	}
+	// Exactly one re-emit — a regression that double-emitted or skipped
+	// the replacement would slip past a Contains check.
+	if got := strings.Count(out, "\x1b[1;23r"); got != 1 {
+		t.Errorf("expected moat's DECSTBM emitted exactly once, got %d in %q", got, out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_InterceptsDECSTBM_WithArgs(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Child tries to set its own scroll region — must be overridden.
+	if _, err := w.Write([]byte("\x1b[5;15r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[5;15r") {
+		t.Errorf("expected child's DECSTBM (ESC[5;15r) to be swallowed, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM to be re-emitted, got %q", out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_InterceptsDECSTBM_SurroundedByText(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// DECSTBM embedded between content — text passes through, DECSTBM is replaced.
+	if _, err := w.Write([]byte("before\x1b[rafter")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "before") || !strings.Contains(out, "after") {
+		t.Errorf("expected surrounding text to pass through, got %q", out)
+	}
+	if strings.Contains(out, "\x1b[r") {
+		t.Errorf("expected ESC[r to be swallowed, got %q", out)
+	}
+	if got := strings.Count(out, "\x1b[1;23r"); got != 1 {
+		t.Errorf("expected moat's DECSTBM emitted exactly once, got %d in %q", got, out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_InterceptsDECSTBM_SplitAcrossWrites(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Split DECSTBM across two writes. The first write must not pass the
+	// partial bytes through to the terminal — otherwise the terminal would
+	// see ESC[1; and then ;23r and execute the original DECSTBM.
+	if _, err := w.Write([]byte("\x1b[1;")); err != nil {
+		t.Fatalf("Write 1: %v", err)
+	}
+	if strings.Contains(buf.String(), "\x1b[1;") {
+		t.Errorf("partial DECSTBM (ESC[1;) leaked through before completion: %q", buf.String())
+	}
+	if _, err := w.Write([]byte("60r")); err != nil {
+		t.Fatalf("Write 2: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[1;60r") {
+		t.Errorf("expected child DECSTBM ESC[1;60r to be swallowed, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM to be re-emitted, got %q", out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_DECSTR_PassesThroughWithDECSTBMRestored(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// DECSTR (soft terminal reset) clears DECSTBM as a side effect. We
+	// pass it through (child may need its other effects) and re-emit our
+	// DECSTBM right after.
+	if _, err := w.Write([]byte("\x1b[!p")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	softIdx := strings.Index(out, "\x1b[!p")
+	stbmIdx := strings.Index(out, "\x1b[1;23r")
+	decsc := strings.Index(out, "\x1b7")
+	decrc := strings.Index(out, "\x1b8")
+	if softIdx < 0 {
+		t.Errorf("expected DECSTR (ESC[!p) to pass through, got %q", out)
+	}
+	if stbmIdx < 0 {
+		t.Errorf("expected DECSTBM re-assertion after DECSTR, got %q", out)
+	}
+	// The handler wraps DECSTBM in DECSC/DECRC so the cursor (preserved
+	// by DECSTR, moved by DECSTBM) ends up where the child expects.
+	// Verify the full ordering: DECSTR -> DECSC -> DECSTBM -> DECRC.
+	if !(softIdx >= 0 && decsc >= 0 && stbmIdx >= 0 && decrc >= 0 &&
+		softIdx < decsc && decsc < stbmIdx && stbmIdx < decrc) {
+		t.Errorf("expected order DECSTR -> DECSC -> DECSTBM -> DECRC, got positions %d, %d, %d, %d in %q",
+			softIdx, decsc, stbmIdx, decrc, out)
+	}
+	w.Cleanup()
+}
+
+// Splitting after the bare ESC byte exercises the len(data)==1 needsMore
+// branch in matchControlSeq — Write 1 is just \x1b, Write 2 completes the
+// DECSTBM. The bare ESC must be buffered (not leaked to the terminal),
+// and on Write 2 the combined sequence is intercepted.
+func TestWriter_InterceptsDECSTBM_SplitAfterBareESC(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	if _, err := w.Write([]byte("\x1b")); err != nil {
+		t.Fatalf("Write 1: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("bare ESC must be buffered, but %d bytes leaked: %q", buf.Len(), buf.String())
+	}
+
+	if _, err := w.Write([]byte("[24r")); err != nil {
+		t.Fatalf("Write 2: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[24r") {
+		t.Errorf("child's DECSTBM must be swallowed across the split, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM after the split, got %q", out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_RIS_PassesThroughWithDECSTBMRestored(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// RIS (full reset, ESC c) wipes the screen and DECSTBM. Pass it
+	// through, then re-establish our region and footer.
+	if _, err := w.Write([]byte("\x1bc")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	risIdx := strings.Index(out, "\x1bc")
+	stbmIdx := strings.Index(out, "\x1b[1;23r")
+	if risIdx < 0 {
+		t.Errorf("expected RIS (ESC c) to pass through, got %q", out)
+	}
+	if stbmIdx < 0 {
+		t.Errorf("expected DECSTBM re-assertion after RIS, got %q", out)
+	}
+	if risIdx >= 0 && stbmIdx >= 0 && risIdx >= stbmIdx {
+		t.Errorf("RIS must precede DECSTBM re-emit, got positions %d and %d", risIdx, stbmIdx)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_DECPrivateModeRestore_NotIntercepted(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// ESC[?2026r is a DEC private mode restore — different semantics from
+	// DECSTBM despite the same final byte. It must pass through unchanged.
+	if _, err := w.Write([]byte("\x1b[?2026r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[?2026r") {
+		t.Errorf("expected DEC private mode restore to pass through unchanged, got %q", out)
+	}
+	// And moat's DECSTBM should NOT be erroneously emitted in response.
+	if strings.Count(out, "\x1b[1;23r") > 0 {
+		t.Errorf("DEC private mode restore should not trigger DECSTBM re-emit, got %q", out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_InterceptsDECSTBM_MultipleInOneWrite(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Two DECSTBMs back-to-back in a single Write — both must be swallowed,
+	// and moat's region must appear twice.
+	if _, err := w.Write([]byte("\x1b[r\x1b[5;15r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[r") || strings.Contains(out, "\x1b[5;15r") {
+		t.Errorf("expected both child DECSTBMs to be swallowed, got %q", out)
+	}
+	if got := strings.Count(out, "\x1b[1;23r"); got != 2 {
+		t.Errorf("expected moat's DECSTBM emitted twice (once per intercept), got %d in %q", got, out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_InterceptsDECSTBM_LongPartialBuffersOK(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// Build a long-but-valid DECSTBM prefix: ESC[ then a long chain of
+	// "N;" params. Stays under maxControlSeqBufLen so it can be buffered.
+	var first bytes.Buffer
+	first.WriteString("\x1b[")
+	for i := 0; i < 30; i++ {
+		fmt.Fprintf(&first, "%d;", i)
+	}
+	if _, err := w.Write(first.Bytes()); err != nil {
+		t.Fatalf("Write 1: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected partial DECSTBM (%d bytes) to be buffered, but %d bytes leaked: %q",
+			first.Len(), buf.Len(), buf.String())
+	}
+
+	// Complete the sequence.
+	if _, err := w.Write([]byte("99r")); err != nil {
+		t.Fatalf("Write 2: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[0;1;2;") {
+		t.Errorf("child's long DECSTBM should not have leaked, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM to be re-emitted, got %q", out)
+	}
+	w.Cleanup()
+}
+
+// TestWriter_InkStartupSequence pins the regression that motivated this work:
+// Ink (used by Claude Code) emits \x1b7\x1b[r\x1b8\x1b[?25h shortly after
+// startup to defensively reset the scroll region. Before this fix, that
+// \x1b[r undid moat's DECSTBM and any subsequent newline at the bottom row
+// scrolled the footer into scrollback. With interception, moat re-emits its
+// own region in place of the child's reset.
+func TestWriter_InkStartupSequence_PreservesScrollRegion(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	// The exact sequence captured in tui-debug traces from a glitchy run.
+	if _, err := w.Write([]byte("\x1b7\x1b[r\x1b8\x1b[?25h")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	// DECSC/DECRC and show-cursor pass through.
+	if !strings.Contains(out, "\x1b7") {
+		t.Errorf("expected DECSC (ESC 7) to pass through, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b8") {
+		t.Errorf("expected DECRC (ESC 8) to pass through, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[?25h") {
+		t.Errorf("expected show-cursor to pass through, got %q", out)
+	}
+	// The bare DECSTBM reset must be swallowed and replaced.
+	if strings.Contains(out, "\x1b[r") {
+		t.Errorf("expected bare ESC[r to be swallowed, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM to be re-emitted in place, got %q", out)
+	}
+	// Ordering: the child's DECSC/DECRC must still bracket moat's
+	// DECSTBM, so the cursor preservation the child intended still works.
+	decsc := strings.Index(out, "\x1b7")
+	stbm := strings.Index(out, "\x1b[1;23r")
+	decrc := strings.Index(out, "\x1b8")
+	if !(decsc >= 0 && stbm >= 0 && decrc >= 0 && decsc < stbm && stbm < decrc) {
+		t.Errorf("expected order DECSC -> DECSTBM -> DECRC, got positions %d, %d, %d in %q",
+			decsc, stbm, decrc, out)
+	}
+	w.Cleanup()
+}
+
+// Exiting compositor mode followed immediately by the child's defensive
+// ESC[r in the same Write exercises the mode-flip path: alt-screen exit
+// triggers exitCompositorLocked (which re-emits scroll region + footer),
+// then the DECSTBM matcher needs to fire on the trailing bytes now that
+// w.altScreen is false. Both must be handled in one Write.
+func TestWriter_AltScreenExit_ThenDECSTBMInSameWrite(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode.
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("Write enter: %v", err)
+	}
+	buf.Reset()
+
+	// Exit + Ink-style DECSTBM reset in one Write.
+	if _, err := w.Write([]byte("\x1b[?1049l\x1b[r")); err != nil {
+		t.Fatalf("Write exit+reset: %v", err)
+	}
+
+	w.mu.Lock()
+	inAlt := w.altScreen
+	w.mu.Unlock()
+	if inAlt {
+		t.Error("expected altScreen=false after exit")
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[r") {
+		t.Errorf("child's DECSTBM reset must be swallowed in scroll mode, got %q", out)
+	}
+	// exitCompositorLocked emits one DECSTBM and the post-exit intercept
+	// emits another. We don't pin the count; just require at least one.
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("expected moat's DECSTBM after the mode flip, got %q", out)
+	}
+	w.Cleanup()
+}
+
+func TestWriter_DECSTBM_CompositorMode_PassesToEmulator(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// Enter compositor mode.
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("Write alt-screen enter: %v", err)
+	}
+	buf.Reset()
+
+	// In compositor mode, DECSTBM from the child goes to the emulator —
+	// it must NOT be replayed on the host terminal.
+	if _, err := w.Write([]byte("\x1b[r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("in compositor mode, moat must not emit host DECSTBM, got %q", out)
+	}
+	w.Cleanup()
 }
