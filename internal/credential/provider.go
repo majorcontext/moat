@@ -41,11 +41,17 @@ const GitHubTokenPlaceholder = "ghp_moatProxyInjectedPlaceholder000000000000"
 // Some tools validate the API key format locally before making requests.
 // Using a valid-looking placeholder bypasses these checks while still allowing
 // the proxy to inject the real key at the network layer.
-//
-// Note: Anthropic API keys start with `sk-ant-api` while OAuth tokens start
-// with `sk-ant-oat` - we may discover we need an OAuth placeholder and smarter
-// logic later.
 const AnthropicAPIKeyPlaceholder = "sk-ant-api03-moatProxyInjectedPlaceholder0000000000000000000000000000000000000000000000000000000000000000000"
+
+// ClaudeOAuthPlaceholder is a placeholder that looks like a valid Claude Code
+// OAuth token. Claude Code checks the sk-ant-oat prefix to decide whether the
+// session is OAuth-authenticated. Without this prefix, it may skip OAuth-specific
+// code paths that determine account capabilities (for example, 1M context
+// window access).
+//
+// The proxy intercepts all Anthropic HTTPS traffic and injects the real token
+// via Authorization headers, so this placeholder never reaches Anthropic's servers.
+const ClaudeOAuthPlaceholder = "sk-ant-oat01-moat-proxy-injected-placeholder-not-a-real-token"
 
 // GeminiAPIKeyPlaceholder is a placeholder that looks like a valid Gemini API
 // key.

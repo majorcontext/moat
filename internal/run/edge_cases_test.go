@@ -280,6 +280,18 @@ func TestStartNoFirewallWhenNotEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Stop the background monitor before t.TempDir() cleanup removes the
+	// store directory. captureLogs in monitorContainerExit opens
+	// <store>/logs.jsonl, and without this the goroutine wakes after
+	// the directory has started being removed, causing flaky
+	// "directory not empty" / "no such file or directory" failures.
+	// t.Cleanup is LIFO, and this is registered after the t.TempDir() above,
+	// so it runs before the temp dir removal.
+	t.Cleanup(func() {
+		m.monitorCancel()
+		m.monitorWg.Wait()
+	})
+
 	r := &Run{
 		ID:              "run_no_fw",
 		Name:            "no-fw",

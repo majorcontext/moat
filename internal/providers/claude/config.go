@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -159,6 +160,10 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	// with valid structure to function, but the actual authentication is
 	// handled transparently by the TLS-intercepting proxy.
 	//
+	// The placeholder uses the sk-ant-oat01-* prefix so Claude Code recognizes
+	// the session as OAuth-authenticated and takes the OAuth code path that
+	// determines account capabilities.
+	//
 	// ExpiresAt handling: Setup-token grants are long-lived and don't carry
 	// an expiry, so cred.ExpiresAt is the zero time.Time. UnixMilli() on the
 	// zero value returns -62135596800000 (year 0001), which Claude Code reads
@@ -170,7 +175,7 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	}
 	creds := oauthCredentials{
 		ClaudeAiOauth: &oauthToken{
-			AccessToken: ProxyInjectedPlaceholder,
+			AccessToken: credential.ClaudeOAuthPlaceholder,
 			ExpiresAt:   expiresAtMs,
 			Scopes:      cred.Scopes,
 		},

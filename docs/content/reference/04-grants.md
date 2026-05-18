@@ -124,7 +124,7 @@ Stored as `anthropic.enc`.
 
 The proxy injects credentials for requests to `api.anthropic.com`:
 
-- **`claude` grant**: `Authorization: Bearer <token>` with OAuth beta flag. Container receives `CLAUDE_CODE_OAUTH_TOKEN` placeholder.
+- **`claude` grant**: `Authorization: Bearer <token>` with OAuth beta flag. Container receives a `.credentials.json` with an `sk-ant-oat01-*` placeholder token; no `CLAUDE_CODE_OAUTH_TOKEN` env var is set.
 - **`anthropic` grant**: `x-api-key: <key>`. Container receives `ANTHROPIC_API_KEY` placeholder.
 
 ### Refresh behavior
