@@ -59,11 +59,10 @@ func (p *OAuthProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *pro
 }
 
 // ContainerEnv returns environment variables for OAuth token injection.
+// OAuth credentials rely on .credentials.json instead of an env var. See
+// containerEnvForCredential in agent.go for the reason.
 func (p *OAuthProvider) ContainerEnv(cred *provider.Credential) []string {
-	// Set CLAUDE_CODE_OAUTH_TOKEN with a placeholder.
-	// This tells Claude Code it's authenticated (skips login prompts).
-	// The real token is injected by the proxy at the network layer.
-	return []string{"CLAUDE_CODE_OAUTH_TOKEN=" + ProxyInjectedPlaceholder}
+	return nil
 }
 
 // ContainerMounts returns mounts needed for Claude Code.
