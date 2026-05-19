@@ -1,9 +1,5 @@
 # Kiro CLI Support — Design
 
-**Date:** 2026-05-19
-**Status:** Approved, pending implementation
-**Author:** Nate Hardison (with Claude)
-
 ## Summary
 
 Add first-class support for the [Kiro CLI](https://cli.kiro.dev) (`kiro-cli`) as
@@ -108,8 +104,10 @@ list). `ConfigureProxy` only sets credentials on the `q.*` patterns.
 - `settings/mcp.json` — `{"mcpServers": {...}}` built from:
   - **local** servers: `kiro.mcp` entries → `{command, args, env, cwd}`
   - **remote relay** servers: `opts.MCPServers[name]` (proxy relay URL) →
-    native HTTP entry if kiro-cli supports it, else a stdio bridge (see
-    Verification Points)
+    native HTTP server entry. kiro-cli supports remote HTTP MCP servers
+    natively — see https://kiro.dev/docs/cli/mcp/configuration/#remote-server
+    for the exact JSON shape; confirm the precise key names against that doc
+    during implementation.
 - `agents/default.json` — a minimal default agent that includes steering
   resources (`file://~/.kiro/steering/**/*.md`) so the runtime-context file is
   loaded. Modeled on agentbox `agents/default.json`, trimmed (no subagents).
@@ -198,16 +196,17 @@ proxy) before the corresponding code is finalized:
 1. **`~/.kiro` config layout** — confirm exact paths/filenames kiro-cli reads
    for settings (`settings/cli.json`), MCP (`settings/mcp.json`), agents
    (`agents/default.json`), and steering. Adjust staging layout to match.
-2. **Remote MCP transport** — confirm whether kiro-cli `mcp.json` supports a
-   native HTTP server entry (e.g. `{"type":"http","url":...}`). If yes, use it
-   for the relay; if not, ship a stdio bridge command (agentbox's
-   `mcp-connect <url>` approach) and document it.
+2. **Remote MCP JSON shape** — kiro-cli natively supports remote HTTP MCP
+   servers (confirmed via
+   https://kiro.dev/docs/cli/mcp/configuration/#remote-server). Confirm the
+   precise key names for the HTTP server entry against that doc and emit them
+   in `settings/mcp.json`.
 3. **Wildcard credential injection** — confirm gatekeeper v0.2.0 matches
    wildcard host patterns (`q.*.amazonaws.com`) for credential injection.
    Evidence suggests yes (codex registers `*.openai.com`; `configprovider`
-   accepts wildcard hosts), but verify; if only exact hosts match, register the
-   concrete regional hosts the user needs (default `q.us-east-1.amazonaws.com`)
-   and document how to add more.
+   accepts wildcard hosts). **If wildcards are not supported, scope to the
+   single concrete host `q.us-east-1.amazonaws.com`** (per user decision) and
+   document how to add other regions.
 
 ## Out of scope (v1)
 
