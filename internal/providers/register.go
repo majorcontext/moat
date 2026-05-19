@@ -12,6 +12,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/gemini"   // registers Gemini/Google provider
 	_ "github.com/majorcontext/moat/internal/providers/github"   // registers GitHub provider
 	_ "github.com/majorcontext/moat/internal/providers/graphite" // registers Graphite provider
+	_ "github.com/majorcontext/moat/internal/providers/kiro"     // registers Kiro provider
 	_ "github.com/majorcontext/moat/internal/providers/meta"     // registers Meta provider
 	_ "github.com/majorcontext/moat/internal/providers/npm"      // registers npm provider
 	_ "github.com/majorcontext/moat/internal/providers/oauth"    // registers OAuth provider

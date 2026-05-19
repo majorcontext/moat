@@ -43,6 +43,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	"github.com/majorcontext/moat/internal/providers/kiro"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -1719,6 +1720,7 @@ region = %s
 	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
 	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
 	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
+	needsKiroInit := slices.Contains(imgNeeds.initProviders, "kiro")
 
 	// Hooks config for image hashing, Dockerfile generation, and pre_run
 	var hooks *deps.HooksConfig
@@ -2255,6 +2257,110 @@ region = %s
 		proxyEnv = append(proxyEnv, geminiConfig.Env...)
 	}
 
+	// Set up Kiro staging directory for init script.
+	var kiroConfig *provider.ContainerConfig
+	hasKiroLocalMCP := opts.Config != nil && len(opts.Config.Kiro.MCP) > 0
+	if needsKiroInit || hasKiroLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncKiroLogs()) {
+		kiroProvider := provider.GetAgent("kiro")
+		if kiroProvider == nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("kiro provider not registered")
+		}
+
+		var kiroCred *provider.Credential
+		if needsKiroInit {
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr == nil {
+				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
+				if storeErr == nil {
+					if cred, err := store.Get(credential.ProviderKiro); err == nil {
+						kiroCred = provider.FromLegacy(cred)
+					}
+				}
+			}
+		}
+
+		kiroMCPServers := make(map[string]provider.MCPServerConfig)
+		if opts.Config != nil && len(opts.Config.MCP) > 0 {
+			proxyAddr := fmt.Sprintf("%s:%d", m.defaultRuntime().GetHostAddress(), r.ProxyPort)
+			for _, mcp := range opts.Config.MCP {
+				relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
+				mc := provider.MCPServerConfig{URL: relayURL}
+				if mcp.Auth != nil {
+					mc.Headers = map[string]string{mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant}
+				}
+				kiroMCPServers[mcp.Name] = mc
+			}
+		}
+
+		var kiroLocalMCP map[string]provider.LocalMCPServerConfig
+		if opts.Config != nil && len(opts.Config.Kiro.MCP) > 0 {
+			kiroLocalMCP = make(map[string]provider.LocalMCPServerConfig)
+			for name, spec := range opts.Config.Kiro.MCP {
+				env := spec.Env
+				if spec.Grant != "" {
+					v, ok := grantToEnvVar(spec.Grant)
+					if !ok {
+						cleanupDaemonRun()
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
+						cleanupAgentConfig(codexConfig)
+						cleanupAgentConfig(geminiConfig)
+						return nil, fmt.Errorf("kiro.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini, kiro)", name, spec.Grant)
+					}
+					if !hasGrant(opts.Config.Grants, spec.Grant) {
+						cleanupDaemonRun()
+						cleanupSSH(sshServer)
+						cleanupAgentConfig(claudeConfig)
+						cleanupAgentConfig(codexConfig)
+						cleanupAgentConfig(geminiConfig)
+						return nil, fmt.Errorf("kiro.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
+					}
+					if env == nil {
+						env = make(map[string]string)
+					} else {
+						envCopy := make(map[string]string, len(env)+1)
+						for k, val := range env {
+							envCopy[k] = val
+						}
+						env = envCopy
+					}
+					env[v] = grantToPlaceholder(spec.Grant)
+				}
+				kiroLocalMCP[name] = provider.LocalMCPServerConfig{
+					Command: spec.Command,
+					Args:    spec.Args,
+					Env:     env,
+					Cwd:     spec.Cwd,
+				}
+			}
+		}
+
+		var prepErr error
+		kiroConfig, prepErr = kiroProvider.PrepareContainer(ctx, provider.PrepareOpts{
+			Credential:      kiroCred,
+			ContainerHome:   containerHome,
+			MCPServers:      kiroMCPServers,
+			RuntimeContext:  renderedContext,
+			LocalMCPServers: kiroLocalMCP,
+		})
+		if prepErr != nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("preparing Kiro container config: %w", prepErr)
+		}
+
+		mounts = append(mounts, kiroConfig.Mounts...)
+		proxyEnv = append(proxyEnv, kiroConfig.Env...)
+	}
+
 	// MCP servers are now configured via .claude.json in the staging directory
 	// (handled by the claude provider's PrepareContainer), not via environment variables.
 
@@ -2440,6 +2546,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, err
 			}
 		}
@@ -2453,6 +2560,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, fmt.Errorf("service dependencies require network support")
 			}
 			networkName := fmt.Sprintf("moat-%s", r.ID)
@@ -2464,6 +2572,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, fmt.Errorf("creating service network: %w", netErr)
 			}
 			r.NetworkID = networkID
@@ -2499,6 +2608,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, fmt.Errorf("configuring %s service: %w", dep.Name, err)
 			}
 
@@ -2513,6 +2623,7 @@ region = %s
 					cleanupAgentConfig(claudeConfig)
 					cleanupAgentConfig(codexConfig)
 					cleanupAgentConfig(geminiConfig)
+					cleanupAgentConfig(kiroConfig)
 					return nil, fmt.Errorf("creating cache directory for %s: %w", dep.Name, mkdirErr)
 				}
 			}
@@ -2525,6 +2636,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, fmt.Errorf("starting %s service: %w", dep.Name, err)
 			}
 
@@ -2543,6 +2655,7 @@ region = %s
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			cleanupAgentConfig(geminiConfig)
+			cleanupAgentConfig(kiroConfig)
 			return nil, fmt.Errorf("creating run storage: %w", err)
 		}
 		r.Store = store
@@ -2565,6 +2678,7 @@ region = %s
 					cleanupAgentConfig(claudeConfig)
 					cleanupAgentConfig(codexConfig)
 					cleanupAgentConfig(geminiConfig)
+					cleanupAgentConfig(kiroConfig)
 					return nil, fmt.Errorf("%s: wait: false is incompatible with provisioning — "+
 						"items cannot be pulled until the service is ready\n\n"+
 						"Either remove wait: false or remove the provisioned items",
@@ -2583,6 +2697,7 @@ region = %s
 				cleanupAgentConfig(claudeConfig)
 				cleanupAgentConfig(codexConfig)
 				cleanupAgentConfig(geminiConfig)
+				cleanupAgentConfig(kiroConfig)
 				return nil, fmt.Errorf("%s service failed to become ready: %w\n\n"+
 					"Check run logs:\n  moat logs %s\n\n"+
 					"Or disable wait:\n  services:\n    %s:\n      wait: false",
@@ -2612,6 +2727,7 @@ region = %s
 					cleanupAgentConfig(claudeConfig)
 					cleanupAgentConfig(codexConfig)
 					cleanupAgentConfig(geminiConfig)
+					cleanupAgentConfig(kiroConfig)
 					return nil, fmt.Errorf("%s service provisioning failed: %w\n\n"+
 						"Check run logs:\n  moat logs %s",
 						dep.Name, err, r.ID)
@@ -2759,6 +2875,7 @@ region = %s
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
 		cleanupAgentConfig(geminiConfig)
+		cleanupAgentConfig(kiroConfig)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -2780,6 +2897,9 @@ region = %s
 	}
 	if geminiConfig != nil {
 		r.GeminiConfigTempDir = geminiConfig.StagingDir
+	}
+	if kiroConfig != nil {
+		r.KiroConfigTempDir = kiroConfig.StagingDir
 	}
 
 	// Ensure proxy is running if we have ports to expose
@@ -2820,6 +2940,7 @@ region = %s
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
 			cleanupAgentConfig(geminiConfig)
+			cleanupAgentConfig(kiroConfig)
 			return nil, fmt.Errorf("creating run storage: %w", storeErr)
 		}
 		r.Store = runStore
@@ -2843,6 +2964,7 @@ region = %s
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
 		cleanupAgentConfig(geminiConfig)
+		cleanupAgentConfig(kiroConfig)
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -3570,7 +3692,7 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 		}
 
 		// Clean up temp directories
-		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir} {
+		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir, r.KiroConfigTempDir} {
 			if dir != "" {
 				if err := os.RemoveAll(dir); err != nil {
 					log.Debug("cleanup: failed to remove temp dir", "path", dir, "error", err)
@@ -4407,6 +4529,8 @@ func grantToEnvVar(grant string) (string, bool) {
 		return "ANTHROPIC_API_KEY", true
 	case "gemini":
 		return "GEMINI_API_KEY", true
+	case "kiro":
+		return "KIRO_API_KEY", true
 	default:
 		return "", false
 	}
@@ -4425,6 +4549,8 @@ func grantToPlaceholder(grant string) string {
 		return credential.GeminiAPIKeyPlaceholder
 	case "github":
 		return credential.GitHubTokenPlaceholder
+	case "kiro":
+		return kiro.KiroAPIKeyPlaceholder
 	case "openai":
 		return credential.OpenAIAPIKeyPlaceholder
 	default:

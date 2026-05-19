@@ -93,6 +93,11 @@ gemini-cli:
   package: "@google/gemini-cli"
   requires: [node]
 
+kiro-cli:
+  description: Amazon Kiro AI coding assistant
+  type: custom
+  user-install: true
+
 graphite-cli:
   description: Graphite CLI for stacked PRs
   type: npm

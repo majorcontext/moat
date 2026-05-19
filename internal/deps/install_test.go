@@ -282,6 +282,20 @@ func TestGetCustomCommandsUnknown(t *testing.T) {
 	}
 }
 
+func TestGetCustomCommandsKiroCLI(t *testing.T) {
+	cmds := getCustomCommands("kiro-cli", "")
+	if len(cmds.Commands) != 1 {
+		t.Fatalf("expected 1 command, got %d: %v", len(cmds.Commands), cmds.Commands)
+	}
+	want := "curl -fsSL https://cli.kiro.dev/install | bash -s -- --force"
+	if cmds.Commands[0] != want {
+		t.Errorf("command = %q, want %q", cmds.Commands[0], want)
+	}
+	if got := cmds.EnvVars["PATH"]; got != "/home/moatuser/.local/bin:$PATH" {
+		t.Errorf("PATH = %q, want %q", got, "/home/moatuser/.local/bin:$PATH")
+	}
+}
+
 func TestGetDynamicPackageCommands(t *testing.T) {
 	tests := []struct {
 		dep      Dependency

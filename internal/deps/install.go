@@ -372,6 +372,17 @@ func getCustomCommands(name, version string) InstallCommands {
 				"PATH": "/home/moatuser/.claude/local/bin:/home/moatuser/.local/bin:$PATH",
 			},
 		}
+	case "kiro-cli":
+		// Native installer from cli.kiro.dev; binary lands in ~/.local/bin.
+		// --force skips the already-installed check for reproducible image builds.
+		return InstallCommands{
+			Commands: []string{
+				`curl -fsSL https://cli.kiro.dev/install | bash -s -- --force`,
+			},
+			EnvVars: map[string]string{
+				"PATH": "/home/moatuser/.local/bin:$PATH",
+			},
+		}
 	case "protoc":
 		// Install protoc with well-known types (include directory).
 		// The protoc zip contains bin/protoc and include/google/protobuf/*.proto.
