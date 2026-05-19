@@ -259,6 +259,37 @@ if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
   fi
 fi
 
+# Kiro CLI Setup
+# When MOAT_KIRO_INIT is set to the staging directory path, copy the staged
+# ~/.kiro tree (settings/cli.json, settings/mcp.json, agents/default.json,
+# steering/moat-context.md) to its final location.
+if [ -n "$MOAT_KIRO_INIT" ] && [ -d "$MOAT_KIRO_INIT" ]; then
+  # Determine target home directory
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    TARGET_HOME="/home/moatuser"
+  else
+    TARGET_HOME="$HOME"
+  fi
+
+  # Create ~/.kiro directory
+  mkdir -p "$TARGET_HOME/.kiro"
+
+  # Copy each staged subdirectory's contents (including dotfiles), preserving
+  # permissions. The kiro provider always stages settings/, agents/, and
+  # steering/ (steering/ may be empty when no runtime context is set).
+  for sub in settings agents steering; do
+    if [ -d "$MOAT_KIRO_INIT/$sub" ]; then
+      mkdir -p "$TARGET_HOME/.kiro/$sub"
+      cp -rp "$MOAT_KIRO_INIT/$sub/." "$TARGET_HOME/.kiro/$sub/"
+    fi
+  done
+
+  # Ensure moatuser owns all the files if we're running as root
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown -R moatuser:moatuser "$TARGET_HOME/.kiro" 2>/dev/null || true
+  fi
+fi
+
 # Provider Init Files
 # When MOAT_INIT_FILES is set, it contains tab-delimited records (one per line):
 #   <absolute-path><TAB><base64-encoded-content>
