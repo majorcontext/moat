@@ -11,13 +11,17 @@ const KiroInitMountPath = "/moat/kiro-init"
 
 // kiroAPIHosts are the hosts the proxy injects the Kiro Bearer token for.
 //
-// VERIFICATION POINT (spec §Verification 3): if gatekeeper v0.2.0 does not
-// match wildcard host patterns for credential injection, replace this slice
-// with the single concrete host "q.us-east-1.amazonaws.com" and document how
-// to add other regions. Confirm during implementation (see Task 10 Step "verify").
+// gatekeeper v0.2.0 credential injection uses exact host-string map lookups
+// (proxy.go getCredentials), not the wildcard pattern matching used by the
+// network firewall. Wildcard patterns in SetCredentialWithGrant are stored
+// verbatim as map keys and will never match real hostnames. Only concrete
+// hostnames are effective for credential injection.
+//
+// Kiro CLI calls q.us-east-1.amazonaws.com (us-east-1 is the only region
+// currently used in production). To support additional regions in the future,
+// add their concrete hostnames here (e.g. "q.eu-west-1.amazonaws.com").
 var kiroAPIHosts = []string{
-	"q.*.amazonaws.com",
-	"*.q.*.amazonaws.com",
+	"q.us-east-1.amazonaws.com",
 }
 
 // kiroPassthroughHosts are allowlisted but receive no credential injection.

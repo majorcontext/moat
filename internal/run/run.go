@@ -118,6 +118,11 @@ type Run struct {
 	// cleaned up when the run is stopped or destroyed.
 	GeminiConfigTempDir string
 
+	// KiroConfigTempDir is the temporary directory containing Kiro configuration files
+	// (settings/cli.json, settings/mcp.json, agents/default.json) that are mounted into
+	// the container. This should be cleaned up when the run is stopped or destroyed.
+	KiroConfigTempDir string
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string
 	NetworkID           string

@@ -17,7 +17,8 @@ var (
 
 // NetworkHosts returns the hosts Kiro needs network access to.
 func NetworkHosts() []string {
-	hosts := []string{"cli.kiro.dev"}
+	hosts := make([]string, 0, 1+len(kiroAPIHosts)+len(kiroPassthroughHosts))
+	hosts = append(hosts, "cli.kiro.dev")
 	hosts = append(hosts, kiroAPIHosts...)
 	hosts = append(hosts, kiroPassthroughHosts...)
 	return hosts

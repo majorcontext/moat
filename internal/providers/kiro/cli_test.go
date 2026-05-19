@@ -9,7 +9,7 @@ import (
 
 func TestNetworkHosts(t *testing.T) {
 	hosts := NetworkHosts()
-	for _, want := range []string{"q.*.amazonaws.com", "cognito-identity.*.amazonaws.com", "cli.kiro.dev"} {
+	for _, want := range []string{"q.us-east-1.amazonaws.com", "cognito-identity.*.amazonaws.com", "cli.kiro.dev"} {
 		if !slices.Contains(hosts, want) {
 			t.Errorf("NetworkHosts() missing %q: %v", want, hosts)
 		}
