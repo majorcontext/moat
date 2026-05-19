@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Added
+
+- **Kiro CLI support** — `moat kiro` runs the Kiro CLI in an isolated container with transparent credential injection; `moat grant kiro` stores a Kiro token. Supports local and remote MCP and runtime-context injection. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+
 ## v0.5.1 — 2026-04-28
 
 Patch release with one security fix (IPv6 egress firewall) and a batch of run-lifecycle and proxy fixes. Adds `MOAT_HOME` for relocating moat state, a multi-runtime manager so Docker and Apple containers can coexist in one install, TUI debug shortcuts, and Python 3.13/3.14 support. Gatekeeper is extracted to its own repository.

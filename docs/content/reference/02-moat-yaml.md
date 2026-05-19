@@ -134,6 +134,18 @@ gemini:
       grant: github
       cwd: /workspace
 
+# Kiro CLI
+kiro:
+  sync_logs: true
+  mcp:
+    my_server:
+      command: /path/to/server
+      args: ["--flag"]
+      env:
+        VAR: value
+      grant: github
+      cwd: /workspace
+
 # Language servers
 language_servers:
   - go
@@ -396,6 +408,7 @@ grants:
 | `anthropic` | Anthropic API |
 | `openai` | OpenAI API |
 | `gemini` | Google Gemini API |
+| `kiro` | Kiro API |
 | `npm` | npm registries |
 | `ssh:HOSTNAME` | SSH access to specific host |
 | `oauth:NAME` | OAuth credentials for a service |
@@ -1278,7 +1291,7 @@ mcp:
 
 MCP servers running on the host machine (e.g., `http://localhost:3000`) are not accessible from inside the container. Moat's proxy relay bridges this gap -- the relay runs on the host and forwards container requests to the host-local server.
 
-**Note:** For sandbox-local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, or `gemini.mcp` instead.
+**Note:** For sandbox-local MCP servers running inside the container, use `claude.mcp`, `codex.mcp`, `gemini.mcp`, or `kiro.mcp` instead.
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
@@ -1438,6 +1451,65 @@ When `grant` is specified, the corresponding environment variable is set automat
 | `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `gemini` | `GEMINI_API_KEY` |
+
+**Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
+
+---
+
+## Kiro
+
+### kiro.sync_logs
+
+Mount Kiro's session logs directory for observability.
+
+```yaml
+kiro:
+  sync_logs: true
+```
+
+- Type: `boolean`
+- Default: `true` (when `kiro` grant is used)
+
+When enabled, Kiro session logs are synced to the host at `~/.moat/runs/<run-id>/kiro/`.
+
+### kiro.mcp
+
+Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to `~/.kiro/settings/mcp.json` inside the container.
+
+```yaml
+kiro:
+  mcp:
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+      env:
+        VAR: value
+      grant: github
+      cwd: /workspace
+```
+
+- Type: `map[string]object`
+- Default: `{}`
+
+#### MCP server fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | `string` | Server executable path (required) |
+| `args` | `array[string]` | Command arguments |
+| `env` | `map[string]string` | Environment variables |
+| `grant` | `string` | Credential to inject as an environment variable |
+| `cwd` | `string` | Working directory for the server process |
+
+When `grant` is specified, the corresponding environment variable is set automatically:
+
+| Grant | Environment variable |
+|-------|---------------------|
+| `github` | `GITHUB_TOKEN` |
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
+| `kiro` | `KIRO_API_KEY` |
 
 **Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
 

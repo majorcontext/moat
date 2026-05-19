@@ -37,7 +37,7 @@ If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for c
 
 ## Common agent flags
 
-The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the following flags. These flags work identically across `moat claude`, `moat codex`, and `moat gemini`.
+The agent commands (`moat claude`, `moat codex`, `moat gemini`, `moat kiro`) share the following flags. These flags work identically across `moat claude`, `moat codex`, `moat gemini`, and `moat kiro`.
 
 | Flag | Description |
 |------|-------------|
@@ -388,6 +388,60 @@ moat gemini --rebuild
 
 ---
 
+## moat kiro
+
+Run the Kiro CLI in a container.
+
+```
+moat kiro [workspace] [flags] [-- initial-prompt]
+```
+
+In addition to the command-specific flags below, `moat kiro` accepts all [common agent flags](#common-agent-flags).
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+| `initial-prompt` | Text after `--` is passed to Kiro as an initial prompt (interactive mode) |
+
+### Command-specific flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+
+### Examples
+
+```bash
+# Interactive Kiro CLI
+moat kiro
+
+# In specific directory
+moat kiro ./my-project
+
+# Interactive with initial prompt (Kiro stays open)
+moat kiro -- "explain this codebase"
+
+# Non-interactive with prompt (exits when done)
+moat kiro -p "explain this codebase"
+moat kiro -p "fix the bug in main.py"
+
+# With GitHub access
+moat kiro --grant github
+
+# Named run
+moat kiro --name my-feature
+
+# Run in a git worktree (non-interactive with prompt)
+moat kiro --worktree=dark-mode --prompt "implement dark mode"
+
+# Force rebuild
+moat kiro --rebuild
+```
+
+---
+
 ## moat wt
 
 Create or reuse a git worktree for a branch and start a run in it.
@@ -497,6 +551,7 @@ moat grant <provider>[:<scopes>]
 | `anthropic` | Anthropic API key |
 | `openai` | OpenAI (API key) |
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
+| `kiro` | Kiro API token |
 | `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
 | `aws` | AWS (IAM role assumption) |
 | `oauth` | OAuth 2.0 (authorization code flow with PKCE) |
@@ -553,6 +608,21 @@ If no Gemini CLI credentials are found, falls directly to the API key prompt.
 ```bash
 # Import from Gemini CLI or enter API key
 moat grant gemini
+```
+
+### moat grant kiro
+
+Stores a Kiro API token. Reads from the `KIRO_API_KEY` environment variable, or prompts interactively.
+
+Kiro tokens are static credentials with no automatic refresh. When a token expires, re-run `moat grant kiro` to replace it.
+
+```bash
+# Enter token interactively
+moat grant kiro
+
+# Read from environment variable
+export KIRO_API_KEY="..."
+moat grant kiro
 ```
 
 ### moat grant npm
@@ -784,6 +854,9 @@ moat revoke <provider>
 moat revoke github
 moat revoke claude          # revokes OAuth token
 moat revoke anthropic       # revokes API key
+moat revoke openai
+moat revoke gemini
+moat revoke kiro
 moat revoke npm
 moat revoke ssh:github.com
 
@@ -1452,6 +1525,7 @@ This command scans for and removes temporary directories matching these patterns
 - `agentops-aws-*` - AWS credential helper directories (legacy)
 - `moat-claude-staging-*` - Claude configuration staging directories
 - `moat-codex-staging-*` - Codex configuration staging directories
+- `moat-kiro-staging-*` - Kiro configuration staging directories
 - `moat-npm-*` - npm credential configuration directories
 
 Only directories older than `--min-age` are removed.
