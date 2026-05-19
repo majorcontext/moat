@@ -39,6 +39,7 @@ type Config struct {
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 	Codex        CodexConfig       `yaml:"codex,omitempty"`
 	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
+	Kiro         KiroConfig        `yaml:"kiro,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	// Clipboard enables host clipboard bridging. Default true when nil.
 	Clipboard *bool          `yaml:"clipboard,omitempty"`
@@ -305,6 +306,16 @@ type GeminiConfig struct {
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
 }
 
+// KiroConfig configures Kiro CLI integration options.
+type KiroConfig struct {
+	// SyncLogs controls whether Kiro session logs are synced to the host.
+	// Default: false, unless the "kiro" grant is configured (then true).
+	SyncLogs *bool `yaml:"sync_logs,omitempty"`
+
+	// MCP defines local MCP (Model Context Protocol) server configurations.
+	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
 // MarketplaceSpec defines a plugin marketplace source.
 type MarketplaceSpec struct {
 	// Source is the type of marketplace: "github", "git", or "directory"
@@ -437,6 +448,21 @@ func (c *Config) ShouldSyncGeminiLogs() bool {
 	// Default: enable if gemini grant is configured
 	for _, grant := range c.Grants {
 		if grant == "gemini" || strings.HasPrefix(grant, "gemini:") {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldSyncKiroLogs returns true if Kiro session logs should be synced.
+// - If kiro.sync_logs is explicitly set, use that value
+// - Otherwise, enable sync_logs if "kiro" is in grants
+func (c *Config) ShouldSyncKiroLogs() bool {
+	if c.Kiro.SyncLogs != nil {
+		return *c.Kiro.SyncLogs
+	}
+	for _, grant := range c.Grants {
+		if grant == "kiro" || strings.HasPrefix(grant, "kiro:") {
 			return true
 		}
 	}
@@ -626,6 +652,13 @@ func Load(dir string) (*Config, error) {
 	// Validate Gemini MCP server specs
 	for name, spec := range cfg.Gemini.MCP {
 		if err := validateMCPServerSpec("gemini", name, spec); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate Kiro MCP server specs
+	for name, spec := range cfg.Kiro.MCP {
+		if err := validateMCPServerSpec("kiro", name, spec); err != nil {
 			return nil, err
 		}
 	}

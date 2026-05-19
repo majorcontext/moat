@@ -2623,3 +2623,24 @@ func TestNetworkHostConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestKiroConfigParsesAndSyncLogs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "moat.yaml")
+	os.WriteFile(path, []byte("agent: kiro\ngrants: [kiro]\nkiro:\n  mcp:\n    s1:\n      command: foo\n"), 0644)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if _, ok := cfg.Kiro.MCP["s1"]; !ok {
+		t.Errorf("kiro.mcp.s1 not parsed: %+v", cfg.Kiro)
+	}
+	if !cfg.ShouldSyncKiroLogs() {
+		t.Error("ShouldSyncKiroLogs() = false, want true (kiro grant present)")
+	}
+	no := false
+	cfg.Kiro.SyncLogs = &no
+	if cfg.ShouldSyncKiroLogs() {
+		t.Error("ShouldSyncKiroLogs() = true, want false (explicitly disabled)")
+	}
+}
