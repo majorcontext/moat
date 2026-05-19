@@ -145,6 +145,23 @@ func TestResolveImageNeedsGeminiCLIDep(t *testing.T) {
 	}
 }
 
+func TestResolveImageNeedsKiro(t *testing.T) {
+	store := newMockStore()
+	store.Save(credential.Credential{Provider: credential.ProviderKiro, Token: "t", CreatedAt: time.Now()})
+
+	needs := resolveImageNeedsWithStore([]string{"kiro"}, nil, store)
+	if !contains(needs.initProviders, "kiro") {
+		t.Errorf("initProviders = %v, want to contain kiro", needs.initProviders)
+	}
+}
+
+func TestResolveImageNeedsKiroDepFallback(t *testing.T) {
+	needs := resolveImageNeedsWithStore(nil, []deps.Dependency{{Name: "kiro-cli"}}, nil)
+	if !contains(needs.initProviders, "kiro") {
+		t.Errorf("initProviders = %v, want to contain kiro (dep fallback)", needs.initProviders)
+	}
+}
+
 func TestResolveImageNeedsGrantAndDep(t *testing.T) {
 	// When a grant already covers claude, the dep fallback shouldn't duplicate.
 	depList := []deps.Dependency{{Name: "claude-code"}}

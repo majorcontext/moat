@@ -84,6 +84,13 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 					initSet["gemini"] = true
 				}
 			}
+
+		case "kiro":
+			if store != nil {
+				if _, err := store.Get(credential.ProviderKiro); err == nil {
+					initSet["kiro"] = true
+				}
+			}
 		}
 
 		// Check InitFileProvider interface using the original grant name
@@ -101,6 +108,9 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	}
 	if !initSet["gemini"] && hasDep(depList, "gemini-cli") {
 		initSet["gemini"] = true
+	}
+	if !initSet["kiro"] && hasDep(depList, "kiro-cli") {
+		initSet["kiro"] = true
 	}
 
 	for name := range initSet {
