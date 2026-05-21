@@ -161,6 +161,35 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 	return nil
 }
 
+// buildContainerMounts converts moat's MountConfig and TmpfsMount entries into
+// Docker SDK mount.Mount structs. Tmpfs mounts overlay subdirectories of
+// bind-mounted paths and are appended after bind mounts so they apply on top.
+func buildContainerMounts(cfg Config) []mount.Mount {
+	mounts := make([]mount.Mount, 0, len(cfg.Mounts)+len(cfg.TmpfsMounts))
+	for _, m := range cfg.Mounts {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+	for _, tm := range cfg.TmpfsMounts {
+		// Mode 1777 (sticky world-writable) matches Docker CLI's `--tmpfs`
+		// default. Without it, runc defaults to mode 755 owned by root,
+		// causing EACCES for non-root container users writing into the tmpfs
+		// (e.g., pnpm install creating its store inside an excluded path).
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeTmpfs,
+			Target: tm.Target,
+			TmpfsOptions: &mount.TmpfsOptions{
+				Mode: 0o1777,
+			},
+		})
+	}
+	return mounts
+}
+
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Verify gVisor is still available if we're configured to use it
@@ -173,24 +202,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		return "", err
 	}
 
-	// Convert mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts)+len(cfg.TmpfsMounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-	// Tmpfs mounts — overlays for excluded directories.
-	// Appended after bind mounts so tmpfs overlays subdirectories of bind-mounted paths.
-	for _, tm := range cfg.TmpfsMounts {
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeTmpfs,
-			Target: tm.Target,
-		})
-	}
+	mounts := buildContainerMounts(cfg)
 
 	// Default to bridge network if not specified
 	networkMode := container.NetworkMode(cfg.NetworkMode)

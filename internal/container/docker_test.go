@@ -3,15 +3,91 @@ package container
 import (
 	"context"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
+
+// TestBuildContainerMounts_TmpfsWorldWritable asserts that tmpfs mounts are
+// created with mode 1777 so non-root container users can write to them.
+// Without an explicit mode, runc creates the tmpfs as mode 755 owned by root,
+// causing EACCES for non-root processes (e.g., pnpm install as moatuser).
+func TestBuildContainerMounts_TmpfsWorldWritable(t *testing.T) {
+	cfg := Config{
+		TmpfsMounts: []TmpfsMount{
+			{Target: "/workspace/node_modules"},
+		},
+	}
+
+	got := buildContainerMounts(cfg)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d mounts, want 1", len(got))
+	}
+	if got[0].Type != mount.TypeTmpfs {
+		t.Errorf("Type = %v, want %v", got[0].Type, mount.TypeTmpfs)
+	}
+	if got[0].TmpfsOptions == nil {
+		t.Fatal("TmpfsOptions is nil; expected non-nil with Mode set to 0o1777")
+	}
+	if got[0].TmpfsOptions.Mode != 0o1777 {
+		t.Errorf("TmpfsOptions.Mode = %o, want %o (sticky world-writable)", got[0].TmpfsOptions.Mode, 0o1777)
+	}
+}
+
+// TestBuildContainerMounts_BindMounts asserts that bind mounts are produced
+// with the right type, source, target, and read-only flag.
+func TestBuildContainerMounts_BindMounts(t *testing.T) {
+	cfg := Config{
+		Mounts: []MountConfig{
+			{Source: "/host/project", Target: "/workspace", ReadOnly: false},
+			{Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
+		},
+	}
+
+	got := buildContainerMounts(cfg)
+
+	want := []mount.Mount{
+		{Type: mount.TypeBind, Source: "/host/project", Target: "/workspace", ReadOnly: false},
+		{Type: mount.TypeBind, Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildContainerMounts() = %#v, want %#v", got, want)
+	}
+}
+
+// TestBuildContainerMounts_TmpfsAfterBind verifies tmpfs mounts come after bind
+// mounts in the slice. Docker applies mounts in order; tmpfs overlays of paths
+// inside a bind mount must follow the bind to take effect.
+func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {
+	cfg := Config{
+		Mounts: []MountConfig{
+			{Source: "/host/project", Target: "/workspace"},
+		},
+		TmpfsMounts: []TmpfsMount{
+			{Target: "/workspace/node_modules"},
+		},
+	}
+
+	got := buildContainerMounts(cfg)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d mounts, want 2", len(got))
+	}
+	if got[0].Type != mount.TypeBind {
+		t.Errorf("mounts[0].Type = %v, want bind", got[0].Type)
+	}
+	if got[1].Type != mount.TypeTmpfs {
+		t.Errorf("mounts[1].Type = %v, want tmpfs", got[1].Type)
+	}
+}
 
 func TestConfig_GroupAdd(t *testing.T) {
 	// Verify that GroupAdd field can be set on Config struct
