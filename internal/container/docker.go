@@ -175,15 +175,22 @@ func buildContainerMounts(cfg Config) []mount.Mount {
 		})
 	}
 	for _, tm := range cfg.TmpfsMounts {
+		// Mode 1777 + exec: two fixes for tmpfs mounts used by mounts.exclude.
+		//
 		// Mode 1777 (sticky world-writable) matches Docker CLI's `--tmpfs`
 		// default. Without it, runc defaults to mode 755 owned by root,
-		// causing EACCES for non-root container users writing into the tmpfs
-		// (e.g., pnpm install creating its store inside an excluded path).
+		// causing EACCES for non-root container users writing into the tmpfs.
+		//
+		// "exec" overrides runc's default "noexec" flag. Excluded paths like
+		// node_modules contain native binaries (e.g., turbo, esbuild) that
+		// must be executable. Without "exec", any spawn from the tmpfs fails
+		// with EACCES regardless of file permissions.
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeTmpfs,
 			Target: tm.Target,
 			TmpfsOptions: &mount.TmpfsOptions{
-				Mode: 0o1777,
+				Mode:    0o1777,
+				Options: [][]string{{"exec"}},
 			},
 		})
 	}

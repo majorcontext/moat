@@ -174,7 +174,7 @@ func TestBuildCreateArgs(t *testing.T) {
 					{Target: "/workspace/node_modules"},
 				},
 			},
-			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--tmpfs", "/workspace/node_modules", "ubuntu:22.04"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--mount", "type=tmpfs,destination=/workspace/node_modules,mode=1777", "ubuntu:22.04"},
 		},
 		{
 			name: "with volume and tmpfs mounts",
@@ -188,7 +188,7 @@ func TestBuildCreateArgs(t *testing.T) {
 					{Target: "/workspace/.venv"},
 				},
 			},
-			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "--tmpfs", "/workspace/node_modules", "--tmpfs", "/workspace/.venv", "ubuntu:22.04"},
+			want: []string{"create", "--memory", "4096MB", "--dns", "8.8.8.8", "--dns", "8.8.4.4", "--volume", "/home/user/project:/workspace", "--mount", "type=tmpfs,destination=/workspace/node_modules,mode=1777", "--mount", "type=tmpfs,destination=/workspace/.venv,mode=1777", "ubuntu:22.04"},
 		},
 		{
 			// Apple's container CLI has no --add-host equivalent. ExtraHosts must

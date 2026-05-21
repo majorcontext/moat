@@ -15,11 +15,12 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// TestBuildContainerMounts_TmpfsWorldWritable asserts that tmpfs mounts are
-// created with mode 1777 so non-root container users can write to them.
-// Without an explicit mode, runc creates the tmpfs as mode 755 owned by root,
-// causing EACCES for non-root processes (e.g., pnpm install as moatuser).
-func TestBuildContainerMounts_TmpfsWorldWritable(t *testing.T) {
+// TestBuildContainerMounts_TmpfsWritableAndExec asserts that tmpfs mounts are
+// created with mode 1777 and the exec option. Mode 1777 lets non-root users
+// write (runc defaults to 755). The exec option overrides runc's default
+// noexec flag so native binaries in excluded paths (e.g., turbo in
+// node_modules) can be executed.
+func TestBuildContainerMounts_TmpfsWritableAndExec(t *testing.T) {
 	cfg := Config{
 		TmpfsMounts: []TmpfsMount{
 			{Target: "/workspace/node_modules"},
@@ -35,10 +36,14 @@ func TestBuildContainerMounts_TmpfsWorldWritable(t *testing.T) {
 		t.Errorf("Type = %v, want %v", got[0].Type, mount.TypeTmpfs)
 	}
 	if got[0].TmpfsOptions == nil {
-		t.Fatal("TmpfsOptions is nil; expected non-nil with Mode set to 0o1777")
+		t.Fatal("TmpfsOptions is nil; expected non-nil with Mode and Options set")
 	}
 	if got[0].TmpfsOptions.Mode != 0o1777 {
 		t.Errorf("TmpfsOptions.Mode = %o, want %o (sticky world-writable)", got[0].TmpfsOptions.Mode, 0o1777)
+	}
+	wantOpts := [][]string{{"exec"}}
+	if !reflect.DeepEqual(got[0].TmpfsOptions.Options, wantOpts) {
+		t.Errorf("TmpfsOptions.Options = %v, want %v (exec required for native binaries)", got[0].TmpfsOptions.Options, wantOpts)
 	}
 }
 
