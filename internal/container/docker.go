@@ -162,11 +162,11 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 }
 
 // buildContainerMounts converts moat's MountConfig and TmpfsMount entries into
-// Docker SDK mount.Mount structs. Tmpfs mounts overlay subdirectories of
-// bind-mounted paths and are appended after bind mounts so they apply on top.
-func buildContainerMounts(cfg Config) []mount.Mount {
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts)+len(cfg.TmpfsMounts))
-	for _, m := range cfg.Mounts {
+// Docker SDK mount.Mount structs. Tmpfs mounts follow bind mounts so overlays
+// of paths inside a bind take effect.
+func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount {
+	mounts := make([]mount.Mount, 0, len(binds)+len(tmpfs))
+	for _, m := range binds {
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   m.Source,
@@ -174,22 +174,14 @@ func buildContainerMounts(cfg Config) []mount.Mount {
 			ReadOnly: m.ReadOnly,
 		})
 	}
-	for _, tm := range cfg.TmpfsMounts {
-		// Mode 1777 + exec: two fixes for tmpfs mounts used by mounts.exclude.
-		//
-		// Mode 1777 (sticky world-writable) matches Docker CLI's `--tmpfs`
-		// default. Without it, runc defaults to mode 755 owned by root,
-		// causing EACCES for non-root container users writing into the tmpfs.
-		//
-		// "exec" overrides runc's default "noexec" flag. Excluded paths like
-		// node_modules contain native binaries (e.g., turbo, esbuild) that
-		// must be executable. Without "exec", any spawn from the tmpfs fails
-		// with EACCES regardless of file permissions.
+	for _, tm := range tmpfs {
+		// "exec" overrides runc's default noexec — excluded paths like
+		// node_modules contain native binaries (turbo, esbuild) that must spawn.
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeTmpfs,
 			Target: tm.Target,
 			TmpfsOptions: &mount.TmpfsOptions{
-				Mode:    0o1777,
+				Mode:    tmpfsMode,
 				Options: [][]string{{"exec"}},
 			},
 		})
@@ -209,7 +201,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		return "", err
 	}
 
-	mounts := buildContainerMounts(cfg)
+	mounts := buildContainerMounts(cfg.Mounts, cfg.TmpfsMounts)
 
 	// Default to bridge network if not specified
 	networkMode := container.NetworkMode(cfg.NetworkMode)
@@ -1018,16 +1010,7 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 		return "", fmt.Errorf("pulling sidecar image: %w", err)
 	}
 
-	// Prepare mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, mt := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   mt.Source,
-			Target:   mt.Target,
-			ReadOnly: mt.ReadOnly,
-		})
-	}
+	mounts := buildContainerMounts(cfg.Mounts, nil)
 
 	// Create container with labels for orphan cleanup
 	labels := make(map[string]string)

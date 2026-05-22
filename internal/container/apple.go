@@ -302,13 +302,9 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--volume", mountStr)
 	}
 
-	// Tmpfs mounts (overlays for excluded directories).
-	// Use --mount instead of --tmpfs so we can set mode=1777 (sticky
-	// world-writable). Without an explicit mode the runtime may default to
-	// 755, causing EACCES for non-root container users — the same issue
-	// fixed for Docker in PR #355.
+	// --mount (not --tmpfs) so we can set the mode; --tmpfs accepts no options.
 	for _, tm := range cfg.TmpfsMounts {
-		args = append(args, "--mount", fmt.Sprintf("type=tmpfs,destination=%s,mode=1777", tm.Target))
+		args = append(args, "--mount", fmt.Sprintf("type=tmpfs,destination=%s,mode=%o", tm.Target, tmpfsMode))
 	}
 
 	// Image

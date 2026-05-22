@@ -15,19 +15,8 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// TestBuildContainerMounts_TmpfsWritableAndExec asserts that tmpfs mounts are
-// created with mode 1777 and the exec option. Mode 1777 lets non-root users
-// write (runc defaults to 755). The exec option overrides runc's default
-// noexec flag so native binaries in excluded paths (e.g., turbo in
-// node_modules) can be executed.
 func TestBuildContainerMounts_TmpfsWritableAndExec(t *testing.T) {
-	cfg := Config{
-		TmpfsMounts: []TmpfsMount{
-			{Target: "/workspace/node_modules"},
-		},
-	}
-
-	got := buildContainerMounts(cfg)
+	got := buildContainerMounts(nil, []TmpfsMount{{Target: "/workspace/node_modules"}})
 
 	if len(got) != 1 {
 		t.Fatalf("got %d mounts, want 1", len(got))
@@ -36,28 +25,24 @@ func TestBuildContainerMounts_TmpfsWritableAndExec(t *testing.T) {
 		t.Errorf("Type = %v, want %v", got[0].Type, mount.TypeTmpfs)
 	}
 	if got[0].TmpfsOptions == nil {
-		t.Fatal("TmpfsOptions is nil; expected non-nil with Mode and Options set")
+		t.Fatal("TmpfsOptions is nil")
 	}
-	if got[0].TmpfsOptions.Mode != 0o1777 {
-		t.Errorf("TmpfsOptions.Mode = %o, want %o (sticky world-writable)", got[0].TmpfsOptions.Mode, 0o1777)
+	if got[0].TmpfsOptions.Mode != tmpfsMode {
+		t.Errorf("Mode = %o, want %o", got[0].TmpfsOptions.Mode, tmpfsMode)
 	}
 	wantOpts := [][]string{{"exec"}}
 	if !reflect.DeepEqual(got[0].TmpfsOptions.Options, wantOpts) {
-		t.Errorf("TmpfsOptions.Options = %v, want %v (exec required for native binaries)", got[0].TmpfsOptions.Options, wantOpts)
+		t.Errorf("Options = %v, want %v", got[0].TmpfsOptions.Options, wantOpts)
 	}
 }
 
-// TestBuildContainerMounts_BindMounts asserts that bind mounts are produced
-// with the right type, source, target, and read-only flag.
 func TestBuildContainerMounts_BindMounts(t *testing.T) {
-	cfg := Config{
-		Mounts: []MountConfig{
-			{Source: "/host/project", Target: "/workspace", ReadOnly: false},
-			{Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
-		},
+	binds := []MountConfig{
+		{Source: "/host/project", Target: "/workspace", ReadOnly: false},
+		{Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
 	}
 
-	got := buildContainerMounts(cfg)
+	got := buildContainerMounts(binds, nil)
 
 	want := []mount.Mount{
 		{Type: mount.TypeBind, Source: "/host/project", Target: "/workspace", ReadOnly: false},
@@ -68,20 +53,13 @@ func TestBuildContainerMounts_BindMounts(t *testing.T) {
 	}
 }
 
-// TestBuildContainerMounts_TmpfsAfterBind verifies tmpfs mounts come after bind
-// mounts in the slice. Docker applies mounts in order; tmpfs overlays of paths
-// inside a bind mount must follow the bind to take effect.
+// Tmpfs must follow binds in the output slice so overlays of paths inside a
+// bind take effect on the daemon side.
 func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {
-	cfg := Config{
-		Mounts: []MountConfig{
-			{Source: "/host/project", Target: "/workspace"},
-		},
-		TmpfsMounts: []TmpfsMount{
-			{Target: "/workspace/node_modules"},
-		},
-	}
+	binds := []MountConfig{{Source: "/host/project", Target: "/workspace"}}
+	tmpfs := []TmpfsMount{{Target: "/workspace/node_modules"}}
 
-	got := buildContainerMounts(cfg)
+	got := buildContainerMounts(binds, tmpfs)
 
 	if len(got) != 2 {
 		t.Fatalf("got %d mounts, want 2", len(got))
