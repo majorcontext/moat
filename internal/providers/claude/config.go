@@ -273,9 +273,11 @@ type oauthCredentials struct {
 
 // oauthToken represents an individual OAuth token from Claude Code.
 type oauthToken struct {
-	AccessToken      string   `json:"accessToken"`
-	RefreshToken     string   `json:"refreshToken,omitempty"`
-	ExpiresAt        int64    `json:"expiresAt"` // Unix timestamp in milliseconds
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ExpiresAt    int64  `json:"expiresAt"` // Unix timestamp in milliseconds
+	// No omitempty: Claude Code requires a non-null scopes array, and
+	// WriteCredentialsFile always populates it (real scopes or the default set).
 	Scopes           []string `json:"scopes"`
 	SubscriptionType string   `json:"subscriptionType,omitempty"`
 	RateLimitTier    string   `json:"rateLimitTier,omitempty"`
