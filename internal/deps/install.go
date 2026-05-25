@@ -368,9 +368,13 @@ func getCustomCommands(name, version string) InstallCommands {
 		// (stable|latest|VERSION); with no version it installs latest. The
 		// version is validated by validateVersion() at parse time, so it only
 		// contains shell-safe characters.
+		//
+		// The "--" terminates bash's own option processing so a version that
+		// happens to start with "-" (e.g. "-n") is passed to the script as a
+		// positional arg rather than interpreted as a bash flag.
 		installCmd := "curl -fsSL https://claude.ai/install.sh | bash"
 		if version != "" {
-			installCmd = fmt.Sprintf("%s -s %s", installCmd, version)
+			installCmd = fmt.Sprintf("%s -s -- %s", installCmd, version)
 		}
 		return InstallCommands{
 			Commands: []string{installCmd},

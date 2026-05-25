@@ -285,7 +285,7 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 		{
 			name:     "pinned version",
 			version:  "2.1.139",
-			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s 2.1.139",
+			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.139",
 			wantPATH: "/home/moatuser/.claude/local/bin",
 		},
 		{

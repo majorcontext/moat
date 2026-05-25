@@ -216,14 +216,15 @@ dependencies:
   - claude-code@2.1.139
 ```
 
-The version must be a published release (for example `2.1.139`). Moat passes it to
-the official installer, so pinning works the same whether `claude-code` is listed
-explicitly or implied by `agent: claude-code`. Changing the pinned version triggers
-an image rebuild on the next run.
+The version can be a release number (for example `2.1.139`), `stable`, or `latest` —
+the value is passed straight to the official installer. Moat installs it the same way
+regardless of how `claude-code` reached the dependency list, but a version specifier
+must be present: `agent: claude-code` on its own does **not** pin a version. Changing
+the version triggers an image rebuild on the next run.
 
-`moat claude` (without an explicit `claude-code` dependency) always installs the
-latest release. To pin the version, add `claude-code@<version>` to `dependencies`
-as shown above.
+`moat claude` and `agent: claude-code` inject an unversioned `claude-code` dependency,
+so they install the latest release. To pin, add an explicit `claude-code@<version>`
+to `dependencies` as shown above.
 
 ## Adding GitHub access
 
