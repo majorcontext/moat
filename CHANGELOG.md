@@ -8,7 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Fixed
 
-- Fix `claude-code@<version>` pinning being ignored — previously, specifying a version such as `claude-code@2.1.139` in `dependencies` (or relying on the dependency implied by `agent: claude-code`) still installed the latest release, because the install command dropped the version argument. The version is now passed to the official installer. This is a workaround for the Claude Code 2.1.150 text-entry regression ([#356](https://github.com/majorcontext/moat/issues/356)): pin `claude-code@2.1.139` until the regression is resolved upstream. ([#357](https://github.com/majorcontext/moat/pull/357))
+- Fix `claude-code@<version>` pinning being ignored — previously, specifying a version such as `claude-code@2.1.139` in `dependencies` still installed the latest release, because the install command dropped the version argument. The version is now passed to the official installer. This is a workaround for the Claude Code 2.1.150 text-entry regression ([#356](https://github.com/majorcontext/moat/issues/356)): pin `claude-code@2.1.139` until the regression is resolved upstream. ([#357](https://github.com/majorcontext/moat/pull/357))
 
 ## v0.5.1 — 2026-04-28
 
