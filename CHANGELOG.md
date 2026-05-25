@@ -6,10 +6,27 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+## v0.5.3 — 2026-05-25
+
+Patch release centered on Claude Code authentication inside containers — subscription detection, `setup-token` capture, and version pinning — plus a non-root tmpfs permissions fix.
+
 ### Fixed
 
 - Fix `claude-code@<version>` pinning being ignored — previously, specifying a version such as `claude-code@2.1.139` in `dependencies` still installed the latest release, because the install command dropped the version argument. The version is now passed to the official installer. ([#357](https://github.com/majorcontext/moat/pull/357))
 - Fix Claude Code showing "not logged in" / "API Usage Billing" inside containers — previously, the generated `~/.claude/.credentials.json` had `null` scopes and no `subscriptionType`, which Claude Code treats as an unauthenticated session. Moat now writes the standard OAuth scopes and a `subscriptionType` (default `max`, overridable via `claude.subscription_type`; the new `claude.rate_limit_tier` is also supported). Grants created by importing existing credentials use the real plan. The real plan is still enforced server-side via the proxy-injected token. Surfaced by v0.5.2 dropping the `CLAUDE_CODE_OAUTH_TOKEN` placeholder env var that had masked the incomplete file. ([#358](https://github.com/majorcontext/moat/pull/358))
+- Fix `moat grant claude` failing to capture a `setup-token` — recent Claude CLI versions render `setup-token` as a TUI, so moat's output scraping always failed ("could not find OAuth token") and fell back to a manual paste anyway. Moat now runs `setup-token` attached to the terminal (no scraping) and reads the pasted token, reassembling it when a narrow terminal soft-wrapped it across lines. ([#353](https://github.com/majorcontext/moat/pull/353))
+- Fix `EACCES` writing to tmpfs mounts as the non-root container user — tmpfs (used by `mounts.exclude` paths) was created mode `755` owned by root, so `moatuser` could not write to it, and `noexec` blocked native binaries in excluded `node_modules`. tmpfs is now mounted mode `1777` with `exec` on Docker, and with an explicit `mode=1777` on Apple containers. ([#355](https://github.com/majorcontext/moat/pull/355))
+
+## v0.5.2 — 2026-05-18
+
+Patch release with Claude Code credential fixes (OAuth placeholder shape and credential expiry) plus marketplace and TUI rendering fixes.
+
+### Fixed
+
+- Fix Claude Code skipping OAuth-only code paths in containers — the container credentials placeholder did not look like an OAuth token and was also set in `CLAUDE_CODE_OAUTH_TOKEN`, so Claude Code could skip paths that determine account capabilities (e.g. 1M-context access). Moat now writes an `sk-ant-oat01-*`-shaped placeholder to `.credentials.json` and no longer sets the env var; the real token is still injected by the proxy. ([#351](https://github.com/majorcontext/moat/pull/351))
+- Fix Claude Code treating injected container credentials as expired — `setup-token` grants carry no expiry, so the zero-value timestamp serialized to year 0001 and showed the session as logged out. A far-future expiry is now written when the grant has none. ([#352](https://github.com/majorcontext/moat/pull/352))
+- Fix `claude.marketplaces` entries written as `{source: github, repo: ...}` being normalized to a `git`/`url` shape that broke plugin allowlist matching in the container. The original source shape is now preserved end to end. ([#345](https://github.com/majorcontext/moat/pull/345))
+- Fix the moat footer scrolling into scrollback with Ink-based TUIs (Claude Code) — the child emits `ESC[r` on startup, resetting moat's scroll region, so newlines on the bottom row pushed the footer into scrollback and left a trail of copies. Moat is now the sole authority over the scroll region and reserves the footer row at the TTY level. ([#349](https://github.com/majorcontext/moat/pull/349))
 
 ## v0.5.1 — 2026-04-28
 
