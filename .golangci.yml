@@ -117,16 +117,6 @@ linters:
           - revive
         text: "dot-imports"
 
-      # staticcheck SA5011 false positives in tests: the bundled staticcheck
-      # (golangci-lint v2.8.0) does not recognize t.Fatal/t.Fatalf as
-      # terminating, so it flags nil-guarded dereferences as possible nil
-      # derefs:  if x == nil { t.Fatal(...) }; x.Field — the guard makes the
-      # deref unreachable when nil. Production code keeps SA5011 active.
-      - path: _test\.go
-        linters:
-          - staticcheck
-        text: "SA5011"
-
       # E2E tests can have longer functions
       - path: e2e/
         linters:
