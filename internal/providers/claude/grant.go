@@ -547,6 +547,10 @@ func grantViaExistingCreds(ctx context.Context) (*provider.Credential, error) {
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now(),
 	}
+	// Preserve the real subscription details so the container's .credentials.json
+	// reflects the actual plan. Setup-token/pasted grants don't carry these and
+	// fall back to defaults (or the moat.yaml override).
+	cred.Metadata = subscriptionMetadata(token.SubscriptionType, token.RateLimitTier)
 
 	fmt.Println("\nClaude Code credentials imported.")
 	fmt.Println("You can now run 'moat claude' to start Claude Code.")

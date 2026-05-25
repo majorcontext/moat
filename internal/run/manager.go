@@ -2035,12 +2035,19 @@ region = %s
 
 			// Call provider to prepare container config
 			var prepErr error
+			var claudeSubType, claudeRateTier string
+			if opts.Config != nil {
+				claudeSubType = opts.Config.Claude.SubscriptionType
+				claudeRateTier = opts.Config.Claude.RateLimitTier
+			}
 			claudeConfig, prepErr = claudeProvider.PrepareContainer(ctx, provider.PrepareOpts{
-				Credential:      claudeCred,
-				ContainerHome:   containerHome,
-				MCPServers:      mcpServers,
-				RuntimeContext:  renderedContext,
-				LocalMCPServers: claudeLocalMCP,
+				Credential:       claudeCred,
+				ContainerHome:    containerHome,
+				MCPServers:       mcpServers,
+				RuntimeContext:   renderedContext,
+				LocalMCPServers:  claudeLocalMCP,
+				SubscriptionType: claudeSubType,
+				RateLimitTier:    claudeRateTier,
 				// HostConfig is read automatically by the provider if nil
 			})
 			if prepErr != nil {

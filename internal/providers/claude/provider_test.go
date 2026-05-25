@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -622,7 +623,7 @@ func TestWriteCredentialsFile(t *testing.T) {
 			Scopes:    []string{"user:read"},
 		}
 
-		err := WriteCredentialsFile(cred, stagingDir)
+		err := WriteCredentialsFile(cred, stagingDir, "", "")
 		if err != nil {
 			t.Fatalf("WriteCredentialsFile() error = %v", err)
 		}
@@ -660,7 +661,7 @@ func TestWriteCredentialsFile(t *testing.T) {
 			// ExpiresAt intentionally zero — simulates setup-token grants
 		}
 
-		err := WriteCredentialsFile(cred, stagingDir)
+		err := WriteCredentialsFile(cred, stagingDir, "", "")
 		if err != nil {
 			t.Fatalf("WriteCredentialsFile() error = %v", err)
 		}
@@ -690,7 +691,7 @@ func TestWriteCredentialsFile(t *testing.T) {
 			Token:    "sk-ant-api01-abc123",
 		}
 
-		err := WriteCredentialsFile(cred, stagingDir)
+		err := WriteCredentialsFile(cred, stagingDir, "", "")
 		if err != nil {
 			t.Fatalf("WriteCredentialsFile() error = %v", err)
 		}
@@ -699,6 +700,132 @@ func TestWriteCredentialsFile(t *testing.T) {
 		credsFile := filepath.Join(stagingDir, ".credentials.json")
 		if _, err := os.Stat(credsFile); err == nil {
 			t.Error("credentials file should NOT exist for API keys")
+		}
+	})
+}
+
+// writeAndReadCreds writes a credentials file and returns the parsed token.
+func writeAndReadCreds(t *testing.T, cred *provider.Credential, subType, rateTier string) *oauthToken {
+	t.Helper()
+	stagingDir := t.TempDir()
+	if err := WriteCredentialsFile(cred, stagingDir, subType, rateTier); err != nil {
+		t.Fatalf("WriteCredentialsFile() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(stagingDir, ".credentials.json"))
+	if err != nil {
+		t.Fatalf("failed to read credentials file: %v", err)
+	}
+	var creds oauthCredentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		t.Fatalf("failed to parse credentials file: %v", err)
+	}
+	if creds.ClaudeAiOauth == nil {
+		t.Fatal("ClaudeAiOauth should be present")
+	}
+	return creds.ClaudeAiOauth
+}
+
+func TestSubscriptionMetadata(t *testing.T) {
+	t.Run("both fields present", func(t *testing.T) {
+		got := subscriptionMetadata("max", "default_claude_max_20x")
+		want := map[string]string{
+			MetaSubscriptionType: "max",
+			MetaRateLimitTier:    "default_claude_max_20x",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("subscriptionMetadata() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("only subscriptionType", func(t *testing.T) {
+		got := subscriptionMetadata("pro", "")
+		want := map[string]string{MetaSubscriptionType: "pro"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("subscriptionMetadata() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("neither field returns nil", func(t *testing.T) {
+		if got := subscriptionMetadata("", ""); got != nil {
+			t.Errorf("subscriptionMetadata() = %v, want nil", got)
+		}
+	})
+}
+
+func TestWriteCredentialsFileFields(t *testing.T) {
+	t.Run("setup-token grant gets default scopes and subscriptionType", func(t *testing.T) {
+		// No scopes, no metadata, no override — mirrors a setup-token grant.
+		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc"}
+		tok := writeAndReadCreds(t, cred, "", "")
+
+		if len(tok.Scopes) == 0 {
+			t.Error("scopes should default to a non-empty set, got null/empty")
+		}
+		if !reflect.DeepEqual(tok.Scopes, defaultClaudeScopes) {
+			t.Errorf("scopes = %v, want default %v", tok.Scopes, defaultClaudeScopes)
+		}
+		if tok.SubscriptionType != defaultSubscriptionType {
+			t.Errorf("subscriptionType = %q, want default %q", tok.SubscriptionType, defaultSubscriptionType)
+		}
+		if tok.RateLimitTier != "" {
+			t.Errorf("rateLimitTier = %q, want empty (no guess)", tok.RateLimitTier)
+		}
+	})
+
+	t.Run("moat.yaml override wins over default", func(t *testing.T) {
+		cred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc"}
+		tok := writeAndReadCreds(t, cred, "pro", "default_claude_pro")
+
+		if tok.SubscriptionType != "pro" {
+			t.Errorf("subscriptionType = %q, want override %q", tok.SubscriptionType, "pro")
+		}
+		if tok.RateLimitTier != "default_claude_pro" {
+			t.Errorf("rateLimitTier = %q, want override %q", tok.RateLimitTier, "default_claude_pro")
+		}
+	})
+
+	t.Run("imported metadata used when no override", func(t *testing.T) {
+		cred := &provider.Credential{
+			Provider: "claude",
+			Token:    "sk-ant-oat01-abc",
+			Metadata: map[string]string{
+				MetaSubscriptionType: "max",
+				MetaRateLimitTier:    "default_claude_max_20x",
+			},
+		}
+		tok := writeAndReadCreds(t, cred, "", "")
+
+		if tok.SubscriptionType != "max" {
+			t.Errorf("subscriptionType = %q, want imported %q", tok.SubscriptionType, "max")
+		}
+		if tok.RateLimitTier != "default_claude_max_20x" {
+			t.Errorf("rateLimitTier = %q, want imported %q", tok.RateLimitTier, "default_claude_max_20x")
+		}
+	})
+
+	t.Run("override beats imported metadata", func(t *testing.T) {
+		cred := &provider.Credential{
+			Provider: "claude",
+			Token:    "sk-ant-oat01-abc",
+			Metadata: map[string]string{MetaSubscriptionType: "max"},
+		}
+		tok := writeAndReadCreds(t, cred, "pro", "")
+
+		if tok.SubscriptionType != "pro" {
+			t.Errorf("subscriptionType = %q, want override %q to beat imported", tok.SubscriptionType, "pro")
+		}
+	})
+
+	t.Run("real scopes preserved", func(t *testing.T) {
+		cred := &provider.Credential{
+			Provider: "claude",
+			Token:    "sk-ant-oat01-abc",
+			Scopes:   []string{"user:inference", "user:profile"},
+		}
+		tok := writeAndReadCreds(t, cred, "", "")
+
+		if !reflect.DeepEqual(tok.Scopes, []string{"user:inference", "user:profile"}) {
+			t.Errorf("scopes = %v, want the credential's real scopes preserved", tok.Scopes)
 		}
 	})
 }

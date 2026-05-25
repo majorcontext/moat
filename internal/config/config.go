@@ -273,6 +273,18 @@ type ClaudeConfig struct {
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
 
+	// SubscriptionType overrides the subscriptionType written to Claude Code's
+	// .credentials.json (e.g. "pro", "max"). Setup-token and pasted-token grants
+	// don't carry the plan, so moat defaults to "max"; set this to match your
+	// plan. Imported grants use the real value unless this is set.
+	SubscriptionType string `yaml:"subscription_type,omitempty"`
+
+	// RateLimitTier overrides the rateLimitTier written to Claude Code's
+	// .credentials.json (e.g. "default_claude_max_20x"). Optional; mainly affects
+	// Claude Code's local rate-limit hints. Real plan limits are enforced
+	// server-side via the proxy-injected token.
+	RateLimitTier string `yaml:"rate_limit_tier,omitempty"`
+
 	// LLMGateway configures a Keep LLM gateway sidecar inside the container.
 	// Mutually exclusive with BaseURL.
 	LLMGateway *LLMGatewayConfig `yaml:"llm-gateway,omitempty"`

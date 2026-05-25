@@ -147,7 +147,7 @@ func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForCont
 //
 // SECURITY: The real OAuth token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
-func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
+func WriteCredentialsFile(cred *provider.Credential, stagingDir, subscriptionType, rateLimitTier string) error {
 	if cred.Provider != "claude" {
 		// Only OAuth credentials (provider "claude") need credential files.
 		// API key credentials (provider "anthropic") skip this.
@@ -173,11 +173,27 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	if cred.ExpiresAt.IsZero() {
 		expiresAtMs = time.Now().Add(365 * 24 * time.Hour).UnixMilli()
 	}
+
+	// Scopes, subscriptionType, and rateLimitTier: Claude Code treats a session
+	// with null scopes or no subscriptionType as unauthenticated ("API Usage
+	// Billing"). Setup-token/pasted grants carry none of these, so resolve each:
+	//   subscriptionType / rateLimitTier: moat.yaml override → value captured at
+	//     grant time (imported creds, via metadata) → default.
+	//   scopes: the grant's real scopes → default set.
+	scopes := cred.Scopes
+	if len(scopes) == 0 {
+		scopes = defaultClaudeScopes
+	}
+	subType := firstNonEmpty(subscriptionType, cred.Metadata[MetaSubscriptionType], defaultSubscriptionType)
+	rateTier := firstNonEmpty(rateLimitTier, cred.Metadata[MetaRateLimitTier])
+
 	creds := oauthCredentials{
 		ClaudeAiOauth: &oauthToken{
-			AccessToken: credential.ClaudeOAuthPlaceholder,
-			ExpiresAt:   expiresAtMs,
-			Scopes:      cred.Scopes,
+			AccessToken:      credential.ClaudeOAuthPlaceholder,
+			ExpiresAt:        expiresAtMs,
+			Scopes:           scopes,
+			SubscriptionType: subType,
+			RateLimitTier:    rateTier,
 		},
 	}
 
@@ -191,6 +207,60 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir string) error {
 	}
 
 	return nil
+}
+
+// Credential metadata keys used to thread subscription details captured at
+// grant time (e.g. from imported host credentials) through to the container's
+// .credentials.json. Setup-token and pasted-token grants don't carry these.
+const (
+	MetaSubscriptionType = "claude_subscription_type"
+	MetaRateLimitTier    = "claude_rate_limit_tier"
+)
+
+// defaultSubscriptionType is written when a grant carries no subscription type
+// and moat.yaml sets no override. Claude Code requires a non-empty
+// subscriptionType to treat the session as a subscription rather than showing
+// "API Usage Billing". The real plan is enforced server-side via the token the
+// proxy injects, so this only affects what Claude Code displays/gates locally.
+const defaultSubscriptionType = "max"
+
+// defaultClaudeScopes is written when a grant carries no scopes (setup-token /
+// pasted-token grants). These are the standard Claude Code OAuth scopes; an
+// empty/null scopes array makes Claude Code treat the session as unauthenticated.
+var defaultClaudeScopes = []string{
+	"user:file_upload",
+	"user:inference",
+	"user:mcp_servers",
+	"user:profile",
+	"user:sessions:claude_code",
+}
+
+// subscriptionMetadata builds the credential metadata that carries subscription
+// details captured at grant time through to WriteCredentialsFile. Returns nil
+// when neither value is set (setup-token/pasted grants), so callers leave
+// Metadata unset and the defaults/override apply.
+func subscriptionMetadata(subscriptionType, rateLimitTier string) map[string]string {
+	if subscriptionType == "" && rateLimitTier == "" {
+		return nil
+	}
+	m := map[string]string{}
+	if subscriptionType != "" {
+		m[MetaSubscriptionType] = subscriptionType
+	}
+	if rateLimitTier != "" {
+		m[MetaRateLimitTier] = rateLimitTier
+	}
+	return m
+}
+
+// firstNonEmpty returns the first non-empty string in vals, or "" if none.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // oauthCredentials represents the OAuth credentials stored by Claude Code.

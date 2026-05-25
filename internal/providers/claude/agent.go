@@ -39,7 +39,7 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 
 	// Write credentials file for OAuth tokens
 	if opts.Credential != nil {
-		if err := WriteCredentialsFile(opts.Credential, tmpDir); err != nil {
+		if err := WriteCredentialsFile(opts.Credential, tmpDir, opts.SubscriptionType, opts.RateLimitTier); err != nil {
 			return nil, fmt.Errorf("writing credentials file: %w", err)
 		}
 	}

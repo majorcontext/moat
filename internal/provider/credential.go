@@ -34,6 +34,14 @@ type PrepareOpts struct {
 	// container. These are defined under agent-specific sections in moat.yaml
 	// (e.g., claude.mcp, codex.mcp, gemini.mcp).
 	LocalMCPServers map[string]LocalMCPServerConfig
+
+	// SubscriptionType and RateLimitTier override the values written to Claude
+	// Code's .credentials.json (from moat.yaml claude.subscription_type /
+	// claude.rate_limit_tier). Empty means "no override" — the provider falls
+	// back to the imported value or a default. Claude-specific; ignored by
+	// other agents.
+	SubscriptionType string
+	RateLimitTier    string
 }
 
 // MCPServerConfig defines a remote/relay MCP server configuration.
