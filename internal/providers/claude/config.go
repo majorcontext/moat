@@ -180,10 +180,11 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir, subscriptionTyp
 	//   subscriptionType / rateLimitTier: moat.yaml override → value captured at
 	//     grant time (imported creds, via metadata) → default.
 	//   scopes: the grant's real scopes → default set.
-	scopes := cred.Scopes
+	// Copy rather than alias: scopes is always an independently-owned slice,
+	// whether it comes from the credential or the package-level default, so no
+	// later append can mutate the caller's slice or the shared default.
+	scopes := append([]string(nil), cred.Scopes...)
 	if len(scopes) == 0 {
-		// Copy, don't alias: defaultClaudeScopes is a package-level var and must
-		// not be exposed for in-place mutation by future callers.
 		scopes = append([]string(nil), defaultClaudeScopes...)
 	}
 	subType := firstNonEmpty(subscriptionType, cred.Metadata[MetaSubscriptionType], defaultSubscriptionType)
