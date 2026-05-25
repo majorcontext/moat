@@ -294,6 +294,14 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash",
 			wantPATH: "/home/moatuser/.claude/local/bin",
 		},
+		{
+			// Symbolic targets (stable|latest) are valid installer args and must
+			// keep the "--" separator so a future refactor can't drop it.
+			name:     "symbolic target stable",
+			version:  "stable",
+			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- stable",
+			wantPATH: "/home/moatuser/.claude/local/bin",
+		},
 	}
 
 	for _, tt := range tests {
