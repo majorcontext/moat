@@ -3,9 +3,41 @@ package claude
 import (
 	"bufio"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
+
+// TestReadOAuthTokenInput_pipedUsesSharedReader guards against re-introducing a
+// second bufio.Reader on os.Stdin for piped input. The menu prompt reads the
+// choice from a bufio.Reader, which can buffer the rest of a piped stdin (the
+// token line arrives in the same read as the choice). The token read MUST use
+// that same reader, or the buffered token is lost.
+func TestReadOAuthTokenInput_pipedUsesSharedReader(t *testing.T) {
+	// One reader over the whole piped stdin: menu choice + token, as a pipe
+	// delivers it in a single read.
+	reader := bufio.NewReader(strings.NewReader("2\nsk-ant-oat01-shared-token\n\n"))
+	if _, err := reader.ReadString('\n'); err != nil { // menu consumes the choice
+		t.Fatalf("consuming menu choice: %v", err)
+	}
+
+	// A pipe (not a TTY) selects the non-interactive branch; the token is read
+	// from reader, not from this file.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw.Close()
+	defer pr.Close()
+
+	got, err := readOAuthTokenInput(reader, pr)
+	if err != nil {
+		t.Fatalf("readOAuthTokenInput: %v", err)
+	}
+	if got != "sk-ant-oat01-shared-token" {
+		t.Errorf("token = %q, want %q (token buffered by the menu reader was lost)", got, "sk-ant-oat01-shared-token")
+	}
+}
 
 // TestScanBracketedPaste covers the interactive terminal path: a bracketed
 // paste (ESC[200~ … ESC[201~) is captured whole even when the source terminal

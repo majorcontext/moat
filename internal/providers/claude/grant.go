@@ -17,6 +17,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Grant acquires a Claude Code OAuth token interactively.
@@ -74,10 +75,10 @@ func (p *OAuthProvider) Grant(ctx context.Context) (*provider.Credential, error)
 				fmt.Printf("Invalid choice: %s\n", response)
 				continue
 			}
-			return grantViaSetupToken(ctx)
+			return grantViaSetupToken(ctx, reader)
 
 		case fmt.Sprint(existingTokenOpt):
-			return grantViaExistingOAuthToken(ctx)
+			return grantViaExistingOAuthToken(ctx, reader)
 
 		case fmt.Sprint(importCredsOpt):
 			if importCredsOpt == 0 {
@@ -112,7 +113,7 @@ func isClaudeAvailable() bool {
 // scraping is brittle and fails silently on upgrades. Letting Claude render
 // to the real terminal and having the user paste the token is
 // version-independent and robust.
-func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
+func grantViaSetupToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
 	fmt.Println()
 	fmt.Println("Running 'claude setup-token'. This may open a browser to sign in.")
 	fmt.Println("When it finishes, copy the token it displays (it starts with sk-ant-oat01-).")
@@ -129,15 +130,13 @@ func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
 		fmt.Println("If it still displayed a token, paste it below.")
 	}
 
-	return promptAndValidateOAuthToken(ctx)
+	return promptAndValidateOAuthToken(ctx, reader)
 }
 
 // grantViaExistingOAuthToken prompts the user to paste an OAuth token they
 // already obtained via `claude setup-token`.
-func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, error) {
-	fmt.Println()
-	fmt.Println("Paste the OAuth token from a 'claude setup-token' run.")
-	return promptAndValidateOAuthToken(ctx)
+func grantViaExistingOAuthToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
+	return promptAndValidateOAuthToken(ctx, reader)
 }
 
 // readPastedToken reads a pasted OAuth token, reassembling it if the source
@@ -309,22 +308,33 @@ func readCSI(br *bufio.Reader) (string, error) {
 
 // promptAndValidateOAuthToken reads an OAuth token pasted by the user, checks
 // its format, validates it against the API, and returns the credential.
-func promptAndValidateOAuthToken(ctx context.Context) (*provider.Credential, error) {
-	fmt.Println("\nPaste the OAuth token (it starts with sk-ant-oat01-).")
-
-	var (
-		token string
-		err   error
-	)
-	if term.IsTerminal(os.Stdin) {
+// readOAuthTokenInput reads a pasted OAuth token from stdin. On an interactive
+// terminal it uses bracketed paste; otherwise it reads from reader.
+//
+// reader MUST be the same bufio.Reader the menu prompt read the choice from.
+// Piped stdin is typically delivered in a single read, so reading the menu
+// choice can buffer the token line inside that reader; creating a fresh
+// bufio.Reader on os.Stdin here would read an already-drained stdin and lose
+// the token.
+func readOAuthTokenInput(reader *bufio.Reader, stdin *os.File) (string, error) {
+	if term.IsTerminal(stdin) {
 		// Bracketed paste captures the whole paste — including a token the
 		// source terminal soft-wrapped onto multiple lines — with no extra
 		// keystroke.
-		token, err = readTokenFromTerminal(os.Stdin)
-	} else {
-		// Piped/non-interactive input: read until a blank line or EOF.
-		token, err = readPastedToken(bufio.NewReader(os.Stdin))
+		return readTokenFromTerminal(stdin)
 	}
+	// Piped/non-interactive input: read until a blank line or EOF.
+	return readPastedToken(reader)
+}
+
+func promptAndValidateOAuthToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
+	// A blank line and a section header separate moat's prompt from whatever the
+	// `claude setup-token` TUI just rendered above it.
+	fmt.Println()
+	ui.Section("Paste your token into moat")
+	fmt.Println("It starts with sk-ant-oat01-.")
+
+	token, err := readOAuthTokenInput(reader, os.Stdin)
 	if err != nil {
 		return nil, fmt.Errorf("reading input: %w", err)
 	}
