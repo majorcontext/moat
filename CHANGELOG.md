@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Fixed
+
+- Fix `claude-code@<version>` pinning being ignored — previously, specifying a version such as `claude-code@2.1.139` in `dependencies` still installed the latest release, because the install command dropped the version argument. The version is now passed to the official installer. This is a workaround for the Claude Code 2.1.150 text-entry regression ([#356](https://github.com/majorcontext/moat/issues/356)): pin `claude-code@2.1.139` until the regression is resolved upstream. ([#357](https://github.com/majorcontext/moat/pull/357))
+
 ## v0.5.1 — 2026-04-28
 
 Patch release with one security fix (IPv6 egress firewall) and a batch of run-lifecycle and proxy fixes. Adds `MOAT_HOME` for relocating moat state, a multi-runtime manager so Docker and Apple containers can coexist in one install, TUI debug shortcuts, and Python 3.13/3.14 support. Gatekeeper is extracted to its own repository.

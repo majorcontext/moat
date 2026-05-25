@@ -275,6 +275,51 @@ func TestGetCustomCommands(t *testing.T) {
 	}
 }
 
+func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		version  string
+		wantCmd  string
+		wantPATH string
+	}{
+		{
+			name:     "pinned version",
+			version:  "2.1.139",
+			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.139",
+			wantPATH: "/home/moatuser/.claude/local/bin",
+		},
+		{
+			name:     "no version installs latest",
+			version:  "",
+			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash",
+			wantPATH: "/home/moatuser/.claude/local/bin",
+		},
+		{
+			// Symbolic targets (stable|latest) are valid installer args and must
+			// keep the "--" separator so a future refactor can't drop it.
+			name:     "symbolic target stable",
+			version:  "stable",
+			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- stable",
+			wantPATH: "/home/moatuser/.claude/local/bin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmds := getCustomCommands("claude-code", tt.version)
+			if len(cmds.Commands) != 1 {
+				t.Fatalf("expected 1 command, got %d: %v", len(cmds.Commands), cmds.Commands)
+			}
+			if cmds.Commands[0] != tt.wantCmd {
+				t.Errorf("install command = %q, want %q", cmds.Commands[0], tt.wantCmd)
+			}
+			if path := cmds.EnvVars["PATH"]; !strings.Contains(path, tt.wantPATH) {
+				t.Errorf("PATH = %q, want it to contain %q", path, tt.wantPATH)
+			}
+		})
+	}
+}
+
 func TestGetCustomCommandsUnknown(t *testing.T) {
 	cmds := getCustomCommands("unknown", "1.0")
 	if len(cmds.Commands) != 0 {

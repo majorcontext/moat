@@ -202,6 +202,30 @@ feature-auth  run_a1b2c3d4e5f6   running  5m ago
 $ moat logs -f run_a1b2c3d4e5f6
 ```
 
+## Pinning the Claude Code version
+
+By default, Moat installs the latest published Claude Code release when it builds
+the image. To pin a specific version, add `claude-code@<version>` to your
+`dependencies`:
+
+```yaml
+agent: claude-code
+dependencies:
+  - node@22
+  - git
+  - claude-code@2.1.139
+```
+
+The version can be a release number (for example `2.1.139`), `stable`, or `latest` —
+the value is passed straight to the official installer. Moat installs it the same way
+regardless of how `claude-code` reached the dependency list, but a version specifier
+must be present: `agent: claude-code` on its own does **not** pin a version. Changing
+the version triggers an image rebuild on the next run.
+
+`moat claude` and `agent: claude-code` inject an unversioned `claude-code` dependency,
+so they install the latest release. To pin, add an explicit `claude-code@<version>`
+to `dependencies` as shown above.
+
 ## Adding GitHub access
 
 Grant GitHub access so Claude Code can interact with repositories:
