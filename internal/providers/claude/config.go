@@ -182,7 +182,9 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir, subscriptionTyp
 	//   scopes: the grant's real scopes → default set.
 	scopes := cred.Scopes
 	if len(scopes) == 0 {
-		scopes = defaultClaudeScopes
+		// Copy, don't alias: defaultClaudeScopes is a package-level var and must
+		// not be exposed for in-place mutation by future callers.
+		scopes = append([]string(nil), defaultClaudeScopes...)
 	}
 	subType := firstNonEmpty(subscriptionType, cred.Metadata[MetaSubscriptionType], defaultSubscriptionType)
 	rateTier := firstNonEmpty(rateLimitTier, cred.Metadata[MetaRateLimitTier])

@@ -1112,10 +1112,14 @@ claude:
 ```
 
 - Type: `string`
-- Default: `max` for `claude` (OAuth) grants obtained via `setup-token` or a pasted
-  token, which don't carry plan information. Grants created with **import existing
-  credentials** use the real plan from your host login. Set this to match your plan
-  (`pro`/`max`) when it would otherwise be wrong.
+- Default: `max`
+
+`setup-token` and pasted-token grants carry no plan information, so they always
+default to `max`. **If you are not on a Max plan and use one of those grant types,
+set `claude.subscription_type` to your actual plan (e.g. `pro`)** — otherwise Claude
+Code will show "Max" and may surface Max-only options locally that then fail
+server-side. Grants created with **import existing credentials** read the real plan
+from your host login, so they don't need this override.
 
 The real plan limits are always enforced server-side via the token the proxy injects;
 this value only affects what Claude Code displays and gates locally.

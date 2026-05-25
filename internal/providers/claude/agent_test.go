@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,6 +91,41 @@ func TestPrepareContainer_skipsRemoteSettingsWhenMissing(t *testing.T) {
 	// Verify remote-settings.json was NOT created
 	if _, err := os.Stat(filepath.Join(cfg.StagingDir, "remote-settings.json")); err == nil {
 		t.Error("remote-settings.json should not exist when host file is missing")
+	}
+}
+
+func TestPrepareContainer_writesCredentialOverrides(t *testing.T) {
+	// Guards the SubscriptionType/RateLimitTier passthrough from PrepareOpts
+	// through agent.go into the container's .credentials.json.
+	t.Setenv("HOME", t.TempDir())
+	p := &OAuthProvider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		Credential:       &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-abc"},
+		SubscriptionType: "pro",
+		RateLimitTier:    "default_claude_pro",
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, ".credentials.json"))
+	if err != nil {
+		t.Fatalf("reading .credentials.json: %v", err)
+	}
+	var creds oauthCredentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		t.Fatalf("parsing .credentials.json: %v", err)
+	}
+	if creds.ClaudeAiOauth == nil {
+		t.Fatal("ClaudeAiOauth should be present")
+	}
+	if creds.ClaudeAiOauth.SubscriptionType != "pro" {
+		t.Errorf("subscriptionType = %q, want %q (override not plumbed through PrepareContainer)", creds.ClaudeAiOauth.SubscriptionType, "pro")
+	}
+	if creds.ClaudeAiOauth.RateLimitTier != "default_claude_pro" {
+		t.Errorf("rateLimitTier = %q, want %q (override not plumbed through PrepareContainer)", creds.ClaudeAiOauth.RateLimitTier, "default_claude_pro")
 	}
 }
 
