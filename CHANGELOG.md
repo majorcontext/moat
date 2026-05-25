@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Fixed
+
+- Fix Claude Code showing "not logged in" / "API Usage Billing" inside containers — previously, the generated `~/.claude/.credentials.json` had `null` scopes and no `subscriptionType`, which Claude Code treats as an unauthenticated session. Moat now writes the standard OAuth scopes and a `subscriptionType` (default `max`, overridable via `claude.subscription_type`; the new `claude.rate_limit_tier` is also supported). Grants created by importing existing credentials use the real plan. The real plan is still enforced server-side via the proxy-injected token. Surfaced by v0.5.2 dropping the `CLAUDE_CODE_OAUTH_TOKEN` placeholder env var that had masked the incomplete file. ([#358](https://github.com/majorcontext/moat/pull/358))
+
 ## v0.5.1 — 2026-04-28
 
 Patch release with one security fix (IPv6 egress firewall) and a batch of run-lifecycle and proxy fixes. Adds `MOAT_HOME` for relocating moat state, a multi-runtime manager so Docker and Apple containers can coexist in one install, TUI debug shortcuts, and Python 3.13/3.14 support. Gatekeeper is extracted to its own repository.
