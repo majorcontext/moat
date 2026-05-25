@@ -161,6 +161,34 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 	return nil
 }
 
+// buildContainerMounts converts moat's MountConfig and TmpfsMount entries into
+// Docker SDK mount.Mount structs. Tmpfs mounts follow bind mounts so overlays
+// of paths inside a bind take effect.
+func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount {
+	mounts := make([]mount.Mount, 0, len(binds)+len(tmpfs))
+	for _, m := range binds {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+	for _, tm := range tmpfs {
+		// "exec" overrides runc's default noexec — excluded paths like
+		// node_modules contain native binaries (turbo, esbuild) that must spawn.
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeTmpfs,
+			Target: tm.Target,
+			TmpfsOptions: &mount.TmpfsOptions{
+				Mode:    tmpfsMode,
+				Options: [][]string{{"exec"}},
+			},
+		})
+	}
+	return mounts
+}
+
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Verify gVisor is still available if we're configured to use it
@@ -173,24 +201,7 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		return "", err
 	}
 
-	// Convert mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts)+len(cfg.TmpfsMounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-	// Tmpfs mounts — overlays for excluded directories.
-	// Appended after bind mounts so tmpfs overlays subdirectories of bind-mounted paths.
-	for _, tm := range cfg.TmpfsMounts {
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeTmpfs,
-			Target: tm.Target,
-		})
-	}
+	mounts := buildContainerMounts(cfg.Mounts, cfg.TmpfsMounts)
 
 	// Default to bridge network if not specified
 	networkMode := container.NetworkMode(cfg.NetworkMode)
@@ -999,16 +1010,7 @@ func (m *dockerSidecarManager) StartSidecar(ctx context.Context, cfg SidecarConf
 		return "", fmt.Errorf("pulling sidecar image: %w", err)
 	}
 
-	// Prepare mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, mt := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   mt.Source,
-			Target:   mt.Target,
-			ReadOnly: mt.ReadOnly,
-		})
-	}
+	mounts := buildContainerMounts(cfg.Mounts, nil)
 
 	// Create container with labels for orphan cleanup
 	labels := make(map[string]string)

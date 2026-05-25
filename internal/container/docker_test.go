@@ -3,15 +3,74 @@ package container
 import (
 	"context"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
+
+func TestBuildContainerMounts_TmpfsWritableAndExec(t *testing.T) {
+	got := buildContainerMounts(nil, []TmpfsMount{{Target: "/workspace/node_modules"}})
+
+	if len(got) != 1 {
+		t.Fatalf("got %d mounts, want 1", len(got))
+	}
+	if got[0].Type != mount.TypeTmpfs {
+		t.Errorf("Type = %v, want %v", got[0].Type, mount.TypeTmpfs)
+	}
+	if got[0].TmpfsOptions == nil {
+		t.Fatal("TmpfsOptions is nil")
+	}
+	if got[0].TmpfsOptions.Mode != tmpfsMode {
+		t.Errorf("Mode = %o, want %o", got[0].TmpfsOptions.Mode, tmpfsMode)
+	}
+	wantOpts := [][]string{{"exec"}}
+	if !reflect.DeepEqual(got[0].TmpfsOptions.Options, wantOpts) {
+		t.Errorf("Options = %v, want %v", got[0].TmpfsOptions.Options, wantOpts)
+	}
+}
+
+func TestBuildContainerMounts_BindMounts(t *testing.T) {
+	binds := []MountConfig{
+		{Source: "/host/project", Target: "/workspace", ReadOnly: false},
+		{Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
+	}
+
+	got := buildContainerMounts(binds, nil)
+
+	want := []mount.Mount{
+		{Type: mount.TypeBind, Source: "/host/project", Target: "/workspace", ReadOnly: false},
+		{Type: mount.TypeBind, Source: "/host/secret", Target: "/etc/secret", ReadOnly: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildContainerMounts() = %#v, want %#v", got, want)
+	}
+}
+
+// Tmpfs must follow binds in the output slice so overlays of paths inside a
+// bind take effect on the daemon side.
+func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {
+	binds := []MountConfig{{Source: "/host/project", Target: "/workspace"}}
+	tmpfs := []TmpfsMount{{Target: "/workspace/node_modules"}}
+
+	got := buildContainerMounts(binds, tmpfs)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d mounts, want 2", len(got))
+	}
+	if got[0].Type != mount.TypeBind {
+		t.Errorf("mounts[0].Type = %v, want bind", got[0].Type)
+	}
+	if got[1].Type != mount.TypeTmpfs {
+		t.Errorf("mounts[1].Type = %v, want tmpfs", got[1].Type)
+	}
+}
 
 func TestConfig_GroupAdd(t *testing.T) {
 	// Verify that GroupAdd field can be set on Config struct

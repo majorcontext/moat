@@ -302,9 +302,9 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 		args = append(args, "--volume", mountStr)
 	}
 
-	// Tmpfs mounts (overlays for excluded directories)
+	// --mount (not --tmpfs) so we can set the mode; --tmpfs accepts no options.
 	for _, tm := range cfg.TmpfsMounts {
-		args = append(args, "--tmpfs", tm.Target)
+		args = append(args, "--mount", fmt.Sprintf("type=tmpfs,destination=%s,mode=%o", tm.Target, tmpfsMode))
 	}
 
 	// Image
