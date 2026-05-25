@@ -8,6 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Fixed
 
+- Fix `claude-code@<version>` pinning being ignored — previously, specifying a version such as `claude-code@2.1.139` in `dependencies` still installed the latest release, because the install command dropped the version argument. The version is now passed to the official installer. This is a workaround for the Claude Code 2.1.150 text-entry regression ([#356](https://github.com/majorcontext/moat/issues/356)): pin `claude-code@2.1.139` until the regression is resolved upstream. ([#357](https://github.com/majorcontext/moat/pull/357))
 - Fix Claude Code showing "not logged in" / "API Usage Billing" inside containers — previously, the generated `~/.claude/.credentials.json` had `null` scopes and no `subscriptionType`, which Claude Code treats as an unauthenticated session. Moat now writes the standard OAuth scopes and a `subscriptionType` (default `max`, overridable via `claude.subscription_type`; the new `claude.rate_limit_tier` is also supported). Grants created by importing existing credentials use the real plan. The real plan is still enforced server-side via the proxy-injected token. Surfaced by v0.5.2 dropping the `CLAUDE_CODE_OAUTH_TOKEN` placeholder env var that had masked the incomplete file. ([#358](https://github.com/majorcontext/moat/pull/358))
 
 ## v0.5.1 — 2026-04-28
