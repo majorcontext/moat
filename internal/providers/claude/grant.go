@@ -12,10 +12,12 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/creack/pty"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // Grant acquires a Claude Code OAuth token interactively.
@@ -73,10 +75,10 @@ func (p *OAuthProvider) Grant(ctx context.Context) (*provider.Credential, error)
 				fmt.Printf("Invalid choice: %s\n", response)
 				continue
 			}
-			return grantViaSetupToken(ctx)
+			return grantViaSetupToken(ctx, reader)
 
 		case fmt.Sprint(existingTokenOpt):
-			return grantViaExistingOAuthToken(ctx)
+			return grantViaExistingOAuthToken(ctx, reader)
 
 		case fmt.Sprint(importCredsOpt):
 			if importCredsOpt == 0 {
@@ -103,145 +105,239 @@ func isClaudeAvailable() bool {
 	return cmd.Run() == nil
 }
 
-// grantViaSetupToken uses `claude setup-token` to get an OAuth token.
-func grantViaSetupToken(ctx context.Context) (*provider.Credential, error) {
+// grantViaSetupToken runs `claude setup-token` attached to the user's
+// terminal, then asks them to paste the token it displays.
+//
+// moat deliberately does NOT capture or parse Claude's output. The CLI
+// renders setup-token as a TUI whose layout changes between versions, so any
+// scraping is brittle and fails silently on upgrades. Letting Claude render
+// to the real terminal and having the user paste the token is
+// version-independent and robust.
+func grantViaSetupToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
 	fmt.Println()
-	fmt.Println("Running 'claude setup-token' to obtain authentication token...")
-	fmt.Println("This may open a browser for authentication.")
+	fmt.Println("Running 'claude setup-token'. This may open a browser to sign in.")
+	fmt.Println("When it finishes, copy the token it displays (it starts with sk-ant-oat01-).")
 	fmt.Println()
 
-	// Use a dedicated timeout for the setup-token command only.
-	// This context is NOT reused for validation — see below.
-	cmdCtx, cmdCancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cmdCancel()
-
-	cmd := exec.CommandContext(cmdCtx, "claude", "setup-token")
+	cmd := exec.CommandContext(ctx, "claude", "setup-token")
 	cmd.Stdin = os.Stdin
-
-	// Build a clean environment that forces dumb terminal mode.
-	// We filter out keys we override to avoid duplicates — on Linux (glibc),
-	// the first occurrence of a duplicate env var wins, so appending to
-	// os.Environ() without filtering means our overrides get ignored.
-	overrides := map[string]string{
-		"TERM":     "dumb",
-		"NO_COLOR": "1",
-		"CI":       "1",
-		"COLUMNS":  "10000",
-	}
-	var env []string
-	for _, e := range os.Environ() {
-		key, _, _ := strings.Cut(e, "=")
-		if _, override := overrides[key]; !override {
-			env = append(env, e)
-		}
-	}
-	for k, v := range overrides {
-		env = append(env, k+"="+v)
-	}
-	cmd.Env = env
-
-	// Spawn with a PTY so Node.js uses synchronous stdout writes.
-	// Without a PTY, stdout is a pipe and Node buffers writes asynchronously —
-	// if the process exits (or calls process.exit()) before the buffer is
-	// flushed, the token is lost. With a PTY, writes are synchronous on POSIX.
-	var output strings.Builder
-	ptmx, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: 24, Cols: 10000}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("starting claude setup-token: %w", err)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// Non-fatal: the CLI may have shown the token before failing during
+		// its own cleanup. Let the user paste it anyway.
+		fmt.Printf("\nNote: 'claude setup-token' exited with an error: %v\n", err)
+		fmt.Println("If it still displayed a token, paste it below.")
 	}
 
-	// Copy PTY output in a goroutine; it returns when the child exits and
-	// the PTY slave side closes.
-	ioDone := make(chan struct{})
-	go func() {
-		defer close(ioDone)
-		_, _ = io.Copy(&output, ptmx)
-	}()
-
-	cmdErr := cmd.Wait()
-	_ = ptmx.Close()
-	<-ioDone // wait for all output to be read
-
-	log.Debug("claude setup-token completed",
-		"subsystem", "grant",
-		"exit_error", cmdErr,
-		"output_len", output.Len(),
-	)
-	if log.Verbose() {
-		log.Debug("claude setup-token raw output",
-			"subsystem", "grant",
-			"raw_output", output.String(),
-		)
-	}
-
-	// Try to extract the token even if the command exited non-zero.
-	// The CLI may have printed the token but then failed during cleanup
-	// (e.g., writing to its own credential store).
-	token := extractOAuthToken(output.String())
-
-	if token == "" {
-		if cmdErr != nil {
-			return nil, fmt.Errorf("claude setup-token failed: %w", cmdErr)
-		}
-		return nil, fmt.Errorf("could not find OAuth token in claude setup-token output")
-	}
-
-	if cmdErr != nil {
-		log.Debug("claude setup-token exited non-zero but token was extracted",
-			"subsystem", "grant",
-			"exit_error", cmdErr,
-			"token_len", len(token),
-		)
-	}
-
-	log.Debug("extracted OAuth token",
-		"subsystem", "grant",
-		"token_len", len(token),
-	)
-
-	// Validate the token to catch corruption from ANSI parsing.
-	// Use a fresh context — the command timeout context may be nearly
-	// exhausted if the user took a while to authenticate in the browser.
-	fmt.Println("\nValidating OAuth token...")
-	auth := &anthropicAuth{}
-	validateCtx, validateCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer validateCancel()
-
-	if err := auth.ValidateOAuthToken(validateCtx, token); err != nil {
-		log.Error("OAuth token validation failed after extraction",
-			"subsystem", "grant",
-			"error", err,
-			"token_len", len(token),
-		)
-		return nil, fmt.Errorf("token validation failed: %w", err)
-	}
-	fmt.Println("OAuth token is valid.")
-
-	cred := &provider.Credential{
-		Provider:  "claude",
-		Token:     token,
-		CreatedAt: time.Now(),
-	}
-
-	fmt.Println("\nClaude credential acquired via setup-token.")
-	fmt.Println("You can now run 'moat claude' to start Claude Code.")
-	return cred, nil
+	return promptAndValidateOAuthToken(ctx, reader)
 }
 
 // grantViaExistingOAuthToken prompts the user to paste an OAuth token they
 // already obtained via `claude setup-token`.
-func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, error) {
-	fmt.Println()
-	fmt.Println("Paste the OAuth token from a previous 'claude setup-token' run.")
-	fmt.Println("The token starts with sk-ant-oat01-")
-	fmt.Print("\nOAuth Token: ")
+func grantViaExistingOAuthToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
+	return promptAndValidateOAuthToken(ctx, reader)
+}
 
-	reader := bufio.NewReader(os.Stdin)
-	token, err := reader.ReadString('\n')
+// readPastedToken reads a pasted OAuth token, reassembling it if the source
+// terminal soft-wrapped it across multiple lines (a narrow window makes the
+// clipboard selection capture real newlines).
+//
+// A terminal in canonical mode delivers a multi-line paste one line at a time,
+// so we cannot rely on the whole paste being buffered after the first line.
+// Instead we keep reading lines until a blank line or EOF terminates input,
+// then drop all whitespace since tokens contain none.
+func readPastedToken(r *bufio.Reader) (string, error) {
+	var b strings.Builder
+	for {
+		line, err := r.ReadString('\n')
+		if strings.TrimSpace(line) == "" {
+			// A blank line ends input once we have content (the user pressing
+			// Enter on an empty line); ignore leading blanks.
+			if b.Len() > 0 || err != nil {
+				if err != nil && err != io.EOF {
+					return "", err
+				}
+				break
+			}
+			continue
+		}
+		b.WriteString(line)
+		if err != nil {
+			if err != io.EOF {
+				return "", err
+			}
+			break
+		}
+	}
+
+	return stripWhitespace(b.String()), nil
+}
+
+// stripWhitespace removes all whitespace. OAuth tokens contain none, so this
+// losslessly reassembles a token that wrapping split with newlines or spaces.
+func stripWhitespace(s string) string {
+	return strings.Map(func(c rune) rune {
+		if unicode.IsSpace(c) {
+			return -1
+		}
+		return c
+	}, s)
+}
+
+// bracketedPasteStart and bracketedPasteEnd are the CSI markers a terminal
+// wraps pasted text in when bracketed paste mode (DECSET 2004) is enabled.
+const (
+	bracketedPasteOn  = "\x1b[?2004h"
+	bracketedPasteOff = "\x1b[?2004l"
+)
+
+// readTokenFromTerminal reads a pasted token from an interactive terminal
+// using bracketed paste, so a wrapped multi-line paste is captured whole with
+// no extra keystroke. Falls back to nothing special for typed input (ends on
+// Enter). The terminal is put in raw mode only for the duration of the read.
+func readTokenFromTerminal(in *os.File) (string, error) {
+	state, err := term.EnableRawMode(in)
+	if err != nil {
+		return "", fmt.Errorf("enabling raw mode: %w", err)
+	}
+	defer func() {
+		fmt.Print(bracketedPasteOff)
+		_ = term.RestoreTerminal(state)
+		fmt.Println()
+	}()
+	fmt.Print(bracketedPasteOn)
+
+	return scanBracketedPaste(in)
+}
+
+// scanBracketedPaste reads bytes until a bracketed paste (ESC[200~ … ESC[201~)
+// completes, or until Enter/EOF for manually typed input. It is pure over an
+// io.Reader so it can be tested without a real terminal. All whitespace is
+// stripped from the result.
+func scanBracketedPaste(r io.Reader) (string, error) {
+	br := bufio.NewReader(r)
+	var typed, pasted strings.Builder
+	inPaste := false
+
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+
+		if b == 0x1b { // ESC: possible CSI sequence
+			seq, serr := readCSI(br)
+			if serr != nil {
+				if serr == io.EOF {
+					break
+				}
+				return "", serr
+			}
+			switch seq {
+			case "200~":
+				inPaste = true
+			case "201~":
+				return stripWhitespace(pasted.String()), nil
+			}
+			continue // ignore all other escape sequences
+		}
+
+		if inPaste {
+			pasted.WriteByte(b)
+			continue
+		}
+
+		// Manually typed input (no paste markers).
+		switch b {
+		case '\r', '\n':
+			if typed.Len() > 0 {
+				return stripWhitespace(typed.String()), nil
+			}
+		case 0x7f, 0x08: // backspace / delete
+			if s := typed.String(); s != "" {
+				typed.Reset()
+				typed.WriteString(s[:len(s)-1])
+			}
+		case 0x03: // Ctrl-C
+			return "", fmt.Errorf("input canceled")
+		case 0x04: // Ctrl-D
+			if typed.Len() > 0 {
+				return stripWhitespace(typed.String()), nil
+			}
+			return "", io.EOF
+		default:
+			if b >= 0x20 {
+				typed.WriteByte(b)
+			}
+		}
+	}
+
+	if inPaste {
+		return stripWhitespace(pasted.String()), nil
+	}
+	return stripWhitespace(typed.String()), nil
+}
+
+// readCSI consumes a CSI sequence after an ESC byte and returns its parameter
+// and final bytes (e.g. "200~"). If ESC is not followed by '[', the single
+// byte is returned so the caller can ignore it.
+func readCSI(br *bufio.Reader) (string, error) {
+	c, err := br.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	if c != '[' {
+		return string(rune(c)), nil
+	}
+	var sb strings.Builder
+	for {
+		d, err := br.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		sb.WriteByte(d)
+		if d >= 0x40 && d <= 0x7e { // CSI final byte
+			return sb.String(), nil
+		}
+	}
+}
+
+// promptAndValidateOAuthToken reads an OAuth token pasted by the user, checks
+// its format, validates it against the API, and returns the credential.
+// readOAuthTokenInput reads a pasted OAuth token from stdin. On an interactive
+// terminal it uses bracketed paste; otherwise it reads from reader.
+//
+// reader MUST be the same bufio.Reader the menu prompt read the choice from.
+// Piped stdin is typically delivered in a single read, so reading the menu
+// choice can buffer the token line inside that reader; creating a fresh
+// bufio.Reader on os.Stdin here would read an already-drained stdin and lose
+// the token.
+func readOAuthTokenInput(reader *bufio.Reader, stdin *os.File) (string, error) {
+	if term.IsTerminal(stdin) {
+		// Bracketed paste captures the whole paste — including a token the
+		// source terminal soft-wrapped onto multiple lines — with no extra
+		// keystroke.
+		return readTokenFromTerminal(stdin)
+	}
+	// Piped/non-interactive input: read until a blank line or EOF.
+	return readPastedToken(reader)
+}
+
+func promptAndValidateOAuthToken(ctx context.Context, reader *bufio.Reader) (*provider.Credential, error) {
+	// A blank line and a section header separate moat's prompt from whatever the
+	// `claude setup-token` TUI just rendered above it.
+	fmt.Println()
+	ui.Section("Paste your token into moat")
+	fmt.Println("It starts with sk-ant-oat01-.")
+
+	token, err := readOAuthTokenInput(reader, os.Stdin)
 	if err != nil {
 		return nil, fmt.Errorf("reading input: %w", err)
 	}
-	token = strings.TrimSpace(token)
 
 	if token == "" {
 		return nil, fmt.Errorf("OAuth token cannot be empty")
@@ -251,7 +347,6 @@ func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, erro
 		return nil, fmt.Errorf("invalid token format: expected an OAuth token starting with \"sk-ant-oat\"")
 	}
 
-	// Validate the token against the API
 	fmt.Println("\nValidating OAuth token...")
 	auth := &anthropicAuth{}
 	validateCtx, validateCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -271,175 +366,6 @@ func grantViaExistingOAuthToken(ctx context.Context) (*provider.Credential, erro
 	fmt.Println("\nClaude credential acquired.")
 	fmt.Println("You can now run 'moat claude' to start Claude Code.")
 	return cred, nil
-}
-
-// extractOAuthToken extracts the OAuth token from claude setup-token output.
-//
-// The token format is: sk-ant-oat01-<base64-data>
-// The token appears on its own line(s) between descriptive text.
-//
-// The Claude CLI output varies:
-// - Sometimes uses \n for newlines with blank lines as \n\n or \n<spaces>\n
-// - Sometimes uses \r with ANSI cursor codes: \x1b[1B (down 1), \x1b[2B (down 2 = blank line)
-//
-// Strategy:
-// 1. Find "sk-ant-oat01-" in the raw output
-// 2. Extract until we hit a "blank line" indicator:
-//   - \x1b[2B (ANSI cursor down 2+)
-//   - \n followed by whitespace-only line followed by \n
-//
-// 3. Clean the extracted block (strip ANSI codes and whitespace)
-func extractOAuthToken(output string) string {
-	// Find the start of the token in raw output
-	const prefix = "sk-ant-oat01-"
-	startIdx := strings.Index(output, prefix)
-	if startIdx == -1 {
-		log.Debug("no token prefix found in output",
-			"subsystem", "grant",
-			"action", "extract_token",
-			"output_len", len(output),
-		)
-		return ""
-	}
-
-	log.Debug("found token prefix",
-		"subsystem", "grant",
-		"action", "extract_token",
-		"start_idx", startIdx,
-		"output_len", len(output),
-	)
-
-	// Extract until we hit a "blank line" indicator
-	endIdx := len(output)
-	endReason := "end_of_output"
-	for i := startIdx; i < len(output); i++ {
-		// Check for ANSI cursor down 2+ lines: \x1b[NB where N >= 2
-		// This is used by Claude CLI to create visual blank lines
-		if output[i] == '\x1b' && i+3 < len(output) && output[i+1] == '[' {
-			// Parse the number before 'B'
-			j := i + 2
-			for j < len(output) && output[j] >= '0' && output[j] <= '9' {
-				j++
-			}
-			if j < len(output) && output[j] == 'B' && j > i+2 {
-				n := 0
-				for k := i + 2; k < j; k++ {
-					n = n*10 + int(output[k]-'0')
-				}
-				if n >= 2 {
-					// Find the \r or start of this escape sequence
-					endIdx = i
-					// Back up past any preceding \r
-					for endIdx > startIdx && output[endIdx-1] == '\r' {
-						endIdx--
-					}
-					endReason = fmt.Sprintf("ansi_cursor_down_%d", n)
-					goto done
-				}
-			}
-		}
-
-		// Check for blank line: \n followed by only whitespace until next \n
-		if output[i] == '\n' {
-			lineStart := i + 1
-			isBlank := true
-			for j := lineStart; j < len(output); j++ {
-				c := output[j]
-				if c == '\n' {
-					// Found end of line
-					if isBlank {
-						endIdx = i
-						endReason = "blank_line"
-						goto done
-					}
-					break
-				}
-				if c != ' ' && c != '\t' && c != '\r' {
-					break // Non-whitespace found, not a blank line
-				}
-			}
-		}
-	}
-done:
-
-	tokenBlock := output[startIdx:endIdx]
-	log.Debug("token block extracted",
-		"subsystem", "grant",
-		"action", "extract_token",
-		"end_reason", endReason,
-		"block_len", len(tokenBlock),
-	)
-	if log.Verbose() {
-		log.Debug("token block raw content",
-			"subsystem", "grant",
-			"action", "extract_token",
-			"raw_block", fmt.Sprintf("%q", tokenBlock),
-		)
-	}
-
-	// Now clean the token block: strip ANSI and extract only token characters
-	cleaned := stripANSI(tokenBlock)
-
-	// Extract only valid token characters, tracking what was removed
-	var token strings.Builder
-	var removed strings.Builder
-	for i := 0; i < len(cleaned); i++ {
-		c := cleaned[i]
-		if isTokenChar(c) {
-			token.WriteByte(c)
-		} else {
-			removed.WriteString(fmt.Sprintf("[%d]=%q ", i, string(c)))
-		}
-	}
-
-	result := token.String()
-	log.Debug("token extraction complete",
-		"subsystem", "grant",
-		"action", "extract_token",
-		"result_len", len(result),
-		"cleaned_len", len(cleaned),
-		"removed_chars", removed.String(),
-	)
-
-	// Validate the token looks reasonable
-	if len(result) < 60 {
-		log.Debug("token too short, rejecting",
-			"subsystem", "grant",
-			"action", "extract_token",
-			"result_len", len(result),
-			"min_len", 60,
-		)
-		return ""
-	}
-
-	return result
-}
-
-// isTokenChar returns true if c is a valid OAuth token character.
-func isTokenChar(c byte) bool {
-	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-		(c >= '0' && c <= '9') || c == '_' || c == '-'
-}
-
-// stripANSI removes ANSI escape sequences from a string.
-func stripANSI(s string) string {
-	var result strings.Builder
-	inEscape := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			// ANSI sequences end with a letter
-			if (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') {
-				inEscape = false
-			}
-			continue
-		}
-		result.WriteByte(s[i])
-	}
-	return result.String()
 }
 
 // grantViaAPIKey prompts for an API key.
