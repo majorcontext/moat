@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1390,7 +1391,6 @@ func TestWriter_CompositorMode_DeviceAttributesQuery_DoesNotDeadlock(t *testing.
 
 	w := NewWriter(&buf, bar, "docker")
 	_ = w.Setup()
-	defer w.Cleanup()
 
 	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
 		t.Fatalf("enter alt screen: %v", err)
@@ -1404,8 +1404,76 @@ func TestWriter_CompositorMode_DeviceAttributesQuery_DoesNotDeadlock(t *testing.
 
 	select {
 	case <-done:
+		// Write returned normally — safe to Cleanup (it re-acquires w.mu).
+		_ = w.Cleanup()
 	case <-time.After(2 * time.Second):
+		// Write is parked holding w.mu. Calling Cleanup would block forever
+		// on the same mutex and stall the test binary until go test's outer
+		// -timeout (default 10 min). Skip Cleanup — the process exits with
+		// FailNow and the leaked goroutine dies with it.
 		t.Fatal("Write deadlocked on CSI c (Device Attributes query)")
+	}
+}
+
+// blockingInjector blocks Inject until released, simulating container-stdin
+// back-pressure on the InjectableReader pipeline. Used to verify the
+// emulator drain is decoupled from injector liveness.
+type blockingInjector struct {
+	block chan struct{}
+	calls int32
+}
+
+func newBlockingInjector() *blockingInjector {
+	return &blockingInjector{block: make(chan struct{})}
+}
+
+func (b *blockingInjector) Inject(p []byte) error {
+	atomic.AddInt32(&b.calls, 1)
+	<-b.block
+	return nil
+}
+
+func (b *blockingInjector) release() { close(b.block) }
+
+// TestWriter_CompositorMode_BlockedInjector_DoesNotBlockEmulator verifies
+// that a stalled injector (e.g., container stdin reader back-pressured)
+// does NOT propagate the stall back into the emulator's reply pipe. If it
+// did, the next reply-bearing handler — invoked from outputLocked under
+// w.mu — would block, deadlocking Write and starving renderLoop. That's
+// the bug this PR fixes; we keep that property under back-pressure too.
+func TestWriter_CompositorMode_BlockedInjector_DoesNotBlockEmulator(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	inj := newBlockingInjector()
+	w.SetInjector(inj)
+	defer inj.release()
+
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("enter alt screen: %v", err)
+	}
+
+	// Hammer the emulator with reply-bearing queries. Without back-pressure
+	// decoupling, the first Inject blocks → drain stalls → subsequent
+	// emulator replies block in vt.Emulator.Write while Writer.Write holds
+	// w.mu, deadlocking the loop after a few iterations.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			_, _ = w.Write([]byte("\x1b[c"))
+		}
+	}()
+
+	select {
+	case <-done:
+		_ = w.Cleanup()
+	case <-time.After(2 * time.Second):
+		t.Fatal("Write deadlocked under blocked injector — drain not decoupled from injector back-pressure")
 	}
 }
 

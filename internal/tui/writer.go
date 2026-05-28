@@ -600,29 +600,49 @@ func (w *Writer) enterCompositorLocked() error {
 	return nil
 }
 
-// SetInjector wires up the destination for VT-emulator-generated replies.
-// Must be called before the first byte of container output reaches Write,
-// otherwise the first reply-bearing handler in compositor mode will deadlock.
+// SetInjector wires up the destination for VT-emulator-generated replies
+// (Primary DA, cursor-position reports, in-band resize notifications, etc.).
 //
-// If never called, emulator replies are still drained (to prevent deadlock)
-// but discarded — terminal capability queries from the child get no answer
-// and the child falls back to defaults.
+// Emulator replies are ALWAYS drained from the emulator regardless of
+// whether an injector is set — that's a strict invariant of compositor
+// mode, otherwise the next reply-bearing handler deadlocks. If no injector
+// is set, drained bytes are discarded, the child's capability queries go
+// unanswered, and the child falls back to defaults.
+//
+// The drain goroutine captures the injector at compositor-entry time, so
+// SetInjector must be called BEFORE the first byte of container output
+// reaches Write to take effect for the first compositor session. Calls
+// after entry don't affect the in-flight session.
 func (w *Writer) SetInjector(injector Injector) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.injector = injector
 }
 
-// drainEmulatorReplies copies bytes from the emulator's internal reply pipe
-// to the injector. Runs as a goroutine while compositor mode is active and
-// exits when the emulator's input pipe is closed (Read returns io.EOF or
-// io.ErrClosedPipe).
+// emulatorReplyQueueDepth is the buffer size of the channel between the
+// emulator-drain goroutine and the injector-forwarder goroutine. It exists
+// solely to decouple emulator pipe drainage from injector liveness — see
+// drainEmulatorReplies for the rationale. A depth of 16 comfortably absorbs
+// a TUI's typical startup query burst (Primary DA, Secondary DA, cursor
+// position, color queries, in-band resize) without dropping; sustained
+// back-pressure beyond that drops replies, and that is the correct
+// behavior (the alternative is deadlock).
+const emulatorReplyQueueDepth = 16
+
+// drainEmulatorReplies copies bytes from the emulator's internal reply
+// pipe and forwards them to the injector via a bounded buffered channel.
+// The decoupling is load-bearing: Inject ultimately writes into an io.Pipe
+// that's drained by Docker's stdin-copy goroutine, which back-pressures if
+// the container's stdin reader stalls. If drain called Inject directly,
+// a stalled container could stall the drain, which would let the next
+// reply-bearing emulator handler block inside outputLocked under w.mu —
+// the exact deadlock this PR fixes, just one indirection deeper. The
+// channel guarantees the emulator pipe is always drained promptly; under
+// sustained injector back-pressure we drop replies on a full channel.
 //
-// The emulator and injector are passed by value so this goroutine operates
-// on the same instances throughout its lifetime even if Writer's fields are
-// reassigned by a subsequent enter/exit cycle. If injector is nil, replies
-// are still drained so the emulator's handlers don't block — they're just
-// discarded.
+// Runs as a goroutine while compositor mode is active. Exits when the
+// emulator's input pipe is closed (Read returns io.EOF or io.ErrClosedPipe),
+// at which point it closes the queue so the forwarder goroutine exits too.
 //
 // We never call vt.Emulator.Close() here; it writes e.closed concurrently
 // with Read's check of that same field (a thread-safety bug in the vt
@@ -632,15 +652,40 @@ func (w *Writer) drainEmulatorReplies(em *vt.Emulator, inj Injector) {
 	if em == nil {
 		return
 	}
+
+	queue := make(chan []byte, emulatorReplyQueueDepth)
+	forwarderDone := make(chan struct{})
+	go func() {
+		defer close(forwarderDone)
+		for b := range queue {
+			if inj == nil {
+				continue
+			}
+			// Best-effort: if Inject fails (e.g., injectable closed) we
+			// keep draining the queue so this goroutine exits cleanly
+			// when the producer closes it.
+			_ = inj.Inject(b)
+		}
+	}()
+
 	buf := make([]byte, 256)
 	for {
 		n, err := em.Read(buf)
-		if n > 0 && inj != nil {
-			// Best-effort: if Inject fails (e.g., injectable closed) we
-			// still keep draining so the emulator doesn't block.
-			_ = inj.Inject(buf[:n])
+		if n > 0 {
+			// Copy: buf is reused on the next Read and the channel may
+			// hand the slice to a slow consumer.
+			b := make([]byte, n)
+			copy(b, buf[:n])
+			select {
+			case queue <- b:
+			default:
+				log.Debug("tui: emulator reply dropped (forwarder back-pressured)",
+					"bytes", n, "queue_depth", emulatorReplyQueueDepth)
+			}
 		}
 		if err != nil {
+			close(queue)
+			<-forwarderDone
 			return
 		}
 	}
@@ -652,17 +697,21 @@ func (w *Writer) drainEmulatorReplies(em *vt.Emulator, inj Injector) {
 // package where Close writes e.closed while Read concurrently reads it.
 // io.Pipe documents Close-vs-Read as safe.
 //
-// If InputPipe ever returns something that isn't an io.Closer (it currently
-// returns *io.PipeWriter), the drain goroutine will leak until GC — but
-// the emulator's reply handlers will also not unblock, so this would be a
-// vt package breaking change worth surfacing.
+// If a future vt release changes InputPipe to return something that isn't
+// an io.Closer, we log a warning so the API drift surfaces at runtime: the
+// drain goroutine would leak unbounded and the next reply-bearing handler
+// would re-introduce the freeze this helper exists to prevent. Silent
+// degradation here would be hard to diagnose from production traces.
 func closeEmulatorReplyPipe(em *vt.Emulator) {
 	if em == nil {
 		return
 	}
-	if pw, ok := em.InputPipe().(io.Closer); ok {
-		_ = pw.Close()
+	pw, ok := em.InputPipe().(io.Closer)
+	if !ok {
+		log.Warn("tui: vt.Emulator.InputPipe() no longer satisfies io.Closer; emulator reply drain may leak and re-introduce compositor freeze")
+		return
 	}
+	_ = pw.Close()
 }
 
 // exitCompositorLocked switches from compositor mode back to scroll mode.
