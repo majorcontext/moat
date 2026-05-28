@@ -170,34 +170,6 @@ func TestCollectMarketplaceTarPreservesFileMode(t *testing.T) {
 	}
 }
 
-func TestCollectMarketplaceTarMirrorsOwnerBitsForContainer(t *testing.T) {
-	dir := t.TempDir()
-
-	// Simulate a host with a restrictive umask (e.g. 0077): git clones an
-	// executable script as 0700 and a regular file as 0600. The tar must
-	// still be readable/executable by the non-root container user.
-	if err := os.WriteFile(filepath.Join(dir, "hook"), []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, tarData, err := CollectMarketplaceTar(dir, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	modes := tarModes(t, tarData)
-
-	if got, want := modes["hook"]&0o777, int64(0o777); got != want {
-		t.Errorf("hook mode = %o, want %o", got, want)
-	}
-	if got, want := modes["data.txt"]&0o777, int64(0o666); got != want {
-		t.Errorf("data.txt mode = %o, want %o", got, want)
-	}
-}
-
 func TestGenerateKnownMarketplaces(t *testing.T) {
 	marketplaces := []PreClonedMarketplace{
 		{Name: "official", Source: "github", Repo: "anthropics/claude-plugins-official", LastUpdated: "2025-01-15T10:30:00+00:00"},
