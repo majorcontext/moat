@@ -30,6 +30,18 @@ type PreClonedMarketplace struct {
 // loading large binaries into memory.
 const maxMarketplaceFileSize = 1 << 20 // 1 MB
 
+// containerSafeMode returns the file mode to write into the tar header.
+// It preserves the owner bits from the source file (so executable scripts
+// stay executable) and mirrors them into the group and other slots. The
+// tar is extracted as root in the container build, but the agent runs as
+// a different UID — without mirroring, a restrictive host umask (e.g.
+// 0077) would leave the file readable only by root and unusable inside
+// the container.
+func containerSafeMode(m fs.FileMode) int64 {
+	owner := m.Perm() & 0o700
+	return int64(owner | (owner >> 3) | (owner >> 6))
+}
+
 // CollectMarketplaceTar walks a cloned marketplace directory and returns
 // a tar archive containing all files. The .git directory is excluded.
 // Files larger than 1MB are skipped with a warning.
@@ -67,7 +79,7 @@ func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []by
 		if d.IsDir() {
 			if hdrErr := tw.WriteHeader(&tar.Header{
 				Name:     filepath.ToSlash(rel) + "/",
-				Mode:     int64(info.Mode().Perm()),
+				Mode:     containerSafeMode(info.Mode()),
 				Typeflag: tar.TypeDir,
 			}); hdrErr != nil {
 				return fmt.Errorf("writing dir header for %s: %w", rel, hdrErr)
@@ -94,7 +106,7 @@ func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []by
 		// that need +x to run inside the container.
 		if hdrErr := tw.WriteHeader(&tar.Header{
 			Name: filepath.ToSlash(rel),
-			Mode: int64(info.Mode().Perm()),
+			Mode: containerSafeMode(info.Mode()),
 			Size: int64(len(fileData)),
 		}); hdrErr != nil {
 			return fmt.Errorf("writing tar header for %s: %w", rel, hdrErr)

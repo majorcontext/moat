@@ -162,6 +162,40 @@ func TestCollectMarketplaceTarPreservesFileMode(t *testing.T) {
 	} else if mode&0o111 != 0 {
 		t.Errorf("expected README.md to be non-executable, got mode %o", mode)
 	}
+
+	if mode, ok := modes["bin/"]; !ok {
+		t.Fatalf("expected bin/ directory in tar, got %v", modeKeys(modes))
+	} else if mode&0o111 == 0 {
+		t.Errorf("expected bin/ to be traversable, got mode %o", mode)
+	}
+}
+
+func TestCollectMarketplaceTarMirrorsOwnerBitsForContainer(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate a host with a restrictive umask (e.g. 0077): git clones an
+	// executable script as 0700 and a regular file as 0600. The tar must
+	// still be readable/executable by the non-root container user.
+	if err := os.WriteFile(filepath.Join(dir, "hook"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, tarData, err := CollectMarketplaceTar(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	modes := tarModes(t, tarData)
+
+	if got, want := modes["hook"]&0o777, int64(0o777); got != want {
+		t.Errorf("hook mode = %o, want %o", got, want)
+	}
+	if got, want := modes["data.txt"]&0o777, int64(0o666); got != want {
+		t.Errorf("data.txt mode = %o, want %o", got, want)
+	}
 }
 
 func TestGenerateKnownMarketplaces(t *testing.T) {
