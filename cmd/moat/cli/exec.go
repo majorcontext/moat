@@ -445,6 +445,14 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	injectable := term.NewInjectableReader(stdin)
 	defer injectable.Close()
 	stdin = injectable
+
+	// Wire the injectable to receive VT-emulator reply bytes (Primary DA,
+	// cursor position, etc.). Without this, a CSI c query from the child in
+	// compositor mode blocks the emulator's reply handler while it holds
+	// the Writer's mutex, freezing the screen on the first paint.
+	if statusWriter != nil {
+		statusWriter.SetInjector(injectable)
+	}
 	if r.Clipboard {
 		stdin = term.NewClipboardProxy(stdin, func() {
 			done := make(chan struct{})

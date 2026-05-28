@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestWriter_Write(t *testing.T) {
@@ -1348,4 +1351,169 @@ func TestWriter_DECSTBM_CompositorMode_PassesToEmulator(t *testing.T) {
 		t.Errorf("in compositor mode, moat must not emit host DECSTBM, got %q", out)
 	}
 	w.Cleanup()
+}
+
+// captureInjector implements the Injector interface used by Writer to forward
+// VT-emulator-generated replies (e.g., responses to CSI c Device Attributes
+// queries) back into the child's input stream. The test variant records the
+// bytes so assertions can verify them.
+type captureInjector struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (c *captureInjector) Inject(b []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = append(c.data, b...)
+	return nil
+}
+
+func (c *captureInjector) bytes() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]byte, len(c.data))
+	copy(out, c.data)
+	return out
+}
+
+// TestWriter_CompositorMode_DeviceAttributesQuery_DoesNotDeadlock verifies
+// that Write does not deadlock when the child emits a CSI c (Primary Device
+// Attributes) query while moat is in compositor mode.
+//
+// The bundled vt.Emulator responds to terminal queries by writing the reply
+// to an internal io.Pipe. If nothing drains the reader side, the handler
+// blocks holding w.mu and freezes the renderer.
+func TestWriter_CompositorMode_DeviceAttributesQuery_DoesNotDeadlock(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("enter alt screen: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = w.Write([]byte("\x1b[c"))
+	}()
+
+	select {
+	case <-done:
+		// Write returned normally — safe to Cleanup (it re-acquires w.mu).
+		_ = w.Cleanup()
+	case <-time.After(2 * time.Second):
+		// Write is parked holding w.mu. Calling Cleanup would block forever
+		// on the same mutex and stall the test binary until go test's outer
+		// -timeout (default 10 min). Skip Cleanup — the process exits with
+		// FailNow and the leaked goroutine dies with it.
+		t.Fatal("Write deadlocked on CSI c (Device Attributes query)")
+	}
+}
+
+// blockingInjector blocks Inject until released, simulating container-stdin
+// back-pressure on the InjectableReader pipeline. Used to verify the
+// emulator drain is decoupled from injector liveness.
+type blockingInjector struct {
+	block chan struct{}
+	calls int32
+}
+
+func newBlockingInjector() *blockingInjector {
+	return &blockingInjector{block: make(chan struct{})}
+}
+
+func (b *blockingInjector) Inject(p []byte) error {
+	atomic.AddInt32(&b.calls, 1)
+	<-b.block
+	return nil
+}
+
+func (b *blockingInjector) release() { close(b.block) }
+
+// TestWriter_CompositorMode_BlockedInjector_DoesNotBlockEmulator verifies
+// that a stalled injector (e.g., container stdin reader back-pressured)
+// does NOT propagate the stall back into the emulator's reply pipe. If it
+// did, the next reply-bearing handler — invoked from outputLocked under
+// w.mu — would block, deadlocking Write and starving renderLoop. That's
+// the bug this PR fixes; we keep that property under back-pressure too.
+func TestWriter_CompositorMode_BlockedInjector_DoesNotBlockEmulator(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	inj := newBlockingInjector()
+	w.SetInjector(inj)
+	defer inj.release()
+
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("enter alt screen: %v", err)
+	}
+
+	// Hammer the emulator with reply-bearing queries. Without back-pressure
+	// decoupling, the first Inject blocks → drain stalls → subsequent
+	// emulator replies block in vt.Emulator.Write while Writer.Write holds
+	// w.mu, deadlocking the loop after a few iterations.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			_, _ = w.Write([]byte("\x1b[c"))
+		}
+	}()
+
+	select {
+	case <-done:
+		_ = w.Cleanup()
+	case <-time.After(2 * time.Second):
+		t.Fatal("Write deadlocked under blocked injector — drain not decoupled from injector back-pressure")
+	}
+}
+
+// TestWriter_CompositorMode_InjectsEmulatorReplies verifies that emulator
+// reply bytes (e.g., Primary Device Attributes response to CSI c) are
+// forwarded to the configured Injector so the child sees the response.
+func TestWriter_CompositorMode_InjectsEmulatorReplies(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	defer w.Cleanup()
+
+	inj := &captureInjector{}
+	w.SetInjector(inj)
+
+	if _, err := w.Write([]byte("\x1b[?1049h")); err != nil {
+		t.Fatalf("enter alt screen: %v", err)
+	}
+	if _, err := w.Write([]byte("\x1b[c")); err != nil {
+		t.Fatalf("write CSI c: %v", err)
+	}
+
+	// Poll briefly; the drain runs in a goroutine.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(inj.bytes()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	got := inj.bytes()
+	if len(got) == 0 {
+		t.Fatal("expected injector to receive Device Attributes reply, got 0 bytes")
+	}
+	// Primary DA reply begins with CSI '?' on real VT100+ terminals.
+	if !bytes.HasPrefix(got, []byte("\x1b[?")) {
+		t.Errorf("expected reply to begin with CSI '?' (Primary DA), got %q", got)
+	}
 }
