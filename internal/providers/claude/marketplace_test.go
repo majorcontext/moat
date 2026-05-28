@@ -89,12 +89,11 @@ func TestCollectMarketplaceTarEmptyDir(t *testing.T) {
 		t.Errorf("expected context key 'marketplace-empty.tar', got %q", contextKey)
 	}
 
-	// Tar should only contain the root directory entry
+	// Tar should be empty — the root entry is skipped (the Dockerfile
+	// creates the destination dir with mkdir -p before tar xf).
 	files := extractTar(t, tarData)
-	for name, content := range files {
-		if len(content) > 0 {
-			t.Errorf("expected no file entries in empty dir tar, got %s", name)
-		}
+	if len(files) != 0 {
+		t.Errorf("expected empty tar, got entries: %v", tarKeys(files))
 	}
 }
 
@@ -167,6 +166,59 @@ func TestCollectMarketplaceTarPreservesFileMode(t *testing.T) {
 		t.Fatalf("expected bin/ directory in tar, got %v", modeKeys(modes))
 	} else if mode&0o111 == 0 {
 		t.Errorf("expected bin/ to be traversable, got mode %o", mode)
+	}
+}
+
+func TestCollectMarketplaceTarSkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+
+	// A regular file that should make it into the tar.
+	if err := os.WriteFile(filepath.Join(dir, "real.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A symlink pointing outside the marketplace. If followed, os.ReadFile
+	// would copy the target's contents into the tar under the symlink's
+	// name and inherit the symlink's 0777 mode bits.
+	target := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(target, []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "leak.txt")); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	_, tarData, err := CollectMarketplaceTar(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := extractTar(t, tarData)
+
+	if _, ok := files["real.txt"]; !ok {
+		t.Errorf("expected real.txt in tar, got %v", tarKeys(files))
+	}
+	if content, ok := files["leak.txt"]; ok {
+		t.Errorf("symlink leak.txt should be skipped, but is present with content %q", string(content))
+	}
+}
+
+func TestCollectMarketplaceTarOmitsRootEntry(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, tarData, err := CollectMarketplaceTar(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := extractTar(t, tarData)
+	for _, name := range []string{"./", "."} {
+		if _, ok := files[name]; ok {
+			t.Errorf("tar should not contain root entry %q (would chmod the destination dir to the host temp-dir mode on extract)", name)
+		}
 	}
 }
 

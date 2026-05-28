@@ -58,6 +58,26 @@ func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []by
 			return fmt.Errorf("computing relative path: %w", relErr)
 		}
 
+		// Skip the root entry. The destination directory is created by
+		// "mkdir -p" in the Dockerfile before "tar xf", so emitting a "./"
+		// header would only chmod the destination to the host temp-dir mode
+		// (0700 from os.MkdirTemp) on extraction.
+		if rel == "." {
+			return nil
+		}
+
+		// Skip non-regular files (symlinks, devices, sockets, FIFOs). A
+		// committed symlink would otherwise be followed by os.ReadFile and
+		// the target's contents copied under the symlink's name, which is
+		// both a content-leak risk (e.g. bin/foo -> /etc/passwd) and would
+		// land in the tar with the symlink's 0777 mode bits.
+		if !d.IsDir() && !d.Type().IsRegular() {
+			log.Warn("skipping non-regular file in marketplace",
+				"file", filepath.ToSlash(rel),
+				"type", d.Type().String())
+			return nil
+		}
+
 		info, infoErr := d.Info()
 		if infoErr != nil {
 			return fmt.Errorf("stat %s: %w", d.Name(), infoErr)
