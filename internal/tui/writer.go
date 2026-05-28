@@ -586,7 +586,8 @@ func (w *Writer) enterCompositorLocked() error {
 	// position, in-band resize, etc.) to the injector. The emulator's reply
 	// handlers write into an internal io.Pipe; without a reader, the next
 	// reply-bearing handler blocks while holding w.mu, freezing renderLoop.
-	// Closing the emulator on exit (via stopCompositorLocked) causes
+	// Closing the emulator's input pipe on exit (via closeEmulatorReplyPipe,
+	// called from exitCompositorLocked / Reset / Cleanup) causes
 	// emulator.Read to return EOF so this goroutine exits.
 	go w.drainEmulatorReplies(w.emulator, w.injector)
 
@@ -698,17 +699,20 @@ func (w *Writer) drainEmulatorReplies(em *vt.Emulator, inj Injector) {
 // io.Pipe documents Close-vs-Read as safe.
 //
 // If a future vt release changes InputPipe to return something that isn't
-// an io.Closer, we log a warning so the API drift surfaces at runtime: the
-// drain goroutine would leak unbounded and the next reply-bearing handler
-// would re-introduce the freeze this helper exists to prevent. Silent
-// degradation here would be hard to diagnose from production traces.
+// an io.Closer, we log a warning so the API drift surfaces at runtime.
+// The fallout is per-session leakage: the in-flight drain goroutine
+// stays parked on em.Read forever (no further writes arrive once we
+// orphan the emulator) and the emulator object can't be GC'd. New
+// compositor sessions still work correctly — each creates a fresh
+// emulator+drain pair — so the symptom is a slowly growing goroutine
+// count, not a recurrence of the original screen freeze.
 func closeEmulatorReplyPipe(em *vt.Emulator) {
 	if em == nil {
 		return
 	}
 	pw, ok := em.InputPipe().(io.Closer)
 	if !ok {
-		log.Warn("tui: vt.Emulator.InputPipe() no longer satisfies io.Closer; emulator reply drain may leak and re-introduce compositor freeze")
+		log.Warn("tui: vt.Emulator.InputPipe() no longer satisfies io.Closer; drain goroutine and emulator object will leak once per compositor session")
 		return
 	}
 	_ = pw.Close()
