@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Fixed
+
+- Fix Claude Code (and other Ink-based TUIs) freezing on the first paint inside the moat container — previously, when the child emitted any terminal-capability query that required a reply (CSI c Primary Device Attributes, CSI 6n cursor position, in-band resize, color queries), moat's VT compositor blocked forever on the emulator's internal reply pipe with no drain, holding `tui.Writer.mu` and starving the render goroutine. Input still reached the child, but no further output reached the host terminal, so the session appeared frozen and Ctrl+C wasn't visibly acknowledged even though it terminated the child. Surfaced 100% of the time with Claude Code 2.1.150+, which queries Device Attributes at startup. Moat now drains the emulator's reply pipe and routes replies back into the child's input stream via the existing injectable-reader chain. ([#362](https://github.com/majorcontext/moat/pull/362))
+
 ## v0.5.3 — 2026-05-25
 
 Patch release centered on Claude Code authentication inside containers — subscription detection, `setup-token` capture, and version pinning — plus a non-root tmpfs permissions fix.
