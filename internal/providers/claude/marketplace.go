@@ -67,7 +67,7 @@ func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []by
 		if d.IsDir() {
 			if hdrErr := tw.WriteHeader(&tar.Header{
 				Name:     filepath.ToSlash(rel) + "/",
-				Mode:     0755,
+				Mode:     int64(info.Mode().Perm()),
 				Typeflag: tar.TypeDir,
 			}); hdrErr != nil {
 				return fmt.Errorf("writing dir header for %s: %w", rel, hdrErr)
@@ -89,9 +89,12 @@ func CollectMarketplaceTar(clonedDir, name string) (contextKey string, data []by
 			return fmt.Errorf("reading %s: %w", rel, readErr)
 		}
 
+		// Preserve the file mode from the upstream repo. This matters for
+		// executable hook scripts (e.g. bin/aw-hook, scripts/on-prompt-submit.sh)
+		// that need +x to run inside the container.
 		if hdrErr := tw.WriteHeader(&tar.Header{
 			Name: filepath.ToSlash(rel),
-			Mode: 0644,
+			Mode: int64(info.Mode().Perm()),
 			Size: int64(len(fileData)),
 		}); hdrErr != nil {
 			return fmt.Errorf("writing tar header for %s: %w", rel, hdrErr)

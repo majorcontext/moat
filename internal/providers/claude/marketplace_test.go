@@ -127,6 +127,43 @@ func TestCollectMarketplaceTarSkipsLargeFiles(t *testing.T) {
 	}
 }
 
+func TestCollectMarketplaceTarPreservesFileMode(t *testing.T) {
+	dir := t.TempDir()
+
+	// Executable hook script (e.g. bin/aw-hook).
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "hook"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Regular non-executable file.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, tarData, err := CollectMarketplaceTar(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	modes := tarModes(t, tarData)
+
+	if mode, ok := modes["bin/hook"]; !ok {
+		t.Fatalf("expected bin/hook in tar, got %v", modeKeys(modes))
+	} else if mode&0o111 == 0 {
+		t.Errorf("expected bin/hook to be executable, got mode %o", mode)
+	}
+
+	if mode, ok := modes["README.md"]; !ok {
+		t.Fatalf("expected README.md in tar, got %v", modeKeys(modes))
+	} else if mode&0o111 != 0 {
+		t.Errorf("expected README.md to be non-executable, got mode %o", mode)
+	}
+}
+
 func TestGenerateKnownMarketplaces(t *testing.T) {
 	marketplaces := []PreClonedMarketplace{
 		{Name: "official", Source: "github", Repo: "anthropics/claude-plugins-official", LastUpdated: "2025-01-15T10:30:00+00:00"},
@@ -247,6 +284,33 @@ func extractTar(t *testing.T, data []byte) map[string][]byte {
 		files[hdr.Name] = content
 	}
 	return files
+}
+
+// tarModes reads a tar archive and returns a map of filename → mode.
+func tarModes(t *testing.T, data []byte) map[string]int64 {
+	t.Helper()
+	modes := make(map[string]int64)
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reading tar: %v", err)
+		}
+		modes[hdr.Name] = hdr.Mode
+	}
+	return modes
+}
+
+// modeKeys returns the keys of a modes map for diagnostic output.
+func modeKeys(m map[string]int64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // tarKeys returns the keys of a tar files map for diagnostic output.
