@@ -50,6 +50,19 @@ const renderInterval = 16 * time.Millisecond
 // mode. Output is fed to a VT emulator and the emulator screen is rendered
 // to the real terminal with the footer appended.
 //
+// Injector forwards bytes the VT emulator generates as replies (e.g.,
+// Primary Device Attributes for CSI c, cursor-position reports for CSI 6n,
+// in-band resize notifications) back into the child's input stream so the
+// child sees the responses it queried for.
+//
+// Compositor mode requires an injector to be wired up via SetInjector; the
+// emulator's reply handlers write into an internal io.Pipe and the reader
+// side MUST be drained or the next reply-bearing handler deadlocks while
+// holding the Writer's mutex, freezing the screen.
+type Injector interface {
+	Inject(b []byte) error
+}
+
 // Writer is goroutine-safe for all methods.
 type Writer struct {
 	mu     sync.Mutex
@@ -57,6 +70,13 @@ type Writer struct {
 	bar    *StatusBar
 	width  int
 	height int // Total terminal height (content + status bar)
+
+	// injector receives bytes the emulator generates as replies to child
+	// queries (Primary DA, cursor position, etc.). May be nil — in that case
+	// emulator replies are still drained (to prevent deadlock) but discarded.
+	// Protected by mu only for the SetInjector path; the drain goroutine
+	// captures the value at compositor-entry time.
+	injector Injector
 
 	// Compositor mode state
 	altScreen bool
@@ -562,6 +582,14 @@ func (w *Writer) enterCompositorLocked() error {
 		return err
 	}
 
+	// Drain the emulator's reply pipe and forward replies (Primary DA, cursor
+	// position, in-band resize, etc.) to the injector. The emulator's reply
+	// handlers write into an internal io.Pipe; without a reader, the next
+	// reply-bearing handler blocks while holding w.mu, freezing renderLoop.
+	// Closing the emulator on exit (via stopCompositorLocked) causes
+	// emulator.Read to return EOF so this goroutine exits.
+	go w.drainEmulatorReplies(w.emulator, w.injector)
+
 	// Start render ticker after the write succeeds so there's no
 	// goroutine to leak if the write fails.
 	w.dirty = false
@@ -570,6 +598,71 @@ func (w *Writer) enterCompositorLocked() error {
 	go w.renderLoop(w.renderTicker, w.stopRender)
 
 	return nil
+}
+
+// SetInjector wires up the destination for VT-emulator-generated replies.
+// Must be called before the first byte of container output reaches Write,
+// otherwise the first reply-bearing handler in compositor mode will deadlock.
+//
+// If never called, emulator replies are still drained (to prevent deadlock)
+// but discarded — terminal capability queries from the child get no answer
+// and the child falls back to defaults.
+func (w *Writer) SetInjector(injector Injector) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.injector = injector
+}
+
+// drainEmulatorReplies copies bytes from the emulator's internal reply pipe
+// to the injector. Runs as a goroutine while compositor mode is active and
+// exits when the emulator's input pipe is closed (Read returns io.EOF or
+// io.ErrClosedPipe).
+//
+// The emulator and injector are passed by value so this goroutine operates
+// on the same instances throughout its lifetime even if Writer's fields are
+// reassigned by a subsequent enter/exit cycle. If injector is nil, replies
+// are still drained so the emulator's handlers don't block — they're just
+// discarded.
+//
+// We never call vt.Emulator.Close() here; it writes e.closed concurrently
+// with Read's check of that same field (a thread-safety bug in the vt
+// package). Instead, closing the underlying io.PipeWriter — which is
+// documented as safe for parallel close-vs-read — unblocks Read cleanly.
+func (w *Writer) drainEmulatorReplies(em *vt.Emulator, inj Injector) {
+	if em == nil {
+		return
+	}
+	buf := make([]byte, 256)
+	for {
+		n, err := em.Read(buf)
+		if n > 0 && inj != nil {
+			// Best-effort: if Inject fails (e.g., injectable closed) we
+			// still keep draining so the emulator doesn't block.
+			_ = inj.Inject(buf[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// closeEmulatorReplyPipe closes the emulator's input pipe writer to signal
+// the drain goroutine to exit. We close the pipe directly rather than
+// calling vt.Emulator.Close() to avoid a thread-safety bug in the vt
+// package where Close writes e.closed while Read concurrently reads it.
+// io.Pipe documents Close-vs-Read as safe.
+//
+// If InputPipe ever returns something that isn't an io.Closer (it currently
+// returns *io.PipeWriter), the drain goroutine will leak until GC — but
+// the emulator's reply handlers will also not unblock, so this would be a
+// vt package breaking change worth surfacing.
+func closeEmulatorReplyPipe(em *vt.Emulator) {
+	if em == nil {
+		return
+	}
+	if pw, ok := em.InputPipe().(io.Closer); ok {
+		_ = pw.Close()
+	}
 }
 
 // exitCompositorLocked switches from compositor mode back to scroll mode.
@@ -585,6 +678,10 @@ func (w *Writer) exitCompositorLocked() error {
 	// Do a final render to flush any pending content
 	w.renderCompositorLocked()
 
+	// Close the emulator's reply pipe so the drain goroutine started in
+	// enterCompositorLocked exits. See closeEmulatorReplyPipe for why we
+	// don't call w.emulator.Close().
+	closeEmulatorReplyPipe(w.emulator)
 	w.emulator = nil
 
 	// Exit alternate screen
@@ -708,6 +805,7 @@ func (w *Writer) Reset() error {
 
 	if w.altScreen {
 		w.stopRenderLoop()
+		closeEmulatorReplyPipe(w.emulator)
 		w.emulator = nil
 		w.altScreen = false
 		buf.WriteString("\x1b[?1049l")
@@ -741,6 +839,7 @@ func (w *Writer) Cleanup() error {
 
 	// Stop compositor if running
 	w.stopRenderLoop()
+	closeEmulatorReplyPipe(w.emulator)
 	w.emulator = nil
 
 	var buf bytes.Buffer
