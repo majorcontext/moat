@@ -131,6 +131,12 @@ func TestWorkspaceToClaudeDir(t *testing.T) {
 			input:    "/private/tmp/claude-502/slugprobe2/Ab1_c.d e-f..g~h+i(j)#k",
 			expected: "-private-tmp-claude-502-slugprobe2-Ab1-c-d-e-f--g-h-i-j--k",
 		},
+		{
+			// Contract relied on by claudeProjectsHostDir's empty-workspace guard.
+			name:     "empty input yields empty",
+			input:    "",
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -191,6 +197,23 @@ func TestClaudeLogMountTargetUsesRuntimeHome(t *testing.T) {
 				t.Errorf("mount target = %s, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestClaudeProjectsHostDir(t *testing.T) {
+	// A normal workspace maps to a per-project subdir under ~/.claude/projects.
+	got := claudeProjectsHostDir("/home/u", "/Users/dev/repo")
+	want := filepath.Join("/home/u", ".claude", "projects", "-Users-dev-repo")
+	if got != want {
+		t.Errorf("claudeProjectsHostDir(host, %q) = %q, want %q", "/Users/dev/repo", got, want)
+	}
+
+	// An empty workspace must NOT collapse to ~/.claude/projects: that would
+	// bind-mount the host's entire projects tree (every project's session
+	// history) into the container. The helper returns "" so the caller skips
+	// the mount entirely.
+	if got := claudeProjectsHostDir("/home/u", ""); got != "" {
+		t.Errorf("claudeProjectsHostDir(host, \"\") = %q, want \"\" (mount must be skipped)", got)
 	}
 }
 

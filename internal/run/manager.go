@@ -1875,11 +1875,12 @@ region = %s
 		imageHome := m.defaultRuntime().BuildManager().GetImageHomeDir(ctx, containerImage)
 		containerHome = resolveContainerHome(needsCustomImage, imageHome)
 		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
-			claudeDir := claude.WorkspaceToClaudeDir(opts.Workspace)
-			hostClaudeProjects := filepath.Join(hostHome, ".claude", "projects", claudeDir)
+			hostClaudeProjects := claudeProjectsHostDir(hostHome, opts.Workspace)
 
 			// Ensure directory exists on host
-			if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
+			if hostClaudeProjects == "" {
+				log.Warn("skipping Claude log sync mount: empty workspace path")
+			} else if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
 				ui.Warnf("Failed to create Claude logs directory: %v", err)
 			} else {
 				// Container writes to ~/.claude/projects/-workspace/
@@ -4042,6 +4043,22 @@ func resolveContainerHome(needsCustomImage bool, imageHome string) string {
 		return "/home/moatuser"
 	}
 	return imageHome
+}
+
+// claudeProjectsHostDir returns the host-side ~/.claude/projects/<dir> path to
+// bind-mount for workspace, or "" if the Claude log-sync mount should be skipped.
+//
+// An empty workspace slugifies to "" and would collapse the filepath.Join to
+// ~/.claude/projects, bind-mounting the host's entire projects tree (every
+// project's session history) into the container. ResolveWorkspacePath makes an
+// empty workspace unreachable today, but the consequence is severe enough to
+// guard against directly.
+func claudeProjectsHostDir(hostHome, workspace string) string {
+	claudeDir := claude.WorkspaceToClaudeDir(workspace)
+	if claudeDir == "" {
+		return ""
+	}
+	return filepath.Join(hostHome, ".claude", "projects", claudeDir)
 }
 
 // hostGitIdentity reads the host's git user.name and user.email and returns
