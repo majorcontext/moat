@@ -95,6 +95,48 @@ func TestWorkspaceToClaudeDir(t *testing.T) {
 			input:    "/workspace",
 			expected: "-workspace",
 		},
+		// The cases below mirror Claude Code's actual slug rule, which replaces
+		// every non-alphanumeric character with "-" (verified against the
+		// claude binary v2.1.156). Letters, digits and existing dashes are kept;
+		// dots, underscores, spaces and other punctuation become dashes, and
+		// runs are NOT collapsed. Paths with a "." in them (e.g. a username like
+		// "user.name") previously forked into a separate projects dir.
+		{
+			name:     "dot in path segment becomes dash",
+			input:    "/Users/user.name/repos/pricing-monorepo",
+			expected: "-Users-user-name-repos-pricing-monorepo",
+		},
+		{
+			name:     "underscore becomes dash",
+			input:    "/home/dev/my_project",
+			expected: "-home-dev-my-project",
+		},
+		{
+			name:     "space becomes dash",
+			input:    "/tmp/my project",
+			expected: "-tmp-my-project",
+		},
+		{
+			name:     "existing dashes are preserved",
+			input:    "/repo/pricing-monorepo",
+			expected: "-repo-pricing-monorepo",
+		},
+		{
+			name:     "consecutive separators are not collapsed",
+			input:    "/a/b..c",
+			expected: "-a-b--c",
+		},
+		{
+			name:     "all character classes match the claude binary",
+			input:    "/private/tmp/claude-502/slugprobe2/Ab1_c.d e-f..g~h+i(j)#k",
+			expected: "-private-tmp-claude-502-slugprobe2-Ab1-c-d-e-f--g-h-i-j--k",
+		},
+		{
+			// Contract relied on by claudeProjectsHostDir's empty-workspace guard.
+			name:     "empty input yields empty",
+			input:    "",
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -155,6 +197,23 @@ func TestClaudeLogMountTargetUsesRuntimeHome(t *testing.T) {
 				t.Errorf("mount target = %s, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestClaudeProjectsHostDir(t *testing.T) {
+	// A normal workspace maps to a per-project subdir under ~/.claude/projects.
+	got := claudeProjectsHostDir("/home/u", "/Users/dev/repo")
+	want := filepath.Join("/home/u", ".claude", "projects", "-Users-dev-repo")
+	if got != want {
+		t.Errorf("claudeProjectsHostDir(host, %q) = %q, want %q", "/Users/dev/repo", got, want)
+	}
+
+	// An empty workspace must NOT collapse to ~/.claude/projects: that would
+	// bind-mount the host's entire projects tree (every project's session
+	// history) into the container. The helper returns "" so the caller skips
+	// the mount entirely.
+	if got := claudeProjectsHostDir("/home/u", ""); got != "" {
+		t.Errorf("claudeProjectsHostDir(host, \"\") = %q, want \"\" (mount must be skipped)", got)
 	}
 }
 
