@@ -6,10 +6,15 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+## v0.5.4 — 2026-06-01
+
+Patch release with three Claude Code fixes: an Ink-based TUI freeze on first paint, host/container session-directory divergence on workspaces with `.` or `_` in the path, and marketplace plugin hook scripts losing the executable bit.
+
 ### Fixed
 
 - Fix Claude Code (and other Ink-based TUIs) freezing on the first paint inside the moat container — previously, when the child emitted any terminal-capability query that required a reply (CSI c Primary Device Attributes, CSI 6n cursor position, in-band resize, color queries), moat's VT compositor blocked forever on the emulator's internal reply pipe with no drain, holding `tui.Writer.mu` and starving the render goroutine. Input still reached the child, but no further output reached the host terminal, so the session appeared frozen and Ctrl+C wasn't visibly acknowledged even though it terminated the child. Surfaced 100% of the time with Claude Code 2.1.150+, which queries Device Attributes at startup. Moat now drains the emulator's reply pipe and routes replies back into the child's input stream via the existing injectable-reader chain. ([#362](https://github.com/majorcontext/moat/pull/362))
 - Fix Claude Code sessions inside the container writing to a different `~/.claude/projects/` directory than host sessions — previously, moat slugified the workspace path by replacing only `/` with `-`, while Claude Code replaces every non-alphanumeric character. For any workspace path containing a `.`, `_`, or space (e.g. a macOS username like `user.name`), moat and the host CLI computed different project-directory names, so container and host sessions silently forked the project's session history and memory store. The slug now matches Claude Code's rule exactly (verified against the claude binary). Note: already-forked directories are not migrated automatically. ([#364](https://github.com/majorcontext/moat/pull/364))
+- Fix marketplace plugin hook scripts failing with `Permission denied` inside the container — previously, `CollectMarketplaceTar` wrote every tar header with a hardcoded mode of `0644`, so executable scripts shipped by marketplace plugins (e.g. `bin/aw-hook`, `scripts/on-prompt-submit.sh`) extracted as non-executable and Claude Code's `UserPromptSubmit` hook failed at runtime. The tar header now derives `Mode` from the source file's permissions, preserving the executable bit. ([#363](https://github.com/majorcontext/moat/pull/363))
 
 ## v0.5.3 — 2026-05-25
 
