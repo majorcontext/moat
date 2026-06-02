@@ -543,6 +543,21 @@ redis:
     url_scheme: "redis"
     url_format: "{scheme}://:{password}@{host}:{port}"
 
+ministack:
+  description: Ministack local cloud emulator (experimental)
+  type: service
+  default: "latest"
+  service:
+    image: "ministackorg/ministack"
+    ports:
+      default: 4566
+    env_prefix: MINISTACK
+    # The ministack image ships python (no curl/wget); this mirrors the image's
+    # own Docker HEALTHCHECK, which probes /_ministack/health via urllib.
+    readiness_cmd: "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')\""
+    url_scheme: "http"
+    url_format: "{scheme}://{host}:{port}"
+
 ollama:
   description: Ollama local model server
   type: service

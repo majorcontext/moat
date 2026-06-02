@@ -179,6 +179,20 @@ func TestBuildServiceConfigOllamaNoModels(t *testing.T) {
 	assert.Equal(t, "ollama pull {item}", cfg.ProvisionCmd)
 }
 
+func TestBuildServiceConfigDefaultsVersion(t *testing.T) {
+	// Dependency listed without an explicit version (e.g. "ministack").
+	// The version must fall back to the registry default so the image
+	// reference isn't built with an empty tag ("repo:").
+	dep := deps.Dependency{Name: "ministack", Type: deps.TypeService}
+
+	cfg, err := buildServiceConfig(dep, "run-ms", nil)
+	require.NoError(t, err)
+
+	spec, _ := deps.GetSpec("ministack")
+	assert.Equal(t, spec.Default, cfg.Version)
+	assert.NotEmpty(t, cfg.Version, "version must not be empty (would produce 'repo:')")
+}
+
 func TestBuildServiceConfigMemory(t *testing.T) {
 	dep := deps.Dependency{Name: "ollama", Version: "0.18.1", Type: deps.TypeService}
 
