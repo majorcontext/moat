@@ -544,7 +544,7 @@ redis:
     url_format: "{scheme}://:{password}@{host}:{port}"
 
 ministack:
-  description: Ministack local cloud emulator (experimental)
+  description: Ministack local cloud emulator
   type: service
   default: "latest"
   service:
