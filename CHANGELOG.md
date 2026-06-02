@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Fixed
+
+- Fix orphaned Apple container networks exhausting the IP pool — previously, because Apple's container CLI removes containers asynchronously, the `container network delete` issued during run teardown often ran before the run's containers had detached and failed with "active containers" / "network has a pending operation". `RemoveNetwork` made a single attempt and `ForceRemoveNetwork` re-issued the same command, so the network leaked; accumulated `moat-run_*` networks eventually exhausted Apple's `/24` IP pool and blocked new runs. Network deletion now retries with exponential backoff until the async detach completes. ([#367](https://github.com/majorcontext/moat/pull/367))
+
 ## v0.5.4 — 2026-06-01
 
 Patch release with three Claude Code fixes: an Ink-based TUI freeze on first paint, host/container session-directory divergence on workspaces with `.` or `_` in the path, and marketplace plugin hook scripts losing the executable bit.
