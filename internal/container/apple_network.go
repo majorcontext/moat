@@ -7,13 +7,63 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 )
 
+// networkDeleteMaxAttempts bounds how many times RemoveNetwork retries when
+// Apple's runtime reports the network is still in use. Apple's `container`
+// CLI tears containers down asynchronously, so `container rm` can return
+// before the container has detached from its network; an immediate
+// `network delete` then fails with "active containers" / "pending operation".
+// Retrying with backoff lets the async detach complete.
+const networkDeleteMaxAttempts = 5
+
+// networkDeleteRetryBase is the base delay between delete retries; each
+// attempt waits networkDeleteRetryBase * 2^(attempt-1).
+const networkDeleteRetryBase = 500 * time.Millisecond
+
 // appleNetworkManager implements NetworkManager using the Apple container CLI.
 type appleNetworkManager struct {
 	containerBin string
+
+	// deleteFn runs `container network delete <name>` and returns the trimmed
+	// combined output. nil means use the real CLI; tests inject a fake.
+	deleteFn func(ctx context.Context, name string) (string, error)
+	// retryBase overrides networkDeleteRetryBase when non-zero (used by tests
+	// to avoid real backoff sleeps).
+	retryBase time.Duration
+}
+
+// runDelete executes the `network delete` command, using the injected deleteFn
+// when present (tests) and the real CLI otherwise.
+func (m *appleNetworkManager) runDelete(ctx context.Context, name string) (string, error) {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, name)
+	}
+	cmd := exec.CommandContext(ctx, m.containerBin, "network", "delete", name)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// isRetryableAppleNetworkDeleteError reports whether a failed `network delete`
+// output indicates a transient condition that should resolve once Apple's
+// asynchronous container teardown completes. Matched case-insensitively
+// against strings observed from the Apple container CLI.
+func isRetryableAppleNetworkDeleteError(output string) bool {
+	s := strings.ToLower(output)
+	for _, marker := range []string{
+		"active container",                // "...cannot be disabled with active containers"
+		"ip allocator cannot be disabled", // same error, alternate phrasing
+		"pending operation",               // "network ... has a pending operation"
+		"in use",                          // generic "network is in use"
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateNetwork creates an Apple container network.
@@ -39,23 +89,57 @@ func (m *appleNetworkManager) CreateNetwork(ctx context.Context, name string) (s
 }
 
 // RemoveNetwork removes an Apple container network by name.
-// Best-effort: does not fail if network doesn't exist.
+// Best-effort: does not fail if the network doesn't exist.
+//
+// Apple removes containers asynchronously, so a delete issued right after the
+// run's containers are removed can fail because they haven't detached yet.
+// Such failures are retried with exponential backoff until the detach
+// completes (or networkDeleteMaxAttempts is reached); non-transient failures
+// return immediately.
 func (m *appleNetworkManager) RemoveNetwork(ctx context.Context, name string) error {
-	cmd := exec.CommandContext(ctx, m.containerBin, "network", "delete", name)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		outStr := strings.TrimSpace(string(output))
-		if strings.Contains(outStr, "not found") || strings.Contains(outStr, "No such") {
+	base := m.retryBase
+	if base == 0 {
+		base = networkDeleteRetryBase
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < networkDeleteMaxAttempts; attempt++ {
+		if attempt > 0 {
+			delay := base * (1 << (attempt - 1))
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				if lastErr != nil {
+					return lastErr
+				}
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		output, err := m.runDelete(ctx, name)
+		if err == nil {
+			log.Debug("removed apple container network", "name", name)
 			return nil
 		}
-		return fmt.Errorf("removing network %s: %s: %w", name, outStr, err)
+		if strings.Contains(output, "not found") || strings.Contains(output, "No such") {
+			return nil
+		}
+
+		lastErr = fmt.Errorf("removing network %s: %s: %w", name, output, err)
+		if !isRetryableAppleNetworkDeleteError(output) {
+			return lastErr
+		}
+		log.Debug("apple network delete failed, retrying after async detach",
+			"name", name, "attempt", attempt+1, "error", output)
 	}
-	log.Debug("removed apple container network", "name", name)
-	return nil
+	return lastErr
 }
 
-// ForceRemoveNetwork delegates to RemoveNetwork for Apple containers.
-// Apple's container runtime handles disconnection automatically.
+// ForceRemoveNetwork delegates to RemoveNetwork, which already retries through
+// Apple's asynchronous container detach. Apple's container runtime has no
+// separate force-disconnect step.
 func (m *appleNetworkManager) ForceRemoveNetwork(ctx context.Context, name string) error {
 	return m.RemoveNetwork(ctx, name)
 }
