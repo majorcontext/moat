@@ -6,6 +6,14 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Added
+
+- **Ministack service** — `ministack` is now available as a `service` dependency, running the LocalStack-compatible Ministack local cloud emulator as a sidecar container. Declare `ministack` under `dependencies` and configure it under `services.ministack` (e.g. `env`, `wait`). Readiness is probed against the container's `/_ministack/health` endpoint. Experimental. ([#366](https://github.com/majorcontext/moat/pull/366))
+
+### Fixed
+
+- Fix service dependencies declared without an explicit version failing to start with `invalid reference format` — previously, a service listed as `name` rather than `name@version` (e.g. `ministack` instead of `ministack@latest`) left the image tag empty, so the reference was built as `repo:` and the container runtime rejected it. The service version now falls back to the registry default, matching the runtime and Dockerfile resolution paths. ([#366](https://github.com/majorcontext/moat/pull/366))
+
 ## v0.5.4 — 2026-06-01
 
 Patch release with three Claude Code fixes: an Ink-based TUI freeze on first paint, host/container session-directory divergence on workspaces with `.` or `_` in the path, and marketplace plugin hook scripts losing the executable bit.
