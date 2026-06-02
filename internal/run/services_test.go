@@ -188,7 +188,8 @@ func TestBuildServiceConfigDefaultsVersion(t *testing.T) {
 	cfg, err := buildServiceConfig(dep, "run-ms", nil)
 	require.NoError(t, err)
 
-	spec, _ := deps.GetSpec("ministack")
+	spec, ok := deps.GetSpec("ministack")
+	require.True(t, ok)
 	assert.Equal(t, spec.Default, cfg.Version)
 	assert.NotEmpty(t, cfg.Version, "version must not be empty (would produce 'repo:')")
 }

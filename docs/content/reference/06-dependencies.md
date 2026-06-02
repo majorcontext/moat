@@ -197,6 +197,7 @@ Both modes require Docker runtime. Apple containers do not support Docker socket
 | `mysql` | 8 | `MOAT_MYSQL_*` |
 | `redis` | 7 | `MOAT_REDIS_*` |
 | `ollama` | 0.9 | `MOAT_OLLAMA_URL` |
+| `ministack` | latest | `MOAT_MINISTACK_*` |
 
 Service dependencies require Docker or Apple container runtime. See the [service dependencies guide](../guides/08-services.md) for environment variable details, networking, and security information.
 

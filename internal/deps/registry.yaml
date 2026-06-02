@@ -554,7 +554,9 @@ ministack:
     env_prefix: MINISTACK
     # The ministack image ships python (no curl/wget); this mirrors the image's
     # own Docker HEALTHCHECK, which probes /_ministack/health via urllib.
-    readiness_cmd: "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')\""
+    # timeout=2 bounds each probe so a stalled connection can't consume the
+    # full readiness window in a single attempt.
+    readiness_cmd: "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health', timeout=2)\""
     url_scheme: "http"
     url_format: "{scheme}://{host}:{port}"
 
