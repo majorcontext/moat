@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -55,12 +56,18 @@ func (m *appleServiceManager) StartService(ctx context.Context, cfg ServiceConfi
 
 	args := buildAppleRunArgs(cfg, m.networkID)
 	cmd := exec.CommandContext(ctx, m.containerBin, args...)
-	output, err := cmd.CombinedOutput()
+	// Read the container ID from stdout only. `container run --detach` writes
+	// startup progress ("[1/6] Fetching image", ...) to stderr, so capturing
+	// combined output would fold that progress into the container ID and break
+	// the subsequent inspect. Stderr is captured separately for error messages.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
 	if err != nil {
-		return ServiceInfo{}, fmt.Errorf("starting %s service: %s: %w", cfg.Name, strings.TrimSpace(string(output)), err)
+		return ServiceInfo{}, fmt.Errorf("starting %s service: %s: %w", cfg.Name, strings.TrimSpace(stderr.String()), err)
 	}
 
-	containerID := strings.TrimSpace(string(output))
+	containerID := parseRunContainerID(string(stdout))
 	log.Debug("started apple service container", "service", cfg.Name, "container", containerID)
 
 	// Apple containers don't support --hostname and DNS resolution by container
@@ -196,6 +203,19 @@ func (m *appleServiceManager) getContainerIP(ctx context.Context, containerID st
 		lastErr = fmt.Errorf("no network address found for container %s", containerID)
 	}
 	return "", lastErr
+}
+
+// parseRunContainerID extracts the container ID from `container run --detach`
+// stdout. The CLI may print stray lines before the ID, so the ID is taken as
+// the last non-empty line. Returns "" when there is no usable output.
+func parseRunContainerID(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // buildAppleContainerName returns the unique container name for a service.

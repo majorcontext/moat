@@ -117,6 +117,23 @@ func TestGetContainerIPExists(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestParseRunContainerID(t *testing.T) {
+	// container 0.12.3 emits run progress (to stderr, but defensively we also
+	// tolerate it on stdout) ahead of the container ID; the ID is the last
+	// non-empty line.
+	blob := "[0/6] [0s]\n[1/6] Fetching image [0s]\n[6/6] Starting container [0s]\nmoat-postgres-run_8fe9526909b5"
+	assert.Equal(t, "moat-postgres-run_8fe9526909b5", parseRunContainerID(blob))
+
+	// Clean single-line output.
+	assert.Equal(t, "abc123", parseRunContainerID("abc123\n"))
+
+	// Trailing blank lines are ignored.
+	assert.Equal(t, "abc123", parseRunContainerID("abc123\n\n"))
+
+	// Empty output yields empty id.
+	assert.Equal(t, "", parseRunContainerID("  \n"))
+}
+
 func TestParseContainerIPv4(t *testing.T) {
 	// CIDR prefix is stripped.
 	addr, ok, err := parseContainerIPv4([]byte(`[{"networks":[{"ipv4Address":"192.168.68.2/24"}],"status":"running"}]`))
