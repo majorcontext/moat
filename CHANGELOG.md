@@ -9,6 +9,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 ### Fixed
 
 - Fix orphaned Apple container networks exhausting the IP pool — previously, because Apple's container CLI removes containers asynchronously, the `container network delete` issued during run teardown often ran before the run's containers had detached and failed with "active containers" / "network has a pending operation". `RemoveNetwork` made a single attempt and `ForceRemoveNetwork` re-issued the same command, so the network leaked; accumulated `moat-run_*` networks eventually exhausted Apple's `/24` IP pool and blocked new runs. Network deletion now retries with exponential backoff until the async detach completes. ([#367](https://github.com/majorcontext/moat/pull/367))
+- Fix Apple service runs failing to start with "no network address found for container" — previously, because Apple assigns a container's address asynchronously, the `container inspect` issued immediately after starting a service sidecar could return before the IPv4 address was attached, aborting the run. The address lookup now polls until the address is assigned. ([#367](https://github.com/majorcontext/moat/pull/367))
 
 ## v0.5.4 — 2026-06-01
 
