@@ -3,7 +3,9 @@ package container
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -109,10 +111,83 @@ func TestGetContainerIPParsing(t *testing.T) {
 
 // Verify getContainerIP is callable (compilation check for method signature).
 func TestGetContainerIPExists(t *testing.T) {
-	mgr := &appleServiceManager{containerBin: "false"}
+	mgr := &appleServiceManager{containerBin: "false", ipRetryBase: time.Millisecond}
 	_, err := mgr.getContainerIP(context.Background(), "nonexistent")
 	// Expected to fail — we just verify the method exists and returns an error
 	assert.Error(t, err)
+}
+
+func TestParseContainerIPv4(t *testing.T) {
+	// CIDR prefix is stripped.
+	addr, ok, err := parseContainerIPv4([]byte(`[{"networks":[{"ipv4Address":"192.168.68.2/24"}],"status":"running"}]`))
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "192.168.68.2", addr)
+
+	// Container started but no address assigned yet (the race we retry on).
+	for _, empty := range []string{
+		`[{"networks":[],"status":"running"}]`,
+		`[{"networks":[{"ipv4Address":""}],"status":"running"}]`,
+		`[]`,
+	} {
+		_, ok, err := parseContainerIPv4([]byte(empty))
+		require.NoError(t, err)
+		assert.False(t, ok, "expected no address for %s", empty)
+	}
+
+	// Malformed JSON is a real error.
+	_, _, err = parseContainerIPv4([]byte(`not json`))
+	assert.Error(t, err)
+}
+
+func TestGetContainerIPRetriesUntilAssigned(t *testing.T) {
+	calls := 0
+	mgr := &appleServiceManager{
+		ipRetryBase: time.Millisecond,
+		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+			calls++
+			if calls < 3 {
+				// Address not assigned yet.
+				return []byte(`[{"networks":[{"ipv4Address":""}],"status":"running"}]`), nil
+			}
+			return []byte(`[{"networks":[{"ipv4Address":"192.168.81.2/24"}],"status":"running"}]`), nil
+		},
+	}
+	addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.81.2", addr)
+	assert.Equal(t, 3, calls, "should poll until the address appears")
+}
+
+func TestGetContainerIPTimesOutWithoutAddress(t *testing.T) {
+	calls := 0
+	mgr := &appleServiceManager{
+		ipRetryBase: time.Millisecond,
+		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+			calls++
+			return []byte(`[{"networks":[{"ipv4Address":""}],"status":"running"}]`), nil
+		},
+	}
+	_, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+	require.Error(t, err)
+	assert.Equal(t, containerIPMaxAttempts, calls)
+}
+
+func TestGetContainerIPRetriesTransientInspectError(t *testing.T) {
+	calls := 0
+	mgr := &appleServiceManager{
+		ipRetryBase: time.Millisecond,
+		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+			calls++
+			if calls < 2 {
+				return nil, errors.New("exit status 1")
+			}
+			return []byte(`[{"networks":[{"ipv4Address":"192.168.81.2/24"}],"status":"running"}]`), nil
+		},
+	}
+	addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.81.2", addr)
 }
 
 func TestAppleBuildRunArgsWithMemory(t *testing.T) {

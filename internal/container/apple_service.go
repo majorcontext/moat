@@ -8,14 +8,31 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 )
+
+// containerIPMaxAttempts bounds how many times getContainerIP polls for a
+// service container's address. Apple's container CLI assigns the IPv4 address
+// asynchronously, so an inspect issued immediately after `run --detach` can
+// return before the address is attached; polling lets the assignment land.
+const containerIPMaxAttempts = 15
+
+// containerIPRetryBase is the delay between address-lookup polls.
+const containerIPRetryBase = 200 * time.Millisecond
 
 // appleServiceManager implements ServiceManager using the Apple container CLI.
 type appleServiceManager struct {
 	containerBin string
 	networkID    string
+
+	// inspectFn runs `container inspect <id>` and returns raw output. nil means
+	// use the real CLI; tests inject a fake.
+	inspectFn func(ctx context.Context, id string) ([]byte, error)
+	// ipRetryBase overrides containerIPRetryBase when non-zero (used by tests
+	// to avoid real backoff sleeps).
+	ipRetryBase time.Duration
 }
 
 // SetNetworkID sets the network for service containers.
@@ -104,34 +121,81 @@ func (m *appleServiceManager) ProvisionService(ctx context.Context, info Service
 	return nil
 }
 
-// getContainerIP inspects a container and returns its IPv4 address on the network.
-func (m *appleServiceManager) getContainerIP(ctx context.Context, containerID string) (string, error) {
-	cmd := exec.CommandContext(ctx, m.containerBin, "inspect", containerID)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("inspecting container: %s: %w", strings.TrimSpace(string(output)), err)
+// runInspect executes `container inspect <id>`, using the injected inspectFn
+// when present (tests) and the real CLI otherwise.
+func (m *appleServiceManager) runInspect(ctx context.Context, containerID string) ([]byte, error) {
+	if m.inspectFn != nil {
+		return m.inspectFn(ctx, containerID)
 	}
+	cmd := exec.CommandContext(ctx, m.containerBin, "inspect", containerID)
+	return cmd.CombinedOutput()
+}
 
+// parseContainerIPv4 extracts the IPv4 address (CIDR prefix stripped) from
+// `container inspect` output. ok is false when the container has no address
+// yet — the transient state right after `run --detach` that callers poll
+// through. A non-nil error means the output could not be parsed at all.
+func parseContainerIPv4(output []byte) (addr string, ok bool, err error) {
 	var info []struct {
 		Networks []struct {
 			IPv4Address string `json:"ipv4Address"`
 		} `json:"networks"`
 	}
 	if err := json.Unmarshal(output, &info); err != nil {
-		return "", fmt.Errorf("parsing inspect output: %w", err)
+		return "", false, fmt.Errorf("parsing inspect output: %w", err)
 	}
-
 	if len(info) == 0 || len(info[0].Networks) == 0 || info[0].Networks[0].IPv4Address == "" {
-		return "", fmt.Errorf("no network address found for container %s", containerID)
+		return "", false, nil
 	}
-
-	// Address is in CIDR format (e.g., "192.168.68.2/24"), strip the prefix length
-	addr := info[0].Networks[0].IPv4Address
+	addr = info[0].Networks[0].IPv4Address
 	if idx := strings.IndexByte(addr, '/'); idx != -1 {
 		addr = addr[:idx]
 	}
+	return addr, true, nil
+}
 
-	return addr, nil
+// getContainerIP inspects a container and returns its IPv4 address on the
+// network. Because Apple assigns the address asynchronously, it polls until
+// the address appears (bounded by containerIPMaxAttempts) rather than failing
+// on the first empty inspect.
+func (m *appleServiceManager) getContainerIP(ctx context.Context, containerID string) (string, error) {
+	base := m.ipRetryBase
+	if base == 0 {
+		base = containerIPRetryBase
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < containerIPMaxAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(base)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				if lastErr != nil {
+					return "", lastErr
+				}
+				return "", ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		output, err := m.runInspect(ctx, containerID)
+		if err != nil {
+			// Inspect can transiently fail right after start; retry.
+			lastErr = fmt.Errorf("inspecting container: %s: %w", strings.TrimSpace(string(output)), err)
+			continue
+		}
+		addr, ok, perr := parseContainerIPv4(output)
+		if perr != nil {
+			lastErr = perr
+			continue
+		}
+		if ok {
+			return addr, nil
+		}
+		lastErr = fmt.Errorf("no network address found for container %s", containerID)
+	}
+	return "", lastErr
 }
 
 // buildAppleContainerName returns the unique container name for a service.
