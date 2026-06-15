@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Fixed
+
+- Fix Claude Code reporting `Failed with non-blocking status code: /bin/sh: 1: python3: not found` — previously, the generated image for the Claude agent had no Python interpreter, so Claude Code's security-guidance feature (which shells out to `python3`) failed. Running the Claude agent now implicitly adds `python` to the container dependencies. Specify an explicit `python@<version>` in `dependencies` to override the version. ([#369](https://github.com/majorcontext/moat/issues/369))
+
 ## v0.5.4 — 2026-06-01
 
 Patch release with three Claude Code fixes: an Ink-based TUI freeze on first paint, host/container session-directory divergence on workspaces with `.` or `_` in the path, and marketplace plugin hook scripts losing the executable bit.

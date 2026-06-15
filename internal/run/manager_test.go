@@ -1956,3 +1956,25 @@ func TestRewriteExtraHostsForCustomNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentImpliedDependencies(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+		want  []string
+	}{
+		{"claude implies python", "claude", []string{"python"}},
+		{"claude variant implies python", "claude-code", []string{"python"}},
+		{"codex implies nothing", "codex", nil},
+		{"gemini implies nothing", "gemini", nil},
+		{"empty agent implies nothing", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agentImpliedDependencies(tt.agent)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("agentImpliedDependencies(%q) = %v, want %v", tt.agent, got, tt.want)
+			}
+		})
+	}
+}

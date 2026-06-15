@@ -1544,6 +1544,13 @@ region = %s
 		allDeps = append(allDeps, langserver.AllDependencies(opts.Config.LanguageServers)...)
 	}
 
+	// Add dependencies implied by the agent itself (e.g., Claude needs python3).
+	// Appended after the config dependencies so a user-specified version takes
+	// precedence (deps.ParseAll dedupes by name, keeping the first occurrence).
+	if opts.Config != nil {
+		allDeps = append(allDeps, agentImpliedDependencies(opts.Config.Agent)...)
+	}
+
 	if len(allDeps) > 0 {
 		var err error
 		depList, err = deps.ParseAll(allDeps)
@@ -4071,6 +4078,16 @@ func claudeProjectsHostDir(hostHome, workspace string) string {
 // and silently fails. This is a pre-existing limitation shared with the
 // safe.directory config — both rely on the init script running as root
 // before dropping to moatuser.
+// agentImpliedDependencies returns dependencies implicitly required by an agent.
+// Claude Code's security-guidance feature shells out to python3, so a Python
+// interpreter must be present whenever the Claude agent runs. See issue #369.
+func agentImpliedDependencies(agent string) []string {
+	if strings.HasPrefix(agent, "claude") {
+		return []string{"python"}
+	}
+	return nil
+}
+
 func hostGitIdentity(depList []deps.Dependency) (env []string, hasGit bool) {
 	for _, d := range depList {
 		if d.Name == "git" {
