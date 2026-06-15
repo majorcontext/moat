@@ -1,0 +1,29 @@
+# Example: HTTPS git with only the `github` grant (no SSH)
+#
+# Demonstrates that HTTPS git fetch/push to github.com works with just
+# `moat grant github` -- no `ssh:github.com` grant required (issue #370).
+#
+# The `github` grant injects a Bearer token for api.github.com and Basic
+# `x-access-token:<token>` auth for github.com (git smart-HTTP rejects
+# Bearer), and moat-init.sh sets `git http.proxyAuthMethod=basic` so git
+# can clear the proxy's 407 CONNECT challenge.
+#
+# Setup:
+#   moat grant github
+#
+# Run:
+#   moat run ./examples/grant-github-nossh
+#
+# Optional write test (clone + empty commit + push a scratch branch, then
+# delete it) against a repo you can push to:
+#   moat run --env VERIFY_REPO=https://github.com/<you>/<repo>.git ./examples/grant-github-nossh
+#
+# Expected: every check reports PASS and the run exits 0.
+
+name: grant-github-nossh
+
+# `github` automatically pulls in the `gh` and `git` dependencies.
+grants:
+  - github
+
+command: ["sh", "/workspace/verify.sh"]
