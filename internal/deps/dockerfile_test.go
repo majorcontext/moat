@@ -1720,6 +1720,18 @@ func TestMoatInitScriptGitIdentity(t *testing.T) {
 	}
 }
 
+func TestMoatInitScriptGitProxyAuth(t *testing.T) {
+	// HTTPS git through the moat proxy needs Basic proxy auth to survive the
+	// 407 CONNECT challenge (issue #370).
+	if !strings.Contains(MoatInitScript, "git config --system http.proxyAuthMethod basic") {
+		t.Error("moat-init.sh should set http.proxyAuthMethod=basic via --system config")
+	}
+	// SSH routing for github.com is still gated on both grants being present.
+	if !strings.Contains(MoatInitScript, `git config --system url."git@github.com:".insteadOf "https://github.com/"`) {
+		t.Error("moat-init.sh should keep the github.com SSH url.insteadOf rewrite")
+	}
+}
+
 func TestImageSpecNeedsInit(t *testing.T) {
 	tests := []struct {
 		name       string

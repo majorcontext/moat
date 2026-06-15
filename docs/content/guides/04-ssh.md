@@ -122,8 +122,10 @@ grants:
 When both `github` and `ssh:github.com` grants are active, Moat automatically
 configures git to use SSH instead of HTTPS for `github.com`. This means
 `git clone https://github.com/org/repo.git` is transparently rewritten to use
-`git@github.com:org/repo.git`. This avoids authentication issues caused by the
-proxy's TLS interception conflicting with git's HTTPS transport.
+`git@github.com:org/repo.git`. HTTPS git works on its own with just the `github`
+grant, so this rewrite is a routing preference rather than a workaround: when you
+grant `ssh:github.com`, git operations use the forwarded SSH key's identity
+instead of the token's.
 
 To disable the rewrite and use HTTPS for GitHub even when an SSH grant is active, set `MOAT_GIT_SSH_GITHUB=0` in `moat.yaml` under `env:` or pass it via `--env`.
 

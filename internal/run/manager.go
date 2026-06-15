@@ -1379,11 +1379,12 @@ region = %s
 				"keys", len(sshMappings))
 		}
 
-		// When both github and ssh:github.com grants are active, configure git
-		// to use SSH instead of HTTPS for github.com. The proxy's TLS MITM and
-		// credential injection doesn't work reliably with git's HTTPS transport,
-		// so routing git over SSH (which goes through the SSH agent proxy) is
-		// more reliable.
+		// When both github and ssh:github.com grants are active, prefer SSH for
+		// github.com git operations. HTTPS git works on its own (issue #370), so
+		// this is a routing preference, not a workaround: it makes git use the
+		// forwarded SSH key's identity rather than the github token's, which the
+		// user opted into by granting ssh:github.com. The MOAT_GIT_SSH_GITHUB env
+		// var drives the url.insteadOf rewrite in moat-init.sh.
 		// Check if user explicitly set MOAT_GIT_SSH_GITHUB (e.g. =0 to opt out)
 		gitSSHAlreadySet := false
 		for _, e := range opts.Env {

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,12 +57,18 @@ func TestProvider_ConfigureProxy(t *testing.T) {
 
 	p.ConfigureProxy(proxy, cred)
 
-	want := "Authorization: Bearer test-token"
-	if proxy.credentials["api.github.com"] != want {
-		t.Errorf("api.github.com credential = %q, want %q", proxy.credentials["api.github.com"], want)
+	// api.github.com (REST/GraphQL) uses Bearer.
+	wantAPI := "Authorization: Bearer test-token"
+	if proxy.credentials["api.github.com"] != wantAPI {
+		t.Errorf("api.github.com credential = %q, want %q", proxy.credentials["api.github.com"], wantAPI)
 	}
-	if proxy.credentials["github.com"] != want {
-		t.Errorf("github.com credential = %q, want %q", proxy.credentials["github.com"], want)
+
+	// github.com (git smart-HTTP) requires Basic with x-access-token:<token>;
+	// Bearer is rejected with 401 (issue #370).
+	wantBasic := base64.StdEncoding.EncodeToString([]byte("x-access-token:test-token"))
+	wantGitHub := "Authorization: Basic " + wantBasic
+	if proxy.credentials["github.com"] != wantGitHub {
+		t.Errorf("github.com credential = %q, want %q", proxy.credentials["github.com"], wantGitHub)
 	}
 }
 
@@ -401,13 +408,16 @@ func TestProvider_Refresh_EnvSource(t *testing.T) {
 		t.Errorf("updated token = %q, want %q", updated.Token, "new-env-token")
 	}
 
-	// Verify proxy was updated
-	want := "Authorization: Bearer new-env-token"
-	if proxy.credentials["api.github.com"] != want {
-		t.Errorf("proxy api.github.com = %q, want %q", proxy.credentials["api.github.com"], want)
+	// Verify proxy was updated with the per-host auth schemes (Bearer for the
+	// API, Basic for git smart-HTTP — see issue #370).
+	wantAPI := "Authorization: Bearer new-env-token"
+	if proxy.credentials["api.github.com"] != wantAPI {
+		t.Errorf("proxy api.github.com = %q, want %q", proxy.credentials["api.github.com"], wantAPI)
 	}
-	if proxy.credentials["github.com"] != want {
-		t.Errorf("proxy github.com = %q, want %q", proxy.credentials["github.com"], want)
+	wantBasic := base64.StdEncoding.EncodeToString([]byte("x-access-token:new-env-token"))
+	wantGitHub := "Authorization: Basic " + wantBasic
+	if proxy.credentials["github.com"] != wantGitHub {
+		t.Errorf("proxy github.com = %q, want %q", proxy.credentials["github.com"], wantGitHub)
 	}
 
 	// Verify original credential is not mutated
