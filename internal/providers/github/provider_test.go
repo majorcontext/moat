@@ -448,6 +448,18 @@ func TestProvider_Refresh_EnvSource_GHToken(t *testing.T) {
 	if updated.Token != "gh-token-value" {
 		t.Errorf("updated token = %q, want %q", updated.Token, "gh-token-value")
 	}
+
+	// Refresh must re-inject the per-host auth schemes (Bearer for the API,
+	// Basic for git smart-HTTP — issue #370), not just return the new token.
+	wantAPI := "Authorization: Bearer gh-token-value"
+	if proxy.credentials["api.github.com"] != wantAPI {
+		t.Errorf("proxy api.github.com = %q, want %q", proxy.credentials["api.github.com"], wantAPI)
+	}
+	wantBasic := base64.StdEncoding.EncodeToString([]byte("x-access-token:gh-token-value"))
+	wantGitHub := "Authorization: Basic " + wantBasic
+	if proxy.credentials["github.com"] != wantGitHub {
+		t.Errorf("proxy github.com = %q, want %q", proxy.credentials["github.com"], wantGitHub)
+	}
 }
 
 func TestProvider_Refresh_EnvSource_Empty(t *testing.T) {
