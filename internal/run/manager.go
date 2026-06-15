@@ -4068,16 +4068,6 @@ func claudeProjectsHostDir(hostHome, workspace string) string {
 	return filepath.Join(hostHome, ".claude", "projects", claudeDir)
 }
 
-// hostGitIdentity reads the host's git user.name and user.email and returns
-// env vars for injecting them into the container. Returns nil if git is not
-// in the dependency list or the host has no identity configured.
-//
-// The env vars are consumed by moat-init.sh which writes them via
-// "git config --system". When the container runs as non-root (Linux
-// --user mode), --system writes to /etc/gitconfig which requires root
-// and silently fails. This is a pre-existing limitation shared with the
-// safe.directory config — both rely on the init script running as root
-// before dropping to moatuser.
 // agentImpliedDependencies returns dependencies implicitly required by an agent.
 // Claude Code's security-guidance feature shells out to python3, so a Python
 // interpreter must be present whenever the Claude agent runs. See issue #369.
@@ -4088,6 +4078,16 @@ func agentImpliedDependencies(agent string) []string {
 	return nil
 }
 
+// hostGitIdentity reads the host's git user.name and user.email and returns
+// env vars for injecting them into the container. Returns nil if git is not
+// in the dependency list or the host has no identity configured.
+//
+// The env vars are consumed by moat-init.sh which writes them via
+// "git config --system". When the container runs as non-root (Linux
+// --user mode), --system writes to /etc/gitconfig which requires root
+// and silently fails. This is a pre-existing limitation shared with the
+// safe.directory config — both rely on the init script running as root
+// before dropping to moatuser.
 func hostGitIdentity(depList []deps.Dependency) (env []string, hasGit bool) {
 	for _, d := range depList {
 		if d.Name == "git" {
