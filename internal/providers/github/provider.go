@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,8 +40,24 @@ func (p *Provider) Name() string {
 
 // ConfigureProxy sets up proxy headers for GitHub.
 func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
-	proxy.SetCredentialWithGrant("api.github.com", "Authorization", "Bearer "+cred.Token, "github")
-	proxy.SetCredentialWithGrant("github.com", "Authorization", "Bearer "+cred.Token, "github")
+	setProxyAuth(proxy, cred.Token)
+}
+
+// setProxyAuth injects GitHub's per-host Authorization headers for token.
+//
+// The two GitHub hosts need different auth schemes:
+//   - api.github.com (REST/GraphQL) accepts a Bearer token.
+//   - github.com serves git smart-HTTP (info/refs, git-upload-pack,
+//     git-receive-pack), which rejects Bearer with 401 and requires Basic auth
+//     of the form "x-access-token:<token>" — the same scheme GitHub Actions'
+//     checkout uses. Injecting Bearer here broke HTTPS git fetch/push (issue
+//     #370); Basic is correct for every github.com HTTPS request.
+//
+// Shared by ConfigureProxy and Refresh so the two injection paths can't drift.
+func setProxyAuth(proxy provider.ProxyConfigurer, token string) {
+	proxy.SetCredentialWithGrant("api.github.com", "Authorization", "Bearer "+token, "github")
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	proxy.SetCredentialWithGrant("github.com", "Authorization", "Basic "+basic, "github")
 }
 
 // ContainerEnv returns environment variables for GitHub.

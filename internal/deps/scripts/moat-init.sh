@@ -346,9 +346,17 @@ if command -v git >/dev/null 2>&1; then
   if [ -n "$MOAT_GIT_USER_EMAIL" ]; then
     git config --system user.email "$MOAT_GIT_USER_EMAIL" 2>/dev/null || true
   fi
-  # When both github and ssh:github.com grants are active, route all
-  # GitHub HTTPS URLs (git, pip, npm, etc.) over SSH instead. The proxy's
-  # TLS interception doesn't work reliably with git's HTTPS transport.
+  # Authenticate to the moat proxy preemptively with Basic. Unlike curl, git
+  # does not send Proxy-Authorization from the proxy URL and does not retry
+  # after the proxy's 407 CONNECT challenge, so HTTPS git through the proxy
+  # fails without this. Harmless when no proxy is configured. See issue #370.
+  git config --system http.proxyAuthMethod basic 2>/dev/null || true
+  # When both github and ssh:github.com grants are active, prefer SSH for all
+  # GitHub HTTPS URLs (git, pip, npm, etc.). HTTPS git to github.com works on
+  # its own (http.proxyAuthMethod above + the github provider's Basic-auth
+  # injection), so this is a routing preference, not a workaround: it makes git
+  # use the forwarded SSH key's identity rather than the token's. Opt out with
+  # MOAT_GIT_SSH_GITHUB=0 to use the HTTPS path. See issue #370.
   if [ "$MOAT_GIT_SSH_GITHUB" = "1" ]; then
     git config --system url."git@github.com:".insteadOf "https://github.com/" 2>/dev/null || true
   fi

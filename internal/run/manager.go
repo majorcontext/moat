@@ -1379,11 +1379,12 @@ region = %s
 				"keys", len(sshMappings))
 		}
 
-		// When both github and ssh:github.com grants are active, configure git
-		// to use SSH instead of HTTPS for github.com. The proxy's TLS MITM and
-		// credential injection doesn't work reliably with git's HTTPS transport,
-		// so routing git over SSH (which goes through the SSH agent proxy) is
-		// more reliable.
+		// When both github and ssh:github.com grants are active, prefer SSH for
+		// github.com git operations. HTTPS git works on its own (issue #370), so
+		// this is a routing preference, not a workaround: it makes git use the
+		// forwarded SSH key's identity rather than the github token's, which the
+		// user opted into by granting ssh:github.com. The MOAT_GIT_SSH_GITHUB env
+		// var drives the url.insteadOf rewrite in moat-init.sh.
 		// Check if user explicitly set MOAT_GIT_SSH_GITHUB (e.g. =0 to opt out)
 		gitSSHAlreadySet := false
 		for _, e := range opts.Env {
@@ -1542,6 +1543,13 @@ region = %s
 	// Language servers are only supported with Claude Code agent.
 	if opts.Config != nil && len(opts.Config.LanguageServers) > 0 && strings.HasPrefix(opts.Config.Agent, "claude") {
 		allDeps = append(allDeps, langserver.AllDependencies(opts.Config.LanguageServers)...)
+	}
+
+	// Add dependencies implied by the agent itself (e.g., Claude needs python3).
+	// Appended after the config dependencies so a user-specified version takes
+	// precedence (deps.ParseAll dedupes by name, keeping the first occurrence).
+	if opts.Config != nil {
+		allDeps = append(allDeps, agentImpliedDependencies(opts.Config.Agent)...)
 	}
 
 	if len(allDeps) > 0 {
@@ -1743,6 +1751,12 @@ region = %s
 	if opts.Config != nil {
 		baseImage = opts.Config.BaseImage
 	}
+	// NeedsGitIdentity (hasGit) also gates whether moat-init.sh is deployed, which
+	// is what sets git http.proxyAuthMethod=basic for HTTPS git through the proxy
+	// (#370). The github grant implies the git dep, so a bare `--grant github` run
+	// gets the init script via this path. Keep that chain intact when refactoring
+	// (covered by TestProvider_ImpliedDependencies + TestImageSpecNeedsInit's
+	// GitIdentity case).
 	imageSpec := &deps.ImageSpec{
 		BaseImage:          baseImage,
 		NeedsSSH:           hasSSHGrants,
@@ -4059,6 +4073,16 @@ func claudeProjectsHostDir(hostHome, workspace string) string {
 		return ""
 	}
 	return filepath.Join(hostHome, ".claude", "projects", claudeDir)
+}
+
+// agentImpliedDependencies returns dependencies implicitly required by an agent.
+// Claude Code's security-guidance feature shells out to python3, so a Python
+// interpreter must be present whenever the Claude agent runs. See issue #369.
+func agentImpliedDependencies(agent string) []string {
+	if strings.HasPrefix(agent, "claude") {
+		return []string{"python"}
+	}
+	return nil
 }
 
 // hostGitIdentity reads the host's git user.name and user.email and returns

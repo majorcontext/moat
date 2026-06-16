@@ -226,6 +226,14 @@ the version triggers an image rebuild on the next run.
 so they install the latest release. To pin, add an explicit `claude-code@<version>`
 to `dependencies` as shown above.
 
+## Python interpreter
+
+Running the Claude agent automatically adds `python` to the container
+dependencies. Claude Code's security-guidance feature shells out to `python3`,
+and without an interpreter it reports `python3: not found`. The dependency is
+implied — you don't need to list it. To control the version, add an explicit
+`python@<version>` to `dependencies` and Moat uses that instead.
+
 ## Adding GitHub access
 
 Grant GitHub access so Claude Code can interact with repositories:
