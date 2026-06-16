@@ -672,6 +672,11 @@ func (r *AppleRuntime) Exec(ctx context.Context, containerID string, cmd []strin
 	return nil
 }
 
+// ExecInteractive runs a command inside a running container with a PTY.
+func (r *AppleRuntime) ExecInteractive(ctx context.Context, containerID string, cmd []string, opts ExecOptions) error {
+	return fmt.Errorf("not implemented")
+}
+
 // exitError converts an exec.ExitError to an ExecError, or wraps other errors.
 func exitError(err error) error {
 	var exitErr *exec.ExitError

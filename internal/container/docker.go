@@ -679,6 +679,11 @@ func (r *DockerRuntime) Exec(ctx context.Context, containerID string, cmd []stri
 	return nil
 }
 
+// ExecInteractive runs a command inside a running container with a PTY.
+func (r *DockerRuntime) ExecInteractive(ctx context.Context, containerID string, cmd []string, opts ExecOptions) error {
+	return fmt.Errorf("not implemented")
+}
+
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
 	exists, err := r.buildMgr.ImageExists(ctx, imageName)
