@@ -62,7 +62,7 @@ func TestAttachedAgents_PrunesDeadPid(t *testing.T) {
 	if got := attachedCount(runID); got != 0 {
 		t.Fatalf("count with only a dead pid = %d, want 0 (pruned)", got)
 	}
-	if _, err := os.Stat(dir + "/1"); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "1")); !os.IsNotExist(err) {
 		t.Fatalf("dead pid entry should have been pruned")
 	}
 }
