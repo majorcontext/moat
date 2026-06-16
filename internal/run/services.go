@@ -225,9 +225,19 @@ func buildServiceConfig(dep deps.Dependency, runID string, userSpec *config.Serv
 		memoryMB = userSpec.Memory
 	}
 
+	// Fall back to the registry default when no version was specified
+	// (e.g. "ministack" rather than "ministack@latest"). Without this the
+	// image reference is built as "repo:" with an empty tag, which the
+	// container runtime rejects with "invalid reference format". This
+	// mirrors the default handling in deps.resolve and the Dockerfile path.
+	version := dep.Version
+	if version == "" {
+		version = spec.Default
+	}
+
 	return container.ServiceConfig{
 		Name:          dep.Name,
-		Version:       dep.Version,
+		Version:       version,
 		Env:           env,
 		RunID:         runID,
 		Image:         spec.Service.Image,

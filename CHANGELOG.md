@@ -6,10 +6,15 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Added
+
+- **Ministack service** — `ministack` is now available as a `service` dependency, running the LocalStack-compatible Ministack local cloud emulator as a sidecar container. Declare `ministack` under `dependencies` and configure it under `services.ministack` (e.g. `env`, `wait`). Readiness is probed against the container's `/_ministack/health` endpoint. ([#366](https://github.com/majorcontext/moat/pull/366))
+
 ### Fixed
 
 - Fix HTTPS git fetch/push to `github.com` failing with only the `github` grant — previously, the proxy injected `Authorization: Bearer <token>` for `github.com`, but GitHub's git smart-HTTP endpoints reject Bearer with a 401 and require Basic auth, and git also aborted on the proxy's 407 CONNECT challenge because it doesn't send proxy credentials preemptively. The provider now injects `Basic x-access-token:<token>` for `github.com` (Bearer is still used for `api.github.com`), and containers set `git http.proxyAuthMethod=basic`, so `git clone`/`fetch`/`push` over HTTPS work with just `--grant github` — no SSH grant required. When both `github` and `ssh:github.com` are granted, git still routes over SSH as before. ([#376](https://github.com/majorcontext/moat/pull/376))
 - Fix Claude Code reporting `Failed with non-blocking status code: /bin/sh: 1: python3: not found` — previously, the generated image for the Claude agent had no Python interpreter, so Claude Code's security-guidance feature (which shells out to `python3`) failed. Running the Claude agent now implicitly adds `python` to the container dependencies. Specify an explicit `python@<version>` in `dependencies` to override the version. ([#369](https://github.com/majorcontext/moat/issues/369))
+- Fix service dependencies declared without an explicit version failing to start with `invalid reference format` — previously, a service listed as `name` rather than `name@version` (e.g. `ministack` instead of `ministack@latest`) left the image tag empty, so the reference was built as `repo:` and the container runtime rejected it. The service version now falls back to the registry default, matching the runtime and Dockerfile resolution paths. ([#366](https://github.com/majorcontext/moat/pull/366))
 
 ## v0.5.4 — 2026-06-01
 

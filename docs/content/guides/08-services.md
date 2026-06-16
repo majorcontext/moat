@@ -2,7 +2,7 @@
 title: "Service dependencies"
 navTitle: "Services"
 description: "Run ephemeral databases and caches alongside your agent containers."
-keywords: ["moat", "postgres", "mysql", "redis", "ollama", "database", "service", "sidecar"]
+keywords: ["moat", "postgres", "mysql", "redis", "ollama", "ministack", "database", "service", "sidecar"]
 ---
 
 # Service dependencies
@@ -191,6 +191,7 @@ Each service has a built-in readiness command:
 | `mysql` | `mysqladmin ping -h localhost -u root --password=<pw>` |
 | `redis` | `redis-cli -a <pw> PING` |
 | `ollama` | `ollama list` |
+| `ministack` | `python3 -c "...urlopen('http://localhost:4566/_ministack/health', timeout=2)"` |
 
 Readiness checks run inside the service container via `docker exec`. They verify that the service accepts connections with the generated credentials.
 
