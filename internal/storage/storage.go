@@ -217,6 +217,20 @@ func (s *RunStore) LogWriter() (*LogWriter, error) {
 	return &LogWriter{file: f}, nil
 }
 
+// JoinLogWriter returns a timestamped writer for a joined agent's console,
+// written to logs.<index>.jsonl so it stays separate from the primary's log.
+func (s *RunStore) JoinLogWriter(index int) (*LogWriter, error) {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, fmt.Sprintf("logs.%d.jsonl", index)),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0600,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("opening join log file: %w", err)
+	}
+	return &LogWriter{file: f}, nil
+}
+
 // ReadLogs reads log entries with offset and limit.
 func (s *RunStore) ReadLogs(offset, limit int) ([]LogEntry, error) {
 	f, err := os.Open(filepath.Join(s.dir, "logs.jsonl"))

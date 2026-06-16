@@ -96,8 +96,8 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent %q does not support join yet", agentArg)
 	}
-	if err := validateJoinAgent(joinable, agentArg, r.Agent); err != nil {
-		return err
+	if valErr := validateJoinAgent(joinable, agentArg, r.Agent); valErr != nil {
+		return valErr
 	}
 
 	containerCmd, err := joinable.JoinCommand(provider.JoinOpts{
@@ -111,18 +111,32 @@ func runJoin(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
+	// Register this join for the display-only attached count. Both interactive
+	// and headless paths need an index so console output lands in logs.<N>.jsonl.
+	index, release, regErr := manager.RegisterJoinedAgent(runID)
+	if regErr == nil {
+		defer release()
+	}
+
 	// Headless (--prompt with no TTY) vs interactive.
 	if joinPrompt != "" || !term.IsTerminal(os.Stdin) || !term.IsTerminal(os.Stdout) {
+		var headlessOut io.Writer = os.Stdout
+		if regErr == nil && r.Store != nil {
+			if lw, lerr := r.Store.JoinLogWriter(index); lerr == nil {
+				defer lw.Close()
+				headlessOut = io.MultiWriter(os.Stdout, lw)
+			}
+		}
 		execErr := manager.ExecInteractive(ctx, runID, containerCmd, container.ExecOptions{
 			Stdin:  nil,
-			Stdout: os.Stdout,
+			Stdout: headlessOut,
 			Stderr: os.Stderr,
 			TTY:    false,
 		})
 		return handleJoinExecErr(manager, execErr)
 	}
 
-	return runJoinInteractive(ctx, manager, r, containerCmd)
+	return runJoinInteractive(ctx, manager, r, containerCmd, index)
 }
 
 func handleJoinExecErr(manager *run.Manager, execErr error) error {
@@ -164,13 +178,7 @@ func setupJoinStatusBar(manager *run.Manager, r *run.Run, index int) (*tui.Write
 	return writer, cleanup, writer
 }
 
-func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string) error {
-	// Register this join for the display-only attached count.
-	index, release, err := manager.RegisterJoinedAgent(r.ID)
-	if err == nil {
-		defer release()
-	}
-
+func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string, index int) error {
 	// Raw mode so keystrokes reach the agent unbuffered.
 	var rawState *term.RawModeState
 	if term.IsTerminal(os.Stdin) {
@@ -187,6 +195,15 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	// Status footer: this is a joined session.
 	statusWriter, statusCleanup, stdout := setupJoinStatusBar(manager, r, index)
 	defer statusCleanup()
+
+	// Tee join output to its own indexed log file, kept separate from the
+	// primary's logs.jsonl per the split-console design.
+	if r.Store != nil {
+		if lw, lerr := r.Store.JoinLogWriter(index); lerr == nil {
+			defer lw.Close()
+			stdout = io.MultiWriter(stdout, lw)
+		}
+	}
 
 	// Resize channel fed by SIGWINCH; closed on exit so the runtime goroutine ends.
 	resize := make(chan container.TTYSize, 1)
