@@ -68,6 +68,11 @@ func (m *appleServiceManager) StartService(ctx context.Context, cfg ServiceConfi
 	}
 
 	containerID := parseRunContainerID(string(stdout))
+	if containerID == "" {
+		// `run --detach` reported success but printed no ID — fail fast with the
+		// raw output instead of polling inspect on an empty ID for seconds.
+		return ServiceInfo{}, fmt.Errorf("starting %s service: no container ID in run output: %q", cfg.Name, strings.TrimSpace(string(stdout)))
+	}
 	log.Debug("started apple service container", "service", cfg.Name, "container", containerID)
 
 	// Apple containers don't support --hostname and DNS resolution by container
