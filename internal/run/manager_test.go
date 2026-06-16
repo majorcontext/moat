@@ -897,6 +897,9 @@ func (s *stubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 func (s *stubRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	panic("not implemented")
 }
+func (s *stubRuntime) ExecInteractive(context.Context, string, []string, container.ExecOptions) error {
+	panic("not implemented")
+}
 
 // TestLoadPersistedRunsCleansStaleRoutes verifies that loadPersistedRuns removes
 // routes for containers that are no longer running. This prevents the bug where
