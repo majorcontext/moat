@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/majorcontext/moat/internal/storage"
@@ -30,7 +31,7 @@ func entryAlive(path string) bool {
 	if err != nil {
 		return false
 	}
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return false
 	}

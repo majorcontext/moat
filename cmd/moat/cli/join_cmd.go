@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -61,6 +63,19 @@ func validateJoinAgent(j provider.JoinableAgent, agentArg, runAgent string) erro
 	return nil
 }
 
+// joinableAgentNames returns the sorted names of registered agents that support
+// `moat join`, for use in the unknown-agent error message.
+func joinableAgentNames() []string {
+	var names []string
+	for _, a := range provider.Agents() {
+		if _, ok := a.(provider.JoinableAgent); ok {
+			names = append(names, a.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func runJoin(cmd *cobra.Command, args []string) error {
 	if joinContinue && joinResume != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
@@ -90,7 +105,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 
 	agent := provider.GetAgent(agentArg)
 	if agent == nil {
-		return fmt.Errorf("unknown agent %q", agentArg)
+		return fmt.Errorf("unknown agent %q; joinable agents: %s", agentArg, strings.Join(joinableAgentNames(), ", "))
 	}
 	joinable, ok := agent.(provider.JoinableAgent)
 	if !ok {
@@ -255,6 +270,22 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	defer cancel()
 
 	done := make(chan struct{})
+
+	// Restore the terminal if we're asked to terminate while in raw mode. An
+	// external SIGTERM/SIGHUP would otherwise kill the process before the
+	// deferred RestoreTerminal runs, leaving the terminal garbled. Canceling
+	// execCtx unblocks ExecInteractive so the deferred cleanup runs normally.
+	termCh := make(chan os.Signal, 1)
+	signal.Notify(termCh, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(termCh)
+	go func() {
+		select {
+		case <-termCh:
+			cancel()
+		case <-done:
+		}
+	}()
+
 	onWinch := func() (container.TTYSize, bool) {
 		if statusWriter == nil || !term.IsTerminal(os.Stdout) {
 			return container.TTYSize{}, false
@@ -281,7 +312,9 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	// Signal resizePump to stop; it closes resize, which unblocks the runtime side.
 	close(done)
 
-	if execErr != nil && ctx.Err() == nil {
+	// A canceled execCtx means we were signaled to terminate (above) — not a
+	// failure; fall through to the clean exit so the terminal is restored.
+	if execErr != nil && ctx.Err() == nil && !errors.Is(execErr, context.Canceled) {
 		var ee *container.ExecError
 		if errors.As(execErr, &ee) {
 			// Agent exited non-zero; surface it but don't treat as a moat error.

@@ -30,7 +30,7 @@ In a second terminal, join it:
 moat join run_a1b2c3d4e5f6 claude
 ```
 
-The second terminal opens an interactive claude session in the same workspace. The status footer on the join shows `joined · 1`; the primary's footer shows `+1`.
+The second terminal opens an interactive claude session in the same workspace. The status footer on the join shows `joined · 1`; the primary's footer shows `primary +1`.
 
 ## Headless join
 
@@ -57,7 +57,7 @@ The output streams to the terminal and the command exits with claude's exit code
 | Session | Footer display |
 |---------|----------------|
 | Primary, no joins | (no session segment) |
-| Primary, N joins active | `+N` before the run ID |
+| Primary, N joins active | `primary +N` before the run ID |
 | Joined session (index N) | `joined · N` before the run ID |
 
 ## Lifecycle
