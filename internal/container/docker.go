@@ -709,6 +709,10 @@ func (r *DockerRuntime) ExecInteractive(ctx context.Context, containerID string,
 		})
 	}
 	if opts.TTY && opts.Resize != nil {
+		// Short-lived goroutine owned by the caller's resize pump: it runs until
+		// the caller closes opts.Resize (immediately after ExecInteractive
+		// returns), not for the life of this method. Resizes that land after the
+		// exec finishes are harmless no-ops on a completed exec.
 		go func() {
 			for size := range opts.Resize {
 				if size.Width == 0 || size.Height == 0 {
@@ -745,6 +749,11 @@ func (r *DockerRuntime) ExecInteractive(ctx context.Context, containerID string,
 
 	select {
 	case <-ctx.Done():
+		// Intentional trade-off: on cancellation (e.g. SIGTERM) we return
+		// ctx.Err() and skip ContainerExecInspect. If the agent exits non-zero
+		// in the same instant, that code is dropped rather than surfaced as an
+		// ExecError — acceptable, since a canceled join doesn't care about the
+		// agent's exit code, and inspecting here would need a background context.
 		return ctx.Err()
 	case copyErr := <-outputDone:
 		if copyErr != nil && copyErr != io.EOF {

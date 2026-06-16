@@ -2,6 +2,7 @@ package run
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -54,7 +55,7 @@ func TestAttachedAgents_PrunesDeadPid(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Write an entry with index filename "1" and a dead pid as content.
-	if err := os.WriteFile(dir+"/1", []byte("999999"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "1"), []byte("999999"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

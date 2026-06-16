@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,8 +21,15 @@ func attachedAgentsDir(runID string) string {
 
 // pidAlive reports whether the given pid is a live process.
 func pidAlive(pid int) bool {
+	// Reject non-positive pids: kill(0, 0) / kill(-1, 0) target process groups,
+	// not a single process, and would spuriously report "alive".
+	if pid <= 0 {
+		return false
+	}
 	// Signal 0 performs error checking without actually sending a signal.
-	return syscall.Kill(pid, 0) == nil
+	// EPERM means the process exists but is owned by another user — still alive.
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // entryAlive reports whether the entry at path refers to a live process.

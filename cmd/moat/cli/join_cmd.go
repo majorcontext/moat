@@ -297,7 +297,7 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	// failure; fall through to the clean exit so the terminal is restored.
 	// Deferred RestoreTerminal and statusCleanup run before returning, ensuring
 	// the terminal is in a good state before runJoin calls exitWithExecError.
-	if execErr != nil && ctx.Err() == nil && !errors.Is(execErr, context.Canceled) {
+	if execErr != nil && !errors.Is(execErr, context.Canceled) {
 		var ee *container.ExecError
 		if errors.As(execErr, &ee) {
 			// Return the ExecError so runJoin can propagate the exit code.
