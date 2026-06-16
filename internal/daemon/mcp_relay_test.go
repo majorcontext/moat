@@ -103,6 +103,8 @@ func TestMCPRelayTokenPathRouting(t *testing.T) {
 			t.Fatalf("expected 404 without a context resolver, got %d\nbody: %s", res.StatusCode, strings.TrimSpace(string(body)))
 		}
 		// The token (first path segment) is what got looked up as the server name.
+		// Note: this asserts gatekeeper's current 404 body shape; if a gatekeeper
+		// update changes the relay's error wording, update this expectation.
 		if !strings.Contains(string(body), token) {
 			t.Fatalf("expected the token to be misread as the server name in the 404 body\nbody: %s", strings.TrimSpace(string(body)))
 		}
