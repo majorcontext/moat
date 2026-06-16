@@ -460,12 +460,31 @@ run_pre_run_hook() {
   if [ -z "$MOAT_PRE_RUN" ]; then
     return
   fi
+  # Capture the hook's exit code with `set -e` temporarily off, so a failing
+  # hook is reported with context instead of aborting the entrypoint silently —
+  # which looks like the container itself failed to start, with no hint the
+  # pre_run hook was the cause. See issue #372.
+  set +e
   if [ "$(id -u)" != "0" ]; then
     # Already non-root, run directly
-    cd /workspace && sh -c "$MOAT_PRE_RUN"
+    ( cd /workspace && sh -c "$MOAT_PRE_RUN" )
+    hook_status=$?
   elif id moatuser >/dev/null 2>&1; then
     # Drop to moatuser for the hook
     gosu moatuser sh -c "cd /workspace && $MOAT_PRE_RUN"
+    hook_status=$?
+  else
+    hook_status=0
+  fi
+  set -e
+
+  if [ "$hook_status" -ne 0 ]; then
+    echo "" >&2
+    echo "moat: pre_run hook failed (exit code $hook_status)" >&2
+    echo "moat:   command: $MOAT_PRE_RUN" >&2
+    echo "moat:   the pre_run hook runs as moatuser in /workspace before your command." >&2
+    echo "moat:   fix the command above, or remove hooks.pre_run from moat.yaml." >&2
+    exit "$hook_status"
   fi
 }
 
