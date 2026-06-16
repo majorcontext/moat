@@ -2,6 +2,10 @@
 package deps
 
 import (
+	"errors"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1730,6 +1734,93 @@ func TestMoatInitScriptGitProxyAuth(t *testing.T) {
 	if !strings.Contains(MoatInitScript, `git config --system url."git@github.com:".insteadOf "https://github.com/"`) {
 		t.Error("moat-init.sh should keep the github.com SSH url.insteadOf rewrite")
 	}
+}
+
+// extractShellFunc returns the source of a POSIX-shell function, from its
+// "name() {" header to the closing "}" on its own line, within script.
+func extractShellFunc(t *testing.T, script, name string) string {
+	t.Helper()
+	start := strings.Index(script, name+"() {")
+	if start < 0 {
+		t.Fatalf("function %q not found in script", name)
+	}
+	rest := script[start:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		t.Fatalf("could not find end of function %q", name)
+	}
+	return rest[:end+2] // include the closing "}"
+}
+
+// TestMoatInitPreRunHookBehavior runs the real run_pre_run_hook function from
+// the embedded moat-init.sh and asserts its behavior (issue #372): a failing
+// hook must report a framed error and exit with the hook's status (not abort
+// the entrypoint silently), while a successful or absent hook continues.
+func TestMoatInitPreRunHookBehavior(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("moat-init.sh is POSIX shell; not run on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("test exercises the non-root hook branch; running as root takes the gosu path")
+	}
+
+	// The shipped function cd's into /workspace; point it at a writable temp
+	// dir so the test is portable. Only the path changes — the status capture,
+	// failure framing, and exit logic under test are the real script's.
+	fn := extractShellFunc(t, MoatInitScript, "run_pre_run_hook")
+	fn = strings.ReplaceAll(fn, "/workspace", t.TempDir())
+
+	run := func(preRun string) (string, int) {
+		t.Helper()
+		// Mirror the entrypoint's `set -e`; __CONTINUED__ prints only if the
+		// hook returned (i.e. did not exit), proving the main command would run.
+		harness := "set -e\n" + fn + "\nrun_pre_run_hook\necho __CONTINUED__\n"
+		cmd := exec.Command("sh", "-c", harness)
+		cmd.Env = append(os.Environ(), "MOAT_PRE_RUN="+preRun)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return string(out), 0
+		}
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return string(out), ee.ExitCode()
+		}
+		t.Fatalf("running hook harness: %v", err)
+		return "", -1
+	}
+
+	t.Run("failing hook is framed and exits with its status", func(t *testing.T) {
+		out, code := run("echo doing-setup; exit 42")
+		if code != 42 {
+			t.Errorf("exit code = %d, want 42\noutput:\n%s", code, out)
+		}
+		if !strings.Contains(out, "pre_run hook failed (exit code 42)") {
+			t.Errorf("missing framed failure message\noutput:\n%s", out)
+		}
+		if strings.Contains(out, "__CONTINUED__") {
+			t.Errorf("entrypoint continued past a failed hook\noutput:\n%s", out)
+		}
+	})
+
+	t.Run("successful hook continues to the command", func(t *testing.T) {
+		out, code := run("echo doing-setup")
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0\noutput:\n%s", code, out)
+		}
+		if !strings.Contains(out, "__CONTINUED__") {
+			t.Errorf("entrypoint did not continue after a successful hook\noutput:\n%s", out)
+		}
+		if strings.Contains(out, "pre_run hook failed") {
+			t.Errorf("reported failure for a successful hook\noutput:\n%s", out)
+		}
+	})
+
+	t.Run("absent hook is a no-op", func(t *testing.T) {
+		out, code := run("")
+		if code != 0 || !strings.Contains(out, "__CONTINUED__") {
+			t.Errorf("unset MOAT_PRE_RUN should be a no-op; code=%d\noutput:\n%s", code, out)
+		}
+	})
 }
 
 func TestImageSpecNeedsInit(t *testing.T) {
