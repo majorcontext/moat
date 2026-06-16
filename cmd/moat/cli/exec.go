@@ -493,6 +493,32 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 		}
 	})
 
+	// Poll joined-agent count once per second so the primary's footer badge
+	// refreshes without requiring a manual resize. Only active when a status
+	// bar is present; the SIGWINCH handler continues to update the count on
+	// resize events as before.
+	if statusWriter != nil {
+		stopPoll := make(chan struct{})
+		defer close(stopPoll)
+		go func() {
+			t := time.NewTicker(1 * time.Second)
+			defer t.Stop()
+			last := manager.AttachedCount(r.ID)
+			for {
+				select {
+				case <-stopPoll:
+					return
+				case <-t.C:
+					if n := manager.AttachedCount(r.ID); n != last {
+						last = n
+						statusWriter.SetJoinedCount(n)
+						statusWriter.RefreshFooter()
+					}
+				}
+			}
+		}()
+	}
+
 	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)

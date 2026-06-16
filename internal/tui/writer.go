@@ -991,6 +991,17 @@ func (w *Writer) SetJoinedCount(n int) {
 	w.bar.SetJoinedCount(n)
 }
 
+// RefreshFooter repaints the footer to reflect updated status-bar state.
+// In compositor mode the render loop already repaints at renderInterval, so
+// this only needs to act in scroll mode.
+func (w *Writer) RefreshFooter() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.altScreen {
+		w.redrawFooterLocked()
+	}
+}
+
 // SetupEscapeHints configures the escape proxy to show escape sequence hints
 // in the status bar when Ctrl-/ is pressed.
 func (w *Writer) SetupEscapeHints(proxy *term.EscapeProxy) {
