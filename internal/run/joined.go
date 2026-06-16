@@ -4,17 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/majorcontext/moat/internal/storage"
 )
 
 // attachedAgentsDir is where per-join liveness entries live for a run.
-// One file per live joined agent, named by its pid (or pid-N for multiple
-// registrations from the same process).
+// One file per live joined agent, named by its unique index (1, 2, 3, …).
+// The file content is the pid of the agent that claimed the slot.
 func attachedAgentsDir(runID string) string {
 	return filepath.Join(storage.DefaultBaseDir(), runID, "agents")
 }
@@ -25,51 +23,78 @@ func pidAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
-// entryPID extracts the PID from an agent entry filename.
-// Filenames are either plain pids ("12345") or pid-N pairs ("12345-2").
-func entryPID(name string) (int, bool) {
-	part := name
-	if idx := strings.IndexByte(name, '-'); idx >= 0 {
-		part = name[:idx]
-	}
-	pid, err := strconv.Atoi(part)
+// entryAlive reports whether the entry at path refers to a live process.
+// The file content must be a decimal pid string.
+func entryAlive(path string) bool {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, false
+		return false
 	}
-	return pid, true
+	pid, err := strconv.Atoi(string(data))
+	if err != nil {
+		return false
+	}
+	return pidAlive(pid)
 }
 
+// pruneDead removes entries from dir whose process is no longer alive.
+// Errors are ignored (best-effort).
+func pruneDead(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if !entryAlive(path) {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+// maxJoinIndex is the upper bound for the O_EXCL index scan. In practice
+// there will never be more than a handful of concurrent joins per run.
+const maxJoinIndex = 4096
+
 // registerJoinedAgent records a live joined agent for the run and returns its
-// 1-based index (the count after registration) plus a release func that removes
-// the entry. The count is for display only; it never affects teardown.
+// unique 1-based index plus a release func that removes the entry. The index
+// is the lowest free integer filename: it is stable and unique for the
+// duration of the agent's lifetime.
 func registerJoinedAgent(runID string) (index int, release func(), err error) {
 	dir := attachedAgentsDir(runID)
 	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 		return 0, nil, mkErr
 	}
-	pid := os.Getpid()
-	pidStr := strconv.Itoa(pid)
+	pruneDead(dir)
 
-	// Find a unique filename for this registration.
-	// Use "pid" if no prior entry exists, otherwise "pid-N" for N=2,3,...
-	name := pidStr
-	if _, statErr := os.Stat(filepath.Join(dir, name)); statErr == nil {
-		// Collision: find next available suffix.
-		for n := 2; ; n++ {
-			candidate := fmt.Sprintf("%s-%d", pidStr, n)
-			if _, statErr2 := os.Stat(filepath.Join(dir, candidate)); os.IsNotExist(statErr2) {
-				name = candidate
-				break
+	pid := strconv.Itoa(os.Getpid())
+
+	for n := 1; n < maxJoinIndex; n++ {
+		path := filepath.Join(dir, strconv.Itoa(n))
+		f, openErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if openErr != nil {
+			if os.IsExist(openErr) {
+				continue // slot taken; try the next one
 			}
+			return 0, nil, openErr
 		}
+		_, writeErr := f.WriteString(pid)
+		closeErr := f.Close()
+		if writeErr != nil {
+			_ = os.Remove(path)
+			return 0, nil, writeErr
+		}
+		if closeErr != nil {
+			_ = os.Remove(path)
+			return 0, nil, closeErr
+		}
+		release = func() { _ = os.Remove(path) }
+		return n, release, nil
 	}
-
-	entry := filepath.Join(dir, name)
-	if wErr := os.WriteFile(entry, []byte(pidStr), 0o600); wErr != nil {
-		return 0, nil, wErr
-	}
-	release = func() { _ = os.Remove(entry) }
-	return attachedCount(runID), release, nil
+	return 0, nil, fmt.Errorf("registerJoinedAgent: exhausted %d index slots for run %s", maxJoinIndex, runID)
 }
 
 // attachedCount returns the number of live joined agents for the run, pruning
@@ -80,21 +105,16 @@ func attachedCount(runID string) int {
 	if err != nil {
 		return 0
 	}
-	// Deterministic order keeps index assignment stable in tests.
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	live := 0
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		pid, ok := entryPID(e.Name())
-		if !ok {
-			continue
-		}
-		if pidAlive(pid) {
+		path := filepath.Join(dir, e.Name())
+		if entryAlive(path) {
 			live++
 		} else {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
+			_ = os.Remove(path)
 		}
 	}
 	return live
