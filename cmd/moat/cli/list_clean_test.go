@@ -90,6 +90,9 @@ func (s *listCleanStubRuntime) ResizeTTY(ctx context.Context, id string, height,
 func (s *listCleanStubRuntime) Exec(ctx context.Context, id string, cmd []string, stdin []byte, stdout, stderr io.Writer) error {
 	panic("unexpected call to Exec")
 }
+func (s *listCleanStubRuntime) ExecInteractive(ctx context.Context, id string, cmd []string, opts container.ExecOptions) error {
+	panic("unexpected call to ExecInteractive")
+}
 
 // --- isImageInUse tests ---
 
