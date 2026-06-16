@@ -681,7 +681,85 @@ func (r *DockerRuntime) Exec(ctx context.Context, containerID string, cmd []stri
 
 // ExecInteractive runs a command inside a running container with a PTY.
 func (r *DockerRuntime) ExecInteractive(ctx context.Context, containerID string, cmd []string, opts ExecOptions) error {
-	return fmt.Errorf("not implemented")
+	execCfg := container.ExecOptions{
+		Cmd:          cmd,
+		User:         "moatuser",
+		Tty:          opts.TTY,
+		AttachStdin:  opts.Stdin != nil,
+		AttachStdout: true,
+		AttachStderr: !opts.TTY, // in TTY mode stderr is merged into stdout
+	}
+
+	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return fmt.Errorf("creating exec: %w", err)
+	}
+
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{Tty: opts.TTY})
+	if err != nil {
+		return fmt.Errorf("attaching to exec: %w", err)
+	}
+	defer resp.Close()
+
+	// Apply the initial size before output starts, then service resizes.
+	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		_ = r.cli.ContainerExecResize(ctx, execID.ID, container.ResizeOptions{
+			Height: opts.InitialHeight,
+			Width:  opts.InitialWidth,
+		})
+	}
+	if opts.TTY && opts.Resize != nil {
+		go func() {
+			for size := range opts.Resize {
+				if size.Width == 0 || size.Height == 0 {
+					continue
+				}
+				_ = r.cli.ContainerExecResize(ctx, execID.ID, container.ResizeOptions{
+					Height: size.Height,
+					Width:  size.Width,
+				})
+			}
+		}()
+	}
+
+	outputDone := make(chan error, 1)
+	go func() {
+		if opts.TTY {
+			// TTY mode is a single raw stream.
+			_, copyErr := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- copyErr
+		} else {
+			_, copyErr := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
+			outputDone <- copyErr
+		}
+	}()
+
+	if opts.Stdin != nil {
+		go func() {
+			_, _ = io.Copy(resp.Conn, opts.Stdin)
+			if cw, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+				_ = cw.CloseWrite()
+			}
+		}()
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case copyErr := <-outputDone:
+		if copyErr != nil && copyErr != io.EOF {
+			return copyErr
+		}
+	}
+
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting exec: %w", err)
+	}
+	if inspect.ExitCode != 0 {
+		return &ExecError{ExitCode: inspect.ExitCode}
+	}
+	return nil
 }
 
 // ensureImage pulls an image if it doesn't exist locally.
