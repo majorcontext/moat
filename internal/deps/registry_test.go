@@ -166,6 +166,18 @@ func TestRegistryHasOllama(t *testing.T) {
 	assert.Empty(t, ollama.Service.PasswordEnv)
 }
 
+func TestRegistryHasMinistack(t *testing.T) {
+	ministack, ok := GetSpec("ministack")
+	require.True(t, ok, "Registry should have 'ministack'")
+	assert.Equal(t, TypeService, ministack.Type)
+	require.NotNil(t, ministack.Service)
+	assert.Equal(t, "ministackorg/ministack", ministack.Service.Image)
+	assert.Equal(t, 4566, ministack.Service.Ports["default"])
+	assert.Equal(t, "MINISTACK", ministack.Service.EnvPrefix)
+	assert.NotEmpty(t, ministack.Service.ReadinessCmd)
+	assert.NotEmpty(t, ministack.Default, "ministack must have a default version to avoid 'repo:' image references")
+}
+
 func TestServiceDepSpec(t *testing.T) {
 	spec, ok := GetSpec("postgres")
 	require.True(t, ok)

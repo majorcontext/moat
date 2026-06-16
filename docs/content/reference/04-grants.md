@@ -15,7 +15,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 
 | Grant | Hosts matched | Header injected | Credential source |
 |-------|---------------|-----------------|-------------------|
-| `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
+| `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` (`api.github.com`); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
 | `claude` | `api.anthropic.com` | `Authorization: Bearer ...` | `claude setup-token` or imported OAuth |
 | `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
@@ -54,12 +54,14 @@ No flags. The command automatically detects your credential source.
 
 ### What it injects
 
-The proxy injects an `Authorization: Bearer <token>` header for requests to:
+The proxy injects an `Authorization` header, using the scheme each host expects:
 
-- `api.github.com`
-- `github.com`
+- `api.github.com` (REST/GraphQL) -- `Bearer <token>`
+- `github.com` (git smart-HTTP) -- `Basic <base64("x-access-token:<token>")>`. GitHub's
+  git endpoints reject Bearer with a 401, so HTTPS `git clone`/`fetch`/`push`
+  needs Basic auth.
 
-The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CLI works without prompting.
+The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CLI works without prompting. Git is configured with `http.proxyAuthMethod=basic` so it authenticates to the proxy and can establish the HTTPS tunnel.
 
 ### Refresh behavior
 
