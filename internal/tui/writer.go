@@ -983,6 +983,14 @@ func (w *Writer) ClearMessage() {
 	w.bar.ClearMessage()
 }
 
+// SetJoinedCount updates the joined-agent count shown in the status footer.
+// Calling this on SIGWINCH keeps the primary's "+N" badge live.
+func (w *Writer) SetJoinedCount(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bar.SetJoinedCount(n)
+}
+
 // SetupEscapeHints configures the escape proxy to show escape sequence hints
 // in the status bar when Ctrl-/ is pressed.
 func (w *Writer) SetupEscapeHints(proxy *term.EscapeProxy) {

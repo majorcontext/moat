@@ -121,6 +121,7 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 	}
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
 	bar.SetGrants(r.Grants)
+	bar.SetJoinedCount(manager.AttachedCount(r.ID))
 	if r.DaemonCommit != "" && r.DaemonCommit != commit {
 		bar.SetWarning("proxy stale")
 	}
@@ -539,6 +540,8 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 							tracer.recorder.AddResize(width, height)
 						}
 						ringRecorder.AddResize(width, height)
+						// Refresh joined-agent count on redraw (display-only).
+						statusWriter.SetJoinedCount(manager.AttachedCount(r.ID))
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY, reserving the footer row.
 						h := containerTTYHeight(statusWriter, height)

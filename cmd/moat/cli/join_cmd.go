@@ -137,10 +137,31 @@ func handleJoinExecErr(manager *run.Manager, execErr error) error {
 	return execErr
 }
 
-// setupJoinStatusBar is a stub for Phase E (Task E2).
-// Phase E will replace this with the real footer implementation.
-func setupJoinStatusBar(_ *run.Manager, _ *run.Run, _ int) (*tui.Writer, func(), io.Writer) {
-	return nil, func() {}, os.Stdout
+func setupJoinStatusBar(manager *run.Manager, r *run.Run, index int) (*tui.Writer, func(), io.Writer) {
+	stdout := io.Writer(os.Stdout)
+	cleanup := func() {}
+	if !term.IsTerminal(os.Stdout) {
+		return nil, cleanup, stdout
+	}
+	width, height := term.GetSize(os.Stdout)
+	if width <= 0 || height <= 0 {
+		return nil, cleanup, stdout
+	}
+	runtimeType := r.Runtime
+	if runtimeType == "" {
+		runtimeType = manager.RuntimeType()
+	}
+	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
+	bar.SetGrants(r.Grants)
+	bar.SetSession(fmt.Sprintf("joined · %d", index))
+	bar.SetDimensions(width, height)
+	writer := tui.NewWriter(os.Stdout, bar, runtimeType)
+	if err := writer.Setup(); err != nil {
+		return nil, cleanup, os.Stdout
+	}
+	_ = os.Stdout.Sync()
+	cleanup = func() { _ = writer.Cleanup() }
+	return writer, cleanup, writer
 }
 
 func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string) error {
