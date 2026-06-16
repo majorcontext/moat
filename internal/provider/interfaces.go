@@ -90,6 +90,27 @@ type RefreshableProvider interface {
 	Refresh(ctx context.Context, p ProxyConfigurer, cred *Credential) (*Credential, error)
 }
 
+// JoinOpts carries the parsed flags for a joined agent session.
+type JoinOpts struct {
+	Continue bool
+	Resume   string
+	Prompt   string
+}
+
+// JoinableAgent is implemented by agent providers that support `moat join` —
+// launching a second instance of the agent into an existing run's container.
+// It is optional: providers that don't implement it cannot be joined.
+type JoinableAgent interface {
+	// JoinCommand returns the in-container command to launch a joined session.
+	JoinCommand(opts JoinOpts) ([]string, error)
+
+	// IdentifiesAs reports whether a run whose recorded Agent field is `agent`
+	// was created by this provider. This absorbs the difference between the
+	// default provider name ("claude") and an explicit moat.yaml agent value
+	// ("claude-code").
+	IdentifiesAs(agent string) bool
+}
+
 // AgentProvider extends CredentialProvider for AI agent runtimes.
 // Implemented by claude, codex, and gemini providers.
 type AgentProvider interface {
