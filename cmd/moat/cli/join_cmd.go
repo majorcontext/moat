@@ -136,7 +136,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 		return handleJoinExecErr(manager, execErr)
 	}
 
-	return runJoinInteractive(ctx, manager, r, containerCmd, index)
+	return runJoinInteractive(ctx, manager, r, containerCmd, index, regErr == nil)
 }
 
 func handleJoinExecErr(manager *run.Manager, execErr error) error {
@@ -151,7 +151,7 @@ func handleJoinExecErr(manager *run.Manager, execErr error) error {
 	return execErr
 }
 
-func setupJoinStatusBar(manager *run.Manager, r *run.Run, index int) (*tui.Writer, func(), io.Writer) {
+func setupJoinStatusBar(manager *run.Manager, r *run.Run, session string) (*tui.Writer, func(), io.Writer) {
 	stdout := io.Writer(os.Stdout)
 	cleanup := func() {}
 	if !term.IsTerminal(os.Stdout) {
@@ -167,7 +167,7 @@ func setupJoinStatusBar(manager *run.Manager, r *run.Run, index int) (*tui.Write
 	}
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
 	bar.SetGrants(r.Grants)
-	bar.SetSession(fmt.Sprintf("joined · %d", index))
+	bar.SetSession(session)
 	bar.SetDimensions(width, height)
 	writer := tui.NewWriter(os.Stdout, bar, runtimeType)
 	if err := writer.Setup(); err != nil {
@@ -178,7 +178,34 @@ func setupJoinStatusBar(manager *run.Manager, r *run.Run, index int) (*tui.Write
 	return writer, cleanup, writer
 }
 
-func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string, index int) error {
+// resizePump forwards terminal-size updates to out until done is closed, then
+// closes out. It owns out exclusively (sole sender + closer), so callers must
+// NOT close out themselves. onWinch is called for each SIGWINCH (e.g. to resize
+// the footer + read the new size); it returns the size to forward and whether to.
+func resizePump(done <-chan struct{}, sigCh <-chan os.Signal, onWinch func() (container.TTYSize, bool), out chan<- container.TTYSize) {
+	defer close(out)
+	for {
+		select {
+		case <-done:
+			return
+		case sig, ok := <-sigCh:
+			if !ok {
+				return
+			}
+			if sig != syscall.SIGWINCH {
+				continue
+			}
+			if size, forward := onWinch(); forward {
+				select {
+				case out <- size:
+				default:
+				}
+			}
+		}
+	}
+}
+
+func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string, index int, registered bool) error {
 	// Raw mode so keystrokes reach the agent unbuffered.
 	var rawState *term.RawModeState
 	if term.IsTerminal(os.Stdin) {
@@ -192,20 +219,24 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 		}
 	}()
 
-	// Status footer: this is a joined session.
-	statusWriter, statusCleanup, stdout := setupJoinStatusBar(manager, r, index)
+	// Status footer: show index only when registration succeeded.
+	session := "joined"
+	if registered {
+		session = fmt.Sprintf("joined · %d", index)
+	}
+	statusWriter, statusCleanup, stdout := setupJoinStatusBar(manager, r, session)
 	defer statusCleanup()
 
-	// Tee join output to its own indexed log file, kept separate from the
-	// primary's logs.jsonl per the split-console design.
-	if r.Store != nil {
+	// Tee join output to its own indexed log file only when registration succeeded,
+	// kept separate from the primary's logs.jsonl per the split-console design.
+	if registered && r.Store != nil {
 		if lw, lerr := r.Store.JoinLogWriter(index); lerr == nil {
 			defer lw.Close()
 			stdout = io.MultiWriter(stdout, lw)
 		}
 	}
 
-	// Resize channel fed by SIGWINCH; closed on exit so the runtime goroutine ends.
+	// Resize channel owned by resizePump — do NOT close it here.
 	resize := make(chan container.TTYSize, 1)
 	var initialW, initialH uint
 	if term.IsTerminal(os.Stdout) {
@@ -223,23 +254,20 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
-		for sig := range sigCh {
-			if sig != syscall.SIGWINCH {
-				continue
-			}
-			if statusWriter != nil && term.IsTerminal(os.Stdout) {
-				if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
-					_ = statusWriter.Resize(w, h)
-					ch := containerTTYHeight(statusWriter, h)
-					select {
-					case resize <- container.TTYSize{Width: uint(w), Height: uint(ch)}: // #nosec G115
-					default:
-					}
-				}
-			}
+	done := make(chan struct{})
+	onWinch := func() (container.TTYSize, bool) {
+		if statusWriter == nil || !term.IsTerminal(os.Stdout) {
+			return container.TTYSize{}, false
 		}
-	}()
+		w, h := term.GetSize(os.Stdout)
+		if w <= 0 || h <= 0 {
+			return container.TTYSize{}, false
+		}
+		_ = statusWriter.Resize(w, h)
+		ch := containerTTYHeight(statusWriter, h)
+		return container.TTYSize{Width: uint(w), Height: uint(ch)}, true // #nosec G115
+	}
+	go resizePump(done, sigCh, onWinch, resize)
 
 	execErr := manager.ExecInteractive(execCtx, r.ID, command, container.ExecOptions{
 		Stdin:         os.Stdin,
@@ -250,7 +278,8 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 		InitialHeight: initialH,
 		Resize:        resize,
 	})
-	close(resize)
+	// Signal resizePump to stop; it closes resize, which unblocks the runtime side.
+	close(done)
 
 	if execErr != nil && ctx.Err() == nil {
 		var ee *container.ExecError
