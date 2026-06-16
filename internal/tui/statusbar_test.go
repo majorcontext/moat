@@ -309,6 +309,34 @@ func TestStatusBar_CtrlSlashHint(t *testing.T) {
 	t.Logf("Full width (80): %q", stripped)
 }
 
+func TestStatusBar_SessionSegment(t *testing.T) {
+	// Joined session shows "joined · N" before the run-id.
+	bar := NewStatusBar("run_123", "happy-otter", "apple")
+	bar.SetDimensions(120, 24)
+	bar.SetSession("joined · 2")
+	out := stripANSI(bar.Content())
+	if !strings.Contains(out, "joined · 2") {
+		t.Fatalf("joined session segment missing: %q", out)
+	}
+	if strings.Index(out, "joined · 2") > strings.Index(out, "run_123") {
+		t.Fatalf("session segment should appear before the run-id: %q", out)
+	}
+
+	// Primary with joins shows "+2"; primary solo shows neither.
+	primary := NewStatusBar("run_123", "happy-otter", "apple")
+	primary.SetDimensions(120, 24)
+	primary.SetJoinedCount(2)
+	if !strings.Contains(stripANSI(primary.Content()), "+2") {
+		t.Fatalf("primary +2 count missing")
+	}
+
+	solo := NewStatusBar("run_123", "happy-otter", "apple")
+	solo.SetDimensions(120, 24)
+	if strings.Contains(stripANSI(solo.Content()), "+0") {
+		t.Fatalf("solo primary should not show a +0 count")
+	}
+}
+
 func TestStatusBar_CtrlSlashHint_TruncationCascade(t *testing.T) {
 	bar := NewStatusBar("run_abc123", "my-agent", "docker")
 	bar.SetGrants([]string{"github", "aws"})
