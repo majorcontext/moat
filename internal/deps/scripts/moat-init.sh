@@ -466,11 +466,13 @@ run_pre_run_hook() {
   # pre_run hook was the cause. See issue #372.
   set +e
   if [ "$(id -u)" != "0" ]; then
-    # Already non-root, run directly
+    # Already non-root, run directly. The subshell keeps the hook's `cd` from
+    # changing the entrypoint's own working directory.
     ( cd /workspace && sh -c "$MOAT_PRE_RUN" )
     hook_status=$?
   elif id moatuser >/dev/null 2>&1; then
-    # Drop to moatuser for the hook
+    # Drop to moatuser for the hook. gosu spawns a separate process, so its
+    # `cd` can't leak into the entrypoint — no subshell needed here.
     gosu moatuser sh -c "cd /workspace && $MOAT_PRE_RUN"
     hook_status=$?
   else
