@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/tui"
 )
 
 var (
@@ -133,7 +137,92 @@ func handleJoinExecErr(manager *run.Manager, execErr error) error {
 	return execErr
 }
 
-// runJoinInteractive is implemented in Task D2.
-func runJoinInteractive(_ context.Context, _ *run.Manager, _ *run.Run, _ []string) error {
-	return fmt.Errorf("interactive join not implemented")
+// setupJoinStatusBar is a stub for Phase E (Task E2).
+// Phase E will replace this with the real footer implementation.
+func setupJoinStatusBar(_ *run.Manager, _ *run.Run, _ int) (*tui.Writer, func(), io.Writer) {
+	return nil, func() {}, os.Stdout
+}
+
+func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, command []string) error {
+	// Register this join for the display-only attached count.
+	index, release, err := manager.RegisterJoinedAgent(r.ID)
+	if err == nil {
+		defer release()
+	}
+
+	// Raw mode so keystrokes reach the agent unbuffered.
+	var rawState *term.RawModeState
+	if term.IsTerminal(os.Stdin) {
+		if rs, rErr := term.EnableRawMode(os.Stdin); rErr == nil {
+			rawState = rs
+		}
+	}
+	defer func() {
+		if rawState != nil {
+			_ = term.RestoreTerminal(rawState)
+		}
+	}()
+
+	// Status footer: this is a joined session.
+	statusWriter, statusCleanup, stdout := setupJoinStatusBar(manager, r, index)
+	defer statusCleanup()
+
+	// Resize channel fed by SIGWINCH; closed on exit so the runtime goroutine ends.
+	resize := make(chan container.TTYSize, 1)
+	var initialW, initialH uint
+	if term.IsTerminal(os.Stdout) {
+		if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
+			// Reserve the footer row.
+			ch := containerTTYHeight(statusWriter, h)
+			initialW, initialH = uint(w), uint(ch) // #nosec G115
+		}
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGWINCH)
+	defer signal.Stop(sigCh)
+
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		for sig := range sigCh {
+			if sig != syscall.SIGWINCH {
+				continue
+			}
+			if statusWriter != nil && term.IsTerminal(os.Stdout) {
+				if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
+					_ = statusWriter.Resize(w, h)
+					ch := containerTTYHeight(statusWriter, h)
+					select {
+					case resize <- container.TTYSize{Width: uint(w), Height: uint(ch)}: // #nosec G115
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	execErr := manager.ExecInteractive(execCtx, r.ID, command, container.ExecOptions{
+		Stdin:         os.Stdin,
+		Stdout:        stdout,
+		Stderr:        os.Stderr,
+		TTY:           true,
+		InitialWidth:  initialW,
+		InitialHeight: initialH,
+		Resize:        resize,
+	})
+	close(resize)
+
+	if execErr != nil && ctx.Err() == nil {
+		var ee *container.ExecError
+		if errors.As(execErr, &ee) {
+			// Agent exited non-zero; surface it but don't treat as a moat error.
+			fmt.Printf("\r\nJoined agent exited (code %d)\r\n", ee.ExitCode)
+			return nil
+		}
+		return fmt.Errorf("join failed: %w", execErr)
+	}
+	fmt.Printf("\r\nJoined agent session ended\r\n")
+	return nil
 }
