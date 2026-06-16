@@ -1752,11 +1752,17 @@ region = %s
 		baseImage = opts.Config.BaseImage
 	}
 	imageSpec := &deps.ImageSpec{
-		BaseImage:          baseImage,
-		NeedsSSH:           hasSSHGrants,
-		SSHHosts:           sshGrants,
-		InitProviders:      imgNeeds.initProviders,
-		NeedsFirewall:      needsProxyForFirewall,
+		BaseImage:     baseImage,
+		NeedsSSH:      hasSSHGrants,
+		SSHHosts:      sshGrants,
+		InitProviders: imgNeeds.initProviders,
+		NeedsFirewall: needsProxyForFirewall,
+		// hasGit also gates whether moat-init.sh is deployed, which is what sets
+		// git http.proxyAuthMethod=basic for HTTPS git through the proxy (#370).
+		// The github grant implies the git dep, so a bare `--grant github` run
+		// gets the init script via this path. Keep that chain intact when
+		// refactoring (covered by TestProvider_ImpliedDependencies +
+		// TestImageSpecNeedsInit's GitIdentity case).
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
 		NeedsClipboard:     needsClipboard,
