@@ -52,14 +52,28 @@ func (s *StatusBar) SetJoinedCount(n int) {
 	s.joinedCount = n
 }
 
-// sessionPlain returns the plain-text session segment (with a trailing space),
+// sessionBase returns the session segment text without any trailing separator,
 // or "" when there is nothing to show.
-func (s *StatusBar) sessionPlain() string {
+//
+// Rules:
+//   - s.session != "" → a joined session; returns s.session (e.g. "joined · 2"), green.
+//   - s.joinedCount > 0 → the primary with joins; returns "primary +N", red.
+//   - otherwise → solo primary; returns "" (no segment).
+func (s *StatusBar) sessionBase() string {
 	if s.session != "" {
-		return s.session + " "
+		return s.session
 	}
 	if s.joinedCount > 0 {
-		return fmt.Sprintf("+%d ", s.joinedCount)
+		return fmt.Sprintf("primary +%d", s.joinedCount)
+	}
+	return ""
+}
+
+// sessionPlain returns the plain-text session segment followed by " · " when
+// non-empty, or "" when there is nothing to show. Used for width measurement.
+func (s *StatusBar) sessionPlain() string {
+	if b := s.sessionBase(); b != "" {
+		return b + " · "
 	}
 	return ""
 }
@@ -94,6 +108,7 @@ const (
 	fgCyan     = "\x1b[36m"
 	fgGreen    = "\x1b[32m"
 	fgMagenta  = "\x1b[35m"
+	fgRed      = "\x1b[31m"
 	fgYellow   = "\x1b[33m"
 	bold       = "\x1b[1m"
 	dim        = "\x1b[2m"
@@ -226,12 +241,18 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning, sh
 	// Build right segment with styling
 	buf.WriteString(" ")
 	if showSession {
-		if seg := s.sessionPlain(); seg != "" {
-			buf.WriteString(fgGreen)
-			buf.WriteString(strings.TrimRight(seg, " "))
+		if base := s.sessionBase(); base != "" {
+			// Color: green for joined sessions, red for primary-with-joins.
+			color := fgGreen
+			if s.session == "" {
+				color = fgRed
+			}
+			buf.WriteString(color)
+			buf.WriteString(base)
 			buf.WriteString(reset)
 			buf.WriteString(bgDarkGray)
-			buf.WriteString(" ")
+			// Separator rendered in default footer style (not colored).
+			buf.WriteString(" · ")
 		}
 	}
 	if showName && s.name != "" {

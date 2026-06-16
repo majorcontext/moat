@@ -310,30 +310,84 @@ func TestStatusBar_CtrlSlashHint(t *testing.T) {
 }
 
 func TestStatusBar_SessionSegment(t *testing.T) {
-	// Joined session shows "joined · N" before the run-id.
+	// Joined session: shows "joined · N · run-id" with green color.
 	bar := NewStatusBar("run_123", "happy-otter", "apple")
 	bar.SetDimensions(120, 24)
 	bar.SetSession("joined · 2")
-	out := stripANSI(bar.Content())
+	content := bar.Content()
+	out := stripANSI(content)
 	if !strings.Contains(out, "joined · 2") {
 		t.Fatalf("joined session segment missing: %q", out)
 	}
+	// Session label must precede the run-id.
 	if strings.Index(out, "joined · 2") > strings.Index(out, "run_123") {
 		t.Fatalf("session segment should appear before the run-id: %q", out)
 	}
+	// The separator between the session label and the run-id must be " · ".
+	// Expected pattern: "joined · 2 · run_123"
+	if !strings.Contains(out, "joined · 2 · run_123") {
+		t.Fatalf("joined session segment should be followed by ' · ' before run-id: %q", out)
+	}
+	// Joined sessions use green color.
+	if !strings.Contains(content, fgGreen) {
+		t.Fatalf("joined session should be green: %q", content)
+	}
 
-	// Primary with joins shows "+2"; primary solo shows neither.
+	// Primary with joins: shows "primary +2 · run-id" with red color.
 	primary := NewStatusBar("run_123", "happy-otter", "apple")
 	primary.SetDimensions(120, 24)
 	primary.SetJoinedCount(2)
-	if !strings.Contains(stripANSI(primary.Content()), "+2") {
-		t.Fatalf("primary +2 count missing")
+	primaryContent := primary.Content()
+	primaryOut := stripANSI(primaryContent)
+	if !strings.Contains(primaryOut, "primary +2") {
+		t.Fatalf("primary +2 label missing: %q", primaryOut)
+	}
+	// Label must precede run-id.
+	if strings.Index(primaryOut, "primary +2") > strings.Index(primaryOut, "run_123") {
+		t.Fatalf("primary label should appear before the run-id: %q", primaryOut)
+	}
+	// Must have " · " separator between label and run-id.
+	if !strings.Contains(primaryOut, "primary +2 · run_123") {
+		t.Fatalf("primary label should be followed by ' · ' before run-id: %q", primaryOut)
+	}
+	// Primary-with-joins uses red color.
+	if !strings.Contains(primaryContent, fgRed) {
+		t.Fatalf("primary-with-joins should be red: %q", primaryContent)
 	}
 
+	// Solo primary: no session segment at all.
 	solo := NewStatusBar("run_123", "happy-otter", "apple")
 	solo.SetDimensions(120, 24)
-	if strings.Contains(stripANSI(solo.Content()), "+0") {
-		t.Fatalf("solo primary should not show a +0 count")
+	soloOut := stripANSI(solo.Content())
+	if strings.Contains(soloOut, "+0") {
+		t.Fatalf("solo primary should not show a +0 count: %q", soloOut)
+	}
+	if strings.Contains(soloOut, "primary") {
+		t.Fatalf("solo primary should not show 'primary' label: %q", soloOut)
+	}
+	if strings.Contains(soloOut, "joined") {
+		t.Fatalf("solo primary should not show 'joined' label: %q", soloOut)
+	}
+
+	// Width alignment: plain measurement must match visible output width.
+	for _, tc := range []struct {
+		name  string
+		setup func(*StatusBar)
+	}{
+		{"solo", func(b *StatusBar) {}},
+		{"joined", func(b *StatusBar) { b.SetSession("joined · 2") }},
+		{"primary+joins", func(b *StatusBar) { b.SetJoinedCount(2) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewStatusBar("run_123", "happy-otter", "apple")
+			b.SetDimensions(120, 24)
+			tc.setup(b)
+			stripped := stripANSI(b.Content())
+			got := len([]rune(stripped))
+			if got != 120 {
+				t.Errorf("footer width = %d, want 120: %q", got, stripped)
+			}
+		})
 	}
 }
 
