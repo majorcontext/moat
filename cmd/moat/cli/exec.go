@@ -102,7 +102,11 @@ func containerTTYHeight(statusWriter *tui.Writer, actual int) int {
 // Returns the writer (which wraps stdout with status bar compositing), a cleanup
 // function that must be deferred, and the output writer to use for container output.
 // If stdout is not a TTY or setup fails, returns nil writer with os.Stdout as output.
-func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, cleanup func(), stdout io.Writer) {
+//
+// session controls the label shown in the footer:
+//   - "" (empty): primary session — displays the joined-agent count badge instead.
+//   - non-empty: joined session — displays the given label (e.g. "joined · 2").
+func setupStatusBar(manager *run.Manager, r *run.Run, session string) (writer *tui.Writer, cleanup func(), stdout io.Writer) {
 	stdout = os.Stdout
 	cleanup = func() {} // no-op by default
 
@@ -121,9 +125,13 @@ func setupStatusBar(manager *run.Manager, r *run.Run) (writer *tui.Writer, clean
 	}
 	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
 	bar.SetGrants(r.Grants)
-	bar.SetJoinedCount(manager.AttachedCount(r.ID))
-	if r.DaemonCommit != "" && r.DaemonCommit != commit {
-		bar.SetWarning("proxy stale")
+	if session != "" {
+		bar.SetSession(session)
+	} else {
+		bar.SetJoinedCount(manager.AttachedCount(r.ID))
+		if r.DaemonCommit != "" && r.DaemonCommit != commit {
+			bar.SetWarning("proxy stale")
+		}
 	}
 	bar.SetDimensions(width, height)
 	writer = tui.NewWriter(os.Stdout, bar, runtimeType)
@@ -420,7 +428,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	}()
 
 	// Set up status bar for interactive session
-	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r)
+	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r, "")
 	defer statusCleanup()
 
 	// Wrap stdout with tracer if tracing is enabled

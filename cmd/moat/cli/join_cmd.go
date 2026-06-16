@@ -17,7 +17,6 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
-	"github.com/majorcontext/moat/internal/tui"
 )
 
 var (
@@ -128,69 +127,51 @@ func runJoin(cmd *cobra.Command, args []string) error {
 
 	// Register this join for the display-only attached count. Both interactive
 	// and headless paths need an index so console output lands in logs.<N>.jsonl.
+	// Do NOT defer release here — we call it explicitly before exitWithExecError
+	// so registry cleanup runs even when the agent exits with a non-zero code.
 	index, release, regErr := manager.RegisterJoinedAgent(runID)
-	if regErr == nil {
-		defer release()
-	}
 
+	var execErr error
 	// Headless (--prompt with no TTY) vs interactive.
 	if joinPrompt != "" || !term.IsTerminal(os.Stdin) || !term.IsTerminal(os.Stdout) {
-		var headlessOut io.Writer = os.Stdout
-		if regErr == nil && r.Store != nil {
-			if lw, lerr := r.Store.JoinLogWriter(index); lerr == nil {
-				defer lw.Close()
-				headlessOut = io.MultiWriter(os.Stdout, lw)
-			}
+		execErr = runJoinHeadless(ctx, manager, r, containerCmd, index, regErr == nil)
+	} else {
+		execErr = runJoinInteractive(ctx, manager, r, containerCmd, index, regErr == nil)
+	}
+
+	// Explicit cleanup before a possible os.Exit so the registry entry is
+	// released and lw.Close() (inside the helpers) has already run.
+	if regErr == nil {
+		release()
+	}
+
+	return exitWithExecError(manager, execErr)
+}
+
+// runJoinHeadless runs the joined agent without a TTY, forwarding piped stdin
+// when available. lw.Close() runs as the function returns, before runJoin
+// calls exitWithExecError, so log flushing precedes any os.Exit.
+func runJoinHeadless(ctx context.Context, manager *run.Manager, r *run.Run, command []string, index int, registered bool) error {
+	var out io.Writer = os.Stdout
+	if registered && r.Store != nil {
+		if lw, lerr := r.Store.JoinLogWriter(index); lerr == nil {
+			defer lw.Close()
+			out = io.MultiWriter(os.Stdout, lw)
 		}
-		execErr := manager.ExecInteractive(ctx, runID, containerCmd, container.ExecOptions{
-			Stdin:  nil,
-			Stdout: headlessOut,
-			Stderr: os.Stderr,
-			TTY:    false,
-		})
-		return handleJoinExecErr(manager, execErr)
 	}
 
-	return runJoinInteractive(ctx, manager, r, containerCmd, index, regErr == nil)
-}
+	// Forward piped stdin so "echo ... | moat join <run> claude" works.
+	var stdin io.Reader
+	if !term.IsTerminal(os.Stdin) {
+		stdin = os.Stdin
+	}
 
-func handleJoinExecErr(manager *run.Manager, execErr error) error {
-	if execErr == nil {
-		return nil
-	}
-	var ee *container.ExecError
-	if errors.As(execErr, &ee) {
-		manager.Close()
-		os.Exit(ee.ExitCode)
-	}
-	return execErr
-}
-
-func setupJoinStatusBar(manager *run.Manager, r *run.Run, session string) (*tui.Writer, func(), io.Writer) {
-	stdout := io.Writer(os.Stdout)
-	cleanup := func() {}
-	if !term.IsTerminal(os.Stdout) {
-		return nil, cleanup, stdout
-	}
-	width, height := term.GetSize(os.Stdout)
-	if width <= 0 || height <= 0 {
-		return nil, cleanup, stdout
-	}
-	runtimeType := r.Runtime
-	if runtimeType == "" {
-		runtimeType = manager.RuntimeType()
-	}
-	bar := tui.NewStatusBar(r.ID, r.Name, runtimeType)
-	bar.SetGrants(r.Grants)
-	bar.SetSession(session)
-	bar.SetDimensions(width, height)
-	writer := tui.NewWriter(os.Stdout, bar, runtimeType)
-	if err := writer.Setup(); err != nil {
-		return nil, cleanup, os.Stdout
-	}
-	_ = os.Stdout.Sync()
-	cleanup = func() { _ = writer.Cleanup() }
-	return writer, cleanup, writer
+	return manager.ExecInteractive(ctx, r.ID, command, container.ExecOptions{
+		Stdin:  stdin,
+		Stdout: out,
+		Stderr: os.Stderr,
+		TTY:    false,
+	})
 }
 
 // resizePump forwards terminal-size updates to out until done is closed, then
@@ -239,7 +220,7 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	if registered {
 		session = fmt.Sprintf("joined · %d", index)
 	}
-	statusWriter, statusCleanup, stdout := setupJoinStatusBar(manager, r, session)
+	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r, session)
 	defer statusCleanup()
 
 	// Tee join output to its own indexed log file only when registration succeeded,
@@ -314,12 +295,13 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 
 	// A canceled execCtx means we were signaled to terminate (above) — not a
 	// failure; fall through to the clean exit so the terminal is restored.
+	// Deferred RestoreTerminal and statusCleanup run before returning, ensuring
+	// the terminal is in a good state before runJoin calls exitWithExecError.
 	if execErr != nil && ctx.Err() == nil && !errors.Is(execErr, context.Canceled) {
 		var ee *container.ExecError
 		if errors.As(execErr, &ee) {
-			// Agent exited non-zero; surface it but don't treat as a moat error.
-			fmt.Printf("\r\nJoined agent exited (code %d)\r\n", ee.ExitCode)
-			return nil
+			// Return the ExecError so runJoin can propagate the exit code.
+			return ee
 		}
 		return fmt.Errorf("join failed: %w", execErr)
 	}
