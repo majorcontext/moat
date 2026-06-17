@@ -13,6 +13,7 @@ func TestLookupServerURL(t *testing.T) {
 		{"hubspot", "https://mcp.hubspot.com"},
 		{"stripe", "https://mcp.stripe.com"},
 		{"asana", "https://mcp.asana.com/mcp"},
+		{"posthog", "https://mcp.posthog.com/mcp"},
 		{"nonexistent", ""},
 	}
 	for _, tt := range tests {

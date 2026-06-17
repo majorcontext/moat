@@ -30,8 +30,8 @@ var grantOAuthCmd = &cobra.Command{
 Opens a browser for OAuth authorization and stores the token securely.
 Supports automatic discovery for MCP servers that implement OAuth metadata.
 
-Well-known services (asana, cloudflare, hubspot, linear, notion, stripe)
-are auto-discovered without needing --url or a config file.
+Well-known services (asana, cloudflare, hubspot, linear, notion, posthog,
+stripe) are auto-discovered without needing --url or a config file.
 
 Examples:
   # Auto-discover a well-known service
@@ -177,7 +177,7 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 		serverURL = "<server-url>"
 	}
 	fmt.Printf("\nUse in moat.yaml:\n\n")
-	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n\n", name, name, serverURL, name)
+	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n      header: Authorization\n\n", name, name, serverURL, name)
 
 	return nil
 }
