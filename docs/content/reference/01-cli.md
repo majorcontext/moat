@@ -1379,6 +1379,16 @@ Show daemon status: PID, proxy port, uptime, active run count, and registered ro
 moat proxy status
 ```
 
+### moat proxy restart
+
+Stop the running proxy daemon and start a fresh one from the current binary. Use this to adopt a newer `moat` binary without waiting for the idle timeout.
+
+The restart holds the daemon spawn lock across the entire stop and start sequence. Health monitors from active runs block on that lock until the new daemon is healthy, so an active run cannot resurrect the old daemon in the gap. The proxy port is preserved so existing containers keep working.
+
+```
+moat proxy restart
+```
+
 ---
 
 ## moat deps

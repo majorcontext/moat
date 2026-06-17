@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 const lockFileName = "daemon.lock"
@@ -84,8 +86,6 @@ func RemoveLockFile(dir string) {
 // An advisory file lock serializes the check-and-spawn sequence so concurrent
 // callers don't each spawn a separate daemon process.
 func EnsureRunning(dir string, proxyPort int) (*Client, error) {
-	sockPath := filepath.Join(dir, "daemon.sock")
-
 	// Ensure the directory exists before taking the spawn lock.
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("creating daemon directory: %w", err)
@@ -114,16 +114,52 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 		_, healthErr := client.Health(healthCtx)
 		healthCancel()
 		if healthErr == nil {
+			// A healthy daemon exists. Decide whether to adopt the caller's
+			// version by comparing the daemon's recorded commit against the
+			// caller's BuildCommit. This is deliberately conservative: it only
+			// restarts when BOTH commits are known and differ (see
+			// shouldAdoptVersion). This lets a newer CLI replace a stale daemon
+			// (e.g. one with an outdated MCP relay) instead of being stuck
+			// behind it forever, while dev builds (commit "none"/empty) never
+			// thrash because they can't be compared.
+			if shouldAdoptVersion(lock.Commit, BuildCommit) {
+				log.Warn("proxy daemon commit differs from caller; restarting to adopt caller version",
+					"daemon_commit", lock.Commit, "caller_commit", BuildCommit)
+				// Restart under the spawn lock we already hold. restartLocked
+				// requests shutdown of the existing daemon, waits for the
+				// process to exit, then spawns a fresh one from this binary.
+				newClient, restartErr := restartLocked(dir, proxyPort, lock)
+				if restartErr != nil {
+					// Adoption failed — keep the existing healthy daemon rather
+					// than leaving callers with no proxy at all.
+					log.Warn("failed to restart daemon for version adoption; keeping existing daemon",
+						"error", restartErr)
+					return client, nil
+				}
+				return newClient, nil
+			}
 			return client, nil
 		}
 		// Daemon is unresponsive — fall through to respawn.
 	}
 
-	// Preserve proxy port from stale daemon for container continuity.
+	// No healthy daemon. Clean up any stale state and spawn a fresh one.
+	return spawnDaemon(dir, proxyPort, lock)
+}
+
+// spawnDaemon cleans up any stale daemon state, resolves the moat executable,
+// starts a new daemon process via self-exec, and waits until it reports healthy.
+// The caller MUST hold the spawn lock. The optional prev argument is the lock
+// info of a daemon being replaced; its proxy port is preserved for container
+// continuity and its stale lock/socket files are removed.
+func spawnDaemon(dir string, proxyPort int, prev *LockInfo) (*Client, error) {
+	sockPath := filepath.Join(dir, "daemon.sock")
+
+	// Preserve proxy port from the previous daemon for container continuity.
 	// Existing containers have HTTP_PROXY set to this port, so reusing
 	// it avoids breaking their network after the daemon restarts.
-	if proxyPort == 0 && lock != nil && lock.ProxyPort > 0 {
-		proxyPort = lock.ProxyPort
+	if proxyPort == 0 && prev != nil && prev.ProxyPort > 0 {
+		proxyPort = prev.ProxyPort
 	}
 
 	// Fall back to the default daemon proxy port. Using a fixed port
@@ -133,9 +169,9 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 
 	// Clean up stale state.
-	if lock != nil {
+	if prev != nil {
 		RemoveLockFile(dir)
-		os.Remove(lock.SockPath)
+		os.Remove(prev.SockPath)
 	}
 
 	// Resolve the daemon executable.
@@ -203,6 +239,118 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	}
 
 	return nil, fmt.Errorf("daemon did not start within 5 seconds")
+}
+
+// shouldAdoptVersion reports whether a healthy daemon running daemonCommit
+// should be restarted so the caller's callerCommit version takes over.
+//
+// It is intentionally conservative: adoption happens ONLY when both commits
+// are "known" (non-empty AND not the dev-build sentinel "none") and they
+// differ. If either side is unknown we cannot meaningfully compare versions,
+// so we keep the existing daemon to avoid restart thrashing between builds
+// that all report "none".
+func shouldAdoptVersion(daemonCommit, callerCommit string) bool {
+	if !commitKnown(daemonCommit) || !commitKnown(callerCommit) {
+		return false
+	}
+	return daemonCommit != callerCommit
+}
+
+// commitKnown reports whether a recorded commit string identifies a specific
+// build. Empty strings and the "none" sentinel (used by plain dev builds)
+// are treated as unknown.
+func commitKnown(commit string) bool {
+	return commit != "" && commit != "none"
+}
+
+// Restart atomically replaces the running daemon with a fresh one spawned from
+// the current binary. It holds the daemon spawn lock across the entire
+// stop→start sequence so concurrent EnsureRunning callers (e.g. health
+// monitors) block until the new daemon is up, then observe it healthy and do
+// nothing — closing the window where a stopped daemon could be resurrected by
+// an old binary.
+func Restart(dir string, proxyPort int) (*Client, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("creating daemon directory: %w", err)
+	}
+
+	unlock, err := acquireSpawnLock(dir)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring daemon spawn lock: %w", err)
+	}
+	defer unlock()
+
+	lock, err := ReadLockFile(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading daemon lock: %w", err)
+	}
+
+	return restartLocked(dir, proxyPort, lock)
+}
+
+// restartLocked stops any existing daemon described by prev (waiting for the
+// process to actually exit) and spawns a fresh one. The caller MUST hold the
+// spawn lock.
+func restartLocked(dir string, proxyPort int, prev *LockInfo) (*Client, error) {
+	if prev != nil {
+		stopDaemon(dir, prev)
+	}
+	return spawnDaemon(dir, proxyPort, prev)
+}
+
+// stopDaemon requests a graceful shutdown of the daemon described by lock and
+// waits for the process to actually exit, escalating from a shutdown request to
+// SIGTERM and finally SIGKILL. The caller MUST hold the spawn lock so no
+// concurrent spawn can race the shutdown.
+func stopDaemon(dir string, lock *LockInfo) {
+	// Ask the daemon to shut down cleanly via its API.
+	client := NewClient(lock.SockPath)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = client.Shutdown(shutdownCtx)
+	shutdownCancel()
+
+	// Wait for the process to exit, escalating if it lingers.
+	if waitForExit(lock.PID, 5*time.Second) {
+		cleanupDaemonFiles(dir, lock)
+		return
+	}
+
+	// Still alive — send SIGTERM.
+	if proc, err := os.FindProcess(lock.PID); err == nil {
+		_ = proc.Signal(syscall.SIGTERM)
+	}
+	if waitForExit(lock.PID, 3*time.Second) {
+		cleanupDaemonFiles(dir, lock)
+		return
+	}
+
+	// Last resort — SIGKILL.
+	log.Warn("daemon did not exit after SIGTERM; sending SIGKILL", "pid", lock.PID)
+	if proc, err := os.FindProcess(lock.PID); err == nil {
+		_ = proc.Signal(syscall.SIGKILL)
+	}
+	_ = waitForExit(lock.PID, 3*time.Second)
+	cleanupDaemonFiles(dir, lock)
+}
+
+// cleanupDaemonFiles removes the lock file and socket left by a stopped daemon.
+func cleanupDaemonFiles(dir string, lock *LockInfo) {
+	RemoveLockFile(dir)
+	os.Remove(lock.SockPath)
+}
+
+// waitForExit polls until the process with the given PID is no longer alive or
+// the timeout elapses. Returns true if the process exited within the timeout.
+func waitForExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	info := &LockInfo{PID: pid}
+	for time.Now().Before(deadline) {
+		if !info.IsAlive() {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return !info.IsAlive()
 }
 
 // acquireSpawnLock takes an advisory file lock (flock) to serialize daemon

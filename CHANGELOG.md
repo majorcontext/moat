@@ -8,6 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Added
 
+- **`moat proxy restart`** — stop the running proxy daemon and start a fresh one from the current binary, holding the daemon spawn lock across the entire stop and start so an active run's health monitor can't resurrect the old daemon in the gap. `EnsureRunning` now also adopts the caller's version automatically: when a healthy daemon's recorded commit and the caller's build commit are both known and differ, it restarts to the caller's version (dev builds reporting `none`/empty are left alone to avoid thrashing). This lets a newer CLI replace a stale daemon — e.g. one with an outdated MCP relay — without waiting for the idle timeout. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 - **Declarative MCP shorthand** — list a well-known MCP server in `moat.yaml` by name alone (a bare `- linear` under `mcp:`), and Moat resolves the URL, auth header, and required grant from its built-in catalog. The map form (`- name: linear`) still works for attaching a policy or overriding fields, and unknown servers still take an explicit `url` + `auth`. `moat grant oauth` now prints this shorthand. ([#383](https://github.com/majorcontext/moat/pull/383))
 - **`moat join`** — launch a second agent inside an already-running container,
   reusing its workspace, grants, and credentials without a new container. v1

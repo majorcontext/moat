@@ -55,10 +55,23 @@ var proxyStatusCmd = &cobra.Command{
 	RunE:  statusProxy,
 }
 
+var proxyRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the proxy daemon",
+	Long: `Stop the running proxy daemon and start a fresh one from the current binary.
+
+The restart holds the daemon spawn lock across the entire stop->start sequence,
+so concurrent health monitors (from active runs) block until the new daemon is
+up rather than resurrecting the old one. Use this to adopt a newer moat binary
+without waiting for the idle timeout.`,
+	RunE: restartProxy,
+}
+
 func init() {
 	proxyCmd.AddCommand(proxyStartCmd)
 	proxyCmd.AddCommand(proxyStopCmd)
 	proxyCmd.AddCommand(proxyStatusCmd)
+	proxyCmd.AddCommand(proxyRestartCmd)
 	rootCmd.AddCommand(proxyCmd)
 }
 
@@ -98,6 +111,24 @@ func stopProxy(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println("Daemon shutdown requested")
+	return nil
+}
+
+func restartProxy(_ *cobra.Command, _ []string) error {
+	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+	// Port 0 preserves the existing proxy port (for container continuity)
+	// or falls back to the daemon default.
+	client, err := daemon.Restart(proxyDir, 0)
+	if err != nil {
+		return err
+	}
+	healthCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	health, err := client.Health(healthCtx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Proxy restarted on port %d (pid %d)\n", health.ProxyPort, health.PID)
 	return nil
 }
 
