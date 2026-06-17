@@ -53,10 +53,12 @@ func credentialRejectionHints(reqs []storage.NetworkRequest, grants []string) []
 	return hints
 }
 
-// hasUnrecoveredRejection reports whether any of hosts had a 401/403 rejection
-// with no successful (2xx) request to that same host — i.e. a rejection that was
-// not recovered. A host that returned both a rejection and a success is treated
-// as recovered and does not flag.
+// hasUnrecoveredRejection reports whether any of hosts ended on a 401/403
+// rejection that was not followed by a successful (2xx) request to that same
+// host. Requests are processed in chronological order (network.jsonl is appended
+// as requests complete): a later rejection un-recovers an earlier success, and a
+// later success recovers an earlier rejection. So [200, 401] flags (the auth
+// failure came last) while [401, 200] and [200, 401, 200] do not.
 func hasUnrecoveredRejection(reqs []storage.NetworkRequest, hosts []string) bool {
 	rejected := make(map[string]bool)
 	succeeded := make(map[string]bool)
@@ -68,6 +70,7 @@ func hasUnrecoveredRejection(reqs []storage.NetworkRequest, hosts []string) bool
 		switch {
 		case req.StatusCode == 401 || req.StatusCode == 403:
 			rejected[host] = true
+			delete(succeeded, host) // a later rejection un-recovers a prior success
 		case req.StatusCode >= 200 && req.StatusCode < 300:
 			succeeded[host] = true
 		}

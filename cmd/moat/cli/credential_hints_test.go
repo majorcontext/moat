@@ -28,6 +28,18 @@ func TestCredentialRejectionHints(t *testing.T) {
 		{URL: "https://api.github.com/repos/o/r", StatusCode: 403},
 		{URL: "https://github.com/o/r.git/info/refs", StatusCode: 200},
 	}
+	// A success BEFORE the rejection (e.g. fetch a public page, then push with an
+	// expired token): the auth failure came last, so it is NOT recovered.
+	successThenReject := []storage.NetworkRequest{
+		{URL: "https://github.com/public/repo", StatusCode: 200},
+		{URL: "https://github.com/public/repo.git/git-receive-pack", StatusCode: 401},
+	}
+	// Reject sandwiched by successes: the final success recovers it.
+	rejectSandwiched := []storage.NetworkRequest{
+		{URL: "https://github.com/o/r", StatusCode: 200},
+		{URL: "https://github.com/o/r.git/info/refs", StatusCode: 401},
+		{URL: "https://github.com/o/r.git/info/refs", StatusCode: 200},
+	}
 
 	tests := []struct {
 		name      string
@@ -41,6 +53,8 @@ func TestCredentialRejectionHints(t *testing.T) {
 		{name: "github 401 but github not granted", reqs: gh401, grants: []string{"anthropic"}, wantHint: false},
 		{name: "github 200 success", reqs: ok, grants: []string{"github"}, wantHint: false},
 		{name: "github 401 then 200 on same host is recovered", reqs: recovered, grants: []string{"github"}, wantHint: false},
+		{name: "200 then 401 on same host is not recovered", reqs: successThenReject, grants: []string{"github"}, wantHint: true, wantGrant: "moat grant github"},
+		{name: "200, 401, 200 on same host is recovered", reqs: rejectSandwiched, grants: []string{"github"}, wantHint: false},
 		{name: "api 403 unrecovered while git succeeded", reqs: apiRejectedGitOK, grants: []string{"github"}, wantHint: true, wantGrant: "moat grant github"},
 		{name: "no requests", reqs: nil, grants: []string{"github"}, wantHint: false},
 	}
