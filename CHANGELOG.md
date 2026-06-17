@@ -13,6 +13,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
   supports same-agent joins (e.g. joining claude into a `moat claude` run). The
   status footer shows the session role and joined-agent count.
   ([#379](https://github.com/majorcontext/moat/pull/379))
+- **PostHog OAuth shortcut** — `moat grant oauth posthog` now auto-discovers OAuth endpoints from PostHog's MCP server (`https://mcp.posthog.com/mcp`) without needing `--url` or a config file, matching the other well-known services (asana, cloudflare, hubspot, linear, notion, stripe). ([#382](https://github.com/majorcontext/moat/pull/382))
 - **Ministack service** — `ministack` is now available as a `service` dependency, running the LocalStack-compatible Ministack local cloud emulator as a sidecar container. Declare `ministack` under `dependencies` and configure it under `services.ministack` (e.g. `env`, `wait`). Readiness is probed against the container's `/_ministack/health` endpoint. ([#366](https://github.com/majorcontext/moat/pull/366))
 
 ### Fixed
