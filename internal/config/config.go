@@ -150,6 +150,19 @@ type MCPServerConfig struct {
 	Policy *keep.PolicyConfig `yaml:"policy,omitempty"`
 }
 
+// UnmarshalYAML lets an mcp[] entry be either a bare service name (string) or a
+// full mapping. A bare string resolves its url/auth from the well-known catalog
+// during config load (see resolveMCPShorthand).
+func (m *MCPServerConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&m.Name)
+	}
+	// Use an alias to decode the mapping without recursing into this method,
+	// while preserving the nested unmarshalers for Auth and Policy.
+	type alias MCPServerConfig
+	return node.Decode((*alias)(m))
+}
+
 // MCPAuthConfig defines authentication for an MCP server. It specifies which
 // grant credential to use and which HTTP header to inject it into when
 // proxying requests to the MCP server.
