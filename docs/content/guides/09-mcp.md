@@ -454,7 +454,6 @@ URL and auth from the catalog:
 mcp:
   - linear
   - notion
-  - posthog
 ```
 
 This is equivalent to the full form above. To attach a [policy](#policies) or
