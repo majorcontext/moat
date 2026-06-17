@@ -86,6 +86,26 @@ func TestResolveMCPShorthand_UnknownNameErrors(t *testing.T) {
 	}
 }
 
+func TestResolveMCPShorthand_PartialAuthMerged(t *testing.T) {
+	// An explicit auth block with only header set: the omitted grant should be
+	// filled from the catalog, the explicit header preserved.
+	src := "mcp:\n  - name: linear\n    auth:\n      header: X-Custom\n"
+	cfg, err := loadConfigFromString(t, src)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	m := cfg.MCP[0]
+	if m.Auth == nil || m.Auth.Header != "X-Custom" {
+		t.Errorf("explicit header not preserved: %+v", m.Auth)
+	}
+	if m.Auth == nil || m.Auth.Grant != "oauth:linear" {
+		t.Errorf("omitted grant not filled from catalog: %+v", m.Auth)
+	}
+	if m.URL != "https://mcp.linear.app/mcp" {
+		t.Errorf("url not resolved: %q", m.URL)
+	}
+}
+
 func TestResolveMCPShorthand_CustomFullEntryUntouched(t *testing.T) {
 	src := "mcp:\n  - name: acme\n    url: https://mcp.acme.com/mcp\n    auth:\n      grant: oauth:acme\n      header: Authorization\n"
 	cfg, err := loadConfigFromString(t, src)
