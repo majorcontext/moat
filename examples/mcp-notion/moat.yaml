@@ -25,4 +25,6 @@ command: ["claude"]
 interactive: true
 
 mcp:
+  - linear
+  - posthog
   - notion

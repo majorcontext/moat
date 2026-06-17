@@ -1999,7 +1999,7 @@ region = %s
 			// the container cannot reach directly.
 			mcpServers := make(map[string]provider.MCPServerConfig)
 			if opts.Config != nil && len(opts.Config.MCP) > 0 {
-				proxyAddr := fmt.Sprintf("%s:%d", m.defaultRuntime().GetHostAddress(), r.ProxyPort)
+				proxyAddr := fmt.Sprintf("%s:%d", syntheticProxyHost, r.ProxyPort) // moat-proxy is in NO_PROXY → direct connect → proxy strips token via handleDirectMCPRelay (GetHostAddress would route through the tunnel → 404)
 				for _, mcp := range opts.Config.MCP {
 					relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
 					mcpCfg := provider.MCPServerConfig{
