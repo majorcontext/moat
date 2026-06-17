@@ -122,13 +122,22 @@ func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 			// (e.g. one with an outdated MCP relay) instead of being stuck
 			// behind it forever, while dev builds (commit "none"/empty) never
 			// thrash because they can't be compared.
+			//
+			// Known limitation: if two *production* binaries with different
+			// commits are installed side-by-side and both have active runs,
+			// their health monitors will flip-flop restarting the daemon — each
+			// EnsureRunning sees the other version and adopts its own.
+			// shouldAdoptVersion only suppresses the dev-build ("none"/empty)
+			// case; it does not prevent two-known-version flip-flop. We accept
+			// this rather than tracking a "preferred" version, since mixed
+			// production installs sharing one daemon dir are not expected.
 			if shouldAdoptVersion(lock.Commit, BuildCommit) {
-				log.Warn("proxy daemon commit differs from caller; restarting to adopt caller version",
+				log.Warn("version adoption: proxy daemon commit differs from caller; restarting daemon to adopt caller version",
 					"daemon_commit", lock.Commit, "caller_commit", BuildCommit)
 				// Restart under the spawn lock we already hold. restartLocked
 				// requests shutdown of the existing daemon, waits for the
 				// process to exit, then spawns a fresh one from this binary.
-				newClient, restartErr := restartLocked(dir, proxyPort, lock)
+				newClient, _, restartErr := restartLocked(dir, proxyPort, lock)
 				if restartErr != nil {
 					// Adoption failed — keep the existing healthy daemon rather
 					// than leaving callers with no proxy at all.
@@ -269,20 +278,23 @@ func commitKnown(commit string) bool {
 // monitors) block until the new daemon is up, then observe it healthy and do
 // nothing — closing the window where a stopped daemon could be resurrected by
 // an old binary.
-func Restart(dir string, proxyPort int) (*Client, error) {
+//
+// The returned bool reports whether an existing daemon was stopped (true) or
+// nothing was running and a fresh daemon was simply started (false).
+func Restart(dir string, proxyPort int) (*Client, bool, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("creating daemon directory: %w", err)
+		return nil, false, fmt.Errorf("creating daemon directory: %w", err)
 	}
 
 	unlock, err := acquireSpawnLock(dir)
 	if err != nil {
-		return nil, fmt.Errorf("acquiring daemon spawn lock: %w", err)
+		return nil, false, fmt.Errorf("acquiring daemon spawn lock: %w", err)
 	}
 	defer unlock()
 
 	lock, err := ReadLockFile(dir)
 	if err != nil {
-		return nil, fmt.Errorf("reading daemon lock: %w", err)
+		return nil, false, fmt.Errorf("reading daemon lock: %w", err)
 	}
 
 	return restartLocked(dir, proxyPort, lock)
@@ -290,12 +302,21 @@ func Restart(dir string, proxyPort int) (*Client, error) {
 
 // restartLocked stops any existing daemon described by prev (waiting for the
 // process to actually exit) and spawns a fresh one. The caller MUST hold the
-// spawn lock.
-func restartLocked(dir string, proxyPort int, prev *LockInfo) (*Client, error) {
-	if prev != nil {
+// spawn lock. The returned bool reports whether a previous daemon was stopped.
+func restartLocked(dir string, proxyPort int, prev *LockInfo) (*Client, bool, error) {
+	stopped := prev != nil
+	if stopped {
+		// Preserve the previous daemon's proxy port for container continuity
+		// before stopDaemon removes its lock file.
+		if proxyPort == 0 && prev.ProxyPort > 0 {
+			proxyPort = prev.ProxyPort
+		}
+		// stopDaemon already removes the previous lock file and socket, so pass
+		// nil as prev below to avoid a redundant (and misleading) second cleanup.
 		stopDaemon(dir, prev)
 	}
-	return spawnDaemon(dir, proxyPort, prev)
+	client, err := spawnDaemon(dir, proxyPort, nil)
+	return client, stopped, err
 }
 
 // stopDaemon requests a graceful shutdown of the daemon described by lock and
@@ -306,8 +327,8 @@ func stopDaemon(dir string, lock *LockInfo) {
 	// Ask the daemon to shut down cleanly via its API.
 	client := NewClient(lock.SockPath)
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer shutdownCancel()
 	_ = client.Shutdown(shutdownCtx)
-	shutdownCancel()
 
 	// Wait for the process to exit, escalating if it lingers.
 	if waitForExit(lock.PID, 5*time.Second) {
@@ -329,7 +350,13 @@ func stopDaemon(dir string, lock *LockInfo) {
 	if proc, err := os.FindProcess(lock.PID); err == nil {
 		_ = proc.Signal(syscall.SIGKILL)
 	}
-	_ = waitForExit(lock.PID, 3*time.Second)
+	if !waitForExit(lock.PID, 3*time.Second) {
+		// Even SIGKILL didn't take within the window (e.g. the process is
+		// stuck in uninterruptible sleep). Proceed anyway: the spawn lock is
+		// held, so at worst a zombie lingers; spawning a fresh daemon is the
+		// priority over blocking the caller indefinitely.
+		log.Warn("daemon did not exit after SIGKILL; proceeding anyway", "pid", lock.PID)
+	}
 	cleanupDaemonFiles(dir, lock)
 }
 
@@ -339,18 +366,26 @@ func cleanupDaemonFiles(dir string, lock *LockInfo) {
 	os.Remove(lock.SockPath)
 }
 
+// processAlive reports whether the process with the given PID is still running.
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
 // waitForExit polls until the process with the given PID is no longer alive or
 // the timeout elapses. Returns true if the process exited within the timeout.
 func waitForExit(pid int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
-	info := &LockInfo{PID: pid}
 	for time.Now().Before(deadline) {
-		if !info.IsAlive() {
+		if !processAlive(pid) {
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return !info.IsAlive()
+	return !processAlive(pid)
 }
 
 // acquireSpawnLock takes an advisory file lock (flock) to serialize daemon

@@ -118,7 +118,7 @@ func restartProxy(_ *cobra.Command, _ []string) error {
 	proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
 	// Port 0 preserves the existing proxy port (for container continuity)
 	// or falls back to the daemon default.
-	client, err := daemon.Restart(proxyDir, 0)
+	client, stopped, err := daemon.Restart(proxyDir, 0)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,11 @@ func restartProxy(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Proxy restarted on port %d (pid %d)\n", health.ProxyPort, health.PID)
+	verb := "started"
+	if stopped {
+		verb = "restarted"
+	}
+	fmt.Printf("Proxy %s on port %d (pid %d)\n", verb, health.ProxyPort, health.PID)
 	return nil
 }
 
