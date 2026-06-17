@@ -145,14 +145,27 @@ func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome stri
 	return nil, "", nil
 }
 
-// CanRefresh reports whether this credential can be refreshed.
-// Returns false for static credentials (PATs) and legacy credentials without metadata.
+// CanRefresh reports whether this credential can be proactively refreshed by the
+// daemon's background loop.
+//
+// Only SourceCLI (`gh auth token`) qualifies. The gh keyring is shared state that
+// `moat grant github` itself reads, so the daemon re-deriving from it never
+// diverges from a re-grant, and it lets long runs follow gh's own token rotation.
+//
+// SourceEnv is intentionally excluded: that token came from the granting shell's
+// GITHUB_TOKEN/GH_TOKEN, but the daemon outlives the CLI and its process env is
+// frozen at spawn. Re-deriving from the daemon's env can only ever return a value
+// that is stale relative to a subsequent `moat grant`, silently clobbering the
+// fresh credential (#373). Env-sourced tokens are therefore treated as static;
+// staleness surfaces as a 401 with a re-grant hint instead.
+//
+// Static credentials (PATs) and legacy credentials without metadata also return
+// false.
 func (p *Provider) CanRefresh(cred *provider.Credential) bool {
 	if cred.Metadata == nil {
 		return false
 	}
-	source := cred.Metadata[provider.MetaKeyTokenSource]
-	return source == SourceCLI || source == SourceEnv
+	return cred.Metadata[provider.MetaKeyTokenSource] == SourceCLI
 }
 
 // RefreshInterval returns how often to attempt refresh.
