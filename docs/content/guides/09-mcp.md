@@ -470,6 +470,60 @@ Run `moat grant oauth <name>` once to authorize; the credential is stored and
 injected at run time. Servers not in the catalog still require the full
 `url` + `auth` form.
 
+### Langfuse
+
+Langfuse uses HTTP Basic auth rather than OAuth. Four regional shortcuts are
+available (`langfuse-eu`, `langfuse-us`, `langfuse-jp`, `langfuse-hipaa`); pick
+the one that matches your Langfuse project.
+
+**1. Build the credential**
+
+Langfuse's API key is a public/secret key pair. Encode it as a Basic auth header:
+
+```bash
+echo -n "pk-lf-your-public-key:sk-lf-your-secret-key" | base64
+```
+
+Prefix the output with `Basic ` (with a space). The full value looks like
+`Basic cGstbGYtLi4uOnNrLWxmLS4uLg==`.
+
+**2. Grant the credential**
+
+```bash
+moat grant mcp langfuse
+Credential: Basic <paste the value from step 1>
+```
+
+The grant name is `mcp-langfuse`. All four regional shortcuts share this grant,
+so you only need to run this once.
+
+**3. Configure in moat.yaml**
+
+```yaml
+mcp:
+  - langfuse-us   # or langfuse-eu / langfuse-jp / langfuse-hipaa
+```
+
+Available shorthand names and their hosts:
+
+| Name | Host |
+|------|------|
+| `langfuse-eu` | cloud.langfuse.com |
+| `langfuse-us` | us.cloud.langfuse.com |
+| `langfuse-jp` | jp.cloud.langfuse.com |
+| `langfuse-hipaa` | hipaa.cloud.langfuse.com |
+
+For a self-hosted Langfuse instance, use the full map form:
+
+```yaml
+mcp:
+  - name: langfuse
+    url: https://langfuse.internal.acme.com/api/public/mcp
+    auth:
+      grant: mcp-langfuse
+      header: Authorization
+```
+
 ### Token refresh
 
 OAuth tokens are auto-refreshed during runs. When a token expires, the proxy uses the stored refresh token to obtain a new access token without interrupting the agent.

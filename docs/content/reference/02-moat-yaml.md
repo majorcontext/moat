@@ -1321,9 +1321,32 @@ MCP servers running on the host machine (e.g., `http://localhost:3000`) are not 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
 Each `mcp:` entry may be a bare service name (a string) when the server is in
-Moat's built-in catalog (e.g. `linear`, `notion`, `posthog`). The bare name
-resolves to its `url` and `auth` automatically; switch to the map form to add a
-`policy` or override a field. Unknown names require an explicit `url`.
+Moat's built-in catalog. The bare name resolves to its `url` and `auth`
+automatically; switch to the map form to add a `policy` or override a field.
+Unknown names require an explicit `url`.
+
+Recognized shorthand names:
+
+| Name | Auth type | Grant |
+|------|-----------|-------|
+| `asana` | OAuth | `oauth:asana` |
+| `betterstack` | OAuth | `oauth:betterstack` |
+| `cloudflare` | OAuth | `oauth:cloudflare` |
+| `context7` | API key | `mcp-context7` |
+| `hubspot` | OAuth | `oauth:hubspot` |
+| `langfuse-eu` | Basic auth | `mcp-langfuse` |
+| `langfuse-hipaa` | Basic auth | `mcp-langfuse` |
+| `langfuse-jp` | Basic auth | `mcp-langfuse` |
+| `langfuse-us` | Basic auth | `mcp-langfuse` |
+| `linear` | OAuth | `oauth:linear` |
+| `notion` | OAuth | `oauth:notion` |
+| `posthog` | OAuth | `oauth:posthog` |
+| `sentry` | OAuth | `oauth:sentry` |
+| `stripe` | OAuth | `oauth:stripe` |
+
+For Langfuse, pick the entry matching your project's region. All four share the
+`mcp-langfuse` grant. See the [MCP guide](../guides/09-mcp.md#langfuse) for the
+Basic auth credential format.
 
 ### mcp[].policy
 

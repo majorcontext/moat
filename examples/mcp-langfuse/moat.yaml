@@ -1,0 +1,28 @@
+# Example: Langfuse MCP server with Basic auth
+#
+# Gives Claude Code access to Langfuse's MCP server for LLM observability,
+# tracing, and evaluation. Credentials are injected transparently by the
+# proxy — the agent never sees raw tokens.
+#
+# First, grant your Langfuse API credentials (one-time):
+#   moat grant mcp langfuse
+#   Credential: Basic <base64 of "pk-lf-...:sk-lf-...">
+#   e.g.: echo -n "pk-lf-...:sk-lf-..." | base64
+#   then prefix with "Basic "
+#
+# Then run:
+#   moat claude examples/mcp-langfuse
+
+name: mcp-langfuse
+
+dependencies:
+  - claude-code
+
+grants:
+  - claude
+
+command: ["claude"]
+interactive: true
+
+mcp:
+  - langfuse-us   # or langfuse-eu / langfuse-jp / langfuse-hipaa

@@ -32,6 +32,12 @@ Examples:
         header: CONTEXT7_API_KEY
   YAML
 
+  # Grant Langfuse MCP access (Basic auth — paste the full header value)
+  moat grant mcp langfuse
+  # Credential: Basic <base64 of "pk-lf-...:sk-lf-..."> e.g.
+  #   echo -n "pk-lf-...:sk-lf-..." | base64
+  # then in moat.yaml:  mcp: [langfuse-us]
+
   # Use in a run
   moat claude ./workspace`,
 	Args: cobra.ExactArgs(1),
