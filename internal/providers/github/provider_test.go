@@ -329,11 +329,14 @@ func TestProvider_CanRefresh(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "env source is refreshable",
+			// Env-sourced tokens are NOT proactively refreshed: the daemon's
+			// process env is frozen at spawn, so re-deriving could clobber a
+			// fresh `moat grant` with a stale value (#373).
+			name: "env source is not proactively refreshable",
 			cred: &provider.Credential{
 				Metadata: map[string]string{provider.MetaKeyTokenSource: SourceEnv},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "PAT source is not refreshable",
