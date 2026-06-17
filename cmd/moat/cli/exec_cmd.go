@@ -13,6 +13,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// exitWithExecError exits the process with the container command's exit code
+// when err is a *container.ExecError; otherwise returns err unchanged. Call
+// AFTER deferred/explicit cleanup so os.Exit doesn't skip it.
+func exitWithExecError(manager *run.Manager, err error) error {
+	if err == nil {
+		return nil
+	}
+	var ee *container.ExecError
+	if errors.As(err, &ee) {
+		manager.Close()
+		os.Exit(ee.ExitCode)
+	}
+	return err
+}
+
 var execCmd = &cobra.Command{
 	Use:   "exec <run> -- <command> [args...]",
 	Short: "Run a command in a running container",
@@ -68,13 +83,5 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	execErr := manager.Exec(ctx, runID, execArgs, stdin, os.Stdout, os.Stderr)
-	if execErr != nil {
-		var ee *container.ExecError
-		if errors.As(execErr, &ee) {
-			manager.Close()
-			os.Exit(ee.ExitCode)
-		}
-		return execErr
-	}
-	return nil
+	return exitWithExecError(manager, execErr)
 }

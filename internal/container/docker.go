@@ -679,6 +679,98 @@ func (r *DockerRuntime) Exec(ctx context.Context, containerID string, cmd []stri
 	return nil
 }
 
+// ExecInteractive runs a command inside a running container with a PTY.
+func (r *DockerRuntime) ExecInteractive(ctx context.Context, containerID string, cmd []string, opts ExecOptions) error {
+	execCfg := container.ExecOptions{
+		Cmd:          cmd,
+		User:         "moatuser",
+		Tty:          opts.TTY,
+		AttachStdin:  opts.Stdin != nil,
+		AttachStdout: true,
+		AttachStderr: !opts.TTY, // in TTY mode stderr is merged into stdout
+	}
+
+	execID, err := r.cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return fmt.Errorf("creating exec: %w", err)
+	}
+
+	resp, err := r.cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{Tty: opts.TTY})
+	if err != nil {
+		return fmt.Errorf("attaching to exec: %w", err)
+	}
+	defer resp.Close()
+
+	// Apply the initial size before output starts, then service resizes.
+	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		_ = r.cli.ContainerExecResize(ctx, execID.ID, container.ResizeOptions{
+			Height: opts.InitialHeight,
+			Width:  opts.InitialWidth,
+		})
+	}
+	if opts.TTY && opts.Resize != nil {
+		// Short-lived goroutine owned by the caller's resize pump: it runs until
+		// the caller closes opts.Resize (immediately after ExecInteractive
+		// returns), not for the life of this method. Resizes that land after the
+		// exec finishes are harmless no-ops on a completed exec.
+		go func() {
+			for size := range opts.Resize {
+				if size.Width == 0 || size.Height == 0 {
+					continue
+				}
+				_ = r.cli.ContainerExecResize(ctx, execID.ID, container.ResizeOptions{
+					Height: size.Height,
+					Width:  size.Width,
+				})
+			}
+		}()
+	}
+
+	outputDone := make(chan error, 1)
+	go func() {
+		if opts.TTY {
+			// TTY mode is a single raw stream.
+			_, copyErr := io.Copy(opts.Stdout, resp.Reader)
+			outputDone <- copyErr
+		} else {
+			_, copyErr := stdcopy.StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
+			outputDone <- copyErr
+		}
+	}()
+
+	if opts.Stdin != nil {
+		go func() {
+			_, _ = io.Copy(resp.Conn, opts.Stdin)
+			if cw, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+				_ = cw.CloseWrite()
+			}
+		}()
+	}
+
+	select {
+	case <-ctx.Done():
+		// Intentional trade-off: on cancellation (e.g. SIGTERM) we return
+		// ctx.Err() and skip ContainerExecInspect. If the agent exits non-zero
+		// in the same instant, that code is dropped rather than surfaced as an
+		// ExecError — acceptable, since a canceled join doesn't care about the
+		// agent's exit code, and inspecting here would need a background context.
+		return ctx.Err()
+	case copyErr := <-outputDone:
+		if copyErr != nil && copyErr != io.EOF {
+			return copyErr
+		}
+	}
+
+	inspect, err := r.cli.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting exec: %w", err)
+	}
+	if inspect.ExitCode != 0 {
+		return &ExecError{ExitCode: inspect.ExitCode}
+	}
+	return nil
+}
+
 // ensureImage pulls an image if it doesn't exist locally.
 func (r *DockerRuntime) ensureImage(ctx context.Context, imageName string) error {
 	exists, err := r.buildMgr.ImageExists(ctx, imageName)

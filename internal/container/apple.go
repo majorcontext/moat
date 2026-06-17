@@ -672,6 +672,86 @@ func (r *AppleRuntime) Exec(ctx context.Context, containerID string, cmd []strin
 	return nil
 }
 
+// ExecInteractive runs a command inside a running container with a PTY.
+func (r *AppleRuntime) ExecInteractive(ctx context.Context, containerID string, cmd []string, opts ExecOptions) error {
+	if !opts.TTY {
+		// Non-TTY interactive exec: stream stdin/stdout without a PTY.
+		args := append([]string{"exec", "--user", "moatuser", "-i", containerID}, cmd...)
+		c := exec.CommandContext(ctx, r.containerBin, args...)
+		c.Stdin = opts.Stdin
+		c.Stdout = opts.Stdout
+		c.Stderr = opts.Stderr
+		if err := c.Run(); err != nil {
+			return exitError(err)
+		}
+		return nil
+	}
+
+	args := append([]string{"exec", "-t", "-i", "--user", "moatuser", containerID}, cmd...)
+	c := exec.CommandContext(ctx, r.containerBin, args...)
+
+	ptmx, err := pty.Start(c)
+	if err != nil {
+		return fmt.Errorf("starting exec with pty: %w", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	// Initial size, then service resizes for this exec's PTY directly (no shared map).
+	if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		_ = pty.Setsize(ptmx, &pty.Winsize{
+			Rows: uint16(opts.InitialHeight), // #nosec G115
+			Cols: uint16(opts.InitialWidth),  // #nosec G115
+		})
+	}
+	if opts.Resize != nil {
+		go func() {
+			for size := range opts.Resize {
+				if size.Width == 0 || size.Height == 0 {
+					continue
+				}
+				_ = pty.Setsize(ptmx, &pty.Winsize{
+					Rows: uint16(size.Height), // #nosec G115
+					Cols: uint16(size.Width),  // #nosec G115
+				})
+			}
+		}()
+	}
+
+	if opts.Stdin != nil {
+		go func() { _, _ = io.Copy(ptmx, opts.Stdin) }()
+	}
+	outputDone := make(chan struct{})
+	go func() {
+		defer close(outputDone)
+		_, _ = io.Copy(opts.Stdout, ptmx)
+	}()
+
+	cmdDone := make(chan error, 1)
+	go func() { cmdDone <- c.Wait() }()
+
+	select {
+	case <-ctx.Done():
+		_ = ptmx.Close()
+		if c.Process != nil {
+			_ = c.Process.Kill()
+		}
+		<-cmdDone
+		return ctx.Err()
+	case werr := <-cmdDone:
+		// Drain output briefly so nothing is lost on fast exit.
+		select {
+		case <-outputDone:
+		case <-time.After(2 * time.Second):
+			_ = ptmx.Close()
+			<-outputDone
+		}
+		if werr != nil {
+			return exitError(werr)
+		}
+		return nil
+	}
+}
+
 // exitError converts an exec.ExitError to an ExecError, or wraps other errors.
 func exitError(err error) error {
 	var exitErr *exec.ExitError

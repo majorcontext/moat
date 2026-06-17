@@ -3885,6 +3885,57 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []
 	return execErr
 }
 
+// ExecInteractive runs a command inside a running container with a PTY,
+// streaming the provided opts. Used by `moat join` for interactive agents.
+func (m *Manager) ExecInteractive(ctx context.Context, runID string, cmd []string, opts container.ExecOptions) error {
+	m.mu.RLock()
+	r, ok := m.runs[runID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("run %s not found", runID)
+	}
+	containerID := r.ContainerID
+	auditStore := r.AuditStore
+	state := r.GetState()
+	m.mu.RUnlock()
+
+	if state != StateRunning {
+		return fmt.Errorf("run %s is not running (state: %s)", runID, state)
+	}
+
+	rt, rtErr := m.runtimeForRun(r)
+	if rtErr != nil {
+		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
+	}
+
+	execErr := rt.ExecInteractive(ctx, containerID, cmd, opts)
+
+	if auditStore != nil {
+		exitCode := 0
+		var ee *container.ExecError
+		if errors.As(execErr, &ee) {
+			exitCode = ee.ExitCode
+		}
+		_, _ = auditStore.AppendExec(audit.ExecData{
+			Command:  cmd,
+			HasStdin: opts.Stdin != nil,
+			ExitCode: exitCode,
+		})
+	}
+	return execErr
+}
+
+// AttachedCount returns the number of live joined agents for a run (display-only).
+func (m *Manager) AttachedCount(runID string) int {
+	return attachedCount(runID)
+}
+
+// RegisterJoinedAgent records a joined agent for a run and returns its index and
+// a release func. Display-only; never affects teardown.
+func (m *Manager) RegisterJoinedAgent(runID string) (int, func(), error) {
+	return registerJoinedAgent(runID)
+}
+
 // FollowLogs streams container logs to the provided writer.
 // This is more reliable than Attach for output-only mode on already-running containers.
 func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) error {

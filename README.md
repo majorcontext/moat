@@ -138,6 +138,7 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | `moat claude [workspace]` | Run Claude Code |
 | `moat codex [workspace]` | Run Codex |
 | `moat run [path] [-- cmd]` | Run an agent |
+| `moat join <run> <agent>` | Run another agent in a running container |
 | `moat attach <run-id>` | Attach to a running agent |
 | `moat grant <provider>` | Store credentials (github, anthropic, openai, aws, ssh) |
 | `moat grant list` | List stored credentials |

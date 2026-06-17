@@ -8,14 +8,16 @@ import (
 
 // StatusBar renders run context at the bottom of the terminal.
 type StatusBar struct {
-	runID   string
-	name    string
-	runtime string
-	grants  []string
-	warning string // persistent warning shown between grants and right side
-	width   int
-	height  int
-	message string // optional message overlay that replaces normal content
+	runID       string
+	name        string
+	runtime     string
+	grants      []string
+	warning     string // persistent warning shown between grants and right side
+	session     string // explicit session role for a joined session, e.g. "joined · 2"
+	joinedCount int    // number of joined agents (shown as "+N" on the primary)
+	width       int
+	height      int
+	message     string // optional message overlay that replaces normal content
 }
 
 // NewStatusBar creates a status bar with the given run metadata.
@@ -36,6 +38,44 @@ func (s *StatusBar) SetGrants(grants []string) {
 // SetWarning sets a persistent warning shown in the status bar (e.g. "proxy stale").
 func (s *StatusBar) SetWarning(warning string) {
 	s.warning = warning
+}
+
+// SetSession sets an explicit session-role label shown before the run-id
+// (e.g. "joined · 2"). Empty means a primary session.
+func (s *StatusBar) SetSession(label string) {
+	s.session = label
+}
+
+// SetJoinedCount sets the number of joined agents, rendered as "+N" before the
+// run-id on a primary session. Zero renders nothing.
+func (s *StatusBar) SetJoinedCount(n int) {
+	s.joinedCount = n
+}
+
+// sessionBase returns the session segment text without any trailing separator,
+// or "" when there is nothing to show.
+//
+// Rules:
+//   - s.session != "" → a joined session; returns s.session (e.g. "joined · 2"), green.
+//   - s.joinedCount > 0 → the primary with joins; returns "primary +N", red.
+//   - otherwise → solo primary; returns "" (no segment).
+func (s *StatusBar) sessionBase() string {
+	if s.session != "" {
+		return s.session
+	}
+	if s.joinedCount > 0 {
+		return fmt.Sprintf("primary +%d", s.joinedCount)
+	}
+	return ""
+}
+
+// sessionPlain returns the plain-text session segment followed by " · " when
+// non-empty, or "" when there is nothing to show. Used for width measurement.
+func (s *StatusBar) sessionPlain() string {
+	if b := s.sessionBase(); b != "" {
+		return b + " · "
+	}
+	return ""
 }
 
 // SetDimensions sets terminal width and height.
@@ -66,7 +106,9 @@ func (s *StatusBar) Render() string {
 const (
 	bgDarkGray = "\x1b[48;5;236m"
 	fgCyan     = "\x1b[36m"
+	fgGreen    = "\x1b[32m"
 	fgMagenta  = "\x1b[35m"
+	fgRed      = "\x1b[31m"
 	fgYellow   = "\x1b[33m"
 	bold       = "\x1b[1m"
 	dim        = "\x1b[2m"
@@ -91,11 +133,11 @@ func (s *StatusBar) Content() string {
 	if s.message != "" {
 		return s.renderMessage()
 	}
-	return s.buildContent(true, true, true, true)
+	return s.buildContent(true, true, true, true, true)
 }
 
-// buildContent constructs the status bar with optional grants, name, and hint.
-func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning bool) string {
+// buildContent constructs the status bar with optional grants, name, hint, and session.
+func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning, showSession bool) string {
 	// Build left segments (plain text for measurement)
 	leftPlain := " moat "
 	runtimePlain := ""
@@ -111,35 +153,43 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning boo
 		warningPlain = " " + s.warning + " "
 	}
 
-	// Build right segment with optional hint
+	// Build right segment with optional session segment and hint
 	var rightPlain string
 	hintPlain := ""
 	if showHint {
 		hintPlain = " (ctrl+/)"
 	}
 
+	sessionSeg := ""
+	if showSession {
+		sessionSeg = s.sessionPlain()
+	}
+
 	if showName && s.name != "" {
-		rightPlain = fmt.Sprintf(" %s · %s%s ", s.runID, s.name, hintPlain)
+		rightPlain = fmt.Sprintf(" %s%s · %s%s ", sessionSeg, s.runID, s.name, hintPlain)
 	} else {
-		rightPlain = fmt.Sprintf(" %s%s ", s.runID, hintPlain)
+		rightPlain = fmt.Sprintf(" %s%s%s ", sessionSeg, s.runID, hintPlain)
 	}
 
 	totalPlain := runeLen(leftPlain) + runeLen(runtimePlain) + runeLen(grantsPlain) + runeLen(warningPlain) + runeLen(rightPlain)
 
 	if totalPlain > s.width {
-		// Truncation cascade: drop hint first, then grants, then name.
+		// Truncation cascade: drop hint first, then grants, then name, then session.
 		// Warning is kept as long as possible (dropped last) since it's diagnostic.
 		if showHint {
-			return s.buildContent(showGrants, showName, false, showWarning)
+			return s.buildContent(showGrants, showName, false, showWarning, showSession)
 		}
 		if showGrants && len(s.grants) > 0 {
-			return s.buildContent(false, showName, false, showWarning)
+			return s.buildContent(false, showName, false, showWarning, showSession)
 		}
 		if showName && s.name != "" {
-			return s.buildContent(false, false, false, showWarning)
+			return s.buildContent(false, false, false, showWarning, showSession)
+		}
+		if showSession && s.sessionPlain() != "" {
+			return s.buildContent(false, false, false, showWarning, false)
 		}
 		if showWarning && s.warning != "" {
-			return s.buildContent(false, false, false, false)
+			return s.buildContent(false, false, false, false, false)
 		}
 		if runeLen(leftPlain)+runeLen(rightPlain) > s.width {
 			// Just spaces
@@ -189,10 +239,26 @@ func (s *StatusBar) buildContent(showGrants, showName, showHint, showWarning boo
 	buf.WriteString(strings.Repeat(" ", middleLen))
 
 	// Build right segment with styling
+	buf.WriteString(" ")
+	if showSession {
+		if base := s.sessionBase(); base != "" {
+			// Color: green for joined sessions, red for primary-with-joins.
+			color := fgGreen
+			if s.session == "" {
+				color = fgRed
+			}
+			buf.WriteString(color)
+			buf.WriteString(base)
+			buf.WriteString(reset)
+			buf.WriteString(bgDarkGray)
+			// Separator rendered in default footer style (not colored).
+			buf.WriteString(" · ")
+		}
+	}
 	if showName && s.name != "" {
-		buf.WriteString(fmt.Sprintf(" %s · %s", s.runID, s.name))
+		buf.WriteString(fmt.Sprintf("%s · %s", s.runID, s.name))
 	} else {
-		buf.WriteString(fmt.Sprintf(" %s", s.runID))
+		buf.WriteString(s.runID)
 	}
 
 	// Add hint in dim style

@@ -141,6 +141,12 @@ type Runtime interface {
 	// stdout and stderr receive the command's output.
 	// Returns *ExecError for non-zero exit codes.
 	Exec(ctx context.Context, id string, cmd []string, stdin []byte, stdout, stderr io.Writer) error
+
+	// ExecInteractive runs a command inside a running container with a PTY,
+	// streaming opts.Stdin/Stdout and applying terminal resizes from opts.Resize.
+	// Use this for interactive TUI agents joined into an existing container.
+	// Returns *ExecError for non-zero exit codes.
+	ExecInteractive(ctx context.Context, id string, cmd []string, opts ExecOptions) error
 }
 
 // ExecError is returned when a command executed inside a container exits

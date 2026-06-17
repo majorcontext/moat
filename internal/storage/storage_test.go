@@ -1,9 +1,11 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,6 +145,42 @@ func TestLogWriter(t *testing.T) {
 		t.Errorf("Line = %q, want %q", entries[0].Line, "hello world")
 	}
 	if entries[0].Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestRunStore_JoinLogWriter(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run_joinlogs1")
+
+	const index = 2
+	w, err := s.JoinLogWriter(index)
+	if err != nil {
+		t.Fatalf("JoinLogWriter: %v", err)
+	}
+
+	w.Write([]byte("join hello\n"))
+	w.Close()
+
+	// Assert the file has the expected indexed name.
+	logPath := filepath.Join(dir, "run_joinlogs1", fmt.Sprintf("logs.%d.jsonl", index))
+	if _, statErr := os.Stat(logPath); os.IsNotExist(statErr) {
+		t.Fatalf("expected log file %s to exist", logPath)
+	}
+
+	// Read the raw JSONL and decode the first entry to check the line field.
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("reading join log file: %v", readErr)
+	}
+	var entry LogEntry
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &entry); jsonErr != nil {
+		t.Fatalf("decoding log entry: %v", jsonErr)
+	}
+	if entry.Line != "join hello" {
+		t.Errorf("Line = %q, want %q", entry.Line, "join hello")
+	}
+	if entry.Timestamp.IsZero() {
 		t.Error("Timestamp should not be zero")
 	}
 }

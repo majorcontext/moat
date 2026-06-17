@@ -82,6 +82,11 @@ type Writer struct {
 	altScreen bool
 	emulator  *vt.Emulator
 
+	// cleanedUp is set once Cleanup() has torn down the status bar. Guards
+	// late repaints (e.g. a footer-count poll firing RefreshFooter after exit)
+	// from painting a stray status line over the reset screen.
+	cleanedUp bool
+
 	// Escape sequence parser state for detecting alt screen sequences
 	// that may be split across Write() calls.
 	escBuf []byte
@@ -884,6 +889,8 @@ func (w *Writer) Cleanup() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	w.cleanedUp = true
+
 	// Stop footer timer if running
 	if w.footerTimer != nil {
 		w.footerTimer.Stop()
@@ -981,6 +988,28 @@ func (w *Writer) ClearMessage() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.bar.ClearMessage()
+}
+
+// SetJoinedCount updates the joined-agent count shown in the status footer.
+// Calling this on SIGWINCH keeps the primary's "+N" badge live.
+func (w *Writer) SetJoinedCount(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bar.SetJoinedCount(n)
+}
+
+// RefreshFooter repaints the footer to reflect updated status-bar state.
+// In compositor mode the render loop already repaints at renderInterval, so
+// this only needs to act in scroll mode.
+func (w *Writer) RefreshFooter() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.cleanedUp {
+		return
+	}
+	if !w.altScreen {
+		w.redrawFooterLocked()
+	}
 }
 
 // SetupEscapeHints configures the escape proxy to show escape sequence hints

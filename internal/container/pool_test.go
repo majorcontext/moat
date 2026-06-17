@@ -135,6 +135,9 @@ func (s *poolStubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 func (s *poolStubRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	panic("not implemented")
 }
+func (s *poolStubRuntime) ExecInteractive(context.Context, string, []string, ExecOptions) error {
+	panic("not implemented")
+}
 
 func newStubPool() *RuntimePool {
 	return NewRuntimePoolWithDefault(&poolStubRuntime{})

@@ -1073,6 +1073,55 @@ moat exec run_a1b2c3d4e5f6 -- sh -c "ps aux"
 
 ---
 
+## moat join
+
+Launch a second agent inside a running container, reusing its workspace, grants, and credentials.
+
+```
+moat join <run> <agent> [flags]
+```
+
+`moat join` is the run-first counterpart to `moat exec`: where `exec` runs an arbitrary command, `join` resolves an agent provider by name, constructs its standard in-container invocation, and execs it into the existing container. The original run owns the container lifecycle — stopping the run tears down the container and any joined agents.
+
+v1 supports same-agent joins only (e.g. joining `claude` into a run started by `moat claude`). The agent argument must match the agent the run was created with.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `run` | Run ID or name of the target (must be in the running state) |
+| `agent` | Agent to launch (`claude`) |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-c`, `--continue` | Continue the most recent conversation |
+| `-r`, `--resume ID` | Resume a specific session by ID |
+| `-p`, `--prompt TEXT` | Run with a prompt (non-interactive; exits when done) |
+
+`--continue` and `--resume` are mutually exclusive.
+
+Without `--prompt`, the join session is interactive: stdin, stdout, and stderr are connected to the terminal, and the status footer shows `joined · N` to indicate the session role and index.
+
+### Examples
+
+```bash
+# Interactive join — second claude session in the same workspace
+moat join run_a1b2c3d4e5f6 claude
+
+# Join and continue the most recent conversation
+moat join run_a1b2c3d4e5f6 claude --continue
+
+# Headless join — run a prompt and exit
+moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"
+
+# Identify the run by name
+moat join my-feature claude
+```
+
+---
+
 ## moat destroy
 
 Remove a stopped run and its artifacts.
