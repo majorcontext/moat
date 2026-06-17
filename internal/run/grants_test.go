@@ -91,3 +91,48 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 		t.Fatalf("detector=%v validators=%v — they must agree", detected, rejected)
 	}
 }
+
+// A credential stored under one key but read with another decrypts-fails. Both
+// the generic and MCP detection paths must report ReasonDecryptFailed (not
+// ReasonNotConfigured) so the user is told the key changed, not that the
+// credential is missing.
+func TestDetectMissingGrantsDecryptFailed(t *testing.T) {
+	dir := t.TempDir()
+	keyA := make([]byte, 32)
+	keyB := make([]byte, 32)
+	if _, err := rand.Read(keyA); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	if _, err := rand.Read(keyB); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+
+	storeA, err := credential.NewFileStore(dir, keyA)
+	if err != nil {
+		t.Fatalf("NewFileStore A: %v", err)
+	}
+	for _, p := range []string{"github", "mcp:render"} {
+		if err := storeA.Save(credential.Credential{Provider: credential.Provider(p), Token: "tok"}); err != nil {
+			t.Fatalf("Save %s: %v", p, err)
+		}
+	}
+
+	storeB, err := credential.NewFileStore(dir, keyB)
+	if err != nil {
+		t.Fatalf("NewFileStore B: %v", err)
+	}
+
+	cfg := &config.Config{MCP: []config.MCPServerConfig{
+		{Name: "render", Auth: &config.MCPAuthConfig{Grant: "mcp:render"}},
+	}}
+	got := DetectMissingGrants(AppendMCPGrants([]string{"github"}, cfg), cfg, storeB)
+	by := map[string]MissingGrant{}
+	for _, m := range got {
+		by[m.Grant] = m
+	}
+	for _, g := range []string{"github", "mcp:render"} {
+		if m, ok := by[g]; !ok || m.Reason != ReasonDecryptFailed {
+			t.Errorf("%s: want ReasonDecryptFailed, got %+v (ok=%v)", g, m, ok)
+		}
+	}
+}

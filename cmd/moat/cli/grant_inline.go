@@ -9,9 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/term"
-
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
 )
 
@@ -25,6 +24,11 @@ func grantDispatch(grant string) (verb string, args []string) {
 		return "oauth", fields[1:]
 	case len(fields) >= 2 && fields[0] == "mcp":
 		return "mcp", fields[1:]
+	case len(fields) == 0:
+		// A malformed grant string (e.g. ":" from a bad mcp.auth.grant) maps to
+		// no command. Pass the raw grant through so the generic path fails with
+		// an "unknown provider" error rather than panicking on fields[:1].
+		return "generic", []string{grant}
 	default:
 		return "generic", fields[:1]
 	}
@@ -59,8 +63,15 @@ func promptLoop(
 			continue
 		}
 		fmt.Fprintf(out, "Grant %s now? [Y/n] ", m.Grant)
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
 		ans := strings.ToLower(strings.TrimSpace(line))
+		if err != nil && ans == "" {
+			// EOF (Ctrl-D) or a read error with no input — abort the remaining
+			// prompts rather than treating empty input as the default Yes, which
+			// would stampede every remaining grant against closed stdin.
+			fmt.Fprintln(out, "  Aborted.")
+			break
+		}
 		if ans == "n" || ans == "no" {
 			fmt.Fprintf(out, "  Skipped. Run later with: %s\n", m.FixCommand)
 			continue
@@ -78,7 +89,7 @@ func promptLoop(
 // stdinIsInteractive reports whether both stdin and stdout are terminals, so an
 // inline prompt makes sense.
 func stdinIsInteractive() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	return term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stdout)
 }
 
 // grantInline runs the existing interactive grant flow for a single grant,

@@ -89,3 +89,37 @@ func TestPromptLoopGrantErrorStaysUngranted(t *testing.T) {
 }
 
 var errTestGrantFailed = stderrors.New("boom")
+
+// A malformed grant string (e.g. ":" from a bad mcp.auth.grant) must not panic
+// grantDispatch — it maps to "moat grant " with no command, an empty fields
+// slice. It should pass the raw grant through the generic path.
+func TestGrantDispatchMalformedDoesNotPanic(t *testing.T) {
+	for _, g := range []string{":", " ", "mcp:"} {
+		verb, args := grantDispatch(g) // must not panic
+		if verb == "" {
+			t.Fatalf("grantDispatch(%q) returned empty verb", g)
+		}
+		_ = args
+	}
+}
+
+// EOF (Ctrl-D) at the prompt must abort the loop, not be read as the default
+// Yes and stampede every remaining grant against closed stdin.
+func TestPromptLoopEOFAborts(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{
+		{Grant: "github", FixCommand: "moat grant github", Promptable: true},
+		{Grant: "oauth:notion", FixCommand: "moat grant oauth notion", Promptable: true},
+	}
+	in := bufio.NewReader(strings.NewReader("")) // immediate EOF
+	granted := promptLoop(context.Background(), missing, in, &out, func(context.Context, string) error {
+		t.Fatal("grantInline must not be called on EOF")
+		return nil
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0 on EOF", granted)
+	}
+	if !strings.Contains(out.String(), "Aborted") {
+		t.Errorf("expected abort notice, got: %s", out.String())
+	}
+}

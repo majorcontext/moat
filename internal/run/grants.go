@@ -47,6 +47,17 @@ type MissingGrant struct {
 	Promptable bool   // can be granted via an inline interactive flow
 }
 
+// classifyMissingReason maps a store.Get error to a MissingReason. A decrypt
+// failure means the credential exists but the encryption key changed; anything
+// else is treated as not configured. Shared by the generic and MCP detection
+// paths so they classify identically.
+func classifyMissingReason(err error) MissingReason {
+	if strings.Contains(err.Error(), "decrypting credential") {
+		return ReasonDecryptFailed
+	}
+	return ReasonNotConfigured
+}
+
 // DetectMissingGrants returns the grants a run needs but does not have. It
 // mirrors the per-grant checks in validateGrants (generic) and
 // validateMCPGrants (MCP) without formatting an error, so the CLI can prompt.
@@ -76,10 +87,7 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 		}
 		credName := credentialStoreKey(grantName, grant)
 		if _, err := store.Get(credName); err != nil {
-			reason := ReasonNotConfigured
-			if strings.Contains(err.Error(), "decrypting credential") {
-				reason = ReasonDecryptFailed
-			}
+			reason := classifyMissingReason(err)
 			// AWS needs mandatory flags (--role, …); cannot prompt cleanly.
 			promptable := grantName != "aws"
 			if grantName == "aws" {
@@ -98,7 +106,7 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 			if _, err := store.Get(credential.Provider(mcp.Auth.Grant)); err != nil {
 				add(MissingGrant{
 					Grant:      mcp.Auth.Grant,
-					Reason:     ReasonNotConfigured,
+					Reason:     classifyMissingReason(err),
 					FixCommand: "moat grant " + grantToCommand(mcp.Auth.Grant),
 					Promptable: true,
 				})
