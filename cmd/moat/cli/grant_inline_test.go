@@ -123,3 +123,31 @@ func TestPromptLoopEOFAborts(t *testing.T) {
 		t.Errorf("expected abort notice, got: %s", out.String())
 	}
 }
+
+// A grant that fails because the context was canceled (Ctrl-C during an OAuth
+// flow) must abort the loop, not prompt every remaining grant against the dead
+// context and print a cascade of identical cancellation errors.
+func TestPromptLoopCancelledContextAborts(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{
+		{Grant: "oauth:notion", FixCommand: "moat grant oauth notion", Promptable: true},
+		{Grant: "oauth:linear", FixCommand: "moat grant oauth linear", Promptable: true},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // context already canceled, as after a Ctrl-C
+	in := bufio.NewReader(strings.NewReader("y\ny\n"))
+	calls := 0
+	granted := promptLoop(ctx, missing, in, &out, func(c context.Context, _ string) error {
+		calls++
+		return c.Err()
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0", granted)
+	}
+	if calls != 1 {
+		t.Fatalf("grantFn called %d times, want 1 (loop must stop after cancellation)", calls)
+	}
+	if !strings.Contains(out.String(), "Aborted") {
+		t.Errorf("expected abort notice, got: %s", out.String())
+	}
+}

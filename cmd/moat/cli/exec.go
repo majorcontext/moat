@@ -278,7 +278,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	// credentials inline rather than failing. Whatever remains unresolved is
 	// still caught by manager.Create's validation below (today's behavior),
 	// so non-interactive runs and --no-prompt are unaffected.
-	noPrompt := opts.Flags.NoPrompt || os.Getenv("MOAT_NO_PROMPT") != ""
+	noPrompt := opts.Flags.NoPrompt || os.Getenv("MOAT_NO_PROMPT") == "1"
 	if !noPrompt && stdinIsInteractive() {
 		if store, storeErr := run.OpenDefaultStore(); storeErr == nil {
 			grants := run.AppendMCPGrants(opts.Flags.Grants, opts.Config)

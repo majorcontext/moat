@@ -88,7 +88,22 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	detected := len(DetectMissingGrants(grants, cfg, store)) > 0
 	rejected := validateGrants(grants, store) != nil || validateMCPGrants(cfg, store) != nil
 	if detected != rejected {
-		t.Fatalf("detector=%v validators=%v — they must agree", detected, rejected)
+		t.Fatalf("missing case: detector=%v validators=%v — they must agree", detected, rejected)
+	}
+
+	// Symmetric case: with every grant present, both must report nothing. A bug
+	// that flagged a spurious missing grant on an otherwise-valid store would
+	// only surface here, not in the all-missing direction above.
+	full := newGrantsTestStore(t)
+	for _, p := range []string{"github", "mcp:render"} {
+		if err := full.Save(credential.Credential{Provider: credential.Provider(p), Token: "tok"}); err != nil {
+			t.Fatalf("Save %s: %v", p, err)
+		}
+	}
+	detected = len(DetectMissingGrants(grants, cfg, full)) > 0
+	rejected = validateGrants(grants, full) != nil || validateMCPGrants(cfg, full) != nil
+	if detected || rejected {
+		t.Fatalf("present case: detector=%v validators=%v — both must report none", detected, rejected)
 	}
 }
 

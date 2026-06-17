@@ -78,6 +78,14 @@ func promptLoop(
 		}
 		if err := grantFn(ctx, m.Grant); err != nil {
 			fmt.Fprintf(out, "  %s %s: %v\n", ui.Red("✗"), m.Grant, err)
+			if ctx.Err() != nil {
+				// The grant failed because the context was canceled (e.g. the
+				// user pressed Ctrl-C during an OAuth browser flow). Stop rather
+				// than prompting every remaining grant against the dead context,
+				// which would print a cascade of identical cancellation errors.
+				fmt.Fprintln(out, "  Aborted.")
+				break
+			}
 			continue
 		}
 		fmt.Fprintf(out, "  %s %s granted\n", ui.Green("✓"), m.Grant)
