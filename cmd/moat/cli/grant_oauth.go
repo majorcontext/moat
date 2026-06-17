@@ -177,7 +177,7 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 		serverURL = "<server-url>"
 	}
 	fmt.Printf("\nUse in moat.yaml:\n\n")
-	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n\n", name, name, serverURL, name)
+	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n      header: Authorization\n\n", name, name, serverURL, name)
 
 	return nil
 }
