@@ -18,6 +18,7 @@ type ExecFlags struct {
 	Interactive   bool
 	NoSandbox     bool
 	NoClipboard   bool
+	NoPrompt      bool
 	TTYTrace      string // Path to save terminal I/O trace for debugging
 }
 
@@ -32,6 +33,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker)")
 	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
 	cmd.Flags().BoolVar(&flags.NoClipboard, "no-clipboard", false, "disable host clipboard bridging")
+	cmd.Flags().BoolVar(&flags.NoPrompt, "no-prompt", false, "never prompt to grant missing credentials; fail instead")
 	cmd.Flags().StringVar(&flags.TTYTrace, "tty-trace", "", "capture terminal I/O to file for debugging (e.g., session.json)")
 }
 
