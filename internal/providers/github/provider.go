@@ -14,8 +14,8 @@ import (
 
 // Token source values stored in Credential.Metadata[provider.MetaKeyTokenSource].
 const (
-	SourceCLI = "cli" // From `gh auth token` - refreshable
-	SourceEnv = "env" // From GITHUB_TOKEN/GH_TOKEN env var - refreshable
+	SourceCLI = "cli" // From `gh auth token` - proactively refreshed (shared gh keyring)
+	SourceEnv = "env" // From GITHUB_TOKEN/GH_TOKEN env var - static (not proactively refreshed; see CanRefresh)
 	SourcePAT = "pat" // Interactive PAT entry - static
 )
 
