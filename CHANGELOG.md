@@ -4,13 +4,18 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+### Added
+
+- **Inline grant prompting** — on an interactive terminal, `moat run`/`moat claude`/`moat codex` now detect missing credential grants before starting the container and offer to grant each one inline, instead of failing and requiring a separate `moat grant` plus a re-run. Non-interactive runs are unchanged; use `--no-prompt` (or `MOAT_NO_PROMPT=1`) to force the fail-fast behavior. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+
 ## v0.6.0 — 2026-06-17
 
 Feature release centered on MCP ergonomics: well-known servers can be listed in `moat.yaml` by name alone, resolving URL, auth, and grant from a built-in catalog (with Langfuse regional and PostHog OAuth shortcuts), and MCP API-key grants adopt the `mcp:<name>` naming convention. Also adds `moat join` to launch a second agent in a running container, `moat proxy restart` for version-aware daemon replacement, and the `ministack` local-cloud service, plus fixes for GitHub HTTPS git auth, Apple async container teardown, and a remote-MCP relay 404 regression.
 
 ### Added
 
-- **Inline grant prompting** — on an interactive terminal, `moat run`/`moat claude`/`moat codex` now detect missing credential grants before starting the container and offer to grant each one inline, instead of failing and requiring a separate `moat grant` plus a re-run. Non-interactive runs are unchanged; use `--no-prompt` (or `MOAT_NO_PROMPT=1`) to force the fail-fast behavior. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 - **`moat proxy restart`** — stop the running proxy daemon and start a fresh one from the current binary, holding the daemon spawn lock across the entire stop and start so an active run's health monitor can't resurrect the old daemon in the gap. `EnsureRunning` now also adopts the caller's version automatically: when a healthy daemon's recorded commit and the caller's build commit are both known and differ, it restarts to the caller's version (dev builds reporting `none`/empty are left alone to avoid thrashing). This lets a newer CLI replace a stale daemon — e.g. one with an outdated MCP relay — without waiting for the idle timeout. ([#385](https://github.com/majorcontext/moat/pull/385))
 - **Langfuse MCP shortcuts** — `langfuse-eu`, `langfuse-us`, `langfuse-jp`, and `langfuse-hipaa` are now recognized shorthand names in `mcp:`. Each resolves to the regional Langfuse MCP endpoint (`/api/public/mcp`) with Basic auth via a shared `mcp:langfuse` grant. Grant once with `moat grant mcp langfuse` (credential: `Basic <base64(pk:sk)>`), then list the regional name in `moat.yaml`. Self-hosted instances still use the full `url` + `auth` form. ([#384](https://github.com/majorcontext/moat/pull/384))
 - **Declarative MCP shorthand** — list a well-known MCP server in `moat.yaml` by name alone (a bare `- linear` under `mcp:`), and Moat resolves the URL, auth header, and required grant from its built-in catalog. The map form (`- name: linear`) still works for attaching a policy or overriding fields, and unknown servers still take an explicit `url` + `auth`. `moat grant oauth` now prints this shorthand. ([#383](https://github.com/majorcontext/moat/pull/383))
