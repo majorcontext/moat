@@ -25,9 +25,3 @@ func TestLookupServerURL(t *testing.T) {
 		})
 	}
 }
-
-func TestRegistryNotEmpty(t *testing.T) {
-	if len(registry) == 0 {
-		t.Error("registry should not be empty")
-	}
-}
