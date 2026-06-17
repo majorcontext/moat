@@ -221,6 +221,13 @@ func TestCredentialStoreKey(t *testing.T) {
 		{"oauth", "oauth:notion", "oauth:notion"},
 		{"oauth", "oauth:slack", "oauth:slack"},
 		{"claude", "claude:read", "claude"},
+		// MCP grants store under the full grant name verbatim. baseName is the
+		// portion before the first ":" as computed by callers, so "mcp:context7"
+		// arrives with baseName "mcp".
+		{"mcp", "mcp:context7", "mcp:context7"},          // canonical form
+		{"mcp-context7", "mcp-context7", "mcp-context7"}, // deprecated form
+		{"mcp", "mcp:render", "mcp:render"},              // canonical form
+		{"mcp-render", "mcp-render", "mcp-render"},       // deprecated form
 	}
 	for _, tt := range tests {
 		t.Run(tt.fullGrant, func(t *testing.T) {
@@ -240,6 +247,8 @@ func TestGrantToCommand(t *testing.T) {
 		{"github", "github"},
 		{"oauth:notion", "oauth notion"},
 		{"ssh:github.com", "ssh github.com"},
+		{"mcp:context7", "mcp context7"}, // canonical
+		{"mcp-context7", "mcp context7"}, // deprecated, normalizes the same
 	}
 	for _, tt := range tests {
 		t.Run(tt.grant, func(t *testing.T) {

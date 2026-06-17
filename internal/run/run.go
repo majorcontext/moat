@@ -14,6 +14,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/id"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/snapshot"
@@ -259,7 +260,7 @@ func (r *Run) SetStateFailedAt(errMsg string, timestamp time.Time) {
 // Some grant types are validated by their own specialized code paths and are
 // skipped here:
 //   - "ssh" / "ssh:<host>" — validated by the SSH agent setup in Create()
-//   - "mcp-*" — validated by validateMCPGrants
+//   - "mcp:*" / "mcp-*" — validated by validateMCPGrants
 //
 // For all other grants, we check that (1) the provider is registered and
 // (2) the credential exists and can be decrypted from the store.
@@ -268,8 +269,9 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
 
-		// Skip grants validated by dedicated code paths
-		if grantName == "ssh" || strings.HasPrefix(grantName, "mcp-") {
+		// Skip grants validated by dedicated code paths. MCP grants accept
+		// both "mcp:<name>" (canonical) and "mcp-<name>" (deprecated) forms.
+		if grantName == "ssh" || mcpcatalog.IsGrant(grant) {
 			continue
 		}
 
@@ -306,15 +308,16 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 	return nil
 }
 
-// grantToCommand converts a grant name like "oauth:notion" or "mcp-context7"
+// grantToCommand converts a grant name like "oauth:notion" or "mcp:context7"
 // to a CLI-friendly form suitable for use in "moat grant <args>" instructions.
-// Examples: "oauth:notion" → "oauth notion", "mcp-context7" → "mcp context7".
+// Examples: "oauth:notion" → "oauth notion", "mcp:context7" → "mcp context7",
+// "mcp-context7" → "mcp context7" (deprecated form).
 func grantToCommand(grant string) string {
+	if server, ok := mcpcatalog.GrantName(grant); ok {
+		return "mcp " + server
+	}
 	if parts := strings.SplitN(grant, ":", 2); len(parts) == 2 {
 		return parts[0] + " " + parts[1]
-	}
-	if after, ok := strings.CutPrefix(grant, "mcp-"); ok {
-		return "mcp " + after
 	}
 	return grant
 }

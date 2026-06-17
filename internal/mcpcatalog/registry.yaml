@@ -13,7 +13,7 @@ cloudflare: https://mcp.cloudflare.com/mcp
 context7:
   url: https://mcp.context7.com/mcp
   auth:
-    grant: mcp-context7
+    grant: mcp:context7
     header: CONTEXT7_API_KEY
 hubspot: https://mcp.hubspot.com
 linear: https://mcp.linear.app/mcp

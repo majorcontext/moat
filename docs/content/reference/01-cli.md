@@ -587,13 +587,13 @@ Store a credential for an MCP server.
 moat grant mcp context7
 ```
 
-The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in moat.yaml.
+The credential is stored as `mcp:<name>` (e.g., `mcp:context7`), mirroring the `oauth:<name>` convention, and can be referenced in moat.yaml. The deprecated `mcp-<name>` (hyphen) form is still accepted for existing grants.
 
 **Interactive prompts:**
 - Credential (hidden input)
 
 **Storage:**
-- `~/.moat/credentials/mcp-<name>.enc`
+- `~/.moat/credentials/mcp:<name>.enc`
 
 ### moat grant oauth
 

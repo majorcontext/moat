@@ -47,14 +47,15 @@ func TestGrantMCP(t *testing.T) {
 	// Verify credential was saved
 	key, _ := credential.DefaultEncryptionKey()
 	store, _ := credential.NewFileStore(credential.DefaultStoreDir(), key)
-	cred, err := store.Get(credential.Provider("mcp-context7"))
+	// Canonical form is "mcp:<name>" (mirrors "oauth:<name>").
+	cred, err := store.Get(credential.Provider("mcp:context7"))
 
 	if err != nil {
 		t.Fatalf("failed to retrieve credential: %v", err)
 	}
 
-	if cred.Provider != "mcp-context7" {
-		t.Errorf("expected provider 'mcp-context7', got %q", cred.Provider)
+	if cred.Provider != "mcp:context7" {
+		t.Errorf("expected provider 'mcp:context7', got %q", cred.Provider)
 	}
 
 	if cred.Token != "test-api-key-123" {

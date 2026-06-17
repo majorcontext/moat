@@ -207,7 +207,7 @@ invalid token (401 Unauthorized)
 ### `MCP server requires grant but it's not configured`
 
 ```
-MCP server 'my-server' requires grant 'mcp-my-server' but it's not configured
+MCP server 'my-server' requires grant 'mcp:my-server' but it's not configured
 
 To fix:
   moat grant mcp my-server

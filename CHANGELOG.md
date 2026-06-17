@@ -17,6 +17,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 - **PostHog OAuth shortcut** — `moat grant oauth posthog` now auto-discovers OAuth endpoints from PostHog's MCP server (`https://mcp.posthog.com/mcp`) without needing `--url` or a config file, matching the other well-known services (asana, cloudflare, hubspot, linear, notion, stripe). ([#382](https://github.com/majorcontext/moat/pull/382))
 - **Ministack service** — `ministack` is now available as a `service` dependency, running the LocalStack-compatible Ministack local cloud emulator as a sidecar container. Declare `ministack` under `dependencies` and configure it under `services.ministack` (e.g. `env`, `wait`). Readiness is probed against the container's `/_ministack/health` endpoint. ([#366](https://github.com/majorcontext/moat/pull/366))
 
+### Changed
+
+- MCP API-key grants now use the `mcp:<name>` (colon) naming convention, mirroring `oauth:<name>`. `moat grant mcp <name>` stores the credential as `mcp:<name>` and prints `grant: mcp:<name>` in its moat.yaml snippet, and the well-known `context7` catalog entry resolves to `mcp:context7`. The previous `mcp-<name>` (hyphen) form is still accepted everywhere — existing stored credentials and `moat.yaml` files keep working — but it is deprecated; prefer `mcp:<name>`. No migration is required. ([#386](https://github.com/majorcontext/moat/pull/386))
+
 ### Fixed
 
 - Fix the `moat.yaml` snippet printed by `moat grant oauth` being invalid — previously, the suggested `mcp:` block emitted `auth.grant` but omitted `auth.header`, so copying it verbatim into `moat.yaml` failed config validation with `'auth.header' is required when auth is specified`. The snippet now includes `header: Authorization`. ([#382](https://github.com/majorcontext/moat/pull/382))

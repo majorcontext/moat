@@ -143,7 +143,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
 # Snapshots
@@ -1274,7 +1274,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 ```
 
@@ -1286,7 +1286,7 @@ mcp:
 - `name` (required): Identifier for the MCP server (must be unique)
 - `url` (required): Endpoint for the MCP server. HTTPS is required for remote servers. HTTP is allowed for host-local servers (`localhost`, `127.0.0.1`, or `[::1]`)
 - `auth` (optional): Authentication configuration
-  - `grant` (required if auth present): Name of grant to use (format: `mcp-<name>`)
+  - `grant` (required if auth present): Name of grant to use (format: `mcp:<name>`; the deprecated `mcp-<name>` form is still accepted)
   - `header` (required if auth present): HTTP header name for credential injection
 
 **Credential injection:**
@@ -1300,7 +1300,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
   - name: local-tools
