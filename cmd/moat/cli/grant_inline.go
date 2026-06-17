@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // grantDispatch maps a grant string to a grant verb and its args, derived from
@@ -65,10 +66,10 @@ func promptLoop(
 			continue
 		}
 		if err := grantFn(ctx, m.Grant); err != nil {
-			fmt.Fprintf(out, "  ✗ %s: %v\n", m.Grant, err)
+			fmt.Fprintf(out, "  %s %s: %v\n", ui.Red("✗"), m.Grant, err)
 			continue
 		}
-		fmt.Fprintf(out, "  ✓ %s granted\n", m.Grant)
+		fmt.Fprintf(out, "  %s %s granted\n", ui.Green("✓"), m.Grant)
 		granted++
 	}
 	return granted
