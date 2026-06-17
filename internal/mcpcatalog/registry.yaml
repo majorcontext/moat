@@ -1,0 +1,20 @@
+# Well-known MCP server catalog for OAuth auto-discovery and config shorthand.
+#
+# When a user runs `moat grant oauth <name>` or lists a bare `<name>` under
+# `mcp:` in moat.yaml, the name is matched against this catalog.
+#
+# A plain string value is an OAuth server: it resolves to that URL, grant
+# `oauth:<name>`, and header `Authorization`. An object value specifies its
+# own auth (e.g. an API-key MCP server).
+
+asana: https://mcp.asana.com/mcp
+cloudflare: https://mcp.cloudflare.com/mcp
+context7:
+  url: https://mcp.context7.com/mcp
+  auth:
+    grant: mcp-context7
+    header: CONTEXT7_API_KEY
+hubspot: https://mcp.hubspot.com
+linear: https://mcp.linear.app/mcp
+notion: https://mcp.notion.com/mcp
+stripe: https://mcp.stripe.com
