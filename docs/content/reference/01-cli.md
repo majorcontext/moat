@@ -51,6 +51,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--keep` | Keep container after run completes |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
 
