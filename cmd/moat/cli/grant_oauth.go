@@ -179,7 +179,10 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 		serverURL = "<server-url>"
 	}
 	fmt.Printf("\nUse in moat.yaml:\n\n")
-	if _, known := mcpcatalog.Lookup(name); known {
+	// Only suggest the bare shorthand when the catalog entry actually uses
+	// OAuth — otherwise the shorthand would resolve to a different (API-key)
+	// grant than the oauth: credential just created.
+	if e, known := mcpcatalog.Lookup(name); known && e.OAuth {
 		fmt.Printf("mcp:\n  - %s\n\n", name)
 	} else {
 		fmt.Printf("mcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n      header: Authorization\n\n", name, serverURL, name)

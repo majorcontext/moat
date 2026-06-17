@@ -74,6 +74,11 @@ func TestResolveMCPShorthand_ExplicitFieldsWin(t *testing.T) {
 	if cfg.MCP[0].URL != "https://custom.example.com/mcp" {
 		t.Errorf("explicit url overridden: %q", cfg.MCP[0].URL)
 	}
+	// An explicit url must not suppress catalog-resolved auth: a user who sets
+	// only url (no auth) should still get the catalog's grant/header.
+	if cfg.MCP[0].Auth == nil || cfg.MCP[0].Auth.Grant != "oauth:linear" || cfg.MCP[0].Auth.Header != "Authorization" {
+		t.Errorf("auth not filled from catalog when url is explicit: %+v", cfg.MCP[0].Auth)
+	}
 }
 
 func TestResolveMCPShorthand_UnknownNameErrors(t *testing.T) {

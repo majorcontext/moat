@@ -7,6 +7,7 @@ package mcpcatalog
 import (
 	_ "embed"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +20,11 @@ type Entry struct {
 	URL    string
 	Grant  string
 	Header string
+	// OAuth reports whether this server authenticates via OAuth (grant
+	// "oauth:<name>"), as opposed to an API-key grant (e.g. context7's
+	// "mcp-context7"). Only OAuth entries are valid targets for
+	// `moat grant oauth` discovery.
+	OAuth bool
 }
 
 // rawEntry is the on-disk YAML value: either a scalar URL string (an OAuth
@@ -63,6 +69,7 @@ func Lookup(name string) (Entry, bool) {
 	if e.Header == "" {
 		e.Header = "Authorization"
 	}
+	e.OAuth = strings.HasPrefix(e.Grant, "oauth:")
 	return e, true
 }
 

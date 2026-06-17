@@ -11,14 +11,14 @@ func TestLookup(t *testing.T) {
 		want   Entry
 		wantOK bool
 	}{
-		// String entry → OAuth defaults synthesized.
-		{"linear", Entry{URL: "https://mcp.linear.app/mcp", Grant: "oauth:linear", Header: "Authorization"}, true},
-		{"notion", Entry{URL: "https://mcp.notion.com/mcp", Grant: "oauth:notion", Header: "Authorization"}, true},
-		{"posthog", Entry{URL: "https://mcp.posthog.com/mcp", Grant: "oauth:posthog", Header: "Authorization"}, true},
-		{"betterstack", Entry{URL: "https://mcp.betterstack.com", Grant: "oauth:betterstack", Header: "Authorization"}, true},
-		{"sentry", Entry{URL: "https://mcp.sentry.dev/mcp", Grant: "oauth:sentry", Header: "Authorization"}, true},
-		// Object entry → explicit auth preserved, no defaulting.
-		{"context7", Entry{URL: "https://mcp.context7.com/mcp", Grant: "mcp-context7", Header: "CONTEXT7_API_KEY"}, true},
+		// String entry → OAuth defaults synthesized (OAuth=true).
+		{"linear", Entry{URL: "https://mcp.linear.app/mcp", Grant: "oauth:linear", Header: "Authorization", OAuth: true}, true},
+		{"notion", Entry{URL: "https://mcp.notion.com/mcp", Grant: "oauth:notion", Header: "Authorization", OAuth: true}, true},
+		{"posthog", Entry{URL: "https://mcp.posthog.com/mcp", Grant: "oauth:posthog", Header: "Authorization", OAuth: true}, true},
+		{"betterstack", Entry{URL: "https://mcp.betterstack.com", Grant: "oauth:betterstack", Header: "Authorization", OAuth: true}, true},
+		{"sentry", Entry{URL: "https://mcp.sentry.dev/mcp", Grant: "oauth:sentry", Header: "Authorization", OAuth: true}, true},
+		// Object entry → explicit API-key auth preserved, no defaulting (OAuth=false).
+		{"context7", Entry{URL: "https://mcp.context7.com/mcp", Grant: "mcp-context7", Header: "CONTEXT7_API_KEY", OAuth: false}, true},
 		// Unknown.
 		{"nonexistent", Entry{}, false},
 	}
