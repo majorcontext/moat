@@ -445,6 +445,31 @@ mcp:
 
 The proxy injects a `Bearer` prefix when injecting `oauth:` grants into the `Authorization` header.
 
+### Shorthand for well-known servers
+
+For servers in Moat's built-in catalog, list the name alone — Moat fills in the
+URL and auth from the catalog:
+
+```yaml
+mcp:
+  - linear
+  - notion
+  - posthog
+```
+
+This is equivalent to the full form above. To attach a [policy](#policies) or
+override a field, use the map form and omit what the catalog provides:
+
+```yaml
+mcp:
+  - name: linear
+    policy: linear-readonly
+```
+
+Run `moat grant oauth <name>` once to authorize; the credential is stored and
+injected at run time. Servers not in the catalog still require the full
+`url` + `auth` form.
+
 ### Token refresh
 
 OAuth tokens are auto-refreshed during runs. When a token expires, the proxy uses the stored refresh token to obtain a new access token without interrupting the agent.

@@ -630,6 +630,13 @@ moat grant oauth linear \
     --scopes "read write"
 ```
 
+After a successful grant for a well-known server, the command prints a ready-to-paste shorthand:
+
+```yaml
+mcp:
+  - linear
+```
+
 **Storage:**
 - `~/.moat/credentials/oauth-<name>.enc`
 

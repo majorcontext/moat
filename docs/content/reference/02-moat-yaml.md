@@ -1320,6 +1320,11 @@ MCP servers running on the host machine (e.g., `http://localhost:3000`) are not 
 
 **See also:** [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers)
 
+Each `mcp:` entry may be a bare service name (a string) when the server is in
+Moat's built-in catalog (e.g. `linear`, `notion`, `posthog`). The bare name
+resolves to its `url` and `auth` automatically; switch to the map form to add a
+`policy` or override a field. Unknown names require an explicit `url`.
+
 ### mcp[].policy
 
 Keep policy rules for this MCP server. Controls which tool calls are allowed, denied, or redacted.
