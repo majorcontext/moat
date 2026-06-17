@@ -8,7 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Added
 
-- **Langfuse MCP shortcuts** — `langfuse-eu`, `langfuse-us`, `langfuse-jp`, and `langfuse-hipaa` are now recognized shorthand names in `mcp:`. Each resolves to the regional Langfuse MCP endpoint (`/api/public/mcp`) with Basic auth via a shared `mcp-langfuse` grant. Grant once with `moat grant mcp langfuse` (credential: `Basic <base64(pk:sk)>`), then list the regional name in `moat.yaml`. Self-hosted instances still use the full `url` + `auth` form. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- **Langfuse MCP shortcuts** — `langfuse-eu`, `langfuse-us`, `langfuse-jp`, and `langfuse-hipaa` are now recognized shorthand names in `mcp:`. Each resolves to the regional Langfuse MCP endpoint (`/api/public/mcp`) with Basic auth via a shared `mcp-langfuse` grant. Grant once with `moat grant mcp langfuse` (credential: `Basic <base64(pk:sk)>`), then list the regional name in `moat.yaml`. Self-hosted instances still use the full `url` + `auth` form. ([#384](https://github.com/majorcontext/moat/pull/384))
 - **Declarative MCP shorthand** — list a well-known MCP server in `moat.yaml` by name alone (a bare `- linear` under `mcp:`), and Moat resolves the URL, auth header, and required grant from its built-in catalog. The map form (`- name: linear`) still works for attaching a policy or overriding fields, and unknown servers still take an explicit `url` + `auth`. `moat grant oauth` now prints this shorthand. ([#383](https://github.com/majorcontext/moat/pull/383))
 - **`moat join`** — launch a second agent inside an already-running container,
   reusing its workspace, grants, and credentials without a new container. v1

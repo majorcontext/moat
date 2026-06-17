@@ -18,16 +18,24 @@ context7:
 hubspot: https://mcp.hubspot.com
 langfuse-eu:
   url: https://cloud.langfuse.com/api/public/mcp
-  auth: { grant: mcp-langfuse, header: Authorization }
+  auth:
+    grant: mcp-langfuse
+    header: Authorization
 langfuse-hipaa:
   url: https://hipaa.cloud.langfuse.com/api/public/mcp
-  auth: { grant: mcp-langfuse, header: Authorization }
+  auth:
+    grant: mcp-langfuse
+    header: Authorization
 langfuse-jp:
   url: https://jp.cloud.langfuse.com/api/public/mcp
-  auth: { grant: mcp-langfuse, header: Authorization }
+  auth:
+    grant: mcp-langfuse
+    header: Authorization
 langfuse-us:
   url: https://us.cloud.langfuse.com/api/public/mcp
-  auth: { grant: mcp-langfuse, header: Authorization }
+  auth:
+    grant: mcp-langfuse
+    header: Authorization
 linear: https://mcp.linear.app/mcp
 notion: https://mcp.notion.com/mcp
 posthog: https://mcp.posthog.com/mcp
