@@ -143,7 +143,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
 # Snapshots
@@ -1274,7 +1274,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 ```
 
@@ -1286,7 +1286,7 @@ mcp:
 - `name` (required): Identifier for the MCP server (must be unique)
 - `url` (required): Endpoint for the MCP server. HTTPS is required for remote servers. HTTP is allowed for host-local servers (`localhost`, `127.0.0.1`, or `[::1]`)
 - `auth` (optional): Authentication configuration
-  - `grant` (required if auth present): Name of grant to use (format: `mcp-<name>`)
+  - `grant` (required if auth present): Name of grant to use (format: `mcp:<name>`; the deprecated `mcp-<name>` form is still accepted)
   - `header` (required if auth present): HTTP header name for credential injection
 
 **Credential injection:**
@@ -1300,7 +1300,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
   - name: local-tools
@@ -1334,10 +1334,10 @@ Recognized shorthand names:
 | `cloudflare` | OAuth | `oauth:cloudflare` |
 | `context7` | API key | `mcp-context7` |
 | `hubspot` | OAuth | `oauth:hubspot` |
-| `langfuse-eu` | Basic auth | `mcp-langfuse` |
-| `langfuse-hipaa` | Basic auth | `mcp-langfuse` |
-| `langfuse-jp` | Basic auth | `mcp-langfuse` |
-| `langfuse-us` | Basic auth | `mcp-langfuse` |
+| `langfuse-eu` | Basic auth | `mcp:langfuse` |
+| `langfuse-hipaa` | Basic auth | `mcp:langfuse` |
+| `langfuse-jp` | Basic auth | `mcp:langfuse` |
+| `langfuse-us` | Basic auth | `mcp:langfuse` |
 | `linear` | OAuth | `oauth:linear` |
 | `notion` | OAuth | `oauth:notion` |
 | `posthog` | OAuth | `oauth:posthog` |
@@ -1345,7 +1345,7 @@ Recognized shorthand names:
 | `stripe` | OAuth | `oauth:stripe` |
 
 For Langfuse, pick the entry matching your project's region. All four share the
-`mcp-langfuse` grant. See the [MCP guide](../guides/09-mcp.md#langfuse) for the
+`mcp:langfuse` grant. See the [MCP guide](../guides/09-mcp.md#langfuse) for the
 Basic auth credential format.
 
 ### mcp[].policy

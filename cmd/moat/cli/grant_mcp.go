@@ -28,7 +28,7 @@ Examples:
     - name: context7
       url: https://mcp.context7.com/mcp
       auth:
-        grant: mcp-context7
+        grant: mcp:context7
         header: CONTEXT7_API_KEY
   YAML
 
@@ -57,7 +57,7 @@ func runGrantMCP(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Enter credential for MCP server '%s'\n", name)
-	fmt.Printf("This will be stored as grant 'mcp-%s'\n\n", name)
+	fmt.Printf("This will be stored as grant 'mcp:%s'\n\n", name)
 	fmt.Print("Credential: ")
 
 	credBytes, err := readPassword()
@@ -79,7 +79,7 @@ func runGrantMCP(cmd *cobra.Command, args []string) error {
 
 	// Store credential
 	cred := credential.Credential{
-		Provider:  credential.Provider(fmt.Sprintf("mcp-%s", name)),
+		Provider:  credential.Provider(fmt.Sprintf("mcp:%s", name)),
 		Token:     credentialStr,
 		CreatedAt: time.Now(),
 	}
@@ -89,13 +89,13 @@ func runGrantMCP(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\nMCP credential 'mcp-%s' saved to %s\n", name, credPath)
+	fmt.Printf("\nMCP credential 'mcp:%s' saved to %s\n", name, credPath)
 	fmt.Printf("\nConfigure in moat.yaml:\n\n")
 	fmt.Printf(`mcp:
   - name: %s
     url: https://mcp.example.com/mcp
     auth:
-      grant: mcp-%s
+      grant: mcp:%s
       header: YOUR_HEADER_NAME
 
 `, name, name)

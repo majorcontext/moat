@@ -8,7 +8,8 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Added
 
-- **Langfuse MCP shortcuts** — `langfuse-eu`, `langfuse-us`, `langfuse-jp`, and `langfuse-hipaa` are now recognized shorthand names in `mcp:`. Each resolves to the regional Langfuse MCP endpoint (`/api/public/mcp`) with Basic auth via a shared `mcp-langfuse` grant. Grant once with `moat grant mcp langfuse` (credential: `Basic <base64(pk:sk)>`), then list the regional name in `moat.yaml`. Self-hosted instances still use the full `url` + `auth` form. ([#384](https://github.com/majorcontext/moat/pull/384))
+- **`moat proxy restart`** — stop the running proxy daemon and start a fresh one from the current binary, holding the daemon spawn lock across the entire stop and start so an active run's health monitor can't resurrect the old daemon in the gap. `EnsureRunning` now also adopts the caller's version automatically: when a healthy daemon's recorded commit and the caller's build commit are both known and differ, it restarts to the caller's version (dev builds reporting `none`/empty are left alone to avoid thrashing). This lets a newer CLI replace a stale daemon — e.g. one with an outdated MCP relay — without waiting for the idle timeout. ([#385](https://github.com/majorcontext/moat/pull/385))
+- **Langfuse MCP shortcuts** — `langfuse-eu`, `langfuse-us`, `langfuse-jp`, and `langfuse-hipaa` are now recognized shorthand names in `mcp:`. Each resolves to the regional Langfuse MCP endpoint (`/api/public/mcp`) with Basic auth via a shared `mcp:langfuse` grant. Grant once with `moat grant mcp langfuse` (credential: `Basic <base64(pk:sk)>`), then list the regional name in `moat.yaml`. Self-hosted instances still use the full `url` + `auth` form. ([#384](https://github.com/majorcontext/moat/pull/384))
 - **Declarative MCP shorthand** — list a well-known MCP server in `moat.yaml` by name alone (a bare `- linear` under `mcp:`), and Moat resolves the URL, auth header, and required grant from its built-in catalog. The map form (`- name: linear`) still works for attaching a policy or overriding fields, and unknown servers still take an explicit `url` + `auth`. `moat grant oauth` now prints this shorthand. ([#383](https://github.com/majorcontext/moat/pull/383))
 - **`moat join`** — launch a second agent inside an already-running container,
   reusing its workspace, grants, and credentials without a new container. v1
@@ -17,6 +18,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
   ([#379](https://github.com/majorcontext/moat/pull/379))
 - **PostHog OAuth shortcut** — `moat grant oauth posthog` now auto-discovers OAuth endpoints from PostHog's MCP server (`https://mcp.posthog.com/mcp`) without needing `--url` or a config file, matching the other well-known services (asana, cloudflare, hubspot, linear, notion, stripe). ([#382](https://github.com/majorcontext/moat/pull/382))
 - **Ministack service** — `ministack` is now available as a `service` dependency, running the LocalStack-compatible Ministack local cloud emulator as a sidecar container. Declare `ministack` under `dependencies` and configure it under `services.ministack` (e.g. `env`, `wait`). Readiness is probed against the container's `/_ministack/health` endpoint. ([#366](https://github.com/majorcontext/moat/pull/366))
+
+### Changed
+
+- MCP API-key grants now use the `mcp:<name>` (colon) naming convention, mirroring `oauth:<name>`. `moat grant mcp <name>` stores the credential as `mcp:<name>` and prints `grant: mcp:<name>` in its moat.yaml snippet, and the well-known `context7` catalog entry resolves to `mcp:context7`. The previous `mcp-<name>` (hyphen) form is still accepted everywhere — existing stored credentials and `moat.yaml` files keep working — but it is deprecated; prefer `mcp:<name>`. No migration is required. ([#386](https://github.com/majorcontext/moat/pull/386))
 
 ### Fixed
 

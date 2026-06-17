@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -147,7 +147,8 @@ func credType(c credential.Credential) string {
 		}
 		return "registry"
 	default:
-		if strings.HasPrefix(string(c.Provider), "mcp-") {
+		// Accept both "mcp:<name>" (canonical) and "mcp-<name>" (deprecated).
+		if mcpcatalog.IsGrant(string(c.Provider)) {
 			return "mcp"
 		}
 		return "token"

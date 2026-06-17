@@ -10,6 +10,30 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
+func TestResolveCredName(t *testing.T) {
+	tests := []struct {
+		grantName string
+		grant     string
+		want      credential.Provider
+	}{
+		{"github", "github", "github"},
+		{"oauth", "oauth:notion", "oauth:notion"},
+		// MCP grants resolve to the full grant name verbatim so that a
+		// credential granted as "mcp:context7" and one granted as the
+		// deprecated "mcp-context7" each resolve to their own store entry.
+		{"mcp", "mcp:context7", "mcp:context7"},
+		{"mcp-context7", "mcp-context7", "mcp-context7"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.grant, func(t *testing.T) {
+			got := resolveCredName(tt.grantName, tt.grant)
+			if got != tt.want {
+				t.Errorf("resolveCredName(%q, %q) = %q, want %q", tt.grantName, tt.grant, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefreshTokensForRun_NoRefreshableProviders(t *testing.T) {
 	// With no providers registered (test environment), refreshTokensForRun
 	// should be a no-op and not panic.

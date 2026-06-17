@@ -245,3 +245,45 @@ func TestResolveDaemonExecutable_UsesEnvOverride(t *testing.T) {
 		t.Errorf("expected /usr/local/bin/moat, got %s", exe)
 	}
 }
+
+func TestShouldAdoptVersion(t *testing.T) {
+	cases := []struct {
+		name         string
+		daemonCommit string
+		callerCommit string
+		want         bool
+	}{
+		{"both known and differ -> adopt", "aaaa", "bbbb", true},
+		{"both known and equal -> keep", "aaaa", "aaaa", false},
+		{"daemon none -> keep", "none", "bbbb", false},
+		{"caller none -> keep", "aaaa", "none", false},
+		{"both none -> keep", "none", "none", false},
+		{"daemon empty -> keep", "", "bbbb", false},
+		{"caller empty -> keep", "aaaa", "", false},
+		{"both empty -> keep", "", "", false},
+		{"daemon none caller empty -> keep", "none", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldAdoptVersion(tc.daemonCommit, tc.callerCommit); got != tc.want {
+				t.Errorf("shouldAdoptVersion(%q, %q) = %v, want %v",
+					tc.daemonCommit, tc.callerCommit, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommitKnown(t *testing.T) {
+	known := []string{"abc123", "deadbeef"}
+	for _, c := range known {
+		if !commitKnown(c) {
+			t.Errorf("commitKnown(%q) = false, want true", c)
+		}
+	}
+	unknown := []string{"", "none"}
+	for _, c := range unknown {
+		if commitKnown(c) {
+			t.Errorf("commitKnown(%q) = true, want false", c)
+		}
+	}
+}

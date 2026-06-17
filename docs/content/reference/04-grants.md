@@ -25,7 +25,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
 | `ssh:<host>` | Specified host only | SSH agent forwarding (not HTTP) | Host SSH agent (`SSH_AUTH_SOCK`) |
-| `mcp-<name>` | Host from MCP server `url` field | Configured per-server header | Interactive prompt |
+| `mcp:<name>` | Host from MCP server `url` field | Configured per-server header | Interactive prompt |
 | `gitlab` | `gitlab.com`, `*.gitlab.com` | `PRIVATE-TOKEN: ...` | `GITLAB_TOKEN`, `GL_TOKEN`, or prompt |
 | `brave-search` | `api.search.brave.com` | `X-Subscription-Token: ...` | `BRAVE_API_KEY`, `BRAVE_SEARCH_API_KEY`, or prompt |
 | `elevenlabs` | `api.elevenlabs.io` | `xi-api-key: ...` | `ELEVENLABS_API_KEY` or prompt |
@@ -657,7 +657,7 @@ $ moat run --grant ssh:github.com -- git clone git@github.com:my-org/my-project.
 moat grant mcp <name>
 ```
 
-The `<name>` argument matches the MCP server name in `moat.yaml`. The credential is stored as `mcp-<name>`.
+The `<name>` argument matches the MCP server name in `moat.yaml`. The credential is stored as `mcp:<name>`, mirroring the `oauth:<name>` convention. The deprecated `mcp-<name>` (hyphen) form is still accepted for existing grants.
 
 ### Credential source
 
@@ -680,7 +680,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 ```
 
@@ -689,7 +689,7 @@ mcp:
 ```bash
 $ moat grant mcp context7
 Enter credential for MCP server 'context7': ••••••••
-MCP credential 'mcp-context7' saved
+MCP credential 'mcp:context7' saved
 
 $ moat claude ./my-project
 ```
@@ -759,7 +759,7 @@ moat revoke claude
 moat revoke anthropic
 moat revoke npm
 moat revoke ssh:github.com
-moat revoke mcp-context7
+moat revoke mcp:context7
 
 # Revoke from a specific profile
 moat revoke github --profile work

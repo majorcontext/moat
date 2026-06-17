@@ -13,28 +13,28 @@ cloudflare: https://mcp.cloudflare.com/mcp
 context7:
   url: https://mcp.context7.com/mcp
   auth:
-    grant: mcp-context7
+    grant: mcp:context7
     header: CONTEXT7_API_KEY
 hubspot: https://mcp.hubspot.com
 langfuse-eu:
   url: https://cloud.langfuse.com/api/public/mcp
   auth:
-    grant: mcp-langfuse
+    grant: mcp:langfuse
     header: Authorization
 langfuse-hipaa:
   url: https://hipaa.cloud.langfuse.com/api/public/mcp
   auth:
-    grant: mcp-langfuse
+    grant: mcp:langfuse
     header: Authorization
 langfuse-jp:
   url: https://jp.cloud.langfuse.com/api/public/mcp
   auth:
-    grant: mcp-langfuse
+    grant: mcp:langfuse
     header: Authorization
 langfuse-us:
   url: https://us.cloud.langfuse.com/api/public/mcp
   auth:
-    grant: mcp-langfuse
+    grant: mcp:langfuse
     header: Authorization
 linear: https://mcp.linear.app/mcp
 notion: https://mcp.notion.com/mcp

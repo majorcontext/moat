@@ -22,7 +22,7 @@ type Entry struct {
 	Header string
 	// OAuth reports whether this server authenticates via OAuth (grant
 	// "oauth:<name>"), as opposed to an API-key grant (e.g. context7's
-	// "mcp-context7"). Only OAuth entries are valid targets for
+	// "mcp:context7"). Only OAuth entries are valid targets for
 	// `moat grant oauth` discovery.
 	OAuth bool
 }
@@ -53,6 +53,30 @@ func init() {
 		// Embedded data is compile-time constant — a parse failure is a bug.
 		panic("mcpcatalog: invalid registry.yaml: " + err.Error())
 	}
+}
+
+// GrantName reports whether grant is an MCP API-key grant and, if so, returns
+// the bare server name. It accepts both the canonical "mcp:<name>" form and the
+// deprecated (but still supported) "mcp-<name>" form, so the two behave
+// identically throughout grant validation, routing, and credential resolution.
+//
+// Examples: "mcp:context7" → ("context7", true), "mcp-context7" →
+// ("context7", true), "oauth:notion" → ("", false), "github" → ("", false).
+func GrantName(grant string) (string, bool) {
+	if name, ok := strings.CutPrefix(grant, "mcp:"); ok && name != "" {
+		return name, true
+	}
+	if name, ok := strings.CutPrefix(grant, "mcp-"); ok && name != "" {
+		return name, true
+	}
+	return "", false
+}
+
+// IsGrant reports whether grant is an MCP API-key grant in either the canonical
+// "mcp:<name>" or deprecated "mcp-<name>" form.
+func IsGrant(grant string) bool {
+	_, ok := GrantName(grant)
+	return ok
 }
 
 // Lookup returns the resolved entry for a name, ok=false if unknown. String

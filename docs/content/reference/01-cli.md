@@ -587,13 +587,13 @@ Store a credential for an MCP server.
 moat grant mcp context7
 ```
 
-The credential is stored as `mcp-<name>` (e.g., `mcp-context7`) and can be referenced in moat.yaml.
+The credential is stored as `mcp:<name>` (e.g., `mcp:context7`), mirroring the `oauth:<name>` convention, and can be referenced in moat.yaml. The deprecated `mcp-<name>` (hyphen) form is still accepted for existing grants.
 
 **Interactive prompts:**
 - Credential (hidden input)
 
 **Storage:**
-- `~/.moat/credentials/mcp-<name>.enc`
+- `~/.moat/credentials/mcp:<name>.enc`
 
 ### moat grant oauth
 
@@ -1377,6 +1377,16 @@ Show daemon status: PID, proxy port, uptime, active run count, and registered ro
 
 ```
 moat proxy status
+```
+
+### moat proxy restart
+
+Stop the running proxy daemon and start a fresh one from the current binary. Use this to adopt a newer `moat` binary without waiting for the idle timeout.
+
+The restart holds the daemon spawn lock across the entire stop and start sequence. Health monitors from active runs block on that lock until the new daemon is healthy, so an active run cannot resurrect the old daemon in the gap. The proxy port is preserved so existing containers keep working.
+
+```
+moat proxy restart
 ```
 
 ---

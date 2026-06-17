@@ -20,7 +20,7 @@ Supported providers:
   anthropic         Anthropic API key
   openai            OpenAI API key or OAuth credentials
   aws               AWS IAM role configuration
-  mcp-<name>        MCP server credential
+  mcp:<name>        MCP server credential (mcp-<name> also accepted)
 
 The credential file is permanently deleted.
 
@@ -37,7 +37,7 @@ Examples:
   moat revoke github
 
   # Revoke MCP server credential
-  moat revoke mcp-context7
+  moat revoke mcp:context7
 
   # Revoke a credential from a specific profile
   moat revoke github --profile myproject

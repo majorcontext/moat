@@ -287,7 +287,12 @@ func TestValidateGrants(t *testing.T) {
 			errMsg:  "Configure the grants above",
 		},
 		{
-			name:    "mcp grant skipped by validateGrants",
+			name:    "mcp grant (canonical) skipped by validateGrants",
+			grants:  []string{"mcp:context7"},
+			wantErr: false,
+		},
+		{
+			name:    "mcp grant (deprecated) skipped by validateGrants",
 			grants:  []string{"mcp-test"},
 			wantErr: false,
 		},
@@ -394,10 +399,16 @@ func TestValidateMCPGrants(t *testing.T) {
 	rand.Read(key)
 	store, _ := credential.NewFileStore(credDir, key)
 
-	// Save one grant
+	// Save grants in both the canonical "mcp:<name>" form and the deprecated
+	// "mcp-<name>" form so we can prove both resolve identically.
 	store.Save(credential.Credential{
-		Provider:  "mcp-context7",
+		Provider:  "mcp:context7",
 		Token:     "test-token",
+		CreatedAt: time.Now(),
+	})
+	store.Save(credential.Credential{
+		Provider:  "mcp-legacy",
+		Token:     "legacy-token",
 		CreatedAt: time.Now(),
 	})
 
@@ -408,13 +419,27 @@ func TestValidateMCPGrants(t *testing.T) {
 		errMsg  string
 	}{
 		{
-			name: "valid grant exists",
+			name: "valid grant exists (canonical mcp: form)",
 			mcp: []config.MCPServerConfig{
 				{
 					Name: "context7",
 					URL:  "https://mcp.context7.com",
 					Auth: &config.MCPAuthConfig{
-						Grant:  "mcp-context7",
+						Grant:  "mcp:context7",
+						Header: "API_KEY",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid grant exists (deprecated mcp- form)",
+			mcp: []config.MCPServerConfig{
+				{
+					Name: "legacy",
+					URL:  "https://mcp.legacy.com",
+					Auth: &config.MCPAuthConfig{
+						Grant:  "mcp-legacy",
 						Header: "API_KEY",
 					},
 				},

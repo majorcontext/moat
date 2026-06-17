@@ -8,13 +8,20 @@ import (
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
 // resolveCredName maps a grant (e.g. "oauth:notion", "github") to the
-// credential store key. OAuth uses the full grant name; all others use
-// the resolved provider name.
+// credential store key. OAuth and MCP grants use the full grant name; all
+// others use the resolved provider name.
 func resolveCredName(grantName, grant string) credential.Provider {
+	// MCP grants ("mcp:<name>" or deprecated "mcp-<name>") store under the full
+	// grant name. This must precede provider.ResolveName because "mcp:context7"
+	// splits to grantName "mcp", which is not a registered provider.
+	if mcpcatalog.IsGrant(grant) {
+		return credential.Provider(grant)
+	}
 	canonical := provider.ResolveName(grantName)
 	if canonical == "oauth" {
 		return credential.Provider(grant)

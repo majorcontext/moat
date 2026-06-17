@@ -41,7 +41,7 @@ moat grant mcp langfuse
 Credential: Basic <paste the value from step 1>
 ```
 
-The credential is stored encrypted under grant name `mcp-langfuse` and injected by the
+The credential is stored encrypted under grant name `mcp:langfuse` and injected by the
 proxy for all `langfuse-*` servers (they share the same grant).
 
 ## Run
@@ -59,6 +59,6 @@ mcp:
   - name: langfuse
     url: https://langfuse.internal.acme.com/api/public/mcp
     auth:
-      grant: mcp-langfuse
+      grant: mcp:langfuse
       header: Authorization
 ```

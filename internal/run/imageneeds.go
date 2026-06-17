@@ -7,6 +7,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -116,7 +117,16 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 // "codex" (aliased from "openai"), but credentials are stored under "openai".
 // For namespaced grants like "oauth:notion", the full grant name is used as
 // the store key so that each OAuth integration has its own credential entry.
+// MCP grants ("mcp:<name>" or the deprecated "mcp-<name>") likewise use the
+// full grant name as the store key — the credential is stored verbatim under
+// whatever form was granted, so both forms resolve independently.
 func credentialStoreKey(baseName, fullGrant string) credential.Provider {
+	// MCP grants store under the full grant name. This must come before the
+	// provider.ResolveName path because "mcp:context7" splits to baseName "mcp",
+	// which is not a registered provider.
+	if mcpcatalog.IsGrant(fullGrant) {
+		return credential.Provider(fullGrant)
+	}
 	canonical := provider.ResolveName(baseName)
 	if canonical == providerCodex {
 		return credential.ProviderOpenAI

@@ -37,10 +37,12 @@ Store credentials for the MCP server with `moat grant mcp`:
 ```bash
 $ moat grant mcp context7
 Enter credential for MCP server 'context7': ***************
-MCP credential 'mcp-context7' saved to ~/.moat/credentials/mcp-context7.enc
+MCP credential 'mcp:context7' saved to ~/.moat/credentials/mcp:context7.enc
 ```
 
-The credential is encrypted and stored locally. The grant name follows the pattern `mcp-<name>`.
+The credential is encrypted and stored locally. The grant name follows the pattern `mcp:<name>`, mirroring the `oauth:<name>` convention.
+
+> The older `mcp-<name>` (hyphen) form is still accepted for backward compatibility but is deprecated. Prefer `mcp:<name>`.
 
 For public MCP servers that do not require authentication, skip this step.
 
@@ -53,7 +55,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 ```
 
@@ -68,7 +70,7 @@ mcp:
 
 | Field | Description |
 |-------|-------------|
-| `auth.grant` | Grant name to use (format: `mcp-<name>`) |
+| `auth.grant` | Grant name to use (format: `mcp:<name>`; the deprecated `mcp-<name>` form is still accepted) |
 | `auth.header` | HTTP header name for credential injection |
 
 Omit the `auth` block for public MCP servers that do not require authentication:
@@ -96,13 +98,13 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
   - name: notion
     url: https://notion-mcp.example.com
     auth:
-      grant: mcp-notion
+      grant: mcp:notion
       header: Notion-Token
 ```
 
@@ -134,7 +136,7 @@ mcp:
   - name: my-tools
     url: http://localhost:3000/mcp
     auth:
-      grant: mcp-my-tools
+      grant: mcp:my-tools
       header: Authorization
 ```
 
@@ -161,7 +163,7 @@ mcp:
   - name: context7
     url: https://mcp.context7.com/mcp
     auth:
-      grant: mcp-context7
+      grant: mcp:context7
       header: CONTEXT7_API_KEY
 
   - name: local-tools
@@ -187,7 +189,7 @@ mcp:
   - name: linear
     url: https://mcp.linear.app/mcp
     auth:
-      grant: mcp-linear
+      grant: mcp:linear
       header: Authorization
     policy: linear-readonly
 ```
@@ -494,7 +496,7 @@ moat grant mcp langfuse
 Credential: Basic <paste the value from step 1>
 ```
 
-The grant name is `mcp-langfuse`. All four regional shortcuts share this grant,
+The grant name is `mcp:langfuse`. All four regional shortcuts share this grant,
 so you only need to run this once.
 
 **3. Configure in moat.yaml**
@@ -520,7 +522,7 @@ mcp:
   - name: langfuse
     url: https://langfuse.internal.acme.com/api/public/mcp
     auth:
-      grant: mcp-langfuse
+      grant: mcp:langfuse
       header: Authorization
 ```
 
@@ -543,7 +545,7 @@ Credential injection events are recorded in audit logs:
 ```bash
 $ moat audit
 
-[10:23:44.500] credential.injected grant=mcp-context7 host=mcp.context7.com header=CONTEXT7_API_KEY
+[10:23:44.500] credential.injected grant=mcp:context7 host=mcp.context7.com header=CONTEXT7_API_KEY
 ```
 
 Sandbox-local MCP server output appears in container logs:
@@ -557,13 +559,13 @@ moat logs
 ### MCP server not appearing in agent
 
 - Verify the MCP server is declared in `moat.yaml` (remote servers at the top level, sandbox-local servers under the agent section)
-- For remote servers, check that the grant exists: `moat grant list` should show `mcp-{name}`
+- For remote servers, check that the grant exists: `moat grant list` should show `mcp:{name}`
 - Check container logs for configuration errors: `moat logs`
 
 ### Authentication failures (401 or 403)
 
 - Verify the grant exists and the credential is correct
-- Revoke and re-grant: `moat revoke mcp-{name}` then `moat grant mcp {name}`
+- Revoke and re-grant: `moat revoke mcp:{name}` then `moat grant mcp {name}`
 - Verify the `url` in `moat.yaml` matches the actual MCP server endpoint
 - Verify the `header` name matches what the MCP server expects
 
@@ -573,7 +575,7 @@ If you see `moat-stub-{grant}` in error output, the proxy did not replace the st
 
 - The `url` in `moat.yaml` matches the host the agent is connecting to
 - The `header` name matches what the agent sends
-- The grant name in `auth.grant` matches the stored credential (`mcp-{name}`)
+- The grant name in `auth.grant` matches the stored credential (`mcp:{name}`)
 
 ### Connection refused
 

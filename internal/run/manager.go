@@ -863,7 +863,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 				}
 
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")
-				// MCP grants (e.g., "mcp-test") have no registered provider — they are
+				// MCP grants (e.g., "mcp:test") have no registered provider — they are
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
 				prov := provider.Get(grantName)
 				if prov == nil {

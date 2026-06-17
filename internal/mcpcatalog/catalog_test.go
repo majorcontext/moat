@@ -18,12 +18,12 @@ func TestLookup(t *testing.T) {
 		{"betterstack", Entry{URL: "https://mcp.betterstack.com", Grant: "oauth:betterstack", Header: "Authorization", OAuth: true}, true},
 		{"sentry", Entry{URL: "https://mcp.sentry.dev/mcp", Grant: "oauth:sentry", Header: "Authorization", OAuth: true}, true},
 		// Object entry → explicit API-key auth preserved, no defaulting (OAuth=false).
-		{"context7", Entry{URL: "https://mcp.context7.com/mcp", Grant: "mcp-context7", Header: "CONTEXT7_API_KEY", OAuth: false}, true},
+		{"context7", Entry{URL: "https://mcp.context7.com/mcp", Grant: "mcp:context7", Header: "CONTEXT7_API_KEY", OAuth: false}, true},
 		// Langfuse regional entries — object form, shared grant, Authorization header.
-		{"langfuse-eu", Entry{URL: "https://cloud.langfuse.com/api/public/mcp", Grant: "mcp-langfuse", Header: "Authorization", OAuth: false}, true},
-		{"langfuse-us", Entry{URL: "https://us.cloud.langfuse.com/api/public/mcp", Grant: "mcp-langfuse", Header: "Authorization", OAuth: false}, true},
-		{"langfuse-jp", Entry{URL: "https://jp.cloud.langfuse.com/api/public/mcp", Grant: "mcp-langfuse", Header: "Authorization", OAuth: false}, true},
-		{"langfuse-hipaa", Entry{URL: "https://hipaa.cloud.langfuse.com/api/public/mcp", Grant: "mcp-langfuse", Header: "Authorization", OAuth: false}, true},
+		{"langfuse-eu", Entry{URL: "https://cloud.langfuse.com/api/public/mcp", Grant: "mcp:langfuse", Header: "Authorization", OAuth: false}, true},
+		{"langfuse-us", Entry{URL: "https://us.cloud.langfuse.com/api/public/mcp", Grant: "mcp:langfuse", Header: "Authorization", OAuth: false}, true},
+		{"langfuse-jp", Entry{URL: "https://jp.cloud.langfuse.com/api/public/mcp", Grant: "mcp:langfuse", Header: "Authorization", OAuth: false}, true},
+		{"langfuse-hipaa", Entry{URL: "https://hipaa.cloud.langfuse.com/api/public/mcp", Grant: "mcp:langfuse", Header: "Authorization", OAuth: false}, true},
 		// No bare langfuse alias.
 		{"langfuse", Entry{}, false},
 		// Unknown.
@@ -42,6 +42,54 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestGrantName(t *testing.T) {
+	tests := []struct {
+		grant      string
+		wantServer string
+		wantOK     bool
+	}{
+		// Canonical and deprecated forms both strip to the same server name.
+		{"mcp:context7", "context7", true},
+		{"mcp-context7", "context7", true},
+		{"mcp:render", "render", true},
+		{"mcp-render", "render", true},
+		// Non-MCP grants are not matched.
+		{"oauth:notion", "", false},
+		{"github", "", false},
+		{"ssh:github.com", "", false},
+		{"", "", false},
+		// Empty server name after the prefix is rejected.
+		{"mcp:", "", false},
+		{"mcp-", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.grant, func(t *testing.T) {
+			server, ok := GrantName(tt.grant)
+			if ok != tt.wantOK {
+				t.Fatalf("GrantName(%q) ok = %v, want %v", tt.grant, ok, tt.wantOK)
+			}
+			if server != tt.wantServer {
+				t.Errorf("GrantName(%q) server = %q, want %q", tt.grant, server, tt.wantServer)
+			}
+			if IsGrant(tt.grant) != tt.wantOK {
+				t.Errorf("IsGrant(%q) = %v, want %v", tt.grant, IsGrant(tt.grant), tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestGrantNameMatchesOAuthExclusion confirms that mcp:context7 keeps
+// OAuth=false, so OAuth auto-discovery still excludes it.
+func TestGrantNameMatchesOAuthExclusion(t *testing.T) {
+	e, ok := Lookup("context7")
+	if !ok {
+		t.Fatal("Lookup(context7) not found")
+	}
+	if e.OAuth {
+		t.Errorf("context7 OAuth = true, want false (mcp: grant must not be OAuth)")
+	}
+}
+
 func TestLangfuseRegions(t *testing.T) {
 	regions := []string{"langfuse-eu", "langfuse-us", "langfuse-jp", "langfuse-hipaa"}
 	urls := make(map[string]bool)
@@ -50,8 +98,8 @@ func TestLangfuseRegions(t *testing.T) {
 		if !ok {
 			t.Fatalf("Lookup(%q) not found", name)
 		}
-		if e.Grant != "mcp-langfuse" {
-			t.Errorf("Lookup(%q).Grant = %q, want %q", name, e.Grant, "mcp-langfuse")
+		if e.Grant != "mcp:langfuse" {
+			t.Errorf("Lookup(%q).Grant = %q, want %q", name, e.Grant, "mcp:langfuse")
 		}
 		if e.Header != "Authorization" {
 			t.Errorf("Lookup(%q).Header = %q, want %q", name, e.Header, "Authorization")
