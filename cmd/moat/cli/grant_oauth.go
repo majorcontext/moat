@@ -31,8 +31,9 @@ var grantOAuthCmd = &cobra.Command{
 Opens a browser for OAuth authorization and stores the token securely.
 Supports automatic discovery for MCP servers that implement OAuth metadata.
 
-Well-known services (asana, cloudflare, hubspot, linear, notion, posthog,
-stripe) are auto-discovered without needing --url or a config file.
+Well-known services (asana, betterstack, cloudflare, hubspot, linear, notion,
+posthog, sentry, stripe) are auto-discovered without needing --url or a config
+file.
 
 Examples:
   # Auto-discover a well-known service

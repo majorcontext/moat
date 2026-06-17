@@ -8,6 +8,7 @@
 # own auth (e.g. an API-key MCP server).
 
 asana: https://mcp.asana.com/mcp
+betterstack: https://mcp.betterstack.com
 cloudflare: https://mcp.cloudflare.com/mcp
 context7:
   url: https://mcp.context7.com/mcp
@@ -18,4 +19,5 @@ hubspot: https://mcp.hubspot.com
 linear: https://mcp.linear.app/mcp
 notion: https://mcp.notion.com/mcp
 posthog: https://mcp.posthog.com/mcp
+sentry: https://mcp.sentry.dev/mcp
 stripe: https://mcp.stripe.com
