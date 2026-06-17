@@ -11,6 +11,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/langserver"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/netrules"
 	"gopkg.in/yaml.v3"
 )
@@ -507,6 +508,12 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("parsing %s: %w", filepath.Base(path), err)
 	}
 
+	// Resolve bare/partial mcp[] entries against the well-known catalog before
+	// validation so downstream code sees fully-populated servers.
+	if err := resolveMCPShorthand(&cfg); err != nil {
+		return nil, err
+	}
+
 	// Validate runtime field (only "docker" or "apple" allowed)
 	if cfg.Runtime != "" && cfg.Runtime != "docker" && cfg.Runtime != "apple" {
 		return nil, fmt.Errorf("invalid runtime %q: must be 'docker' or 'apple'", cfg.Runtime)
@@ -843,6 +850,37 @@ func validateTopLevelMCPServerSpec(index int, spec MCPServerConfig, seenNames ma
 		}
 	}
 
+	return nil
+}
+
+// resolveMCPShorthand fills omitted url/auth on each mcp[] entry from the
+// well-known catalog, keyed by name. Explicitly-set fields always win. A bare
+// name unknown to the catalog (and with no url) is an error.
+func resolveMCPShorthand(cfg *Config) error {
+	for i := range cfg.MCP {
+		m := &cfg.MCP[i]
+		entry, ok := mcpcatalog.Lookup(m.Name)
+		if !ok {
+			if m.URL == "" {
+				return fmt.Errorf("mcp[%d]: unknown MCP server %q: provide a url, or use a known name (%s)",
+					i, m.Name, strings.Join(mcpcatalog.Names(), ", "))
+			}
+			continue // custom server identified by url
+		}
+		if m.URL == "" {
+			m.URL = entry.URL
+		}
+		if m.Auth == nil {
+			m.Auth = &MCPAuthConfig{Grant: entry.Grant, Header: entry.Header}
+		} else {
+			if m.Auth.Grant == "" {
+				m.Auth.Grant = entry.Grant
+			}
+			if m.Auth.Header == "" {
+				m.Auth.Header = entry.Header
+			}
+		}
+	}
 	return nil
 }
 

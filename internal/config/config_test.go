@@ -1467,7 +1467,7 @@ mcp:
       grant: mcp-test
       header: API_KEY
 `,
-			wantErr: "mcp[0]: 'url' is required",
+			wantErr: "mcp[0]: unknown MCP server \"test\"",
 		},
 		{
 			name: "non-https url",
