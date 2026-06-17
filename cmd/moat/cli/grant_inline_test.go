@@ -2,8 +2,14 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
+
+	"github.com/majorcontext/moat/internal/run"
 )
 
 func TestGrantDispatchGenericForBareProvider(t *testing.T) {
@@ -21,3 +27,65 @@ func TestGrantDispatchOAuthAndMCP(t *testing.T) {
 		t.Fatalf("mcp:render -> verb=%q args=%v", verb, args)
 	}
 }
+
+func TestPromptLoopSkipsNonPromptable(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{
+		{Grant: "aws", FixCommand: "moat grant aws --role=...", Promptable: false},
+	}
+	in := bufio.NewReader(strings.NewReader(""))
+	granted := promptLoop(context.Background(), missing, in, &out, func(context.Context, string) error {
+		t.Fatal("grantInline must not be called for non-promptable grants")
+		return nil
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0", granted)
+	}
+	if !strings.Contains(out.String(), "moat grant aws") {
+		t.Errorf("expected fix command in output, got: %s", out.String())
+	}
+}
+
+func TestPromptLoopDefaultYesGrants(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{{Grant: "github", FixCommand: "moat grant github", Promptable: true}}
+	in := bufio.NewReader(strings.NewReader("\n")) // bare Enter => default Y
+	calls := 0
+	granted := promptLoop(context.Background(), missing, in, &out, func(_ context.Context, g string) error {
+		calls++
+		if g != "github" {
+			t.Fatalf("granted %q", g)
+		}
+		return nil
+	})
+	if granted != 1 || calls != 1 {
+		t.Fatalf("granted=%d calls=%d, want 1/1", granted, calls)
+	}
+}
+
+func TestPromptLoopDeclineSkips(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{{Grant: "github", FixCommand: "moat grant github", Promptable: true}}
+	in := bufio.NewReader(strings.NewReader("n\n"))
+	granted := promptLoop(context.Background(), missing, in, &out, func(context.Context, string) error {
+		t.Fatal("grantInline must not be called when user declines")
+		return nil
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0", granted)
+	}
+}
+
+func TestPromptLoopGrantErrorStaysUngranted(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{{Grant: "github", FixCommand: "moat grant github", Promptable: true}}
+	in := bufio.NewReader(strings.NewReader("y\n"))
+	granted := promptLoop(context.Background(), missing, in, &out, func(context.Context, string) error {
+		return errTestGrantFailed
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0 when grant fails", granted)
+	}
+}
+
+var errTestGrantFailed = stderrors.New("boom")

@@ -2,8 +2,14 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"io"
+	"os"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/majorcontext/moat/internal/run"
 )
@@ -21,6 +27,57 @@ func grantDispatch(grant string) (verb string, args []string) {
 	default:
 		return "generic", fields[:1]
 	}
+}
+
+// promptForMissingGrants runs the interactive prompt loop against stdin/stdout.
+// Returns the number of grants successfully granted.
+func promptForMissingGrants(ctx context.Context, missing []run.MissingGrant) int {
+	return promptLoop(ctx, missing, bufio.NewReader(os.Stdin), os.Stdout, grantInline)
+}
+
+// promptLoop is the testable core: prints a summary, then prompts per
+// promptable grant (default Y) and invokes grantFn. Non-promptable grants are
+// listed with their fix command and skipped. Returns the count granted.
+func promptLoop(
+	ctx context.Context,
+	missing []run.MissingGrant,
+	in *bufio.Reader,
+	out io.Writer,
+	grantFn func(context.Context, string) error,
+) int {
+	fmt.Fprintf(out, "\n%d grant(s) needed before this run can start:\n", len(missing))
+	for _, m := range missing {
+		fmt.Fprintf(out, "  • %s\n", m.Grant)
+	}
+	fmt.Fprintln(out)
+
+	granted := 0
+	for _, m := range missing {
+		if !m.Promptable {
+			fmt.Fprintf(out, "%s: cannot grant interactively — run: %s\n", m.Grant, m.FixCommand)
+			continue
+		}
+		fmt.Fprintf(out, "Grant %s now? [Y/n] ", m.Grant)
+		line, _ := in.ReadString('\n')
+		ans := strings.ToLower(strings.TrimSpace(line))
+		if ans == "n" || ans == "no" {
+			fmt.Fprintf(out, "  Skipped. Run later with: %s\n", m.FixCommand)
+			continue
+		}
+		if err := grantFn(ctx, m.Grant); err != nil {
+			fmt.Fprintf(out, "  ✗ %s: %v\n", m.Grant, err)
+			continue
+		}
+		fmt.Fprintf(out, "  ✓ %s granted\n", m.Grant)
+		granted++
+	}
+	return granted
+}
+
+// stdinIsInteractive reports whether both stdin and stdout are terminals, so an
+// inline prompt makes sense.
+func stdinIsInteractive() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // grantInline runs the existing interactive grant flow for a single grant,
