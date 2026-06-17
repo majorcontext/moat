@@ -9,6 +9,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/mcpcatalog"
 	"github.com/majorcontext/moat/internal/providers/oauth"
 	"github.com/spf13/cobra"
 )
@@ -177,7 +178,11 @@ func runGrantOAuth(cmd *cobra.Command, args []string) error {
 		serverURL = "<server-url>"
 	}
 	fmt.Printf("\nUse in moat.yaml:\n\n")
-	fmt.Printf("grants:\n  - oauth:%s\n\nmcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n      header: Authorization\n\n", name, name, serverURL, name)
+	if _, known := mcpcatalog.Lookup(name); known {
+		fmt.Printf("mcp:\n  - %s\n\n", name)
+	} else {
+		fmt.Printf("mcp:\n  - name: %s\n    url: %s\n    auth:\n      grant: oauth:%s\n      header: Authorization\n\n", name, serverURL, name)
+	}
 
 	return nil
 }
