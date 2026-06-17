@@ -17,6 +17,17 @@ func TestCredentialRejectionHints(t *testing.T) {
 	ok := []storage.NetworkRequest{
 		{URL: "https://github.com/octocat/Hello-World.git/info/refs", StatusCode: 200},
 	}
+	// A 401 to github.com followed by a 200 to the same host: recovered, no hint.
+	recovered := []storage.NetworkRequest{
+		{URL: "https://github.com/octocat/Hello-World.git/info/refs", StatusCode: 401},
+		{URL: "https://github.com/octocat/Hello-World.git/git-upload-pack", StatusCode: 200},
+	}
+	// 403 on api.github.com (unrecovered) while github.com git succeeded: the
+	// api host still flags because it had no success of its own.
+	apiRejectedGitOK := []storage.NetworkRequest{
+		{URL: "https://api.github.com/repos/o/r", StatusCode: 403},
+		{URL: "https://github.com/o/r.git/info/refs", StatusCode: 200},
+	}
 
 	tests := []struct {
 		name      string
@@ -29,6 +40,8 @@ func TestCredentialRejectionHints(t *testing.T) {
 		{name: "api.github.com 403 with github grant", reqs: api403, grants: []string{"github"}, wantHint: true, wantGrant: "moat grant github"},
 		{name: "github 401 but github not granted", reqs: gh401, grants: []string{"anthropic"}, wantHint: false},
 		{name: "github 200 success", reqs: ok, grants: []string{"github"}, wantHint: false},
+		{name: "github 401 then 200 on same host is recovered", reqs: recovered, grants: []string{"github"}, wantHint: false},
+		{name: "api 403 unrecovered while git succeeded", reqs: apiRejectedGitOK, grants: []string{"github"}, wantHint: true, wantGrant: "moat grant github"},
 		{name: "no requests", reqs: nil, grants: []string{"github"}, wantHint: false},
 	}
 

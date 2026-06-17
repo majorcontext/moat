@@ -21,7 +21,7 @@ var grantAuths = []grantAuth{
 	{
 		grant: "github",
 		hosts: []string{"github.com", "api.github.com"},
-		hint:  "GitHub rejected the injected credential — the stored token may be expired. Run `moat grant github` to refresh it.",
+		hint:  "GitHub rejected the injected credential — the stored token may be expired or missing a required scope. Run `moat grant github` to refresh it.",
 	},
 }
 
@@ -30,6 +30,11 @@ var grantAuths = []grantAuth{
 // actionable re-grant hint per affected grant. An expired stored token
 // otherwise surfaces only as an opaque downstream error (e.g. git's
 // "could not read Username"), so this points the user at the real fix.
+//
+// A host is only flagged when it had a rejection and no subsequent success —
+// so a request that recovered (e.g. retried and got a 2xx, or fell back to SSH
+// and the run completed) does not produce a spurious warning. Callers should
+// additionally only surface these on a failed run.
 func credentialRejectionHints(reqs []storage.NetworkRequest, grants []string) []string {
 	granted := make(map[string]bool, len(grants))
 	for _, g := range grants {
@@ -41,28 +46,45 @@ func credentialRejectionHints(reqs []storage.NetworkRequest, grants []string) []
 		if !granted[ga.grant] {
 			continue
 		}
-		if hasAuthRejection(reqs, ga.hosts) {
+		if hasUnrecoveredRejection(reqs, ga.hosts) {
 			hints = append(hints, ga.hint)
 		}
 	}
 	return hints
 }
 
-// hasAuthRejection reports whether any request to one of hosts was rejected with
-// a 401 or 403.
-func hasAuthRejection(reqs []storage.NetworkRequest, hosts []string) bool {
+// hasUnrecoveredRejection reports whether any of hosts had a 401/403 rejection
+// with no successful (2xx) request to that same host — i.e. a rejection that was
+// not recovered. A host that returned both a rejection and a success is treated
+// as recovered and does not flag.
+func hasUnrecoveredRejection(reqs []storage.NetworkRequest, hosts []string) bool {
+	rejected := make(map[string]bool)
+	succeeded := make(map[string]bool)
 	for _, req := range reqs {
-		if req.StatusCode != 401 && req.StatusCode != 403 {
-			continue
-		}
 		host := requestHost(req.URL)
-		if host == "" {
+		if host == "" || !hostMatches(host, hosts) {
 			continue
 		}
-		for _, h := range hosts {
-			if host == h || strings.HasSuffix(host, "."+h) {
-				return true
-			}
+		switch {
+		case req.StatusCode == 401 || req.StatusCode == 403:
+			rejected[host] = true
+		case req.StatusCode >= 200 && req.StatusCode < 300:
+			succeeded[host] = true
+		}
+	}
+	for host := range rejected {
+		if !succeeded[host] {
+			return true
+		}
+	}
+	return false
+}
+
+// hostMatches reports whether host equals or is a subdomain of any of hosts.
+func hostMatches(host string, hosts []string) bool {
+	for _, h := range hosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
 		}
 	}
 	return false

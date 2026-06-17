@@ -368,17 +368,21 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		return r, nil
 	case err := <-waitDone:
 		logCancel()
-		// Surface actionable hints when a grant's injected credential was
-		// rejected (e.g. an expired GitHub token otherwise shows up only as
-		// git's opaque "could not read Username").
-		if r.Store != nil {
-			if reqs, rerr := r.Store.ReadNetworkRequests(); rerr == nil {
-				for _, hint := range credentialRejectionHints(reqs, r.Grants) {
-					ui.Warn(hint)
+		if err != nil {
+			// On a failed run, surface actionable hints when a grant's injected
+			// credential was rejected (e.g. an expired GitHub token otherwise
+			// shows up only as git's opaque "could not read Username"). Gated on
+			// failure so a benign 401/403 that the run recovered from doesn't
+			// produce a spurious warning.
+			if r.Store != nil {
+				if reqs, rerr := r.Store.ReadNetworkRequests(); rerr == nil {
+					for _, hint := range credentialRejectionHints(reqs, r.Grants) {
+						ui.Warn(hint)
+					}
+				} else {
+					log.Debug("reading network requests for credential hints", "error", rerr)
 				}
 			}
-		}
-		if err != nil {
 			return r, fmt.Errorf("run failed: %w", err)
 		}
 		fmt.Println()
