@@ -129,6 +129,7 @@ moat run [flags] [path] [-- command]
 | `--keep` | Keep container after run completes |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
+| `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
 ### Execution modes
@@ -420,6 +421,7 @@ Configuration is read from `moat.yaml` in the repository root. If a run is alrea
 | `--runtime` | Container runtime to use (`apple`, `docker`) |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--no-prompt` | Never prompt to grant missing credentials; fail instead. Also set via `MOAT_NO_PROMPT=1`. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging |
 
 ### Run naming

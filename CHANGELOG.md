@@ -8,7 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Added
 
-- **Inline grant prompting** — on an interactive terminal, `moat run`/`moat claude`/`moat codex` now detect missing credential grants before starting the container and offer to grant each one inline, instead of failing and requiring a separate `moat grant` plus a re-run. Non-interactive runs are unchanged; use `--no-prompt` (or `MOAT_NO_PROMPT=1`) to force the fail-fast behavior. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- **Inline grant prompting** — on an interactive terminal, `moat run`/`moat claude`/`moat codex` now detect missing credential grants before starting the container and offer to grant each one inline, instead of failing and requiring a separate `moat grant` plus a re-run. Non-interactive runs are unchanged; use `--no-prompt` (or `MOAT_NO_PROMPT=1`) to force the fail-fast behavior. ([#389](https://github.com/majorcontext/moat/pull/389))
 
 ## v0.6.0 — 2026-06-17
 
