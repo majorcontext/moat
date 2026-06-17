@@ -63,10 +63,10 @@ func init() {
 // Examples: "mcp:context7" → ("context7", true), "mcp-context7" →
 // ("context7", true), "oauth:notion" → ("", false), "github" → ("", false).
 func GrantName(grant string) (string, bool) {
-	if name, ok := strings.CutPrefix(grant, "mcp:"); ok {
+	if name, ok := strings.CutPrefix(grant, "mcp:"); ok && name != "" {
 		return name, true
 	}
-	if name, ok := strings.CutPrefix(grant, "mcp-"); ok {
+	if name, ok := strings.CutPrefix(grant, "mcp-"); ok && name != "" {
 		return name, true
 	}
 	return "", false

@@ -51,6 +51,9 @@ func TestGrantName(t *testing.T) {
 		{"github", "", false},
 		{"ssh:github.com", "", false},
 		{"", "", false},
+		// Empty server name after the prefix is rejected.
+		{"mcp:", "", false},
+		{"mcp-", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.grant, func(t *testing.T) {
