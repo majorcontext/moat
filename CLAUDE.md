@@ -115,6 +115,15 @@ golangci-lint run
 - Use `go vet` to catch common issues
 - **After completing a batch of changes, always run `make lint` and fix any issues before committing.** This catches formatting, vet, and lint errors early. If `golangci-lint` is not installed, fall back to `go vet ./...`.
 
+## Codebase Invariants
+
+Rules PR review has caught more than once, ordered by how often and how severely they bite. Check the relevant ones when touching that area:
+
+1. **Test the companion case — the most common review miss.** A test that asserts one direction or one property almost always needs its mirror: all-missing → also assert all-present; "explicit value wins" → also assert the catalog fallback still populates; the happy path → also cover the refresh/error path and symbolic inputs (`stable`/`latest`). One-sided tests pass while the regression they exist to catch ships anyway. (#357, #376, #383, #389)
+2. **Detector ↔ validator parity.** `run.DetectMissingGrants` (CLI pre-flight) must classify exactly what `validateGrants`/`validateMCPGrants` (the `Create` gate) reject — same empty-string handling, same error buckets. When you edit one, edit the other, and update the drift-guard test (`TestDetectMissingGrantsMatchesValidators`) to assert **both** directions. (#389)
+3. **Catalog lookups filter by auth type.** `oauth.LookupServerURL` returns `""` for non-OAuth catalog entries (`!e.OAuth`) so `moat grant oauth <api-key-server>` fails clearly instead of attempting OAuth discovery and failing confusingly. Preserve this property when adding catalog entries or lookup helpers. (#383, #386)
+4. **Match documented contracts exactly.** Env/flag checks use the documented value (`MOAT_NO_PROMPT == "1"`, not `!= ""`, which silently accepts `0`/`false`). Don't collapse distinct error causes (not-found vs permission-denied vs decrypt-failed) into one catch-all bucket — each implies different user guidance. (#389)
+
 ## Logging vs User-Visible Output
 
 Two separate systems — don't mix them up:
@@ -188,6 +197,15 @@ Documentation is part of the feature. A feature without docs is incomplete.
 - Store all design specs and implementation plans in `docs/plans/`
 - Naming convention: `YYYY-MM-DD-<topic>-design.md` for specs, `YYYY-MM-DD-<topic>-plan.md` for plans
 - Do not create `docs/superpowers/` or other directories for specs — `docs/plans/` is the single location
+
+## Before You Push
+
+The `claude-review` bot reviews every push — but it's the same model reviewing the same diff, so catching issues locally first saves a round-trip. Before pushing a branch:
+
+- **Self-review the diff** with `/code-review` (or the compound-engineering review agents). This catches the recurring classes the bot flags: edge cases, missing test coverage, error-classification mistakes.
+- **Re-read open PR review threads** before each new push. "Previous review flagged this — still not fixed" has recurred; address prior feedback before adding more.
+- **Check the high-frequency traps** from "Codebase Invariants" above — especially companion-case test coverage — plus empty/malformed inputs (empty strings, trailing-separator names like `mcp:`).
+- **Fill the CHANGELOG PR link** — replace the `#NNN` placeholder with the real PR number. CI now fails on an unfilled placeholder.
 
 ## Creating Pull Requests
 

@@ -32,6 +32,16 @@ jobs:
             exit 1
           fi
 
+      - name: Check CHANGELOG PR-link placeholders
+        run: |
+          # The changelog entry template uses #NNN as a placeholder for the PR
+          # number. Leaving it unfilled has slipped through review repeatedly
+          # (#383, #384), so fail fast if any placeholder remains.
+          if grep -nE '#NNN|pull/NNN' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has an unfilled PR-number placeholder. Replace NNN with the real PR number."
+            exit 1
+          fi
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
