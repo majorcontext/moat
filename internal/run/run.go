@@ -343,8 +343,8 @@ func appendMCPGrants(grants []string, cfg *config.Config) []string {
 // validateMCPGrants checks that all required MCP grants exist.
 func validateMCPGrants(cfg *config.Config, store *credential.FileStore) error {
 	for _, mcp := range cfg.MCP {
-		if mcp.Auth == nil {
-			continue // No auth required
+		if mcp.Auth == nil || mcp.Auth.Grant == "" {
+			continue // No auth required (or no grant named)
 		}
 
 		_, err := store.Get(credential.Provider(mcp.Auth.Grant))

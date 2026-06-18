@@ -274,6 +274,22 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		Clipboard:     clipboard,
 	}
 
+	// Pre-flight: on an interactive terminal, offer to grant any missing
+	// credentials inline rather than failing. Whatever remains unresolved is
+	// still caught by manager.Create's validation below (today's behavior),
+	// so non-interactive runs and --no-prompt are unaffected.
+	noPrompt := opts.Flags.NoPrompt || os.Getenv("MOAT_NO_PROMPT") == "1"
+	if !noPrompt && stdinIsInteractive() {
+		if store, storeErr := run.OpenDefaultStore(); storeErr == nil {
+			grants := run.AppendMCPGrants(opts.Flags.Grants, opts.Config)
+			if missing := run.DetectMissingGrants(grants, opts.Config, store); len(missing) > 0 {
+				promptForMissingGrants(ctx, missing)
+			}
+		} else {
+			log.Debug("grant pre-flight: could not open store", "error", storeErr)
+		}
+	}
+
 	// Create run
 	r, err := manager.Create(ctx, runOpts)
 	if err != nil {

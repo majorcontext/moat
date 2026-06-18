@@ -694,6 +694,26 @@ MCP credential 'mcp:context7' saved
 $ moat claude ./my-project
 ```
 
+## Inline grant prompting
+
+On an interactive terminal, `moat run`, `moat claude`, and `moat codex` detect missing credential grants before the container starts and offer to grant each one inline:
+
+```
+Grant github now? [Y/n]
+```
+
+Accepting runs the corresponding `moat grant` command in place. Declining prints the command to run later:
+
+```
+  Skipped. Run later with: moat grant github
+```
+
+Any grants that remain missing after the prompts fail with the existing missing-grants error.
+
+AWS grants are never prompted inline (they require flags such as `--role`). Unrecognized providers are also skipped.
+
+On non-interactive terminals (no TTY), prompting is suppressed and missing grants fail immediately. To force this fail-fast behavior on an interactive terminal, pass `--no-prompt` or set `MOAT_NO_PROMPT=1`. For CI and headless automation, set `MOAT_NO_PROMPT=1` to guarantee fail-fast behavior regardless of whether a TTY happens to be attached.
+
 ## Using grants in runs
 
 ### Via CLI flags
