@@ -1,0 +1,32 @@
+# Example: host-local MCP server with host-only credentials
+#
+# Runs an MCP server on the HOST (not in the sandbox) so it can use
+# credentials that only exist on the host — a corp credential process,
+# the OS keychain, a VPN-gated CLI. The agent reaches the server's tools
+# through Moat's proxy relay, but the credential never enters the
+# container: nothing is injected, nothing is written to container config.
+#
+# Note there is no `auth:` block. The host server authenticates itself;
+# Moat relays the request untouched and injects no credential.
+#
+# Start the host server first, then run the agent:
+#   node examples/mcp-hostlocal/server.js &
+#   moat claude examples/mcp-hostlocal
+#
+# Verify config generation (relay URL, no injected auth):
+#   moat run --no-sandbox examples/mcp-hostlocal -- cat /moat/claude-init/.claude.json
+
+name: mcp-hostlocal
+
+dependencies:
+  - claude-code
+
+grants:
+  - claude
+
+command: ["claude"]
+interactive: true
+
+mcp:
+  - name: corp-hostlocal
+    url: http://localhost:9123

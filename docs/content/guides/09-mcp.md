@@ -12,7 +12,7 @@ MCP (Model Context Protocol) servers extend AI agents with additional tools and 
 Moat supports three types of MCP servers:
 
 - **Remote MCP servers** -- External HTTPS services accessed through Moat's credential-injecting proxy
-- **Host-local MCP servers** -- Services running on the host machine, bridged to the container through the proxy relay
+- **Host-local MCP servers** -- Services running on the host machine, bridged to the container through the proxy relay -- useful when the server needs credentials that exist only on the host
 - **Sandbox-local MCP servers** -- Child processes running inside the container
 
 This guide covers configuring all three types, granting credentials, and troubleshooting common issues.
@@ -119,6 +119,8 @@ moat grant mcp notion
 
 Host-local MCP servers run on your host machine (outside the container). Containers cannot reach `localhost` on the host directly, so Moat's proxy relay bridges the connection.
 
+Running the server on the host is the right choice when it authenticates with credentials that only exist on the host -- a corp credential process, the OS keychain, or a VPN-gated CLI. Those credentials stay on the host: they are never injected into the container and never written to container config. The agent invokes the server's tools through the relay and only sees the results. This is the opposite trade-off from a [sandbox-local server](#sandbox-local-mcp-servers), where the server -- and its secrets -- run inside the container. See [`examples/mcp-hostlocal`](https://github.com/majorcontext/moat/tree/main/examples/mcp-hostlocal) for a runnable demonstration.
+
 ### Configure in moat.yaml
 
 Declare host-local servers in the `mcp:` section with an `http://localhost` or `http://127.0.0.1` URL:
@@ -129,7 +131,7 @@ mcp:
     url: http://localhost:3000/mcp
 ```
 
-Authentication is optional. If the host-local server requires credentials:
+With no `auth:` block, Moat relays the request untouched and injects nothing -- the host server authenticates itself (this is the credential-isolation case above). Add an `auth:` block only when you want Moat to inject a credential from the grant store instead:
 
 ```yaml
 mcp:
