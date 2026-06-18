@@ -37,6 +37,7 @@ const (
 	ReasonNotConfigured   MissingReason = iota // no credential stored
 	ReasonDecryptFailed                        // stored but encryption key changed
 	ReasonUnknownProvider                      // typo / not a registered provider
+	ReasonReadFailed                           // store read failed (e.g. permission denied, corrupt file)
 )
 
 // MissingGrant describes a grant a run needs but does not have.
@@ -45,17 +46,25 @@ type MissingGrant struct {
 	Reason     MissingReason
 	FixCommand string // e.g. "moat grant oauth notion"
 	Promptable bool   // can be granted via an inline interactive flow
+	Detail     string // raw store error, populated for ReasonReadFailed
 }
 
 // classifyMissingReason maps a store.Get error to a MissingReason. A decrypt
-// failure means the credential exists but the encryption key changed; anything
-// else is treated as not configured. Shared by the generic and MCP detection
-// paths so they classify identically.
+// failure means the credential exists but the encryption key changed; a
+// not-found error means no credential is stored. Anything else (a permission
+// error or a corrupt file) is a read failure the user can't fix by re-granting
+// blindly, so it is surfaced rather than prompted. Mirrors the buckets in
+// validateGrants so the detector and the validator classify identically.
 func classifyMissingReason(err error) MissingReason {
-	if strings.Contains(err.Error(), "decrypting credential") {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "decrypting credential"):
 		return ReasonDecryptFailed
+	case strings.Contains(msg, "credential not found"):
+		return ReasonNotConfigured
+	default:
+		return ReasonReadFailed
 	}
-	return ReasonNotConfigured
 }
 
 // DetectMissingGrants returns the grants a run needs but does not have. It
@@ -88,12 +97,18 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 		credName := credentialStoreKey(grantName, grant)
 		if _, err := store.Get(credName); err != nil {
 			reason := classifyMissingReason(err)
-			// AWS needs mandatory flags (--role, …); cannot prompt cleanly.
-			promptable := grantName != "aws"
+			// AWS needs mandatory flags (--role, …); cannot prompt cleanly. A
+			// read failure (permission/corrupt file) isn't fixed by re-granting
+			// blindly, so surface the raw error instead of prompting.
+			promptable := grantName != "aws" && reason != ReasonReadFailed
 			if grantName == "aws" {
 				fix = "moat grant aws --role=arn:aws:iam::ACCOUNT:role/ROLE"
 			}
-			add(MissingGrant{Grant: grant, Reason: reason, FixCommand: fix, Promptable: promptable})
+			detail := ""
+			if reason == ReasonReadFailed {
+				detail = err.Error()
+			}
+			add(MissingGrant{Grant: grant, Reason: reason, FixCommand: fix, Promptable: promptable, Detail: detail})
 		}
 	}
 
@@ -104,11 +119,17 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 				continue
 			}
 			if _, err := store.Get(credential.Provider(mcp.Auth.Grant)); err != nil {
+				reason := classifyMissingReason(err)
+				detail := ""
+				if reason == ReasonReadFailed {
+					detail = err.Error()
+				}
 				add(MissingGrant{
 					Grant:      mcp.Auth.Grant,
-					Reason:     classifyMissingReason(err),
+					Reason:     reason,
 					FixCommand: "moat grant " + grantToCommand(mcp.Auth.Grant),
-					Promptable: true,
+					Promptable: reason != ReasonReadFailed,
+					Detail:     detail,
 				})
 			}
 		}

@@ -2,6 +2,9 @@ package run
 
 import (
 	"crypto/rand"
+	stderrors "errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -104,6 +107,62 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	rejected = validateGrants(grants, full) != nil || validateMCPGrants(cfg, full) != nil
 	if detected || rejected {
 		t.Fatalf("present case: detector=%v validators=%v — both must report none", detected, rejected)
+	}
+}
+
+func TestClassifyMissingReason(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want MissingReason
+	}{
+		{"decrypting credential for github: cipher: message authentication failed", ReasonDecryptFailed},
+		{"credential not found: github", ReasonNotConfigured},
+		{"reading credential file: open /x: permission denied", ReasonReadFailed},
+		{"invalid credential file", ReasonReadFailed},
+	}
+	for _, c := range cases {
+		if got := classifyMissingReason(stderrors.New(c.msg)); got != c.want {
+			t.Errorf("classifyMissingReason(%q) = %v, want %v", c.msg, got, c.want)
+		}
+	}
+}
+
+// A credential file that exists but can't be read cleanly (here, truncated so
+// it's shorter than the cipher nonce → "invalid credential file") must be
+// reported as a non-promptable read failure with the raw error surfaced, not as
+// a promptable "not configured" grant.
+func TestDetectMissingGrantsReadFailed(t *testing.T) {
+	dir := t.TempDir()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	store, err := credential.NewFileStore(dir, key)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	// Save a valid credential, then truncate the file so the next read fails
+	// with a store error other than not-found or decrypt.
+	if err := store.Save(credential.Credential{Provider: "github", Token: "tok"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "github.enc"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	got := DetectMissingGrants([]string{"github"}, nil, store)
+	if len(got) != 1 {
+		t.Fatalf("got %d missing, want 1: %+v", len(got), got)
+	}
+	m := got[0]
+	if m.Reason != ReasonReadFailed {
+		t.Errorf("Reason = %v, want ReasonReadFailed", m.Reason)
+	}
+	if m.Promptable {
+		t.Error("read failure must not be promptable")
+	}
+	if m.Detail == "" {
+		t.Error("read failure must carry the raw store error in Detail")
 	}
 }
 

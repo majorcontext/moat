@@ -59,7 +59,13 @@ func promptLoop(
 	granted := 0
 	for _, m := range missing {
 		if !m.Promptable {
-			fmt.Fprintf(out, "%s: cannot grant interactively — run: %s\n", m.Grant, m.FixCommand)
+			if m.Detail != "" {
+				// A read failure (e.g. permission denied, corrupt file). Surface
+				// the raw error so the user knows re-granting may not help.
+				fmt.Fprintf(out, "%s: %s — run: %s\n", m.Grant, m.Detail, m.FixCommand)
+			} else {
+				fmt.Fprintf(out, "%s: cannot grant interactively — run: %s\n", m.Grant, m.FixCommand)
+			}
 			continue
 		}
 		fmt.Fprintf(out, "Grant %s now? [Y/n] ", m.Grant)

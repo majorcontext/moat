@@ -46,6 +46,24 @@ func TestPromptLoopSkipsNonPromptable(t *testing.T) {
 	}
 }
 
+func TestPromptLoopReadFailureSurfacesDetail(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingGrant{
+		{Grant: "github", FixCommand: "moat grant github", Promptable: false, Detail: "reading credential file: permission denied"},
+	}
+	in := bufio.NewReader(strings.NewReader(""))
+	granted := promptLoop(context.Background(), missing, in, &out, func(context.Context, string) error {
+		t.Fatal("grantInline must not be called for a non-promptable read failure")
+		return nil
+	})
+	if granted != 0 {
+		t.Fatalf("granted=%d, want 0", granted)
+	}
+	if !strings.Contains(out.String(), "permission denied") {
+		t.Errorf("expected raw error in output, got: %s", out.String())
+	}
+}
+
 func TestPromptLoopDefaultYesGrants(t *testing.T) {
 	var out bytes.Buffer
 	missing := []run.MissingGrant{{Grant: "github", FixCommand: "moat grant github", Promptable: true}}
