@@ -77,8 +77,7 @@ const server = http.createServer((req, res) => {
     body += c;
     if (body.length > MAX_BODY) {
       tooLarge = true;
-      res.writeHead(413).end();
-      req.destroy();
+      res.writeHead(413).end(() => req.destroy());
     }
   });
   req.on("end", () => {
