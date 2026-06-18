@@ -119,7 +119,11 @@ moat grant mcp notion
 
 Host-local MCP servers run on your host machine (outside the container). Containers cannot reach `localhost` on the host directly, so Moat's proxy relay bridges the connection.
 
-Running the server on the host is the right choice when it authenticates with credentials that only exist on the host -- a corp credential process, the OS keychain, or a VPN-gated CLI. Those credentials stay on the host: they are never injected into the container and never written to container config. The agent invokes the server's tools through the relay and only sees the results. This is the opposite trade-off from a [sandbox-local server](#sandbox-local-mcp-servers), where the server -- and its secrets -- run inside the container. See [`examples/mcp-hostlocal`](https://github.com/majorcontext/moat/tree/main/examples/mcp-hostlocal) for a runnable demonstration.
+Running the server on the host is the right choice when it authenticates with credentials that only exist on the host -- a corp credential process, the OS keychain, or a VPN-gated CLI. Those credentials stay on the host: they are never injected into the container and never written to container config. The agent invokes the server's tools through the relay and only sees the results.
+
+> **Note:** A [sandbox-local server](#sandbox-local-mcp-servers) runs the server -- and its secrets -- inside the container instead. Use host-local when the credential cannot or should not enter the sandbox.
+
+See [`examples/mcp-hostlocal`](https://github.com/majorcontext/moat/tree/main/examples/mcp-hostlocal) for a runnable demonstration.
 
 ### Configure in moat.yaml
 

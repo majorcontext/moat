@@ -29,4 +29,4 @@ interactive: true
 
 mcp:
   - name: corp-hostlocal
-    url: http://localhost:9123
+    url: http://localhost:9123/mcp

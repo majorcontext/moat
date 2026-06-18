@@ -36,7 +36,7 @@ seeing the underlying credential.
 
 The agent connects to a relay endpoint on the proxy
 (`http://moat-proxy:PORT/mcp/<token>/corp-hostlocal`). The relay, running on the
-host, forwards the request to `http://localhost:9123`. The host server uses its
+host, forwards the request to `http://localhost:9123/mcp`. The host server uses its
 host-only credential to do the work and returns only derived results. The
 credential never crosses into the sandbox.
 

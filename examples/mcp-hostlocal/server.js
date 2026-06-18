@@ -54,20 +54,35 @@ function handle(msg) {
           ],
         };
       }
+      // Plain-object throw (not an Error): caught below, which checks e.code.
       throw { code: -32602, message: `unknown tool: ${msg.params && msg.params.name}` };
     default:
       throw { code: -32601, message: `method not found: ${msg.method}` };
   }
 }
 
+const MAX_BODY = 1 * 1024 * 1024; // 1 MiB — MCP messages are small
+
 const server = http.createServer((req, res) => {
+  // Accepts POST on any path; the relay forwards the configured URL's path
+  // (e.g. /mcp) through unchanged, and this demo ignores it.
   if (req.method !== "POST") {
     res.writeHead(405).end();
     return;
   }
   let body = "";
-  req.on("data", (c) => (body += c));
+  let tooLarge = false;
+  req.on("data", (c) => {
+    if (tooLarge) return;
+    body += c;
+    if (body.length > MAX_BODY) {
+      tooLarge = true;
+      res.writeHead(413).end();
+      req.destroy();
+    }
+  });
   req.on("end", () => {
+    if (tooLarge) return;
     let msg;
     try {
       msg = JSON.parse(body);
