@@ -142,6 +142,38 @@ func TestServer_RegisterWithInvalidPolicyYAML(t *testing.T) {
 	}
 }
 
+func TestServer_RegisterRejectsInvalidProfile(t *testing.T) {
+	sock := filepath.Join(testSockDir(t), "d.sock")
+	srv := NewServer(sock, 9119)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	client := testClient(sock)
+
+	// A path-traversal profile must be rejected at the daemon boundary before it
+	// reaches the credential-store filepath.Join.
+	reqBody := RegisterRequest{RunID: "run-bad-profile", CredProfile: "../../../etc"}
+	body, _ := json.Marshal(reqBody)
+	resp, err := client.Post("http://localhost/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/runs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid profile, got %d", resp.StatusCode)
+	}
+	var regResp RegisterResponse
+	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if regResp.Error == "" {
+		t.Error("expected non-empty error in response")
+	}
+}
+
 func TestServer_RegisterAndListRuns(t *testing.T) {
 	sock := filepath.Join(testSockDir(t), "d.sock")
 	srv := NewServer(sock, 9119)

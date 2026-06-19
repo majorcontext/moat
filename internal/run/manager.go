@@ -4378,7 +4378,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		MCPServers:       rc.MCPServers,
 		Grants:           grants,
 		AWSConfig:        rc.AWSConfig,
-		Profile:          credential.ActiveProfile,
+		CredProfile:      credential.ActiveProfile,
 	}
 
 	for host, creds := range rc.Credentials {

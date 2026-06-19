@@ -143,8 +143,9 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// Validate the profile at the daemon boundary: it flows into a filepath.Join
 	// for the credential store dir, so an unvalidated "../.." would escape the
 	// credential tree. The CLI validates too, but the daemon must not trust its
-	// socket input.
-	if err := credential.ValidateProfile(req.Profile); err != nil {
+	// socket input. RestoreRuns has a matching guard for persisted runs — keep
+	// both.
+	if err := credential.ValidateProfile(req.CredProfile); err != nil {
 		writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: fmt.Sprintf("invalid profile: %v", err)})
 		return
 	}

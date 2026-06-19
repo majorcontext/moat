@@ -23,6 +23,7 @@ func TestRunPersister_SaveAndLoad(t *testing.T) {
 	rc1.NetworkPolicy = "strict"
 	rc1.NetworkAllow = []string{"api.github.com"}
 	rc1.MCPServers = []config.MCPServerConfig{{Name: "test", URL: "https://mcp.example.com"}}
+	rc1.CredProfile = "vibrant"
 	token1 := reg.Register(rc1)
 
 	rc2 := NewRunContext("run-2")
@@ -68,6 +69,12 @@ func TestRunPersister_SaveAndLoad(t *testing.T) {
 	}
 	if len(pr1.MCPServers) != 1 || pr1.MCPServers[0].Name != "test" {
 		t.Errorf("run-1 MCPServers = %v, want [{test https://mcp.example.com}]", pr1.MCPServers)
+	}
+	// CredProfile must survive Save -> JSON -> Load: the restore path scopes the
+	// credential store to it, and the literal-PersistedRun restore test bypasses
+	// Save(), so a dropped field copy would otherwise go uncaught.
+	if pr1.CredProfile != "vibrant" {
+		t.Errorf("run-1 CredProfile = %q, want %q", pr1.CredProfile, "vibrant")
 	}
 
 	pr2, ok := byID["run-2"]
@@ -220,6 +227,25 @@ func TestRestoreRuns_ScopesStoreToRunProfile(t *testing.T) {
 
 	if restored != 1 {
 		t.Fatalf("restored = %d, want 1 (restore did not use the run's 'vibrant' profile store)", restored)
+	}
+}
+
+// A persisted run whose CredProfile fails validation (e.g. a tampered file with
+// a path-traversal profile) must be skipped, not opened against a store path
+// outside the credential tree.
+func TestRestoreRuns_SkipsRunWithInvalidProfile(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	reg := NewRegistry()
+	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
+		RunID:       "evil",
+		AuthToken:   "tok",
+		Grants:      []string{"github"},
+		CredProfile: "../../../etc",
+	}})
+
+	if restored != 0 {
+		t.Fatalf("restored = %d, want 0 (traversal profile must be rejected)", restored)
 	}
 }
 
