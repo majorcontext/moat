@@ -75,11 +75,15 @@ type RegisterRequest struct {
 	Grants               []string                 `json:"grants,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
-	PolicyYAML           map[string][]byte        `json:"policy_yaml,omitempty"`
-	PolicyRuleSets       []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
-	HostGateway          string                   `json:"host_gateway,omitempty"`
-	HostGatewayIP        string                   `json:"host_gateway_ip,omitempty"`
-	AllowedHostPorts     []int                    `json:"allowed_host_ports,omitempty"`
+	// Profile is the credential profile the run was created under. The daemon
+	// scopes token refresh to it. Additive/optional: an older CLI omits it and
+	// the daemon falls back to the default profile (prior behavior).
+	Profile          string              `json:"profile,omitempty"`
+	PolicyYAML       map[string][]byte   `json:"policy_yaml,omitempty"`
+	PolicyRuleSets   []PolicyRuleSetSpec `json:"policy_rule_sets,omitempty"`
+	HostGateway      string              `json:"host_gateway,omitempty"`
+	HostGatewayIP    string              `json:"host_gateway_ip,omitempty"`
+	AllowedHostPorts []int               `json:"allowed_host_ports,omitempty"`
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.
@@ -146,6 +150,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkRules = req.NetworkRules
 	rc.AWSConfig = req.AWSConfig
 	rc.Grants = req.Grants
+	rc.CredProfile = req.Profile
 	rc.TransformerSpecs = req.ResponseTransformers
 	rc.HostGateway = req.HostGateway
 	rc.HostGatewayIP = req.HostGatewayIP

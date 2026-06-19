@@ -33,6 +33,7 @@ type PersistedRun struct {
 	NetworkAllow     []string                 `json:"network_allow,omitempty"`
 	AWSConfig        *AWSConfig               `json:"aws_config,omitempty"`
 	TransformerSpecs []TransformerSpec        `json:"transformer_specs,omitempty"`
+	CredProfile      string                   `json:"cred_profile,omitempty"`
 }
 
 // persistedFile is the versioned on-disk format.
@@ -78,6 +79,7 @@ func (p *RunPersister) Save() error {
 			NetworkAllow:     rc.NetworkAllow,
 			AWSConfig:        rc.AWSConfig,
 			TransformerSpecs: rc.TransformerSpecs,
+			CredProfile:      rc.CredProfile,
 		}
 		rc.mu.RUnlock()
 		runs = append(runs, pr)
@@ -191,12 +193,6 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		log.Warn("restore: cannot get encryption key, skipping restore", "error", err)
 		return 0
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
-	if err != nil {
-		log.Warn("restore: cannot open credential store, skipping restore", "error", err)
-		return 0
-	}
-
 	restored := 0
 	for _, pr := range runs {
 		rc := NewRunContext(pr.RunID)
@@ -207,6 +203,17 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		rc.NetworkAllow = pr.NetworkAllow
 		rc.AWSConfig = pr.AWSConfig
 		rc.TransformerSpecs = pr.TransformerSpecs
+		rc.CredProfile = pr.CredProfile
+
+		// Open the store scoped to this run's profile — the daemon serves runs
+		// from many profiles, so a single default-profile store would re-resolve
+		// the wrong credentials (the same bug as token refresh).
+		store, err := credential.NewFileStore(storeDirForRun(rc), key)
+		if err != nil {
+			log.Warn("restore: cannot open credential store, skipping run",
+				"run_id", pr.RunID, "error", err)
+			continue
+		}
 
 		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store); err != nil {
 			log.Warn("restore: failed to resolve credentials, skipping run",

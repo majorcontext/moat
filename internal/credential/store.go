@@ -169,9 +169,19 @@ var ActiveProfile string
 // Otherwise returns the default <moat-home>/credentials/. See config.GlobalConfigDir
 // for how MOAT_HOME overrides the default ~/.moat location.
 func DefaultStoreDir() string {
+	return StoreDirForProfile(ActiveProfile)
+}
+
+// StoreDirForProfile returns the credential store directory for an explicit
+// profile, independent of the process-global ActiveProfile. An empty profile
+// returns the default (unscoped) store. Use this when the current process's
+// active profile may differ from the profile a credential belongs to — most
+// importantly the shared proxy daemon, which serves runs from many profiles
+// and must scope each run's token refresh to that run's own profile.
+func StoreDirForProfile(profile string) string {
 	base := filepath.Join(config.GlobalConfigDir(), "credentials")
-	if ActiveProfile != "" {
-		return filepath.Join(base, "profiles", ActiveProfile)
+	if profile != "" {
+		return filepath.Join(base, "profiles", profile)
 	}
 	return base
 }

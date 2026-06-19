@@ -29,6 +29,13 @@ func resolveCredName(grantName, grant string) credential.Provider {
 	return credential.Provider(canonical)
 }
 
+// storeDirForRun returns the credential store directory for the run's profile.
+// The daemon is shared across profiles, so refresh must use the run's own
+// profile rather than the daemon process's credential.ActiveProfile.
+func storeDirForRun(rc *RunContext) string {
+	return credential.StoreDirForProfile(rc.CredProfile)
+}
+
 // StartTokenRefresh begins a background goroutine that periodically
 // refreshes credentials for the given run context.
 func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
@@ -38,7 +45,7 @@ func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
 		log.Debug("token refresh: cannot get encryption key", "error", err)
 		return
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewFileStore(storeDirForRun(rc), key)
 	if err != nil {
 		log.Debug("token refresh: cannot open store", "error", err)
 		return

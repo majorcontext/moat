@@ -34,6 +34,38 @@ func TestResolveCredName(t *testing.T) {
 	}
 }
 
+// Regression: the shared daemon may run under the default profile
+// (ActiveProfile == "") while serving a run created under a different profile.
+// Token refresh must read/write the *run's* profile store, not the daemon
+// process's, or it injects the wrong profile's credentials into the run
+// (e.g. a profile=vibrant run suddenly using the default profile's Linear auth).
+func TestStoreDirForRun_ScopesToRunProfile(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+	saved := credential.ActiveProfile
+	credential.ActiveProfile = "" // daemon process: default profile
+	t.Cleanup(func() { credential.ActiveProfile = saved })
+
+	rc := NewRunContext("run-vibrant")
+	rc.CredProfile = "vibrant"
+
+	got := storeDirForRun(rc)
+	if want := credential.StoreDirForProfile("vibrant"); got != want {
+		t.Errorf("storeDirForRun(profile=vibrant) = %q, want %q", got, want)
+	}
+	if got == credential.DefaultStoreDir() {
+		t.Errorf("storeDirForRun returned the daemon's default store %q — cross-profile credential leak", got)
+	}
+}
+
+// The run's profile must survive the RegisterRequest -> RunContext conversion
+// so the daemon can scope refresh to it.
+func TestToRunContext_CarriesProfile(t *testing.T) {
+	req := &RegisterRequest{RunID: "r", Profile: "vibrant"}
+	if got := req.ToRunContext().CredProfile; got != "vibrant" {
+		t.Errorf("ToRunContext().CredProfile = %q, want vibrant", got)
+	}
+}
+
 func TestRefreshTokensForRun_NoRefreshableProviders(t *testing.T) {
 	// With no providers registered (test environment), refreshTokensForRun
 	// should be a no-op and not panic.

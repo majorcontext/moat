@@ -70,6 +70,12 @@ type RunContext struct {
 	HostGatewayIP    string            `json:"host_gateway_ip,omitempty"` // actual IP for forwarding allowed host traffic
 	AllowedHostPorts []int             `json:"allowed_host_ports,omitempty"`
 
+	// CredProfile is the credential profile this run was created under (from
+	// the CLI's --profile/MOAT_PROFILE). The daemon is shared across profiles,
+	// so token refresh must scope to this value rather than the daemon
+	// process's own credential.ActiveProfile. Empty means the default profile.
+	CredProfile string `json:"cred_profile,omitempty"`
+
 	RegisteredAt time.Time `json:"registered_at"`
 
 	KeepEngines   map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
