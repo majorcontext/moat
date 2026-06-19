@@ -4,7 +4,9 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.6.1 — 2026-06-19
+
+Security and ergonomics patch. Fixes a cross-profile credential leak in the shared proxy daemon — token refresh and the daemon-restart restore path now scope to the run's own credential profile instead of the daemon process's. Also adds inline grant prompting so `moat run`/`moat claude`/`moat codex` can grant missing credentials in place rather than failing and requiring a separate `moat grant` plus a re-run.
 
 ### Added
 
