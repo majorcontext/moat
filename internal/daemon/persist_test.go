@@ -186,6 +186,43 @@ func TestRestoreRuns_Empty(t *testing.T) {
 	}
 }
 
+// Companion to TestStoreDirForRun_ScopesToRunProfile: the daemon-restart
+// restore path must re-resolve each run's credentials from that run's own
+// profile store, not the daemon process's default. The credential is seeded
+// ONLY in the "vibrant" profile store, so a restore that reads the default
+// store fails to resolve and skips the run (restored == 0); a correctly
+// profile-scoped restore finds it (restored == 1).
+func TestRestoreRuns_ScopesStoreToRunProfile(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+	saved := credential.ActiveProfile
+	credential.ActiveProfile = "" // daemon process: default profile
+	t.Cleanup(func() { credential.ActiveProfile = saved })
+
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("encryption key: %v", err)
+	}
+	vibrant, err := credential.NewFileStore(credential.StoreDirForProfile("vibrant"), key)
+	if err != nil {
+		t.Fatalf("open vibrant store: %v", err)
+	}
+	if err := vibrant.Save(credential.Credential{Provider: "github", Token: "vibrant-token"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	reg := NewRegistry()
+	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
+		RunID:       "r1",
+		AuthToken:   "tok",
+		Grants:      []string{"github"},
+		CredProfile: "vibrant",
+	}})
+
+	if restored != 1 {
+		t.Fatalf("restored = %d, want 1 (restore did not use the run's 'vibrant' profile store)", restored)
+	}
+}
+
 func TestRunPersister_SaveDebouncedCoalesces(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.json")

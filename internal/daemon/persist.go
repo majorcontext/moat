@@ -195,6 +195,14 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 	}
 	restored := 0
 	for _, pr := range runs {
+		// Guard against a tampered persist file: the profile flows into the
+		// credential store path, so reject traversal before opening any store.
+		if err := credential.ValidateProfile(pr.CredProfile); err != nil {
+			log.Warn("restore: invalid profile, skipping run",
+				"run_id", pr.RunID, "profile", pr.CredProfile, "error", err)
+			continue
+		}
+
 		rc := NewRunContext(pr.RunID)
 		rc.ContainerID = pr.ContainerID
 		rc.Grants = pr.Grants
