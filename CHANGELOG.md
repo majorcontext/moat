@@ -10,6 +10,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 - **Inline grant prompting** — on an interactive terminal, `moat run`/`moat claude`/`moat codex` now detect missing credential grants before starting the container and offer to grant each one inline, instead of failing and requiring a separate `moat grant` plus a re-run. Non-interactive runs are unchanged; use `--no-prompt` (or `MOAT_NO_PROMPT=1`) to force the fail-fast behavior. ([#389](https://github.com/majorcontext/moat/pull/389))
 
+### Security
+
+- Fix cross-profile credential leak in the shared proxy daemon — previously, background OAuth token refresh opened the credential store via the daemon process's global active profile, which is frozen at daemon spawn (usually the default) and does not reflect the profile a served run was created under. A run started with `--profile <name>` could therefore have its live OAuth credential replaced on the first refresh tick (and the stored token overwritten) with the **default** profile's credential for the same grant — e.g. a `--profile vibrant` run suddenly using the default profile's Linear auth. The run's profile is now sent to the daemon and token refresh (and the daemon-restart restore path, which had the same flaw) is scoped to it. Affects anyone using `--profile`/`MOAT_PROFILE` with refreshable OAuth grants; no user action required beyond upgrading both the CLI and daemon (`moat proxy restart`). ([#392](https://github.com/majorcontext/moat/pull/392))
+
 ## v0.6.0 — 2026-06-17
 
 Feature release centered on MCP ergonomics: well-known servers can be listed in `moat.yaml` by name alone, resolving URL, auth, and grant from a built-in catalog (with Langfuse regional and PostHog OAuth shortcuts), and MCP API-key grants adopt the `mcp:<name>` naming convention. Also adds `moat join` to launch a second agent in a running container, `moat proxy restart` for version-aware daemon replacement, and the `ministack` local-cloud service, plus fixes for GitHub HTTPS git auth, Apple async container teardown, and a remote-MCP relay 404 regression.
