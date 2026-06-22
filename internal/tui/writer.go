@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +83,16 @@ type Writer struct {
 	// Compositor mode state
 	altScreen bool
 	emulator  *vt.Emulator
+
+	// hostMouseModes records the mouse-tracking DEC private modes that moat has
+	// enabled on the host terminal on the child's behalf while in compositor
+	// mode (see forwardMouseModeLocked). In compositor mode the child's output
+	// is consumed by the emulator, so its mouse-mode sequences would never
+	// reach the host unless forwarded. We track what we enabled so we can
+	// disable it on teardown if the child leaves the alternate screen — or
+	// dies — without disabling it itself, which would otherwise leave the
+	// user's terminal stuck reporting mouse events.
+	hostMouseModes map[int]bool
 
 	// cleanedUp is set once Cleanup() has torn down the status bar. Guards
 	// late repaints (e.g. a footer-count poll firing RefreshFooter after exit)
@@ -302,6 +314,26 @@ func (w *Writer) processDataLocked(data []byte) error {
 			// CSI — interception silently fails, but real DECSTBMs are
 			// well under 10 bytes, so this only fires for pathological
 			// input. Memory bound > correctness coverage here.
+		} else {
+			// In compositor mode the child's output is fed to the emulator,
+			// so its mouse-mode set/reset sequences would never reach the host.
+			// Those modes control host-global mouse reporting, so forward them
+			// to the host instead of swallowing them. This is what stops the
+			// wheel from being hijacked: when the child disables mouse on
+			// leaving a fullscreen view, the disable reaches the host and
+			// reporting turns back off so the wheel scrolls scrollback again.
+			matched, set, modes, length, needsMore := matchMouseMode(data)
+			if needsMore && len(data) <= maxControlSeqBufLen {
+				w.escBuf = append(w.escBuf[:0], data...)
+				return nil
+			}
+			if matched {
+				if err := w.forwardMouseModeLocked(set, modes); err != nil {
+					return err
+				}
+				data = data[length:]
+				continue
+			}
 		}
 
 		// Not an alt screen sequence - output the ESC and continue
@@ -469,6 +501,144 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 	}
 	// Unreachable: callers gate this on res.kind != ctrlNone.
 	return nil
+}
+
+// mouseModeSet is the set of DEC private modes that control host-global mouse
+// reporting. In compositor mode these are forwarded to the host rather than
+// fed to the emulator (see processDataLocked / forwardMouseModeLocked), because
+// the host — not the emulator — is what reports mouse events back to the child.
+//
+//	1000 X11 button press/release   1006 SGR mouse encoding
+//	1002 button-event (drag)        1007 alternate scroll (wheel→arrows)
+//	1003 any-event (motion)         1015 urxvt mouse encoding
+//	1005 UTF-8 mouse encoding        1016 SGR-pixels mouse encoding
+//
+// Non-mouse private modes (cursor visibility, bracketed paste, focus reporting)
+// are deliberately excluded: they belong to the emulator/render loop, not the
+// host.
+var mouseModeSet = map[int]bool{
+	1000: true,
+	1002: true,
+	1003: true,
+	1005: true,
+	1006: true,
+	1007: true,
+	1015: true,
+	1016: true,
+}
+
+// matchMouseMode reports whether data begins with a DEC private mode set/reset
+// (CSI ? Pm;... h|l) containing at least one mouse mode. It returns the
+// recognized mouse params (so a clean mouse-only sequence can be rebuilt for the
+// host), whether it is a set ('h') or reset ('l'), and the bytes consumed.
+//
+// needsMore is true when data holds an incomplete CSI ? sequence that could
+// still resolve into one; the caller should buffer and retry. Sequences with a
+// final byte other than h/l (queries, DECRQM, etc.) and private modes with no
+// recognized mouse param return the zero value so they flow to the emulator.
+func matchMouseMode(data []byte) (matched, set bool, modes []int, length int, needsMore bool) {
+	if len(data) == 0 || data[0] != 0x1b {
+		return false, false, nil, 0, false
+	}
+	// "ESC" or "ESC[" could still grow into "ESC[?...".
+	if len(data) < 3 {
+		if len(data) == 1 || data[1] == '[' {
+			return false, false, nil, 0, true
+		}
+		return false, false, nil, 0, false
+	}
+	if data[1] != '[' || data[2] != '?' {
+		return false, false, nil, 0, false
+	}
+
+	i := 3
+	for i < len(data) && ((data[i] >= '0' && data[i] <= '9') || data[i] == ';') {
+		i++
+	}
+	if i >= len(data) {
+		// Parameters so far but no final byte yet — may still complete.
+		return false, false, nil, 0, true
+	}
+	final := data[i]
+	if final != 'h' && final != 'l' {
+		return false, false, nil, 0, false
+	}
+
+	for _, field := range strings.Split(string(data[3:i]), ";") {
+		if field == "" {
+			continue
+		}
+		n, err := strconv.Atoi(field)
+		if err != nil {
+			continue
+		}
+		if mouseModeSet[n] {
+			modes = append(modes, n)
+		}
+	}
+	if len(modes) == 0 {
+		return false, false, nil, 0, false
+	}
+	return true, final == 'h', modes, i + 1, false
+}
+
+// forwardMouseModeLocked writes a reconstructed mouse-only set/reset to the host
+// and records which modes moat has enabled there. Rebuilding from only the
+// recognized mouse params keeps any non-mouse mode that shared the original
+// sequence from leaking to the host (the render loop owns host cursor state).
+// Caller must hold the mutex.
+func (w *Writer) forwardMouseModeLocked(set bool, modes []int) error {
+	var b strings.Builder
+	b.WriteString("\x1b[?")
+	for i, m := range modes {
+		if i > 0 {
+			b.WriteByte(';')
+		}
+		b.WriteString(strconv.Itoa(m))
+	}
+	if set {
+		b.WriteByte('h')
+	} else {
+		b.WriteByte('l')
+	}
+	if _, err := w.out.Write([]byte(b.String())); err != nil {
+		return err
+	}
+
+	for _, m := range modes {
+		if set {
+			if w.hostMouseModes == nil {
+				w.hostMouseModes = make(map[int]bool)
+			}
+			w.hostMouseModes[m] = true
+		} else {
+			delete(w.hostMouseModes, m)
+		}
+	}
+	return nil
+}
+
+// disableHostMouseModesLocked returns the bytes that disable every mouse mode
+// moat enabled on the host (ascending order, for deterministic output) and
+// clears the tracking set. Returns nil when none are active. Caller must hold
+// the mutex.
+func (w *Writer) disableHostMouseModesLocked() []byte {
+	if len(w.hostMouseModes) == 0 {
+		return nil
+	}
+	modes := make([]int, 0, len(w.hostMouseModes))
+	for m := range w.hostMouseModes {
+		modes = append(modes, m)
+	}
+	sort.Ints(modes)
+	var b strings.Builder
+	for _, m := range modes {
+		b.WriteString("\x1b[?")
+		b.WriteString(strconv.Itoa(m))
+		b.WriteByte('l')
+	}
+	w.hostMouseModes = nil
+	return []byte(b.String())
 }
 
 // scrollRegionBytes returns the DECSTBM command that pins moat's footer at
@@ -746,6 +916,14 @@ func (w *Writer) exitCompositorLocked() error {
 	var buf bytes.Buffer
 	buf.WriteString("\x1b[?1049l")
 
+	// Disable any mouse modes moat enabled on the host during compositor mode
+	// that the child did not disable itself. Scroll mode passes the child's
+	// sequences through directly, so the host should start clean; the child
+	// re-enables if it still wants mouse reporting.
+	if dis := w.disableHostMouseModesLocked(); dis != nil {
+		buf.Write(dis)
+	}
+
 	// Re-establish scroll region on the main screen
 	if w.height > 1 {
 		fmt.Fprintf(&buf, "\x1b[1;%dr", w.height-1)
@@ -869,6 +1047,12 @@ func (w *Writer) Reset() error {
 		buf.WriteString("\x1b[?1049l")
 	}
 
+	// Disable any mouse modes moat mirrored onto the host so a reset leaves the
+	// terminal in a clean state.
+	if dis := w.disableHostMouseModesLocked(); dis != nil {
+		buf.Write(dis)
+	}
+
 	// Discard any partial alt-screen escape sequence buffered from a previous
 	// Write — carrying it forward could re-trigger a phantom mode transition.
 	w.escBuf = nil
@@ -908,6 +1092,13 @@ func (w *Writer) Cleanup() error {
 	if w.altScreen {
 		buf.WriteString("\x1b[?1049l")
 		w.altScreen = false
+	}
+
+	// Disable any mouse modes moat mirrored onto the host so a crash or kill
+	// mid-alt-screen doesn't leave the user's terminal stuck reporting mouse
+	// events after moat exits.
+	if dis := w.disableHostMouseModesLocked(); dis != nil {
+		buf.Write(dis)
 	}
 
 	// Reset scrolling region to full screen (DECSTBM with no params)
