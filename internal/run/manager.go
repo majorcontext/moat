@@ -1029,17 +1029,16 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			}
 		}
 
-		// Verify the daemon supports Keep policies before sending them.
+		// Determine whether any file/pack policy inspects the request body
+		// (params.body). Body rules can only appear in file/pack policies — inline
+		// deny-lists match the operation path only — so only policyYAML needs
+		// checking.
+		requiresBodyPolicy := policyRequiresBody(policyYAML)
+
+		// Verify the daemon supports the Keep-policy features this run needs.
 		if len(policyYAML) > 0 || len(policyRuleSets) > 0 {
-			hasKeepPolicy := false
-			for _, cap := range daemonCapabilities {
-				if cap == "keep-policy" {
-					hasKeepPolicy = true
-					break
-				}
-			}
-			if !hasKeepPolicy {
-				return nil, fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy stop' to upgrade (the next command will start a fresh daemon)")
+			if err := checkKeepPolicyCapabilities(daemonCapabilities, requiresBodyPolicy); err != nil {
+				return nil, err
 			}
 		}
 
@@ -1049,15 +1048,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		// don't route moat-host traffic correctly, which silently breaks host
 		// access and the network-host bypass fix. Fail fast with an actionable
 		// message rather than letting the run register and misbehave.
-		hasHostGatewayV2 := false
-		for _, cap := range daemonCapabilities {
-			if cap == "host-gateway-v2" {
-				hasHostGatewayV2 = true
-				break
-			}
-		}
-		if !hasHostGatewayV2 {
-			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy stop' to upgrade (the next command will start a fresh daemon)")
+		if !slices.Contains(daemonCapabilities, daemon.CapHostGatewayV2) {
+			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
 		}
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
@@ -4544,4 +4536,48 @@ func hasGrant(grants []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// policyRequiresBody reports whether any compiled file/pack policy in policyYAML
+// references the request body (params.body). Each policy is compiled under its
+// registration scope (the map key, which is the scope gatekeeper evaluates
+// against at runtime); keeplib.Engine.RequiresBody fails safe (returns true) on
+// an unknown scope. Inline deny-list policies are excluded by construction —
+// they match the operation path only and cannot reference params.body, so they
+// are never present in policyYAML.
+func policyRequiresBody(policyYAML map[string][]byte) bool {
+	for scope, yamlBytes := range policyYAML {
+		eng, err := keeplib.LoadFromBytes(yamlBytes)
+		if err != nil {
+			// Unexpected: ValidateRuleBytes already passed on these bytes upstream.
+			// Fail safe — treat an uncompilable policy as requiring the body
+			// capability rather than silently bypassing the gate. (The daemon
+			// rejects the same bytes at registration, so this never relaxes
+			// enforcement.)
+			log.Warn("keep: policy failed to compile during body-capability detection; assuming body inspection required",
+				"scope", scope, "error", err)
+			return true
+		}
+		requires := eng.RequiresBody(scope)
+		eng.Close()
+		if requires {
+			return true
+		}
+	}
+	return false
+}
+
+// checkKeepPolicyCapabilities verifies the running daemon advertises the
+// capabilities required to enforce this run's Keep policies. requiresBody is
+// true when any policy references params.body (see policyRequiresBody). An older
+// daemon that lacks a capability would silently under-enforce, so this fails
+// fast with an actionable upgrade message instead of registering and misbehaving.
+func checkKeepPolicyCapabilities(daemonCapabilities []string, requiresBody bool) error {
+	if !slices.Contains(daemonCapabilities, daemon.CapKeepPolicy) {
+		return fmt.Errorf("proxy daemon does not support Keep policies (missing 'keep-policy' capability); run 'moat proxy restart' to upgrade")
+	}
+	if requiresBody && !slices.Contains(daemonCapabilities, daemon.CapKeepBodyPolicy) {
+		return fmt.Errorf("proxy daemon does not support request-body Keep policies (missing 'keep-body-policy' capability); run 'moat proxy restart' to upgrade")
+	}
+	return nil
 }

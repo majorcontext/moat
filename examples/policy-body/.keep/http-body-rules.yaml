@@ -1,0 +1,23 @@
+# Illustrative HTTP request-body policy (not a maintained security pack).
+#
+# Denies any outbound request whose JSON body contains a secret.
+# hasSecrets(params.body) scans every string leaf of the parsed body.
+#
+# IMPORTANT — operation matching: Keep matches `operation` case-insensitively
+# (the runtime operation "POST host/path" is lowercased) using path.Match, where
+# `*` does NOT cross `/`. So an `operation:` like "POST httpbin.org/*" never
+# matches. Match HTTP requests in `when` on the (lowercased) params.host /
+# params.method / params.path instead, as below. params.host here is "httpbin.org".
+#
+# Body rules require a file/pack policy with scope: http (the inline
+# `deny: [...]` shorthand matches the operation path only). Pair body rules
+# with strict network rules — they do not cover query params, headers,
+# response bodies, or non-HTTP egress.
+scope: http
+mode: enforce
+rules:
+  - name: deny-secret-in-body
+    match:
+      when: "params.host == 'httpbin.org' && params.body != null && hasSecrets(params.body)"
+    action: deny
+    message: "Request body contains a secret; blocked by policy."

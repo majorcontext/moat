@@ -1,6 +1,7 @@
 package keep
 
 import (
+	"context"
 	"testing"
 
 	keeplib "github.com/majorcontext/keep"
@@ -39,16 +40,16 @@ func TestLinearReadonlyPack_ScopeRewrite(t *testing.T) {
 
 	// Read operations should be allowed.
 	for _, op := range []string{"list_issues", "get_issue", "search_issues"} {
-		call := NormalizeMCPCall(op, nil, "mcp-linear")
-		result, evalErr := SafeEvaluate(eng, call, "mcp-linear")
+		call := keeplib.NewMCPCall(op, nil)
+		result, evalErr := keeplib.SafeEvaluate(context.Background(), eng, call, "mcp-linear")
 		require.NoError(t, evalErr, "operation %s", op)
 		assert.Equal(t, keeplib.Allow, result.Decision, "operation %s should be allowed", op)
 	}
 
 	// Write operations should be denied.
 	for _, op := range []string{"create_issue", "delete_issue", "update_issue"} {
-		call := NormalizeMCPCall(op, nil, "mcp-linear")
-		result, evalErr := SafeEvaluate(eng, call, "mcp-linear")
+		call := keeplib.NewMCPCall(op, nil)
+		result, evalErr := keeplib.SafeEvaluate(context.Background(), eng, call, "mcp-linear")
 		require.NoError(t, evalErr, "operation %s", op)
 		assert.Equal(t, keeplib.Deny, result.Decision, "operation %s should be denied", op)
 	}

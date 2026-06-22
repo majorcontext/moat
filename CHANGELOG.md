@@ -4,6 +4,14 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+Adds HTTP request-body inspection to Keep policies. File- and pack-based `network.keep_policy` rules can now match on the parsed JSON request body, so policies can enforce content-based rules (e.g. block requests whose body carries a secret) instead of host/method/path alone.
+
+### Added
+
+- **HTTP request-body policies** — file/pack `network.keep_policy` rules can match on the parsed JSON request body via `params.body` (e.g. `hasSecrets(params.body)` for a whole-body secret scan, or `params.body.field == 'x'` for an exact match). The proxy buffers and inspects the body only when a rule references it. Inspection applies to `application/json` over HTTPS; once any body rule exists, the `http` scope fail-closes on non-JSON, compressed, malformed, duplicate-key, or oversized bodies. A new `keep-body-policy` daemon capability gates the feature — an older proxy daemon fails fast with a `moat proxy restart` upgrade message rather than silently under-enforcing. Requires `keep` ≥ v0.6.0 and `gatekeeper` ≥ v0.13.0. See [HTTP request-body rules](docs/content/reference/02-moat-yaml.md) and `examples/policy-body`. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+
 ## v0.6.1 — 2026-06-19
 
 Security and ergonomics patch. Fixes a cross-profile credential leak in the shared proxy daemon — token refresh and the daemon-restart restore path now scope to the run's own credential profile instead of the daemon process's. Also adds inline grant prompting so `moat run`/`moat claude`/`moat codex` can grant missing credentials in place rather than failing and requiring a separate `moat grant` plus a re-run.

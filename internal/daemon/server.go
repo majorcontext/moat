@@ -127,7 +127,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		RunCount:     s.registry.Count(),
 		StartedAt:    s.startedAt.Format(time.RFC3339),
 		Commit:       BuildCommit,
-		Capabilities: []string{"keep-policy", "host-gateway-v2"},
+		Capabilities: []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2},
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

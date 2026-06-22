@@ -685,6 +685,37 @@ network:
 
 **See also:** [MCP servers: Policy enforcement](../guides/09-mcp.md#policy-enforcement) for the same rule format applied to MCP tool calls
 
+#### Request-body rules (`params.body`)
+
+File- or pack-based policies can match on the parsed JSON request body via `params.body`. (The inline `deny: [...]` shorthand matches the operation path only and cannot inspect bodies.)
+
+```yaml
+# .keep/api-rules.yaml
+scope: http
+mode: enforce
+rules:
+  # Block a request whose JSON body carries a secret. hasSecrets scans the whole
+  # body recursively (every string leaf). Match the host in `when` (see the
+  # operation-matching note below) rather than an `operation:` glob.
+  - name: deny-secret-in-body
+    match: { when: "params.host == 'api.example.com' && params.body != null && hasSecrets(params.body)" }
+    action: deny
+
+  # Match an exact body field, scoped to a host + path.
+  - name: deny-destructive
+    match: { when: "params.host == 'api.example.com' && params.path == '/graphql' && params.body.operation == 'delete'" }
+    action: deny
+```
+
+Behavior and limits:
+
+- **Operation matching (important).** Keep matches a rule's `operation` **case-insensitively** against the runtime operation string `"<method> <host><path>"` (e.g. `"post api.example.com/repos"` — the method is lowercased) using `path.Match`, where `*` does **not** cross `/`. So `operation: "POST api.example.com/*"` never matches an HTTP request (uppercase method, and `*` stops at the first `/`). For HTTP body rules, match in the `when` clause on the lowercased `params.host` / `params.method` / `params.path` and omit `operation` (an empty `operation` is a catch-all), as shown above.
+- **Authoring guard:** `has(params.body)` is always true for body-carrying requests, so test for a populated body with `params.body != null`. An empty/whitespace body is passed as `null`. A rule that compiles can still evaluate falsy and fail open — validate that your rule actually *denies* a matching request, not just that the policy loads.
+- **JSON only, fail-closed.** Bodies are inspected only when `Content-Type` is `application/json`. Once **any** rule in the `http` scope references `params.body`, every non-JSON, `Content-Encoding`-compressed (e.g. gzip), duplicate-key, malformed, or oversized body is **denied** — for *all* hosts in the scope, not just the host a body rule targets. Adding one body rule effectively makes the whole `http` scope JSON-only. Scope body rules deliberately.
+- **HTTPS only.** Body inspection runs on intercepted HTTPS (CONNECT) requests. Plain `http://` requests are not inspected — rely on `network.policy`/`network.rules` to disallow plaintext egress to sensitive hosts.
+- **Not covered.** `params` exposes `method`, `host`, `path`, and `body` only — not URL query parameters, request headers, response bodies, or non-HTTP egress. Pair body rules with strict host/path rules and a restrictive `network.policy` as the primary exfil control; body inspection is a narrow opt-in hardening primitive, not a complete DLP control.
+- **Daemon upgrade.** Request-body rules require a proxy daemon built with body-inspection support. If the running daemon is older, `moat run` fails with a clear error — run `moat proxy restart` to replace it with a fresh daemon.
+
 ### network.host
 
 TCP ports on the host machine that the container may access.

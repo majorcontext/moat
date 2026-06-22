@@ -1,0 +1,51 @@
+# Example: Keep HTTP request-body policy
+#
+# Inspects the JSON body of outbound HTTP requests and denies any whose body
+# contains a secret. The Moat proxy buffers the request body, scans it with
+# Keep's hasSecrets() over the whole object, and blocks the request before it
+# leaves the container.
+#
+# NOTE: This is an ILLUSTRATIVE example, not a maintained security pack. Body
+# rules are an opt-in hardening primitive — pair them with strict network rules.
+#
+# Run with:
+#   moat run examples/policy-body
+#
+# What happens:
+#   The script POSTs two JSON bodies to httpbin.org. The first carries a fake
+#   AWS key; the proxy detects the secret and blocks the request. The second is
+#   clean and is allowed through.
+#
+# Limits: body rules apply only to application/json over HTTPS. Once any body
+# rule exists, non-JSON or compressed bodies to the policed scope are denied.
+
+name: policy-body-demo
+
+dependencies:
+  - python@3.12
+
+network:
+  policy: strict
+  rules:
+    - "httpbin.org"
+  keep_policy: .keep/http-body-rules.yaml
+
+command:
+  - python
+  - -c
+  - |
+    import json, urllib.request
+    def post(payload):
+        req = urllib.request.Request(
+            "https://httpbin.org/post",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            print("ALLOWED:", payload)
+        except Exception as e:
+            print("BLOCKED:", payload, "->", e)
+    post({"token": "AKIAIOSFODNN7REALKEY"})  # secret in body -> blocked
+    post({"note": "nothing secret here"})     # clean body   -> allowed

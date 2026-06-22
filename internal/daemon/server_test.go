@@ -93,7 +93,7 @@ func TestServer_HealthEndpointCapabilities(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	wantCaps := map[string]bool{"keep-policy": false, "host-gateway-v2": false}
+	wantCaps := map[string]bool{CapKeepPolicy: false, CapKeepBodyPolicy: false, CapHostGatewayV2: false}
 	for _, c := range health.Capabilities {
 		if _, ok := wantCaps[c]; ok {
 			wantCaps[c] = true

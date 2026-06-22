@@ -109,6 +109,18 @@ type UpdateRunRequest struct {
 	ContainerID string `json:"container_id"`
 }
 
+// Daemon capability identifiers advertised in HealthResponse.Capabilities and
+// checked by the CLI before registering a run. These strings are part of the
+// cross-version contract (see Backwards Compatibility above): the daemon
+// advertises them and the CLI checks them, so both sides must use the same
+// literal — keep them as shared constants to prevent an advertise/check typo
+// from silently disabling a capability gate. Add, never rename or remove.
+const (
+	CapKeepPolicy     = "keep-policy"
+	CapKeepBodyPolicy = "keep-body-policy"
+	CapHostGatewayV2  = "host-gateway-v2"
+)
+
 // HealthResponse is returned from GET /v1/health.
 type HealthResponse struct {
 	PID          int      `json:"pid"`
