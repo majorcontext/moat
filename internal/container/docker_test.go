@@ -53,6 +53,25 @@ func TestBuildContainerMounts_BindMounts(t *testing.T) {
 	}
 }
 
+// A MountConfig with Volume:true becomes a Docker named-volume mount
+// (Type=volume, Source is the volume name); without it, a bind mount.
+func TestBuildContainerMounts_NamedVolume(t *testing.T) {
+	binds := []MountConfig{
+		{Source: "/host/project", Target: "/workspace"},
+		{Source: "moat_agent_node-modules", Target: "/workspace/node_modules", Volume: true},
+	}
+
+	got := buildContainerMounts(binds, nil)
+
+	want := []mount.Mount{
+		{Type: mount.TypeBind, Source: "/host/project", Target: "/workspace"},
+		{Type: mount.TypeVolume, Source: "moat_agent_node-modules", Target: "/workspace/node_modules"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildContainerMounts() = %#v, want %#v", got, want)
+	}
+}
+
 // Tmpfs must follow binds in the output slice so overlays of paths inside a
 // bind take effect on the daemon side.
 func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {

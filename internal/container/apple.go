@@ -293,7 +293,8 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	// entries are silently dropped here; callers should configure addresses
 	// directly via env vars (e.g. proxy URL, MOAT_HOST_GATEWAY) on Apple.
 
-	// Volume mounts
+	// Volume mounts. Named volumes (MountConfig.Volume) are rejected for the Apple
+	// runtime in config.CheckVolumeRuntimeSupport, so every entry here is a bind mount.
 	for _, m := range cfg.Mounts {
 		mountStr := m.Source + ":" + m.Target
 		if m.ReadOnly {

@@ -361,11 +361,12 @@ type SidecarConfig struct {
 	MemoryMB int
 }
 
-// MountConfig describes a volume mount (bind mount from host to container).
+// MountConfig describes a volume mount.
 type MountConfig struct {
-	Source   string
+	Source   string // host path (bind) OR Docker named-volume name (when Volume is true)
 	Target   string
 	ReadOnly bool
+	Volume   bool // if true, Source is a Docker named volume (mount.TypeVolume), not a host path
 }
 
 // TmpfsMount describes a tmpfs mount inside the container.

@@ -167,8 +167,12 @@ func (r *DockerRuntime) Ping(ctx context.Context) error {
 func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount {
 	mounts := make([]mount.Mount, 0, len(binds)+len(tmpfs))
 	for _, m := range binds {
+		mtype := mount.TypeBind
+		if m.Volume {
+			mtype = mount.TypeVolume
+		}
 		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+			Type:     mtype,
 			Source:   m.Source,
 			Target:   m.Target,
 			ReadOnly: m.ReadOnly,
