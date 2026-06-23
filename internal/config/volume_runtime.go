@@ -13,7 +13,7 @@ func CheckVolumeRuntimeSupport(vols []VolumeConfig, appleRuntime bool) error {
 		return nil
 	}
 	for i, v := range vols {
-		if v.Type == "volume" {
+		if v.IsNamedVolume() {
 			return fmt.Errorf("volumes[%d]: named volumes (type: volume) are not supported on the Apple container runtime; use type: bind or a mounts: exclude: (tmpfs) instead", i)
 		}
 	}

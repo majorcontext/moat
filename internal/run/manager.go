@@ -2759,15 +2759,11 @@ region = %s
 	}
 
 	// Named-volume roots are chowned to the run user by one of two mutually
-	// exclusive mechanisms, selected by whether the entrypoint runs as root:
-	//   - containerUser == "" (root entrypoint): moat-init chowns them, driven by
-	//     this MOAT_VOLUME_CHOWN env var.
-	//   - containerUser != "" (non-root, e.g. Linux workspace UID): the Docker
-	//     runtime's initNamedVolumeOwnership helper chowns them before start.
-	// Only inject the env var on the root path so it isn't dead weight (and can't
-	// desync) on the non-root path.
-	if containerUser == "" && len(volumeChownPaths) > 0 {
-		proxyEnv = append(proxyEnv, "MOAT_VOLUME_CHOWN="+strings.Join(volumeChownPaths, " "))
+	// exclusive mechanisms (see volumeChownEnv): moat-init on the root-entrypoint
+	// path (driven by MOAT_VOLUME_CHOWN), or the runtime's initNamedVolumeOwnership
+	// helper on the non-root path.
+	if env, ok := volumeChownEnv(containerUser, volumeChownPaths); ok {
+		proxyEnv = append(proxyEnv, env)
 	}
 
 	// Create container

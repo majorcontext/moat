@@ -36,4 +36,27 @@ func TestVolumeMount(t *testing.T) {
 	if volMC.Target != "/workspace/node_modules" {
 		t.Errorf("volume target = %q", volMC.Target)
 	}
+
+	// readonly must carry through to the named-volume MountConfig.
+	roMC, _ := volumeMount("myagent", config.VolumeConfig{Name: "ro", Target: "/ro", Type: "volume", ReadOnly: true})
+	if !roMC.ReadOnly {
+		t.Error("readonly named volume should set MountConfig.ReadOnly")
+	}
+}
+
+func TestVolumeChownEnv(t *testing.T) {
+	paths := []string{"/workspace/node_modules", "/workspace/.pnpm-store"}
+
+	// root entrypoint (containerUser == "") + paths → inject for moat-init.
+	if env, ok := volumeChownEnv("", paths); !ok || env != "MOAT_VOLUME_CHOWN=/workspace/node_modules /workspace/.pnpm-store" {
+		t.Errorf("root path: got (%q, %v), want the joined env and true", env, ok)
+	}
+	// non-root container (containerUser set) → omit; the helper chowns instead.
+	if env, ok := volumeChownEnv("1000:1000", paths); ok || env != "" {
+		t.Errorf("non-root path: got (%q, %v), want (\"\", false)", env, ok)
+	}
+	// no named volumes → nothing to inject.
+	if _, ok := volumeChownEnv("", nil); ok {
+		t.Error("no chown paths should not inject MOAT_VOLUME_CHOWN")
+	}
 }

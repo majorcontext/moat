@@ -712,7 +712,7 @@ func Load(dir string) (*Config, error) {
 		// only as a filesystem path and tolerates more.
 		hasNamedVolume := false
 		for _, vol := range cfg.Volumes {
-			if vol.Type == "volume" {
+			if vol.IsNamedVolume() {
 				hasNamedVolume = true
 				break
 			}

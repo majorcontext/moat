@@ -11,6 +11,14 @@ func DockerVolumeName(agentName, volumeName string) string {
 	return fmt.Sprintf("moat_%s_%s", agentName, volumeName)
 }
 
+// IsNamedVolume reports whether the entry is backed by a native Docker named
+// volume (type: volume) rather than the default host bind mount (type: bind or "").
+// This is the single source of truth for the predicate — validation, image-init
+// gating, and mount construction all route through it so they cannot drift.
+func (v VolumeConfig) IsNamedVolume() bool {
+	return v.Type == "volume"
+}
+
 // VolumeDir returns the host directory for an agent volume.
 // Path: ~/.moat/volumes/<agentName>/<volumeName>/
 //

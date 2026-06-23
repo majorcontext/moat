@@ -251,6 +251,23 @@ func (r *DockerRuntime) initNamedVolumeOwnership(ctx context.Context, cfg Config
 		return nil
 	}
 
+	// Idempotency: Docker creates a named-volume root as root:root only on first
+	// creation, so the chown is needed once. If every named volume already exists,
+	// it was created and chowned by an earlier run — skip the helper round-trip on
+	// the hot path. (A volume that pre-exists but was created for a different UID
+	// keeps that owner; that only arises when the same agent is run by different
+	// host users, which is unusual.)
+	allExist := true
+	for _, m := range helperMounts {
+		if _, err := r.cli.VolumeInspect(ctx, m.Source); err != nil {
+			allExist = false
+			break
+		}
+	}
+	if allExist {
+		return nil
+	}
+
 	resp, err := r.cli.ContainerCreate(ctx,
 		volumeOwnershipHelperConfig(cfg, cmd),
 		&container.HostConfig{
