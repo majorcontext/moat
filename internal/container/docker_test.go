@@ -72,6 +72,41 @@ func TestBuildContainerMounts_NamedVolume(t *testing.T) {
 	}
 }
 
+// volumeOwnershipPlan: needs the helper only for a non-root container that has
+// named volumes; skips for a root entrypoint or when there are no named volumes.
+func TestVolumeOwnershipPlan(t *testing.T) {
+	volMounts := []MountConfig{
+		{Source: "/host/proj", Target: "/workspace"},                             // bind, ignored
+		{Source: "moat_a_nm", Target: "/workspace/node_modules", Volume: true},   // volume
+		{Source: "moat_a_store", Target: "/workspace/.pnpm-store", Volume: true}, // volume
+	}
+
+	// root entrypoint (User empty): moat-init chowns, no helper
+	if _, _, ok := volumeOwnershipPlan(Config{User: "", Mounts: volMounts}); ok {
+		t.Error("root entrypoint should not need the ownership helper")
+	}
+	// non-root but no named volumes: nothing to do
+	if _, _, ok := volumeOwnershipPlan(Config{User: "1000:1000", Mounts: []MountConfig{{Source: "/h", Target: "/workspace"}}}); ok {
+		t.Error("no named volumes should not need the ownership helper")
+	}
+	// non-root with named volumes: plan covers only the volumes, in order
+	mounts, cmd, ok := volumeOwnershipPlan(Config{User: "1000:1000", Mounts: volMounts})
+	if !ok {
+		t.Fatal("non-root + named volumes should need the ownership helper")
+	}
+	wantMounts := []mount.Mount{
+		{Type: mount.TypeVolume, Source: "moat_a_nm", Target: "/moat-vol/0"},
+		{Type: mount.TypeVolume, Source: "moat_a_store", Target: "/moat-vol/1"},
+	}
+	if !reflect.DeepEqual(mounts, wantMounts) {
+		t.Errorf("helper mounts = %#v, want %#v", mounts, wantMounts)
+	}
+	wantCmd := []string{"chown", "1000:1000", "/moat-vol/0", "/moat-vol/1"}
+	if !reflect.DeepEqual(cmd, wantCmd) {
+		t.Errorf("chown cmd = %#v, want %#v", cmd, wantCmd)
+	}
+}
+
 // Tmpfs must follow binds in the output slice so overlays of paths inside a
 // bind take effect on the daemon side.
 func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {

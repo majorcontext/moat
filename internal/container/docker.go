@@ -193,6 +193,84 @@ func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount
 	return mounts
 }
 
+// volumeOwnershipPlan decides whether named-volume roots must be chowned before a
+// non-root container starts, and returns the helper-container mounts and chown
+// command to do it. ok is false when no initialization is needed: a root entrypoint
+// (cfg.User == "") chowns the volumes itself via moat-init, and a config with no
+// named volumes has nothing to do.
+//
+// Docker creates named-volume roots owned by root:root. When the main container runs
+// as a non-root user (cfg.User set — e.g. the workspace UID on Linux native Docker),
+// it cannot write to a fresh volume root, and moat-init's in-container chown only runs
+// when the entrypoint is root. So the non-root case is handled here instead.
+func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, ok bool) {
+	if cfg.User == "" {
+		return nil, nil, false
+	}
+	var paths []string
+	for _, m := range cfg.Mounts {
+		if !m.Volume {
+			continue
+		}
+		p := fmt.Sprintf("/moat-vol/%d", len(paths))
+		paths = append(paths, p)
+		helperMounts = append(helperMounts, mount.Mount{Type: mount.TypeVolume, Source: m.Source, Target: p})
+	}
+	if len(paths) == 0 {
+		return nil, nil, false
+	}
+	// Non-recursive: only the volume root needs the owner fixed; contents are created
+	// by the run user. cfg.User is "uid:gid", valid for chown.
+	cmd = append([]string{"chown", cfg.User}, paths...)
+	return helperMounts, cmd, true
+}
+
+// initNamedVolumeOwnership runs a short-lived root helper container to chown named
+// volume roots to the run user, when required (see volumeOwnershipPlan). It is a
+// no-op for root-entrypoint containers (macOS/Windows Docker Desktop) and for runs
+// with no named volumes.
+func (r *DockerRuntime) initNamedVolumeOwnership(ctx context.Context, cfg Config) error {
+	helperMounts, cmd, ok := volumeOwnershipPlan(cfg)
+	if !ok {
+		return nil
+	}
+
+	resp, err := r.cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: cfg.Image, // already pulled by the caller; has chown
+			User:  "0:0",     // root, so it can chown the volume roots
+			Cmd:   cmd,
+		},
+		&container.HostConfig{
+			Runtime:     r.ociRuntime,
+			Mounts:      helperMounts,
+			NetworkMode: "none",
+		},
+		nil, nil, "",
+	)
+	if err != nil {
+		return fmt.Errorf("creating volume-ownership helper: %w", err)
+	}
+	defer func() { _ = r.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true}) }() //nolint:errcheck
+
+	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting volume-ownership helper: %w", err)
+	}
+
+	statusCh, errCh := r.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("waiting for volume-ownership helper: %w", err)
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("volume-ownership helper exited %d (chown %s on named volumes)", status.StatusCode, cfg.User)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
 // CreateContainer creates a new Docker container.
 func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string, error) {
 	// Verify gVisor is still available if we're configured to use it
@@ -202,6 +280,13 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 
 	// Pull image if not present
 	if err := r.ensureImage(ctx, cfg.Image); err != nil {
+		return "", err
+	}
+
+	// Fix named-volume root ownership for non-root containers before they start
+	// (Docker creates volume roots as root:root; moat-init can only chown them when
+	// the entrypoint is root). No-op for root-entrypoint runs and runs without volumes.
+	if err := r.initNamedVolumeOwnership(ctx, cfg); err != nil {
 		return "", err
 	}
 
