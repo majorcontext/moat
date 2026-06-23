@@ -525,10 +525,26 @@ Unlike `mounts:` (bind mounts with a host-side source path), volumes are managed
 | `name` | `string` | yes | Volume name, scoped to agent. Must match `[a-z0-9][a-z0-9_-]*`. |
 | `target` | `string` | yes | Absolute path inside the container. |
 | `readonly` | `bool` | no | Mount as read-only. Default: `false`. |
+| `type` | `string` | no | Backing store: `bind` (default) or `volume`. See [Storage](#storage). |
 
 #### Storage
 
-Volumes are stored on the host at `~/.moat/volumes/<agent-name>/<volume-name>/` and bind-mounted into the container. This works identically across Docker and Apple container runtimes.
+A volume's `type` selects how it is backed:
+
+- **`bind`** (default) — a host directory at `~/.moat/volumes/<agent-name>/<volume-name>/`, bind-mounted into the container. Host-visible (you can inspect or edit the files directly). On macOS it is served over virtiofs. Works on both Docker and Apple container runtimes.
+- **`volume`** — a native in-VM Docker named volume (`moat_<agent-name>_<volume-name>`). Not host-visible, isolated from the workspace, stored on the VM's native filesystem. Much faster for workloads with many small files, and **required for pnpm v11 stores**, whose SQLite WAL index deadlocks on virtiofs. Docker runtime only (rejected on the Apple container runtime). Intended for empty/cache paths such as `node_modules` and the pnpm store.
+
+Example — keep a pnpm monorepo's caches off virtiofs on native volumes:
+
+```yaml
+volumes:
+  - name: node-modules
+    target: /workspace/node_modules
+    type: volume
+  - name: pnpm-store
+    target: /workspace/.pnpm-store
+    type: volume
+```
 
 #### Volume lifecycle
 
@@ -547,6 +563,8 @@ moat volumes ls                  # List managed volumes
 moat volumes rm <agent-name>     # Remove volumes for an agent
 moat volumes prune               # Remove all managed volumes
 ```
+
+> **Note:** `moat volumes` commands manage `type: bind` volumes (the host directories under `~/.moat/volumes/`). A `type: volume` entry is a native Docker named volume — remove it with `docker volume rm moat_<agent-name>_<volume-name>`.
 
 For examples of using volumes to cache dependencies across runs, see [Recipes](../guides/13-recipes.md).
 
