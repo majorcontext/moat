@@ -490,6 +490,18 @@ run_pre_run_hook() {
   fi
 }
 
+# Named volume ownership
+# Docker named volumes (moat.yaml `volumes:` with `type: volume`) are created
+# root-owned. Chown each mount root to moatuser so the non-root pre_run hook and
+# command can write. Non-recursive on purpose: a fresh volume's root is the only
+# root-owned node, and its contents are created by moatuser. `chown -R` over a
+# multi-GB cache on every start would reintroduce the slowness this feature avoids.
+if [ -n "$MOAT_VOLUME_CHOWN" ] && [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+  for vpath in $MOAT_VOLUME_CHOWN; do
+    chown moatuser:moatuser "$vpath" 2>/dev/null || true
+  done
+fi
+
 # Execute the user's command
 # First run the pre_run hook (if set), then exec the main command.
 # If we're already running as a non-root user (UID != 0), just exec directly.
