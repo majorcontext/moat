@@ -497,9 +497,14 @@ run_pre_run_hook() {
 # root-owned node, and its contents are created by moatuser. `chown -R` over a
 # multi-GB cache on every start would reintroduce the slowness this feature avoids.
 if [ -n "$MOAT_VOLUME_CHOWN" ] && [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+  # Disable pathname expansion so a target containing a glob char ([ ] * ?) is not
+  # expanded against the filesystem. Word-splitting on spaces stays on — the paths
+  # are space-separated (matching MOAT_EXTRA_HOSTS).
+  set -f
   for vpath in $MOAT_VOLUME_CHOWN; do
     chown moatuser:moatuser "$vpath" 2>/dev/null || true
   done
+  set +f
 fi
 
 # Execute the user's command

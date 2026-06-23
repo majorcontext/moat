@@ -569,6 +569,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		}
 	}
 
+	// Reject `type: volume` on the Apple container runtime as early as possible —
+	// before any resources are staged — so this error return needs no cleanup.
+	// Config load already rejects an explicit `runtime: apple`; this also catches
+	// the auto-detected case where moat.yaml has no runtime: set.
+	if opts.Config != nil {
+		isApple := m.defaultRuntime().Type() == container.RuntimeApple
+		if err := config.CheckVolumeRuntimeSupport(opts.Config.Volumes, isApple); err != nil {
+			return nil, err
+		}
+	}
+
 	// Auto-include MCP auth grants so the credential processing loop loads
 	// them into the RunContext. Without this, users would need to duplicate
 	// each mcp[].auth.grant in the top-level grants: list.
@@ -2742,16 +2753,6 @@ region = %s
 		log.Debug("using default agent memory for Apple container", "memoryMB", memoryMB)
 	}
 
-	// Named volumes are Docker-only; catch the auto-detected Apple-runtime case
-	// (config load already rejects an explicit `runtime: apple`).
-	if opts.Config != nil {
-		isApple := m.defaultRuntime().Type() == container.RuntimeApple
-		if err := config.CheckVolumeRuntimeSupport(opts.Config.Volumes, isApple); err != nil {
-			cleanupDaemonRun()
-			cleanupSSH(sshServer)
-			return nil, err
-		}
-	}
 	if len(volumeChownPaths) > 0 {
 		proxyEnv = append(proxyEnv, "MOAT_VOLUME_CHOWN="+strings.Join(volumeChownPaths, " "))
 	}
