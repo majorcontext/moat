@@ -134,6 +134,11 @@ type VolumeConfig struct {
 	Name     string `yaml:"name"`
 	Target   string `yaml:"target"`
 	ReadOnly bool   `yaml:"readonly,omitempty"`
+	// Type selects the backing store: "bind" (default) is a host bind mount at
+	// ~/.moat/volumes/<agent>/<name> (host-visible; on macOS served over virtiofs);
+	// "volume" is a native in-VM Docker named volume (fast, isolated, SQLite-safe).
+	// Docker runtime only.
+	Type string `yaml:"type,omitempty"`
 }
 
 // MCPServerConfig defines an MCP server configuration for top-level
@@ -711,6 +716,12 @@ func Load(dir string) (*Config, error) {
 			if !filepath.IsAbs(vol.Target) {
 				return nil, fmt.Errorf("%s: 'target' must be an absolute path, got %q", prefix, vol.Target)
 			}
+			switch vol.Type {
+			case "", "bind", "volume":
+				// ok; "" defaults to bind
+			default:
+				return nil, fmt.Errorf("%s: invalid type %q (must be \"bind\" or \"volume\")", prefix, vol.Type)
+			}
 			if seenVolNames[vol.Name] {
 				return nil, fmt.Errorf("%s: duplicate volume name %q", prefix, vol.Name)
 			}
@@ -719,6 +730,9 @@ func Load(dir string) (*Config, error) {
 				return nil, fmt.Errorf("%s: duplicate volume target %q", prefix, vol.Target)
 			}
 			seenVolTargets[vol.Target] = true
+		}
+		if err := CheckVolumeRuntimeSupport(cfg.Volumes, cfg.Runtime == "apple"); err != nil {
+			return nil, err
 		}
 	}
 
