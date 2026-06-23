@@ -733,8 +733,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// Add volume mounts from config. type: bind (default) → host bind mount at
 	// ~/.moat/volumes/<agent>/<name>/ (owned by the current user, matching the
 	// container user). type: volume → native in-VM Docker named volume (Docker
-	// auto-creates it on mount); its mount root is chowned to moatuser by moat-init
-	// via the MOAT_VOLUME_CHOWN env var injected below.
+	// auto-creates it on mount). Its root is created root-owned and chowned to the
+	// run user by one of two paths, depending on whether the entrypoint is root:
+	//   - root entrypoint (containerUser == ""): moat-init chowns it to moatuser,
+	//     driven by the MOAT_VOLUME_CHOWN env var injected below.
+	//   - non-root (containerUser set, e.g. Linux workspace UID): the Docker
+	//     runtime's initNamedVolumeOwnership helper chowns it to that UID before start.
 	var volumeChownPaths []string
 	if opts.Config != nil && len(opts.Config.Volumes) > 0 {
 		for _, vol := range opts.Config.Volumes {
