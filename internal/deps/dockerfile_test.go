@@ -1823,6 +1823,82 @@ func TestMoatInitPreRunHookBehavior(t *testing.T) {
 	})
 }
 
+// TestMoatInitPreRunHookProxyOptIn runs the real run_pre_run_hook from the
+// embedded moat-init.sh and asserts it opts Node's built-in fetch/undici into
+// honoring the proxy environment (NODE_USE_ENV_PROXY=1) when — and only when —
+// moat has configured a proxy. Without this, corepack (the pnpm/yarn
+// bootstrapper) ignores HTTP(S)_PROXY and connects directly to the registry,
+// which the moat egress firewall drops, so `pnpm install` in pre_run fails with
+// a connect timeout. The opt-in must stay scoped to the hook: it must NOT leak
+// into the entrypoint environment, which is inherited by the agent exec'd after
+// the hook. All three properties are asserted (in-hook on, in-hook off, no
+// leak) since a function-level `export` would satisfy the on-case while
+// silently leaking to the agent.
+func TestMoatInitPreRunHookProxyOptIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("moat-init.sh is POSIX shell; not run on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("test exercises the non-root hook branch; running as root takes the gosu path")
+	}
+
+	fn := extractShellFunc(t, MoatInitScript, "run_pre_run_hook")
+	fn = strings.ReplaceAll(fn, "/workspace", t.TempDir())
+
+	// Strip any proxy vars inherited from the test process so each case fully
+	// controls whether a proxy is configured.
+	baseEnv := func() []string {
+		environ := os.Environ()
+		env := make([]string, 0, len(environ))
+		for _, kv := range environ {
+			name := strings.ToUpper(kv[:strings.IndexByte(kv, '=')])
+			switch name {
+			case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "NODE_USE_ENV_PROXY":
+				continue
+			}
+			env = append(env, kv)
+		}
+		return env
+	}
+
+	// IN_HOOK is what the pre_run command sees; AFTER_HOOK (printed by the
+	// harness once the hook returns) is what the entrypoint — and therefore the
+	// agent it exec's — would inherit. AFTER_HOOK must always be empty.
+	const preRun = `printf 'IN_HOOK=[%s]\n' "${NODE_USE_ENV_PROXY:-}"`
+	run := func(extra ...string) string {
+		t.Helper()
+		harness := "set -e\n" + fn + "\nrun_pre_run_hook\n" +
+			`printf 'AFTER_HOOK=[%s]\n' "${NODE_USE_ENV_PROXY:-}"` + "\n"
+		cmd := exec.Command("sh", "-c", harness)
+		cmd.Env = append(append(baseEnv(), "MOAT_PRE_RUN="+preRun), extra...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("hook harness failed: %v\noutput:\n%s", err, out)
+		}
+		return string(out)
+	}
+
+	t.Run("proxy configured opts the hook in without leaking", func(t *testing.T) {
+		out := run("HTTPS_PROXY=http://moat:tok@moat-proxy:18080")
+		if !strings.Contains(out, "IN_HOOK=[1]") {
+			t.Errorf("expected NODE_USE_ENV_PROXY=1 inside the hook when a proxy is configured\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "AFTER_HOOK=[]") {
+			t.Errorf("NODE_USE_ENV_PROXY leaked past the hook into the entrypoint env (would reach the agent)\noutput:\n%s", out)
+		}
+	})
+
+	t.Run("no proxy leaves it unset", func(t *testing.T) {
+		out := run()
+		if !strings.Contains(out, "IN_HOOK=[]") {
+			t.Errorf("NODE_USE_ENV_PROXY must not be set inside the hook when no proxy is configured\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "AFTER_HOOK=[]") {
+			t.Errorf("NODE_USE_ENV_PROXY must not be set after the hook when no proxy is configured\noutput:\n%s", out)
+		}
+	})
+}
+
 func TestImageSpecNeedsInit(t *testing.T) {
 	tests := []struct {
 		name       string

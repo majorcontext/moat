@@ -460,6 +460,21 @@ run_pre_run_hook() {
   if [ -z "$MOAT_PRE_RUN" ]; then
     return
   fi
+
+  # Node 24+'s built-in fetch/undici and http(s) clients ignore HTTP(S)_PROXY
+  # unless told to honor the environment. corepack (the pnpm/yarn bootstrapper)
+  # uses fetch, so without this it connects DIRECTLY to the registry — which the
+  # moat egress firewall drops, making `pnpm install` in pre_run fail with a
+  # connect timeout. Opting in routes those downloads through the moat proxy
+  # (the only permitted egress). We apply it as a prelude *inside* the hook's
+  # own shell rather than `export`-ing it here, so it stays scoped to the hook
+  # and never leaks into the agent exec'd at the end of this script. Only set
+  # when moat has configured a proxy.
+  hook_prelude=""
+  if [ -n "$HTTPS_PROXY" ] || [ -n "$https_proxy" ] || [ -n "$HTTP_PROXY" ] || [ -n "$http_proxy" ]; then
+    hook_prelude="export NODE_USE_ENV_PROXY=1; "
+  fi
+
   # Capture the hook's exit code with `set -e` temporarily off, so a failing
   # hook is reported with context instead of aborting the entrypoint silently —
   # which looks like the container itself failed to start, with no hint the
@@ -468,12 +483,12 @@ run_pre_run_hook() {
   if [ "$(id -u)" != "0" ]; then
     # Already non-root, run directly. The subshell keeps the hook's `cd` from
     # changing the entrypoint's own working directory.
-    ( cd /workspace && sh -c "$MOAT_PRE_RUN" )
+    ( cd /workspace && sh -c "${hook_prelude}$MOAT_PRE_RUN" )
     hook_status=$?
   elif id moatuser >/dev/null 2>&1; then
     # Drop to moatuser for the hook. gosu spawns a separate process, so its
     # `cd` can't leak into the entrypoint — no subshell needed here.
-    gosu moatuser sh -c "cd /workspace && $MOAT_PRE_RUN"
+    gosu moatuser sh -c "${hook_prelude}cd /workspace && $MOAT_PRE_RUN"
     hook_status=$?
   else
     hook_status=0
