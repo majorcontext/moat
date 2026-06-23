@@ -203,6 +203,18 @@ volumes:
 `,
 			errContains: "not supported on the Apple",
 		},
+		{
+			name: "volume target with whitespace",
+			content: `
+name: myapp
+agent: test
+volumes:
+  - name: state
+    target: /work space/cache
+    type: volume
+`,
+			errContains: "must not contain whitespace",
+		},
 	}
 
 	for _, tt := range tests {
@@ -231,6 +243,8 @@ func TestLoadConfigVolumeTypesValid(t *testing.T) {
 		{"explicit bind", "name: myapp\nvolumes:\n  - name: v\n    target: /data\n    type: bind\n"},
 		{"explicit volume", "name: myapp\nvolumes:\n  - name: v\n    target: /data\n    type: volume\n"},
 		{"bind on apple ok", "name: myapp\nruntime: apple\nvolumes:\n  - name: v\n    target: /data\n    type: bind\n"},
+		// whitespace check is scoped to type: volume; a bind target with a space still loads.
+		{"bind target with space ok", "name: myapp\nvolumes:\n  - name: v\n    target: /work space/c\n    type: bind\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -723,6 +723,12 @@ func Load(dir string) (*Config, error) {
 			default:
 				return nil, fmt.Errorf("%s: invalid type %q (must be \"bind\" or \"volume\")", prefix, vol.Type)
 			}
+			// type: volume targets are passed to moat-init via the space-separated
+			// MOAT_VOLUME_CHOWN env var; a whitespace target would word-split and
+			// misroute the chown. Reject it with a clear error instead.
+			if vol.Type == "volume" && strings.ContainsAny(vol.Target, " \t\n\r") {
+				return nil, fmt.Errorf("%s: type: volume target must not contain whitespace, got %q", prefix, vol.Target)
+			}
 			if seenVolNames[vol.Name] {
 				return nil, fmt.Errorf("%s: duplicate volume name %q", prefix, vol.Name)
 			}
