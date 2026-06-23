@@ -107,6 +107,23 @@ func TestVolumeOwnershipPlan(t *testing.T) {
 	}
 }
 
+// The ownership helper must put chown in Entrypoint, not Cmd: moat-built images
+// set ENTRYPOINT=moat-init, which drops to moatuser before running Cmd args, so a
+// Cmd-only helper would chown as the non-root user and fail with EPERM.
+func TestVolumeOwnershipHelperConfig(t *testing.T) {
+	cmd := []string{"chown", "1000:1000", "/moat-vol/0"}
+	c := volumeOwnershipHelperConfig(Config{Image: "moat/run:test"}, cmd)
+	if !reflect.DeepEqual([]string(c.Entrypoint), cmd) {
+		t.Errorf("Entrypoint = %#v, want %#v (chown must override the image ENTRYPOINT)", c.Entrypoint, cmd)
+	}
+	if len(c.Cmd) != 0 {
+		t.Errorf("Cmd must be empty (chown is the entrypoint), got %#v", c.Cmd)
+	}
+	if c.User != "0:0" {
+		t.Errorf("User = %q, want 0:0", c.User)
+	}
+}
+
 // Tmpfs must follow binds in the output slice so overlays of paths inside a
 // bind take effect on the daemon side.
 func TestBuildContainerMounts_TmpfsAfterBind(t *testing.T) {

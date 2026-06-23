@@ -225,6 +225,22 @@ func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, 
 	return helperMounts, cmd, true
 }
 
+// volumeOwnershipHelperConfig builds the container config for the ownership helper.
+//
+// The chown command goes in Entrypoint, NOT Cmd. moat-built images set
+// ENTRYPOINT ["/usr/local/bin/moat-init"], which (running as root) drops to moatuser
+// via gosu before exec'ing its arguments — so a Cmd-only helper would run chown as
+// moatuser (uid 5000), which lacks CAP_CHOWN, and fail with EPERM. Overriding
+// Entrypoint runs chown directly as the root container user. cfg.Image is the run
+// image (already pulled by CreateContainer's ensureImage) and has chown.
+func volumeOwnershipHelperConfig(cfg Config, cmd []string) *container.Config {
+	return &container.Config{
+		Image:      cfg.Image,
+		User:       "0:0", // root, so it can chown the volume roots
+		Entrypoint: cmd,
+	}
+}
+
 // initNamedVolumeOwnership runs a short-lived root helper container to chown named
 // volume roots to the run user, when required (see volumeOwnershipPlan). It is a
 // no-op for root-entrypoint containers (macOS/Windows Docker Desktop) and for runs
@@ -236,11 +252,7 @@ func (r *DockerRuntime) initNamedVolumeOwnership(ctx context.Context, cfg Config
 	}
 
 	resp, err := r.cli.ContainerCreate(ctx,
-		&container.Config{
-			Image: cfg.Image, // already pulled by the caller; has chown
-			User:  "0:0",     // root, so it can chown the volume roots
-			Cmd:   cmd,
-		},
+		volumeOwnershipHelperConfig(cfg, cmd),
 		&container.HostConfig{
 			Runtime:     r.ociRuntime,
 			Mounts:      helperMounts,
