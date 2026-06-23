@@ -1293,6 +1293,85 @@ func TestLoadAllSettingsMirrorsHostTui(t *testing.T) {
 	}
 }
 
+// TestApplyRunPolicy verifies the run-policy gate: a bypass (yolo) Claude Code run
+// pins the renderer AND persists permissions.defaultMode, while the companion
+// --noyolo run pins the renderer but must NOT persist bypass mode (guarding
+// against a privilege escalation if the skipPrompt gate ever regresses).
+func TestApplyRunPolicy(t *testing.T) {
+	hasBypass := func(t *testing.T, s *Settings) bool {
+		t.Helper()
+		raw, ok := s.RawExtras["permissions"]
+		if !ok {
+			return false
+		}
+		var p map[string]any
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permissions not valid JSON: %v", err)
+		}
+		return p["defaultMode"] == "bypassPermissions"
+	}
+
+	t.Run("claude code with bypass pins renderer and persists mode", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(true, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if !s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should be true under bypass")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q", s.Tui, DefaultTUI)
+		}
+		if !hasBypass(t, s) {
+			t.Error("bypass run should persist permissions.defaultMode=bypassPermissions")
+		}
+	})
+
+	// Companion: a --noyolo run pins the renderer but must NOT gain bypass mode.
+	t.Run("claude code without bypass pins renderer but does not persist bypass", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(true, false); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should be false under --noyolo")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q", s.Tui, DefaultTUI)
+		}
+		if hasBypass(t, s) {
+			t.Error("--noyolo run must NOT persist bypassPermissions (privilege escalation)")
+		}
+	})
+
+	t.Run("existing renderer choice is preserved", func(t *testing.T) {
+		s := &Settings{Tui: "fullscreen"}
+		if err := s.ApplyRunPolicy(true, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if s.Tui != "fullscreen" {
+			t.Errorf("Tui = %q, want fullscreen (host choice must not be overwritten)", s.Tui)
+		}
+	})
+
+	// Companion: a non-Claude-Code run touches neither renderer nor bypass mode.
+	t.Run("non claude code run sets only the prompt suppression", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(false, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if !s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should still reflect bypass")
+		}
+		if s.Tui != "" {
+			t.Errorf("Tui should be empty for non-claude-code run, got %q", s.Tui)
+		}
+		if hasBypass(t, s) {
+			t.Error("non-claude-code run must not persist bypass mode")
+		}
+	})
+}
+
 // TestMergeSettingsBaseNilDoesNotMutateOverride verifies that MergeSettings
 // does not mutate the caller's override struct when base is nil.
 func TestMergeSettingsBaseNilDoesNotMutateOverride(t *testing.T) {

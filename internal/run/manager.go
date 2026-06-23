@@ -2079,25 +2079,11 @@ region = %s
 				if claudeSettings == nil {
 					claudeSettings = &claude.Settings{}
 				}
-				claudeSettings.SkipDangerousModePermissionPrompt = skipPrompt
-				if hasClaudeCode {
-					// Pin the renderer so Claude Code's "Try the new fullscreen
-					// renderer?" upsell never fires mid-session. Accepting it (or
-					// Claude's silent auto-graduation) re-execs Claude, and that
-					// re-exec drops the --dangerously-skip-permissions CLI flag,
-					// silently reverting bypass mode to default. claudeSettings.Tui
-					// already carries the host's choice via LoadAllSettings; fall
-					// back to the classic renderer when the host has no preference.
-					if claudeSettings.Tui == "" {
-						claudeSettings.Tui = claude.DefaultTUI
-					}
-					// Persist bypass mode in settings.json too so it survives any
-					// re-exec that does occur (e.g. a manual /tui switch or /login).
-					if skipPrompt {
-						if bypassErr := claudeSettings.EnableBypassPermissionsMode(); bypassErr != nil {
-							log.Warn("failed to persist bypass-permissions mode in settings.json", "error", bypassErr)
-						}
-					}
+				// Pin the renderer and (for bypass runs) persist bypass mode so
+				// Claude Code's fullscreen-renderer re-exec can't silently drop the
+				// --dangerously-skip-permissions flag. See Settings.ApplyRunPolicy.
+				if policyErr := claudeSettings.ApplyRunPolicy(hasClaudeCode, skipPrompt); policyErr != nil {
+					ui.Warnf("Failed to persist bypass-permissions mode in settings.json (check the 'permissions' value in ~/.moat/claude/settings.json): %v", policyErr)
 				}
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")

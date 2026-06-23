@@ -355,10 +355,7 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 		// Bool fields: true wins (override or base sets it).
 		SkipDangerousModePermissionPrompt: base.SkipDangerousModePermissionPrompt || override.SkipDangerousModePermissionPrompt,
 		// String fields: a non-empty override wins, otherwise keep the base value.
-		Tui: base.Tui,
-	}
-	if override.Tui != "" {
-		result.Tui = override.Tui
+		Tui: firstNonEmpty(override.Tui, base.Tui),
 	}
 
 	// Copy base plugins and sources
@@ -562,6 +559,35 @@ func (s *Settings) EnableBypassPermissionsMode() error {
 		s.RawExtras = make(map[string]json.RawMessage)
 	}
 	s.RawExtras["permissions"] = merged
+	return nil
+}
+
+// ApplyRunPolicy applies moat's container-run settings policy in one place so the
+// renderer pin and the bypass-permissions gate stay tied to the right conditions
+// (and remain unit-testable). hasClaudeCode reports whether the run includes the
+// Claude Code binary; bypass reports whether the run uses
+// --dangerously-skip-permissions (i.e. not --noyolo).
+//
+//   - SkipDangerousModePermissionPrompt is set to bypass (suppresses the
+//     bypass-mode warning banner).
+//   - For Claude Code runs the renderer is pinned: a host/user choice already in
+//     Tui is kept (via the settings merge), otherwise the classic default. This
+//     stops Claude's fullscreen-renderer upsell from re-execing the process and
+//     dropping the --dangerously-skip-permissions flag.
+//   - For Claude Code runs WITH bypass, permissions.defaultMode is persisted so
+//     bypass survives such a re-exec. It is deliberately NOT persisted for
+//     --noyolo runs, so a no-bypass run never silently gains bypass mode.
+func (s *Settings) ApplyRunPolicy(hasClaudeCode, bypass bool) error {
+	s.SkipDangerousModePermissionPrompt = bypass
+	if !hasClaudeCode {
+		return nil
+	}
+	if s.Tui == "" {
+		s.Tui = DefaultTUI
+	}
+	if bypass {
+		return s.EnableBypassPermissionsMode()
+	}
 	return nil
 }
 
