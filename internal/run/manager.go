@@ -4547,19 +4547,23 @@ func hasGrant(grants []string, name string) bool {
 // are never present in policyYAML.
 func policyRequiresBody(policyYAML map[string][]byte) bool {
 	for scope, yamlBytes := range policyYAML {
-		eng, err := keeplib.LoadFromBytes(yamlBytes)
-		if err != nil {
-			// Unexpected: ValidateRuleBytes already passed on these bytes upstream.
-			// Fail safe — treat an uncompilable policy as requiring the body
-			// capability rather than silently bypassing the gate. (The daemon
-			// rejects the same bytes at registration, so this never relaxes
-			// enforcement.)
-			log.Warn("keep: policy failed to compile during body-capability detection; assuming body inspection required",
-				"scope", scope, "error", err)
-			return true
-		}
-		requires := eng.RequiresBody(scope)
-		eng.Close()
+		// Wrap in a closure so eng.Close() runs via defer even if RequiresBody
+		// panics — the per-iteration engine is always released.
+		requires := func() bool {
+			eng, err := keeplib.LoadFromBytes(yamlBytes)
+			if err != nil {
+				// Unexpected: ValidateRuleBytes already passed on these bytes
+				// upstream. Fail safe — treat an uncompilable policy as requiring
+				// the body capability rather than silently bypassing the gate.
+				// (The daemon rejects the same bytes at registration, so this
+				// never relaxes enforcement.)
+				log.Warn("keep: policy failed to compile during body-capability detection; assuming body inspection required",
+					"scope", scope, "error", err)
+				return true
+			}
+			defer eng.Close()
+			return eng.RequiresBody(scope)
+		}()
 		if requires {
 			return true
 		}
