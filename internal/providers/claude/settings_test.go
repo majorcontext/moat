@@ -1138,6 +1138,161 @@ func indexOf(s string, b byte) int {
 	return -1
 }
 
+// TestEnableBypassPermissionsMode verifies the helper sets
+// permissions.defaultMode=bypassPermissions and serializes it.
+func TestEnableBypassPermissionsMode(t *testing.T) {
+	s := &Settings{}
+	if err := s.EnableBypassPermissionsMode(); err != nil {
+		t.Fatalf("EnableBypassPermissionsMode: %v", err)
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	perms, ok := out["permissions"]
+	if !ok {
+		t.Fatalf("expected permissions key in %s", data)
+	}
+	var permObj map[string]any
+	if err := json.Unmarshal(perms, &permObj); err != nil {
+		t.Fatalf("Unmarshal permissions: %v", err)
+	}
+	if permObj["defaultMode"] != "bypassPermissions" {
+		t.Errorf("defaultMode = %v, want bypassPermissions", permObj["defaultMode"])
+	}
+}
+
+// TestEnableBypassPermissionsModePreservesExistingKeys is the companion case:
+// existing permission sub-keys (e.g. deny rules carried from moat-user settings)
+// must survive; only defaultMode is added.
+func TestEnableBypassPermissionsModePreservesExistingKeys(t *testing.T) {
+	s := &Settings{
+		RawExtras: map[string]json.RawMessage{
+			"permissions": json.RawMessage(`{"deny":["Read(./secrets/**)"],"defaultMode":"plan"}`),
+		},
+	}
+	if err := s.EnableBypassPermissionsMode(); err != nil {
+		t.Fatalf("EnableBypassPermissionsMode: %v", err)
+	}
+
+	var permObj map[string]any
+	if err := json.Unmarshal(s.RawExtras["permissions"], &permObj); err != nil {
+		t.Fatalf("Unmarshal permissions: %v", err)
+	}
+	// defaultMode is overwritten to bypassPermissions...
+	if permObj["defaultMode"] != "bypassPermissions" {
+		t.Errorf("defaultMode = %v, want bypassPermissions", permObj["defaultMode"])
+	}
+	// ...but the pre-existing deny rule is preserved.
+	deny, ok := permObj["deny"].([]any)
+	if !ok || len(deny) != 1 || deny[0] != "Read(./secrets/**)" {
+		t.Errorf("deny rule not preserved: %v", permObj["deny"])
+	}
+}
+
+// TestSettingsTuiRoundTrip verifies tui is serialized and parsed when set, and
+// (companion) omitted from JSON when empty.
+func TestSettingsTuiRoundTrip(t *testing.T) {
+	// Set: emitted and round-trips.
+	data, err := json.Marshal(&Settings{Tui: "fullscreen"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var withTui map[string]any
+	if err := json.Unmarshal(data, &withTui); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if withTui["tui"] != "fullscreen" {
+		t.Errorf("tui = %v, want fullscreen", withTui["tui"])
+	}
+	var parsed Settings
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal into Settings: %v", err)
+	}
+	if parsed.Tui != "fullscreen" {
+		t.Errorf("parsed.Tui = %q, want fullscreen", parsed.Tui)
+	}
+
+	// Companion: empty tui is omitted entirely.
+	emptyData, err := json.Marshal(&Settings{})
+	if err != nil {
+		t.Fatalf("Marshal empty: %v", err)
+	}
+	var empty map[string]any
+	if err := json.Unmarshal(emptyData, &empty); err != nil {
+		t.Fatalf("Unmarshal empty: %v", err)
+	}
+	if _, ok := empty["tui"]; ok {
+		t.Errorf("empty Settings should not emit tui, got %s", emptyData)
+	}
+}
+
+// TestMergeSettingsTui verifies tui merge semantics: a non-empty override wins,
+// and (companion) an empty override preserves the base value.
+func TestMergeSettingsTui(t *testing.T) {
+	// Non-empty override wins.
+	merged := MergeSettings(&Settings{Tui: "default"}, &Settings{Tui: "fullscreen"}, SourceMoatUser)
+	if merged.Tui != "fullscreen" {
+		t.Errorf("override should win: Tui = %q, want fullscreen", merged.Tui)
+	}
+
+	// Companion: empty override keeps the base value (so a moat-user file without
+	// tui doesn't wipe the host's choice).
+	keptBase := MergeSettings(&Settings{Tui: "fullscreen"}, &Settings{}, SourceMoatUser)
+	if keptBase.Tui != "fullscreen" {
+		t.Errorf("empty override should keep base: Tui = %q, want fullscreen", keptBase.Tui)
+	}
+
+	// Companion: nil-base clone carries the override's tui.
+	cloned := MergeSettings(nil, &Settings{Tui: "fullscreen"}, SourceClaudeUser)
+	if cloned.Tui != "fullscreen" {
+		t.Errorf("nil-base clone should carry Tui = %q, want fullscreen", cloned.Tui)
+	}
+}
+
+// TestLoadAllSettingsMirrorsHostTui verifies the host's tui choice flows through
+// LoadAllSettings, and (companion) is dropped when host settings are skipped.
+func TestLoadAllSettingsMirrorsHostTui(t *testing.T) {
+	fakeHome := t.TempDir()
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"tui":"fullscreen"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", "")
+	workspace := t.TempDir()
+
+	// Without skip: host tui is mirrored.
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
+	result, err := LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if result.Tui != "fullscreen" {
+		t.Errorf("host tui should be mirrored: Tui = %q, want fullscreen", result.Tui)
+	}
+
+	// Companion: with skip, the host tui is not loaded (caller falls back to default).
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
+	result, err = LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if result.Tui != "" {
+		t.Errorf("with skip, host tui should not load: Tui = %q, want empty", result.Tui)
+	}
+}
+
 // TestMergeSettingsBaseNilDoesNotMutateOverride verifies that MergeSettings
 // does not mutate the caller's override struct when base is nil.
 func TestMergeSettingsBaseNilDoesNotMutateOverride(t *testing.T) {

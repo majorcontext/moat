@@ -140,6 +140,8 @@ Claude Code executes the prompt and exits when complete.
 
 By default, `moat claude` runs with `--dangerously-skip-permissions` enabled. This skips Claude Code's per-tool confirmation prompts that normally ask before each file edit, command execution, or network request.
 
+To keep bypass mode active across the full session, moat also writes `permissions.defaultMode: "bypassPermissions"` into the container's `settings.json`. Without it, Claude Code's renderer switch (the "Try the new fullscreen renderer?" prompt) re-execs the process, drops the CLI flag, and silently reverts to per-tool prompting. moat pins the renderer (see [Terminal renderer](#terminal-renderer)) so that switch never happens, and the persisted mode covers any other restart.
+
 **Security properties:**
 
 The container runs as a non-root user with filesystem access limited to the mounted workspace. Credentials are injected at the network layer and never appear in the container environment. See [Security model](../concepts/08-security.md) for the full threat model.
@@ -350,7 +352,21 @@ Claude Code can use `git@github.com:...` URLs for cloning and pushing.
 }
 ```
 
-In contrast, moat only reads plugin and marketplace fields from your host `~/.claude/settings.json`. This prevents host-specific settings from leaking into containers.
+In contrast, moat reads only plugin, marketplace, and `tui` (renderer) fields from your host `~/.claude/settings.json`. This prevents host-specific settings from leaking into containers while keeping the renderer consistent with your terminal.
+
+## Terminal renderer
+
+Claude Code has two terminal renderers: the classic scroll renderer and a newer fullscreen renderer. moat pins the renderer in the container's `settings.json` via the `tui` field so Claude Code's "Try the new fullscreen renderer?" prompt never appears mid-session.
+
+This matters because accepting that prompt (or Claude's silent auto-graduation to the fullscreen renderer) re-execs the Claude process, which drops the `--dangerously-skip-permissions` flag and reverts to per-tool prompting. Pinning `tui` avoids the re-exec entirely.
+
+moat mirrors your host's `tui` choice (from `~/.claude/settings.json`) and falls back to the classic renderer (`"default"`) when your host has no preference. To force a specific renderer for moat runs, set `tui` in `~/.moat/claude/settings.json`:
+
+```json
+{
+  "tui": "fullscreen"
+}
+```
 
 ## Plugin management
 
