@@ -135,9 +135,10 @@ type VolumeConfig struct {
 	Target   string `yaml:"target"`
 	ReadOnly bool   `yaml:"readonly,omitempty"`
 	// Type selects the backing store: "bind" (default) is a host bind mount at
-	// ~/.moat/volumes/<agent>/<name> (host-visible; on macOS served over virtiofs);
-	// "volume" is a native in-VM Docker named volume (fast, isolated, SQLite-safe).
-	// Docker runtime only.
+	// ~/.moat/volumes/<agent>/<name> (visible on the host; crosses the host↔VM
+	// filesystem-sharing layer on VM-based runtimes). "volume" is a Docker named
+	// volume on the engine's native filesystem (not host-visible; bypasses that
+	// layer). Docker runtime only.
 	Type string `yaml:"type,omitempty"`
 }
 
