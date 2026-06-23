@@ -545,11 +545,12 @@ func (s *Settings) EnableBypassPermissionsMode() error {
 		}
 	}
 
-	mode, err := json.Marshal(BypassPermissionsMode)
-	if err != nil {
-		return err
-	}
-	perms["defaultMode"] = mode
+	// BypassPermissionsMode is a fixed string constant with no JSON-special
+	// characters, so its encoding is a static quoted literal — no runtime
+	// marshal (and no unreachable error branch) needed. The surrounding quotes
+	// are required: an unquoted RawMessage would be invalid JSON and fail the
+	// json.Marshal(perms) below.
+	perms["defaultMode"] = json.RawMessage(`"` + BypassPermissionsMode + `"`)
 
 	merged, err := json.Marshal(perms)
 	if err != nil {

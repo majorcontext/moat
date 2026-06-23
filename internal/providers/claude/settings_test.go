@@ -1354,6 +1354,26 @@ func TestApplyRunPolicy(t *testing.T) {
 		}
 	})
 
+	// Companion (error path): a malformed persisted permissions value fails the
+	// bypass-persist step, but the renderer pin must still hold — ApplyRunPolicy
+	// pins Tui before attempting persistence, so the primary fix (no upsell
+	// re-exec) survives even when defaultMode can't be written.
+	t.Run("malformed persisted permissions leaves renderer pinned but errors", func(t *testing.T) {
+		s := &Settings{
+			RawExtras: map[string]json.RawMessage{
+				// A plausible mistake: a rule list where an object is expected.
+				"permissions": json.RawMessage(`["Read(./x)"]`),
+			},
+		}
+		err := s.ApplyRunPolicy(true, true)
+		if err == nil {
+			t.Fatal("expected an error for a malformed permissions value")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q (renderer pin must survive a bypass-persist failure)", s.Tui, DefaultTUI)
+		}
+	})
+
 	// Companion: a non-Claude-Code run touches neither renderer nor bypass mode.
 	t.Run("non claude code run sets only the prompt suppression", func(t *testing.T) {
 		s := &Settings{}
