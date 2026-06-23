@@ -66,7 +66,7 @@ enumerate scalar fields explicitly. Example rules:
 # GraphQL mutation denylist (EXPERIMENTAL brittle stopgap — NOT a sole control;
 # robust form is the post-v1 graphqlOps() helper; see Caveats)
 - name: deny-graphql-mutation
-  match: { when: "params.host == 'api.github.com' && params.path == '/graphql' && params.body.query.contains('mutation')" }
+  match: { when: "params.host == 'api.github.com' && params.path == '/graphql' && params.body != null && params.body.query.contains('mutation')" }
   action: deny
 ```
 

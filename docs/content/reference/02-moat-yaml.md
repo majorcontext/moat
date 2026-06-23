@@ -703,7 +703,7 @@ rules:
 
   # Match an exact body field, scoped to a host + path.
   - name: deny-destructive
-    match: { when: "params.host == 'api.example.com' && params.path == '/graphql' && params.body.operation == 'delete'" }
+    match: { when: "params.host == 'api.example.com' && params.path == '/graphql' && params.body != null && params.body.operation == 'delete'" }
     action: deny
 ```
 
