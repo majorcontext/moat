@@ -1198,7 +1198,9 @@ To clean a single branch's worktree, use `moat wt clean <branch>`.
 
 Manage persistent volumes.
 
-Volumes store data at `~/.moat/volumes/<agent-name>/<volume-name>/` and persist across runs for the same agent name. They are created automatically when `moat.yaml` specifies a `volumes:` section.
+These commands manage **`type: bind`** volumes (the default): host directories at `~/.moat/volumes/<agent-name>/<volume-name>/` that persist across runs for the same agent name, created automatically when `moat.yaml` specifies a `volumes:` section.
+
+A `type: volume` entry is a native Docker named volume (`moat_<agent-name>_<volume-name>`) and is **not** managed by these commands — list it with `docker volume ls` and remove it with `docker volume rm`. See [moat.yaml › Volumes](./02-moat-yaml.md#volumes) for the difference.
 
 ### moat volumes ls
 

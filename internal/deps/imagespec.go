@@ -57,6 +57,12 @@ type ImageSpec struct {
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
 
+	// HasNamedVolumes indicates the run mounts at least one type: volume (native
+	// Docker named volume). Such volumes are created root-owned; moat-init's
+	// in-container chown is what makes them writable by the non-root run user on
+	// root-entrypoint runtimes, so their presence requires the moat-init entrypoint.
+	HasNamedVolumes bool
+
 	// Hooks contains user-defined lifecycle hook commands.
 	Hooks *HooksConfig
 }
@@ -80,6 +86,11 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 // relies on moat-init.sh to write synthetic hostnames (moat-proxy, moat-host)
 // to /etc/hosts via MOAT_EXTRA_HOSTS. Without the entrypoint, HTTP_PROXY
 // points at an unresolvable hostname and the policy fails open.
+//
+// HasNamedVolumes is included because a custom image otherwise runs directly as
+// the non-root user (USER moatuser) with no entrypoint; named volumes are created
+// root-owned, and moat-init is what chowns them so that user can write — without
+// it the run hits EACCES on first write to the volume.
 func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	if s == nil {
 		return dockerMode != ""
@@ -87,7 +98,7 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
-		s.NeedsFirewall
+		s.NeedsFirewall || s.HasNamedVolumes
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.

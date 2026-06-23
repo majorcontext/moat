@@ -1846,6 +1846,10 @@ func TestImageSpecNeedsInit(t *testing.T) {
 		// rely on MOAT_EXTRA_HOSTS to write synthetic hostnames to /etc/hosts.
 		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", true},
 		{"clipboard", &ImageSpec{NeedsClipboard: true}, "", true},
+		// Named volumes require moat-init: it chowns the root-owned volume root to
+		// the run user on root-entrypoint runtimes; without it the run hits EACCES.
+		{"named volumes", &ImageSpec{HasNamedVolumes: true}, "", true},
+		{"no named volumes", &ImageSpec{HasNamedVolumes: false}, "", false},
 	}
 
 	for _, tt := range tests {

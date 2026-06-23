@@ -14,6 +14,22 @@ import (
 //
 // This function is pure (no filesystem side effects); the caller does the
 // MkdirAll for bind volumes.
+// configHasNamedVolumes reports whether any configured volume uses type: volume
+// (a native Docker named volume). Named volumes are created root-owned, so the run
+// needs the moat-init entrypoint to chown the volume root to the run user — see
+// ImageSpec.HasNamedVolumes / needsInit.
+func configHasNamedVolumes(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, v := range cfg.Volumes {
+		if v.Type == "volume" {
+			return true
+		}
+	}
+	return false
+}
+
 func volumeMount(agentName string, vol config.VolumeConfig) (container.MountConfig, bool) {
 	if vol.Type == "volume" {
 		return container.MountConfig{

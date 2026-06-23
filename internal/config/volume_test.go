@@ -215,6 +215,18 @@ volumes:
 `,
 			errContains: "must not contain whitespace",
 		},
+		{
+			name: "agent name invalid for named volume",
+			content: `
+name: "bad name"
+agent: test
+volumes:
+  - name: state
+    target: /data
+    type: volume
+`,
+			errContains: "not valid with type: volume",
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,6 +257,8 @@ func TestLoadConfigVolumeTypesValid(t *testing.T) {
 		{"bind on apple ok", "name: myapp\nruntime: apple\nvolumes:\n  - name: v\n    target: /data\n    type: bind\n"},
 		// whitespace check is scoped to type: volume; a bind target with a space still loads.
 		{"bind target with space ok", "name: myapp\nvolumes:\n  - name: v\n    target: /work space/c\n    type: bind\n"},
+		// agent-name charset is enforced only for type: volume; bind tolerates a spaced name.
+		{"spaced agent name ok for bind", "name: \"bad name\"\nvolumes:\n  - name: v\n    target: /data\n    type: bind\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

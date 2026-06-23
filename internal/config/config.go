@@ -20,6 +20,11 @@ import (
 // Must start with a letter or digit.
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// agentVolumeNameRe matches the chars allowed in a Docker volume name component.
+// A type: volume entry turns the agent name into part of moat_<name>_<vol>, so the
+// agent name must use this charset (the "moat_" prefix covers the leading-char rule).
+var agentVolumeNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
 // imageRefRe matches valid Docker image references: registry/repo:tag or @sha256:digest.
 // Prevents Dockerfile injection via newlines or special characters in base_image.
 var imageRefRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*(@sha256:[a-f0-9]{64})?$`)
@@ -700,6 +705,20 @@ func Load(dir string) (*Config, error) {
 	if len(cfg.Volumes) > 0 {
 		if cfg.Name == "" {
 			return nil, fmt.Errorf("'name' is required when volumes are configured (volumes are scoped by agent name)")
+		}
+		// A type: volume entry becomes part of a Docker volume name
+		// (moat_<name>_<vol>), so the agent name must use the Docker name charset.
+		// Only enforced when a named volume is present; the bind path uses the name
+		// only as a filesystem path and tolerates more.
+		hasNamedVolume := false
+		for _, vol := range cfg.Volumes {
+			if vol.Type == "volume" {
+				hasNamedVolume = true
+				break
+			}
+		}
+		if hasNamedVolume && !agentVolumeNameRe.MatchString(cfg.Name) {
+			return nil, fmt.Errorf("name %q is not valid with type: volume (must match [A-Za-z0-9_.-]+; it becomes part of the Docker volume name)", cfg.Name)
 		}
 		seenVolNames := make(map[string]bool)
 		seenVolTargets := make(map[string]bool)
