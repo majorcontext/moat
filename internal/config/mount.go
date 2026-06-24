@@ -129,6 +129,24 @@ func ValidateExcludes(excludes []string, target string) ([]string, error) {
 			return nil, fmt.Errorf("mount %s: exclude path must not be empty", target)
 		}
 
+		// Reject shell metacharacters. Exclude patterns are interpolated into a
+		// root-run tar command during volume-mode copy-in (moat-init.sh); only a
+		// path-safe character class is allowed. Patterns are fed via
+		// --exclude-from a temp file, but defense-in-depth validation stops bad
+		// input at config load.
+		if i := strings.IndexFunc(exc, func(r rune) bool {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+				return false
+			case r == '/' || r == '.' || r == '-' || r == '_' || r == '*':
+				return false
+			default:
+				return true
+			}
+		}); i >= 0 {
+			return nil, fmt.Errorf("mount %s: exclude path %q contains unsupported character %q (allowed: letters, digits, / . - _ *; glob metacharacters ? [ ] are not supported)", target, exc, string(exc[i]))
+		}
+
 		// Check for ".." in the raw path before cleaning (filepath.Clean
 		// resolves "foo/../bar" to "bar", hiding the traversal).
 		for _, part := range strings.Split(exc, "/") {
@@ -171,4 +189,25 @@ func ValidateExcludes(excludes []string, target string) ([]string, error) {
 	}
 
 	return cleaned, nil
+}
+
+// ValidateNoGitExclude rejects excluding .git (or any subpath) in volume mode.
+// A partial .git is a broken repository, so volume-mode copy-in must always
+// include the full .git directory.
+func ValidateNoGitExclude(excludes []string) error {
+	for _, exc := range excludes {
+		c := filepath.Clean(exc)
+		// Reject a literal .git or any subpath, AND any first path component that
+		// glob-matches .git (e.g. ".git*", "*", "[.]git") — those would still
+		// exclude .git from the copy-in and silently produce a broken repository.
+		first := c
+		if i := strings.IndexByte(c, '/'); i >= 0 {
+			first = c[:i]
+		}
+		matched, _ := filepath.Match(first, ".git")
+		if c == ".git" || strings.HasPrefix(c, ".git/") || matched {
+			return fmt.Errorf("exclude %q is not allowed in volume mode: it would drop .git, and a partial .git is a broken repository", exc)
+		}
+	}
+	return nil
 }

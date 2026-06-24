@@ -8,6 +8,8 @@ import (
 	"sort"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/storage"
@@ -86,6 +88,10 @@ Use --to to extract the snapshot to a different directory instead of
 restoring in-place. This is useful for comparing states or recovering
 specific files without modifying the current workspace.
 
+Volume-mode runs require --to: in-place restore is blocked because the host
+workspace was never the live tree, so writing into it would defeat the host
+protection volume mode provides.
+
 Examples:
   moat snapshot restore run_a1b2c3d4e5f6                      # Restore most recent snapshot
   moat snapshot restore run_a1b2c3d4e5f6 snap_a1b2c3d4e5f6    # Restore specific snapshot
@@ -143,8 +149,41 @@ func createSnapshot(cmd *cobra.Command, args []string) error {
 
 	snapshotDir := filepath.Join(runDir, "snapshots")
 
-	// Create engine - use workspace from metadata
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, snapshot.EngineOptions{})
+	// Determine the workspace source and engine options. For volume-mode runs
+	// the workspace lives in a Docker volume, not on the host, so materialize
+	// it to a host temp dir first and archive that (keeping .git).
+	engineWorkspace := meta.Workspace
+	engineOpts := snapshot.EngineOptions{}
+
+	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
+		if meta.WorkspaceVolume == "" {
+			return fmt.Errorf("run %s has no workspace volume recorded; snapshot not possible", runID)
+		}
+
+		tmp, mkErr := os.MkdirTemp("", "moat-vol-snap-")
+		if mkErr != nil {
+			return fmt.Errorf("creating temp dir for volume snapshot: %w", mkErr)
+		}
+		defer os.RemoveAll(tmp)
+
+		rt, rtErr := container.NewRuntime()
+		if rtErr != nil {
+			return fmt.Errorf("creating container runtime: %w", rtErr)
+		}
+
+		if exportErr := rt.VolumeExport(cmd.Context(), meta.WorkspaceVolume, tmp); exportErr != nil {
+			return fmt.Errorf("exporting workspace volume %q: %w", meta.WorkspaceVolume, exportErr)
+		}
+
+		engineWorkspace = tmp
+		engineOpts = snapshot.EngineOptions{
+			ForceBackend: "archive",
+			IncludeGit:   true,
+		}
+	}
+
+	// Create engine - use workspace from metadata (or materialized volume dir)
+	engine, err := snapshot.NewEngine(engineWorkspace, snapshotDir, engineOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}
@@ -273,8 +312,13 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create engine
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, snapshot.EngineOptions{})
+	// Create engine. Volume-mode snapshots are archive-backed, so prune must use
+	// the archive backend to find/delete them (auto-detect would pick APFS on macOS).
+	pruneOpts := snapshot.EngineOptions{}
+	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
+		pruneOpts.ForceBackend = "archive"
+	}
+	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, pruneOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}
@@ -364,6 +408,17 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// checkRestoreAllowed blocks in-place restore for volume-mode runs. In volume
+// mode the host directory was never the live tree, so an in-place restore would
+// write the agent's changes straight into the developer's source tree — the host
+// write-back volume mode exists to prevent. Require --to.
+func checkRestoreAllowed(workspaceMode, restoreTo string) error {
+	if workspaceMode == string(config.WorkspaceModeVolume) && restoreTo == "" {
+		return fmt.Errorf("in-place restore is not allowed for volume-mode runs; use --to <dir> to extract (e.g. moat snapshot restore <run-id> --to ~/out)")
+	}
+	return nil
+}
+
 func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	runID, err := resolveSnapshotRunID(args[0])
 	if err != nil {
@@ -395,8 +450,20 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no snapshots found for this run")
 	}
 
-	// Create engine - use workspace from metadata
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, snapshot.EngineOptions{})
+	// Block in-place restore for volume-mode runs.
+	if guardErr := checkRestoreAllowed(meta.WorkspaceMode, snapshotRestoreTo); guardErr != nil {
+		return guardErr
+	}
+
+	// Create engine - use workspace from metadata. Volume-mode snapshots are
+	// always written with the archive backend (see createSnapshot), so the
+	// restore must force the same backend — otherwise on macOS the engine
+	// auto-detects APFS and tries to clone the .tar.gz as a directory.
+	restoreOpts := snapshot.EngineOptions{}
+	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
+		restoreOpts.ForceBackend = "archive"
+	}
+	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, restoreOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}

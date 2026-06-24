@@ -47,10 +47,11 @@ type Config struct {
 	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	// Clipboard enables host clipboard bridging. Default true when nil.
-	Clipboard *bool          `yaml:"clipboard,omitempty"`
-	Snapshots SnapshotConfig `yaml:"snapshots,omitempty"`
-	Tracing   TracingConfig  `yaml:"tracing,omitempty"`
-	Hooks     HooksConfig    `yaml:"hooks,omitempty"`
+	Clipboard *bool           `yaml:"clipboard,omitempty"`
+	Snapshots SnapshotConfig  `yaml:"snapshots,omitempty"`
+	Tracing   TracingConfig   `yaml:"tracing,omitempty"`
+	Hooks     HooksConfig     `yaml:"hooks,omitempty"`
+	Workspace WorkspaceConfig `yaml:"workspace,omitempty"`
 
 	// Sandbox configures container sandboxing.
 	// "none" disables gVisor sandbox (Docker only).
@@ -528,6 +529,11 @@ func Load(dir string) (*Config, error) {
 	// Validate runtime field (only "docker" or "apple" allowed)
 	if cfg.Runtime != "" && cfg.Runtime != "docker" && cfg.Runtime != "apple" {
 		return nil, fmt.Errorf("invalid runtime %q: must be 'docker' or 'apple'", cfg.Runtime)
+	}
+
+	// Validate workspace mode
+	if err := cfg.Workspace.Validate(); err != nil {
+		return nil, err
 	}
 
 	// Validate container resource limits

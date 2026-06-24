@@ -848,7 +848,17 @@ func (s *stubRuntime) CreateContainer(context.Context, container.Config) (string
 	panic("not implemented")
 }
 func (s *stubRuntime) StartContainer(context.Context, string) error { panic("not implemented") }
-func (s *stubRuntime) StopContainer(context.Context, string) error  { return nil }
+func (s *stubRuntime) VolumeCreate(context.Context, string) error   { panic("not implemented") }
+func (s *stubRuntime) VolumeRemove(context.Context, string, bool) error {
+	panic("not implemented")
+}
+func (s *stubRuntime) VolumeList(context.Context, string) ([]string, error) {
+	panic("not implemented")
+}
+func (s *stubRuntime) VolumeExport(context.Context, string, string) error {
+	panic("not implemented")
+}
+func (s *stubRuntime) StopContainer(context.Context, string) error { return nil }
 func (s *stubRuntime) WaitContainer(ctx context.Context, _ string) (int64, error) {
 	// Block until the test signals completion via the done channel
 	select {

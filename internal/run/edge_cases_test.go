@@ -50,6 +50,16 @@ func (f *flexibleRuntime) StartContainer(ctx context.Context, id string) error {
 	}
 	return nil
 }
+func (f *flexibleRuntime) VolumeCreate(context.Context, string) error { return nil }
+func (f *flexibleRuntime) VolumeRemove(context.Context, string, bool) error {
+	return nil
+}
+func (f *flexibleRuntime) VolumeList(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (f *flexibleRuntime) VolumeExport(context.Context, string, string) error {
+	return nil
+}
 func (f *flexibleRuntime) StopContainer(ctx context.Context, id string) error {
 	if f.stopFn != nil {
 		return f.stopFn(ctx, id)

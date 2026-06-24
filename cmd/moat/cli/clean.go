@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
@@ -296,10 +297,19 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	// Remove stopped runs
 	var freedSize int64
-	var removedCount, failedCount int
+	var removedCount, failedCount, skippedCount int
 	destroyedRunIDs := make(map[string]bool)
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
+		// Volume-mode runs hold the only copy of the agent's work in their
+		// named volume. Destroying without an extraction snapshot loses it, so
+		// `moat clean` honors the same guard as `moat destroy`: skip such runs
+		// unless --force was passed (mirrors destroy's --force override).
+		if !cleanForce && r.WorkspaceMode == string(config.WorkspaceModeVolume) && !hasExtractionSnapshot(r.ID) {
+			fmt.Println(ui.Yellow("skipped (volume run, no extraction snapshot; snapshot it or use --force)"))
+			skippedCount++
+			continue
+		}
 		if err := manager.Destroy(ctx, r.ID); err != nil {
 			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
@@ -381,6 +391,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\nCleaned %d resources, freed %d MB", removedCount, freedSize/(1024*1024))
 	if failedCount > 0 {
 		fmt.Printf(" (%d failed)", failedCount)
+	}
+	if skippedCount > 0 {
+		fmt.Printf(" (%d volume runs skipped — snapshot or --force to remove)", skippedCount)
 	}
 	if wtFailedCount > 0 {
 		fmt.Printf(" (%d worktree cleanups failed)", wtFailedCount)

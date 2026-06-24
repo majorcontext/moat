@@ -224,6 +224,16 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 	}
 	// If neither is set, detect.go checks MOAT_RUNTIME env var, then auto-detects
 
+	// Resolve workspace mode: --workspace-mode CLI flag > moat.yaml > default (bind).
+	var wsCfg config.WorkspaceConfig
+	if opts.Config != nil {
+		wsCfg = opts.Config.Workspace
+	}
+	wsMode, err := config.ResolveWorkspaceMode(wsCfg, opts.Flags.WorkspaceMode)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create manager. ReapOrphanNetworks=true because this path creates a
 	// new network — best moment to clean up leaks from prior crashed runs.
 	managerOpts := run.ManagerOptions{ReapOrphanNetworks: true}
@@ -272,6 +282,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		KeepContainer: opts.Flags.KeepContainer,
 		Interactive:   opts.Interactive,
 		Clipboard:     clipboard,
+		WorkspaceMode: wsMode,
 	}
 
 	// Pre-flight: on an interactive terminal, offer to grant any missing

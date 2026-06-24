@@ -59,6 +59,19 @@ type Runtime interface {
 	// StartContainer starts an existing container.
 	StartContainer(ctx context.Context, id string) error
 
+	// VolumeCreate creates a named volume. Idempotent if it already exists.
+	VolumeCreate(ctx context.Context, name string) error
+
+	// VolumeRemove removes a named volume. force removes even if it appears in use.
+	VolumeRemove(ctx context.Context, name string, force bool) error
+
+	// VolumeList returns names of volumes whose name starts with prefix.
+	VolumeList(ctx context.Context, prefix string) ([]string, error)
+
+	// VolumeExport copies the volume's contents to hostDir on the host filesystem
+	// (used for snapshot capture). hostDir must already exist.
+	VolumeExport(ctx context.Context, name, hostDir string) error
+
 	// StopContainer stops a running container.
 	StopContainer(ctx context.Context, id string) error
 

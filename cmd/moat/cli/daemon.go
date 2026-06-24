@@ -228,8 +228,16 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Set up idle auto-shutdown (5 min). On timeout, send SIGTERM to self.
+	// Set up idle auto-shutdown (5 min). On timeout, reclaim any orphaned
+	// workspace volumes (left by destroyed runs whose volume removal failed, or
+	// crashed runs / SIGKILL) and send SIGTERM to self. The GC keys off on-disk
+	// run directories (a run dir survives until `moat destroy`), NOT the empty
+	// idle registry — so persisted volumes for not-yet-destroyed runs are never
+	// touched. It is fully defensive and never blocks shutdown.
 	idleShutdown := daemon.NewIdleTimer(5*time.Minute, func() {
+		gcCtx, gcCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		daemon.GCOrphanWorkspaceVolumes(gcCtx)
+		gcCancel()
 		log.Info("daemon idle timeout, shutting down")
 		sigCh <- syscall.SIGTERM
 	})

@@ -484,6 +484,8 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		WorktreeBranch:    meta.WorktreeBranch,
 		WorktreePath:      meta.WorktreePath,
 		WorktreeRepoID:    meta.WorktreeRepoID,
+		WorkspaceMode:     meta.WorkspaceMode,
+		WorkspaceVolume:   meta.WorkspaceVolume,
 	}
 
 	// If container is confirmed stopped by a live check or by authoritative
@@ -656,20 +658,33 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	var mounts []container.MountConfig
 	var tmpfsMounts []container.TmpfsMount
 
-	// Check if any config mount explicitly targets /workspace.
-	// If so, skip the implicit workspace mount (the explicit one replaces it).
-	hasExplicitWorkspace := false
-	if opts.Config != nil {
-		for _, me := range opts.Config.Mounts {
-			if me.Target == "/workspace" {
-				hasExplicitWorkspace = true
-				break
-			}
+	// Volume mode replaces the host /workspace bind with a named Docker volume
+	// and a read-only staging bind. moat-init.sh populates the volume from the
+	// staging tree, then chowns it and drops privileges.
+	volumeMode := opts.WorkspaceMode == config.WorkspaceModeVolume
+	var workspaceVolumeName string
+	if volumeMode {
+		if err := GuardVolumeWorkspace(opts.Workspace, m.defaultRuntime().Type()); err != nil {
+			return nil, err
 		}
+		if err := config.ValidateNoGitExclude(workspaceExcludeList(opts.Config)); err != nil {
+			return nil, err
+		}
+		workspaceVolumeName = WorkspaceVolumeName(r.ID)
+		r.WorkspaceMode = string(config.WorkspaceModeVolume)
+		r.WorkspaceVolume = workspaceVolumeName
 	}
 
-	// Mount workspace (unless replaced by an explicit mount)
-	if !hasExplicitWorkspace {
+	// Check if any config mount explicitly targets /workspace.
+	// If so, skip the implicit workspace mount (the explicit one replaces it).
+	hasExplicitWorkspace := ConfigHasExplicitWorkspaceMount(opts.Config)
+
+	switch {
+	case volumeMode:
+		// Staging bind (host tree, read-only) + named volume at /workspace.
+		mounts = append(mounts, VolumeWorkspaceMounts(opts.Workspace, workspaceVolumeName)...)
+	case !hasExplicitWorkspace:
+		// Mount workspace (unless replaced by an explicit mount)
 		mounts = append(mounts, container.MountConfig{
 			Source:   opts.Workspace,
 			Target:   "/workspace",
@@ -680,21 +695,32 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// If workspace is a git worktree, mount the main .git directory so git
 	// operations work inside the container. The .git file in worktrees contains
 	// an absolute host path; mounting the main .git at that same path makes
-	// the reference resolve as-is.
-	if info, err := worktree.ResolveGitDir(opts.Workspace); err != nil {
-		log.Debug("failed to resolve worktree git dir", "error", err)
-	} else if info != nil {
-		mounts = append(mounts, container.MountConfig{
-			Source:   info.MainGitDir,
-			Target:   info.MainGitDir,
-			ReadOnly: false,
-		})
-		log.Debug("mounted main git dir for worktree", "path", info.MainGitDir)
+	// the reference resolve as-is. Skipped in volume mode, which rejects
+	// worktrees outright (GuardVolumeWorkspace above).
+	if !volumeMode {
+		if info, err := worktree.ResolveGitDir(opts.Workspace); err != nil {
+			log.Debug("failed to resolve worktree git dir", "error", err)
+		} else if info != nil {
+			mounts = append(mounts, container.MountConfig{
+				Source:   info.MainGitDir,
+				Target:   info.MainGitDir,
+				ReadOnly: false,
+			})
+			log.Debug("mounted main git dir for worktree", "path", info.MainGitDir)
+		}
 	}
 
 	// Add mounts from config
 	if opts.Config != nil {
 		for _, me := range opts.Config.Mounts {
+			// In volume mode the named volume owns /workspace. A /workspace mount
+			// entry is consulted only for its exclude: list (applied during
+			// copy-in by workspaceExcludes) — do not add a bind (it would
+			// duplicate the volume mount) and do not create tmpfs overlays
+			// (excludes are filtered at copy-in, not overlaid at runtime).
+			if volumeMode && me.Target == "/workspace" {
+				continue
+			}
 			// Resolve relative paths against workspace
 			source := me.Source
 			if !filepath.IsAbs(source) {
@@ -1782,6 +1808,10 @@ region = %s
 		ClaudePlugins:      claudePlugins,
 		HasNamedVolumes:    configHasNamedVolumes(opts.Config),
 		Hooks:              hooks,
+		// Volume mode requires the moat-init entrypoint to populate + chown the
+		// named volume as root; force a custom image with init even when the run
+		// has no deps/grants (otherwise the volume is silently left empty).
+		NeedsWorkspaceVolume: volumeMode,
 	}
 
 	// Resolve container image based on dependencies and image spec
@@ -2321,7 +2351,12 @@ region = %s
 	// translation automatically, so we can use the default moatuser (5000).
 	const moatuserUID = 5000
 	var containerUser string
-	if goruntime.GOOS == "linux" {
+	if volumeMode {
+		// Volume mode runs as root so moat-init.sh can populate the freshly
+		// created volume (root-owned) and chown /workspace before dropping
+		// privileges to the workspace user.
+		containerUser = "0:0"
+	} else if goruntime.GOOS == "linux" {
 		// Use the workspace owner's UID/GID, not the process UID.
 		// This handles cases where moat is run with sudo or as a different user.
 		workspaceUID, workspaceGID := getWorkspaceOwner(opts.Workspace)
@@ -2772,6 +2807,36 @@ region = %s
 		proxyEnv = append(proxyEnv, env)
 	}
 
+	// In volume mode, tell moat-init.sh to populate /workspace from the staging
+	// bind, and create the per-run named volume before the container so the
+	// named-volume mount resolves at container-create time.
+	if volumeMode {
+		proxyEnv = append(proxyEnv,
+			"MOAT_WORKSPACE_VOLUME=1",
+			"MOAT_WORKSPACE_STAGING="+stagingPath,
+		)
+		if excludes := workspaceExcludes(opts.Config); excludes != "" {
+			proxyEnv = append(proxyEnv, "MOAT_WORKSPACE_EXCLUDES="+excludes)
+		}
+		if err := m.defaultRuntime().VolumeCreate(ctx, workspaceVolumeName); err != nil {
+			return nil, fmt.Errorf("creating workspace volume %s: %w", workspaceVolumeName, err)
+		}
+		// Remove the freshly-created volume if Create fails before returning
+		// successfully (container create or a later step errors out), so a
+		// partially-created run leaves no orphaned volume. cleanupRunDir is the
+		// existing success sentinel — it is set to false only on the success path
+		// at the end of Create. Best-effort: cleanup failure is logged, not fatal.
+		volCleanupRT := m.defaultRuntime()
+		volCleanupName := workspaceVolumeName
+		defer func() {
+			if cleanupRunDir {
+				if err := volCleanupRT.VolumeRemove(ctx, volCleanupName, true); err != nil {
+					log.Debug("create: failed to remove workspace volume after failure", "volume", volCleanupName, "error", err)
+				}
+			}
+		}()
+	}
+
 	// Create container
 	containerID, err := m.defaultRuntime().CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -3094,8 +3159,9 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	// Save state to disk
 	_ = r.SaveMetadata()
 
-	// Create pre-run snapshot
-	if r.SnapEngine != nil && !r.DisablePreRunSnapshot {
+	// Create pre-run snapshot. Skipped in volume mode: the host staging tree is
+	// not the live workspace, so a pre-run snapshot of it would be meaningless.
+	if r.SnapEngine != nil && !r.DisablePreRunSnapshot && r.WorkspaceMode != string(config.WorkspaceModeVolume) {
 		if _, err := r.SnapEngine.Create(snapshot.TypePreRun, ""); err != nil {
 			log.Debug("failed to create pre-run snapshot", "error", err)
 		}
@@ -3591,6 +3657,12 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 			}
 		}
 
+		// NOTE: the per-run workspace volume is intentionally NOT removed here.
+		// cleanupResources runs when the container exits (Stop/Wait/monitor), but
+		// in volume mode the volume is the only copy of the agent's work and must
+		// survive run-stop so the user can `moat snapshot` (extract) it before
+		// tearing down. Volume removal happens only in Destroy (full teardown).
+
 		// Remove network (with force-disconnect fallback)
 		if rt != nil && r.NetworkID != "" {
 			netMgr := rt.NetworkManager()
@@ -3798,6 +3870,20 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 
 	// Clean up all run resources (idempotent - may already be done by Stop/monitorContainerExit)
 	m.cleanupResources(ctx, r)
+
+	// Remove the per-run workspace volume (volume mode). Unlike cleanupResources
+	// (which runs at every container exit), this is the full-teardown path: the
+	// volume must persist after run-stop so the user can `moat snapshot` to
+	// extract their work, and is only reclaimed here at Destroy. Removed
+	// unconditionally — Destroy is a complete teardown regardless of KeepContainer.
+	// Best-effort: a failure here must not block the rest of Destroy.
+	if r.WorkspaceVolume != "" {
+		if rt, rtErr := m.runtimeForRun(r); rtErr != nil {
+			log.Debug("destroy: cannot resolve runtime, skipping volume removal", "run", r.ID, "error", rtErr)
+		} else if err := rt.VolumeRemove(ctx, r.WorkspaceVolume, true); err != nil {
+			log.Warn("destroy: failed to remove workspace volume", "volume", r.WorkspaceVolume, "error", err)
+		}
+	}
 
 	// Check if we should stop the routing proxy (no more agents with ports)
 	if m.proxyLifecycle.ShouldStop() {

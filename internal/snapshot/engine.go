@@ -18,6 +18,10 @@ type EngineOptions struct {
 	Additional []string
 	// ForceBackend forces a specific backend for testing: "archive" or "apfs".
 	ForceBackend string
+	// IncludeGit keeps the .git directory in archive snapshots. Volume mode
+	// sets this so agent commits survive extraction; default false preserves
+	// bind-mode behavior (always exclude .git).
+	IncludeGit bool
 }
 
 // Engine manages snapshot operations with automatic backend detection.
@@ -76,6 +80,7 @@ func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
 			return NewArchiveBackend(snapshotDir, ArchiveOptions{
 				UseGitignore: opts.UseGitignore,
 				Additional:   opts.Additional,
+				IncludeGit:   opts.IncludeGit,
 			})
 		default:
 			// Unknown backend, fall through to auto-detection
@@ -92,6 +97,7 @@ func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
 	return NewArchiveBackend(snapshotDir, ArchiveOptions{
 		UseGitignore: opts.UseGitignore,
 		Additional:   opts.Additional,
+		IncludeGit:   opts.IncludeGit,
 	})
 }
 

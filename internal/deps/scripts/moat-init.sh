@@ -452,6 +452,74 @@ if [ -n "$MOAT_DOCKER_GID" ] && [ "$(id -u)" = "0" ] && [ -S /var/run/docker.soc
   fi
 fi
 
+# Workspace Volume Population
+# When MOAT_WORKSPACE_VOLUME=1, copy the read-only staging tree into /workspace
+# before dropping privileges. The staging mount (MOAT_WORKSPACE_STAGING, default
+# /mnt/host-workspace) is a bind-mount of the host workspace directory; /workspace
+# is a named Docker volume that starts empty each run.
+#
+# Excludes (MOAT_WORKSPACE_EXCLUDES) are newline-delimited, "./"-prefixed paths
+# relative to the staging root (e.g. "./node_modules"). They are written to a temp
+# file so the user-controlled value never expands on the command line.
+#
+# Symlinks are copied as symlinks (not dereferenced) — this is tar's DEFAULT
+# behavior, so out-of-tree symlink targets are never copied into the volume.
+# We deliberately pass NO symlink flag: the explicit no-deref long option only
+# exists in GNU tar 1.35+, but the container base (debian bookworm) ships GNU tar
+# 1.34, which rejects it and aborts the copy. The default preserves the security
+# property without any flag.
+#
+# Must run as root, before the privilege drop and before run_pre_run_hook, so
+# that chown -R moatuser:moatuser /workspace succeeds.
+populate_workspace_volume() {
+  [ "${MOAT_WORKSPACE_VOLUME:-}" = "1" ] || return 0
+
+  # Defensive: this function must run as root (it chowns /workspace). The call
+  # site is before the privilege drop; this guard makes a future refactor that
+  # moves it past the drop fail loudly instead of hitting a silent chown EPERM.
+  if [ "$(id -u)" != "0" ]; then
+    echo "moat: populate_workspace_volume must run as root" >&2
+    exit 1
+  fi
+
+  staging="${MOAT_WORKSPACE_STAGING:-/mnt/host-workspace}"
+
+  exclude_file="/tmp/moat-excludes.$$"
+  : > "$exclude_file"
+  if [ -n "${MOAT_WORKSPACE_EXCLUDES:-}" ]; then
+    printf '%s' "$MOAT_WORKSPACE_EXCLUDES" > "$exclude_file"
+  fi
+
+  # Copy staging -> /workspace. Symlinks are preserved as symlinks (tar default,
+  # so no out-of-tree target leakage); excludes are read from a file (never
+  # expand the user-controlled env var into the command line).
+  #
+  # Excludes are newline-delimited (one "./"-prefixed pattern per line), NOT
+  # NUL-delimited: GNU tar 1.34's `--null --exclude-from` only applies the first
+  # record and silently ignores the rest, which left every exclude after the
+  # first copied into the volume. Plain (newline) --exclude-from applies all
+  # patterns. Exclude patterns are validated at config load to a path-safe class
+  # (no whitespace/newlines), so newline is a safe delimiter.
+  #
+  # In POSIX sh, $? after a pipeline reports only the rightmost command's
+  # status, so a failure in the source `tar -cf -` (read error, bad exclude
+  # file) would go undetected and leave a silently partial workspace. Capture
+  # the source tar's status via a temp file and check both ends.
+  src_rc_file="/tmp/moat-ws-rc.$$"
+  ( cd "$staging" && tar --exclude-from="$exclude_file" -cf - . ; echo $? > "$src_rc_file" ) \
+    | ( cd /workspace && tar -xf - )
+  dst_rc=$?
+  src_rc="$(cat "$src_rc_file" 2>/dev/null || echo 1)"
+  rm -f "$exclude_file" "$src_rc_file"
+  if [ "$src_rc" -ne 0 ] || [ "$dst_rc" -ne 0 ]; then
+    echo "moat: failed to populate workspace volume (src=$src_rc dst=$dst_rc)" >&2
+    exit 1
+  fi
+
+  # The fresh volume mountpoint is root-owned; hand it to the agent user.
+  chown -R moatuser:moatuser /workspace
+}
+
 # Pre-run Hook
 # When MOAT_PRE_RUN is set, run the command as moatuser in /workspace before
 # executing the main command. This runs on every container start (not cached).
@@ -513,6 +581,7 @@ fi
 # This happens when Docker is started with --user to match host UID on Linux.
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
+populate_workspace_volume
 run_pre_run_hook
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)

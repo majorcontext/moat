@@ -26,6 +26,10 @@ import (
 	"github.com/majorcontext/moat/internal/ui"
 )
 
+// errVolumeUnsupported is returned by the Apple runtime's volume lifecycle
+// methods, which are not supported. It points the user at the alternatives.
+var errVolumeUnsupported = errors.New("volume mode is not supported with the Apple container runtime; use the Docker runtime (--runtime docker) or workspace.mode: bind")
+
 // AppleRuntime implements Runtime using Apple's container CLI tool.
 type AppleRuntime struct {
 	containerBin string
@@ -296,6 +300,9 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	// Volume mounts. Named volumes (MountConfig.Volume) are rejected for the Apple
 	// runtime in config.CheckVolumeRuntimeSupport, so every entry here is a bind mount.
 	for _, m := range cfg.Mounts {
+		if m.Volume {
+			return nil, fmt.Errorf("named volume mounts are not supported on the Apple container runtime")
+		}
 		mountStr := m.Source + ":" + m.Target
 		if m.ReadOnly {
 			mountStr += ":ro"
@@ -329,6 +336,26 @@ func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) e
 		return fmt.Errorf("starting container: %w: %s", err, stderr.String())
 	}
 	return nil
+}
+
+// VolumeCreate is unsupported on the Apple container runtime.
+func (r *AppleRuntime) VolumeCreate(ctx context.Context, name string) error {
+	return errVolumeUnsupported
+}
+
+// VolumeRemove is unsupported on the Apple container runtime.
+func (r *AppleRuntime) VolumeRemove(ctx context.Context, name string, force bool) error {
+	return errVolumeUnsupported
+}
+
+// VolumeList is unsupported on the Apple container runtime.
+func (r *AppleRuntime) VolumeList(ctx context.Context, prefix string) ([]string, error) {
+	return nil, errVolumeUnsupported
+}
+
+// VolumeExport is unsupported on the Apple container runtime.
+func (r *AppleRuntime) VolumeExport(ctx context.Context, name, hostDir string) error {
+	return errVolumeUnsupported
 }
 
 // StopContainer stops a running container.

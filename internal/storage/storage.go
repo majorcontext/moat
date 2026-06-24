@@ -50,6 +50,13 @@ type Metadata struct {
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
 	NetworkID           string `json:"network_id,omitempty"`
+
+	// Workspace mode fields (set when workspace.mode: volume).
+	// WorkspaceMode records the resolved mode ("bind" or "volume").
+	// WorkspaceVolume is the per-run Docker volume name backing /workspace,
+	// removed during cleanup.
+	WorkspaceMode   string `json:"workspace_mode,omitempty"`
+	WorkspaceVolume string `json:"workspace_volume,omitempty"`
 }
 
 // RunStore manages storage for a single agent run.

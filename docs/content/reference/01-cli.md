@@ -49,6 +49,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the follow
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
 | `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
 | `--keep` | Keep container after run completes |
+| `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) or `volume` (isolated Docker named volume). Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
@@ -128,6 +129,7 @@ moat run [flags] [path] [-- command]
 | `--runtime RUNTIME` | Container runtime to use (apple, docker) |
 | `--keep` | Keep container after run completes |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
+| `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) mounts the host directory at `/workspace`; `volume` copies it into an isolated Docker named volume. Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
@@ -1137,7 +1139,7 @@ moat join my-feature claude
 Remove a stopped run and its artifacts.
 
 ```
-moat destroy [run]
+moat destroy [run] [flags]
 ```
 
 ### Arguments
@@ -1146,7 +1148,15 @@ moat destroy [run]
 |----------|-------------|
 | `run` | Run ID or name (default: most recent stopped) |
 
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--force` | Destroy even if a volume-mode run has no extraction snapshot |
+
 If a name matches multiple runs, you'll be prompted to confirm destroying all of them.
+
+For volume-mode runs, the workspace lives only in the Docker named volume. Destroying such a run without first capturing a snapshot permanently deletes the agent's work. The command refuses unless an extraction snapshot exists; pass `-f`/`--force` to override.
 
 ### Examples
 
@@ -1156,6 +1166,9 @@ moat destroy my-agent
 
 # Destroy by ID
 moat destroy run_a1b2c3d4e5f6
+
+# Destroy a volume-mode run even without an extraction snapshot
+moat destroy --force run_a1b2c3d4e5f6
 ```
 
 ---
@@ -1270,6 +1283,10 @@ moat snapshot <run> [flags]
 |------|-------------|
 | `--label TEXT` | Optional label for the snapshot |
 
+### Volume-mode behavior
+
+For volume-mode runs (`workspace.mode: volume`), `moat snapshot` captures `/workspace` from the Docker named volume rather than from the host directory. The snapshot includes `.git` (so commits the agent made inside the container are preserved). This is the primary way to extract changes from a volume-mode run.
+
 ### Examples
 
 ```bash
@@ -1328,6 +1345,20 @@ moat snapshot restore <run> [snapshot-id] [flags]
 | Flag | Description |
 |------|-------------|
 | `--to DIR` | Extract to a different directory instead of restoring in-place |
+
+#### Volume-mode restriction
+
+In-place restore is blocked for volume-mode runs. The purpose of volume mode is to prevent writes back to the host, so restoring directly would defeat it. Use `--to` to extract the snapshot to a directory outside the run:
+
+```bash
+moat snapshot restore run_a1b2c3d4e5f6 --to ~/output
+```
+
+Then fetch the agent's commits into your repository:
+
+```bash
+git -C ~/myrepo fetch ~/output
+```
 
 #### Examples
 
