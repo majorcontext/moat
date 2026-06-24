@@ -9,9 +9,13 @@ import (
 	"github.com/majorcontext/moat/internal/storage"
 )
 
-// volumeNamePrefix is the prefix moat uses for per-run workspace volumes.
-// Must match run.WorkspaceVolumeName ("moat-ws-" + runID).
-const volumeNamePrefix = "moat-ws-"
+// WorkspaceVolumePrefix is the prefix moat uses for per-run workspace volume
+// names (the name is WorkspaceVolumePrefix + runID). It is the single source of
+// truth for the naming convention: run.WorkspaceVolumeName builds names from it,
+// and the GC here strips it to recover run IDs. It lives in this package because
+// internal/run imports internal/daemon (not the reverse), so the shared constant
+// cannot live in run without an import cycle.
+const WorkspaceVolumePrefix = "moat-ws-"
 
 // volumeRuntime is the subset of container.Runtime that volume GC needs.
 // Declaring it locally keeps the GC logic testable and decoupled from the
@@ -26,10 +30,10 @@ type volumeRuntime interface {
 func orphanVolumes(all []string, liveRunIDs map[string]bool) []string {
 	var orphans []string
 	for _, name := range all {
-		if !strings.HasPrefix(name, volumeNamePrefix) {
+		if !strings.HasPrefix(name, WorkspaceVolumePrefix) {
 			continue
 		}
-		runID := strings.TrimPrefix(name, volumeNamePrefix)
+		runID := strings.TrimPrefix(name, WorkspaceVolumePrefix)
 		if !liveRunIDs[runID] {
 			orphans = append(orphans, name)
 		}
@@ -83,7 +87,7 @@ func GCOrphanWorkspaceVolumes(ctx context.Context) {
 	// first guarantees any volume we see has a run dir that the live snapshot
 	// below will include - it can never be seen-but-not-live and wrongly
 	// reclaimed. The reverse order could delete a brand-new run's volume.
-	all, err := rt.VolumeList(ctx, volumeNamePrefix)
+	all, err := rt.VolumeList(ctx, WorkspaceVolumePrefix)
 	if err != nil {
 		log.Debug("skipping volume GC", "err", err)
 		return

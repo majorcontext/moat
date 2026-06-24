@@ -50,12 +50,14 @@ func volumeMount(agentName string, vol config.VolumeConfig) (container.MountConf
 }
 
 // volumeChownEnv returns the MOAT_VOLUME_CHOWN env entry for moat-init and whether
-// to inject it. It is injected only on the root-entrypoint path (containerUser == "")
+// to inject it. It is injected only on the root-entrypoint path - containerUser ""
+// (Docker Desktop default) or an explicit "0:0" (volume-mode runs force this) -
 // where moat-init performs the chown; on the non-root path the ownership helper
 // container does it instead, so the env var is omitted. The two mechanisms are
-// mutually exclusive — exactly one chowns the volume roots.
+// mutually exclusive — exactly one chowns the volume roots. This must stay in sync
+// with volumeOwnershipPlan's root-entrypoint check (container package).
 func volumeChownEnv(containerUser string, chownPaths []string) (string, bool) {
-	if containerUser != "" || len(chownPaths) == 0 {
+	if (containerUser != "" && containerUser != "0:0") || len(chownPaths) == 0 {
 		return "", false
 	}
 	return "MOAT_VOLUME_CHOWN=" + strings.Join(chownPaths, " "), true

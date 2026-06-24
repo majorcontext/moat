@@ -2,10 +2,48 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/majorcontext/moat/internal/storage"
 )
+
+// TestLiveRunIDsFromRunDirs guards the boundary the GC depends on: the live set
+// is exactly the run-directory names under the base dir (no metadata.json
+// required), and only directories count. A bug returning an empty or wrong set
+// would make GC treat live runs as orphans and delete their volumes.
+func TestLiveRunIDsFromRunDirs(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+	runsDir := storage.DefaultBaseDir()
+	if err := os.MkdirAll(filepath.Join(runsDir, "run_a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// In-flight run: dir exists but no metadata.json yet — must still be live.
+	if err := os.MkdirAll(filepath.Join(runsDir, "run_b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A stray file is not a run dir and must be ignored.
+	if err := os.WriteFile(filepath.Join(runsDir, "not-a-run"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	live, err := liveRunIDsFromRunDirs()
+	if err != nil {
+		t.Fatalf("liveRunIDsFromRunDirs: %v", err)
+	}
+	if !live["run_a"] || !live["run_b"] {
+		t.Errorf("expected run_a and run_b live, got %v", live)
+	}
+	if live["not-a-run"] {
+		t.Error("a non-directory entry must not be treated as a live run")
+	}
+	if len(live) != 2 {
+		t.Errorf("expected exactly 2 live runs, got %d: %v", len(live), live)
+	}
+}
 
 func TestOrphanVolumes(t *testing.T) {
 	all := []string{"moat-ws-run_a", "moat-ws-run_b", "moat-ws-run_c", "not-a-moat-vol"}

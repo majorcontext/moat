@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/run"
@@ -41,28 +40,14 @@ func init() {
 // listing failure) it returns false so the destroy guard requires --force, which
 // is the safer default.
 func hasExtractionSnapshot(runID string) bool {
-	baseDir := storage.DefaultBaseDir()
-	runDir := filepath.Join(baseDir, runID)
-	snapshotDir := filepath.Join(runDir, "snapshots")
+	snapshotDir := filepath.Join(storage.DefaultBaseDir(), runID, "snapshots")
 
-	if _, statErr := os.Stat(snapshotDir); statErr != nil {
-		return false
-	}
-
-	store, err := storage.NewRunStore(baseDir, runID)
-	if err != nil {
-		return false
-	}
-	meta, err := store.LoadMetadata()
-	if err != nil {
-		return false
-	}
-
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, snapshot.EngineOptions{})
-	if err != nil {
-		return false
-	}
-	snapshots, err := engine.List()
+	// Read the snapshot store directly rather than via snapshot.NewEngine, which
+	// requires the run's workspace to still exist: in volume mode the host
+	// workspace is often gone by destroy time, and a workspace-dependent check
+	// would fail closed and demand --force even when a valid extraction snapshot
+	// exists — training users to always pass --force and eroding the guard.
+	snapshots, err := snapshot.ListSnapshots(snapshotDir)
 	if err != nil {
 		return false
 	}

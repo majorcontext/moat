@@ -69,6 +69,28 @@ func NewEngine(workspace, snapshotDir string, opts EngineOptions) (*Engine, erro
 	return engine, nil
 }
 
+// ListSnapshots reads snapshot metadata directly from a snapshot directory,
+// without constructing an Engine. Unlike NewEngine(...).List(), it does NOT
+// require the run's workspace to still exist on disk, so guards that run after
+// the workspace is gone (e.g. the destroy/clean extraction-snapshot check) get a
+// correct answer instead of failing closed. A missing metadata file is not an
+// error — it yields an empty list (no snapshots taken yet).
+func ListSnapshots(snapshotDir string) ([]Metadata, error) {
+	path := filepath.Join(snapshotDir, metadataFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read snapshot metadata: %w", err)
+	}
+	var list []Metadata
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, fmt.Errorf("corrupted snapshot metadata at %s: %w", path, err)
+	}
+	return list, nil
+}
+
 // detectBackend selects the appropriate backend based on options and filesystem.
 func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
 	// If ForceBackend is set, use that

@@ -206,7 +206,11 @@ func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount
 // it cannot write to a fresh volume root, and moat-init's in-container chown only runs
 // when the entrypoint is root. So the non-root case is handled here instead.
 func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, ok bool) {
-	if cfg.User == "" {
+	// Root entrypoint - "" (Docker Desktop default) or an explicit "0:0" (volume-mode
+	// runs force this) - chowns named-volume roots via moat-init/MOAT_VOLUME_CHOWN, so
+	// the helper is a no-op. Without the "0:0" case the helper would run and chown the
+	// volume root to 0:0 (root), leaving the run user unable to write it.
+	if cfg.User == "" || cfg.User == "0:0" {
 		return nil, nil, false
 	}
 	var paths []string
@@ -476,6 +480,11 @@ func (r *DockerRuntime) VolumeList(ctx context.Context, prefix string) ([]string
 	return names, nil
 }
 
+// volumeExportTimeout bounds a single VolumeExport. A whole-tree tar copy of a
+// workspace volume completes in seconds to a few minutes; the cap exists only to
+// keep a wedged container or stalled daemon from hanging `moat snapshot` forever.
+const volumeExportTimeout = 30 * time.Minute
+
 // VolumeExport copies the volume's contents to hostDir by running a short-lived
 // container that mounts the volume read-only at /vol and bind-mounts hostDir
 // read-write at /out, then copies the contents across with tar. hostDir must
@@ -499,6 +508,13 @@ func (r *DockerRuntime) VolumeList(ctx context.Context, prefix string) ([]string
 //     expected and harmless. Ownership is irrelevant: the snapshot is re-archived
 //     and extracted under the user's own uid.
 func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) error {
+	// Bound the export: WaitContainer otherwise blocks on the caller's ctx, which
+	// is only canceled by Ctrl-C, so a stalled Docker daemon or a wedged export
+	// container would hang `moat snapshot` indefinitely. A whole-tree tar copy is
+	// minutes at most; cap it generously.
+	ctx, cancel := context.WithTimeout(ctx, volumeExportTimeout)
+	defer cancel()
+
 	cfg := Config{
 		Name:  id.Generate("moat-export"),
 		Image: "debian:bookworm-slim",

@@ -8,13 +8,16 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/daemon"
 )
 
 // stagingPath is where the host tree is bind-mounted read-only during copy-in.
 const stagingPath = "/mnt/host-workspace"
 
-// WorkspaceVolumeName derives the per-run Docker volume name.
-func WorkspaceVolumeName(runID string) string { return "moat-ws-" + runID }
+// WorkspaceVolumeName derives the per-run Docker volume name. The prefix is
+// defined in internal/daemon (the GC consumer that must match it and cannot
+// import run without a cycle) so there is a single source of truth.
+func WorkspaceVolumeName(runID string) string { return daemon.WorkspaceVolumePrefix + runID }
 
 // VolumeWorkspaceMounts returns the staging bind (host tree, read-only) and the
 // named-volume mount at /workspace for volume mode.
