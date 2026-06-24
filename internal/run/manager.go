@@ -2071,14 +2071,20 @@ region = %s
 			mounts = append(mounts, claudeConfig.Mounts...)
 			proxyEnv = append(proxyEnv, claudeConfig.Env...)
 
-			// Write settings.json to suppress startup prompts and configure plugins.
+			// Write settings.json to suppress startup prompts, pin the renderer,
+			// persist bypass-permissions mode, and configure plugins.
 			// moat-init.sh copies $MOAT_CLAUDE_INIT/settings.json to ~/.claude/settings.json.
 			skipPrompt := opts.Config != nil && opts.Config.Claude.SkipPermissionsPrompt
-			if hasPlugins || skipPrompt {
+			if hasPlugins || skipPrompt || hasClaudeCode {
 				if claudeSettings == nil {
 					claudeSettings = &claude.Settings{}
 				}
-				claudeSettings.SkipDangerousModePermissionPrompt = skipPrompt
+				// Pin the renderer and (for bypass runs) persist bypass mode so
+				// Claude Code's fullscreen-renderer re-exec can't silently drop the
+				// --dangerously-skip-permissions flag. See Settings.ApplyRunPolicy.
+				if policyErr := claudeSettings.ApplyRunPolicy(hasClaudeCode, skipPrompt); policyErr != nil {
+					ui.Warnf("Failed to persist bypass-permissions mode in settings.json (check the 'permissions' value in ~/.moat/claude/settings.json): %v", policyErr)
+				}
 				settingsPath := filepath.Join(claudeConfig.StagingDir, "settings.json")
 				settingsJSON, jsonErr := json.MarshalIndent(claudeSettings, "", "  ")
 				if jsonErr != nil {

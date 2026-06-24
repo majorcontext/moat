@@ -1138,6 +1138,260 @@ func indexOf(s string, b byte) int {
 	return -1
 }
 
+// TestEnableBypassPermissionsMode verifies the helper sets
+// permissions.defaultMode=bypassPermissions and serializes it.
+func TestEnableBypassPermissionsMode(t *testing.T) {
+	s := &Settings{}
+	if err := s.EnableBypassPermissionsMode(); err != nil {
+		t.Fatalf("EnableBypassPermissionsMode: %v", err)
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	perms, ok := out["permissions"]
+	if !ok {
+		t.Fatalf("expected permissions key in %s", data)
+	}
+	var permObj map[string]any
+	if err := json.Unmarshal(perms, &permObj); err != nil {
+		t.Fatalf("Unmarshal permissions: %v", err)
+	}
+	if permObj["defaultMode"] != "bypassPermissions" {
+		t.Errorf("defaultMode = %v, want bypassPermissions", permObj["defaultMode"])
+	}
+}
+
+// TestEnableBypassPermissionsModePreservesExistingKeys is the companion case:
+// existing permission sub-keys (e.g. deny rules carried from moat-user settings)
+// must survive; only defaultMode is added.
+func TestEnableBypassPermissionsModePreservesExistingKeys(t *testing.T) {
+	s := &Settings{
+		RawExtras: map[string]json.RawMessage{
+			"permissions": json.RawMessage(`{"deny":["Read(./secrets/**)"],"defaultMode":"plan"}`),
+		},
+	}
+	if err := s.EnableBypassPermissionsMode(); err != nil {
+		t.Fatalf("EnableBypassPermissionsMode: %v", err)
+	}
+
+	var permObj map[string]any
+	if err := json.Unmarshal(s.RawExtras["permissions"], &permObj); err != nil {
+		t.Fatalf("Unmarshal permissions: %v", err)
+	}
+	// defaultMode is overwritten to bypassPermissions...
+	if permObj["defaultMode"] != "bypassPermissions" {
+		t.Errorf("defaultMode = %v, want bypassPermissions", permObj["defaultMode"])
+	}
+	// ...but the pre-existing deny rule is preserved.
+	deny, ok := permObj["deny"].([]any)
+	if !ok || len(deny) != 1 || deny[0] != "Read(./secrets/**)" {
+		t.Errorf("deny rule not preserved: %v", permObj["deny"])
+	}
+}
+
+// TestSettingsTuiRoundTrip verifies tui is serialized and parsed when set, and
+// (companion) omitted from JSON when empty.
+func TestSettingsTuiRoundTrip(t *testing.T) {
+	// Set: emitted and round-trips.
+	data, err := json.Marshal(&Settings{Tui: "fullscreen"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var withTui map[string]any
+	if err := json.Unmarshal(data, &withTui); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if withTui["tui"] != "fullscreen" {
+		t.Errorf("tui = %v, want fullscreen", withTui["tui"])
+	}
+	var parsed Settings
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal into Settings: %v", err)
+	}
+	if parsed.Tui != "fullscreen" {
+		t.Errorf("parsed.Tui = %q, want fullscreen", parsed.Tui)
+	}
+
+	// Companion: empty tui is omitted entirely.
+	emptyData, err := json.Marshal(&Settings{})
+	if err != nil {
+		t.Fatalf("Marshal empty: %v", err)
+	}
+	var empty map[string]any
+	if err := json.Unmarshal(emptyData, &empty); err != nil {
+		t.Fatalf("Unmarshal empty: %v", err)
+	}
+	if _, ok := empty["tui"]; ok {
+		t.Errorf("empty Settings should not emit tui, got %s", emptyData)
+	}
+}
+
+// TestMergeSettingsTui verifies tui merge semantics: a non-empty override wins,
+// and (companion) an empty override preserves the base value.
+func TestMergeSettingsTui(t *testing.T) {
+	// Non-empty override wins.
+	merged := MergeSettings(&Settings{Tui: "default"}, &Settings{Tui: "fullscreen"}, SourceMoatUser)
+	if merged.Tui != "fullscreen" {
+		t.Errorf("override should win: Tui = %q, want fullscreen", merged.Tui)
+	}
+
+	// Companion: empty override keeps the base value (so a moat-user file without
+	// tui doesn't wipe the host's choice).
+	keptBase := MergeSettings(&Settings{Tui: "fullscreen"}, &Settings{}, SourceMoatUser)
+	if keptBase.Tui != "fullscreen" {
+		t.Errorf("empty override should keep base: Tui = %q, want fullscreen", keptBase.Tui)
+	}
+
+	// Companion: nil-base clone carries the override's tui.
+	cloned := MergeSettings(nil, &Settings{Tui: "fullscreen"}, SourceClaudeUser)
+	if cloned.Tui != "fullscreen" {
+		t.Errorf("nil-base clone should carry Tui = %q, want fullscreen", cloned.Tui)
+	}
+}
+
+// TestLoadAllSettingsMirrorsHostTui verifies the host's tui choice flows through
+// LoadAllSettings, and (companion) is dropped when host settings are skipped.
+func TestLoadAllSettingsMirrorsHostTui(t *testing.T) {
+	fakeHome := t.TempDir()
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"tui":"fullscreen"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", "")
+	workspace := t.TempDir()
+
+	// Without skip: host tui is mirrored.
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
+	result, err := LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if result.Tui != "fullscreen" {
+		t.Errorf("host tui should be mirrored: Tui = %q, want fullscreen", result.Tui)
+	}
+
+	// Companion: with skip, the host tui is not loaded (caller falls back to default).
+	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
+	result, err = LoadAllSettings(workspace, nil)
+	if err != nil {
+		t.Fatalf("LoadAllSettings: %v", err)
+	}
+	if result.Tui != "" {
+		t.Errorf("with skip, host tui should not load: Tui = %q, want empty", result.Tui)
+	}
+}
+
+// TestApplyRunPolicy verifies the run-policy gate: a bypass (yolo) Claude Code run
+// pins the renderer AND persists permissions.defaultMode, while the companion
+// --noyolo run pins the renderer but must NOT persist bypass mode (guarding
+// against a privilege escalation if the skipPrompt gate ever regresses).
+func TestApplyRunPolicy(t *testing.T) {
+	hasBypass := func(t *testing.T, s *Settings) bool {
+		t.Helper()
+		raw, ok := s.RawExtras["permissions"]
+		if !ok {
+			return false
+		}
+		var p map[string]any
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permissions not valid JSON: %v", err)
+		}
+		return p["defaultMode"] == "bypassPermissions"
+	}
+
+	t.Run("claude code with bypass pins renderer and persists mode", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(true, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if !s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should be true under bypass")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q", s.Tui, DefaultTUI)
+		}
+		if !hasBypass(t, s) {
+			t.Error("bypass run should persist permissions.defaultMode=bypassPermissions")
+		}
+	})
+
+	// Companion: a --noyolo run pins the renderer but must NOT gain bypass mode.
+	t.Run("claude code without bypass pins renderer but does not persist bypass", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(true, false); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should be false under --noyolo")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q", s.Tui, DefaultTUI)
+		}
+		if hasBypass(t, s) {
+			t.Error("--noyolo run must NOT persist bypassPermissions (privilege escalation)")
+		}
+	})
+
+	t.Run("existing renderer choice is preserved", func(t *testing.T) {
+		s := &Settings{Tui: "fullscreen"}
+		if err := s.ApplyRunPolicy(true, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if s.Tui != "fullscreen" {
+			t.Errorf("Tui = %q, want fullscreen (host choice must not be overwritten)", s.Tui)
+		}
+	})
+
+	// Companion (error path): a malformed persisted permissions value fails the
+	// bypass-persist step, but the renderer pin must still hold — ApplyRunPolicy
+	// pins Tui before attempting persistence, so the primary fix (no upsell
+	// re-exec) survives even when defaultMode can't be written.
+	t.Run("malformed persisted permissions leaves renderer pinned but errors", func(t *testing.T) {
+		s := &Settings{
+			RawExtras: map[string]json.RawMessage{
+				// A plausible mistake: a rule list where an object is expected.
+				"permissions": json.RawMessage(`["Read(./x)"]`),
+			},
+		}
+		err := s.ApplyRunPolicy(true, true)
+		if err == nil {
+			t.Fatal("expected an error for a malformed permissions value")
+		}
+		if s.Tui != DefaultTUI {
+			t.Errorf("Tui = %q, want %q (renderer pin must survive a bypass-persist failure)", s.Tui, DefaultTUI)
+		}
+	})
+
+	// Companion: a non-Claude-Code run touches neither renderer nor bypass mode.
+	t.Run("non claude code run sets only the prompt suppression", func(t *testing.T) {
+		s := &Settings{}
+		if err := s.ApplyRunPolicy(false, true); err != nil {
+			t.Fatalf("ApplyRunPolicy: %v", err)
+		}
+		if !s.SkipDangerousModePermissionPrompt {
+			t.Error("SkipDangerousModePermissionPrompt should still reflect bypass")
+		}
+		if s.Tui != "" {
+			t.Errorf("Tui should be empty for non-claude-code run, got %q", s.Tui)
+		}
+		if hasBypass(t, s) {
+			t.Error("non-claude-code run must not persist bypass mode")
+		}
+	})
+}
+
 // TestMergeSettingsBaseNilDoesNotMutateOverride verifies that MergeSettings
 // does not mutate the caller's override struct when base is nil.
 func TestMergeSettingsBaseNilDoesNotMutateOverride(t *testing.T) {

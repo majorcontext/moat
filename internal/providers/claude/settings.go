@@ -16,6 +16,16 @@ import (
 // This is defense-in-depth; dockerfile.go also validates before shell execution.
 var validRepoFormat = regexp.MustCompile(`^[a-zA-Z0-9._@:/-]+$`)
 
+// DefaultTUI is the renderer moat pins when the host has no `tui` preference.
+// "default" selects Claude Code's classic scroll renderer, which moat's status-bar
+// compositor handles via DECSTBM passthrough (no per-frame VT re-render).
+const DefaultTUI = "default"
+
+// BypassPermissionsMode is the permissions.defaultMode value that persistently
+// enables bypass-permissions mode. Unlike the --dangerously-skip-permissions CLI
+// flag, a settings.json value survives a Claude Code process re-exec.
+const BypassPermissionsMode = "bypassPermissions"
+
 // SettingSource identifies where a setting came from.
 type SettingSource string
 
@@ -43,6 +53,13 @@ type Settings struct {
 	// that Claude Code shows when launched with --dangerously-skip-permissions.
 	// Set to true for container runs since the container provides isolation.
 	SkipDangerousModePermissionPrompt bool `json:"skipDangerousModePermissionPrompt,omitempty"`
+
+	// Tui pins Claude Code's terminal renderer ("fullscreen" or "default").
+	// Setting it suppresses the "Try the new fullscreen renderer?" upsell, which
+	// otherwise re-execs Claude mid-session — and that re-exec silently drops the
+	// --dangerously-skip-permissions CLI flag (reverting bypass mode to default).
+	// Mirrored from the host's choice so container runs match the user's terminal.
+	Tui string `json:"tui,omitempty"`
 
 	// RawExtras holds unknown JSON fields from settings files.
 	// Only extras from the moat-user source (~/.moat/claude/settings.json)
@@ -85,6 +102,7 @@ var knownSettingsKeys = map[string]bool{
 	"enabledPlugins":                    true,
 	"extraKnownMarketplaces":            true,
 	"skipDangerousModePermissionPrompt": true,
+	"tui":                               true,
 }
 
 // UnmarshalJSON implements custom unmarshaling to capture unknown fields in RawExtras.
@@ -128,6 +146,9 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 	}
 	if s.SkipDangerousModePermissionPrompt {
 		m["skipDangerousModePermissionPrompt"] = true
+	}
+	if s.Tui != "" {
+		m["tui"] = s.Tui
 	}
 
 	// Emit extras — keys matching known struct fields are skipped (they're already serialized above).
@@ -294,6 +315,7 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 			EnabledPlugins:                    cloneMapStringBool(override.EnabledPlugins),
 			ExtraKnownMarketplaces:            cloneMapStringMarketplace(override.ExtraKnownMarketplaces),
 			SkipDangerousModePermissionPrompt: override.SkipDangerousModePermissionPrompt,
+			Tui:                               override.Tui,
 			PluginSources:                     make(map[string]SettingSource),
 			MarketplaceSources:                make(map[string]SettingSource),
 		}
@@ -332,6 +354,8 @@ func MergeSettings(base, override *Settings, overrideSource SettingSource) *Sett
 		MarketplaceSources:     make(map[string]SettingSource),
 		// Bool fields: true wins (override or base sets it).
 		SkipDangerousModePermissionPrompt: base.SkipDangerousModePermissionPrompt || override.SkipDangerousModePermissionPrompt,
+		// String fields: a non-empty override wins, otherwise keep the base value.
+		Tui: firstNonEmpty(override.Tui, base.Tui),
 	}
 
 	// Copy base plugins and sources
@@ -498,6 +522,74 @@ func ConfigToSettings(cfg *config.Config) *Settings {
 	}
 
 	return settings
+}
+
+// EnableBypassPermissionsMode sets permissions.defaultMode to "bypassPermissions"
+// so bypass mode is persisted in settings.json rather than relying solely on the
+// --dangerously-skip-permissions CLI flag. This matters because Claude Code
+// re-execs itself when switching renderers (the new fullscreen renderer) and the
+// re-exec drops the original CLI flags — reverting bypass mode to default. A
+// settings.json value survives the re-exec.
+//
+// Any other permission sub-keys already present (e.g. allow/deny/ask rules carried
+// from ~/.moat/claude/settings.json) are preserved; only defaultMode is set.
+// permissions is intentionally not a typed field — modeling only defaultMode would
+// silently drop a user's rule arrays — so it is merged through RawExtras.
+func (s *Settings) EnableBypassPermissionsMode() error {
+	perms := map[string]json.RawMessage{}
+	if s.RawExtras != nil {
+		if existing, ok := s.RawExtras["permissions"]; ok {
+			if err := json.Unmarshal(existing, &perms); err != nil {
+				return err
+			}
+		}
+	}
+
+	// BypassPermissionsMode is a fixed string constant with no JSON-special
+	// characters, so its encoding is a static quoted literal — no runtime
+	// marshal (and no unreachable error branch) needed. The surrounding quotes
+	// are required: an unquoted RawMessage would be invalid JSON and fail the
+	// json.Marshal(perms) below.
+	perms["defaultMode"] = json.RawMessage(`"` + BypassPermissionsMode + `"`)
+
+	merged, err := json.Marshal(perms)
+	if err != nil {
+		return err
+	}
+	if s.RawExtras == nil {
+		s.RawExtras = make(map[string]json.RawMessage)
+	}
+	s.RawExtras["permissions"] = merged
+	return nil
+}
+
+// ApplyRunPolicy applies moat's container-run settings policy in one place so the
+// renderer pin and the bypass-permissions gate stay tied to the right conditions
+// (and remain unit-testable). hasClaudeCode reports whether the run includes the
+// Claude Code binary; bypass reports whether the run uses
+// --dangerously-skip-permissions (i.e. not --noyolo).
+//
+//   - SkipDangerousModePermissionPrompt is set to bypass (suppresses the
+//     bypass-mode warning banner).
+//   - For Claude Code runs the renderer is pinned: a host/user choice already in
+//     Tui is kept (via the settings merge), otherwise the classic default. This
+//     stops Claude's fullscreen-renderer upsell from re-execing the process and
+//     dropping the --dangerously-skip-permissions flag.
+//   - For Claude Code runs WITH bypass, permissions.defaultMode is persisted so
+//     bypass survives such a re-exec. It is deliberately NOT persisted for
+//     --noyolo runs, so a no-bypass run never silently gains bypass mode.
+func (s *Settings) ApplyRunPolicy(hasClaudeCode, bypass bool) error {
+	s.SkipDangerousModePermissionPrompt = bypass
+	if !hasClaudeCode {
+		return nil
+	}
+	if s.Tui == "" {
+		s.Tui = DefaultTUI
+	}
+	if bypass {
+		return s.EnableBypassPermissionsMode()
+	}
+	return nil
 }
 
 // HasPluginsOrMarketplaces returns true if the settings contain any plugins or marketplaces.

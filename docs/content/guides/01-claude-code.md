@@ -154,6 +154,8 @@ moat claude --noyolo ./my-project
 
 With `--noyolo`, Claude Code prompts for confirmation before each potentially destructive operation, just as it would when running directly on your host machine.
 
+Note that a default `moat claude` run sets `permissions.defaultMode` to `bypassPermissions` in the container settings, overriding any `defaultMode` you set in `~/.moat/claude/settings.json`. Use `--noyolo` to keep your own `permissions` settings instead.
+
 ### Resuming sessions
 
 When Claude Code exits, Moat captures the session ID from the Claude projects directory on the host filesystem. You can resume a previous session by run name:
@@ -350,7 +352,11 @@ Claude Code can use `git@github.com:...` URLs for cloning and pushing.
 }
 ```
 
-In contrast, moat only reads plugin and marketplace fields from your host `~/.claude/settings.json`. This prevents host-specific settings from leaking into containers.
+In contrast, moat reads only plugin, marketplace, and `tui` (renderer) fields from your host `~/.claude/settings.json`. This prevents host-specific settings from leaking into containers.
+
+### Terminal renderer
+
+moat sets Claude Code's renderer (`tui`) to match your host's choice, defaulting to the classic renderer when the host has no preference. To override it for moat runs, set `tui` (`"fullscreen"` or `"default"`) in `~/.moat/claude/settings.json`.
 
 ## Plugin management
 
