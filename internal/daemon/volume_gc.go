@@ -77,25 +77,30 @@ func GCOrphanWorkspaceVolumes(ctx context.Context) {
 		log.Debug("skipping volume GC: no container runtime", "err", err)
 		return
 	}
-	live, err := liveRunIDsFromRunDirs()
-	if err != nil {
-		log.Debug("skipping volume GC: cannot enumerate run dirs", "err", err)
-		return
-	}
-	gcOrphanWorkspaceVolumes(ctx, live, rt)
-}
-
-// gcOrphanWorkspaceVolumes is the testable core: given the set of live run ids
-// (run dirs that still exist) and a runtime, it removes orphaned workspace
-// volumes. VolumeList errors (e.g. Apple runtime or no Docker) are treated as
-// "skip", never fatal.
-func gcOrphanWorkspaceVolumes(ctx context.Context, liveRunIDs map[string]bool, rt volumeRuntime) {
+	// List volumes BEFORE snapshotting live run dirs. This ordering avoids a
+	// TOCTOU race: a run that starts between the two reads would have its run dir
+	// created first (manager.go) and its volume created after, so listing volumes
+	// first guarantees any volume we see has a run dir that the live snapshot
+	// below will include - it can never be seen-but-not-live and wrongly
+	// reclaimed. The reverse order could delete a brand-new run's volume.
 	all, err := rt.VolumeList(ctx, volumeNamePrefix)
 	if err != nil {
 		log.Debug("skipping volume GC", "err", err)
 		return
 	}
+	live, err := liveRunIDsFromRunDirs()
+	if err != nil {
+		log.Debug("skipping volume GC: cannot enumerate run dirs", "err", err)
+		return
+	}
+	gcOrphanWorkspaceVolumes(ctx, all, live, rt)
+}
 
+// gcOrphanWorkspaceVolumes is the testable core: given the already-listed
+// workspace volume names and the set of live run ids (run dirs that still
+// exist), it removes the orphans. Listing is done by the caller so the
+// list-before-live ordering (see GCOrphanWorkspaceVolumes) is preserved.
+func gcOrphanWorkspaceVolumes(ctx context.Context, all []string, liveRunIDs map[string]bool, rt volumeRuntime) {
 	for _, name := range orphanVolumes(all, liveRunIDs) {
 		if err := rt.VolumeRemove(ctx, name, true); err != nil {
 			log.Warn("failed to remove orphaned workspace volume", "name", name, "err", err)

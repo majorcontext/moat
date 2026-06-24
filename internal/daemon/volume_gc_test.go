@@ -50,7 +50,7 @@ func TestGCRetainsVolumeForLiveRunDir(t *testing.T) {
 	rt := &fakeVolumeRuntime{list: []string{"moat-ws-run_live", "moat-ws-run_dead"}}
 	live := map[string]bool{"run_live": true}
 
-	gcOrphanWorkspaceVolumes(context.Background(), live, rt)
+	gcOrphanWorkspaceVolumes(context.Background(), rt.list, live, rt)
 
 	if want := []string{"moat-ws-run_dead"}; !reflect.DeepEqual(rt.removed, want) {
 		t.Fatalf("removed %v, want %v (run_live must be retained)", rt.removed, want)

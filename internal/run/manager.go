@@ -2830,7 +2830,11 @@ region = %s
 		volCleanupName := workspaceVolumeName
 		defer func() {
 			if cleanupRunDir {
-				if err := volCleanupRT.VolumeRemove(ctx, volCleanupName, true); err != nil {
+				// Use a fresh context: if Create failed because the caller's ctx
+				// was canceled (e.g. Ctrl-C), removing the volume with that same
+				// canceled ctx would be rejected and leak the volume. Matches the
+				// cleanup pattern in VolumeExport.
+				if err := volCleanupRT.VolumeRemove(context.Background(), volCleanupName, true); err != nil {
 					log.Debug("create: failed to remove workspace volume after failure", "volume", volCleanupName, "error", err)
 				}
 			}

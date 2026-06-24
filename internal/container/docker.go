@@ -448,6 +448,12 @@ func (r *DockerRuntime) VolumeCreate(ctx context.Context, name string) error {
 // VolumeRemove removes a named volume. force removes even if it appears in use.
 func (r *DockerRuntime) VolumeRemove(ctx context.Context, name string, force bool) error {
 	if err := r.cli.VolumeRemove(ctx, name, force); err != nil {
+		// Ignore "not found" - the volume may already be gone (e.g. idle GC
+		// reclaimed an orphan before `moat destroy` ran). Treating it as success
+		// keeps destroy/GC idempotent and avoids spurious warnings.
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
@@ -496,7 +502,19 @@ func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) 
 	cfg := Config{
 		Name:  id.Generate("moat-export"),
 		Image: "debian:bookworm-slim",
-		Cmd:   []string{"sh", "-c", "cd /vol && tar -cf - . | (cd /out && tar --no-same-owner -xf -) && { chmod -R go+rX /out 2>/dev/null || true; }"},
+		// In POSIX sh, $? after a pipeline reports only the rightmost command's
+		// status, so a failure in the source `tar -cf - .` (a read error, or a
+		// non-zero exit that still emits a valid *subset* archive) would go
+		// undetected: the destination tar extracts the partial stream cleanly and
+		// the pipeline reports success, yielding a silently truncated snapshot.
+		// Capture the source tar's status via a temp file and require both ends
+		// to be 0 - the same guard the populate path uses (see moat-init.sh).
+		// chmod stays best-effort (see the doc comment above).
+		Cmd: []string{"sh", "-c", `( cd /vol && tar -cf - . ; echo $? > /tmp/moat-export-rc ) | ( cd /out && tar --no-same-owner -xf - )
+dst_rc=$?
+src_rc=$(cat /tmp/moat-export-rc 2>/dev/null || echo 1)
+if [ "$src_rc" -ne 0 ] || [ "$dst_rc" -ne 0 ]; then echo "moat: volume export failed (src=$src_rc dst=$dst_rc)" >&2; exit 1; fi
+chmod -R go+rX /out 2>/dev/null || true`},
 		Mounts: []MountConfig{
 			{Volume: true, Source: name, Target: "/vol", ReadOnly: true},
 			{Source: hostDir, Target: "/out", ReadOnly: false},
