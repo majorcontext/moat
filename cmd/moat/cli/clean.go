@@ -305,7 +305,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		// named volume. Destroying without an extraction snapshot loses it, so
 		// `moat clean` honors the same guard as `moat destroy`: skip such runs
 		// unless --force was passed (mirrors destroy's --force override).
-		if !cleanForce && r.WorkspaceMode == string(config.WorkspaceModeVolume) && !hasExtractionSnapshot(r.ID) {
+		if !cleanForce && config.IsVolumeMode(r.WorkspaceMode) && !hasExtractionSnapshot(r.ID) {
 			fmt.Println(ui.Yellow("skipped (volume run, no extraction snapshot; snapshot it or use --force)"))
 			skippedCount++
 			continue
@@ -402,6 +402,15 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (%d worktree dirs skipped — run from within the repo to clean)", wtSkippedCount)
 	}
 	fmt.Println()
+
+	// Exit non-zero when volume runs were skipped to protect un-extracted work.
+	// The summary above is human-readable, but `moat clean` (without --force)
+	// otherwise exits 0 whether it cleaned everything or quietly skipped runs,
+	// giving automation no signal that work was left behind. A non-zero exit lets
+	// a pipeline notice and decide to snapshot-then-clean or re-run with --force.
+	if skippedCount > 0 {
+		return fmt.Errorf("%d volume run(s) skipped to avoid data loss; snapshot them (moat snapshot <run>) or re-run with --force", skippedCount)
+	}
 	return nil
 }
 

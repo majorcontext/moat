@@ -16,7 +16,7 @@ type EngineOptions struct {
 	UseGitignore bool
 	// Additional specifies extra patterns to exclude (gitignore syntax).
 	Additional []string
-	// ForceBackend forces a specific backend for testing: "archive" or "apfs".
+	// ForceBackend forces a specific backend: BackendArchive or BackendAPFS.
 	ForceBackend string
 	// IncludeGit keeps the .git directory in archive snapshots. Volume mode
 	// sets this so agent commits survive extraction; default false preserves
@@ -36,6 +36,12 @@ type Engine struct {
 
 // metadataFile is the filename for persisted snapshot metadata.
 const metadataFile = "snapshots.json"
+
+// Backend identifiers, used for EngineOptions.ForceBackend and Backend.Name.
+const (
+	BackendArchive = "archive"
+	BackendAPFS    = "apfs"
+)
 
 // NewEngine creates a new snapshot engine with automatic backend detection.
 // It loads any existing snapshot metadata from the snapshot directory.
@@ -96,9 +102,9 @@ func detectBackend(workspace, snapshotDir string, opts EngineOptions) Backend {
 	// If ForceBackend is set, use that
 	if opts.ForceBackend != "" {
 		switch opts.ForceBackend {
-		case "apfs":
+		case BackendAPFS:
 			return NewAPFSBackend(snapshotDir)
-		case "archive":
+		case BackendArchive:
 			return NewArchiveBackend(snapshotDir, ArchiveOptions{
 				UseGitignore: opts.UseGitignore,
 				Additional:   opts.Additional,

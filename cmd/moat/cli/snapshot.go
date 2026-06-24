@@ -155,7 +155,7 @@ func createSnapshot(cmd *cobra.Command, args []string) error {
 	engineWorkspace := meta.Workspace
 	engineOpts := snapshot.EngineOptions{}
 
-	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
+	if config.IsVolumeMode(meta.WorkspaceMode) {
 		if meta.WorkspaceVolume == "" {
 			return fmt.Errorf("run %s has no workspace volume recorded; snapshot not possible", runID)
 		}
@@ -177,7 +177,7 @@ func createSnapshot(cmd *cobra.Command, args []string) error {
 
 		engineWorkspace = tmp
 		engineOpts = snapshot.EngineOptions{
-			ForceBackend: "archive",
+			ForceBackend: snapshot.BackendArchive,
 			IncludeGit:   true,
 		}
 	}
@@ -315,8 +315,8 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 	// Create engine. Volume-mode snapshots are archive-backed, so prune must use
 	// the archive backend to find/delete them (auto-detect would pick APFS on macOS).
 	pruneOpts := snapshot.EngineOptions{}
-	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
-		pruneOpts.ForceBackend = "archive"
+	if config.IsVolumeMode(meta.WorkspaceMode) {
+		pruneOpts.ForceBackend = snapshot.BackendArchive
 	}
 	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, pruneOpts)
 	if err != nil {
@@ -413,7 +413,7 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 // write the agent's changes straight into the developer's source tree — the host
 // write-back volume mode exists to prevent. Require --to.
 func checkRestoreAllowed(workspaceMode, restoreTo string) error {
-	if workspaceMode == string(config.WorkspaceModeVolume) && restoreTo == "" {
+	if config.IsVolumeMode(workspaceMode) && restoreTo == "" {
 		return fmt.Errorf("in-place restore is not allowed for volume-mode runs; use --to <dir> to extract (e.g. moat snapshot restore <run-id> --to ~/out)")
 	}
 	return nil
@@ -460,8 +460,8 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	// restore must force the same backend — otherwise on macOS the engine
 	// auto-detects APFS and tries to clone the .tar.gz as a directory.
 	restoreOpts := snapshot.EngineOptions{}
-	if meta.WorkspaceMode == string(config.WorkspaceModeVolume) {
-		restoreOpts.ForceBackend = "archive"
+	if config.IsVolumeMode(meta.WorkspaceMode) {
+		restoreOpts.ForceBackend = snapshot.BackendArchive
 	}
 	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, restoreOpts)
 	if err != nil {

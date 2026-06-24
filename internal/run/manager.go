@@ -3165,7 +3165,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 
 	// Create pre-run snapshot. Skipped in volume mode: the host staging tree is
 	// not the live workspace, so a pre-run snapshot of it would be meaningless.
-	if r.SnapEngine != nil && !r.DisablePreRunSnapshot && r.WorkspaceMode != string(config.WorkspaceModeVolume) {
+	if r.SnapEngine != nil && !r.DisablePreRunSnapshot && !config.IsVolumeMode(r.WorkspaceMode) {
 		if _, err := r.SnapEngine.Create(snapshot.TypePreRun, ""); err != nil {
 			log.Debug("failed to create pre-run snapshot", "error", err)
 		}

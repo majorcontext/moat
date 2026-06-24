@@ -12,6 +12,15 @@ const (
 	WorkspaceModeVolume WorkspaceMode = "volume"
 )
 
+// IsVolumeMode reports whether a stored/serialized workspace-mode string (e.g.
+// run.Run.WorkspaceMode or storage.Metadata.WorkspaceMode, both plain strings)
+// is volume mode. Centralizing the comparison avoids repeating the
+// string(WorkspaceModeVolume) cast at every call site, where a single typo would
+// silently diverge.
+func IsVolumeMode(mode string) bool {
+	return mode == string(WorkspaceModeVolume)
+}
+
 // WorkspaceConfig is the moat.yaml `workspace:` block.
 type WorkspaceConfig struct {
 	// Mode is "bind" (default) or "volume". Empty means bind.

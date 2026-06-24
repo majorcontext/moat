@@ -68,3 +68,16 @@ func TestResolveWorkspaceModeInvalidYaml(t *testing.T) {
 		t.Fatal("expected error for invalid yaml workspace mode")
 	}
 }
+
+func TestIsVolumeMode(t *testing.T) {
+	if !IsVolumeMode("volume") {
+		t.Error(`IsVolumeMode("volume") = false, want true`)
+	}
+	// Companion: every non-volume form (the bind default, empty, and anything
+	// else) must read as not-volume, so guards keyed on it don't misfire.
+	for _, mode := range []string{"", "bind", "Volume", "vol", "VOLUME"} {
+		if IsVolumeMode(mode) {
+			t.Errorf("IsVolumeMode(%q) = true, want false", mode)
+		}
+	}
+}

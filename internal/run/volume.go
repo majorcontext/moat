@@ -45,7 +45,7 @@ func GuardVolumeWorkspace(hostWorkspace string, rt container.RuntimeType) error 
 // removing it without an extraction snapshot loses everything, including in-volume
 // commits. Bind-mode runs are unaffected (the host tree persists).
 func CheckDestroyAllowed(workspaceMode string, hasExtractionSnapshot, force bool) error {
-	if workspaceMode == string(config.WorkspaceModeVolume) && !hasExtractionSnapshot && !force {
+	if config.IsVolumeMode(workspaceMode) && !hasExtractionSnapshot && !force {
 		return fmt.Errorf("this volume-mode run has no extraction snapshot; destroying it deletes the workspace volume and loses all agent changes.\n" +
 			"Capture your work first: `moat snapshot <run>` then `moat snapshot restore <run> --to <dir>`, or pass --force to destroy anyway")
 	}
