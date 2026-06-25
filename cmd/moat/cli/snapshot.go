@@ -239,8 +239,14 @@ func listSnapshots(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create engine - use workspace from metadata
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, snapshot.EngineOptions{})
+	// Create engine - use workspace from metadata. Volume-mode snapshots are
+	// archive-backed; force the archive backend so the printed backend name (and
+	// any backend-touching call) matches, rather than auto-detecting APFS on macOS.
+	listOpts := snapshot.EngineOptions{}
+	if config.IsVolumeMode(meta.WorkspaceMode) {
+		listOpts.ForceBackend = snapshot.BackendArchive
+	}
+	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, listOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}

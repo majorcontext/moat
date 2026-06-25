@@ -1187,8 +1187,11 @@ Removes stopped runs, unused moat images, orphaned networks, and worktree direct
 
 | Flag | Description |
 |------|-------------|
-| `-f`, `--force` | Skip confirmation prompt |
+| `-f`, `--force` | Skip the confirmation prompt. Does **not** remove volume-mode runs that lack an extraction snapshot — those are skipped to protect un-extracted work. |
+| `--force-volumes` | Also remove volume-mode runs that have no extraction snapshot. This deletes the workspace volume and loses all agent changes. |
 | `--dry-run` | Show what would be removed |
+
+Volume-mode runs hold the agent's only copy of its work in a Docker named volume. `moat clean` skips such runs unless they have an extraction snapshot, even with `--force`, and **exits non-zero** when it skips any (so scripts can detect it). Snapshot them first (`moat snapshot <run>`), or pass `--force-volumes` to discard them.
 
 ### Examples
 
@@ -1196,8 +1199,11 @@ Removes stopped runs, unused moat images, orphaned networks, and worktree direct
 # Interactive cleanup
 moat clean
 
-# Force cleanup
+# Skip the confirmation prompt (still protects un-extracted volume runs)
 moat clean -f
+
+# Also remove un-extracted volume runs (destroys their workspace volumes)
+moat clean --force-volumes
 
 # Preview cleanup
 moat clean --dry-run

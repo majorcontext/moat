@@ -11,11 +11,10 @@ import (
 )
 
 // TestVolumeCopyInPipeline exercises the tar pipeline that
-// populate_workspace_volume() in moat-init.sh uses.  The script passes
-// --no-dereference (which is the default in GNU tar; the flag makes the intent
-// explicit in debian:bookworm-slim containers).  The CI host's GNU tar 1.34
-// does not recognize --no-dereference as a flag name, so the test pipeline
-// omits it — the default behavior is identical.
+// populate_workspace_volume() in moat-init.sh uses.  The script does NOT pass
+// --no-dereference: GNU tar 1.34 (in the container image) does not recognize the
+// long flag name, and symlink-preservation is already tar's default for `-cf`.
+// See TestMoatInitNoNoDeref, which asserts the flag is absent from the script.
 //
 // The pipeline under test:
 //
@@ -65,10 +64,9 @@ func TestVolumeCopyInPipeline(t *testing.T) {
 	excludeFile := filepath.Join(t.TempDir(), "excludes")
 	write(t, excludeFile, "./node_modules\n./dist/sub\n")
 
-	// Pipeline without --no-dereference: the CI host's GNU tar 1.34 doesn't
-	// recognize that flag name (it is the default and has no explicit flag).
-	// The container image (debian:bookworm-slim, GNU tar 1.35+) does accept it;
-	// the script keeps the flag for documentation clarity.
+	// Pipeline without --no-dereference, matching the script: symlink-preservation
+	// is tar's default for `-cf`, and GNU tar 1.34 doesn't recognize the long flag
+	// name. Invariant 4 below confirms symlinks survive without it.
 	cmd := exec.Command("sh", "-c",
 		`set -e; cd "$1"; tar --exclude-from="$3" -cf - . | (cd "$2" && tar -xf -)`,
 		"sh", staging, workspace, excludeFile)

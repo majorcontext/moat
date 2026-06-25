@@ -301,25 +301,31 @@ fi
 # - Codex: Written to .mcp.json in workspace by the codex provider
 # - Gemini: Written to .mcp.json in workspace by the gemini provider
 #
-# Copy .mcp.json from Codex staging if present
-if [ -n "$MOAT_CODEX_INIT" ] && [ -f "$MOAT_CODEX_INIT/mcp.json" ]; then
-  cp -p "$MOAT_CODEX_INIT/mcp.json" /workspace/.mcp.json
-  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-    chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
-  fi
-fi
-
-# Copy .mcp.json from Gemini staging if present.
-# Both Codex and Gemini write to the same destination path. This is safe because
+# setup_workspace_mcp_json copies the local-process MCP config (.mcp.json) for
+# Codex/Gemini into /workspace. It is a function (not inline) so it can be called
+# AFTER populate_workspace_volume: in volume mode populate tar-extracts the
+# staging tree over /workspace, so writing .mcp.json earlier would let the user's
+# own .mcp.json clobber moat's. Running it last makes moat's config win in both
+# modes (in bind mode populate is a no-op, so ordering is unchanged there).
+#
+# Both Codex and Gemini write the same destination path. This is safe because
 # config validation rejects runs that activate both agents simultaneously — at
-# most one of these blocks will execute. Adding a third agent with its own
-# .mcp.json must preserve this mutual-exclusion invariant.
-if [ -n "$MOAT_GEMINI_INIT" ] && [ -f "$MOAT_GEMINI_INIT/mcp.json" ]; then
-  cp -p "$MOAT_GEMINI_INIT/mcp.json" /workspace/.mcp.json
-  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-    chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
+# most one block executes. A third agent with its own .mcp.json must preserve
+# this mutual-exclusion invariant.
+setup_workspace_mcp_json() {
+  if [ -n "$MOAT_CODEX_INIT" ] && [ -f "$MOAT_CODEX_INIT/mcp.json" ]; then
+    cp -p "$MOAT_CODEX_INIT/mcp.json" /workspace/.mcp.json
+    if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+      chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
+    fi
   fi
-fi
+  if [ -n "$MOAT_GEMINI_INIT" ] && [ -f "$MOAT_GEMINI_INIT/mcp.json" ]; then
+    cp -p "$MOAT_GEMINI_INIT/mcp.json" /workspace/.mcp.json
+    if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+      chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
+    fi
+  fi
+}
 
 # Clipboard Bridging
 # When MOAT_CLIPBOARD is set, start a headless X server for clipboard
@@ -582,6 +588,7 @@ fi
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
 populate_workspace_volume
+setup_workspace_mcp_json
 run_pre_run_hook
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)

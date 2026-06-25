@@ -120,6 +120,8 @@ Capture a snapshot first, or pass `--force` to discard the volume:
 moat destroy --force run_a1b2c3d4e5f6
 ```
 
+`moat clean` applies the same guard: it skips un-extracted volume-mode runs (even with `-f`/`--force`, which only suppresses the confirmation prompt) and exits non-zero when it does, so scripts can detect leftover work. Pass `--force-volumes` to remove them too.
+
 ## Volume lifecycle
 
 The volume is named `moat-ws-<run-id>` and is removed when the run is destroyed. Volumes left behind by crashed runs are reclaimed automatically when the proxy daemon's idle timer fires (after 5 minutes with no active runs).
