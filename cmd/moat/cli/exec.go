@@ -698,6 +698,17 @@ func takeSnapshot(r *run.Run, statusWriter *tui.Writer, flashMu *sync.Mutex, fla
 		return
 	}
 
+	// In volume mode the in-process SnapEngine points at the read-only host
+	// staging directory, not the Docker volume, so a keyboard snapshot would
+	// archive the original host tree (no agent changes) yet still create a
+	// TypeManual snapshot — which satisfies hasExtractionSnapshot and would let
+	// `moat destroy` delete the volume and lose all the agent's work. Direct the
+	// user to `moat snapshot`, which exports the volume.
+	if config.IsVolumeMode(r.WorkspaceMode) {
+		flash("Volume-mode run: use 'moat snapshot " + r.ID + "' to capture the volume")
+		return
+	}
+
 	snap, err := r.SnapEngine.Create(snapshot.TypeManual, "")
 	if err != nil {
 		log.Error("manual snapshot failed", "error", err)

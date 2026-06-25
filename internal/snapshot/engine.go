@@ -293,7 +293,9 @@ func (e *Engine) saveMetadata() error {
 	}
 
 	path := filepath.Join(e.snapshotDir, metadataFile)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// 0600 to match the archive files (which may sit in a restricted snapshot
+	// dir alongside .git-bearing archives); the metadata itself is non-sensitive.
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write metadata file: %w", err)
 	}
 
