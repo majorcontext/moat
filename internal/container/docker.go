@@ -485,6 +485,11 @@ func (r *DockerRuntime) VolumeList(ctx context.Context, prefix string) ([]string
 // keep a wedged container or stalled daemon from hanging `moat snapshot` forever.
 const volumeExportTimeout = 30 * time.Minute
 
+// volumeExportImage is the throwaway base image for the export sidecar. It only
+// needs a POSIX sh + tar (and chmod), which debian-slim provides. Named so a
+// pull failure can surface the image in the error.
+const volumeExportImage = "debian:bookworm-slim"
+
 // VolumeExport copies the volume's contents to hostDir by running a short-lived
 // container that mounts the volume read-only at /vol and bind-mounts hostDir
 // read-write at /out, then copies the contents across with tar. hostDir must
@@ -517,7 +522,7 @@ func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) 
 
 	cfg := Config{
 		Name:  id.Generate("moat-export"),
-		Image: "debian:bookworm-slim",
+		Image: volumeExportImage,
 		// In POSIX sh, $? after a pipeline reports only the rightmost command's
 		// status, so a failure in the source `tar -cf - .` (a read error, or a
 		// non-zero exit that still emits a valid *subset* archive) would go
@@ -538,7 +543,10 @@ chmod -R go+rX /out 2>/dev/null || true`},
 	}
 	ctrID, err := r.CreateContainer(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("create export container: %w", err)
+		// Name the image so an unpullable base (air-gapped host, registry rate
+		// limit, custom registry) gives an actionable error instead of an opaque
+		// pull failure.
+		return fmt.Errorf("create export container (image %s must be pullable): %w", volumeExportImage, err)
 	}
 	// Use a fresh context for cleanup: if the caller's ctx is canceled (e.g.
 	// Ctrl-C during the export), removing the throwaway container with the

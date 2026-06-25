@@ -246,7 +246,7 @@ func listSnapshots(cmd *cobra.Command, args []string) error {
 	if config.IsVolumeMode(meta.WorkspaceMode) {
 		listOpts.ForceBackend = snapshot.BackendArchive
 	}
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, listOpts)
+	engine, err := snapshot.NewEngine(snapshotEngineWorkspace(meta.Workspace), snapshotDir, listOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}
@@ -324,7 +324,7 @@ func pruneSnapshots(cmd *cobra.Command, args []string) error {
 	if config.IsVolumeMode(meta.WorkspaceMode) {
 		pruneOpts.ForceBackend = snapshot.BackendArchive
 	}
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, pruneOpts)
+	engine, err := snapshot.NewEngine(snapshotEngineWorkspace(meta.Workspace), snapshotDir, pruneOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}
@@ -425,6 +425,23 @@ func checkRestoreAllowed(workspaceMode, restoreTo string) error {
 	return nil
 }
 
+// snapshotEngineWorkspace returns a directory to pass to snapshot.NewEngine as
+// its workspace argument for operations that never read the workspace: list,
+// prune, and extract-to-dir restore. NewEngine requires the path to exist, but
+// the original source directory may be gone — especially in volume mode, where
+// the host tree was only the staging source, not the live data. Falling back to
+// a guaranteed-existing placeholder lets these operations work from snapshotDir
+// alone. Operations that DO read the workspace (create, in-place restore) must
+// pass the real path so a missing workspace still errors clearly.
+func snapshotEngineWorkspace(workspace string) string {
+	if workspace != "" {
+		if _, err := os.Stat(workspace); err == nil {
+			return workspace
+		}
+	}
+	return os.TempDir()
+}
+
 func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	runID, err := resolveSnapshotRunID(args[0])
 	if err != nil {
@@ -469,7 +486,14 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 	if config.IsVolumeMode(meta.WorkspaceMode) {
 		restoreOpts.ForceBackend = snapshot.BackendArchive
 	}
-	engine, err := snapshot.NewEngine(meta.Workspace, snapshotDir, restoreOpts)
+	// An extract-to-dir restore (--to) never reads the workspace, so tolerate a
+	// missing source dir (common in volume mode). An in-place restore writes back
+	// to the workspace, so it must use the real path and fail if it is gone.
+	engineWorkspace := meta.Workspace
+	if snapshotRestoreTo != "" {
+		engineWorkspace = snapshotEngineWorkspace(meta.Workspace)
+	}
+	engine, err := snapshot.NewEngine(engineWorkspace, snapshotDir, restoreOpts)
 	if err != nil {
 		return fmt.Errorf("initializing snapshot engine: %w", err)
 	}

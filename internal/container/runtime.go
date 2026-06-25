@@ -65,7 +65,10 @@ type Runtime interface {
 	// VolumeRemove removes a named volume. force removes even if it appears in use.
 	VolumeRemove(ctx context.Context, name string, force bool) error
 
-	// VolumeList returns names of volumes whose name starts with prefix.
+	// VolumeList returns names of moat-managed volumes (those created by
+	// VolumeCreate, which labels them moat=workspace) whose name starts with
+	// prefix. The label filter means a non-moat volume is never returned even if
+	// its name happens to match prefix.
 	VolumeList(ctx context.Context, prefix string) ([]string, error)
 
 	// VolumeExport copies the volume's contents to hostDir on the host filesystem
