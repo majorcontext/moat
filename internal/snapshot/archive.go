@@ -19,6 +19,11 @@ type ArchiveOptions struct {
 	UseGitignore bool
 	// Additional specifies extra patterns to exclude (gitignore syntax).
 	Additional []string
+	// IncludeGit keeps the .git directory in the archive instead of skipping
+	// it. Volume mode sets this so agent commits made inside the container
+	// survive snapshot extraction. Defaults to false (bind-mode behavior),
+	// which always excludes .git.
+	IncludeGit bool
 }
 
 // ArchiveBackend implements the Backend interface using tar.gz archives.
@@ -49,8 +54,9 @@ func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 
 	archivePath := filepath.Join(b.snapshotDir, id+".tar.gz")
 
-	// Create the archive file
-	file, err := os.Create(archivePath)
+	// Create the archive file with restrictive permissions; archives may
+	// contain .git contents (remotes, credentials) in volume mode.
+	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", fmt.Errorf("create archive file: %w", err)
 	}
@@ -85,8 +91,9 @@ func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 			return nil
 		}
 
-		// Always skip .git directory
-		if relPath == ".git" || strings.HasPrefix(relPath, ".git/") || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
+		// Skip the .git directory unless IncludeGit is set (volume mode keeps
+		// .git so agent commits survive extraction).
+		if !b.opts.IncludeGit && (relPath == ".git" || strings.HasPrefix(relPath, ".git/") || strings.HasPrefix(relPath, ".git"+string(filepath.Separator))) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -155,14 +162,18 @@ func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 
 // Restore extracts the archive to the workspace, preserving .git directory.
 func (b *ArchiveBackend) Restore(workspacePath, nativeRef string) error {
-	// First, preserve the .git directory if it exists
+	// Preserve the .git directory across the in-place restore. When IncludeGit
+	// is set the archive already contains .git, so the preserve/rename dance is
+	// skipped — it would clobber the archived .git with the live workspace copy.
 	gitDir := filepath.Join(workspacePath, ".git")
 	var gitBackup string
-	if _, err := os.Stat(gitDir); err == nil {
-		// Create a temporary backup of .git
-		gitBackup = gitDir + ".backup"
-		if err := os.Rename(gitDir, gitBackup); err != nil {
-			return fmt.Errorf("backup .git directory: %w", err)
+	if !b.opts.IncludeGit {
+		if _, err := os.Stat(gitDir); err == nil {
+			// Create a temporary backup of .git
+			gitBackup = gitDir + ".backup"
+			if err := os.Rename(gitDir, gitBackup); err != nil {
+				return fmt.Errorf("backup .git directory: %w", err)
+			}
 		}
 	}
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
@@ -16,7 +17,8 @@ import (
 )
 
 var (
-	cleanForce bool
+	cleanForce        bool
+	cleanForceVolumes bool
 )
 
 var cleanCmd = &cobra.Command{
@@ -30,14 +32,31 @@ Worktrees created from other repos will have their directories removed,
 but you may need to run 'git worktree prune' in those repos separately.
 
 Shows what will be removed and asks for confirmation before proceeding.
-Use --force to skip confirmation (for scripts).
+Use --force to skip confirmation (for scripts). --force does NOT remove
+volume-mode runs that lack an extraction snapshot — those are skipped to
+protect un-extracted work. Use --force-volumes to remove them too (this deletes
+the workspace volume and loses all agent changes). clean exits non-zero when
+volume runs were skipped, so automation can notice.
 Use --dry-run to see what would be removed without prompting.`,
 	RunE: cleanResources,
+	// The skipped-volume summary line is printed directly; returning an error
+	// only drives the non-zero exit, so silence cobra's duplicate "Error:" line.
+	SilenceErrors: true,
 }
 
 func init() {
 	rootCmd.AddCommand(cleanCmd)
 	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "skip confirmation prompt")
+	cleanCmd.Flags().BoolVar(&cleanForceVolumes, "force-volumes", false, "also remove volume-mode runs that have no extraction snapshot (deletes the workspace volume)")
+}
+
+// shouldSkipVolumeRunForClean reports whether `moat clean` must skip a run to
+// avoid silent data loss: a volume-mode run with no extraction snapshot, unless
+// the user explicitly opted in with --force-volumes. Bind-mode runs are never
+// skipped (the host tree persists). Kept separate from cleanForce so that the
+// prompt-skip convenience flag does not also bypass the data-loss guard.
+func shouldSkipVolumeRunForClean(forceVolumes bool, workspaceMode string, hasExtractionSnapshot bool) bool {
+	return !forceVolumes && config.IsVolumeMode(workspaceMode) && !hasExtractionSnapshot
 }
 
 func cleanResources(cmd *cobra.Command, args []string) error {
@@ -296,10 +315,20 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 
 	// Remove stopped runs
 	var freedSize int64
-	var removedCount, failedCount int
+	var removedCount, failedCount, skippedCount int
 	destroyedRunIDs := make(map[string]bool)
 	for _, r := range stoppedRuns {
 		fmt.Printf("Removing run %s (%s)... ", r.Name, r.ID)
+		// Volume-mode runs hold the only copy of the agent's work in their named
+		// volume. Destroying without an extraction snapshot loses it, so skip such
+		// runs unless the user explicitly opted in with --force-volumes. This is a
+		// separate flag from --force (prompt-skip) so a `clean --force` script
+		// can't silently bypass the data-loss guard.
+		if shouldSkipVolumeRunForClean(cleanForceVolumes, r.WorkspaceMode, hasExtractionSnapshot(r.ID)) {
+			fmt.Println(ui.Yellow("skipped (volume run, no extraction snapshot; snapshot it or use --force-volumes)"))
+			skippedCount++
+			continue
+		}
 		if err := manager.Destroy(ctx, r.ID); err != nil {
 			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
@@ -382,6 +411,9 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 	if failedCount > 0 {
 		fmt.Printf(" (%d failed)", failedCount)
 	}
+	if skippedCount > 0 {
+		fmt.Printf(" (%d volume runs skipped — snapshot or --force-volumes to remove)", skippedCount)
+	}
 	if wtFailedCount > 0 {
 		fmt.Printf(" (%d worktree cleanups failed)", wtFailedCount)
 	}
@@ -389,6 +421,16 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" (%d worktree dirs skipped — run from within the repo to clean)", wtSkippedCount)
 	}
 	fmt.Println()
+
+	// Exit non-zero when volume runs were skipped to protect un-extracted work.
+	// The summary above is human-readable, but clean otherwise exits 0 whether it
+	// cleaned everything or quietly skipped runs, giving automation no signal that
+	// work was left behind. A non-zero exit lets a pipeline notice and decide to
+	// snapshot-then-clean or re-run with --force-volumes. cleanCmd sets
+	// SilenceErrors so this doesn't double-print with the summary line above.
+	if skippedCount > 0 {
+		return fmt.Errorf("%d volume run(s) skipped to avoid data loss; snapshot them (moat snapshot <run>) or re-run with --force-volumes", skippedCount)
+	}
 	return nil
 }
 

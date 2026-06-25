@@ -24,11 +24,13 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/majorcontext/moat/internal/buildkit"
 	"github.com/majorcontext/moat/internal/container/output"
+	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
@@ -204,7 +206,11 @@ func buildContainerMounts(binds []MountConfig, tmpfs []TmpfsMount) []mount.Mount
 // it cannot write to a fresh volume root, and moat-init's in-container chown only runs
 // when the entrypoint is root. So the non-root case is handled here instead.
 func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, ok bool) {
-	if cfg.User == "" {
+	// Root entrypoint - "" (Docker Desktop default) or an explicit "0:0" (volume-mode
+	// runs force this) - chowns named-volume roots via moat-init/MOAT_VOLUME_CHOWN, so
+	// the helper is a no-op. Without the "0:0" case the helper would run and chown the
+	// volume root to 0:0 (root), leaving the run user unable to write it.
+	if cfg.User == "" || cfg.User == "0:0" {
 		return nil, nil, false
 	}
 	var paths []string
@@ -427,6 +433,147 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 func (r *DockerRuntime) StartContainer(ctx context.Context, containerID string) error {
 	if err := r.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("starting container: %w", err)
+	}
+	return nil
+}
+
+// VolumeCreate creates a named volume. Docker's VolumeCreate is idempotent: if a
+// volume with the same name already exists, it returns the existing volume.
+func (r *DockerRuntime) VolumeCreate(ctx context.Context, name string) error {
+	if _, err := r.cli.VolumeCreate(ctx, volume.CreateOptions{
+		Name:   name,
+		Labels: map[string]string{"moat": "workspace"},
+	}); err != nil {
+		return fmt.Errorf("create volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// VolumeRemove removes a named volume. force removes even if it appears in use.
+func (r *DockerRuntime) VolumeRemove(ctx context.Context, name string, force bool) error {
+	if err := r.cli.VolumeRemove(ctx, name, force); err != nil {
+		// Ignore "not found" - the volume may already be gone (e.g. idle GC
+		// reclaimed an orphan before `moat destroy` ran). Treating it as success
+		// keeps destroy/GC idempotent and avoids spurious warnings.
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("remove volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// VolumeList returns names of volumes whose name starts with prefix.
+func (r *DockerRuntime) VolumeList(ctx context.Context, prefix string) ([]string, error) {
+	resp, err := r.cli.VolumeList(ctx, volume.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("label", "moat=workspace")),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list volumes: %w", err)
+	}
+	var names []string
+	for _, v := range resp.Volumes {
+		if v != nil && strings.HasPrefix(v.Name, prefix) {
+			names = append(names, v.Name)
+		}
+	}
+	return names, nil
+}
+
+// volumeExportTimeout bounds a single VolumeExport. A whole-tree tar copy of a
+// workspace volume completes in seconds to a few minutes; the cap exists only to
+// keep a wedged container or stalled daemon from hanging `moat snapshot` forever.
+const volumeExportTimeout = 30 * time.Minute
+
+// volumeExportImage is the throwaway base image for the export sidecar. It only
+// needs a POSIX sh + tar (and chmod), which debian-slim provides. Named so a
+// pull failure can surface the image in the error.
+const volumeExportImage = "debian:bookworm-slim"
+
+// VolumeExport copies the volume's contents to hostDir by running a short-lived
+// container that mounts the volume read-only at /vol and bind-mounts hostDir
+// read-write at /out, then copies the contents across with tar. hostDir must
+// already exist on the host.
+//
+// The copy is a `tar | tar --no-same-owner` pipe (not `cp -a`) followed by a
+// recursive chmod, both chosen to avoid the chown the macOS bind mount rejects:
+//   - The volume's files are owned by moatuser (uid 5000). On macOS Docker
+//     Desktop the host bind mount at /out is a virtual filesystem that rejects
+//     chown to arbitrary uids and other privileged metadata ops (xattr/context),
+//     so a plain `cp -a` (which preserves all of them) fails with exit 1. tar
+//     with --no-same-owner restores mode, timestamps, and symlinks but NOT
+//     ownership/xattrs/context — none of the ops the macOS mount rejects.
+//   - The export container runs as root. On Linux Docker the materialized files
+//     are root-owned, so the non-root moat process can't read restrictive-mode
+//     files when it re-archives hostDir; `chmod -R go+rX` grants read+traverse
+//     to group/other so moat can always read the copy. This chmod is BEST-EFFORT
+//     (errors ignored): on macOS Docker Desktop the files are mapped to the
+//     invoking user's uid (already owner-readable by moat), and the virtual FS
+//     rejects chmod on read-only entries like .git/objects — failures there are
+//     expected and harmless. Ownership is irrelevant: the snapshot is re-archived
+//     and extracted under the user's own uid.
+func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) error {
+	// Bound the export: WaitContainer otherwise blocks on the caller's ctx, which
+	// is only canceled by Ctrl-C, so a stalled Docker daemon or a wedged export
+	// container would hang `moat snapshot` indefinitely. A whole-tree tar copy is
+	// minutes at most; cap it generously.
+	ctx, cancel := context.WithTimeout(ctx, volumeExportTimeout)
+	defer cancel()
+
+	cfg := Config{
+		Name:  id.Generate("moat-export"),
+		Image: volumeExportImage,
+		// In POSIX sh, $? after a pipeline reports only the rightmost command's
+		// status, so a failure in the source `tar -cf - .` (a read error, or a
+		// non-zero exit that still emits a valid *subset* archive) would go
+		// undetected: the destination tar extracts the partial stream cleanly and
+		// the pipeline reports success, yielding a silently truncated snapshot.
+		// Capture the source tar's status via a temp file and require both ends
+		// to be 0 - the same guard the populate path uses (see moat-init.sh).
+		// chmod stays best-effort (see the doc comment above).
+		Cmd: []string{"sh", "-c", `( cd /vol && tar -cf - . ; echo $? > /tmp/moat-export-rc ) | ( cd /out && tar --no-same-owner -xf - )
+dst_rc=$?
+src_rc=$(cat /tmp/moat-export-rc 2>/dev/null || echo 1)
+if [ "$src_rc" -ne 0 ] || [ "$dst_rc" -ne 0 ]; then echo "moat: volume export failed (src=$src_rc dst=$dst_rc)" >&2; exit 1; fi
+chmod -R go+rX /out 2>/dev/null || true`},
+		Mounts: []MountConfig{
+			{Volume: true, Source: name, Target: "/vol", ReadOnly: true},
+			{Source: hostDir, Target: "/out", ReadOnly: false},
+		},
+	}
+	ctrID, err := r.CreateContainer(ctx, cfg)
+	if err != nil {
+		// Name the image so an unpullable base (air-gapped host, registry rate
+		// limit, custom registry) gives an actionable error instead of an opaque
+		// pull failure.
+		return fmt.Errorf("create export container (image %s must be pullable): %w", volumeExportImage, err)
+	}
+	// Use a fresh context for cleanup: if the caller's ctx is canceled (e.g.
+	// Ctrl-C during the export), removing the throwaway container with the
+	// already-canceled ctx would be rejected and leak a moat-export-* container.
+	defer func() { _ = r.RemoveContainer(context.Background(), ctrID) }()
+
+	if startErr := r.StartContainer(ctx, ctrID); startErr != nil {
+		return fmt.Errorf("start export container: %w", startErr)
+	}
+	code, err := r.WaitContainer(ctx, ctrID)
+	if err != nil {
+		return fmt.Errorf("export container wait: %w", err)
+	}
+	if code != 0 {
+		// Surface the container's own stderr so a failure is diagnosable instead
+		// of an opaque exit code (the container still exists until the defer).
+		detail := ""
+		if logs, logErr := r.ContainerLogsAll(ctx, ctrID); logErr == nil {
+			detail = strings.TrimSpace(string(logs))
+			if len(detail) > 800 {
+				detail = "..." + detail[len(detail)-800:]
+			}
+		}
+		if detail != "" {
+			return fmt.Errorf("export container exited with code %d: %s", code, detail)
+		}
+		return fmt.Errorf("export container exited with code %d", code)
 	}
 	return nil
 }

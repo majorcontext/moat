@@ -32,6 +32,18 @@ func (s *listCleanStubRuntime) CreateContainer(ctx context.Context, cfg containe
 func (s *listCleanStubRuntime) StartContainer(ctx context.Context, id string) error {
 	panic("unexpected call to StartContainer")
 }
+func (s *listCleanStubRuntime) VolumeCreate(ctx context.Context, name string) error {
+	panic("unexpected call to VolumeCreate")
+}
+func (s *listCleanStubRuntime) VolumeRemove(ctx context.Context, name string, force bool) error {
+	panic("unexpected call to VolumeRemove")
+}
+func (s *listCleanStubRuntime) VolumeList(ctx context.Context, prefix string) ([]string, error) {
+	panic("unexpected call to VolumeList")
+}
+func (s *listCleanStubRuntime) VolumeExport(ctx context.Context, name, hostDir string) error {
+	panic("unexpected call to VolumeExport")
+}
 func (s *listCleanStubRuntime) StopContainer(ctx context.Context, id string) error {
 	panic("unexpected call to StopContainer")
 }

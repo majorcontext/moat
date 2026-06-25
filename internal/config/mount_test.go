@@ -243,6 +243,37 @@ func TestValidateExcludes(t *testing.T) {
 	}
 }
 
+func TestValidateExcludesRejectsShellMetacharacters(t *testing.T) {
+	bad := []string{"foo;rm -rf /", "$(whoami)", "a`b`", "x|y", "we ird", "a&b", "a>b"}
+	for _, p := range bad {
+		if _, err := ValidateExcludes([]string{p}, "/workspace"); err == nil {
+			t.Errorf("expected rejection for exclude %q", p)
+		}
+	}
+	// Companion: ordinary patterns still validate.
+	good := []string{"node_modules", "dist", ".cache/build", "a-b_c.tmp", "*.log"}
+	if _, err := ValidateExcludes(good, "/workspace"); err != nil {
+		t.Errorf("ordinary excludes rejected: %v", err)
+	}
+}
+
+func TestValidateNoGitExclude(t *testing.T) {
+	// Literal .git/subpaths AND globs whose first component matches .git must be
+	// rejected — they would all drop .git from the copy-in and break the repo.
+	for _, p := range []string{".git", ".git/objects", ".git/config", ".git*", "*", ".git*/foo"} {
+		if err := ValidateNoGitExclude([]string{p}); err == nil {
+			t.Errorf("expected exclude %q to be rejected in volume mode", p)
+		}
+	}
+	// Companion: legitimate excludes (including .gitignore and globs that don't
+	// match .git) must pass.
+	for _, p := range []string{"node_modules", "dist", ".gitignore", "*.log", "dist/sub"} {
+		if err := ValidateNoGitExclude([]string{p}); err != nil {
+			t.Errorf("non-.git exclude %q should pass: %v", p, err)
+		}
+	}
+}
+
 func TestParseMount(t *testing.T) {
 	tests := []struct {
 		input    string

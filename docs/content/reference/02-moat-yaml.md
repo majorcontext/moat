@@ -50,6 +50,10 @@ secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
   DATABASE_URL: ssm:///production/database/url
 
+# Workspace mode
+workspace:
+  mode: bind  # or 'volume' for an isolated copy in a Docker named volume
+
 # Mounts
 mounts:
   - ./data:/data:ro
@@ -445,6 +449,79 @@ secrets:
 | `ssm:///PATH` | AWS SSM (default region) | `ssm:///prod/db/url` |
 | `ssm://REGION/PATH` | AWS SSM (specific region) | `ssm://us-west-2/prod/db/url` |
 | `env://VAR_NAME` | Host environment | `env://MY_API_KEY` |
+
+---
+
+## Workspace
+
+### workspace.mode
+
+Controls how the host working tree is presented to the container.
+
+```yaml
+workspace:
+  mode: volume  # or 'bind' (default)
+```
+
+- Type: `string`
+- Values: `bind` | `volume`
+- Default: `bind`
+- CLI override: `--workspace-mode`
+
+| Mode | Behavior |
+|------|----------|
+| `bind` | Bind-mounts the host directory at `/workspace` (default) |
+| `volume` | Copies the host directory into an ephemeral Docker named volume at `/workspace` |
+
+#### Volume mode
+
+In volume mode, Moat copies the host working tree into a fresh named Docker volume (`moat-ws-<run-id>`) before the run starts. The host directory is bind-mounted **read-only** at `/mnt/host-workspace` for the copy-in and remains mounted there for the container's lifetime (Docker cannot unmount mid-run). The agent works against the volume at `/workspace` and cannot write to the host, but it can still **read** the host tree at `/mnt/host-workspace` — so `exclude:` keeps paths out of the writable `/workspace` copy, but is **not** a confidentiality boundary. Keep secrets out of the workspace directory entirely rather than relying on `exclude:`.
+
+The volume is created fresh for every run. Changes the agent makes inside `/workspace` are isolated to the volume and do not affect the host.
+
+##### Copy-in semantics and excludes
+
+The full working tree is copied in, except paths listed in the `/workspace` mount's `exclude:` field. Use `exclude:` to skip directories that are large or irrelevant (e.g., `node_modules`):
+
+```yaml
+workspace:
+  mode: volume
+
+mounts:
+  - source: .
+    target: /workspace
+    exclude:
+      - node_modules
+      - .venv
+      - dist
+```
+
+Exclude patterns may contain letters, digits, `/`, `.`, `-`, `_`, and `*`. Shell metacharacters (`?`, `[`, `]`) and characters outside that set are rejected.
+
+`.git` cannot be excluded in volume mode. The copy-in always includes the full `.git` directory — a partial `.git` is a broken repository.
+
+##### Constraints
+
+- **Docker only.** Volume mode requires the Docker runtime. Runs on the Apple container runtime fail with a clear error; use `workspace.mode: bind` or pass `--runtime docker`.
+- **Git worktrees and submodules are rejected.** When `.git` is a file rather than a directory (as in a git worktree or submodule checkout), volume mode fails. Use the main checkout or `workspace.mode: bind`.
+
+A `mounts:` entry targeting `/workspace` is allowed in volume mode and is consulted only for its `exclude:` list — the named volume always provides `/workspace`, so no duplicate mount is created.
+
+##### Extraction
+
+The volume is the only copy of the agent's work. Extract changes with `moat snapshot` before destroying the run:
+
+```bash
+moat snapshot <run>
+moat snapshot restore <run> --to ~/output
+git -C ~/myrepo fetch ~/output
+```
+
+See [Volume-mode workspaces](../guides/15-volume-workspaces.md) for the full extraction workflow.
+
+##### Lifecycle
+
+The volume is named `moat-ws-<run-id>` and removed when the run is destroyed. Volumes left by crashed runs are reclaimed by the daemon when its idle timer fires (after 5 minutes with no active runs). Destroying a volume-mode run that has no extraction snapshot requires `--force`.
 
 ---
 

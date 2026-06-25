@@ -65,6 +65,13 @@ type ImageSpec struct {
 
 	// Hooks contains user-defined lifecycle hook commands.
 	Hooks *HooksConfig
+
+	// NeedsWorkspaceVolume indicates the run uses volume-mode workspaces, which
+	// require the moat-init entrypoint to populate the named volume from the
+	// read-only staging bind and chown it (both as root, before the privilege
+	// drop). Without the entrypoint, populate_workspace_volume never runs and the
+	// volume is left empty, so this forces both a custom image and the init script.
+	NeedsWorkspaceVolume bool
 }
 
 // NeedsCustomImage reports whether any option requires building a custom image.
@@ -75,7 +82,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
-		len(s.ClaudePlugins) > 0 || hasHooks
+		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume
 }
 
 // needsInit returns whether the moat-init entrypoint script is required.
@@ -98,7 +105,7 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
-		s.NeedsFirewall || s.HasNamedVolumes
+		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.

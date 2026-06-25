@@ -59,6 +59,22 @@ type Runtime interface {
 	// StartContainer starts an existing container.
 	StartContainer(ctx context.Context, id string) error
 
+	// VolumeCreate creates a named volume. Idempotent if it already exists.
+	VolumeCreate(ctx context.Context, name string) error
+
+	// VolumeRemove removes a named volume. force removes even if it appears in use.
+	VolumeRemove(ctx context.Context, name string, force bool) error
+
+	// VolumeList returns names of moat-managed volumes (those created by
+	// VolumeCreate, which labels them moat=workspace) whose name starts with
+	// prefix. The label filter means a non-moat volume is never returned even if
+	// its name happens to match prefix.
+	VolumeList(ctx context.Context, prefix string) ([]string, error)
+
+	// VolumeExport copies the volume's contents to hostDir on the host filesystem
+	// (used for snapshot capture). hostDir must already exist.
+	VolumeExport(ctx context.Context, name, hostDir string) error
+
 	// StopContainer stops a running container.
 	StopContainer(ctx context.Context, id string) error
 

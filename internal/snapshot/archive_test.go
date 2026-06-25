@@ -355,6 +355,45 @@ func TestArchiveBackendPreservesGitDirOnRestore(t *testing.T) {
 	}
 }
 
+func TestArchiveBackendRestoreReplacesGitWhenIncludeGit(t *testing.T) {
+	// With IncludeGit=true the archive already contains .git, so the in-place
+	// Restore must NOT preserve the live .git — the archived one wins.
+	ws := t.TempDir()
+	snapshotDir := t.TempDir()
+
+	mustWriteFile(t, ws, ".git/config", "ARCHIVED")
+	mustWriteFile(t, ws, "main.go", "package main\n")
+
+	backend := NewArchiveBackend(snapshotDir, ArchiveOptions{IncludeGit: true})
+	nativeRef, err := backend.Create(ws, "snap_includegit_restore")
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	// Mutate the live workspace: change .git/config and add an extra file that
+	// is not in the snapshot.
+	mustWriteFile(t, ws, ".git/config", "LIVE")
+	mustWriteFile(t, ws, "extra.txt", "should be removed\n")
+
+	if err := backend.Restore(ws, nativeRef); err != nil {
+		t.Fatalf("Restore() error: %v", err)
+	}
+
+	// The archived .git/config (ARCHIVED) must have replaced the live one (LIVE).
+	content, err := os.ReadFile(filepath.Join(ws, ".git", "config"))
+	if err != nil {
+		t.Fatalf("failed to read .git/config: %v", err)
+	}
+	if string(content) != "ARCHIVED" {
+		t.Errorf(".git/config = %q, want %q (archived .git should win)", string(content), "ARCHIVED")
+	}
+
+	// The extra file added after the snapshot must be gone (clean restore).
+	if _, err := os.Stat(filepath.Join(ws, "extra.txt")); !os.IsNotExist(err) {
+		t.Errorf("extra.txt should not exist after restore")
+	}
+}
+
 func TestArchiveBackendSymlinks(t *testing.T) {
 	// Create temp directories
 	workspaceDir := t.TempDir()
@@ -776,6 +815,82 @@ func TestArchiveBackendFileCountLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too many files") {
 		t.Errorf("error should mention file count limit, got: %v", err)
+	}
+}
+
+// mustWriteFile creates parent directories and writes a file with the given
+// content. It fails the test on any error.
+func mustWriteFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir for %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+}
+
+func TestArchiveIncludeGit(t *testing.T) {
+	ws := t.TempDir()
+	mustWriteFile(t, ws, ".git/config", "[remote]\n  url = https://x@github.com/y")
+	mustWriteFile(t, ws, "main.go", "package main")
+	mustWriteFile(t, ws, "secret.env", "TOKEN=abc")
+	mustWriteFile(t, ws, ".gitignore", "secret.env")
+	snapDir := t.TempDir()
+	b := NewArchiveBackend(snapDir, ArchiveOptions{UseGitignore: true, IncludeGit: true})
+	ref, err := b.Create(ws, "snap_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := b.RestoreTo(ref, out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".git", "config")); err != nil {
+		t.Errorf(".git/config should be in the archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "secret.env")); !os.IsNotExist(err) {
+		t.Errorf("gitignored secret.env should still be excluded")
+	}
+}
+
+// Archives may contain .git (remotes, credentials) in volume mode, so they must
+// be created 0600 (not world/group readable). Regression guard for the security
+// mitigation called out in the design.
+func TestArchiveFileMode0600(t *testing.T) {
+	ws := t.TempDir()
+	mustWriteFile(t, ws, "main.go", "package main")
+	snapDir := t.TempDir()
+	b := NewArchiveBackend(snapDir, ArchiveOptions{})
+	if _, err := b.Create(ws, "snap_perm"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(snapDir, "snap_perm.tar.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("archive perm = %o, want 0600", perm)
+	}
+}
+
+func TestArchiveExcludesGitByDefault(t *testing.T) {
+	ws := t.TempDir()
+	mustWriteFile(t, ws, ".git/config", "x")
+	mustWriteFile(t, ws, "main.go", "package main")
+	snapDir := t.TempDir()
+	b := NewArchiveBackend(snapDir, ArchiveOptions{})
+	ref, err := b.Create(ws, "snap_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := b.RestoreTo(ref, out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".git")); !os.IsNotExist(err) {
+		t.Errorf("bind-mode default must still exclude .git")
 	}
 }
 

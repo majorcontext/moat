@@ -379,6 +379,48 @@ runtime: invalid
 	}
 }
 
+func TestLoadConfigAcceptsWorkspaceMode(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+
+	content := `
+name: myapp
+agent: test
+workspace:
+  mode: volume
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept workspace.mode, got error: %v", err)
+	}
+	if cfg.Workspace.Mode != WorkspaceModeVolume {
+		t.Errorf("Workspace.Mode = %q, want %q", cfg.Workspace.Mode, WorkspaceModeVolume)
+	}
+}
+
+func TestLoadConfigRejectsInvalidWorkspaceMode(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+
+	content := `
+name: myapp
+agent: test
+workspace:
+  mode: bogus
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load should error when workspace.mode is invalid")
+	}
+	if !strings.Contains(err.Error(), "workspace.mode") {
+		t.Errorf("error should mention 'workspace.mode', got: %v", err)
+	}
+}
+
 func TestLoadConfigWithUnifiedContainer(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "moat.yaml")

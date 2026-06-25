@@ -85,6 +85,12 @@ func TestVolumeOwnershipPlan(t *testing.T) {
 	if _, _, ok := volumeOwnershipPlan(Config{User: "", Mounts: volMounts}); ok {
 		t.Error("root entrypoint should not need the ownership helper")
 	}
+	// explicit root entrypoint ("0:0", forced by volume mode): also moat-init's
+	// job, so still no helper. Without this case the helper would run and chown
+	// the volume root to 0:0 (root), leaving the run user unable to write it.
+	if _, _, ok := volumeOwnershipPlan(Config{User: "0:0", Mounts: volMounts}); ok {
+		t.Error("0:0 root entrypoint should not need the ownership helper")
+	}
 	// non-root but no named volumes: nothing to do
 	if _, _, ok := volumeOwnershipPlan(Config{User: "1000:1000", Mounts: []MountConfig{{Source: "/h", Target: "/workspace"}}}); ok {
 		t.Error("no named volumes should not need the ownership helper")

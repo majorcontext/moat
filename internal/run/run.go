@@ -98,6 +98,12 @@ type Run struct {
 	// Snapshot settings
 	DisablePreRunSnapshot bool // If true, skip pre-run snapshot creation
 
+	// Workspace mode (set when workspace.mode: volume). WorkspaceMode is the
+	// resolved mode ("bind" or "volume"); WorkspaceVolume is the per-run Docker
+	// volume name backing /workspace, removed during cleanup.
+	WorkspaceMode   string
+	WorkspaceVolume string
+
 	// AWS credential provider (set when using aws grant)
 	AWSCredentialProvider *awsprov.CredentialProvider
 
@@ -139,6 +145,8 @@ type Options struct {
 	KeepContainer bool           // If true, don't auto-remove container after run
 	Interactive   bool           // Keep stdin open for interactive input
 	Clipboard     bool           // Enable host clipboard bridging
+	// WorkspaceMode is the resolved workspace mode (bind|volume). Empty == bind.
+	WorkspaceMode config.WorkspaceMode
 }
 
 // generateID creates a unique run identifier.
@@ -184,6 +192,8 @@ func (r *Run) SaveMetadata() error {
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
 		ServiceContainers:   r.ServiceContainers,
+		WorkspaceMode:       r.WorkspaceMode,
+		WorkspaceVolume:     r.WorkspaceVolume,
 	})
 }
 

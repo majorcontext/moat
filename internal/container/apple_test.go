@@ -1,13 +1,32 @@
 package container
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/creack/pty"
 )
+
+func TestAppleVolumeMethodsUnsupported(t *testing.T) {
+	r := &AppleRuntime{}
+	ctx := context.Background()
+	if err := r.VolumeCreate(ctx, "moat-ws-x"); err == nil || !strings.Contains(err.Error(), "volume mode") {
+		t.Errorf("VolumeCreate: want 'volume mode' error, got %v", err)
+	}
+	if err := r.VolumeRemove(ctx, "moat-ws-x", true); err == nil {
+		t.Errorf("VolumeRemove: want error, got nil")
+	}
+	if _, err := r.VolumeList(ctx, "moat-ws-"); err == nil {
+		t.Errorf("VolumeList: want error, got nil")
+	}
+	if err := r.VolumeExport(ctx, "moat-ws-x", t.TempDir()); err == nil {
+		t.Errorf("VolumeExport: want error, got nil")
+	}
+}
 
 func TestBuildCreateArgs(t *testing.T) {
 	tests := []struct {

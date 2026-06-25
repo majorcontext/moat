@@ -87,6 +87,18 @@ func (s *poolStubRuntime) CreateContainer(context.Context, Config) (string, erro
 func (s *poolStubRuntime) StartContainer(context.Context, string) error {
 	panic("not implemented")
 }
+func (s *poolStubRuntime) VolumeCreate(context.Context, string) error {
+	panic("not implemented")
+}
+func (s *poolStubRuntime) VolumeRemove(context.Context, string, bool) error {
+	panic("not implemented")
+}
+func (s *poolStubRuntime) VolumeList(context.Context, string) ([]string, error) {
+	panic("not implemented")
+}
+func (s *poolStubRuntime) VolumeExport(context.Context, string, string) error {
+	panic("not implemented")
+}
 func (s *poolStubRuntime) StopContainer(context.Context, string) error {
 	panic("not implemented")
 }
