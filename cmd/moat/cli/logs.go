@@ -75,16 +75,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading logs: %w", err)
 	}
 
+	// Warn up front, before the log flood, so -f doesn't look like it streamed.
+	if logsFollow {
+		ui.Warn("follow mode (-f) is not yet supported; showing current logs only")
+	}
+
 	log.Info("displaying logs", "runID", runID)
 	for _, entry := range entries {
 		ts := entry.Timestamp.Format("15:04:05.000")
 		fmt.Printf("[%s] %s\n", ts, entry.Line)
-	}
-
-	if logsFollow {
-		// Follow isn't implemented yet; say so visibly (log.Info only shows with
-		// --verbose) rather than silently exiting as if -f streamed.
-		ui.Warn("follow mode (-f) is not yet supported; showing current logs only")
 	}
 
 	return nil

@@ -381,6 +381,31 @@ func TestInstallCommandsFormatForDockerfile(t *testing.T) {
 	}
 }
 
+func TestInstallCommandsFormatForDockerfileEnvSorted(t *testing.T) {
+	cmds := InstallCommands{
+		Commands: []string{"true"},
+		EnvVars:  map[string]string{"ZEBRA": "1", "ALPHA": "2", "MIKE": "3"},
+	}
+
+	result := cmds.FormatForDockerfile()
+
+	// ENV lines must come out in sorted key order so the generated Dockerfile is
+	// stable run-to-run (otherwise random map order busts Docker's layer cache).
+	ai := strings.Index(result, "ENV ALPHA=")
+	mi := strings.Index(result, "ENV MIKE=")
+	zi := strings.Index(result, "ENV ZEBRA=")
+	if ai < 0 || mi < 0 || zi < 0 {
+		t.Fatalf("missing ENV lines:\n%s", result)
+	}
+	if !(ai < mi && mi < zi) {
+		t.Errorf("ENV keys not sorted (want ALPHA<MIKE<ZEBRA), got offsets %d/%d/%d:\n%s", ai, mi, zi, result)
+	}
+	// Deterministic across repeated calls (a 3-key map would otherwise vary).
+	if again := cmds.FormatForDockerfile(); again != result {
+		t.Errorf("FormatForDockerfile is not deterministic:\n%q\nvs\n%q", result, again)
+	}
+}
+
 func TestInstallCommandsFormatForDockerfileSingle(t *testing.T) {
 	cmds := InstallCommands{
 		Commands: []string{"echo hello"},
