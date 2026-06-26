@@ -2,7 +2,6 @@ package routing
 
 import (
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -16,9 +15,9 @@ func TestSaveIsAtomic(t *testing.T) {
 	if err := rt.Add("demo", map[string]string{"web": "127.0.0.1:3000"}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	// The temp file used for the atomic rename must not linger.
-	if _, err := os.Stat(filepath.Join(dir, "routes.json.tmp")); !os.IsNotExist(err) {
-		t.Errorf("routes.json.tmp should not remain after save (err=%v)", err)
+	// No temp file from the atomic rename may linger (unique routes-*.json.tmp).
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(leftovers) != 0 {
+		t.Errorf("temp files should not remain after save: %v", leftovers)
 	}
 	// And the route must round-trip through a fresh table (reads from disk).
 	rt2, _ := NewRouteTable(dir)

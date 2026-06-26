@@ -273,7 +273,13 @@ func TestLoadGlobalMalformedReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobal should not fail on malformed config: %v", err)
 	}
-	if want := DefaultGlobalConfig().Proxy.Port; cfg.Proxy.Port != want {
-		t.Errorf("malformed config should fall back to defaults: Proxy.Port = %d, want %d", cfg.Proxy.Port, want)
+	// Check more than one field: a partial unmarshal can zero some fields, so
+	// the reset must restore the whole default config, not just Proxy.Port.
+	def := DefaultGlobalConfig()
+	if cfg.Proxy.Port != def.Proxy.Port {
+		t.Errorf("Proxy.Port = %d, want default %d", cfg.Proxy.Port, def.Proxy.Port)
+	}
+	if cfg.Debug.RetentionDays != def.Debug.RetentionDays {
+		t.Errorf("Debug.RetentionDays = %d, want default %d", cfg.Debug.RetentionDays, def.Debug.RetentionDays)
 	}
 }

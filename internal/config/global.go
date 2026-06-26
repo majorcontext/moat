@@ -6,10 +6,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 	"gopkg.in/yaml.v3"
 )
+
+// malformedConfigWarnOnce keeps the malformed-config warning to one line per
+// process — LoadGlobal is called several times per command.
+var malformedConfigWarnOnce sync.Once
 
 // GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
@@ -49,10 +54,14 @@ func LoadGlobal() (*GlobalConfig, error) {
 	configPath := filepath.Join(GlobalConfigDir(), "config.yaml")
 	if data, err := os.ReadFile(configPath); err == nil {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
-			// Don't silently run on defaults — a malformed global config is
-			// almost always a user typo they'd want to know about. Warn and
-			// reset to clean defaults (a partial unmarshal may have set fields).
-			log.Warn("ignoring malformed global config; using defaults", "path", configPath, "error", err)
+			// A malformed global config is almost always a user typo, so surface
+			// it rather than silently falling back. Use ui (always on stderr) —
+			// log.Warn only shows with --verbose — and warn once per process
+			// despite the multiple LoadGlobal calls. Reset to clean defaults
+			// since a partial unmarshal may have set some fields.
+			malformedConfigWarnOnce.Do(func() {
+				ui.Warnf("ignoring malformed global config %s; using defaults: %v", configPath, err)
+			})
 			cfg = DefaultGlobalConfig()
 		}
 	}

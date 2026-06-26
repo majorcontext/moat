@@ -163,8 +163,9 @@ func (r *Run) SaveMetadata() error {
 		return nil // No store configured
 	}
 
-	// Snapshot stateMu-protected fields under the lock to avoid races
-	// between Stop() and monitorContainerExit() calling SaveMetadata concurrently.
+	// Snapshot stateMu-protected fields under the lock to avoid races between
+	// concurrent SaveMetadata calls (Stop / monitorContainerExit) and
+	// runProviderStoppedHooks writing ProviderMeta.
 	r.stateMu.Lock()
 	state := r.State
 	startedAt := r.StartedAt
