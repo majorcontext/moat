@@ -16,7 +16,7 @@ func ExampleGenerate() {
 func ExampleIsValid() {
 	fmt.Println(id.IsValid("run_a1b2c3d4e5f6", "run")) // well-formed
 	fmt.Println(id.IsValid("run_a1b2c3d4e5f6", "vol")) // wrong prefix
-	fmt.Println(id.IsValid("run_xyz", "run"))          // suffix not 12 hex chars
+	fmt.Println(id.IsValid("run_xyz", "run"))          // malformed suffix (not 12 lowercase-hex chars)
 	// Output:
 	// true
 	// false

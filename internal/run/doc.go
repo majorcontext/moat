@@ -4,20 +4,24 @@
 //
 // # Lifecycle
 //
-// A run moves through a small state machine, driven by [Manager]:
+// A run moves through the [State] machine, driven by [Manager]:
 //
-//		Create ──▶ Start ──▶ (running) ──▶ exit ──▶ Stopped
-//		   │                                   ▲
-//		   └────────────── Destroy ◀───────────┘
+//	created ─▶ starting ─▶ running ─▶ stopping ─▶ stopped   (terminal)
+//	                 │         │
+//	                 └─────────┴────────── error ─▶ failed   (terminal)
 //
-//	  - [Manager.Create] builds everything the run needs (image, mounts,
-//	    credentials, proxy registration, provider staging) and returns a [Run]
-//	    in the Created state. It is the heaviest phase; on any error it rolls
-//	    back every resource it had acquired so far.
-//	  - [Manager.Start] (or [Manager.StartAttached] for an interactive TTY)
-//	    starts the container and hands control to the exit monitor.
-//	  - [Manager.Wait] blocks until the run exits; [Manager.Stop] requests an
-//	    early stop; [Manager.Destroy] removes the run and its resources.
+// [Manager.Destroy] removes a run from any state and reclaims its resources.
+//
+//   - [Manager.Create] builds everything the run needs (image, mounts,
+//     credentials, proxy registration, provider staging) and returns a [Run]
+//     in [StateCreated]. It is the heaviest phase; on any error it rolls back
+//     every resource it had acquired so far.
+//   - [Manager.Start] (or [Manager.StartAttached] for an interactive TTY)
+//     starts the container and hands control to the exit monitor.
+//   - [Manager.Wait] blocks until the run exits; [Manager.Stop] requests an
+//     early stop. A run that errors out (failed setup, crash on attach) lands
+//     in [StateFailed] rather than [StateStopped] — that is the `failed` you
+//     see in `moat list`.
 //
 // # Concurrency model
 //

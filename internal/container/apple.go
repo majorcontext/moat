@@ -30,9 +30,6 @@ import (
 // methods, which are not supported. It points the user at the alternatives.
 var errVolumeUnsupported = errors.New("volume mode is not supported with the Apple container runtime; use the Docker runtime (--runtime docker) or workspace.mode: bind")
 
-// Verify AppleRuntime satisfies the Runtime interface at compile time.
-var _ Runtime = (*AppleRuntime)(nil)
-
 // AppleRuntime implements Runtime using Apple's container CLI tool.
 type AppleRuntime struct {
 	containerBin string
@@ -47,6 +44,9 @@ type AppleRuntime struct {
 	ptyMu     sync.Mutex
 	activePTY map[string]*os.File
 }
+
+// Verify AppleRuntime satisfies the Runtime interface at compile time.
+var _ Runtime = (*AppleRuntime)(nil)
 
 // appleBuildManager implements BuildManager for Apple containers.
 type appleBuildManager struct {

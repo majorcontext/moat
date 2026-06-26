@@ -54,9 +54,6 @@ For Docker Desktop (macOS/Windows):
 To bypass (reduced isolation):
   moat run --no-sandbox`)
 
-// Verify DockerRuntime satisfies the Runtime interface at compile time.
-var _ Runtime = (*DockerRuntime)(nil)
-
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
 	cli        *client.Client
@@ -70,6 +67,9 @@ type DockerRuntime struct {
 	sidecarMgr *dockerSidecarManager
 	buildMgr   *dockerBuildManager
 }
+
+// Verify DockerRuntime satisfies the Runtime interface at compile time.
+var _ Runtime = (*DockerRuntime)(nil)
 
 // dockerNetworkManager implements NetworkManager for Docker.
 type dockerNetworkManager struct {
