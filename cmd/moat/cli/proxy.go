@@ -10,6 +10,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
+	"github.com/majorcontext/moat/internal/routing"
 	"github.com/spf13/cobra"
 )
 
@@ -144,15 +145,26 @@ func statusProxy(_ *cobra.Command, _ []string) error {
 	health, err := client.Health(context.Background())
 	if err != nil {
 		fmt.Println("Daemon is not running")
-		return nil
+	} else {
+		fmt.Printf("Daemon running (pid %d)\n", health.PID)
+		fmt.Printf("  Proxy port: %d\n", health.ProxyPort)
+		fmt.Printf("  Active runs: %d\n", health.RunCount)
+		fmt.Printf("  Started: %s\n", health.StartedAt)
+		if health.Commit != "" {
+			fmt.Printf("  Commit: %s (cli: %s)\n", health.Commit, commit)
+		}
 	}
 
-	fmt.Printf("Daemon running (pid %d)\n", health.PID)
-	fmt.Printf("  Proxy port: %d\n", health.ProxyPort)
-	fmt.Printf("  Active runs: %d\n", health.RunCount)
-	fmt.Printf("  Started: %s\n", health.StartedAt)
-	if health.Commit != "" {
-		fmt.Printf("  Commit: %s (cli: %s)\n", health.Commit, commit)
+	// Advertise the hostname-routing entry point when an agent has started it.
+	// The routing proxy runs in an agent's process, so it can be up even when
+	// the daemon is not.
+	if lock, _ := routing.LoadProxyLock(proxyDir); lock != nil && lock.IsAlive() {
+		fmt.Printf("Endpoint index: https://localhost:%d/\n", lock.Port)
+	}
+
+	// The remaining details come from the daemon API.
+	if err != nil {
+		return nil
 	}
 
 	// List runs.

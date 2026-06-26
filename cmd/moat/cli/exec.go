@@ -345,16 +345,18 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 
 	log.Info("run started", "id", r.ID)
 
-	// Print port information if available
+	// Print port information if available. Use the proxy's actual bound port
+	// (not the configured default) so the advertised URLs are reachable even
+	// when the proxy fell back to an OS-assigned port.
 	if len(r.Ports) > 0 {
-		globalCfg, _ := config.LoadGlobal()
-		proxyPort := globalCfg.Proxy.Port
+		proxyPort := manager.RoutingPort()
 
 		fmt.Println("Endpoints:")
 		for endpointName, containerPort := range r.Ports {
 			url := fmt.Sprintf("https://%s.%s.localhost:%d", endpointName, r.Name, proxyPort)
 			fmt.Printf("  %s: %s (container :%d)\n", endpointName, url, containerPort)
 		}
+		fmt.Printf("  %s\n", ui.Dim(fmt.Sprintf("all endpoints: https://localhost:%d/  ·  moat open %s", proxyPort, r.Name)))
 	}
 
 	fmt.Println(ui.Dim("Press Ctrl+C to stop"))

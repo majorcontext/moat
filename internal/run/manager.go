@@ -4145,6 +4145,14 @@ func (m *Manager) RuntimePool() *container.RuntimePool {
 }
 
 // Close releases manager resources.
+// RoutingPort returns the port the shared routing proxy is bound to. This is
+// the actual listening port (which may differ from the configured default if
+// it was taken and the proxy fell back to an OS-assigned port), so it's the
+// truthful value to advertise in user-facing URLs.
+func (m *Manager) RoutingPort() int {
+	return m.proxyLifecycle.Port()
+}
+
 // It cancels monitor goroutines and waits (with a bounded timeout) for them
 // to finish capturing logs and updating state before closing the runtime.
 func (m *Manager) Close() error {
