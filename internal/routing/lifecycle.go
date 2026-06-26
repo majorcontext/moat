@@ -105,7 +105,9 @@ func (lc *Lifecycle) EnsureRunning() error {
 		// is taken, point the user at how to change it rather than surfacing a
 		// raw bind error.
 		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("routing proxy port %d is already in use — choose another with MOAT_PROXY_PORT=<port> or set proxy.port in ~/.moat/config.yaml: %w", lc.port, err)
+			// Don't wrap the raw "bind: address already in use" — the whole
+			// point is to replace that noise with an actionable message.
+			return fmt.Errorf("routing proxy port %d is already in use — choose another with MOAT_PROXY_PORT=<port> or set proxy.port in ~/.moat/config.yaml", lc.port)
 		}
 		return fmt.Errorf("starting proxy: %w", err)
 	}

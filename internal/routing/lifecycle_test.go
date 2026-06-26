@@ -28,9 +28,16 @@ func TestEnsureRunningPortInUse(t *testing.T) {
 	if err == nil {
 		t.Fatal("EnsureRunning: expected error when port is in use, got nil")
 	}
-	// The message must be actionable: point at how to pick a different port.
-	if !strings.Contains(err.Error(), "MOAT_PROXY_PORT") || !strings.Contains(err.Error(), fmt.Sprint(port)) {
-		t.Errorf("error not actionable: %v", err)
+	// The message must be actionable: name the busy port and both ways to
+	// change it (env var and config key).
+	for _, want := range []string{"MOAT_PROXY_PORT", "proxy.port", fmt.Sprint(port)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+	// And it must not re-introduce the raw bind-error noise it replaces.
+	if strings.Contains(err.Error(), "address already in use") {
+		t.Errorf("error should not embed the raw bind error: %v", err)
 	}
 }
 
