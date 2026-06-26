@@ -487,8 +487,13 @@ func writeUserCustomDeps(b *strings.Builder, deps []Dependency) {
 		for _, cmd := range cmds.Commands {
 			b.WriteString("RUN " + cmd + "\n")
 		}
-		for k, v := range cmds.EnvVars {
-			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
+		envKeys := make([]string, 0, len(cmds.EnvVars))
+		for k := range cmds.EnvVars {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		for _, k := range envKeys {
+			b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, cmds.EnvVars[k]))
 		}
 	}
 	b.WriteString("\n")

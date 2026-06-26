@@ -16,7 +16,9 @@ import (
 type RouteTable struct {
 	dir    string
 	routes map[string]map[string]string // agent -> endpoint -> host:port
-	mu     sync.RWMutex
+	// Every method reloads from disk under the lock before reading, so they all
+	// take a write lock — a plain Mutex, not RWMutex, matches the real usage.
+	mu sync.Mutex
 }
 
 // NewRouteTable creates or loads a route table from the given directory.

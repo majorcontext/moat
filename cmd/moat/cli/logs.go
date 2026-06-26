@@ -9,6 +9,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -74,14 +75,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading logs: %w", err)
 	}
 
+	// Warn up front, before the log flood, so -f doesn't look like it streamed.
+	if logsFollow {
+		ui.Warn("follow mode (-f) is not yet supported; showing current logs only")
+	}
+
 	log.Info("displaying logs", "runID", runID)
 	for _, entry := range entries {
 		ts := entry.Timestamp.Format("15:04:05.000")
 		fmt.Printf("[%s] %s\n", ts, entry.Line)
-	}
-
-	if logsFollow {
-		log.Info("Follow mode not yet implemented")
 	}
 
 	return nil

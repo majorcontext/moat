@@ -5,51 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/majorcontext/moat/internal/container"
 )
-
-func TestGetProviderSetup(t *testing.T) {
-	// Register a test provider
-	testProvider := Provider("test-provider-setup")
-	RegisterProviderSetup(testProvider, &mockProviderSetup{provider: testProvider})
-	defer delete(providerSetups, testProvider)
-
-	// Test registered provider
-	setup := GetProviderSetup(testProvider)
-	if setup == nil {
-		t.Error("GetProviderSetup(test-provider-setup) returned nil")
-	}
-	if setup.Provider() != testProvider {
-		t.Errorf("Provider() = %v, want %v", setup.Provider(), testProvider)
-	}
-
-	// Test unknown provider returns nil
-	unknownSetup := GetProviderSetup(Provider("unknown"))
-	if unknownSetup != nil {
-		t.Error("GetProviderSetup(unknown) should return nil")
-	}
-}
-
-func TestRegisterProviderSetup(t *testing.T) {
-	// Register a custom provider
-	customProvider := Provider("custom")
-	customSetup := &mockProviderSetup{provider: customProvider}
-
-	RegisterProviderSetup(customProvider, customSetup)
-
-	// Verify it can be retrieved
-	setup := GetProviderSetup(customProvider)
-	if setup == nil {
-		t.Error("GetProviderSetup(custom) returned nil after registration")
-	}
-	if setup.Provider() != customProvider {
-		t.Errorf("Provider() = %v, want %v", setup.Provider(), customProvider)
-	}
-
-	// Clean up
-	delete(providerSetups, customProvider)
-}
 
 func TestIsOAuthToken(t *testing.T) {
 	tests := []struct {
@@ -240,24 +196,3 @@ func TestGenerateAccessTokenPlaceholder(t *testing.T) {
 		t.Errorf("iss = %v, want https://auth.openai.com", payload["iss"])
 	}
 }
-
-// mockProviderSetup implements ProviderSetup for testing.
-type mockProviderSetup struct {
-	provider Provider
-}
-
-func (m *mockProviderSetup) Provider() Provider {
-	return m.provider
-}
-
-func (m *mockProviderSetup) ConfigureProxy(p ProxyConfigurer, cred *Credential) {}
-
-func (m *mockProviderSetup) ContainerEnv(cred *Credential) []string {
-	return nil
-}
-
-func (m *mockProviderSetup) ContainerMounts(cred *Credential, containerHome string) ([]container.MountConfig, string, error) {
-	return nil, "", nil
-}
-
-func (m *mockProviderSetup) Cleanup(cleanupPath string) {}

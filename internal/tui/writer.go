@@ -285,7 +285,7 @@ func (w *Writer) processDataLocked(data []byte) error {
 		// the next Write the combined buffer is re-classified by both
 		// matchers in turn — if it turns out to be DECSTBM, the second
 		// pass routes it correctly.
-		if w.isPrefixOfAltScreen(data) && len(data) < maxAltScreenSeqLen() {
+		if w.isPrefixOfAltScreen(data) && len(data) < maxAltScreenSeqLen {
 			// Buffer it for the next Write call
 			w.escBuf = append(w.escBuf[:0], data...)
 			return nil
@@ -699,8 +699,10 @@ func (w *Writer) isPrefixOfAltScreen(data []byte) bool {
 	return false
 }
 
-// maxAltScreenSeqLen returns the length of the longest alt screen sequence.
-func maxAltScreenSeqLen() int {
+// maxAltScreenSeqLen is the length of the longest alt-screen sequence, derived
+// once at init from altScreenEnter/altScreenExit rather than recomputed on every
+// Write that hits a partial-escape boundary.
+var maxAltScreenSeqLen = func() int {
 	max := 0
 	for _, seq := range altScreenEnter {
 		if len(seq) > max {
@@ -713,7 +715,7 @@ func maxAltScreenSeqLen() int {
 		}
 	}
 	return max
-}
+}()
 
 // enterCompositorLocked switches from scroll mode to compositor mode.
 func (w *Writer) enterCompositorLocked() error {
