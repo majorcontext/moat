@@ -94,7 +94,8 @@ type Run struct {
 	DaemonCommit string
 
 	// ProviderCleanupPaths tracks paths to clean up for each provider when the run ends.
-	// Keys are provider names, values are cleanup paths returned by ProviderSetup.ContainerMounts.
+	// Keys are provider names, values are cleanup paths returned when the provider
+	// prepared its container mounts.
 	ProviderCleanupPaths map[string]string
 
 	// Snapshot settings

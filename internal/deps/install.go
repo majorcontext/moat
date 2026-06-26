@@ -4,6 +4,7 @@ package deps
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -544,8 +545,13 @@ func (ic InstallCommands) FormatForDockerfile() string {
 	}
 	b.WriteString("\n")
 
-	for k, v := range ic.EnvVars {
-		b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, v))
+	envKeys := make([]string, 0, len(ic.EnvVars))
+	for k := range ic.EnvVars {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		b.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, ic.EnvVars[k]))
 	}
 
 	return b.String()

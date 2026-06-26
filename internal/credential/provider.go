@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"time"
-
-	"github.com/majorcontext/moat/internal/container"
 )
 
 // ProxyInjectedPlaceholder is a placeholder value for credentials that will be
@@ -170,58 +168,6 @@ type ProxyConfigurer interface {
 	// URL paths, Authorization headers, and request bodies for a specific host.
 	// Body substitution is limited to 64KB requests to avoid memory issues.
 	SetTokenSubstitution(host, placeholder, realToken string)
-}
-
-// ProviderSetup configures a credential provider for use in a container run.
-// Each provider (GitHub, Anthropic, etc.) implements this interface to handle
-// its specific proxy configuration, environment variables, and container mounts.
-type ProviderSetup interface {
-	// Provider returns the provider identifier.
-	Provider() Provider
-
-	// ConfigureProxy sets up proxy headers for this credential.
-	ConfigureProxy(p ProxyConfigurer, cred *Credential)
-
-	// ContainerEnv returns environment variables to set in the container.
-	ContainerEnv(cred *Credential) []string
-
-	// ContainerMounts returns mounts needed for this credential.
-	// The containerHome parameter is the home directory inside the container.
-	// Returns the mounts and an optional cleanup directory path.
-	ContainerMounts(cred *Credential, containerHome string) ([]container.MountConfig, string, error)
-
-	// Cleanup is called when the run ends to clean up any resources.
-	// The cleanupPath is the path returned by ContainerMounts.
-	Cleanup(cleanupPath string)
-}
-
-// ProviderResult holds the result of configuring a provider.
-type ProviderResult struct {
-	// Env contains environment variables to add to the container.
-	Env []string
-	// Mounts contains mount configurations for the container.
-	Mounts []container.MountConfig
-	// CleanupPath is a path to clean up when the run ends (optional).
-	CleanupPath string
-}
-
-// providerSetups holds registered provider setups.
-var providerSetups = make(map[Provider]ProviderSetup)
-
-// RegisterProviderSetup registers a ProviderSetup for a provider.
-// This is typically called from init() functions in provider packages.
-func RegisterProviderSetup(provider Provider, setup ProviderSetup) {
-	providerSetups[provider] = setup
-}
-
-// GetProviderSetup returns the ProviderSetup for a given provider.
-// Returns nil if the provider doesn't have a registered setup.
-// Provider packages register their setups via init() using RegisterProviderSetup.
-func GetProviderSetup(provider Provider) ProviderSetup {
-	if setup, ok := providerSetups[provider]; ok {
-		return setup
-	}
-	return nil
 }
 
 // IsOAuthToken returns true if the token appears to be a Claude Code OAuth token.

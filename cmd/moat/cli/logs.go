@@ -9,6 +9,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -81,7 +82,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	if logsFollow {
-		log.Info("Follow mode not yet implemented")
+		// Follow isn't implemented yet; say so visibly (log.Info only shows with
+		// --verbose) rather than silently exiting as if -f streamed.
+		ui.Warn("follow mode (-f) is not yet supported; showing current logs only")
 	}
 
 	return nil
