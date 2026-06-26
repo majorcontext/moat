@@ -27,7 +27,7 @@ func (s *mockStore) Get(provider credential.Provider) (*credential.Credential, e
 	if c, ok := s.creds[provider]; ok {
 		return c, nil
 	}
-	return nil, fmt.Errorf("credential not found: %s", provider)
+	return nil, fmt.Errorf("%w: %s", credential.ErrNotFound, provider)
 }
 
 func (s *mockStore) Delete(provider credential.Provider) error {
