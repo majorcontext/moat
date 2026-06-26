@@ -3141,7 +3141,7 @@ func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) er
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	m.mu.Unlock()
 	r.SetState(StateStarting)
@@ -3207,7 +3207,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	m.mu.Unlock()
@@ -3385,7 +3385,7 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 
 	// Check state (thread-safe)
@@ -3428,7 +3428,7 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	m.mu.RUnlock()
 
@@ -3465,7 +3465,7 @@ func (m *Manager) Get(runID string) (*Run, error) {
 
 	r, ok := m.runs[runID]
 	if !ok {
-		return nil, fmt.Errorf("run %s not found", runID)
+		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	return r, nil
 }
@@ -3824,7 +3824,7 @@ func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 		updateErr := dc.UpdateRun(updateCtx, r.ProxyAuthToken, r.ContainerID)
 		updateCancel()
 
-		if errors.Is(updateErr, daemon.ErrRunNotFound) {
+		if errors.Is(updateErr, ErrRunNotFound) {
 			// Run is not registered — re-register with the same token.
 			log.Info("run not found in proxy daemon, re-registering",
 				"run_id", r.ID)
@@ -3868,7 +3868,7 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	m.mu.Unlock()
 
@@ -3927,7 +3927,7 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	m.mu.RUnlock()
@@ -3975,7 +3975,7 @@ func (m *Manager) Exec(ctx context.Context, runID string, cmd []string, stdin []
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	auditStore := r.AuditStore
@@ -4016,7 +4016,7 @@ func (m *Manager) ExecInteractive(ctx context.Context, runID string, cmd []strin
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	auditStore := r.AuditStore
@@ -4067,7 +4067,7 @@ func (m *Manager) FollowLogs(ctx context.Context, runID string, w io.Writer) err
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return fmt.Errorf("run %s not found", runID)
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	m.mu.RUnlock()
@@ -4094,7 +4094,7 @@ func (m *Manager) RecentLogs(runID string, lines int) (string, error) {
 	r, ok := m.runs[runID]
 	if !ok {
 		m.mu.RUnlock()
-		return "", fmt.Errorf("run %s not found", runID)
+		return "", fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
 	containerID := r.ContainerID
 	m.mu.RUnlock()

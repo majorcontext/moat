@@ -95,7 +95,7 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	encrypted, err := os.ReadFile(s.path(provider))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("credential not found: %s", provider)
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, provider)
 		}
 		return nil, fmt.Errorf("reading credential file: %w", err)
 	}

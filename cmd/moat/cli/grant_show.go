@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -63,7 +64,7 @@ func runGrantShow(cmd *cobra.Command, args []string) error {
 
 	cred, err := store.Get(credential.Provider(providerName))
 	if err != nil {
-		if strings.Contains(err.Error(), "credential not found") {
+		if errors.Is(err, credential.ErrNotFound) {
 			return fmt.Errorf("no credential found for %s\n\nRun 'moat grant %s' to store a credential", providerName, providerName)
 		}
 		return err // surface decryption/permission errors directly

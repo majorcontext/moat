@@ -35,6 +35,11 @@ const (
 	StateFailed   State = "failed"
 )
 
+// ErrRunNotFound is returned (wrapped) when no run matches the given name or ID.
+// Match it with errors.Is. It aliases the daemon's sentinel so a not-found from
+// either the manager or the daemon registry compares equal.
+var ErrRunNotFound = daemon.ErrRunNotFound
+
 // Run represents an agent execution environment.
 type Run struct {
 	ID        string

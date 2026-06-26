@@ -368,8 +368,8 @@ func TestStopNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("Stop should fail for non-existent run")
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' error, got: %v", err)
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("expected ErrRunNotFound, got: %v", err)
 	}
 }
 
