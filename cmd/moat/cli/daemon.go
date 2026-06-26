@@ -198,11 +198,9 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	}
 
 	// Give the daemon API the shared route table so runs can register their
-	// hostname routes via POST /v1/routes/. Hostname traffic is served by the
-	// per-agent routing proxy (internal/routing.Lifecycle) that every `moat run`
-	// with exposed ports starts and shares via ~/.moat/proxy/proxy.lock — the
-	// daemon does not host its own routing proxy. (It used to start a second one
-	// here on a random, never-advertised port; nothing could reach it.)
+	// hostname routes via POST /v1/routes/. Hostname traffic itself is served by
+	// the per-agent routing proxy (internal/routing.Lifecycle, shared via
+	// ~/.moat/proxy/proxy.lock); the daemon does not host its own routing proxy.
 	routeTable, err := routing.NewRouteTable(daemonDir)
 	if err != nil {
 		log.Warn("failed to create route table", "error", err)
