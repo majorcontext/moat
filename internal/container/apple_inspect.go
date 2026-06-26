@@ -82,6 +82,9 @@ func (i appleInspectInfo) state() string { return i.Status.State }
 
 // networks returns the network attachments, preferring the 1.0.0 location
 // (status.networks) and falling back to the legacy top-level array.
+// Note: the priority is inverted relative to imageRef because the 1.0.0 schema
+// moved networks into status, whereas it moved image into configuration (not
+// status) — so each accessor prefers wherever its field lives in 1.0.0.
 func (i appleInspectInfo) networks() []appleNetwork {
 	if len(i.Status.Networks) > 0 {
 		return i.Status.Networks

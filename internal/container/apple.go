@@ -1167,11 +1167,17 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
 
+	return runInfosFromInspect(containers), nil
+}
+
+// runInfosFromInspect filters parsed `container inspect`/`list` entries down to
+// moat run containers and maps them to Info. Containers are created with
+// `--name <run-id>`; the legacy CLI exposed that as a top-level `name`, while
+// the 1.0.0 CLI drops `name` and carries the value as `id`, so fall back to id
+// before matching.
+func runInfosFromInspect(containers []appleInspectInfo) []Info {
 	var result []Info
 	for _, c := range containers {
-		// Containers are created with `--name <run-id>`. The legacy CLI exposed
-		// that as a top-level `name`; the 1.0.0 CLI drops `name` and carries the
-		// value as `id`. Fall back to id so the filter sees the run name on both.
 		name := c.Name
 		if name == "" {
 			name = c.ID
@@ -1186,7 +1192,7 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 			})
 		}
 	}
-	return result, nil
+	return result
 }
 
 // RemoveImage removes an image by ID or tag.

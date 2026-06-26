@@ -2,7 +2,6 @@ package container
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -73,27 +72,6 @@ func TestAppleBuildRunArgsNoNetwork(t *testing.T) {
 
 	args := buildAppleRunArgs(cfg, "")
 	assert.NotContains(t, args, "--network")
-}
-
-func TestParseContainerIP(t *testing.T) {
-	// Real output from `container inspect`
-	inspectJSON := `[{"networks":[{"macAddress":"fe:6f:a4:62:2c:2c","network":"moat-run_30c05d9962c8","hostname":"moat-postgres-run_30c05d9962c8","ipv4Address":"192.168.68.2/24","ipv4Gateway":"192.168.68.1","ipv6Address":"fda7:cecc:4485:250e:fc6f:a4ff:fe62:2c2c/64"}],"status":"running"}]`
-
-	var info []struct {
-		Networks []struct {
-			IPv4Address string `json:"ipv4Address"`
-		} `json:"networks"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(inspectJSON), &info))
-	require.Len(t, info, 1)
-	require.Len(t, info[0].Networks, 1)
-
-	addr := info[0].Networks[0].IPv4Address
-	// Strip CIDR prefix
-	if idx := len("192.168.68.2"); idx < len(addr) && addr[idx] == '/' {
-		addr = addr[:idx]
-	}
-	assert.Equal(t, "192.168.68.2", addr)
 }
 
 func TestGetContainerIPParsing(t *testing.T) {

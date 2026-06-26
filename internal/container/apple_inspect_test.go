@@ -89,3 +89,33 @@ func TestParseAppleInspectMalformed(t *testing.T) {
 	_, err := parseAppleInspect([]byte(`not json`))
 	assert.Error(t, err)
 }
+
+func TestRunInfosFromInspect(t *testing.T) {
+	// Mixed list across both schemas: a 1.0.0 run (no top-level name, run ID
+	// carried as id), a legacy run (run ID in name), and two non-moat
+	// containers that must be filtered out.
+	const data = `[
+		{"id":"run_aaaaaaaaaaaa","configuration":{"image":{"reference":"moat/run:1"}},"status":{"state":"running"}},
+		{"id":"deadbeef","name":"run_bbbbbbbbbbbb","image":"moat/run:2","status":"stopped"},
+		{"id":"buildkit","status":{"state":"running"}},
+		{"id":"abc123","name":"some-other-container","status":"running"}
+	]`
+
+	info, err := parseAppleInspect([]byte(data))
+	require.NoError(t, err)
+
+	got := runInfosFromInspect(info)
+	require.Len(t, got, 2, "only the two moat run containers should remain")
+
+	// 1.0.0 entry: name falls back to id, image read from configuration.
+	assert.Equal(t, "run_aaaaaaaaaaaa", got[0].ID)
+	assert.Equal(t, "run_aaaaaaaaaaaa", got[0].Name)
+	assert.Equal(t, "moat/run:1", got[0].Image)
+	assert.Equal(t, "running", got[0].Status)
+
+	// Legacy entry: name carries the run ID, id is the container hash.
+	assert.Equal(t, "deadbeef", got[1].ID)
+	assert.Equal(t, "run_bbbbbbbbbbbb", got[1].Name)
+	assert.Equal(t, "moat/run:2", got[1].Image)
+	assert.Equal(t, "stopped", got[1].Status)
+}
