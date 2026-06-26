@@ -30,12 +30,6 @@ func TestRouteTable(t *testing.T) {
 		t.Errorf("Lookup(myapp, web) = %q, want 127.0.0.1:49152", addr)
 	}
 
-	// Lookup default (first service)
-	_, ok = rt.LookupDefault("myapp")
-	if !ok {
-		t.Fatal("LookupDefault(myapp) not found")
-	}
-
 	// Remove
 	err = rt.Remove("myapp")
 	if err != nil {

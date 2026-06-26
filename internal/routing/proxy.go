@@ -87,7 +87,11 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 		rp.writeError(w, http.StatusNotFound, "unknown agent", agent)
 	case 1:
-		// A single endpoint is unambiguous — route directly to it.
+		// A single endpoint is unambiguous — route directly to it. Note this
+		// branch is reached both from the bare agent host (demo.localhost) and
+		// from an unknown service on a single-endpoint agent (typo.demo.localhost):
+		// in the latter case the typo'd subdomain still proxies through, which
+		// matches the pre-index behavior for single-endpoint agents.
 		for _, addr := range endpoints {
 			rp.proxyTo(w, r, addr)
 		}

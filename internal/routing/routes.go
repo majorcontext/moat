@@ -97,25 +97,6 @@ func (rt *RouteTable) Lookup(agent, endpoint string) (string, bool) {
 	return addr, ok
 }
 
-// LookupDefault returns the first endpoint's address for an agent.
-// It reloads routes from disk to pick up changes from other processes.
-func (rt *RouteTable) LookupDefault(agent string) (string, bool) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-
-	rt.reload()
-
-	endpoints, ok := rt.routes[agent]
-	if !ok || len(endpoints) == 0 {
-		return "", false
-	}
-	// Return first endpoint (map iteration order is random but consistent for small maps)
-	for _, addr := range endpoints {
-		return addr, true
-	}
-	return "", false
-}
-
 // AgentExists returns true if the agent has registered routes.
 // It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) AgentExists(agent string) bool {

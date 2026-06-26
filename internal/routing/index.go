@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // endpointLink is a single named endpoint and its externally-reachable URL.
@@ -22,8 +24,12 @@ type agentEntry struct {
 }
 
 // wantsJSON reports whether the client prefers a JSON response over HTML.
+// Browsers always send text/html in their Accept header, so they fall through
+// to the HTML page; scripted clients (curl/jq) asking for application/json get
+// JSON.
 func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
+	accept := r.Header.Get("Accept")
+	return strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/html")
 }
 
 // requestScheme returns the scheme the index links should use, mirroring the
@@ -98,7 +104,11 @@ func (rp *ReverseProxy) writeAgentIndex(w http.ResponseWriter, r *http.Request, 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	// The status line is already committed, so an encode error can't change the
+	// response — but log it so encoding bugs aren't invisible.
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Debug("index json encode error", "error", err)
+	}
 }
 
 // indexPage is the view model for the HTML discovery page.
@@ -110,7 +120,11 @@ type indexPage struct {
 func renderHTML(w http.ResponseWriter, page indexPage) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = indexTemplate.Execute(w, page)
+	// As with writeJSON, the status is committed; log execution errors so
+	// template bugs are visible.
+	if err := indexTemplate.Execute(w, page); err != nil {
+		log.Debug("index template execute error", "error", err)
+	}
 }
 
 var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>

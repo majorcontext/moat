@@ -218,20 +218,63 @@ func TestAgentIndexUsesRequestScheme(t *testing.T) {
 	})
 	rp := NewReverseProxy(routes)
 
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "demo.localhost:8080"
-	req.TLS = &tls.ConnectionState{} // simulate HTTPS
-	rec := httptest.NewRecorder()
+	t.Run("html uses request scheme", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "demo.localhost:8080"
+		req.TLS = &tls.ConnectionState{} // simulate HTTPS
+		rec := httptest.NewRecorder()
 
-	rp.ServeHTTP(rec, req)
+		rp.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "https://web.demo.localhost:8080") {
-		t.Errorf("expected https links, got:\n%s", body)
-	}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "https://web.demo.localhost:8080") {
+			t.Errorf("expected https links, got:\n%s", body)
+		}
+	})
+
+	// The agent index JSON serializes an agentEntry at the top level (name,
+	// base_url, endpoints) — distinct from the global index's {"agents":[…]}
+	// wrapper. Lock that contract in so a shared-wrapper refactor can't change
+	// it silently.
+	t.Run("json shape is a bare agentEntry", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "demo.localhost:8080"
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+
+		rp.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var entry struct {
+			Name      string `json:"name"`
+			BaseURL   string `json:"base_url"`
+			Endpoints []struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &entry); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, rec.Body.String())
+		}
+		if entry.Name != "demo" {
+			t.Errorf("name = %q, want demo", entry.Name)
+		}
+		if entry.BaseURL != "http://demo.localhost:8080" {
+			t.Errorf("base_url = %q", entry.BaseURL)
+		}
+		urls := map[string]string{}
+		for _, e := range entry.Endpoints {
+			urls[e.Name] = e.URL
+		}
+		if urls["web"] != "http://web.demo.localhost:8080" || urls["api"] != "http://api.demo.localhost:8080" {
+			t.Errorf("endpoints = %+v", entry.Endpoints)
+		}
+	})
 }
 
 func TestProxyServerWithTLS(t *testing.T) {
@@ -388,10 +431,11 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 	rp := NewReverseProxy(routes)
 
 	tests := []struct {
-		name     string
-		host     string
-		wantCode int
-		wantBody string
+		name             string
+		host             string
+		wantCode         int
+		wantBody         string
+		wantBodyContains []string
 	}{
 		{
 			name:     "web endpoint with port",
@@ -423,6 +467,7 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 			wantCode: http.StatusOK,
 			// Multiple endpoints -> bare agent host serves the index instead
 			// of guessing which endpoint to proxy to.
+			wantBodyContains: []string{"web.demo.localhost:8080", "api.demo.localhost:8080"},
 		},
 		{
 			name:     "unknown endpoint serves discovery index",
@@ -430,6 +475,7 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 			wantCode: http.StatusOK,
 			// Unknown endpoint name falls through to the agent index so the
 			// caller can discover the valid endpoint names.
+			wantBodyContains: []string{"web.demo.localhost:8080", "api.demo.localhost:8080"},
 		},
 		{
 			name:     "unknown agent",
@@ -450,10 +496,15 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 				t.Errorf("Host %q: status = %d, want %d", tt.host, rec.Code, tt.wantCode)
 			}
 
-			if tt.wantBody != "" {
+			if tt.wantBody != "" || len(tt.wantBodyContains) > 0 {
 				body, _ := io.ReadAll(rec.Body)
-				if string(body) != tt.wantBody {
+				if tt.wantBody != "" && string(body) != tt.wantBody {
 					t.Errorf("Host %q: body = %q, want %q", tt.host, body, tt.wantBody)
+				}
+				for _, want := range tt.wantBodyContains {
+					if !strings.Contains(string(body), want) {
+						t.Errorf("Host %q: body missing %q\n%s", tt.host, want, body)
+					}
 				}
 			}
 		})
