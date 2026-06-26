@@ -57,8 +57,8 @@ var OAuthEndpointWorkarounds = []string{
 //
 // Original 403 responses are still logged for debugging, but the client
 // receives a success response to prevent crashes.
-func CreateOAuthEndpointTransformer() func(req, resp interface{}) (interface{}, bool) {
-	return func(reqInterface, respInterface interface{}) (interface{}, bool) {
+func CreateOAuthEndpointTransformer() func(req, resp any) (any, bool) {
+	return func(reqInterface, respInterface any) (any, bool) {
 		req, ok := reqInterface.(*http.Request)
 		if !ok {
 			return respInterface, false

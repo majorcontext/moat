@@ -1482,7 +1482,7 @@ region = %s
 	if opts.Config != nil {
 		for k, v := range opts.Config.Env {
 			if needsProxy && isMoatOwnedProxyVar(k) {
-				ui.Warn(fmt.Sprintf("ignoring %s in moat.yaml env — overriding proxy settings would bypass network policy enforcement", k))
+				ui.Warnf("ignoring %s in moat.yaml env — overriding proxy settings would bypass network policy enforcement", k)
 				continue
 			}
 			proxyEnv = append(proxyEnv, k+"="+v)
@@ -1526,7 +1526,7 @@ region = %s
 	for _, e := range opts.Env {
 		if needsProxy {
 			if idx := strings.IndexByte(e, '='); idx >= 0 && isMoatOwnedProxyVar(e[:idx]) {
-				ui.Warn(fmt.Sprintf("ignoring %s in env — overriding proxy settings would bypass network policy enforcement", e[:idx]))
+				ui.Warnf("ignoring %s in env — overriding proxy settings would bypass network policy enforcement", e[:idx])
 				continue
 			}
 		}
@@ -2740,9 +2740,9 @@ region = %s
 	if networkID != "" && net.ParseIP(hostAddr) != nil {
 		netMgr := m.defaultRuntime().NetworkManager()
 		if netMgr == nil {
-			ui.Warn(fmt.Sprintf("cannot resolve gateway for custom network %q — proxy may be unreachable from container", networkID))
+			ui.Warnf("cannot resolve gateway for custom network %q — proxy may be unreachable from container", networkID)
 		} else if gw := netMgr.NetworkGateway(ctx, networkID); gw == "" {
-			ui.Warn(fmt.Sprintf("custom network %q has no gateway — proxy may be unreachable from container", networkID))
+			ui.Warnf("custom network %q has no gateway — proxy may be unreachable from container", networkID)
 		} else if gw != hostAddr {
 			log.Debug("rewriting proxy host for custom network",
 				"old", hostAddr, "new", gw, "network", networkID)
