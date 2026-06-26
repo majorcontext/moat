@@ -1096,9 +1096,9 @@ func (r *DockerRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 
 	var result []Info
 	for _, c := range containers {
-		// Check if any name looks like a moat run ID (8 hex chars)
+		// Check if any name looks like a moat run ID (run_<12 hex>)
 		for _, name := range c.Names {
-			// Names have leading slash, e.g., "/a1b2c3d4"
+			// Names have leading slash, e.g., "/run_d2d975055e71"
 			name = strings.TrimPrefix(name, "/")
 			if isRunID(name) {
 				result = append(result, Info{

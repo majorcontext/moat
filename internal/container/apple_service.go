@@ -3,7 +3,6 @@ package container
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -148,18 +147,18 @@ func (m *appleServiceManager) runInspect(ctx context.Context, containerID string
 // yet — the transient state right after `run --detach` that callers poll
 // through. A non-nil error means the output could not be parsed at all.
 func parseContainerIPv4(output []byte) (addr string, ok bool, err error) {
-	var info []struct {
-		Networks []struct {
-			IPv4Address string `json:"ipv4Address"`
-		} `json:"networks"`
-	}
-	if err := json.Unmarshal(output, &info); err != nil {
+	info, err := parseAppleInspect(output)
+	if err != nil {
 		return "", false, fmt.Errorf("parsing inspect output: %w", err)
 	}
-	if len(info) == 0 || len(info[0].Networks) == 0 || info[0].Networks[0].IPv4Address == "" {
+	if len(info) == 0 {
 		return "", false, nil
 	}
-	addr = info[0].Networks[0].IPv4Address
+	nets := info[0].networks()
+	if len(nets) == 0 || nets[0].IPv4Address == "" {
+		return "", false, nil
+	}
+	addr = nets[0].IPv4Address
 	if idx := strings.IndexByte(addr, '/'); idx != -1 {
 		addr = addr[:idx]
 	}

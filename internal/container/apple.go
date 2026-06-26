@@ -419,10 +419,8 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 			log.Debug("transient inspect error, retrying", "error", err, "stderr", stderrStr)
 		} else {
 			// Apple's inspect returns an array of container info objects
-			var info []struct {
-				Status string `json:"status"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+			info, err := parseAppleInspect(stdout.Bytes())
+			if err != nil {
 				return -1, fmt.Errorf("parsing container info: %w", err)
 			}
 
@@ -431,7 +429,7 @@ func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (i
 				return 0, nil
 			}
 
-			if info[0].Status == "exited" || info[0].Status == "stopped" {
+			if state := info[0].state(); state == "exited" || state == "stopped" {
 				// Apple's container CLI doesn't provide exit code in inspect output
 				// Return 0 for stopped containers (best we can do)
 				return 0, nil
@@ -1164,27 +1162,27 @@ func (r *AppleRuntime) ListContainers(ctx context.Context) ([]Info, error) {
 		return nil, fmt.Errorf("listing containers: %w", err)
 	}
 
-	var containers []struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Image   string `json:"image"`
-		Status  string `json:"status"`
-		Created string `json:"created"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &containers); err != nil {
+	containers, err := parseAppleInspect(stdout.Bytes())
+	if err != nil {
 		return nil, fmt.Errorf("parsing container list: %w", err)
 	}
 
 	var result []Info
 	for _, c := range containers {
-		if isRunID(c.Name) {
-			created, _ := time.Parse(time.RFC3339, c.Created)
+		// Containers are created with `--name <run-id>`. The legacy CLI exposed
+		// that as a top-level `name`; the 1.0.0 CLI drops `name` and carries the
+		// value as `id`. Fall back to id so the filter sees the run name on both.
+		name := c.Name
+		if name == "" {
+			name = c.ID
+		}
+		if isRunID(name) {
 			result = append(result, Info{
 				ID:      c.ID,
-				Name:    c.Name,
-				Image:   c.Image,
-				Status:  c.Status,
-				Created: created,
+				Name:    name,
+				Image:   c.imageRef(),
+				Status:  c.state(),
+				Created: c.createdTime(),
 			})
 		}
 	}
@@ -1303,10 +1301,8 @@ func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (
 	}
 
 	// Apple's inspect returns an array of container info objects
-	var info []struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+	info, err := parseAppleInspect(stdout.Bytes())
+	if err != nil {
 		return "", fmt.Errorf("parsing container %s info: %w", containerID, err)
 	}
 
@@ -1314,7 +1310,7 @@ func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (
 		return "", fmt.Errorf("container %s not found", containerID)
 	}
 
-	return info[0].Status, nil
+	return info[0].state(), nil
 }
 
 // ResizeTTY resizes the container's TTY to the given dimensions.

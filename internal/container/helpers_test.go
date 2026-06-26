@@ -7,26 +7,30 @@ func TestIsRunID(t *testing.T) {
 		input string
 		want  bool
 	}{
-		// Valid run IDs (8 lowercase hex chars)
-		{"a1b2c3d4", true},
-		{"00000000", true},
-		{"ffffffff", true},
-		{"12345678", true},
+		// Valid run IDs: "run_" + 12 lowercase hex chars (id.Generate("run")).
+		{"run_a1b2c3d4e5f6", true},
+		{"run_000000000000", true},
+		{"run_ffffffffffff", true},
+		{"run_123456789abc", true},
 
-		// Invalid: wrong length
-		{"a1b2c3d", false},   // 7 chars
-		{"a1b2c3d4e", false}, // 9 chars
-		{"", false},          // empty
+		// Invalid: wrong hex length
+		{"run_a1b2c3d4e5f", false},   // 11 chars
+		{"run_a1b2c3d4e5f60", false}, // 13 chars
+		{"run_", false},              // no hex
+		{"", false},                  // empty
+
+		// Invalid: missing or wrong prefix
+		{"a1b2c3d4e5f6", false},      // bare hex, no prefix
+		{"a1b2c3d4", false},          // legacy 8-hex form is no longer a run name
+		{"snap_a1b2c3d4e5f6", false}, // different prefix
 
 		// Invalid: uppercase (our IDs are always lowercase)
-		{"A1B2C3D4", false},
-		{"a1B2c3d4", false},
+		{"run_A1B2C3D4E5F6", false},
+		{"run_a1B2c3d4e5f6", false},
 
 		// Invalid: non-hex characters
-		{"a1b2c3dg", false}, // 'g' is not hex
-		{"a1b2c3d-", false}, // dash
-		{"a1b2c3d ", false}, // space
-		{"a1b2c3d_", false}, // underscore
+		{"run_a1b2c3d4e5fg", false}, // 'g' is not hex
+		{"run_a1b2c3d4e5f-", false}, // dash
 
 		// Not run IDs (common Docker/container names)
 		{"myagent", false},

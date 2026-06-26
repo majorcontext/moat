@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/majorcontext/moat/internal/credential/keyring"
 )
 
 const (
@@ -54,8 +56,10 @@ type ClaudeCodeCredentials struct{}
 //
 // Returns the credentials if found, or an error describing what went wrong.
 func (c *ClaudeCodeCredentials) GetClaudeCodeCredentials() (*ClaudeOAuthToken, error) {
-	// Try keychain first on macOS
-	if runtime.GOOS == "darwin" {
+	// Try keychain first on macOS, unless the keychain is disabled
+	// (MOAT_KEYRING_BACKEND=file) — e.g. in tests or headless environments
+	// where touching the keychain would pop a blocking authorization prompt.
+	if runtime.GOOS == "darwin" && !keyring.KeychainDisabled() {
 		if token, err := c.getFromKeychain(); err == nil {
 			return token, nil
 		}

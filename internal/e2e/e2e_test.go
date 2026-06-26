@@ -77,6 +77,12 @@ func TestMain(m *testing.M) {
 	// isn't available in test containers.
 	os.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "1")
 
+	// Never touch the developer's real system keychain. On macOS the keychain
+	// pops a blocking GUI authorization prompt, which hangs headless/CI runs;
+	// file-based key storage (under the isolated MOAT_HOME below) avoids it.
+	// Inherited by the spawned daemon subprocess so it uses the same key.
+	os.Setenv("MOAT_KEYRING_BACKEND", "file")
+
 	// Isolate tests from the developer's real ~/.moat directory. Without this,
 	// tests share the user's daemon, credential store, run storage, and locks
 	// with any live moat session — which means an older daemon from a previous
@@ -799,6 +805,10 @@ func createTestWorkspaceWithRuntime(t *testing.T, rt, version string) string {
 func TestAppleContainerRuntime(t *testing.T) {
 	requireApple(t)
 
+	// Clear any MOAT_RUNTIME override (e.g. from a dev's .envrc) so we exercise
+	// genuine auto-detection rather than a forced runtime.
+	t.Setenv("MOAT_RUNTIME", "")
+
 	// Verify that NewRuntime() selects Apple container on this system
 	rt, err := container.NewRuntime()
 	if err != nil {
@@ -825,6 +835,10 @@ func TestAppleContainerRuntime(t *testing.T) {
 // TestAppleContainerSystemStart is Apple-only: tests Apple container system start idempotence.
 func TestAppleContainerSystemStart(t *testing.T) {
 	requireApple(t)
+
+	// Clear any MOAT_RUNTIME override (e.g. from a dev's .envrc) so the
+	// NewRuntime() auto-detection check below exercises the real code path.
+	t.Setenv("MOAT_RUNTIME", "")
 
 	// 'container system start' should be idempotent - it succeeds even if already running
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

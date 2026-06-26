@@ -135,16 +135,25 @@ func TestParseRunContainerID(t *testing.T) {
 }
 
 func TestParseContainerIPv4(t *testing.T) {
-	// CIDR prefix is stripped.
+	// CIDR prefix is stripped (legacy schema: top-level networks, status string).
 	addr, ok, err := parseContainerIPv4([]byte(`[{"networks":[{"ipv4Address":"192.168.68.2/24"}],"status":"running"}]`))
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, "192.168.68.2", addr)
 
-	// Container started but no address assigned yet (the race we retry on).
+	// container 1.0.0 schema: networks nested under the status object.
+	addr, ok, err = parseContainerIPv4([]byte(`[{"id":"run_abc","status":{"state":"running","networks":[{"ipv4Address":"192.168.64.2/24","ipv4Gateway":"192.168.64.1"}]}}]`))
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "192.168.64.2", addr)
+
+	// Container started but no address assigned yet (the race we retry on) —
+	// both schemas.
 	for _, empty := range []string{
 		`[{"networks":[],"status":"running"}]`,
 		`[{"networks":[{"ipv4Address":""}],"status":"running"}]`,
+		`[{"id":"run_abc","status":{"state":"running","networks":[]}}]`,
+		`[{"id":"run_abc","status":{"state":"stopped"}}]`,
 		`[]`,
 	} {
 		_, ok, err := parseContainerIPv4([]byte(empty))

@@ -158,6 +158,122 @@ func TestGetOrCreateKeyBothBackendsFail(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateKeyNilPrimaryUsesFallback(t *testing.T) {
+	// A nil primary (the MOAT_KEYRING_BACKEND=file path) must never touch the
+	// keychain — it reads/writes only the fallback (file) backend.
+	existingKey := make([]byte, 32)
+	if _, err := rand.Read(existingKey); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	fallback := &mockBackend{key: existingKey}
+
+	key, err := getOrCreateKeyWithBackends(nil, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.Equal(key, existingKey) {
+		t.Error("should return existing key from fallback when primary is nil")
+	}
+	if fallback.setCalls != 0 {
+		t.Error("should not write when fallback already has a key")
+	}
+}
+
+func TestGetOrCreateKeyNilPrimaryGeneratesNew(t *testing.T) {
+	fallback := &mockBackend{}
+
+	key, err := getOrCreateKeyWithBackends(nil, fallback)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(key) != 32 {
+		t.Errorf("generated key wrong length: got %d, want 32", len(key))
+	}
+	if fallback.setCalls != 1 {
+		t.Error("should store newly generated key in fallback")
+	}
+}
+
+func TestGetOrCreateKeyNilPrimaryFallbackStoreFails(t *testing.T) {
+	// With no keychain, a file-store failure surfaces a file-only error that
+	// does not pretend the keychain was involved.
+	fallback := &mockBackend{setErr: fmt.Errorf("permission denied")}
+
+	_, err := getOrCreateKeyWithBackends(nil, fallback)
+	if err == nil {
+		t.Fatal("expected error when fallback store fails")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error should mention the file failure: %v", err)
+	}
+	if strings.Contains(err.Error(), "Keychain") {
+		t.Errorf("file-only error should not mention the keychain: %v", err)
+	}
+}
+
+func TestKeychainDisabled(t *testing.T) {
+	// Exact-match contract: only "file" disables the keychain. Any other value
+	// (including the empty string and look-alikes) keeps keychain-first behavior,
+	// so a typo can never silently downgrade the backend.
+	cases := []struct {
+		value string
+		want  bool
+	}{
+		{"file", true},
+		{"", false},
+		{"keychain", false},
+		{"1", false},
+		{"File", false},  // case-sensitive
+		{"file ", false}, // no trimming
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("MOAT_KEYRING_BACKEND", tc.value)
+			if got := KeychainDisabled(); got != tc.want {
+				t.Errorf("KeychainDisabled() with %q = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetOrCreateKeyFileBackendEnv(t *testing.T) {
+	// MOAT_KEYRING_BACKEND=file drives the public GetOrCreateKey through the
+	// file backend only, with no keychain access.
+	t.Setenv("MOAT_KEYRING_BACKEND", "file")
+	t.Setenv("MOAT_KEYRING_SERVICE", "")
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	if !KeychainDisabled() {
+		t.Fatal("KeychainDisabled() should be true when MOAT_KEYRING_BACKEND=file")
+	}
+
+	key, err := GetOrCreateKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateKey: %v", err)
+	}
+	if len(key) != KeySize {
+		t.Fatalf("key length = %d, want %d", len(key), KeySize)
+	}
+
+	// A second call returns the same key, now read back from the file.
+	key2, err := GetOrCreateKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateKey (2nd): %v", err)
+	}
+	if !bytes.Equal(key, key2) {
+		t.Error("second GetOrCreateKey returned a different key")
+	}
+
+	// The key must have landed in a file under MOAT_HOME.
+	path, err := DefaultKeyFilePath()
+	if err != nil {
+		t.Fatalf("DefaultKeyFilePath: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected key file at %s: %v", path, err)
+	}
+}
+
 func TestFileBackendConcurrentCreation(t *testing.T) {
 	tmpDir := t.TempDir()
 	keyPath := filepath.Join(tmpDir, "concurrent.key")

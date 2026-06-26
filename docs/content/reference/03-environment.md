@@ -127,6 +127,18 @@ Primarily useful for:
 
 `MOAT_HOME` is inherited by spawned daemon processes, so the daemon socket, lock file, and logs all land under the override path. The real `$HOME` is still used for reading third-party state like `~/.claude/` and `~/.config/gh/`.
 
+### MOAT_KEYRING_BACKEND
+
+Control where Moat stores the encryption key that protects the credential store. By default Moat uses the system keychain (macOS Keychain, Windows Credential Manager, or a Linux secret service) and silently falls back to a file at `~/.moat/encryption.key` when no keychain is available.
+
+```bash
+export MOAT_KEYRING_BACKEND=file  # Skip the system keychain; use file storage only
+```
+
+Set this to `file` on headless or locked-down macOS where touching the keychain pops a blocking GUI authorization prompt. It also disables the macOS Keychain lookup for Claude Code OAuth credentials (falling back to `~/.claude/.credentials.json`). Any other value (or leaving it unset) keeps the default keychain-first behavior. The Moat test suite sets it so tests never touch the real keychain.
+
+Set it consistently across every Moat process for a given `MOAT_HOME`, including the proxy daemon (which inherits the variable from the CLI that spawns it). The credential store is encrypted with a key resolved from the selected backend, so mixing backends across processes — for example, switching this variable on while a daemon started without it is still running — makes them resolve different keys and credentials fail to decrypt. After changing the value on a host with a running daemon, run `moat proxy restart` so the daemon picks up the new backend.
+
 ### AWS credentials
 
 For AWS SSM secrets, standard AWS environment variables are used:
