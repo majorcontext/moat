@@ -5,8 +5,13 @@
 #   - http://web.demo.localhost:8080 -> container port 3000
 #   - http://api.demo.localhost:8080 -> container port 8080
 #
+# Discover endpoints from a browser:
+#   - http://localhost:8080      -> index of every running agent and endpoint
+#   - http://demo.localhost:8080 -> index of this agent's endpoints
+#   (the proxy port is shown by `moat run` / `moat proxy status`)
+#
 # Run with:
-#   moat run examples/multi-service
+#   moat run examples/multi-endpoint
 
 name: demo
 

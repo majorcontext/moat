@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/gatekeeper/proxy"
@@ -52,14 +54,14 @@ func TestReverseProxyRejectsNonLocalhostHost(t *testing.T) {
 	routes, _ := NewRouteTable(dir)
 	rp := NewReverseProxy(routes)
 
+	// Bare localhost / 127.0.0.1 are intentionally excluded here: they serve
+	// the discovery index (see TestGlobalIndex), not a 400.
 	tests := []struct {
 		name string
 		host string
 	}{
 		{"external domain", "google.com"},
 		{"external domain with port", "google.com:8080"},
-		{"bare localhost", "localhost"},
-		{"bare localhost with port", "localhost:8080"},
 		{"ip address", "192.168.1.1:8080"},
 	}
 
@@ -118,6 +120,161 @@ func TestReverseProxyDefaultService(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("Status = %d, want 200", rec.Code)
 	}
+}
+
+func TestGlobalIndex(t *testing.T) {
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	routes.Add("demo", map[string]string{
+		"web": "127.0.0.1:3000",
+		"api": "127.0.0.1:8080",
+	})
+	rp := NewReverseProxy(routes)
+
+	t.Run("html", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "localhost:8080"
+		rec := httptest.NewRecorder()
+
+		rp.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+			t.Errorf("Content-Type = %q, want text/html", ct)
+		}
+		body := rec.Body.String()
+		for _, want := range []string{"demo", "http://web.demo.localhost:8080", "http://api.demo.localhost:8080"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing %q\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "localhost:8080"
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+
+		rp.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var payload struct {
+			Agents []struct {
+				Name      string `json:"name"`
+				BaseURL   string `json:"base_url"`
+				Endpoints []struct {
+					Name string `json:"name"`
+					URL  string `json:"url"`
+				} `json:"endpoints"`
+			} `json:"agents"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, rec.Body.String())
+		}
+		if len(payload.Agents) != 1 || payload.Agents[0].Name != "demo" {
+			t.Fatalf("agents = %+v, want one agent 'demo'", payload.Agents)
+		}
+		if payload.Agents[0].BaseURL != "http://demo.localhost:8080" {
+			t.Errorf("base_url = %q", payload.Agents[0].BaseURL)
+		}
+		// Endpoints are sorted by name: api before web.
+		eps := payload.Agents[0].Endpoints
+		if len(eps) != 2 || eps[0].Name != "api" || eps[1].Name != "web" {
+			t.Fatalf("endpoints = %+v, want sorted [api web]", eps)
+		}
+		if eps[1].URL != "http://web.demo.localhost:8080" {
+			t.Errorf("web url = %q", eps[1].URL)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		emptyRoutes, _ := NewRouteTable(t.TempDir())
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "localhost:8080"
+		rec := httptest.NewRecorder()
+
+		NewReverseProxy(emptyRoutes).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "No agents") {
+			t.Errorf("expected empty-state message, got:\n%s", rec.Body.String())
+		}
+	})
+}
+
+func TestAgentIndexUsesRequestScheme(t *testing.T) {
+	dir := t.TempDir()
+	routes, _ := NewRouteTable(dir)
+	routes.Add("demo", map[string]string{
+		"web": "127.0.0.1:3000",
+		"api": "127.0.0.1:8080",
+	})
+	rp := NewReverseProxy(routes)
+
+	t.Run("html uses request scheme", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "demo.localhost:8080"
+		req.TLS = &tls.ConnectionState{} // simulate HTTPS
+		rec := httptest.NewRecorder()
+
+		rp.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "https://web.demo.localhost:8080") {
+			t.Errorf("expected https links, got:\n%s", body)
+		}
+	})
+
+	// The agent index JSON serializes an agentEntry at the top level (name,
+	// base_url, endpoints) — distinct from the global index's {"agents":[…]}
+	// wrapper. Lock that contract in so a shared-wrapper refactor can't change
+	// it silently.
+	t.Run("json shape is a bare agentEntry", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "demo.localhost:8080"
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+
+		rp.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var entry struct {
+			Name      string `json:"name"`
+			BaseURL   string `json:"base_url"`
+			Endpoints []struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &entry); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, rec.Body.String())
+		}
+		if entry.Name != "demo" {
+			t.Errorf("name = %q, want demo", entry.Name)
+		}
+		if entry.BaseURL != "http://demo.localhost:8080" {
+			t.Errorf("base_url = %q", entry.BaseURL)
+		}
+		urls := map[string]string{}
+		for _, e := range entry.Endpoints {
+			urls[e.Name] = e.URL
+		}
+		if urls["web"] != "http://web.demo.localhost:8080" || urls["api"] != "http://api.demo.localhost:8080" {
+			t.Errorf("endpoints = %+v", entry.Endpoints)
+		}
+	})
 }
 
 func TestProxyServerWithTLS(t *testing.T) {
@@ -274,10 +431,11 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 	rp := NewReverseProxy(routes)
 
 	tests := []struct {
-		name     string
-		host     string
-		wantCode int
-		wantBody string
+		name             string
+		host             string
+		wantCode         int
+		wantBody         string
+		wantBodyContains []string
 	}{
 		{
 			name:     "web endpoint with port",
@@ -304,16 +462,20 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 			wantBody: "api endpoint",
 		},
 		{
-			name:     "agent only, no endpoint prefix",
+			name:     "agent only serves discovery index",
 			host:     "demo.localhost:8080",
 			wantCode: http.StatusOK,
-			// LookupDefault returns any endpoint
+			// Multiple endpoints -> bare agent host serves the index instead
+			// of guessing which endpoint to proxy to.
+			wantBodyContains: []string{"web.demo.localhost:8080", "api.demo.localhost:8080"},
 		},
 		{
-			name:     "unknown endpoint falls back to default",
+			name:     "unknown endpoint serves discovery index",
 			host:     "unknown.demo.localhost:8080",
 			wantCode: http.StatusOK,
-			// unknown endpoint -> Lookup fails -> LookupDefault succeeds
+			// Unknown endpoint name falls through to the agent index so the
+			// caller can discover the valid endpoint names.
+			wantBodyContains: []string{"web.demo.localhost:8080", "api.demo.localhost:8080"},
 		},
 		{
 			name:     "unknown agent",
@@ -334,10 +496,15 @@ func TestReverseProxyMultiEndpoint(t *testing.T) {
 				t.Errorf("Host %q: status = %d, want %d", tt.host, rec.Code, tt.wantCode)
 			}
 
-			if tt.wantBody != "" {
+			if tt.wantBody != "" || len(tt.wantBodyContains) > 0 {
 				body, _ := io.ReadAll(rec.Body)
-				if string(body) != tt.wantBody {
+				if tt.wantBody != "" && string(body) != tt.wantBody {
 					t.Errorf("Host %q: body = %q, want %q", tt.host, body, tt.wantBody)
+				}
+				for _, want := range tt.wantBodyContains {
+					if !strings.Contains(string(body), want) {
+						t.Errorf("Host %q: body missing %q\n%s", tt.host, want, body)
+					}
 				}
 			}
 		})

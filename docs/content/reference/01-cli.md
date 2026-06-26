@@ -963,6 +963,51 @@ The WORKTREE column appears when any run has a worktree branch. To show only wor
 
 ---
 
+## moat open
+
+Open a running agent's endpoint in your browser.
+
+```
+moat open [agent] [endpoint] [flags]
+```
+
+With no arguments, opens the discovery index listing every running agent and its endpoints. With an agent name, opens that agent's page; add an endpoint name to open a specific endpoint directly.
+
+When no agent is given, moat uses the agent named in the current directory's `moat.yaml`, or the only running agent if there's exactly one.
+
+The resolved URL is always printed, so it still works on a headless or SSH session where no browser is available.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `agent` | Agent name. Optional — defaults from the current directory's `moat.yaml`, or the sole running agent. |
+| `endpoint` | Endpoint name from `ports:`. Optional. |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--print` | Print the URL without opening a browser |
+
+### Examples
+
+```bash
+# Index of every running agent and endpoint
+moat open
+
+# The "my-app" agent (its endpoint index, or its sole endpoint)
+moat open my-app
+
+# my-app's "web" endpoint
+moat open my-app web
+
+# Print the URL without launching a browser
+moat open --print my-app
+```
+
+---
+
 ## moat status
 
 Show high-level system status summary.

@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/run"
+	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -107,5 +111,25 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			)
 		}
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	// If any run exposes endpoints and the routing proxy is up, advertise the
+	// discovery index so endpoints are reachable from a browser.
+	hasEndpoints := false
+	for _, r := range runs {
+		if len(r.Ports) > 0 {
+			hasEndpoints = true
+			break
+		}
+	}
+	if hasEndpoints {
+		proxyDir := filepath.Join(config.GlobalConfigDir(), "proxy")
+		if lock, _ := routing.LoadProxyLock(proxyDir); lock != nil && lock.IsAlive() {
+			fmt.Println(ui.Dim(fmt.Sprintf("\nEndpoints: https://localhost:%d/  ·  moat open <name> [endpoint]", lock.Port)))
+		}
+	}
+
+	return nil
 }

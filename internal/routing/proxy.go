@@ -30,8 +30,17 @@ func NewReverseProxy(routes *RouteTable) *ReverseProxy {
 func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse Host header: [service.]agent.localhost[:port]
 	host := r.Host
+	port := ""
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		port = host[idx+1:]
 		host = host[:idx] // Remove port
+	}
+
+	// Bare proxy root (e.g. http://localhost:8080) — serve a discovery index
+	// listing every running agent and its endpoints.
+	if host == "" || host == "localhost" || host == "127.0.0.1" {
+		rp.writeGlobalIndex(w, r, port)
+		return
 	}
 
 	// Only handle .localhost hosts — reject anything else to avoid
@@ -54,29 +63,47 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		agent = parts[0]
 	}
 
-	// Lookup backend address
-	var backendAddr string
-	var ok bool
+	// Service-specific route (e.g. web.demo.localhost). If the named endpoint
+	// exists, proxy straight to it.
 	if service != "" {
-		backendAddr, ok = rp.routes.Lookup(agent, service)
-	}
-	if !ok {
-		backendAddr, ok = rp.routes.LookupDefault(agent)
+		if backendAddr, ok := rp.routes.Lookup(agent, service); ok {
+			rp.proxyTo(w, r, backendAddr)
+			return
+		}
+		// Unknown service falls through to the agent's index/default handling
+		// below so the caller can discover the valid endpoint names.
 	}
 
-	if !ok {
-		registered := rp.routes.Agents()
+	// Bare agent host (e.g. demo.localhost) or unknown service: consult the
+	// agent's endpoints.
+	endpoints := rp.routes.Endpoints(agent)
+	switch len(endpoints) {
+	case 0:
 		log.Debug("routing: unknown agent",
 			"agent", agent,
 			"service", service,
 			"host", r.Host,
-			"registered", registered,
+			"registered", rp.routes.Agents(),
 		)
 		rp.writeError(w, http.StatusNotFound, "unknown agent", agent)
-		return
+	case 1:
+		// A single endpoint is unambiguous — route directly to it. Note this
+		// branch is reached both from the bare agent host (demo.localhost) and
+		// from an unknown service on a single-endpoint agent (typo.demo.localhost):
+		// in the latter case the typo'd subdomain still proxies through, which
+		// matches the pre-index behavior for single-endpoint agents.
+		for _, addr := range endpoints {
+			rp.proxyTo(w, r, addr)
+		}
+	default:
+		// Multiple endpoints: don't guess. Serve an index so the caller can
+		// pick the endpoint they want.
+		rp.writeAgentIndex(w, r, agent, endpoints, port)
 	}
+}
 
-	// Proxy the request
+// proxyTo reverse-proxies the request to the given backend host:port.
+func (rp *ReverseProxy) proxyTo(w http.ResponseWriter, r *http.Request, backendAddr string) {
 	target, err := url.Parse("http://" + backendAddr)
 	if err != nil {
 		rp.writeError(w, http.StatusInternalServerError, "invalid backend", backendAddr)
