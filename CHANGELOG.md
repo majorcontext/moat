@@ -33,6 +33,7 @@ Adds HTTP request-body inspection to Keep policies. File- and pack-based `networ
 ### Security
 
 - Upgrade dependencies to clear 15 vulnerabilities that `govulncheck` reports moat actually calls — `containerd/v2` (→2.2.5), `golang.org/x/crypto` (→0.53.0), `in-toto-golang` (→0.11.0), `go-git/v5` (→5.17.1), `moby/buildkit` (→0.28.1), and `ulikunitz/xz` (→0.5.15). No user action required. Remaining `govulncheck` findings are in `docker/docker` (no upstream fix available yet) and the Go standard library (cleared by building with a newer Go toolchain). ([#416](https://github.com/majorcontext/moat/pull/416))
+- Build with the Go 1.25.11 toolchain to clear ~16 Go standard-library vulnerabilities `govulncheck` reports moat calls (`crypto/x509`, `crypto/tls`, `html/template`, `net/*`, `archive/tar`, …), pinned via a `toolchain` directive. No user action required. With this and the dependency upgrades above, `govulncheck`'s reachable count drops from 36 to 5 — the rest being `docker/docker`, which has no upstream fix yet. ([#417](https://github.com/majorcontext/moat/pull/417))
 
 ## v0.6.1 — 2026-06-19
 
