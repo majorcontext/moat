@@ -3,10 +3,36 @@ package routing
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestEnsureRunningPortInUse(t *testing.T) {
+	// Occupy a port so the lifecycle's bind fails with EADDRINUSE.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	lc, err := NewLifecycle(t.TempDir(), port)
+	if err != nil {
+		t.Fatalf("NewLifecycle: %v", err)
+	}
+
+	err = lc.EnsureRunning()
+	if err == nil {
+		t.Fatal("EnsureRunning: expected error when port is in use, got nil")
+	}
+	// The message must be actionable: point at how to pick a different port.
+	if !strings.Contains(err.Error(), "MOAT_PROXY_PORT") || !strings.Contains(err.Error(), fmt.Sprint(port)) {
+		t.Errorf("error not actionable: %v", err)
+	}
+}
 
 func TestProxyLifecycle(t *testing.T) {
 	dir := t.TempDir()

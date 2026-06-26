@@ -2,9 +2,11 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/majorcontext/gatekeeper/proxy"
 )
@@ -98,6 +100,13 @@ func (lc *Lifecycle) EnsureRunning() error {
 	}
 
 	if err := lc.server.Start(lc.port); err != nil {
+		// The routing port is intentionally deterministic (no fallback to a
+		// random port — advertised URLs must stay stable). If the chosen port
+		// is taken, point the user at how to change it rather than surfacing a
+		// raw bind error.
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("routing proxy port %d is already in use — choose another with MOAT_PROXY_PORT=<port> or set proxy.port in ~/.moat/config.yaml: %w", lc.port, err)
+		}
 		return fmt.Errorf("starting proxy: %w", err)
 	}
 
