@@ -139,6 +139,7 @@ Open either in a browser for a clickable list. Clients that send `Accept: applic
 ```json
 { "agents": [
   { "name": "dark-mode",
+    "base_url": "https://dark-mode.localhost:8080",
     "endpoints": [ { "name": "web", "url": "https://web.dark-mode.localhost:8080" } ] }
 ] }
 ```
