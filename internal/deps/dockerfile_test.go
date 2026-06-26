@@ -712,6 +712,31 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	}
 }
 
+func TestWriteUserCustomDepsEnvSorted(t *testing.T) {
+	// rust contributes three ENV vars (CARGO_HOME, PATH, RUSTUP_HOME), so it
+	// exercises the ENV-sort path: they must be emitted in sorted key order so
+	// the generated Dockerfile is stable run-to-run (Docker layer caching).
+	var b strings.Builder
+	writeUserCustomDeps(&b, []Dependency{{Name: "rust"}})
+	out := b.String()
+
+	ci := strings.Index(out, "ENV CARGO_HOME=")
+	pi := strings.Index(out, "ENV PATH=")
+	ri := strings.Index(out, "ENV RUSTUP_HOME=")
+	if ci < 0 || pi < 0 || ri < 0 {
+		t.Fatalf("missing ENV lines:\n%s", out)
+	}
+	if !(ci < pi && pi < ri) {
+		t.Errorf("ENV keys not sorted (want CARGO_HOME<PATH<RUSTUP_HOME), got offsets %d/%d/%d:\n%s", ci, pi, ri, out)
+	}
+
+	var b2 strings.Builder
+	writeUserCustomDeps(&b2, []Dependency{{Name: "rust"}})
+	if b2.String() != out {
+		t.Error("writeUserCustomDeps output is not deterministic")
+	}
+}
+
 func TestGenerateDockerfileMixedUserAndRootCustomDeps(t *testing.T) {
 	// Verify that user-install and root custom deps coexist correctly.
 	deps := []Dependency{
