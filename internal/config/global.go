@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/majorcontext/moat/internal/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,7 +48,13 @@ func LoadGlobal() (*GlobalConfig, error) {
 
 	configPath := filepath.Join(GlobalConfigDir(), "config.yaml")
 	if data, err := os.ReadFile(configPath); err == nil {
-		_ = yaml.Unmarshal(data, cfg) // Ignore unmarshal errors, use defaults
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			// Don't silently run on defaults — a malformed global config is
+			// almost always a user typo they'd want to know about. Warn and
+			// reset to clean defaults (a partial unmarshal may have set fields).
+			log.Warn("ignoring malformed global config; using defaults", "path", configPath, "error", err)
+			cfg = DefaultGlobalConfig()
+		}
 	}
 
 	// Tilde expansion in mount sources resolves against the real user home,

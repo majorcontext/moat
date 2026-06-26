@@ -260,3 +260,20 @@ func TestDefaultGlobalConfig_DebugDefaults(t *testing.T) {
 		t.Errorf("expected default RetentionDays=14, got %d", cfg.Debug.RetentionDays)
 	}
 }
+
+func TestLoadGlobalMalformedReturnsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MOAT_HOME", dir)
+	// Invalid YAML — a user typo in ~/.moat/config.yaml.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("proxy: {port: : :]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadGlobal()
+	if err != nil {
+		t.Fatalf("LoadGlobal should not fail on malformed config: %v", err)
+	}
+	if want := DefaultGlobalConfig().Proxy.Port; cfg.Proxy.Port != want {
+		t.Errorf("malformed config should fall back to defaults: Proxy.Port = %d, want %d", cfg.Proxy.Port, want)
+	}
+}

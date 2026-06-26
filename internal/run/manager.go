@@ -3579,12 +3579,16 @@ func runProviderStoppedHooks(r *Run) {
 		if len(meta) == 0 {
 			continue
 		}
+		// ProviderMeta is guarded by stateMu — SaveMetadata may read it
+		// concurrently from monitorContainerExit/Stop.
+		r.stateMu.Lock()
 		if r.ProviderMeta == nil {
 			r.ProviderMeta = make(map[string]string)
 		}
 		for k, v := range meta {
 			r.ProviderMeta[k] = v
 		}
+		r.stateMu.Unlock()
 	}
 }
 

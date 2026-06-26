@@ -217,6 +217,12 @@ func (rt *RouteTable) save() error {
 	if err != nil {
 		return err
 	}
+	// Write atomically (temp + rename) so a crash mid-write can't leave a
+	// truncated/corrupt routes.json that every proxy then fails to parse.
 	path := filepath.Join(rt.dir, "routes.json")
-	return os.WriteFile(path, data, 0644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
