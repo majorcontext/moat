@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/majorcontext/moat/internal/credential/keyring"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/term"
@@ -502,8 +503,10 @@ func hasClaudeCodeCredentials() bool {
 // 1. macOS Keychain (if on macOS)
 // 2. ~/.claude/.credentials.json file
 func getClaudeCodeCredentials() (*oauthToken, error) {
-	// Try keychain first on macOS
-	if runtime.GOOS == "darwin" {
+	// Try keychain first on macOS, unless the keychain is disabled
+	// (MOAT_KEYRING_BACKEND=file) — e.g. in tests or headless environments
+	// where touching the keychain would pop a blocking authorization prompt.
+	if runtime.GOOS == "darwin" && !keyring.KeychainDisabled() {
 		if token, err := getFromKeychain(); err == nil {
 			log.Debug("credentials found in keychain",
 				"subsystem", "grant",

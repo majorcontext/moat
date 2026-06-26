@@ -25,14 +25,21 @@ func TestManagerExecInteractive_NotRunning(t *testing.T) {
 	}
 }
 
+// unknownRuntimeType is a RuntimeType that NewRuntimeByType rejects on every
+// platform. Using it (rather than "apple") keeps the resolve-error test
+// deterministic: on a Mac where Apple containers are actually available, the
+// pool's lazy Get("apple") would succeed and the test would fall through to a
+// real exec instead of the resolve-error path it means to exercise.
+const unknownRuntimeType container.RuntimeType = "nonexistent-runtime"
+
 // TestManagerExecInteractive_RuntimeResolveError verifies that ExecInteractive
 // returns the "resolving runtime" error when the run's Runtime field names a
 // type that is not available in the pool.
 func TestManagerExecInteractive_RuntimeResolveError(t *testing.T) {
 	// newEdgeCaseManager creates a pool whose only runtime is the flexibleRuntime
-	// (type = RuntimeDocker). A run whose Runtime field is set to "apple" requests
-	// a different type — one that is not in the pool — which triggers the
-	// runtimeForRun error path.
+	// (type = RuntimeDocker). A run whose Runtime field names a type not in the
+	// pool forces the pool to lazily initialize it, which fails for an unknown
+	// type and triggers the runtimeForRun error path.
 	rt := &flexibleRuntime{done: make(chan struct{})}
 	m := newEdgeCaseManager(t, rt)
 
@@ -41,7 +48,7 @@ func TestManagerExecInteractive_RuntimeResolveError(t *testing.T) {
 		Name:        "rt-resolve",
 		ContainerID: "ctr-rt",
 		State:       StateRunning,
-		Runtime:     string(container.RuntimeApple), // pool only has Docker
+		Runtime:     string(unknownRuntimeType), // not in pool, cannot be created
 		exitCh:      make(chan struct{}),
 	}
 	m.mu.Lock()

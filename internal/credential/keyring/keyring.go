@@ -11,6 +11,11 @@
 // If the keychain is unavailable (e.g., in CI, headless servers, or containers),
 // it silently falls back to file-based storage with restricted permissions (0600).
 //
+// Setting MOAT_KEYRING_BACKEND=file forces file-based storage and skips the
+// system keychain entirely. This is useful on headless or locked-down macOS
+// where touching the keychain pops a blocking GUI authorization prompt, and is
+// set by the test suite so tests never touch (or prompt for) the real keychain.
+//
 // Concurrency: All key creation operations are protected by a global file lock
 // (~/.moat/key.lock, or $MOAT_HOME/key.lock when MOAT_HOME is set) to prevent race
 // conditions when multiple processes attempt
@@ -54,6 +59,18 @@ func getServiceName() string {
 		return name
 	}
 	return ServiceName
+}
+
+// KeychainDisabled reports whether Moat should skip the system keychain
+// entirely (encryption key and any other keychain-backed credential lookups)
+// in favor of file-based sources. Controlled by MOAT_KEYRING_BACKEND=file.
+//
+// This avoids the blocking keychain authorization prompt on headless or
+// locked-down macOS — including the "allow this app to use / modify the
+// keychain item" dialog that an unsigned, freshly-rebuilt test binary triggers.
+// The test suite sets it so tests never touch (or prompt for) the real keychain.
+func KeychainDisabled() bool {
+	return os.Getenv("MOAT_KEYRING_BACKEND") == "file"
 }
 
 // encodeKey converts a raw key to base64 for keychain storage.
@@ -298,11 +315,15 @@ func withGlobalKeyLock(fn func() ([]byte, error)) ([]byte, error) {
 	return fn()
 }
 
-// getOrCreateKeyWithBackends retrieves or creates an encryption key using the provided backends.
+// getOrCreateKeyWithBackends retrieves or creates an encryption key using the
+// provided backends. A nil primary skips the keychain entirely and uses the
+// fallback (file) backend only — the MOAT_KEYRING_BACKEND=file path.
 func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
-	// 1. Try primary backend (keychain)
-	if key, err := primary.Get(); err == nil {
-		return key, nil
+	// 1. Try primary backend (keychain), when configured.
+	if primary != nil {
+		if key, err := primary.Get(); err == nil {
+			return key, nil
+		}
 	}
 
 	// 2. Try fallback backend (file)
@@ -316,21 +337,24 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 		return nil, err
 	}
 
-	// 4. Try to store in primary
-	primaryErr := primary.Set(key)
-	if primaryErr == nil {
-		// Re-read from primary for consistency with fallback path.
-		// This ensures we always return the actually stored key.
-		storedKey, getErr := primary.Get()
-		if getErr != nil {
-			return nil, fmt.Errorf("failed to verify stored encryption key in %s: %w", primary.Name(), getErr)
+	// 4. Try to store in primary, when configured.
+	var primaryErr error
+	if primary != nil {
+		primaryErr = primary.Set(key)
+		if primaryErr == nil {
+			// Re-read from primary for consistency with fallback path.
+			// This ensures we always return the actually stored key.
+			storedKey, getErr := primary.Get()
+			if getErr != nil {
+				return nil, fmt.Errorf("failed to verify stored encryption key in %s: %w", primary.Name(), getErr)
+			}
+			return storedKey, nil
 		}
-		return storedKey, nil
+		// 5. Fall back to file storage.
+		slog.Info("system keychain unavailable, using file-based key storage",
+			"fallback", fallback.Name())
 	}
 
-	// 5. Fall back to file storage
-	slog.Info("system keychain unavailable, using file-based key storage",
-		"fallback", fallback.Name())
 	if fallbackErr := fallback.Set(key); fallbackErr != nil {
 		// fallback.Name() returns a display string like "file (/path/to/key)",
 		// so extract the raw directory from the concrete backend when possible.
@@ -338,11 +362,15 @@ func getOrCreateKeyWithBackends(primary, fallback Backend) ([]byte, error) {
 		if fb, ok := fallback.(*fileBackend); ok {
 			dir = filepath.Dir(fb.path)
 		}
-		return nil, fmt.Errorf("storing encryption key failed.\n"+
-			"  Keychain (%s): %v\n"+
-			"  File (%s): %v\n"+
-			"Remediation: Ensure %s is writable and check system keychain access settings",
-			primary.Name(), primaryErr, fallback.Name(), fallbackErr, dir)
+		if primary != nil {
+			return nil, fmt.Errorf("storing encryption key failed.\n"+
+				"  Keychain (%s): %v\n"+
+				"  File (%s): %v\n"+
+				"Remediation: Ensure %s is writable and check system keychain access settings",
+				primary.Name(), primaryErr, fallback.Name(), fallbackErr, dir)
+		}
+		return nil, fmt.Errorf("storing encryption key in %s failed: %w\n"+
+			"Remediation: Ensure %s is writable", fallback.Name(), fallbackErr, dir)
 	}
 
 	// Re-read the key from fallback to ensure we return the actual stored key.
@@ -364,8 +392,12 @@ func GetOrCreateKey() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		primary := &keychainBackend{}
 		fallback := &fileBackend{path: keyFilePath}
+		// A nil primary tells getOrCreateKeyWithBackends to skip the keychain.
+		var primary Backend
+		if !KeychainDisabled() {
+			primary = &keychainBackend{}
+		}
 		return getOrCreateKeyWithBackends(primary, fallback)
 	})
 }
@@ -380,8 +412,17 @@ func DeleteKey() error {
 		slog.Debug("could not determine key file path for deletion", "error", err)
 		keyFilePath = "" // Will cause file backend to fail gracefully
 	}
-	primary := &keychainBackend{}
 	fallback := &fileBackend{path: keyFilePath}
+
+	// When the keychain is disabled, only the file backend holds a key.
+	if KeychainDisabled() {
+		if err := fallback.Delete(); err != nil {
+			return fmt.Errorf("deleting key from %s: %w", fallback.Name(), err)
+		}
+		return nil
+	}
+
+	primary := &keychainBackend{}
 
 	// Try to delete from both backends, collecting any errors
 	var primaryErr, fallbackErr error

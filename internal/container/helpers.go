@@ -1,16 +1,13 @@
 package container
 
-// isRunID checks if a string looks like a moat run ID (8 hex chars).
+import "github.com/majorcontext/moat/internal/id"
+
+// isRunID reports whether s is a moat run ID — the value moat passes as the
+// container's `--name`. Run IDs have the form "run_" followed by 12 lowercase
+// hex chars (see internal/id.Generate). This is how ListContainers tells moat
+// containers apart from unrelated containers on the host.
 func isRunID(s string) bool {
-	if len(s) != 8 {
-		return false
-	}
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return false
-		}
-	}
-	return true
+	return id.IsValid(s, "run")
 }
 
 // isValidUsername checks if a string is a valid POSIX username.

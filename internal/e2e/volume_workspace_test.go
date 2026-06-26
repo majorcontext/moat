@@ -169,11 +169,13 @@ func extractLogValue(logs []storage.LogEntry, key string) string {
 // protection, snapshot, restore --to with .git/agent-commit preservation, the
 // in-place-restore block, and the destroy data-loss guard.
 //
-// requireDocker-gated so it runs in Linux CI and, on a Mac with Docker Desktop,
+// Docker-gated so it runs in Linux CI and, on a Mac with Docker Desktop,
 // also exercises the Docker-Desktop virtual-FS paths (VolumeExport copy,
-// archive-backend restore) that had macOS-only bugs.
+// archive-backend restore) that had macOS-only bugs. Uses skipIfNoDocker (not
+// requireDocker) so it forces the Docker runtime — volume mode is Docker-only,
+// and without forcing, auto-detection would pick Apple containers on macOS.
 func TestVolumeWorkspaceLifecycle(t *testing.T) {
-	requireDocker(t)
+	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -331,7 +333,9 @@ func TestVolumeWorkspaceLifecycle(t *testing.T) {
 // volume-mode run with no extraction snapshot refuses to be destroyed without
 // --force, and the volume persists until --force is used.
 func TestVolumeWorkspaceDestroyGuard(t *testing.T) {
-	requireDocker(t)
+	// skipIfNoDocker (not requireDocker) forces the Docker runtime — volume mode
+	// is Docker-only, and auto-detection would pick Apple containers on macOS.
+	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()

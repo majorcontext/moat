@@ -2,7 +2,6 @@ package container
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -75,27 +74,6 @@ func TestAppleBuildRunArgsNoNetwork(t *testing.T) {
 	assert.NotContains(t, args, "--network")
 }
 
-func TestParseContainerIP(t *testing.T) {
-	// Real output from `container inspect`
-	inspectJSON := `[{"networks":[{"macAddress":"fe:6f:a4:62:2c:2c","network":"moat-run_30c05d9962c8","hostname":"moat-postgres-run_30c05d9962c8","ipv4Address":"192.168.68.2/24","ipv4Gateway":"192.168.68.1","ipv6Address":"fda7:cecc:4485:250e:fc6f:a4ff:fe62:2c2c/64"}],"status":"running"}]`
-
-	var info []struct {
-		Networks []struct {
-			IPv4Address string `json:"ipv4Address"`
-		} `json:"networks"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(inspectJSON), &info))
-	require.Len(t, info, 1)
-	require.Len(t, info[0].Networks, 1)
-
-	addr := info[0].Networks[0].IPv4Address
-	// Strip CIDR prefix
-	if idx := len("192.168.68.2"); idx < len(addr) && addr[idx] == '/' {
-		addr = addr[:idx]
-	}
-	assert.Equal(t, "192.168.68.2", addr)
-}
-
 func TestGetContainerIPParsing(t *testing.T) {
 	// Test that getContainerIP would correctly parse the IP (without calling CLI)
 	// We test the parsing logic by verifying buildServiceInfo uses the host parameter
@@ -135,16 +113,25 @@ func TestParseRunContainerID(t *testing.T) {
 }
 
 func TestParseContainerIPv4(t *testing.T) {
-	// CIDR prefix is stripped.
+	// CIDR prefix is stripped (legacy schema: top-level networks, status string).
 	addr, ok, err := parseContainerIPv4([]byte(`[{"networks":[{"ipv4Address":"192.168.68.2/24"}],"status":"running"}]`))
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, "192.168.68.2", addr)
 
-	// Container started but no address assigned yet (the race we retry on).
+	// container 1.0.0 schema: networks nested under the status object.
+	addr, ok, err = parseContainerIPv4([]byte(`[{"id":"run_abc","status":{"state":"running","networks":[{"ipv4Address":"192.168.64.2/24","ipv4Gateway":"192.168.64.1"}]}}]`))
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "192.168.64.2", addr)
+
+	// Container started but no address assigned yet (the race we retry on) —
+	// both schemas.
 	for _, empty := range []string{
 		`[{"networks":[],"status":"running"}]`,
 		`[{"networks":[{"ipv4Address":""}],"status":"running"}]`,
+		`[{"id":"run_abc","status":{"state":"running","networks":[]}}]`,
+		`[{"id":"run_abc","status":{"state":"stopped"}}]`,
 		`[]`,
 	} {
 		_, ok, err := parseContainerIPv4([]byte(empty))
@@ -157,54 +144,79 @@ func TestParseContainerIPv4(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// ipInspectSchemas builds a `container inspect` response carrying the given
+// IPv4 address (empty = no address assigned yet) in each CLI schema
+// getContainerIP must handle: the legacy top-level `networks` array and the
+// 1.0.0 `status.networks` object. Each retry test runs against both so a
+// regression in how networks() traverses either layout is caught.
+var ipInspectSchemas = map[string]func(addr string) []byte{
+	"legacy": func(addr string) []byte {
+		return []byte(`[{"networks":[{"ipv4Address":"` + addr + `"}],"status":"running"}]`)
+	},
+	"v1": func(addr string) []byte {
+		return []byte(`[{"id":"run_x","status":{"state":"running","networks":[{"ipv4Address":"` + addr + `"}]}}]`)
+	},
+}
+
 func TestGetContainerIPRetriesUntilAssigned(t *testing.T) {
-	calls := 0
-	mgr := &appleServiceManager{
-		ipRetryBase: time.Millisecond,
-		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
-			calls++
-			if calls < 3 {
-				// Address not assigned yet.
-				return []byte(`[{"networks":[{"ipv4Address":""}],"status":"running"}]`), nil
+	for name, build := range ipInspectSchemas {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mgr := &appleServiceManager{
+				ipRetryBase: time.Millisecond,
+				inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+					calls++
+					if calls < 3 {
+						return build(""), nil // address not assigned yet
+					}
+					return build("192.168.81.2/24"), nil
+				},
 			}
-			return []byte(`[{"networks":[{"ipv4Address":"192.168.81.2/24"}],"status":"running"}]`), nil
-		},
+			addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+			require.NoError(t, err)
+			assert.Equal(t, "192.168.81.2", addr)
+			assert.Equal(t, 3, calls, "should poll until the address appears")
+		})
 	}
-	addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
-	require.NoError(t, err)
-	assert.Equal(t, "192.168.81.2", addr)
-	assert.Equal(t, 3, calls, "should poll until the address appears")
 }
 
 func TestGetContainerIPTimesOutWithoutAddress(t *testing.T) {
-	calls := 0
-	mgr := &appleServiceManager{
-		ipRetryBase: time.Millisecond,
-		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
-			calls++
-			return []byte(`[{"networks":[{"ipv4Address":""}],"status":"running"}]`), nil
-		},
+	for name, build := range ipInspectSchemas {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mgr := &appleServiceManager{
+				ipRetryBase: time.Millisecond,
+				inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+					calls++
+					return build(""), nil
+				},
+			}
+			_, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+			require.Error(t, err)
+			assert.Equal(t, containerIPMaxAttempts, calls)
+		})
 	}
-	_, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
-	require.Error(t, err)
-	assert.Equal(t, containerIPMaxAttempts, calls)
 }
 
 func TestGetContainerIPRetriesTransientInspectError(t *testing.T) {
-	calls := 0
-	mgr := &appleServiceManager{
-		ipRetryBase: time.Millisecond,
-		inspectFn: func(_ context.Context, _ string) ([]byte, error) {
-			calls++
-			if calls < 2 {
-				return nil, errors.New("exit status 1")
+	for name, build := range ipInspectSchemas {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mgr := &appleServiceManager{
+				ipRetryBase: time.Millisecond,
+				inspectFn: func(_ context.Context, _ string) ([]byte, error) {
+					calls++
+					if calls < 2 {
+						return nil, errors.New("exit status 1")
+					}
+					return build("192.168.81.2/24"), nil
+				},
 			}
-			return []byte(`[{"networks":[{"ipv4Address":"192.168.81.2/24"}],"status":"running"}]`), nil
-		},
+			addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
+			require.NoError(t, err)
+			assert.Equal(t, "192.168.81.2", addr)
+		})
 	}
-	addr, err := mgr.getContainerIP(context.Background(), "moat-postgres-run_x")
-	require.NoError(t, err)
-	assert.Equal(t, "192.168.81.2", addr)
 }
 
 func TestAppleBuildRunArgsWithMemory(t *testing.T) {

@@ -44,6 +44,14 @@ func TestDockerExecInteractive(t *testing.T) {
 	}
 	defer rt.StopContainer(ctx, containerID)
 
+	// StartContainer returns as soon as the container is started, not when the
+	// entrypoint's `adduser -D moatuser` has finished. ExecInteractive hardcodes
+	// User:"moatuser", so firing a subtest before the user exists races container
+	// startup — invisible locally (the gap is sub-millisecond) but it surfaces as
+	// an exec failure on slow/loaded CI runners. Wait until a moatuser exec runs
+	// cleanly first.
+	waitForMoatUser(t, rt, containerID)
+
 	t.Run("TTY output contains expected string", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := rt.ExecInteractive(ctx, containerID, []string{"sh", "-c", "echo HELLO_INTERACTIVE"}, ExecOptions{
@@ -77,4 +85,22 @@ func TestDockerExecInteractive(t *testing.T) {
 			t.Errorf("ExitCode = %d, want 7", execErr.ExitCode)
 		}
 	})
+}
+
+// waitForMoatUser blocks until a `moatuser` exec runs cleanly in the container,
+// confirming the entrypoint finished creating the user and the container is far
+// enough along to accept exec. Reuses rt.Exec (which also runs as moatuser), so
+// success means ExecInteractive's hardcoded User won't race startup.
+func waitForMoatUser(t *testing.T, rt *DockerRuntime, containerID string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		var out bytes.Buffer
+		if last = rt.Exec(context.Background(), containerID, []string{"true"}, nil, &out, &out); last == nil {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	t.Fatalf("moatuser not ready in container within deadline: %v", last)
 }
