@@ -645,3 +645,33 @@ func TestFileStoreGetNotFoundIsErrNotFound(t *testing.T) {
 		t.Errorf("Get for missing credential: got %v, want errors.Is(..., ErrNotFound)", err)
 	}
 }
+
+func TestFileStoreGetDecryptFailedIsErrDecrypt(t *testing.T) {
+	dir := t.TempDir()
+
+	// Save a credential under one key...
+	key1 := make([]byte, 32)
+	if _, err := rand.Read(key1); err != nil {
+		t.Fatal(err)
+	}
+	store1, err := NewFileStore(dir, key1)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store1.Save(Credential{Provider: "github", Token: "ghp_test", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// ...then read it back with a different key -> decryption fails as ErrDecrypt.
+	key2 := make([]byte, 32)
+	if _, err := rand.Read(key2); err != nil {
+		t.Fatal(err)
+	}
+	store2, err := NewFileStore(dir, key2)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if _, err := store2.Get(Provider("github")); !errors.Is(err, ErrDecrypt) {
+		t.Errorf("Get with wrong key: got %v, want errors.Is(..., ErrDecrypt)", err)
+	}
+}
