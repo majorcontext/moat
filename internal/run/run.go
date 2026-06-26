@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -71,9 +72,10 @@ type Run struct {
 	sshAgentStopOnce sync.Once // Ensures SSHAgentServer.Stop() called only once
 	cleanupOnce      sync.Once // Ensures resource cleanup runs only once
 
-	// State protection - guards State, Error, StartedAt, StoppedAt fields
-	// Use this lock when reading or modifying these fields to prevent races
-	// between monitorContainerExit goroutine and user-facing methods
+	// State protection - guards State, Error, StartedAt, StoppedAt, and
+	// ProviderMeta. Use this lock when reading or modifying these fields to
+	// prevent races between the monitorContainerExit goroutine, provider
+	// stopped-hooks, and user-facing methods.
 	stateMu sync.Mutex
 
 	// Firewall settings (set when network.policy is strict)
@@ -161,13 +163,15 @@ func (r *Run) SaveMetadata() error {
 		return nil // No store configured
 	}
 
-	// Snapshot stateMu-protected fields under the lock to avoid races
-	// between Stop() and monitorContainerExit() calling SaveMetadata concurrently.
+	// Snapshot stateMu-protected fields under the lock to avoid races between
+	// concurrent SaveMetadata calls (Stop / monitorContainerExit) and
+	// runProviderStoppedHooks writing ProviderMeta.
 	r.stateMu.Lock()
 	state := r.State
 	startedAt := r.StartedAt
 	stoppedAt := r.StoppedAt
 	errMsg := r.Error
+	providerMeta := maps.Clone(r.ProviderMeta)
 	r.stateMu.Unlock()
 
 	return r.Store.SaveMetadata(storage.Metadata{
@@ -184,7 +188,7 @@ func (r *Run) SaveMetadata() error {
 		StartedAt:           startedAt,
 		StoppedAt:           stoppedAt,
 		Error:               errMsg,
-		ProviderMeta:        r.ProviderMeta,
+		ProviderMeta:        providerMeta,
 		WorktreeBranch:      r.WorktreeBranch,
 		WorktreePath:        r.WorktreePath,
 		WorktreeRepoID:      r.WorktreeRepoID,

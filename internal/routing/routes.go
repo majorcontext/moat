@@ -217,6 +217,35 @@ func (rt *RouteTable) save() error {
 	if err != nil {
 		return err
 	}
+	// Write atomically (unique temp + rename) so a crash mid-write can't leave a
+	// truncated routes.json that every proxy then fails to parse. The table
+	// reloads before every mutation to support writers in other processes, so
+	// the temp name must be unique per writer — a shared name would let
+	// concurrent cross-process saves clobber each other's temp before rename.
 	path := filepath.Join(rt.dir, "routes.json")
-	return os.WriteFile(path, data, 0644)
+	tmp, err := os.CreateTemp(rt.dir, "routes-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	// Match the previous routes.json mode (CreateTemp defaults to 0600).
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
