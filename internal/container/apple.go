@@ -45,6 +45,9 @@ type AppleRuntime struct {
 	activePTY map[string]*os.File
 }
 
+// Verify AppleRuntime satisfies the Runtime interface at compile time.
+var _ Runtime = (*AppleRuntime)(nil)
+
 // appleBuildManager implements BuildManager for Apple containers.
 type appleBuildManager struct {
 	containerBin string

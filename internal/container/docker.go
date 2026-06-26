@@ -68,6 +68,9 @@ type DockerRuntime struct {
 	buildMgr   *dockerBuildManager
 }
 
+// Verify DockerRuntime satisfies the Runtime interface at compile time.
+var _ Runtime = (*DockerRuntime)(nil)
+
 // dockerNetworkManager implements NetworkManager for Docker.
 type dockerNetworkManager struct {
 	cli *client.Client

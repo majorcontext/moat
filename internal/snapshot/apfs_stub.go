@@ -2,10 +2,10 @@
 
 package snapshot
 
-import "fmt"
+import "errors"
 
 // ErrAPFSNotAvailable is returned when APFS operations are attempted on non-Darwin platforms.
-var ErrAPFSNotAvailable = fmt.Errorf("APFS snapshots are only available on macOS")
+var ErrAPFSNotAvailable = errors.New("APFS snapshots are only available on macOS")
 
 // APFSBackend is a stub for non-darwin platforms.
 // On non-darwin systems, all methods return errors to indicate APFS is unavailable.

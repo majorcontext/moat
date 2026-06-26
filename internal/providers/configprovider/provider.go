@@ -35,7 +35,7 @@ const maxScrubBodySize = 512 * 1024
 // back to the container (e.g., Telegram's getWebhookInfo can return URLs containing
 // the bot token).
 func buildResponseScrubber(realToken, placeholder string) credential.ResponseTransformer {
-	return func(reqInterface, respInterface interface{}) (interface{}, bool) {
+	return func(reqInterface, respInterface any) (any, bool) {
 		resp, ok := respInterface.(*http.Response)
 		if !ok || resp.Body == nil {
 			return respInterface, false
