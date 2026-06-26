@@ -197,29 +197,17 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		return startErr
 	}
 
-	// Set up routing proxy.
+	// Give the daemon API the shared route table so runs can register their
+	// hostname routes via POST /v1/routes/. Hostname traffic is served by the
+	// per-agent routing proxy (internal/routing.Lifecycle) that every `moat run`
+	// with exposed ports starts and shares via ~/.moat/proxy/proxy.lock — the
+	// daemon does not host its own routing proxy. (It used to start a second one
+	// here on a random, never-advertised port; nothing could reach it.)
 	routeTable, err := routing.NewRouteTable(daemonDir)
 	if err != nil {
 		log.Warn("failed to create route table", "error", err)
 	} else {
 		apiServer.SetRoutes(routeTable)
-
-		routingProxy := routing.NewProxyServer(routeTable)
-
-		// Enable TLS for routing proxy using same CA.
-		if err := routingProxy.EnableTLS(ca); err != nil {
-			log.Warn("failed to enable TLS for routing proxy", "error", err)
-		}
-
-		// Start routing proxy on a random available port.
-		if err := routingProxy.Start(0); err != nil {
-			log.Warn("failed to start routing proxy", "error", err)
-		} else {
-			log.Info("routing proxy started", "port", routingProxy.Port())
-			defer func() {
-				_ = routingProxy.Stop(context.Background())
-			}()
-		}
 	}
 
 	log.Info("daemon started", "pid", os.Getpid(), "proxy_port", actualPort, "sock", sockPath)
