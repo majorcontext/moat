@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -56,11 +57,10 @@ type MissingGrant struct {
 // blindly, so it is surfaced rather than prompted. Mirrors the buckets in
 // validateGrants so the detector and the validator classify identically.
 func classifyMissingReason(err error) MissingReason {
-	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "decrypting credential"):
+	case errors.Is(err, credential.ErrDecrypt):
 		return ReasonDecryptFailed
-	case strings.Contains(msg, "credential not found"):
+	case errors.Is(err, credential.ErrNotFound):
 		return ReasonNotConfigured
 	default:
 		return ReasonReadFailed

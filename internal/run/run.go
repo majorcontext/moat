@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -34,6 +35,11 @@ const (
 	StateStopped  State = "stopped"
 	StateFailed   State = "failed"
 )
+
+// ErrRunNotFound is returned (wrapped) when no run matches the given name or ID.
+// Match it with errors.Is. It aliases the daemon's sentinel so a not-found from
+// either the manager or the daemon registry compares equal.
+var ErrRunNotFound = daemon.ErrRunNotFound
 
 // Run represents an agent execution environment.
 type Run struct {
@@ -304,12 +310,11 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 		// Check credential exists and can be decrypted
 		_, err := store.Get(credName)
 		if err != nil {
-			errMsg := err.Error()
 			grantCmd := grantToCommand(grant)
 			switch {
-			case strings.Contains(errMsg, "credential not found"):
+			case errors.Is(err, credential.ErrNotFound):
 				errs = append(errs, fmt.Sprintf("  - %s: not configured\n    Run: moat grant %s", grant, grantCmd))
-			case strings.Contains(errMsg, "decrypting credential"):
+			case errors.Is(err, credential.ErrDecrypt):
 				errs = append(errs, fmt.Sprintf("  - %s: encryption key changed\n    Run: moat grant %s", grant, grantCmd))
 			default:
 				errs = append(errs, fmt.Sprintf("  - %s: %v\n    Run: moat grant %s", grant, err, grantCmd))

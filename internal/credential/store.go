@@ -95,7 +95,7 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	encrypted, err := os.ReadFile(s.path(provider))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("credential not found: %s", provider)
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, provider)
 		}
 		return nil, fmt.Errorf("reading credential file: %w", err)
 	}
@@ -108,10 +108,10 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	nonce, ciphertext := encrypted[:nonceSize], encrypted[nonceSize:]
 	data, err := s.cipher.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting credential for %s: %w\n"+
+		return nil, fmt.Errorf("%w for %s: %w\n"+
 			"  This may indicate the encryption key has changed.\n"+
 			"  If you recently upgraded moat, your credentials may have been encrypted with the old key.\n"+
-			"  To re-authenticate: moat grant %s", provider, err, provider)
+			"  To re-authenticate: moat grant %s", ErrDecrypt, provider, err, provider)
 	}
 
 	var cred Credential

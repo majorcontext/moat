@@ -27,7 +27,7 @@ func (m *Manager) Resolve(arg string) ([]*Run, error) {
 	if id.IsValid(arg, "run") {
 		r, ok := m.runs[arg]
 		if !ok {
-			return nil, fmt.Errorf("run %s not found", arg)
+			return nil, fmt.Errorf("%w: %s", ErrRunNotFound, arg)
 		}
 		return []*Run{r}, nil
 	}

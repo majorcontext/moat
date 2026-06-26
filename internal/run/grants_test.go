@@ -3,6 +3,7 @@ package run
 import (
 	"crypto/rand"
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,17 +113,18 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 
 func TestClassifyMissingReason(t *testing.T) {
 	cases := []struct {
-		msg  string
+		name string
+		err  error
 		want MissingReason
 	}{
-		{"decrypting credential for github: cipher: message authentication failed", ReasonDecryptFailed},
-		{"credential not found: github", ReasonNotConfigured},
-		{"reading credential file: open /x: permission denied", ReasonReadFailed},
-		{"invalid credential file", ReasonReadFailed},
+		{"decrypt", fmt.Errorf("%w for github: cipher", credential.ErrDecrypt), ReasonDecryptFailed},
+		{"not found", fmt.Errorf("%w: github", credential.ErrNotFound), ReasonNotConfigured},
+		{"read failure", stderrors.New("reading credential file: open /x: permission denied"), ReasonReadFailed},
+		{"unwrapped", stderrors.New("invalid credential file"), ReasonReadFailed},
 	}
 	for _, c := range cases {
-		if got := classifyMissingReason(stderrors.New(c.msg)); got != c.want {
-			t.Errorf("classifyMissingReason(%q) = %v, want %v", c.msg, got, c.want)
+		if got := classifyMissingReason(c.err); got != c.want {
+			t.Errorf("classifyMissingReason(%s) = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,8 +12,8 @@ import (
 func TestManagerExecInteractive_RunNotFound(t *testing.T) {
 	m := &Manager{runs: map[string]*Run{}}
 	err := m.ExecInteractive(context.Background(), "run_missing", []string{"claude"}, container.ExecOptions{})
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("got %v, want a 'not found' error", err)
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("got %v, want ErrRunNotFound", err)
 	}
 }
 
