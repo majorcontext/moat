@@ -2,6 +2,8 @@ module github.com/majorcontext/moat
 
 go 1.25.5
 
+toolchain go1.25.11
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
