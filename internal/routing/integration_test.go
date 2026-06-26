@@ -109,7 +109,8 @@ func TestFullRoutingFlow(t *testing.T) {
 		t.Errorf("HTTPS API response = %q, want 'api service'", body)
 	}
 
-	// Test default service (agent without service prefix)
+	// Test bare agent host (no service prefix): with multiple endpoints this
+	// serves the discovery index page (200) rather than guessing a backend.
 	req, _ = http.NewRequest("GET", "https://"+proxyAddr+"/", nil)
 	req.Host = "myapp.localhost"
 	resp, err = httpsClient.Do(req)

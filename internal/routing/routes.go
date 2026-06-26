@@ -177,6 +177,45 @@ func (rt *RouteTable) RemoveIfStale(agent string) bool {
 	return true
 }
 
+// Endpoints returns a copy of an agent's endpoint -> host:port map.
+// It reloads routes from disk to pick up changes from other processes.
+// Returns nil if the agent has no registered routes.
+func (rt *RouteTable) Endpoints(agent string) map[string]string {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
+
+	endpoints, ok := rt.routes[agent]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(endpoints))
+	for name, addr := range endpoints {
+		out[name] = addr
+	}
+	return out
+}
+
+// Snapshot returns a deep copy of the full agent -> endpoint -> host:port map.
+// It reloads routes from disk to pick up changes from other processes.
+func (rt *RouteTable) Snapshot() map[string]map[string]string {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.reload()
+
+	out := make(map[string]map[string]string, len(rt.routes))
+	for agent, endpoints := range rt.routes {
+		copied := make(map[string]string, len(endpoints))
+		for name, addr := range endpoints {
+			copied[name] = addr
+		}
+		out[agent] = copied
+	}
+	return out
+}
+
 // Agents returns all registered agent names.
 // It reloads routes from disk to pick up changes from other processes.
 func (rt *RouteTable) Agents() []string {
