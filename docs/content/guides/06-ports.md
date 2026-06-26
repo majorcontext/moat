@@ -37,6 +37,13 @@ Moat starts a routing proxy automatically when `ports` are configured.
 
 ### 3. Open in your browser
 
+```bash
+$ moat open my-app web
+https://web.my-app.localhost:8080
+```
+
+`moat open` resolves the URL and launches your browser (and always prints it). Or open it directly:
+
 ```
 https://web.my-app.localhost:8080
 ```
@@ -86,6 +93,8 @@ $ moat list
 NAME        RUN ID              STATE    AGE  ENDPOINTS
 dark-mode   run_a1b2c3d4e5f6   running  2m ago   web
 checkout    run_d4e5f6a1b2c3   running  1m ago   web
+
+Endpoints: https://localhost:8080/  ·  moat open <name> [endpoint]
 ```
 
 ### Stop agents
@@ -101,6 +110,40 @@ By run ID:
 ```bash
 $ moat stop run_a1b2c3d4e5f6
 ```
+
+## Discovering endpoints
+
+You don't have to memorize hostnames. Moat serves a discovery index and ships a shortcut to open it.
+
+### moat open
+
+```bash
+$ moat open                 # index of every running agent and endpoint
+$ moat open dark-mode       # the dark-mode agent's endpoints
+$ moat open dark-mode web   # dark-mode's "web" endpoint, directly
+```
+
+With no agent, moat uses the agent named in the current directory's `moat.yaml`, or the only running agent. The URL is always printed, so `moat open --print` works on a headless or SSH session. See [`moat open`](../reference/01-cli.md#moat-open).
+
+### Index pages
+
+The proxy root is a browsable index:
+
+```
+https://localhost:8080            → every agent and its endpoints
+https://dark-mode.localhost:8080  → one agent's endpoints
+```
+
+Open either in a browser for a clickable list. Clients that send `Accept: application/json` get the same data as JSON, which is handy for scripting:
+
+```json
+{ "agents": [
+  { "name": "dark-mode",
+    "endpoints": [ { "name": "web", "url": "https://web.dark-mode.localhost:8080" } ] }
+] }
+```
+
+An agent host with a single endpoint proxies straight through to it; the index only appears when an agent exposes more than one.
 
 ## Trusting the CA certificate
 
@@ -150,16 +193,18 @@ The name comes from `--name` on the CLI or `name` in `moat.yaml`.
 ```bash
 $ moat proxy status
 
-Routing Proxy
-=============
-Status: running
-Port: 8080
-CA: ~/.moat/proxy/ca/ca.crt
+Daemon running (pid 53831)
+  Proxy port: 19080
+  Active runs: 2
+  Started: 2026-06-26T01:44:51Z
+Endpoint index: https://localhost:8080/
 
-Registered Agents:
-  dark-mode   web:3000
-  checkout    web:3000
+Registered runs:
+  - run_a1b2c3d4e5f6 (container: 9f8e7d6c5b4a)
+  - run_d4e5f6a1b2c3 (container: 1a2b3c4d5e6f)
 ```
+
+The **Endpoint index** line is the browsable entry point — open it (or run `moat open`) to see every agent's endpoints. It appears whenever the routing proxy is up, even if the daemon itself is stopped. (`Proxy port` is the internal credential-injecting proxy, not the routing port.)
 
 ### Use a different port
 
