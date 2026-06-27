@@ -25,8 +25,15 @@ linters:
     - unused        # Unused code detection
     - bodyclose     # HTTP response body must be closed
     - prealloc      # Slice preallocation for performance
+    - exhaustive    # Enum switches must handle every case (or have a default)
+    - testifylint   # Idiomatic testify assertions (require for errors, Len/Empty, etc.)
 
   settings:
+    exhaustive:
+      # A switch with a default is treated as exhaustive; we only flag enum
+      # switches that silently skip unhandled cases with no default at all.
+      default-signifies-exhaustive: true
+
     errcheck:
       check-type-assertions: true
       check-blank: false

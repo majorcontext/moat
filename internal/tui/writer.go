@@ -465,6 +465,7 @@ func matchControlSeq(data []byte) controlSeqResult {
 // Caller passes raw bytes of the matched sequence so RIS/DECSTR can be
 // forwarded verbatim.
 func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error {
+	//nolint:exhaustive // ctrlNone is gated out by the caller (only called when res.kind != ctrlNone)
 	switch res.kind {
 	case ctrlDECSTBM:
 		return w.outputLocked(w.scrollRegionBytes())

@@ -541,6 +541,9 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 			go dumpTUI(r, ringRecorder, statusWriter, &flashMu, &flashTimer)
 		case term.EscapeResetTUI:
 			go resetTUI(ctx, manager, r, statusWriter, injectable, &flashMu, &flashTimer)
+		case term.EscapeNone, term.EscapeStop:
+			// No inline UI action: EscapeNone means no escape was matched, and
+			// EscapeStop is handled by the run lifecycle, not this hook.
 		}
 	})
 

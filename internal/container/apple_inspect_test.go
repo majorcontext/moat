@@ -82,7 +82,7 @@ func TestParseAppleInspectEmptyAndNull(t *testing.T) {
 	info, err = parseAppleInspect([]byte(`[{"id":"run_abc","status":null}]`))
 	require.NoError(t, err)
 	require.Len(t, info, 1)
-	assert.Equal(t, "", info[0].state())
+	assert.Empty(t, info[0].state())
 }
 
 func TestParseAppleInspectMalformed(t *testing.T) {

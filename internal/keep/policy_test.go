@@ -89,7 +89,7 @@ func TestToKeepYAML_MultipleDeny(t *testing.T) {
 	assert.Contains(t, yamlStr, "operation: Edit")
 	assert.Contains(t, yamlStr, "operation: Write")
 	assert.Contains(t, yamlStr, "operation: Bash")
-	assert.Equal(t, 3, len(pc.Deny))
+	assert.Len(t, pc.Deny, 3)
 }
 
 func TestToKeepYAML_AuditMode(t *testing.T) {

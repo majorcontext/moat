@@ -105,6 +105,7 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 	var c categorizedDeps
 	for _, dep := range deps {
 		if dep.IsDynamic() {
+			//nolint:exhaustive // gated by dep.IsDynamic(); only TypeDynamic* values reach here
 			switch dep.Type {
 			case TypeDynamicNpm:
 				c.dynamicNpm = append(c.dynamicNpm, dep)
@@ -144,6 +145,9 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 			c.dockerMode = dep.DockerMode
 		case TypeMeta:
 			// Meta dependencies are expanded during parsing/validation
+		default:
+			// Other types (services, dynamic — handled above) need no
+			// Dockerfile categorization here.
 		}
 	}
 	return c

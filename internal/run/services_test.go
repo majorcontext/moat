@@ -140,7 +140,7 @@ func TestBuildServiceConfigUnknown(t *testing.T) {
 	dep := deps.Dependency{Name: "unknown", Version: "1", Type: deps.TypeService}
 
 	_, err := buildServiceConfig(dep, "run-000", nil)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown service")
 }
 

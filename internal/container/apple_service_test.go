@@ -55,7 +55,7 @@ func TestAppleBuildRunArgsWithCmd(t *testing.T) {
 			break
 		}
 	}
-	assert.Greater(t, imageIdx, 0, "image should be in args")
+	assert.Positive(t, imageIdx, "image should be in args")
 	// Extra cmd args come after image, with placeholders resolved
 	assert.Contains(t, args[imageIdx+1:], "--requirepass")
 	assert.Contains(t, args[imageIdx+1:], "redispass")
@@ -109,7 +109,7 @@ func TestParseRunContainerID(t *testing.T) {
 	assert.Equal(t, "abc123", parseRunContainerID("abc123\n\n"))
 
 	// Empty output yields empty id.
-	assert.Equal(t, "", parseRunContainerID("  \n"))
+	assert.Empty(t, parseRunContainerID("  \n"))
 }
 
 func TestParseContainerIPv4(t *testing.T) {

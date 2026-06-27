@@ -51,6 +51,9 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 			customDeps = append(customDeps, dep)
 		case TypeMeta:
 			// Meta dependencies are expanded during parsing/validation
+		default:
+			// Other types (uv-tool, docker, services, dynamic) are not
+			// installed via the shell-script path.
 		}
 	}
 
