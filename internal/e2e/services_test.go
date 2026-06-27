@@ -90,7 +90,7 @@ func TestServicePostgres(t *testing.T) {
 	}
 	cleanupRun(t, mgr, r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestServiceRedis(t *testing.T) {
 	}
 	cleanupRun(t, mgr, r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func TestServiceMultiple(t *testing.T) {
 	}
 	cleanupRun(t, mgr, r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func TestServiceCustomConfig(t *testing.T) {
 	}
 	cleanupRun(t, mgr, r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -382,7 +382,7 @@ func TestServiceCleanup(t *testing.T) {
 
 	runID := r.ID
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

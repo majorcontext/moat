@@ -122,7 +122,7 @@ func TestHostTrafficBlockedByDefault(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -208,7 +208,7 @@ func TestHostTrafficAllowedWithNetworkHost(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -270,7 +270,7 @@ func TestHostTrafficWrongPortBlocked(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -348,7 +348,7 @@ func TestHostTrafficStrictPolicyWithRules(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -415,7 +415,7 @@ func TestHostTrafficMultiplePorts(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -482,7 +482,7 @@ func TestHostTrafficProxyBypass(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {

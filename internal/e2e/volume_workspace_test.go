@@ -231,7 +231,7 @@ func TestVolumeWorkspaceLifecycle(t *testing.T) {
 		_ = exec.Command("docker", "volume", "rm", run.WorkspaceVolumeName(r.ID)).Run()
 	})
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -374,7 +374,7 @@ func TestVolumeWorkspaceDestroyGuard(t *testing.T) {
 		_ = exec.Command("docker", "volume", "rm", volName).Run()
 	})
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := mgr.Wait(ctx, r.ID); err != nil {

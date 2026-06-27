@@ -42,7 +42,7 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start and wait for completion (simulating attached mode)
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -115,7 +115,7 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start without waiting (detached mode)
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -250,7 +250,7 @@ func TestLogsCapturedAfterStop(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r.ID)
 
 		// Start the run
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -325,7 +325,7 @@ func TestLogsAlwaysExistForAudit(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 

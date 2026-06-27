@@ -3038,9 +3038,6 @@ region = %s
 	return r, nil
 }
 
-// StartOptions configures how a run is started.
-type StartOptions struct{}
-
 // replaceHostInEnv replaces all occurrences of oldHost with newHost in the
 // value portion of env vars (after the first '='). This is used to rewrite
 // proxy URLs when a container is placed on a custom network whose gateway
@@ -3136,7 +3133,7 @@ func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
 }
 
 // Start begins execution of a run.
-func (m *Manager) Start(ctx context.Context, runID string, opts StartOptions) error {
+func (m *Manager) Start(ctx context.Context, runID string) error {
 	m.mu.Lock()
 	r, ok := m.runs[runID]
 	if !ok {

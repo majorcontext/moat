@@ -67,7 +67,7 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 			t.Fatalf("Create run 1: %v", err)
 		}
 
-		if err := mgr.Start(ctx, r1.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r1.ID); err != nil {
 			t.Fatalf("Start run 1: %v", err)
 		}
 		if err := mgr.Wait(ctx, r1.ID); err != nil {
@@ -135,7 +135,7 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r2.ID)
 
-		if err := mgr.Start(ctx, r2.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r2.ID); err != nil {
 			t.Fatalf("Start run 2: %v", err)
 		}
 		if err := mgr.Wait(ctx, r2.ID); err != nil {
@@ -208,7 +208,7 @@ func TestVolumeReadOnly(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		if err := mgr.Wait(ctx, r.ID); err != nil {
@@ -292,7 +292,7 @@ func TestVolumeIsolation(t *testing.T) {
 		t.Fatalf("Create agent1: %v", err)
 	}
 
-	if err := mgr.Start(ctx, r1.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r1.ID); err != nil {
 		t.Fatalf("Start agent1: %v", err)
 	}
 	if err := mgr.Wait(ctx, r1.ID); err != nil {
@@ -349,7 +349,7 @@ func TestVolumeIsolation(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r2.ID)
 
-	if err := mgr.Start(ctx, r2.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r2.ID); err != nil {
 		t.Fatalf("Start agent2: %v", err)
 	}
 	if err := mgr.Wait(ctx, r2.ID); err != nil {

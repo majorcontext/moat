@@ -209,7 +209,7 @@ func TestDaemonNetworkLogging(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -292,7 +292,7 @@ func TestDaemonCredentialInjection(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -362,7 +362,7 @@ func TestDaemonProxyEnvInContainer(t *testing.T) {
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 
@@ -455,10 +455,10 @@ func TestDaemonNetworkLoggingIsolation(t *testing.T) {
 		defer mgr.Destroy(context.Background(), r2.ID)
 
 		// Start both runs
-		if err := mgr.Start(ctx, r1.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r1.ID); err != nil {
 			t.Fatalf("Start r1: %v", err)
 		}
-		if err := mgr.Start(ctx, r2.ID, run.StartOptions{}); err != nil {
+		if err := mgr.Start(ctx, r2.ID); err != nil {
 			t.Fatalf("Start r2: %v", err)
 		}
 

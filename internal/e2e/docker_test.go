@@ -73,7 +73,7 @@ func TestDockerDependency(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestDockerDindDependency(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -388,7 +388,7 @@ func TestDockerDindIsolation(t *testing.T) {
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -501,7 +501,7 @@ CMD ["echo", "Hello from BuildKit"]
 	}
 	defer mgr.Destroy(context.Background(), r.ID)
 
-	if err := mgr.Start(ctx, r.ID, run.StartOptions{}); err != nil {
+	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 

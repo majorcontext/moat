@@ -217,7 +217,7 @@ func TestStartFirewallFailureStopsContainer(t *testing.T) {
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
-	err := m.Start(context.Background(), r.ID, StartOptions{})
+	err := m.Start(context.Background(), r.ID)
 	if err == nil {
 		t.Fatal("Start should fail when firewall setup fails")
 	}
@@ -266,7 +266,7 @@ func TestStartFirewallFailureStopContainerAlsoFails(t *testing.T) {
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
-	err := m.Start(context.Background(), r.ID, StartOptions{})
+	err := m.Start(context.Background(), r.ID)
 	if err == nil {
 		t.Fatal("Start should fail when firewall setup fails")
 	}
@@ -334,7 +334,7 @@ func TestStartNoFirewallWhenNotEnabled(t *testing.T) {
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
-	err = m.Start(context.Background(), r.ID, StartOptions{})
+	err = m.Start(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("Start should succeed: %v", err)
 	}
