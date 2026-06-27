@@ -24,13 +24,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check formatting
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "::error::Code is not formatted. Run 'gofmt -w .' to fix."
-            gofmt -d .
-            exit 1
-          fi
+      # Formatting (gofumpt + goimports) is enforced by golangci-lint below —
+      # it runs the configured formatters as part of `golangci-lint run` and
+      # fails on any unformatted file. Run `golangci-lint fmt` (or `make fix`)
+      # to apply.
 
       - name: Check CHANGELOG PR-link placeholders
         run: |

@@ -67,3 +67,17 @@ GO
   [ "${status:-0}" -eq 0 ]
   grep -q "binary data" "$TMPDIR/data.gob"
 }
+
+# --- gofumpt-specific behavior (when gofumpt is installed) ---
+
+@test "applies gofumpt's stricter rules when gofumpt is available" {
+  command -v gofumpt >/dev/null || skip "gofumpt not installed; hook falls back to gofmt"
+  # A blank line right after a function's opening brace: gofumpt removes it,
+  # plain gofmt leaves it. Independent of the module's Go version (unlike the
+  # 0o octal rule), so it works on this standalone temp file.
+  printf 'package main\n\nfunc main() {\n\n\tprintln("x")\n}\n' > "$TMPDIR/blank.go"
+  result="$(run_hook "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$TMPDIR/blank.go\"}}")" || status=$?
+  [ "${status:-0}" -eq 0 ]
+  # 2 blank lines in -> 1 after gofumpt (the post-brace blank is removed).
+  [ "$(grep -c '^$' "$TMPDIR/blank.go")" -eq 1 ]
+}

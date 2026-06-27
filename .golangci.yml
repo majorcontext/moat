@@ -145,7 +145,7 @@ issues:
 
 formatters:
   enable:
-    - gofmt         # Formatting (canonical)
+    - gofumpt       # Formatting (stricter superset of gofmt)
     - goimports     # Import organization
   exclusions:
     generated: lax
