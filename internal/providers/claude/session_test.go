@@ -36,7 +36,7 @@ func TestFindLatestSessionID(t *testing.T) {
 	t.Run("ignores non-UUID files", func(t *testing.T) {
 		dir := t.TempDir()
 		writeSessionFile(t, dir, "aaaaaaaa-1111-2222-3333-444455556666", runStart.Add(1*time.Minute))
-		if err := os.WriteFile(filepath.Join(dir, "not-a-uuid.jsonl"), []byte("data"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "not-a-uuid.jsonl"), []byte("data"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -48,7 +48,7 @@ func TestFindLatestSessionID(t *testing.T) {
 
 	t.Run("ignores directories", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.Mkdir(filepath.Join(dir, "aaaaaaaa-1111-2222-3333-444455556666"), 0755); err != nil {
+		if err := os.Mkdir(filepath.Join(dir, "aaaaaaaa-1111-2222-3333-444455556666"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 
@@ -97,7 +97,7 @@ func TestOnRunStopped_NoWorkspace(t *testing.T) {
 func writeSessionFile(t *testing.T, dir, uuid string, modTime time.Time) {
 	t.Helper()
 	path := filepath.Join(dir, uuid+".jsonl")
-	if err := os.WriteFile(path, []byte(`{"type":"session"}`+"\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"type":"session"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, modTime, modTime); err != nil {

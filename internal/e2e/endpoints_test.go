@@ -126,7 +126,8 @@ func TestEndpointRoutingBasic(t *testing.T) {
 func TestEndpointRoutingMultiEndpoint(t *testing.T) {
 	env, cleanup := startEndpointRun(t, "e2e-multi-endpoint",
 		map[string]int{"web": 3000, "api": 8001},
-		[]string{"sh", "-c",
+		[]string{
+			"sh", "-c",
 			"python3 -m http.server 3000 --directory /tmp &" +
 				" python3 -m http.server 8001 --directory /workspace &" +
 				" wait",
@@ -280,7 +281,8 @@ func TestProxyTokenValidInContainer(t *testing.T) {
 			Name:      "e2e-proxy-token",
 			Workspace: workspace,
 			Grants:    []string{"github"},
-			Cmd: []string{"sh", "-c",
+			Cmd: []string{
+				"sh", "-c",
 				// Try to curl an HTTPS endpoint through the proxy.
 				// We use --write-out to capture the HTTP status code.
 				// If we get 407, the proxy token is invalid.
@@ -460,7 +462,7 @@ dependencies:
 ports:
 %s`, portsYAML)
 
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 

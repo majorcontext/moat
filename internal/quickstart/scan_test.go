@@ -24,8 +24,8 @@ func TestScanWorkspace_detectsFileTypes(t *testing.T) {
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(content), 0644)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(content), 0o644)
 	}
 
 	result := ScanWorkspace(dir)
@@ -49,7 +49,7 @@ func TestScanWorkspace_detectsManifests(t *testing.T) {
 
 	manifests := []string{"go.mod", "Makefile", "Dockerfile"}
 	for _, name := range manifests {
-		os.WriteFile(filepath.Join(dir, name), []byte("content"), 0644)
+		os.WriteFile(filepath.Join(dir, name), []byte("content"), 0o644)
 	}
 
 	result := ScanWorkspace(dir)
@@ -70,8 +70,8 @@ func TestScanWorkspace_detectsCIConfigs(t *testing.T) {
 	dir := t.TempDir()
 
 	ciDir := filepath.Join(dir, ".github", "workflows")
-	os.MkdirAll(ciDir, 0755)
-	os.WriteFile(filepath.Join(ciDir, "ci.yml"), []byte("name: CI"), 0644)
+	os.MkdirAll(ciDir, 0o755)
+	os.WriteFile(filepath.Join(ciDir, "ci.yml"), []byte("name: CI"), 0o644)
 
 	result := ScanWorkspace(dir)
 
@@ -85,12 +85,12 @@ func TestScanWorkspace_skipsNodeModules(t *testing.T) {
 
 	// Create a JS file in node_modules (should be skipped).
 	nmDir := filepath.Join(dir, "node_modules", "pkg")
-	os.MkdirAll(nmDir, 0755)
-	os.WriteFile(filepath.Join(nmDir, "index.js"), []byte("module.exports = {}"), 0644)
+	os.MkdirAll(nmDir, 0o755)
+	os.WriteFile(filepath.Join(nmDir, "index.js"), []byte("module.exports = {}"), 0o644)
 
 	// Create a JS file in src (should be counted).
-	os.MkdirAll(filepath.Join(dir, "src"), 0755)
-	os.WriteFile(filepath.Join(dir, "src", "app.js"), []byte("console.log()"), 0644)
+	os.MkdirAll(filepath.Join(dir, "src"), 0o755)
+	os.WriteFile(filepath.Join(dir, "src", "app.js"), []byte("console.log()"), 0o644)
 
 	result := ScanWorkspace(dir)
 

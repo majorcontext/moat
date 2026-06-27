@@ -44,6 +44,7 @@ func (f *flexibleRuntime) Ping(context.Context) error { return nil }
 func (f *flexibleRuntime) CreateContainer(context.Context, container.Config) (string, error) {
 	return "ctr-test", nil
 }
+
 func (f *flexibleRuntime) StartContainer(ctx context.Context, id string) error {
 	if f.startFn != nil {
 		return f.startFn(ctx, id)
@@ -54,18 +55,22 @@ func (f *flexibleRuntime) VolumeCreate(context.Context, string) error { return n
 func (f *flexibleRuntime) VolumeRemove(context.Context, string, bool) error {
 	return nil
 }
+
 func (f *flexibleRuntime) VolumeList(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+
 func (f *flexibleRuntime) VolumeExport(context.Context, string, string) error {
 	return nil
 }
+
 func (f *flexibleRuntime) StopContainer(ctx context.Context, id string) error {
 	if f.stopFn != nil {
 		return f.stopFn(ctx, id)
 	}
 	return nil
 }
+
 func (f *flexibleRuntime) WaitContainer(ctx context.Context, id string) (int64, error) {
 	if f.waitFn != nil {
 		return f.waitFn(ctx, id)
@@ -77,24 +82,28 @@ func (f *flexibleRuntime) WaitContainer(ctx context.Context, id string) (int64, 
 		return 0, ctx.Err()
 	}
 }
+
 func (f *flexibleRuntime) RemoveContainer(ctx context.Context, id string) error {
 	if f.removeFn != nil {
 		return f.removeFn(ctx, id)
 	}
 	return nil
 }
+
 func (f *flexibleRuntime) ContainerLogs(ctx context.Context, id string) (io.ReadCloser, error) {
 	if f.containerLogsFn != nil {
 		return f.containerLogsFn(ctx, id)
 	}
 	return io.NopCloser(strings.NewReader("")), nil
 }
+
 func (f *flexibleRuntime) ContainerLogsAll(ctx context.Context, id string) ([]byte, error) {
 	if f.containerLogsAllFn != nil {
 		return f.containerLogsAllFn(ctx, id)
 	}
 	return nil, nil
 }
+
 func (f *flexibleRuntime) ContainerState(_ context.Context, id string) (string, error) {
 	if f.states != nil {
 		state, ok := f.states[id]
@@ -105,6 +114,7 @@ func (f *flexibleRuntime) ContainerState(_ context.Context, id string) (string, 
 	}
 	return "running", nil
 }
+
 func (f *flexibleRuntime) GetPortBindings(context.Context, string) (map[int]int, error) {
 	return nil, nil
 }
@@ -121,9 +131,11 @@ func (f *flexibleRuntime) SetupFirewall(ctx context.Context, id, host string, po
 	}
 	return nil
 }
+
 func (f *flexibleRuntime) ListImages(context.Context) ([]container.ImageInfo, error) {
 	return nil, nil
 }
+
 func (f *flexibleRuntime) ListContainers(context.Context) ([]container.Info, error) {
 	return nil, nil
 }
@@ -131,6 +143,7 @@ func (f *flexibleRuntime) RemoveImage(context.Context, string) error { return ni
 func (f *flexibleRuntime) Attach(context.Context, string, container.AttachOptions) error {
 	return nil
 }
+
 func (f *flexibleRuntime) StartAttached(context.Context, string, container.AttachOptions) error {
 	return nil
 }
@@ -138,6 +151,7 @@ func (f *flexibleRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 func (f *flexibleRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	return nil
 }
+
 func (f *flexibleRuntime) ExecInteractive(context.Context, string, []string, container.ExecOptions) error {
 	return nil
 }

@@ -217,9 +217,11 @@ func (f *fakeRefreshableProvider) ImpliedDependencies() []string { return nil }
 func (f *fakeRefreshableProvider) CanRefresh(*provider.Credential) bool {
 	return true
 }
+
 func (f *fakeRefreshableProvider) RefreshInterval() time.Duration {
 	return 5 * time.Minute
 }
+
 func (f *fakeRefreshableProvider) Refresh(_ context.Context, _ provider.ProxyConfigurer, old *provider.Credential) (*provider.Credential, error) {
 	return &provider.Credential{
 		Token:     f.newToken,
@@ -246,6 +248,7 @@ func (s *fakeStore) Save(c credential.Credential) error {
 	s.creds[c.Provider] = &c
 	return nil
 }
+
 func (s *fakeStore) Get(p credential.Provider) (*credential.Credential, error) {
 	c, ok := s.creds[p]
 	if !ok {

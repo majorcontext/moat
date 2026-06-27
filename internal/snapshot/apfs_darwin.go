@@ -40,7 +40,7 @@ func (b *APFSBackend) Create(workspacePath, id string) (string, error) {
 	}
 
 	// Ensure snapshot directory exists
-	if err := os.MkdirAll(b.snapshotDir, 0755); err != nil {
+	if err := os.MkdirAll(b.snapshotDir, 0o755); err != nil {
 		return "", fmt.Errorf("create snapshot directory: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func (b *APFSBackend) RestoreTo(nativeRef, destPath string) error {
 	}
 
 	// Ensure destination exists
-	if err := os.MkdirAll(destPath, 0755); err != nil {
+	if err := os.MkdirAll(destPath, 0o755); err != nil {
 		return fmt.Errorf("create destination directory: %w", err)
 	}
 

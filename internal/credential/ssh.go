@@ -89,7 +89,7 @@ func (s *FileStore) AddSSHMapping(mapping SSHMapping) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.sshPath(), data, 0600)
+	return os.WriteFile(s.sshPath(), data, 0o600)
 }
 
 // RemoveSSHMapping removes an SSH mapping for a host.
@@ -111,5 +111,5 @@ func (s *FileStore) RemoveSSHMapping(host string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.sshPath(), data, 0600)
+	return os.WriteFile(s.sshPath(), data, 0o600)
 }

@@ -438,7 +438,7 @@ func TestFileBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat failed: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if info.Mode().Perm() != 0o600 {
 		t.Errorf("wrong permissions: got %o, want 0600", info.Mode().Perm())
 	}
 
@@ -494,7 +494,7 @@ func TestFileBackendTrimsWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if err := os.WriteFile(keyPath, append(data, '\n', '\n', ' ', '\n'), 0600); err != nil {
+	if err := os.WriteFile(keyPath, append(data, '\n', '\n', ' ', '\n'), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -678,10 +678,10 @@ func TestFileExistsAfterLockAcquired(t *testing.T) {
 		existingKey[i] = byte(i + 50)
 	}
 	encoded := encodeKey(existingKey)
-	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(keyPath, []byte(encoded), 0600); err != nil {
+	if err := os.WriteFile(keyPath, []byte(encoded), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

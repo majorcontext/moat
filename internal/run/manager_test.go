@@ -353,10 +353,10 @@ func TestEnsureCACertOnlyDir(t *testing.T) {
 	certContent := []byte("-----BEGIN CERTIFICATE-----\ntest cert\n-----END CERTIFICATE-----\n")
 	keyContent := []byte("-----BEGIN PRIVATE KEY-----\ntest key\n-----END PRIVATE KEY-----\n")
 
-	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(caDir, "ca.key"), keyContent, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(caDir, "ca.key"), keyContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -401,7 +401,7 @@ func TestEnsureCACertOnlyDirCaching(t *testing.T) {
 	certContent := []byte("test certificate content")
 	certPath := filepath.Join(caDir, "ca.crt")
 
-	if err := os.WriteFile(certPath, certContent, 0644); err != nil {
+	if err := os.WriteFile(certPath, certContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -428,7 +428,7 @@ func TestEnsureCACertOnlyDirCaching(t *testing.T) {
 
 	// Now change the source content - should trigger update
 	newContent := []byte("updated certificate content")
-	if err := os.WriteFile(certPath, newContent, 0644); err != nil {
+	if err := os.WriteFile(certPath, newContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,16 +452,16 @@ func TestEnsureCACertOnlyDirRemovesStaleFiles(t *testing.T) {
 
 	// Create source certificate
 	certContent := []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----")
-	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(caDir, "ca.crt"), certContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create certOnlyDir with a stale file (simulating accidental private key copy)
-	if err := os.MkdirAll(certOnlyDir, 0755); err != nil {
+	if err := os.MkdirAll(certOnlyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	staleKeyPath := filepath.Join(certOnlyDir, "ca.key")
-	if err := os.WriteFile(staleKeyPath, []byte("PRIVATE KEY DATA"), 0600); err != nil {
+	if err := os.WriteFile(staleKeyPath, []byte("PRIVATE KEY DATA"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -852,9 +852,11 @@ func (s *stubRuntime) VolumeCreate(context.Context, string) error   { panic("not
 func (s *stubRuntime) VolumeRemove(context.Context, string, bool) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) VolumeList(context.Context, string) ([]string, error) {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) VolumeExport(context.Context, string, string) error {
 	panic("not implemented")
 }
@@ -872,9 +874,11 @@ func (s *stubRuntime) RemoveContainer(context.Context, string) error { return ni
 func (s *stubRuntime) ContainerLogs(context.Context, string) (io.ReadCloser, error) {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) ContainerLogsAll(context.Context, string) ([]byte, error) {
 	return nil, nil // called by captureLogs after WaitContainer returns
 }
+
 func (s *stubRuntime) GetPortBindings(context.Context, string) (map[int]int, error) {
 	panic("not implemented")
 }
@@ -888,9 +892,11 @@ func (s *stubRuntime) Close() error                             { return nil }
 func (s *stubRuntime) SetupFirewall(context.Context, string, string, int) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) ListImages(context.Context) ([]container.ImageInfo, error) {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) ListContainers(context.Context) ([]container.Info, error) {
 	panic("not implemented")
 }
@@ -898,15 +904,19 @@ func (s *stubRuntime) RemoveImage(context.Context, string) error { panic("not im
 func (s *stubRuntime) Attach(context.Context, string, container.AttachOptions) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) StartAttached(context.Context, string, container.AttachOptions) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	panic("not implemented")
 }
+
 func (s *stubRuntime) ExecInteractive(context.Context, string, []string, container.ExecOptions) error {
 	panic("not implemented")
 }

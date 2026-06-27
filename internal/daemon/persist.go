@@ -106,7 +106,7 @@ func (p *RunPersister) Save() error {
 		os.Remove(tmpName)
 		return fmt.Errorf("write temp file: %w", err)
 	}
-	if err := tmp.Chmod(0600); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return fmt.Errorf("chmod temp file: %w", err)

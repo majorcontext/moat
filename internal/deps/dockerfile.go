@@ -79,8 +79,10 @@ func runtimeBaseImage(name, version string) string {
 // Many base images have a default user at UID 1000, and deleting that user
 // doesn't change ownership of their files - the new user would inherit access.
 // UID 5000 is safely above the typical user range (1000-4999).
-const containerUser = "moatuser"
-const containerUID = "5000"
+const (
+	containerUser = "moatuser"
+	containerUID  = "5000"
+)
 
 // categorizedDeps holds dependencies sorted by type for Dockerfile generation.
 type categorizedDeps struct {

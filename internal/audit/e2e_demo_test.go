@@ -127,7 +127,7 @@ func TestE2E_TamperProofAuditDemo(t *testing.T) {
 	store.Close()
 
 	bundleJSON, _ := json.MarshalIndent(bundle, "", "  ")
-	os.WriteFile(bundlePath, bundleJSON, 0644)
+	os.WriteFile(bundlePath, bundleJSON, 0o644)
 
 	fmt.Printf("  ✓ Bundle version: %d\n", bundle.Version)
 	fmt.Printf("  ✓ Entries: %d\n", len(bundle.Entries))

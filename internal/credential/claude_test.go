@@ -66,7 +66,7 @@ func TestClaudeCodeCredentials_GetFromFile(t *testing.T) {
 
 	// Create .claude directory
 	claudeDir := filepath.Join(tempDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestClaudeCodeCredentials_GetFromFile(t *testing.T) {
 			"rateLimitTier": "default"
 		}
 	}`
-	if err := os.WriteFile(credFile, []byte(testCreds), 0600); err != nil {
+	if err := os.WriteFile(credFile, []byte(testCreds), 0o600); err != nil {
 		t.Fatalf("Failed to write test credentials: %v", err)
 	}
 
@@ -132,12 +132,12 @@ func TestClaudeCodeCredentials_GetFromFile_NoOAuth(t *testing.T) {
 	tempDir := t.TempDir()
 
 	claudeDir := filepath.Join(tempDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
 
 	credFile := filepath.Join(claudeDir, ".credentials.json")
-	if err := os.WriteFile(credFile, []byte(`{}`), 0600); err != nil {
+	if err := os.WriteFile(credFile, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("Failed to write test credentials: %v", err)
 	}
 
@@ -187,13 +187,13 @@ func TestClaudeCodeCredentials_HasClaudeCodeCredentials(t *testing.T) {
 	tempDir := t.TempDir()
 
 	claudeDir := filepath.Join(tempDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
 
 	credFile := filepath.Join(claudeDir, ".credentials.json")
 	testCreds := `{"claudeAiOauth": {"accessToken": "test", "expiresAt": 1768957840059}}`
-	if err := os.WriteFile(credFile, []byte(testCreds), 0600); err != nil {
+	if err := os.WriteFile(credFile, []byte(testCreds), 0o600); err != nil {
 		t.Fatalf("Failed to write test credentials: %v", err)
 	}
 

@@ -813,7 +813,7 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 	defer os.RemoveAll(tmpDir)
 
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0o644); err != nil {
 		return fmt.Errorf("writing Dockerfile: %w", err)
 	}
 
@@ -822,11 +822,11 @@ func (m *appleBuildManager) BuildImage(ctx context.Context, dockerfile string, t
 		path := filepath.Join(tmpDir, name)
 		// Create parent directories if needed
 		if dir := filepath.Dir(path); dir != tmpDir {
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return fmt.Errorf("creating context dir for %s: %w", name, err)
 			}
 		}
-		if err := os.WriteFile(path, content, 0644); err != nil {
+		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return fmt.Errorf("writing context file %s: %w", name, err)
 		}
 	}
@@ -866,7 +866,8 @@ func (m *appleBuildManager) runBuild(ctx context.Context, dockerfilePath, tag st
 	if cpus < 2 {
 		cpus = 2
 	}
-	args := []string{"build",
+	args := []string{
+		"build",
 		"-f", dockerfilePath,
 		"-t", tag,
 		"--cpus", strconv.Itoa(cpus),
@@ -922,7 +923,8 @@ func (m *appleBuildManager) startBuilder(ctx context.Context) error {
 		cpus = 2
 	}
 
-	args := []string{"builder", "start",
+	args := []string{
+		"builder", "start",
 		"--cpus", strconv.Itoa(cpus),
 		"--memory", "8192MB",
 	}

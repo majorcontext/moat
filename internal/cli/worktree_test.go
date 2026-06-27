@@ -35,7 +35,7 @@ func initTestRepo(t *testing.T) string {
 	run("git", "init")
 	run("git", "remote", "add", "origin", "https://github.com/acme/myrepo.git")
 	readme := filepath.Join(tmpDir, "README.md")
-	os.WriteFile(readme, []byte("# test"), 0644)
+	os.WriteFile(readme, []byte("# test"), 0o644)
 	run("git", "add", ".")
 	run("git", "commit", "-m", "initial commit")
 

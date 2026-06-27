@@ -300,8 +300,8 @@ func TestListProfiles(t *testing.T) {
 
 	// Create some profile directories
 	profilesDir := filepath.Join(tmpHome, ".moat", "credentials", "profiles")
-	os.MkdirAll(filepath.Join(profilesDir, "alpha"), 0700)
-	os.MkdirAll(filepath.Join(profilesDir, "beta"), 0700)
+	os.MkdirAll(filepath.Join(profilesDir, "alpha"), 0o700)
+	os.MkdirAll(filepath.Join(profilesDir, "beta"), 0o700)
 
 	profiles, err = ListProfiles()
 	if err != nil {
@@ -524,9 +524,9 @@ func TestListProfiles_IgnoresFiles(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	profilesDir := filepath.Join(tmpHome, ".moat", "credentials", "profiles")
-	os.MkdirAll(filepath.Join(profilesDir, "real-profile"), 0700)
+	os.MkdirAll(filepath.Join(profilesDir, "real-profile"), 0o700)
 	// Create a regular file that should be ignored
-	os.WriteFile(filepath.Join(profilesDir, "not-a-profile.txt"), []byte("junk"), 0600)
+	os.WriteFile(filepath.Join(profilesDir, "not-a-profile.txt"), []byte("junk"), 0o600)
 
 	profiles, err := ListProfiles()
 	if err != nil {

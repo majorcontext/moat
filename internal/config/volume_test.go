@@ -46,7 +46,7 @@ volumes:
     target: /var/cache/myapp
     readonly: true
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -82,7 +82,7 @@ volumes:
   - name: state
     target: /data
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -233,7 +233,7 @@ volumes:
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			configPath := filepath.Join(dir, "moat.yaml")
-			os.WriteFile(configPath, []byte(tt.content), 0644)
+			os.WriteFile(configPath, []byte(tt.content), 0o644)
 
 			_, err := Load(dir)
 			if err == nil {
@@ -263,7 +263,7 @@ func TestLoadConfigVolumeTypesValid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.content), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			cfg, err := Load(dir)
@@ -290,7 +290,7 @@ volumes:
   - name: ` + name + `
     target: /data
 `
-			os.WriteFile(configPath, []byte(content), 0644)
+			os.WriteFile(configPath, []byte(content), 0o644)
 
 			_, err := Load(dir)
 			if err != nil {

@@ -156,7 +156,7 @@ func TestRunPersister_FilePermissions(t *testing.T) {
 		t.Fatalf("Stat: %v", err)
 	}
 	perm := info.Mode().Perm()
-	if perm != 0600 {
+	if perm != 0o600 {
 		t.Errorf("file permissions = %o, want 0600", perm)
 	}
 }
@@ -379,7 +379,7 @@ func TestRunPersister_LoadLegacyFormat(t *testing.T) {
 
 	// Write a legacy bare-array format.
 	legacy := `[{"auth_token":"tok-1","run_id":"run-1"}]`
-	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 

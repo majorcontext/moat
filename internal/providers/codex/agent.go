@@ -41,7 +41,7 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 
 	// Write runtime context file if provided
 	if opts.RuntimeContext != "" {
-		if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(opts.RuntimeContext), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(opts.RuntimeContext), 0o644); err != nil {
 			cleanupFn()
 			return nil, fmt.Errorf("writing context file: %w", err)
 		}
@@ -65,7 +65,7 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 			cleanupFn()
 			return nil, fmt.Errorf("marshaling MCP config: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(tmpDir, "mcp.json"), mcpJSON, 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, "mcp.json"), mcpJSON, 0o644); err != nil {
 			cleanupFn()
 			return nil, fmt.Errorf("writing MCP config: %w", err)
 		}
@@ -113,7 +113,7 @@ func PopulateStagingDir(cred *provider.Credential, stagingDir string) error {
 		return fmt.Errorf("marshaling auth file: %w", err)
 	}
 
-	if writeErr := os.WriteFile(filepath.Join(stagingDir, "auth.json"), authJSON, 0600); writeErr != nil {
+	if writeErr := os.WriteFile(filepath.Join(stagingDir, "auth.json"), authJSON, 0o600); writeErr != nil {
 		return fmt.Errorf("writing auth file: %w", writeErr)
 	}
 

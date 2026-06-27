@@ -161,7 +161,7 @@ func TestLockFile_CorruptedData(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, lockFileName)
 
-	if err := os.WriteFile(lockPath, []byte("not valid json"), 0644); err != nil {
+	if err := os.WriteFile(lockPath, []byte("not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

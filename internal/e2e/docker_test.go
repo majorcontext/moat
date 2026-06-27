@@ -469,7 +469,7 @@ func TestDockerDindBuildKitImageBuild(t *testing.T) {
 RUN echo "BuildKit E2E test image"
 CMD ["echo", "Hello from BuildKit"]
 `
-	if err := os.WriteFile(workspace+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(workspace+"/Dockerfile", []byte(dockerfile), 0o644); err != nil {
 		t.Fatalf("WriteFile Dockerfile: %v", err)
 	}
 

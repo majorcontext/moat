@@ -23,7 +23,7 @@ type RouteTable struct {
 
 // NewRouteTable creates or loads a route table from the given directory.
 func NewRouteTable(dir string) (*RouteTable, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 
@@ -241,7 +241,7 @@ func (rt *RouteTable) save() error {
 		return err
 	}
 	// Match the previous routes.json mode (CreateTemp defaults to 0600).
-	if err := os.Chmod(tmpName, 0644); err != nil {
+	if err := os.Chmod(tmpName, 0o644); err != nil {
 		cleanup()
 		return err
 	}

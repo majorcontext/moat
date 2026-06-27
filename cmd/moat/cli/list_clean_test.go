@@ -23,60 +23,79 @@ func (s *listCleanStubRuntime) ListContainers(ctx context.Context) ([]container.
 // Stubs for the rest of container.Runtime — not exercised by isImageInUse.
 // These panic to catch unexpected calls if isImageInUse is ever extended.
 func (s *listCleanStubRuntime) Type() container.RuntimeType { panic("unexpected call to Type") }
+
 func (s *listCleanStubRuntime) Ping(ctx context.Context) error {
 	panic("unexpected call to Ping")
 }
+
 func (s *listCleanStubRuntime) CreateContainer(ctx context.Context, cfg container.Config) (string, error) {
 	panic("unexpected call to CreateContainer")
 }
+
 func (s *listCleanStubRuntime) StartContainer(ctx context.Context, id string) error {
 	panic("unexpected call to StartContainer")
 }
+
 func (s *listCleanStubRuntime) VolumeCreate(ctx context.Context, name string) error {
 	panic("unexpected call to VolumeCreate")
 }
+
 func (s *listCleanStubRuntime) VolumeRemove(ctx context.Context, name string, force bool) error {
 	panic("unexpected call to VolumeRemove")
 }
+
 func (s *listCleanStubRuntime) VolumeList(ctx context.Context, prefix string) ([]string, error) {
 	panic("unexpected call to VolumeList")
 }
+
 func (s *listCleanStubRuntime) VolumeExport(ctx context.Context, name, hostDir string) error {
 	panic("unexpected call to VolumeExport")
 }
+
 func (s *listCleanStubRuntime) StopContainer(ctx context.Context, id string) error {
 	panic("unexpected call to StopContainer")
 }
+
 func (s *listCleanStubRuntime) WaitContainer(ctx context.Context, id string) (int64, error) {
 	panic("unexpected call to WaitContainer")
 }
+
 func (s *listCleanStubRuntime) RemoveContainer(ctx context.Context, id string) error {
 	panic("unexpected call to RemoveContainer")
 }
+
 func (s *listCleanStubRuntime) ContainerLogs(ctx context.Context, id string) (io.ReadCloser, error) {
 	panic("unexpected call to ContainerLogs")
 }
+
 func (s *listCleanStubRuntime) ContainerLogsAll(ctx context.Context, id string) ([]byte, error) {
 	panic("unexpected call to ContainerLogsAll")
 }
+
 func (s *listCleanStubRuntime) GetPortBindings(ctx context.Context, id string) (map[int]int, error) {
 	panic("unexpected call to GetPortBindings")
 }
+
 func (s *listCleanStubRuntime) GetHostAddress() string {
 	panic("unexpected call to GetHostAddress")
 }
+
 func (s *listCleanStubRuntime) SupportsHostNetwork() bool {
 	panic("unexpected call to SupportsHostNetwork")
 }
+
 func (s *listCleanStubRuntime) NetworkManager() container.NetworkManager {
 	panic("unexpected call to NetworkManager")
 }
+
 func (s *listCleanStubRuntime) SidecarManager() container.SidecarManager {
 	panic("unexpected call to SidecarManager")
 }
+
 func (s *listCleanStubRuntime) BuildManager() container.BuildManager {
 	panic("unexpected call to BuildManager")
 }
+
 func (s *listCleanStubRuntime) ServiceManager() container.ServiceManager {
 	panic("unexpected call to ServiceManager")
 }
@@ -84,24 +103,31 @@ func (s *listCleanStubRuntime) Close() error { panic("unexpected call to Close")
 func (s *listCleanStubRuntime) SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error {
 	panic("unexpected call to SetupFirewall")
 }
+
 func (s *listCleanStubRuntime) ListImages(ctx context.Context) ([]container.ImageInfo, error) {
 	panic("unexpected call to ListImages")
 }
+
 func (s *listCleanStubRuntime) ContainerState(ctx context.Context, id string) (string, error) {
 	panic("unexpected call to ContainerState")
 }
+
 func (s *listCleanStubRuntime) RemoveImage(ctx context.Context, id string) error {
 	panic("unexpected call to RemoveImage")
 }
+
 func (s *listCleanStubRuntime) StartAttached(ctx context.Context, id string, opts container.AttachOptions) error {
 	panic("unexpected call to StartAttached")
 }
+
 func (s *listCleanStubRuntime) ResizeTTY(ctx context.Context, id string, height, width uint) error {
 	panic("unexpected call to ResizeTTY")
 }
+
 func (s *listCleanStubRuntime) Exec(ctx context.Context, id string, cmd []string, stdin []byte, stdout, stderr io.Writer) error {
 	panic("unexpected call to Exec")
 }
+
 func (s *listCleanStubRuntime) ExecInteractive(ctx context.Context, id string, cmd []string, opts container.ExecOptions) error {
 	panic("unexpected call to ExecInteractive")
 }

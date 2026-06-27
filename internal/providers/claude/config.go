@@ -135,7 +135,7 @@ func WriteClaudeConfig(stagingDir string, mcpServers map[string]MCPServerForCont
 		return fmt.Errorf("marshaling claude config: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(stagingDir, ".claude.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(stagingDir, ".claude.json"), data, 0o644); err != nil {
 		return fmt.Errorf("writing .claude.json: %w", err)
 	}
 
@@ -205,7 +205,7 @@ func WriteCredentialsFile(cred *provider.Credential, stagingDir, subscriptionTyp
 		return fmt.Errorf("marshaling credentials: %w", err)
 	}
 
-	if writeErr := os.WriteFile(filepath.Join(stagingDir, ".credentials.json"), credsJSON, 0600); writeErr != nil {
+	if writeErr := os.WriteFile(filepath.Join(stagingDir, ".credentials.json"), credsJSON, 0o600); writeErr != nil {
 		return fmt.Errorf("writing credentials file: %w", writeErr)
 	}
 

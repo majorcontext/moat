@@ -88,7 +88,7 @@ func LoadConfig(dir, name string) (*Config, error) {
 // SaveConfig writes an OAuth config to <dir>/<name>.yaml.
 // Creates the directory if it does not exist.
 func SaveConfig(dir, name string, cfg *Config) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating oauth config dir: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func SaveConfig(dir, name string, cfg *Config) error {
 	}
 
 	path := filepath.Join(dir, name+".yaml")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing oauth config %s: %w", path, err)
 	}
 

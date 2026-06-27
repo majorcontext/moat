@@ -33,7 +33,7 @@ func NewFileStore(dir string, key []byte) (*FileStore, error) {
 		return nil, fmt.Errorf("key must be 32 bytes, got %d", len(key))
 	}
 
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating credential dir: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (s *FileStore) Save(cred Credential) error {
 	}
 
 	encrypted := s.cipher.Seal(nonce, nonce, data, nil)
-	if err := os.WriteFile(s.path(cred.Provider), encrypted, 0600); err != nil {
+	if err := os.WriteFile(s.path(cred.Provider), encrypted, 0o600); err != nil {
 		return fmt.Errorf("writing credential file: %w", err)
 	}
 

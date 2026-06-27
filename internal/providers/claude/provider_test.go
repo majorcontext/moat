@@ -572,7 +572,7 @@ func TestReadHostConfig(t *testing.T) {
 		}
 
 		data, _ := json.Marshal(full)
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatalf("failed to write test file: %v", err)
 		}
 

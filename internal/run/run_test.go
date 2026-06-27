@@ -221,7 +221,7 @@ func TestValidateGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()
 	credDir := filepath.Join(tmpDir, "credentials")
-	os.MkdirAll(credDir, 0700)
+	os.MkdirAll(credDir, 0o700)
 
 	key := make([]byte, 32)
 	rand.Read(key)
@@ -332,7 +332,7 @@ func TestValidateGrants(t *testing.T) {
 func TestValidateGrantsErrorFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	credDir := filepath.Join(tmpDir, "credentials")
-	os.MkdirAll(credDir, 0700)
+	os.MkdirAll(credDir, 0o700)
 
 	key := make([]byte, 32)
 	rand.Read(key)
@@ -357,7 +357,7 @@ func TestValidateGrantsErrorFormat(t *testing.T) {
 func TestValidateGrantsDecryptionFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	credDir := filepath.Join(tmpDir, "credentials")
-	os.MkdirAll(credDir, 0700)
+	os.MkdirAll(credDir, 0o700)
 
 	// Create store with one key and save a credential
 	key1 := make([]byte, 32)
@@ -393,7 +393,7 @@ func TestValidateMCPGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()
 	credDir := filepath.Join(tmpDir, "credentials")
-	os.MkdirAll(credDir, 0700)
+	os.MkdirAll(credDir, 0o700)
 
 	key := make([]byte, 32)
 	rand.Read(key)

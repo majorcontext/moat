@@ -1527,7 +1527,7 @@ func prepareBuildContext(dockerfile string, opts BuildOptions) (tmpDir string, p
 	}
 
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); writeErr != nil {
+	if writeErr := os.WriteFile(dockerfilePath, []byte(dockerfile), 0o644); writeErr != nil {
 		os.RemoveAll(tmpDir)
 		return "", "", fmt.Errorf("writing Dockerfile: %w", writeErr)
 	}
@@ -1535,12 +1535,12 @@ func prepareBuildContext(dockerfile string, opts BuildOptions) (tmpDir string, p
 	for name, content := range opts.ContextFiles {
 		path := filepath.Join(tmpDir, name)
 		if dir := filepath.Dir(path); dir != tmpDir {
-			if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
+			if mkdirErr := os.MkdirAll(dir, 0o755); mkdirErr != nil {
 				os.RemoveAll(tmpDir)
 				return "", "", fmt.Errorf("creating context dir for %s: %w", name, mkdirErr)
 			}
 		}
-		if writeErr := os.WriteFile(path, content, 0644); writeErr != nil {
+		if writeErr := os.WriteFile(path, content, 0o644); writeErr != nil {
 			os.RemoveAll(tmpDir)
 			return "", "", fmt.Errorf("writing context file %s: %w", name, writeErr)
 		}
@@ -1631,7 +1631,7 @@ func (m *dockerBuildManager) buildImageWithBuilder(ctx context.Context, dockerfi
 	// Add Dockerfile to tar
 	header := &tar.Header{
 		Name: "Dockerfile",
-		Mode: 0644,
+		Mode: 0o644,
 		Size: int64(len(dockerfile)),
 	}
 	if err := tw.WriteHeader(header); err != nil {
@@ -1645,7 +1645,7 @@ func (m *dockerBuildManager) buildImageWithBuilder(ctx context.Context, dockerfi
 	for name, content := range opts.ContextFiles {
 		h := &tar.Header{
 			Name: name,
-			Mode: 0644,
+			Mode: 0o644,
 			Size: int64(len(content)),
 		}
 		if err := tw.WriteHeader(h); err != nil {

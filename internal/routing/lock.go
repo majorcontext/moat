@@ -47,7 +47,7 @@ func LoadProxyLock(dir string) (*ProxyLockInfo, error) {
 
 // SaveProxyLock writes the proxy lock file.
 func SaveProxyLock(dir string, info ProxyLockInfo) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func SaveProxyLock(dir string, info ProxyLockInfo) error {
 	}
 
 	path := filepath.Join(dir, "proxy.lock")
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 // RemoveProxyLock removes the proxy lock file.

@@ -17,14 +17,14 @@ func TestLoadGlobalConfig(t *testing.T) {
 
 	// Create config file
 	configDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(configDir, 0755)
+	os.MkdirAll(configDir, 0o755)
 	configPath := filepath.Join(configDir, "config.yaml")
 
 	content := `
 proxy:
   port: 9000
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := LoadGlobal()
 	if err != nil {
@@ -75,7 +75,7 @@ func TestLoadGlobal_DebugConfig(t *testing.T) {
 	// Create temp config file
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	err := os.WriteFile(configPath, []byte("debug:\n  retention_days: 7\n"), 0644)
+	err := os.WriteFile(configPath, []byte("debug:\n  retention_days: 7\n"), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestLoadGlobal_DebugConfig(t *testing.T) {
 
 	// Create .moat directory and move config
 	moatDir := filepath.Join(tmpDir, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 	os.Rename(configPath, filepath.Join(moatDir, "config.yaml"))
 
 	cfg, err := LoadGlobal()
@@ -107,7 +107,7 @@ func TestLoadGlobal_Mounts(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 
 	content := `
 mounts:
@@ -116,7 +116,7 @@ mounts:
     mode: ro
   - /home/user/.moat/scripts/helper.sh:/home/user/.local/bin/helper.sh:ro
 `
-	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0o644)
 
 	cfg, err := LoadGlobal()
 	if err != nil {
@@ -153,14 +153,14 @@ func TestLoadGlobal_MountsRelativeSourceRejected(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 
 	content := `
 mounts:
   - source: ./relative/path
     target: /container/path
 `
-	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0o644)
 
 	_, err := LoadGlobal()
 	if err == nil {
@@ -177,7 +177,7 @@ func TestLoadGlobal_MountsExcludeRejected(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 
 	content := `
 mounts:
@@ -186,7 +186,7 @@ mounts:
     exclude:
       - node_modules
 `
-	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0o644)
 
 	_, err := LoadGlobal()
 	if err == nil {
@@ -203,14 +203,14 @@ func TestLoadGlobal_MountsTildeExpansion(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 
 	content := `
 mounts:
   - source: ~/.moat/scripts/statusline.js
     target: /home/user/.claude/moat/statusline.js
 `
-	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0o644)
 
 	cfg, err := LoadGlobal()
 	if err != nil {
@@ -233,7 +233,7 @@ func TestLoadGlobal_MountsEnforcesReadOnly(t *testing.T) {
 	t.Setenv("MOAT_HOME", "")
 
 	moatDir := filepath.Join(tmpHome, ".moat")
-	os.MkdirAll(moatDir, 0755)
+	os.MkdirAll(moatDir, 0o755)
 
 	// Mount specified as rw — should be forced to ro
 	content := `
@@ -242,7 +242,7 @@ mounts:
     target: /data
     mode: rw
 `
-	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0644)
+	os.WriteFile(filepath.Join(moatDir, "config.yaml"), []byte(content), 0o644)
 
 	cfg, err := LoadGlobal()
 	if err != nil {

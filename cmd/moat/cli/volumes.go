@@ -28,9 +28,7 @@ var volumesLsCmd = &cobra.Command{
 	RunE:  listVolumes,
 }
 
-var (
-	volumesRmForce bool
-)
+var volumesRmForce bool
 
 var volumesRmCmd = &cobra.Command{
 	Use:   "rm <agent-name>",

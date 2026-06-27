@@ -27,12 +27,12 @@ env:
 mounts:
   - ./data:/data:ro
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create data directory
-	if err := os.MkdirAll(filepath.Join(dir, "data"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

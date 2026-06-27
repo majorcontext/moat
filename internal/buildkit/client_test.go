@@ -116,7 +116,7 @@ func TestClient_Build(t *testing.T) {
 	dockerfile := `FROM alpine:3.20
 RUN echo "BuildKit integration test"
 `
-	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -130,7 +130,6 @@ RUN echo "BuildKit integration test"
 		Platform:   "linux/amd64",
 		NoCache:    true,
 	})
-
 	if err != nil {
 		t.Errorf("Build() failed: %v", err)
 	}
@@ -162,7 +161,7 @@ func TestClient_BuildWithArgs(t *testing.T) {
 ARG TEST_ARG
 RUN echo "TEST_ARG=${TEST_ARG}"
 `
-	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -179,7 +178,6 @@ RUN echo "TEST_ARG=${TEST_ARG}"
 			"TEST_ARG": "test-value",
 		},
 	})
-
 	if err != nil {
 		t.Errorf("Build() with build args failed: %v", err)
 	}
@@ -206,7 +204,7 @@ func TestClient_BuildWithInvalidDockerfile(t *testing.T) {
 	dockerfile := `INVALID_INSTRUCTION this should fail
 FROM alpine:3.20
 `
-	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -251,7 +249,7 @@ func TestClient_BuildWithUnreachableBuildKit(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dockerfile := `FROM alpine:3.20`
-	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+	if err := os.WriteFile(tmpDir+"/Dockerfile", []byte(dockerfile), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 

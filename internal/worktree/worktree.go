@@ -61,7 +61,7 @@ func Resolve(repoRoot, repoID, branch, agentName string) (*Result, error) {
 	}
 
 	// Create parent directory
-	if err := os.MkdirAll(filepath.Dir(wtPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
 		return nil, fmt.Errorf("creating worktree parent directory: %w", err)
 	}
 

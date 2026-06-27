@@ -7,9 +7,11 @@ import (
 	"os"
 )
 
-var logger *slog.Logger
-var fileWriter *FileWriter
-var verbose bool
+var (
+	logger     *slog.Logger
+	fileWriter *FileWriter
+	verbose    bool
+)
 
 // Options configures the logger.
 type Options struct {

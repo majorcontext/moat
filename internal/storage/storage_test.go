@@ -677,7 +677,7 @@ func TestReadNetworkRequestsMalformed(t *testing.T) {
 	f, err := os.OpenFile(
 		filepath.Join(dir, "run_netmal1", "network.jsonl"),
 		os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		t.Fatalf("OpenFile: %v", err)

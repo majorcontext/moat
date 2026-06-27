@@ -31,13 +31,13 @@ func TestAPFSBackendCreateAndRestore(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files
-	if err := os.WriteFile(filepath.Join(workspace, "file1.txt"), []byte("content1"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "file1.txt"), []byte("content1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspace, "subdir"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, "subdir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "subdir", "file2.txt"), []byte("content2"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "subdir", "file2.txt"), []byte("content2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,7 +72,7 @@ func TestAPFSBackendCreateAndRestore(t *testing.T) {
 	}
 
 	// Modify the workspace
-	if err := os.WriteFile(filepath.Join(workspace, "file1.txt"), []byte("modified"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "file1.txt"), []byte("modified"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,10 +111,10 @@ func TestAPFSBackendRemovesGitDir(t *testing.T) {
 
 	// Create a .git directory
 	gitDir := filepath.Join(workspace, ".git")
-	if err := os.MkdirAll(gitDir, 0755); err != nil {
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("git config"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("git config"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestAPFSBackendRestoreTo(t *testing.T) {
 	destDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspace, "test.txt"), []byte("test content"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "test.txt"), []byte("test content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

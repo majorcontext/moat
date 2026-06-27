@@ -18,8 +18,10 @@ func SetWriter(w io.Writer) {
 
 // --- Color detection ---
 
-var stdoutColor = detectColor(os.Stdout)
-var stderrColor = detectColor(os.Stderr)
+var (
+	stdoutColor = detectColor(os.Stdout)
+	stderrColor = detectColor(os.Stderr)
+)
 
 func detectColor(f *os.File) bool {
 	if os.Getenv("NO_COLOR") != "" {

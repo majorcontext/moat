@@ -39,7 +39,6 @@ func TestGrantMCP(t *testing.T) {
 	cmd := rootCmd
 	cmd.SetArgs([]string{"grant", "mcp", "context7"})
 	err := cmd.Execute()
-
 	if err != nil {
 		t.Fatalf("grant mcp context7 failed: %v", err)
 	}
@@ -49,7 +48,6 @@ func TestGrantMCP(t *testing.T) {
 	store, _ := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	// Canonical form is "mcp:<name>" (mirrors "oauth:<name>").
 	cred, err := store.Get(credential.Provider("mcp:context7"))
-
 	if err != nil {
 		t.Fatalf("failed to retrieve credential: %v", err)
 	}

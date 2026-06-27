@@ -28,7 +28,7 @@ func TestLoadSettings(t *testing.T) {
     }
   }
 }`
-	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,7 +94,7 @@ func TestLoadSettingsGitHubRepoFormat(t *testing.T) {
     }
   }
 }`
-	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,7 +156,7 @@ func TestLoadSettingsInvalidRepoFormat(t *testing.T) {
     }
   }
 }`
-	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +297,7 @@ func TestLoadAllSettings(t *testing.T) {
 	// Set up workspace with project settings
 	workspace := t.TempDir()
 	claudeDir := filepath.Join(workspace, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,7 +306,7 @@ func TestLoadAllSettings(t *testing.T) {
     "project-plugin@market": true
   }
 }`
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(projectSettings), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(projectSettings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -340,7 +340,7 @@ func TestLoadAllSettingsSkipHostSettings(t *testing.T) {
 	// Set up a fake home with host-level settings that should be skipped.
 	fakeHome := t.TempDir()
 	claudeDir := filepath.Join(fakeHome, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hostSettings := `{
@@ -349,18 +349,18 @@ func TestLoadAllSettingsSkipHostSettings(t *testing.T) {
     "host-market": { "source": { "source": "git", "url": "https://example.com/host.git" } }
   }
 }`
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(hostSettings), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(hostSettings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Set up workspace with project settings that should still load.
 	workspace := t.TempDir()
 	projClaudeDir := filepath.Join(workspace, ".claude")
-	if err := os.MkdirAll(projClaudeDir, 0755); err != nil {
+	if err := os.MkdirAll(projClaudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	projSettings := `{ "enabledPlugins": { "proj-plugin@proj-market": true } }`
-	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -596,7 +596,7 @@ func TestLoadKnownMarketplaces(t *testing.T) {
     "lastUpdated": "2026-01-24T00:50:43.196Z"
   }
 }`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -653,7 +653,7 @@ func TestLoadKnownMarketplacesGitSource(t *testing.T) {
     "lastUpdated": "2026-01-24T00:50:41.204Z"
   }
 }`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -681,7 +681,7 @@ func TestLoadKnownMarketplacesMalformedJSON(t *testing.T) {
 
 	// Invalid JSON
 	content := `{ invalid json }`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -714,7 +714,7 @@ func TestLoadKnownMarketplacesInvalidRepoFormat(t *testing.T) {
     "lastUpdated": "2026-01-24T00:50:41.204Z"
   }
 }`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -760,7 +760,7 @@ func TestLoadKnownMarketplacesEmptyURL(t *testing.T) {
     "lastUpdated": "2026-01-24T00:50:41.204Z"
   }
 }`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -849,7 +849,7 @@ func TestLoadSettingsPreservesUnknownFields(t *testing.T) {
   },
   "customUnknownField": "preserved"
 }`
-	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -893,7 +893,7 @@ func TestSettingsRoundTripWithExtras(t *testing.T) {
   },
   "customField": 42
 }`
-	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -933,7 +933,7 @@ func TestLoadAllSettingsPreservesMoatUserExtras(t *testing.T) {
 	t.Setenv("MOAT_SKIP_HOST_CLAUDE_SETTINGS", "")
 
 	moatClaudeDir := filepath.Join(fakeHome, ".moat", "claude")
-	if err := os.MkdirAll(moatClaudeDir, 0755); err != nil {
+	if err := os.MkdirAll(moatClaudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	moatSettings := `{
@@ -941,21 +941,21 @@ func TestLoadAllSettingsPreservesMoatUserExtras(t *testing.T) {
   "statusLine": { "command": "date" },
   "customSetting": "from-moat-user"
 }`
-	if err := os.WriteFile(filepath.Join(moatClaudeDir, "settings.json"), []byte(moatSettings), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(moatClaudeDir, "settings.json"), []byte(moatSettings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Set up workspace with project settings that also have unknown fields.
 	workspace := t.TempDir()
 	projClaudeDir := filepath.Join(workspace, ".claude")
-	if err := os.MkdirAll(projClaudeDir, 0755); err != nil {
+	if err := os.MkdirAll(projClaudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	projSettings := `{
   "enabledPlugins": { "proj-plugin@market": true },
   "projectOnlySetting": "should-be-dropped"
 }`
-	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projClaudeDir, "settings.json"), []byte(projSettings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1068,7 +1068,7 @@ func TestSettingsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("json.MarshalIndent: %v", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1261,10 +1261,10 @@ func TestMergeSettingsTui(t *testing.T) {
 func TestLoadAllSettingsMirrorsHostTui(t *testing.T) {
 	fakeHome := t.TempDir()
 	claudeDir := filepath.Join(fakeHome, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"tui":"fullscreen"}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"tui":"fullscreen"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

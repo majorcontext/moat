@@ -31,7 +31,7 @@ func TestVolumeWorkspaceMounts(t *testing.T) {
 
 func TestGuardVolumeWorkspaceRejectsWorktree(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere/.git/worktrees/x"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere/.git/worktrees/x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	err := GuardVolumeWorkspace(dir, container.RuntimeDocker)
@@ -49,7 +49,7 @@ func TestGuardVolumeWorkspaceRejectsApple(t *testing.T) {
 
 func TestGuardVolumeWorkspaceAllowsNormalRepoOnDocker(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := GuardVolumeWorkspace(dir, container.RuntimeDocker); err != nil {

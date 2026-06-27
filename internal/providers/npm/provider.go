@@ -63,7 +63,7 @@ func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome stri
 	if err != nil {
 		return nil, "", fmt.Errorf("creating npm config dir: %w", err)
 	}
-	if err := os.Chmod(tmpDir, 0700); err != nil {
+	if err := os.Chmod(tmpDir, 0o700); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, "", fmt.Errorf("setting permissions on npm config dir: %w", err)
 	}
@@ -78,7 +78,7 @@ func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome stri
 	// Generate .npmrc with placeholder tokens
 	npmrcContent := GenerateNpmrc(entries, NpmTokenPlaceholder)
 	npmrcPath := filepath.Join(tmpDir, ".npmrc")
-	if err := os.WriteFile(npmrcPath, []byte(npmrcContent), 0600); err != nil {
+	if err := os.WriteFile(npmrcPath, []byte(npmrcContent), 0o600); err != nil {
 		return nil, "", fmt.Errorf("writing .npmrc: %w", err)
 	}
 

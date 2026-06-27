@@ -241,10 +241,10 @@ func TestResolveClaudeCredential_SkipsMigrationInReadOnlyDir(t *testing.T) {
 	}
 
 	// Make directory read-only to prevent migration writes
-	if err := os.Chmod(dir, 0555); err != nil {
+	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(dir, 0755) // restore for cleanup
+	defer os.Chmod(dir, 0o755) // restore for cleanup
 
 	// Should fall through to "anthropic" since migration can't write
 	got := resolveClaudeCredential(store)
@@ -264,7 +264,7 @@ func writeTestMetadata(t *testing.T, baseDir, runID string, meta storage.Metadat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(store.Dir()+"/metadata.json", data, 0600); err != nil {
+	if err := os.WriteFile(store.Dir()+"/metadata.json", data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

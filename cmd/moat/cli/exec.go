@@ -40,8 +40,10 @@ const (
 
 // Re-export types from internal/cli for backward compatibility
 // with code in cmd/moat/cli that uses these types.
-type ExecFlags = intcli.ExecFlags
-type ExecOptions = intcli.ExecOptions
+type (
+	ExecFlags   = intcli.ExecFlags
+	ExecOptions = intcli.ExecOptions
+)
 
 // AddExecFlags adds the common execution flags to a command.
 func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
@@ -729,7 +731,7 @@ func dumpTUI(r *run.Run, ringRecorder *trace.RingRecorder, statusWriter *tui.Wri
 	flash := func(msg string) { flashMessage(statusWriter, flashMu, flashTimer, msg) }
 
 	runDir := filepath.Join(storage.DefaultBaseDir(), r.ID)
-	if err := os.MkdirAll(runDir, 0700); err != nil {
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		log.Error("tui dump mkdir failed", "dir", runDir, "error", err)
 		flash("tui dump failed: " + err.Error())
 		return

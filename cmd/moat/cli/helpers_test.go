@@ -62,7 +62,7 @@ func TestResolveWorkspacePath_File(t *testing.T) {
 	// Create a temp file (not directory)
 	tempDir := t.TempDir()
 	tempFile := filepath.Join(tempDir, "testfile.txt")
-	if err := os.WriteFile(tempFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(tempFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 

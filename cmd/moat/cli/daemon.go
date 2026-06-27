@@ -20,8 +20,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var daemonDir string
-var daemonProxyPort int
+var (
+	daemonDir       string
+	daemonProxyPort int
+)
 
 var daemonCmd = &cobra.Command{
 	Use:    "_daemon",

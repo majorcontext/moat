@@ -152,7 +152,7 @@ func (f *fileBackend) Get() ([]byte, error) {
 		return nil, fmt.Errorf("reading key file: %w", err)
 	}
 	perm := info.Mode().Perm()
-	if perm&0077 != 0 {
+	if perm&0o077 != 0 {
 		return nil, fmt.Errorf("%w: %s has permissions %04o (expected 0600).\n"+
 			"  The key may have been exposed. To fix:\n"+
 			"  1. chmod 600 %s\n"+
@@ -170,7 +170,7 @@ func (f *fileBackend) Get() ([]byte, error) {
 
 func (f *fileBackend) Set(key []byte) error {
 	dir := filepath.Dir(f.path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating key directory: %w", err)
 	}
 
@@ -180,7 +180,7 @@ func (f *fileBackend) Set(key []byte) error {
 	// the stale .lock file is harmless and can be safely deleted manually.
 	// The next process will create a new lock file.
 	lockPath := f.path + ".lock"
-	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("creating lock file: %w", err)
 	}
@@ -201,7 +201,7 @@ func (f *fileBackend) Set(key []byte) error {
 	}
 
 	encoded := encodeKey(key)
-	if err := os.WriteFile(f.path, []byte(encoded), 0600); err != nil {
+	if err := os.WriteFile(f.path, []byte(encoded), 0o600); err != nil {
 		return fmt.Errorf("writing key file: %w", err)
 	}
 	return nil
@@ -296,11 +296,11 @@ func withGlobalKeyLock(fn func() ([]byte, error)) ([]byte, error) {
 	}
 
 	// Ensure lock directory exists
-	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0700); mkErr != nil {
+	if mkErr := os.MkdirAll(filepath.Dir(lockPath), 0o700); mkErr != nil {
 		return nil, fmt.Errorf("creating lock directory: %w", mkErr)
 	}
 
-	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("creating global key lock file: %w", err)
 	}

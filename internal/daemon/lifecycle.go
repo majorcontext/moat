@@ -46,7 +46,7 @@ func (l *LockInfo) IsAlive() bool {
 
 // WriteLockFile writes the daemon lock file.
 func WriteLockFile(dir string, info LockInfo) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	if info.StartedAt.IsZero() {
@@ -56,7 +56,7 @@ func WriteLockFile(dir string, info LockInfo) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, lockFileName), data, 0644)
+	return os.WriteFile(filepath.Join(dir, lockFileName), data, 0o644)
 }
 
 // ReadLockFile reads the daemon lock file. Returns nil, nil if not found.
@@ -87,7 +87,7 @@ func RemoveLockFile(dir string) {
 // callers don't each spawn a separate daemon process.
 func EnsureRunning(dir string, proxyPort int) (*Client, error) {
 	// Ensure the directory exists before taking the spawn lock.
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating daemon directory: %w", err)
 	}
 
@@ -189,7 +189,8 @@ func spawnDaemon(dir string, proxyPort int, prev *LockInfo) (*Client, error) {
 		return nil, err
 	}
 
-	args := []string{exe, "_daemon",
+	args := []string{
+		exe, "_daemon",
 		"--dir", dir,
 		"--proxy-port", fmt.Sprintf("%d", proxyPort),
 	}
@@ -204,7 +205,7 @@ func spawnDaemon(dir string, proxyPort int, prev *LockInfo) (*Client, error) {
 
 	// Send daemon stderr to a log file for debugging startup failures.
 	logPath := filepath.Join(dir, "daemon.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	logFileOwned := err == nil // track whether we opened a separate file
 	if !logFileOwned {
 		logFile = devNull // non-fatal; discard output rather than passing nil fds
@@ -282,7 +283,7 @@ func commitKnown(commit string) bool {
 // The returned bool reports whether an existing daemon was stopped (true) or
 // nothing was running and a fresh daemon was simply started (false).
 func Restart(dir string, proxyPort int) (*Client, bool, error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, false, fmt.Errorf("creating daemon directory: %w", err)
 	}
 
@@ -392,7 +393,7 @@ func waitForExit(pid int, timeout time.Duration) bool {
 // spawning. Returns an unlock function that must be called (typically deferred).
 func acquireSpawnLock(dir string) (unlock func(), err error) {
 	lockPath := filepath.Join(dir, spawnLockFileName)
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}

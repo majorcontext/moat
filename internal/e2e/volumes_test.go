@@ -393,7 +393,7 @@ func createTestWorkspaceWithVolumes(t *testing.T, agentName string, volumes []co
 	}
 
 	yaml := "name: " + agentName + "\nagent: e2e-test\nversion: 1.0.0\nvolumes:\n" + volLines
-	if err := os.WriteFile(dir+"/moat.yaml", []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(dir+"/moat.yaml", []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 

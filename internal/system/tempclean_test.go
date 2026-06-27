@@ -21,7 +21,7 @@ func TestFindOrphanedTempDirs(t *testing.T) {
 	legacyOldDir := filepath.Join(tmpDir, "agentops-aws-old")
 
 	for _, dir := range []string{oldDir, recentDir, claudeOldDir, legacyOldDir} {
-		if err := os.Mkdir(dir, 0755); err != nil {
+		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -91,7 +91,7 @@ func TestCleanOrphanedTempDirs(t *testing.T) {
 	}
 
 	for _, dir := range testDirs {
-		if err := os.Mkdir(dir, 0755); err != nil {
+		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		// Make them old
@@ -134,7 +134,7 @@ func TestCleanOrphanedTempDirs_SkipsRecentlyModified(t *testing.T) {
 
 	// Create a test directory
 	testDir := filepath.Join(tmpDir, "test-recent")
-	if err := os.Mkdir(testDir, 0755); err != nil {
+	if err := os.Mkdir(testDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -198,19 +198,19 @@ func TestDirSize(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a directory with some files
-	if err := os.WriteFile(filepath.Join(tmpDir, "file1.txt"), []byte("hello"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "file1.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte("world"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte("world"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a subdirectory with a file
 	subDir := filepath.Join(tmpDir, "subdir")
-	if err := os.Mkdir(subDir, 0755); err != nil {
+	if err := os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subDir, "file3.txt"), []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subDir, "file3.txt"), []byte("test"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

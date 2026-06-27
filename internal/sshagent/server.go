@@ -85,7 +85,7 @@ func (s *Server) startUnix() error {
 	// 1. The socket directory is per-run (~/.moat/sockets/<run-id>/)
 	// 2. The proxy enforces host-based key filtering
 	// 3. Only the specific container has the directory mounted
-	if err := os.Chmod(s.socketPath, 0666); err != nil {
+	if err := os.Chmod(s.socketPath, 0o666); err != nil {
 		listener.Close()
 		return fmt.Errorf("setting socket permissions: %w", err)
 	}

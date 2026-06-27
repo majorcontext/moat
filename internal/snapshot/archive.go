@@ -48,7 +48,7 @@ func (b *ArchiveBackend) Name() string {
 // Create creates a tar.gz archive of the workspace.
 func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 	// Ensure snapshot directory exists
-	if err := os.MkdirAll(b.snapshotDir, 0755); err != nil {
+	if err := os.MkdirAll(b.snapshotDir, 0o755); err != nil {
 		return "", fmt.Errorf("create snapshot directory: %w", err)
 	}
 
@@ -56,7 +56,7 @@ func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 
 	// Create the archive file with restrictive permissions; archives may
 	// contain .git contents (remotes, credentials) in volume mode.
-	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("create archive file: %w", err)
 	}
@@ -150,7 +150,6 @@ func (b *ArchiveBackend) Create(workspacePath, id string) (string, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		// Clean up on error
 		os.Remove(archivePath)
@@ -274,17 +273,17 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			//nolint:gosec // G115: Mode is masked to permission bits which fit in uint32
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode&0777)); err != nil {
+			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode&0o777)); err != nil {
 				return fmt.Errorf("create directory %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
 			// Ensure parent directory exists
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return fmt.Errorf("create parent directory for %s: %w", header.Name, err)
 			}
 
 			//nolint:gosec // G115: Mode is masked to permission bits which fit in uint32
-			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode&0777))
+			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode&0o777))
 			if err != nil {
 				return fmt.Errorf("create file %s: %w", header.Name, err)
 			}
@@ -313,7 +312,7 @@ func (b *ArchiveBackend) RestoreTo(nativeRef, destPath string) error {
 			}
 		case tar.TypeSymlink:
 			// Ensure parent directory exists
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return fmt.Errorf("create parent directory for symlink %s: %w", header.Name, err)
 			}
 

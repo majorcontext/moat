@@ -394,7 +394,7 @@ type TmpfsMount struct {
 // tmpfsMode is the permission mode for tmpfs overlays. Sticky world-writable
 // (01777) so non-root container users can write — runc otherwise defaults
 // tmpfs to 0755 owned by root.
-const tmpfsMode = 01777
+const tmpfsMode = 0o1777
 
 // ImageInfo contains information about a container image.
 type ImageInfo struct {

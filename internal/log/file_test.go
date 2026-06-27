@@ -72,16 +72,16 @@ func TestCleanup(t *testing.T) {
 	// Create old log files
 	oldDate := time.Now().AddDate(0, 0, -20).Format("2006-01-02")
 	oldFile := filepath.Join(tmpDir, oldDate+".jsonl")
-	os.WriteFile(oldFile, []byte("old"), 0644)
+	os.WriteFile(oldFile, []byte("old"), 0o644)
 
 	// Create recent log file
 	recentDate := time.Now().AddDate(0, 0, -5).Format("2006-01-02")
 	recentFile := filepath.Join(tmpDir, recentDate+".jsonl")
-	os.WriteFile(recentFile, []byte("recent"), 0644)
+	os.WriteFile(recentFile, []byte("recent"), 0o644)
 
 	// Create non-log file (should be ignored)
 	otherFile := filepath.Join(tmpDir, "other.txt")
-	os.WriteFile(otherFile, []byte("other"), 0644)
+	os.WriteFile(otherFile, []byte("other"), 0o644)
 
 	// Run cleanup with 14 day retention
 	Cleanup(tmpDir, 14)

@@ -262,7 +262,7 @@ func TestCleanup(t *testing.T) {
 		t.Fatalf("creating temp dir: %v", err)
 	}
 	// Create a file to verify cleanup
-	if writeErr := os.WriteFile(filepath.Join(tmpDir, "test"), []byte("data"), 0600); writeErr != nil {
+	if writeErr := os.WriteFile(filepath.Join(tmpDir, "test"), []byte("data"), 0o600); writeErr != nil {
 		t.Fatalf("creating test file: %v", writeErr)
 	}
 

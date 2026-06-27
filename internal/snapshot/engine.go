@@ -52,7 +52,7 @@ func NewEngine(workspace, snapshotDir string, opts EngineOptions) (*Engine, erro
 	}
 
 	// Ensure snapshot directory exists
-	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create snapshot directory: %w", err)
 	}
 

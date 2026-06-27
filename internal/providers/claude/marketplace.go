@@ -187,7 +187,7 @@ func CloneMarketplace(ctx context.Context, repo string) (dir string, commitTime 
 		// Clean dir contents for the next attempt (MkdirTemp created it,
 		// git clone may have partially populated it).
 		os.RemoveAll(dir)
-		if mkErr := os.MkdirAll(dir, 0700); mkErr != nil {
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 			os.RemoveAll(dir)
 			return "", "", fmt.Errorf("recreating temp dir: %w", mkErr)
 		}

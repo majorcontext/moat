@@ -224,7 +224,7 @@ mcp:
       grant: mcp-server2
       header: X-Server2-Key
 `
-	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(agentYAML), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(agentYAML), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
@@ -437,7 +437,7 @@ mcp:
       grant: mcp-test
       header: X-Test-Key
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(agentYAML), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(agentYAML), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 

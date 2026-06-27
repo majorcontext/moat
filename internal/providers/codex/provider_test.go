@@ -107,7 +107,6 @@ func TestProvider_ContainerMounts(t *testing.T) {
 	}
 
 	mounts, cleanupPath, err := p.ContainerMounts(cred, "/home/testuser")
-
 	if err != nil {
 		t.Errorf("ContainerMounts() error = %v", err)
 	}

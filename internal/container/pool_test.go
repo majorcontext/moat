@@ -84,36 +84,47 @@ func (s *poolStubRuntime) Ping(context.Context) error { panic("not implemented")
 func (s *poolStubRuntime) CreateContainer(context.Context, Config) (string, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) StartContainer(context.Context, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) VolumeCreate(context.Context, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) VolumeRemove(context.Context, string, bool) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) VolumeList(context.Context, string) ([]string, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) VolumeExport(context.Context, string, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) StopContainer(context.Context, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) WaitContainer(context.Context, string) (int64, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) RemoveContainer(context.Context, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ContainerLogs(context.Context, string) (io.ReadCloser, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ContainerLogsAll(context.Context, string) ([]byte, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) GetPortBindings(context.Context, string) (map[int]int, error) {
 	panic("not implemented")
 }
@@ -126,27 +137,35 @@ func (s *poolStubRuntime) ServiceManager() ServiceManager { return nil }
 func (s *poolStubRuntime) SetupFirewall(context.Context, string, string, int) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ListImages(context.Context) ([]ImageInfo, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ListContainers(context.Context) ([]Info, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ContainerState(context.Context, string) (string, error) {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) RemoveImage(context.Context, string) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) StartAttached(context.Context, string, AttachOptions) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ResizeTTY(context.Context, string, uint, uint) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) Exec(context.Context, string, []string, []byte, io.Writer, io.Writer) error {
 	panic("not implemented")
 }
+
 func (s *poolStubRuntime) ExecInteractive(context.Context, string, []string, ExecOptions) error {
 	panic("not implemented")
 }

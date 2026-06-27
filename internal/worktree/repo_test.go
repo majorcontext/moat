@@ -237,7 +237,7 @@ func TestFindRepoRoot(t *testing.T) {
 	}
 
 	subDir := filepath.Join(tmpDir, "a", "b", "c")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 

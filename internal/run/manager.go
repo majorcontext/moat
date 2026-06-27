@@ -1234,7 +1234,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 			// Write the credential helper script
 			// Use 0700 permissions since the script contains the credential endpoint URL
 			helperPath := filepath.Join(awsDir, "credentials")
-			if err := os.WriteFile(helperPath, awsprov.GetCredentialHelper(), 0700); err != nil {
+			if err := os.WriteFile(helperPath, awsprov.GetCredentialHelper(), 0o700); err != nil {
 				cleanupDaemonRun()
 				return nil, fmt.Errorf("writing AWS credential helper: %w", err)
 			}
@@ -1245,7 +1245,7 @@ credential_process = /moat/aws/credentials
 region = %s
 `, r.AWSCredentialProvider.Region())
 			configPath := filepath.Join(awsDir, "config")
-			if err := os.WriteFile(configPath, []byte(awsConfig), 0644); err != nil {
+			if err := os.WriteFile(configPath, []byte(awsConfig), 0o644); err != nil {
 				cleanupDaemonRun()
 				return nil, fmt.Errorf("writing AWS config: %w", err)
 			}
@@ -1384,7 +1384,7 @@ region = %s
 		} else {
 			// Use Unix socket - can be mounted directly
 			sshSocketDir = filepath.Join(config.GlobalConfigDir(), "sockets", r.ID)
-			if err := os.MkdirAll(sshSocketDir, 0755); err != nil {
+			if err := os.MkdirAll(sshSocketDir, 0o755); err != nil {
 				upstreamAgent.Close()
 				cleanupDaemonRun()
 				return nil, fmt.Errorf("creating SSH socket directory: %w", err)
@@ -1936,7 +1936,7 @@ region = %s
 			// Ensure directory exists on host
 			if hostClaudeProjects == "" {
 				log.Warn("skipping Claude log sync mount: empty workspace path")
-			} else if err := os.MkdirAll(hostClaudeProjects, 0755); err != nil {
+			} else if err := os.MkdirAll(hostClaudeProjects, 0o755); err != nil {
 				ui.Warnf("Failed to create Claude logs directory: %v", err)
 			} else {
 				// Container writes to ~/.claude/projects/-workspace/
@@ -2141,7 +2141,7 @@ region = %s
 					// MarshalIndent cannot fail for Settings (no channels, funcs, or cycles);
 					// log.Warn for defense-in-depth only.
 					log.Warn("failed to marshal settings.json", "error", jsonErr)
-				} else if writeErr := os.WriteFile(settingsPath, settingsJSON, 0644); writeErr != nil {
+				} else if writeErr := os.WriteFile(settingsPath, settingsJSON, 0o644); writeErr != nil {
 					ui.Warnf("Failed to write Claude settings to container: %v", writeErr)
 				} else {
 					log.Debug("wrote settings.json to staging dir",
@@ -4331,7 +4331,7 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 	srcHash := sha256.Sum256(srcContent)
 
 	// Create directory if it doesn't exist
-	if err = os.MkdirAll(certOnlyDir, 0755); err != nil {
+	if err = os.MkdirAll(certOnlyDir, 0o755); err != nil {
 		return fmt.Errorf("creating directory: %w", err)
 	}
 
@@ -4358,7 +4358,7 @@ func ensureCACertOnlyDir(caDir, certOnlyDir string) error {
 		}
 	}
 
-	if err = os.WriteFile(certDst, srcContent, 0644); err != nil {
+	if err = os.WriteFile(certDst, srcContent, 0o644); err != nil {
 		return fmt.Errorf("writing CA certificate: %w", err)
 	}
 

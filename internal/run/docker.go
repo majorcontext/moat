@@ -122,7 +122,7 @@ func GetDockerSocketGID() (uint32, error) {
 	// Check if socket is accessible by checking file permissions
 	// For Unix sockets, check read+write permission bits
 	mode := info.Mode()
-	if mode&0060 != 0060 { // Check group read+write
+	if mode&0o060 != 0o060 { // Check group read+write
 		log.Debug("docker socket has unexpected group permissions",
 			"mode", mode.String(),
 			"gid", gid)

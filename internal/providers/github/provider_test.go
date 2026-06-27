@@ -115,11 +115,11 @@ func TestProvider_ContainerInitFiles(t *testing.T) {
 	// Create a temp gh config to test with
 	tmpHome := t.TempDir()
 	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
-	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+	if err := os.MkdirAll(ghConfigDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	configContent := "git_protocol: ssh\neditor: vim\n"
-	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmpHome)
@@ -149,7 +149,7 @@ func TestProvider_ContainerInitFiles_StripsCredentials(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
-	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+	if err := os.MkdirAll(ghConfigDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// Config with embedded credentials (insecure-storage or older gh versions)
@@ -160,7 +160,7 @@ hosts:
     oauth_token: gho_SECRETTOKEN123
     user: testuser
 `
-	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmpHome)
@@ -198,12 +198,12 @@ func TestProvider_ContainerInitFiles_CredentialsOnly(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	ghConfigDir := filepath.Join(tmpHome, ".config", "gh")
-	if err := os.MkdirAll(ghConfigDir, 0700); err != nil {
+	if err := os.MkdirAll(ghConfigDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// Config with only credential fields, no preferences
 	configContent := "hosts:\n  github.com:\n    oauth_token: gho_SECRET\n"
-	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(ghConfigDir, "config.yml"), []byte(configContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmpHome)

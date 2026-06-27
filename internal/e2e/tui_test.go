@@ -110,7 +110,8 @@ func TestAppleTUIWriterAltScreenDuringInit(t *testing.T) {
 		Name:        "e2e-tui-altscreen",
 		Workspace:   workspace,
 		Interactive: true,
-		Cmd: []string{"sh", "-c",
+		Cmd: []string{
+			"sh", "-c",
 			// Enter alt screen, write content, exit alt screen, write normal content
 			`printf '\033[?1049h'; echo 'in-alt-screen'; printf '\033[?1049l'; echo 'back-to-normal'`,
 		},

@@ -51,13 +51,13 @@ func TestEngineCreateAndRestore(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files in workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "pkg"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "pkg"), 0o755); err != nil {
 		t.Fatalf("failed to create pkg dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "pkg/lib.go"), []byte("package pkg\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "pkg/lib.go"), []byte("package pkg\n"), 0o644); err != nil {
 		t.Fatalf("failed to create pkg/lib.go: %v", err)
 	}
 
@@ -96,10 +96,10 @@ func TestEngineCreateAndRestore(t *testing.T) {
 	}
 
 	// Modify workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // modified\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // modified\n"), 0o644); err != nil {
 		t.Fatalf("failed to modify main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "newfile.txt"), []byte("new content\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "newfile.txt"), []byte("new content\n"), 0o644); err != nil {
 		t.Fatalf("failed to create newfile.txt: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestEngineRestoreTo(t *testing.T) {
 	restoreDir := t.TempDir()
 
 	// Create test files in workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "app.go"), []byte("package app\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "app.go"), []byte("package app\n"), 0o644); err != nil {
 		t.Fatalf("failed to create app.go: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestEngineList(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestEngineGet(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestEngineDelete(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
@@ -342,7 +342,7 @@ func TestEngineMetadataPersistence(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
@@ -389,23 +389,23 @@ func TestEngineGitignoreOption(t *testing.T) {
 	gitignore := `node_modules/
 *.log
 `
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		t.Fatalf("failed to create .gitignore: %v", err)
 	}
 
 	// Create files that should be included
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
 	// Create files that should be excluded
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "node_modules/pkg"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "node_modules/pkg"), 0o755); err != nil {
 		t.Fatalf("failed to create node_modules: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "node_modules/pkg/index.js"), []byte("module.exports = {}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "node_modules/pkg/index.js"), []byte("module.exports = {}\n"), 0o644); err != nil {
 		t.Fatalf("failed to create node_modules file: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log entry\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log entry\n"), 0o644); err != nil {
 		t.Fatalf("failed to create app.log: %v", err)
 	}
 
@@ -449,13 +449,13 @@ func TestEngineAdditionalExcludes(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "vendor"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "vendor"), 0o755); err != nil {
 		t.Fatalf("failed to create vendor dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "vendor/dep.go"), []byte("package vendor\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "vendor/dep.go"), []byte("package vendor\n"), 0o644); err != nil {
 		t.Fatalf("failed to create vendor/dep.go: %v", err)
 	}
 

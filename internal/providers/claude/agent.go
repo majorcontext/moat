@@ -25,7 +25,7 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 	}
 
 	// Ensure proper permissions
-	if err := os.Chmod(tmpDir, 0700); err != nil {
+	if err := os.Chmod(tmpDir, 0o700); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("setting permissions on staging dir: %w", err)
 	}
@@ -95,7 +95,7 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 	if hostHomeErr == nil {
 		remoteSettingsPath := filepath.Join(hostHome, ".claude", "remote-settings.json")
 		if data, readErr := os.ReadFile(remoteSettingsPath); readErr == nil {
-			if writeErr := os.WriteFile(filepath.Join(tmpDir, "remote-settings.json"), data, 0600); writeErr != nil {
+			if writeErr := os.WriteFile(filepath.Join(tmpDir, "remote-settings.json"), data, 0o600); writeErr != nil {
 				log.Debug("failed to stage remote-settings.json", "error", writeErr)
 			}
 		}
@@ -103,7 +103,7 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 
 	// Write runtime context file if provided
 	if opts.RuntimeContext != "" {
-		if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte(opts.RuntimeContext), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte(opts.RuntimeContext), 0o644); err != nil {
 			return nil, fmt.Errorf("writing context file: %w", err)
 		}
 	}

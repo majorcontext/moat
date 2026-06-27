@@ -119,7 +119,7 @@ client_id: my-client-id
 client_secret: my-secret
 scopes: read write
 `
-		if err := os.WriteFile(filepath.Join(dir, "example.yaml"), []byte(content), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "example.yaml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -154,7 +154,7 @@ scopes: read write
 
 	t.Run("invalid yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(":::not yaml:::"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(":::not yaml:::"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, err := LoadConfig(dir, "bad")
@@ -167,7 +167,7 @@ scopes: read write
 		dir := t.TempDir()
 		content := `client_id: my-client-id
 `
-		if err := os.WriteFile(filepath.Join(dir, "partial.yaml"), []byte(content), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "partial.yaml"), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, err := LoadConfig(dir, "partial")

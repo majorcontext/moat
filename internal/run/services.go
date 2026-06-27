@@ -19,10 +19,12 @@ import (
 	"github.com/majorcontext/moat/internal/deps"
 )
 
-const passwordLength = 32
-const passwordChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const readinessTimeout = 30 * time.Second
-const readinessInterval = 1 * time.Second
+const (
+	passwordLength    = 32
+	passwordChars     = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	readinessTimeout  = 30 * time.Second
+	readinessInterval = 1 * time.Second
+)
 
 // validProvisionItem matches safe provision item names (e.g., Ollama model names).
 // Allows alphanumerics, dots, dashes, underscores, colons, slashes, and @ signs.

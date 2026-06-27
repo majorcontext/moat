@@ -91,7 +91,7 @@ func (c *Collector) StartUnix(socketPath string) error {
 	// - Container processes run as various UIDs, so owner-only (0200) won't work
 	// - Read permission is denied to prevent agents from verifying what was logged
 	// - The socket is bind-mounted into containers, not exposed to the host network
-	if err := os.Chmod(socketPath, 0222); err != nil {
+	if err := os.Chmod(socketPath, 0o222); err != nil {
 		listener.Close()
 		os.Remove(socketPath)
 		return fmt.Errorf("setting socket permissions: %w", err)

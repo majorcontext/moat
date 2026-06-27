@@ -76,7 +76,7 @@ func TestServerSocketPermissions(t *testing.T) {
 	// Socket should be owner read/write only (0600 or similar)
 	// Note: On some systems socket permissions may differ
 	mode := info.Mode().Perm()
-	if mode&0077 != 0 {
+	if mode&0o077 != 0 {
 		t.Logf("Socket permissions: %o (note: some systems allow different permissions)", mode)
 	}
 }
@@ -92,7 +92,7 @@ func TestServerRemovesExistingSocket(t *testing.T) {
 	socketPath := filepath.Join(dir, "a.sock")
 
 	// Create a stale socket file
-	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {
+	if err := os.WriteFile(socketPath, []byte("stale"), 0o600); err != nil {
 		t.Fatalf("Creating stale file: %v", err)
 	}
 

@@ -97,7 +97,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("marshaling bundle: %w", marshalErr)
 		}
 
-		if writeErr := os.WriteFile(auditExportFile, data, 0644); writeErr != nil {
+		if writeErr := os.WriteFile(auditExportFile, data, 0o644); writeErr != nil {
 			return fmt.Errorf("writing bundle: %w", writeErr)
 		}
 

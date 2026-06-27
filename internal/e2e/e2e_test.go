@@ -647,7 +647,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 		// Create a test file in the workspace
 		testFile := "e2e-test-file.txt"
 		testContent := "e2e-test-content-xyz"
-		if err := os.WriteFile(filepath.Join(workspace, testFile), []byte(testContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(workspace, testFile), []byte(testContent), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
 
@@ -774,7 +774,7 @@ func createTestWorkspace(t *testing.T) string {
 	yaml := `agent: e2e-test
 version: 1.0.0
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
@@ -790,7 +790,7 @@ func createTestWorkspaceWithRuntime(t *testing.T, rt, version string) string {
 
 	// Create moat.yaml with runtime
 	yaml := "agent: e2e-test\nversion: 1.0.0\nruntime:\n  " + rt + ": " + version + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 
@@ -2035,7 +2035,7 @@ version: 1.0.0
 claude:
   sync_logs: true
 `
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 	return dir
@@ -2053,7 +2053,7 @@ func createTestWorkspaceWithDeps(t *testing.T, deps []string) string {
 	}
 
 	yaml := "agent: e2e-test\nversion: 1.0.0\ndependencies:\n" + depLines
-	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
 

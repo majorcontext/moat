@@ -16,7 +16,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Create some old files to test cleanup
 	oldDate := time.Now().AddDate(0, 0, -20).Format("2006-01-02")
 	oldFile := filepath.Join(tmpDir, oldDate+".jsonl")
-	os.WriteFile(oldFile, []byte("old log"), 0644)
+	os.WriteFile(oldFile, []byte("old log"), 0o644)
 
 	// Initialize logger
 	err := Init(Options{

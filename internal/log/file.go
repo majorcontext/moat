@@ -19,7 +19,7 @@ type FileWriter struct {
 
 // NewFileWriter creates a FileWriter that writes to dir/YYYY-MM-DD.jsonl.
 func NewFileWriter(dir string) (*FileWriter, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating debug log dir: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func (fw *FileWriter) rotateLocked() error {
 	filename := today + ".jsonl"
 	path := filepath.Join(fw.dir, filename)
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("opening log file: %w", err)
 	}

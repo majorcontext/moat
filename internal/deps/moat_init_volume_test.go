@@ -176,14 +176,14 @@ func TestMoatInitScriptVolumePopulate(t *testing.T) {
 
 func mkdir(t *testing.T, p string) {
 	t.Helper()
-	if err := os.MkdirAll(p, 0755); err != nil {
+	if err := os.MkdirAll(p, 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func write(t *testing.T, p, s string) {
 	t.Helper()
-	if err := os.WriteFile(p, []byte(s), 0644); err != nil {
+	if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

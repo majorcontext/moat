@@ -69,7 +69,7 @@ type RunStore struct {
 // It creates the run directory under baseDir if it doesn't exist.
 func NewRunStore(baseDir, runID string) (*RunStore, error) {
 	runDir := filepath.Join(baseDir, runID)
-	if err := os.MkdirAll(runDir, 0700); err != nil {
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, err
 	}
 	return &RunStore{
@@ -104,7 +104,7 @@ func (s *RunStore) SaveMetadata(m Metadata) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.dir, "metadata.json"), data, 0600)
+	return os.WriteFile(filepath.Join(s.dir, "metadata.json"), data, 0o600)
 }
 
 // LoadMetadata reads the metadata from metadata.json in the run directory.
@@ -216,7 +216,7 @@ func (s *RunStore) LogWriter() (*LogWriter, error) {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, "logs.jsonl"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("opening log file: %w", err)
@@ -230,7 +230,7 @@ func (s *RunStore) JoinLogWriter(index int) (*LogWriter, error) {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, fmt.Sprintf("logs.%d.jsonl", index)),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("opening join log file: %w", err)
@@ -289,7 +289,7 @@ func (s *RunStore) WriteSpan(span Span) error {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, "traces.jsonl"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return fmt.Errorf("opening trace file: %w", err)
@@ -350,7 +350,7 @@ func (s *RunStore) WriteNetworkRequest(req NetworkRequest) error {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, "network.jsonl"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return fmt.Errorf("opening network file: %w", err)
@@ -380,7 +380,7 @@ func (s *RunStore) WriteSecretResolution(res SecretResolution) error {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, "secrets.jsonl"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return err
@@ -460,7 +460,7 @@ func (s *RunStore) WriteExecEvent(event ExecEvent) error {
 	f, err := os.OpenFile(
 		filepath.Join(s.dir, "exec.jsonl"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0600,
+		0o600,
 	)
 	if err != nil {
 		return fmt.Errorf("opening exec file: %w", err)
@@ -510,7 +510,7 @@ func (s *RunStore) ReadExecEvents() ([]ExecEvent, error) {
 
 // SaveDockerfile saves the Dockerfile used to build the container image.
 func (s *RunStore) SaveDockerfile(dockerfile string) error {
-	return os.WriteFile(filepath.Join(s.dir, "Dockerfile"), []byte(dockerfile), 0644)
+	return os.WriteFile(filepath.Join(s.dir, "Dockerfile"), []byte(dockerfile), 0o644)
 }
 
 // ReadDockerfile reads the Dockerfile from the run directory.

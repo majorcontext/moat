@@ -15,13 +15,13 @@ func TestArchiveBackend(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files in workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "pkg"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "pkg"), 0o755); err != nil {
 		t.Fatalf("failed to create pkg dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "pkg/lib.go"), []byte("package pkg\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "pkg/lib.go"), []byte("package pkg\n"), 0o644); err != nil {
 		t.Fatalf("failed to create pkg/lib.go: %v", err)
 	}
 
@@ -46,10 +46,10 @@ func TestArchiveBackend(t *testing.T) {
 	}
 
 	// Modify workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // modified\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // modified\n"), 0o644); err != nil {
 		t.Fatalf("failed to modify main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "newfile.txt"), []byte("new content\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "newfile.txt"), []byte("new content\n"), 0o644); err != nil {
 		t.Fatalf("failed to create newfile.txt: %v", err)
 	}
 
@@ -117,13 +117,13 @@ func TestArchiveBackendRestoreTo(t *testing.T) {
 	restoreDir := t.TempDir()
 
 	// Create test files in workspace
-	if err := os.WriteFile(filepath.Join(workspaceDir, "app.go"), []byte("package app\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "app.go"), []byte("package app\n"), 0o644); err != nil {
 		t.Fatalf("failed to create app.go: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "internal"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "internal"), 0o755); err != nil {
 		t.Fatalf("failed to create internal dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "internal/core.go"), []byte("package internal\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "internal/core.go"), []byte("package internal\n"), 0o644); err != nil {
 		t.Fatalf("failed to create internal/core.go: %v", err)
 	}
 
@@ -178,32 +178,32 @@ func TestArchiveBackendGitignore(t *testing.T) {
 build/
 .env
 `
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		t.Fatalf("failed to create .gitignore: %v", err)
 	}
 
 	// Create files that should be included
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
 	// Create files/directories that should be excluded
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "node_modules/pkg"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "node_modules/pkg"), 0o755); err != nil {
 		t.Fatalf("failed to create node_modules: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "node_modules/pkg/index.js"), []byte("module.exports = {}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "node_modules/pkg/index.js"), []byte("module.exports = {}\n"), 0o644); err != nil {
 		t.Fatalf("failed to create node_modules file: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log entry\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log entry\n"), 0o644); err != nil {
 		t.Fatalf("failed to create app.log: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "build"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "build"), 0o755); err != nil {
 		t.Fatalf("failed to create build dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "build/output.js"), []byte("compiled\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "build/output.js"), []byte("compiled\n"), 0o644); err != nil {
 		t.Fatalf("failed to create build/output.js: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".env"), []byte("SECRET=value\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".env"), []byte("SECRET=value\n"), 0o644); err != nil {
 		t.Fatalf("failed to create .env: %v", err)
 	}
 
@@ -250,16 +250,16 @@ func TestArchiveBackendAdditionalExcludes(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "vendor"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "vendor"), 0o755); err != nil {
 		t.Fatalf("failed to create vendor dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "vendor/dep.go"), []byte("package vendor\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "vendor/dep.go"), []byte("package vendor\n"), 0o644); err != nil {
 		t.Fatalf("failed to create vendor/dep.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "debug.tmp"), []byte("temp data\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "debug.tmp"), []byte("temp data\n"), 0o644); err != nil {
 		t.Fatalf("failed to create debug.tmp: %v", err)
 	}
 
@@ -299,15 +299,15 @@ func TestArchiveBackendPreservesGitDirOnRestore(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create test files
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
 	// Create a fake .git directory (should NOT be archived, but should be preserved on restore)
-	if err := os.MkdirAll(filepath.Join(workspaceDir, ".git/objects"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".git/objects"), 0o755); err != nil {
 		t.Fatalf("failed to create .git: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".git/HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".git/HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create .git/HEAD: %v", err)
 	}
 
@@ -320,11 +320,11 @@ func TestArchiveBackendPreservesGitDirOnRestore(t *testing.T) {
 	}
 
 	// Modify workspace files
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // changed\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main // changed\n"), 0o644); err != nil {
 		t.Fatalf("failed to modify main.go: %v", err)
 	}
 	// Also add a marker to .git to verify it's preserved
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".git/marker"), []byte("keep me\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".git/marker"), []byte("keep me\n"), 0o644); err != nil {
 		t.Fatalf("failed to create .git/marker: %v", err)
 	}
 
@@ -400,7 +400,7 @@ func TestArchiveBackendSymlinks(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a file and a symlink to it
-	if err := os.WriteFile(filepath.Join(workspaceDir, "target.txt"), []byte("target content\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "target.txt"), []byte("target content\n"), 0o644); err != nil {
 		t.Fatalf("failed to create target.txt: %v", err)
 	}
 	if err := os.Symlink("target.txt", filepath.Join(workspaceDir, "link.txt")); err != nil {
@@ -501,7 +501,7 @@ func TestArchiveBackendSymlinkPathTraversal(t *testing.T) {
 			// Try to restore it
 			backend := NewArchiveBackend(snapshotDir, ArchiveOptions{})
 			testRestoreDir := filepath.Join(restoreDir, tc.name)
-			if err := os.MkdirAll(testRestoreDir, 0755); err != nil {
+			if err := os.MkdirAll(testRestoreDir, 0o755); err != nil {
 				t.Fatalf("failed to create restore dir: %v", err)
 			}
 
@@ -543,7 +543,7 @@ func createMaliciousArchive(t *testing.T, archivePath, linkName, linkTarget stri
 	targetContent := []byte("target content")
 	targetHeader := &tar.Header{
 		Name: "target.txt",
-		Mode: 0644,
+		Mode: 0o644,
 		Size: int64(len(targetContent)),
 	}
 	if err := tw.WriteHeader(targetHeader); err != nil {
@@ -557,7 +557,7 @@ func createMaliciousArchive(t *testing.T, archivePath, linkName, linkTarget stri
 	if dir := filepath.Dir(linkName); dir != "." {
 		dirHeader := &tar.Header{
 			Name:     dir + "/",
-			Mode:     0755,
+			Mode:     0o755,
 			Typeflag: tar.TypeDir,
 		}
 		if err := tw.WriteHeader(dirHeader); err != nil {
@@ -569,7 +569,7 @@ func createMaliciousArchive(t *testing.T, archivePath, linkName, linkTarget stri
 	header := &tar.Header{
 		Name:     linkName,
 		Linkname: linkTarget,
-		Mode:     0777,
+		Mode:     0o777,
 		Typeflag: tar.TypeSymlink,
 	}
 	if err := tw.WriteHeader(header); err != nil {
@@ -583,7 +583,7 @@ func TestArchiveBackendListMultiple(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create a test file
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
 
@@ -631,13 +631,13 @@ func TestArchiveBackendFilePermissions(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create files with different permissions
-	if err := os.WriteFile(filepath.Join(workspaceDir, "script.sh"), []byte("#!/bin/bash\necho hello\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "script.sh"), []byte("#!/bin/bash\necho hello\n"), 0o755); err != nil {
 		t.Fatalf("failed to create script.sh: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "data.txt"), []byte("data\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "data.txt"), []byte("data\n"), 0o644); err != nil {
 		t.Fatalf("failed to create data.txt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "readonly.txt"), []byte("read only\n"), 0444); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "readonly.txt"), []byte("read only\n"), 0o444); err != nil {
 		t.Fatalf("failed to create readonly.txt: %v", err)
 	}
 
@@ -660,7 +660,7 @@ func TestArchiveBackendFilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat script.sh: %v", err)
 	}
-	if info.Mode().Perm()&0111 == 0 {
+	if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("script.sh should be executable, got mode %o", info.Mode().Perm())
 	}
 
@@ -668,7 +668,7 @@ func TestArchiveBackendFilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat data.txt: %v", err)
 	}
-	if info.Mode().Perm()&0111 != 0 {
+	if info.Mode().Perm()&0o111 != 0 {
 		t.Errorf("data.txt should not be executable, got mode %o", info.Mode().Perm())
 	}
 }
@@ -679,32 +679,32 @@ func TestArchiveBackendNestedGitignore(t *testing.T) {
 	snapshotDir := t.TempDir()
 
 	// Create root .gitignore
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("*.log\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".gitignore"), []byte("*.log\n"), 0o644); err != nil {
 		t.Fatalf("failed to create .gitignore: %v", err)
 	}
 
 	// Create subdirectory with its own .gitignore
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "subdir"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "subdir"), 0o755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/.gitignore"), []byte("*.tmp\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/.gitignore"), []byte("*.tmp\n"), 0o644); err != nil {
 		t.Fatalf("failed to create subdir/.gitignore: %v", err)
 	}
 
 	// Create files
-	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to create main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "app.log"), []byte("log\n"), 0o644); err != nil {
 		t.Fatalf("failed to create app.log: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/code.go"), []byte("package subdir\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/code.go"), []byte("package subdir\n"), 0o644); err != nil {
 		t.Fatalf("failed to create subdir/code.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/cache.tmp"), []byte("temp\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/cache.tmp"), []byte("temp\n"), 0o644); err != nil {
 		t.Fatalf("failed to create subdir/cache.tmp: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/debug.log"), []byte("debug\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "subdir/debug.log"), []byte("debug\n"), 0o644); err != nil {
 		t.Fatalf("failed to create subdir/debug.log: %v", err)
 	}
 
@@ -792,7 +792,7 @@ func TestArchiveBackendFileCountLimit(t *testing.T) {
 	for i := 0; i < testFileCount; i++ {
 		header := &tar.Header{
 			Name: "file" + string(rune('0'+i%10)) + ".txt",
-			Mode: 0644,
+			Mode: 0o644,
 			Size: 0,
 		}
 		if err := tw.WriteHeader(header); err != nil {
@@ -823,10 +823,10 @@ func TestArchiveBackendFileCountLimit(t *testing.T) {
 func mustWriteFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir for %s: %v", rel, err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", rel, err)
 	}
 }
