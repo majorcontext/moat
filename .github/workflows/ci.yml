@@ -68,6 +68,10 @@ jobs:
       - name: Set up bats
         uses: bats-core/bats-action@3.0.1
 
+      - name: Install gofumpt
+        # So the go-fmt hook test exercises gofumpt (not the gofmt fallback).
+        run: go install mvdan.cc/gofumpt@v0.9.2
+
       - name: Run tests
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
