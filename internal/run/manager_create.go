@@ -112,16 +112,38 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 	// each mcp[].auth.grant in the top-level grants: list.
 	opts.Grants = appendMCPGrants(opts.Grants, opts.Config)
 
+	// openCredStore opens the run's credential store at most once and memoizes
+	// the result; deriving the key can touch the OS keychain, so re-opening at
+	// each site below was wasteful. credKeyFailed marks a key-derivation failure
+	// (fatal for some callers) versus a store-open failure (others degrade).
+	var (
+		credStoreCache *credential.FileStore
+		credStoreErr   error
+		credKeyFailed  bool
+		credStoreDone  bool
+	)
+	openCredStore := func() (*credential.FileStore, error) {
+		if !credStoreDone {
+			credStoreDone = true
+			key, keyErr := credential.DefaultEncryptionKey()
+			if keyErr != nil {
+				credKeyFailed = true
+				credStoreErr = fmt.Errorf("getting encryption key: %w", keyErr)
+			} else if s, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key); storeErr != nil {
+				credStoreErr = fmt.Errorf("opening credential store: %w", storeErr)
+			} else {
+				credStoreCache = s
+			}
+		}
+		return credStoreCache, credStoreErr
+	}
+
 	// Validate grants before allocating any resources (proxy, container, etc.)
 	needsGrantValidation := len(opts.Grants) > 0 || (opts.Config != nil && len(opts.Config.MCP) > 0)
 	if needsGrantValidation {
-		key, keyErr := credential.DefaultEncryptionKey()
-		if keyErr != nil {
-			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
-		}
-		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+		store, err := openCredStore()
 		if err != nil {
-			return nil, fmt.Errorf("opening credential store: %w", err)
+			return nil, err
 		}
 		if err := validateGrants(opts.Grants, store); err != nil {
 			return nil, err
@@ -381,14 +403,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 		runCtx := daemon.NewRunContext(r.ID)
 
 		// Load credentials for granted providers
-		key, keyErr := credential.DefaultEncryptionKey()
-		if keyErr != nil {
-			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
+		store, err := openCredStore()
+		if err != nil && credKeyFailed {
+			return nil, err
 		}
-		store, err := credential.NewFileStore(
-			credential.DefaultStoreDir(),
-			key,
-		)
 
 		// Track Anthropic/Claude credential for base URL proxy setup
 		var anthropicCred *provider.Credential
@@ -821,15 +839,10 @@ region = %s
 		}
 
 		// Load SSH mappings for granted hosts
-		key, keyErr := credential.DefaultEncryptionKey()
-		if keyErr != nil {
-			cleanupDaemonRun()
-			return nil, fmt.Errorf("getting encryption key: %w", keyErr)
-		}
-		store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+		store, err := openCredStore()
 		if err != nil {
 			cleanupDaemonRun()
-			return nil, fmt.Errorf("opening credential store: %w", err)
+			return nil, err
 		}
 
 		sshMappings, err := store.GetSSHMappingsForHosts(sshGrants)
@@ -1481,38 +1494,34 @@ region = %s
 	// avoiding bind mounts for config dirs that tools need to write to.
 	initFiles := make(map[string]string)
 	if containerHome != "" {
-		key, keyErr := credential.DefaultEncryptionKey()
-		if keyErr == nil {
-			store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-			if storeErr == nil {
-				for _, grant := range opts.Grants {
-					grantName := strings.Split(grant, ":")[0]
-					credName := credential.Provider(provider.ResolveName(grantName))
-					if cred, err := store.Get(credName); err == nil {
-						if prov := provider.Get(grantName); prov != nil {
-							provCred := provider.FromLegacy(cred)
-							providerMounts, cleanupPath, mountErr := prov.ContainerMounts(provCred, containerHome)
-							if mountErr != nil {
-								log.Debug("failed to set up provider mounts", "provider", credName, "error", mountErr)
-							} else {
-								mounts = append(mounts, providerMounts...)
-								if cleanupPath != "" {
-									if r.ProviderCleanupPaths == nil {
-										r.ProviderCleanupPaths = make(map[string]string)
-									}
-									r.ProviderCleanupPaths[string(credName)] = cleanupPath
+		if store, storeErr := openCredStore(); storeErr == nil {
+			for _, grant := range opts.Grants {
+				grantName := strings.Split(grant, ":")[0]
+				credName := credential.Provider(provider.ResolveName(grantName))
+				if cred, err := store.Get(credName); err == nil {
+					if prov := provider.Get(grantName); prov != nil {
+						provCred := provider.FromLegacy(cred)
+						providerMounts, cleanupPath, mountErr := prov.ContainerMounts(provCred, containerHome)
+						if mountErr != nil {
+							log.Debug("failed to set up provider mounts", "provider", credName, "error", mountErr)
+						} else {
+							mounts = append(mounts, providerMounts...)
+							if cleanupPath != "" {
+								if r.ProviderCleanupPaths == nil {
+									r.ProviderCleanupPaths = make(map[string]string)
 								}
+								r.ProviderCleanupPaths[string(credName)] = cleanupPath
 							}
-							// Collect init files from providers that implement InitFileProvider
-							if ifp, ok := prov.(provider.InitFileProvider); ok {
-								for p, content := range ifp.ContainerInitFiles(provCred, containerHome) {
-									cleaned := filepath.Clean(p)
-									if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome+string(filepath.Separator)) {
-										log.Warn("init file path outside container home, skipping", "provider", credName, "path", p)
-										continue
-									}
-									initFiles[cleaned] = content
+						}
+						// Collect init files from providers that implement InitFileProvider
+						if ifp, ok := prov.(provider.InitFileProvider); ok {
+							for p, content := range ifp.ContainerInitFiles(provCred, containerHome) {
+								cleaned := filepath.Clean(p)
+								if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome+string(filepath.Separator)) {
+									log.Warn("init file path outside container home, skipping", "provider", credName, "path", p)
+									continue
 								}
+								initFiles[cleaned] = content
 							}
 						}
 					}
@@ -1589,18 +1598,14 @@ region = %s
 			// Preference: claude > anthropic (for backward compatibility)
 			var claudeCred *provider.Credential
 			if needsClaudeInit {
-				key, keyErr := credential.DefaultEncryptionKey()
-				if keyErr == nil {
-					store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-					if storeErr == nil {
-						// Try claude first, fall back to anthropic
-						cred, err := store.Get(credential.ProviderClaude)
-						if err != nil {
-							cred, err = store.Get(credential.ProviderAnthropic)
-						}
-						if err == nil {
-							claudeCred = provider.FromLegacy(cred)
-						}
+				if store, storeErr := openCredStore(); storeErr == nil {
+					// Try claude first, fall back to anthropic
+					cred, err := store.Get(credential.ProviderClaude)
+					if err != nil {
+						cred, err = store.Get(credential.ProviderAnthropic)
+					}
+					if err == nil {
+						claudeCred = provider.FromLegacy(cred)
 					}
 				}
 			}
@@ -1692,13 +1697,9 @@ region = %s
 		// Get Codex credential for PrepareContainer
 		var codexCred *provider.Credential
 		if needsCodexInit {
-			key, keyErr := credential.DefaultEncryptionKey()
-			if keyErr == nil {
-				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-				if storeErr == nil {
-					if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
-						codexCred = provider.FromLegacy(cred)
-					}
+			if store, storeErr := openCredStore(); storeErr == nil {
+				if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
+					codexCred = provider.FromLegacy(cred)
 				}
 			}
 		}
@@ -1780,13 +1781,9 @@ region = %s
 		// Get Gemini credential for PrepareContainer
 		var geminiCred *provider.Credential
 		if needsGeminiInit {
-			key, keyErr := credential.DefaultEncryptionKey()
-			if keyErr == nil {
-				store, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key)
-				if storeErr == nil {
-					if cred, err := store.Get(credential.ProviderGemini); err == nil {
-						geminiCred = provider.FromLegacy(cred)
-					}
+			if store, storeErr := openCredStore(); storeErr == nil {
+				if cred, err := store.Get(credential.ProviderGemini); err == nil {
+					geminiCred = provider.FromLegacy(cred)
 				}
 			}
 		}
