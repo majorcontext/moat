@@ -1316,45 +1316,8 @@ region = %s
 	}
 
 	// Set up provider-specific container mounts and init files.
-	// Init files are written to disk by moat-init.sh at container startup,
-	// avoiding bind mounts for config dirs that tools need to write to.
-	initFiles := make(map[string]string)
-	if containerHome != "" {
-		if store, storeErr := openCredStore(); storeErr == nil {
-			for _, grant := range opts.Grants {
-				grantName := strings.Split(grant, ":")[0]
-				credName := credential.Provider(provider.ResolveName(grantName))
-				if cred, err := store.Get(credName); err == nil {
-					if prov := provider.Get(grantName); prov != nil {
-						provCred := provider.FromLegacy(cred)
-						providerMounts, cleanupPath, mountErr := prov.ContainerMounts(provCred, containerHome)
-						if mountErr != nil {
-							log.Debug("failed to set up provider mounts", "provider", credName, "error", mountErr)
-						} else {
-							mounts = append(mounts, providerMounts...)
-							if cleanupPath != "" {
-								if r.ProviderCleanupPaths == nil {
-									r.ProviderCleanupPaths = make(map[string]string)
-								}
-								r.ProviderCleanupPaths[string(credName)] = cleanupPath
-							}
-						}
-						// Collect init files from providers that implement InitFileProvider
-						if ifp, ok := prov.(provider.InitFileProvider); ok {
-							for p, content := range ifp.ContainerInitFiles(provCred, containerHome) {
-								cleaned := filepath.Clean(p)
-								if !filepath.IsAbs(cleaned) || !strings.HasPrefix(cleaned, containerHome+string(filepath.Separator)) {
-									log.Warn("init file path outside container home, skipping", "provider", credName, "path", p)
-									continue
-								}
-								initFiles[cleaned] = content
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	providerMounts, initFiles := m.setupProviderMounts(r, opts.Grants, containerHome, openCredStore)
+	mounts = append(mounts, providerMounts...)
 	if len(initFiles) > 0 {
 		var buf strings.Builder
 		for initPath, content := range initFiles {
