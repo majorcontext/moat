@@ -837,47 +837,9 @@ region = %s
 	proxyEnv = append(proxyEnv, sshSetup.env...)
 	mounts = append(mounts, sshSetup.mounts...)
 
-	// Configure network mode and extra hosts based on runtime capabilities
-	// We use bridge mode when:
-	// 1. We have ports to publish (host mode doesn't support port publishing)
-	// 2. We're on macOS/Windows (host mode not supported)
-	// 3. We're using Apple container runtime
-	// We only use host mode when we need proxy access AND don't have ports to publish on Linux.
-	var networkMode string
-	var extraHosts []string
-	needsPorts := len(ports) > 0
+	// Configure network mode and extra hosts based on runtime capabilities.
 	needsProxy := r.ProxyAuthToken != ""
-
-	if needsProxy || needsPorts {
-		if m.defaultRuntime().SupportsHostNetwork() && !needsPorts {
-			// Docker on Linux without ports: use host network so container can reach 127.0.0.1
-			networkMode = "host"
-		} else {
-			// Use bridge mode when we need port publishing, or on macOS/Windows/Apple
-			networkMode = "bridge"
-			// On Linux, Docker doesn't provide host.docker.internal by default,
-			// so add it via host-gateway mapping. On macOS/Windows, Docker
-			// Desktop and Rancher Desktop resolve it via built-in DNS — adding
-			// host-gateway would override the correct IP with the bridge
-			// gateway (which is unreachable on Rancher Desktop).
-			if m.defaultRuntime().Type() == container.RuntimeDocker && goruntime.GOOS == "linux" {
-				extraHosts = []string{"host.docker.internal:host-gateway"}
-			}
-		}
-		// Add synthetic hostnames to --add-host on runtimes where Docker's
-		// "host-gateway" substitution produces a reachable IP (Docker on
-		// Linux). Apple has no --add-host equivalent, and Docker Desktop on
-		// macOS/Windows must not use this path — "host-gateway" resolves to
-		// the docker0 bridge gateway, which is unreachable from containers on
-		// custom networks (those created by `services:`). Those runtimes
-		// instead rely on MOAT_EXTRA_HOSTS written by moat-init.sh (see above).
-		//
-		// "moat-proxy" is used for proxy traffic (in NO_PROXY).
-		// "moat-host" is used for host service traffic (NOT in NO_PROXY,
-		// so it flows through the proxy for network policy enforcement).
-		synthHosts, _ := synthHostStrategy(m.defaultRuntime().Type(), goruntime.GOOS, hostAddr)
-		extraHosts = append(extraHosts, synthHosts...)
-	}
+	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, hostAddr)
 
 	// Add config env vars, filtering out proxy-related variables that would
 	// override moat's proxy settings and re-open the host traffic bypass.
