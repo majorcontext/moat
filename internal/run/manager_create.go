@@ -2117,35 +2117,8 @@ region = %s
 	buildkitEnv := computeBuildKitEnv(buildkitCfg.Enabled)
 	proxyEnv = append(proxyEnv, buildkitEnv...)
 
-	// Extract container resource limits from config (applies to both Docker and Apple).
-	// Priority: explicit moat.yaml > agent provider default > runtime fallback.
-	var memoryMB, cpus int
-	var dns []string
-	var ulimits []container.Ulimit
-	if opts.Config != nil {
-		memoryMB = opts.Config.Container.Memory
-		cpus = opts.Config.Container.CPUs
-		dns = opts.Config.Container.DNS
-		for name, spec := range opts.Config.Container.Ulimits {
-			ulimits = append(ulimits, container.Ulimit{
-				Name: name,
-				Soft: spec.Soft,
-				Hard: spec.Hard,
-			})
-		}
-		sort.Slice(ulimits, func(i, j int) bool {
-			return ulimits[i].Name < ulimits[j].Name
-		})
-	}
-
-	// On Apple containers, if moat.yaml didn't set memory and we're running an
-	// AI agent, use the agent default (8 GB). Apple's system default of 1 GB is
-	// too low for Claude Code, Codex, and Gemini CLI.
-	// Docker containers are left unlimited unless explicitly configured.
-	if memoryMB == 0 && m.defaultRuntime().Type() == container.RuntimeApple && isAIAgent(opts.Config) {
-		memoryMB = container.DefaultAgentMemoryMB
-		log.Debug("using default agent memory for Apple container", "memoryMB", memoryMB)
-	}
+	// Extract container resource limits (memory, CPUs, DNS, ulimits) for the run.
+	memoryMB, cpus, dns, ulimits := m.resolveResourceLimits(opts.Config)
 
 	// Named-volume roots are chowned to the run user by one of two mutually
 	// exclusive mechanisms (see volumeChownEnv): moat-init on the root-entrypoint
