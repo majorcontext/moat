@@ -69,6 +69,37 @@ func TestBuildLocalMCPConfig_GrantInjectsEnvWithoutMutatingSpec(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeMCPRelayServers_Empty(t *testing.T) {
+	if got := buildClaudeMCPRelayServers(nil, 8080, "tok"); len(got) != 0 {
+		t.Fatalf("expected empty map for no MCP servers, got %v", got)
+	}
+}
+
+func TestBuildClaudeMCPRelayServers_RelayURLNoAuth(t *testing.T) {
+	mcps := []config.MCPServerConfig{{Name: "srv"}}
+	got := buildClaudeMCPRelayServers(mcps, 8080, "tok123")
+	cfg, ok := got["srv"]
+	if !ok {
+		t.Fatalf("missing server entry: %v", got)
+	}
+	// The relay must target the synthetic proxy host + per-run token, in this
+	// exact shape (a past 404 bug came from using the wrong host here).
+	if want := "http://moat-proxy:8080/mcp/tok123/srv"; cfg.URL != want {
+		t.Fatalf("relay URL = %q, want %q", cfg.URL, want)
+	}
+	if cfg.Headers != nil {
+		t.Fatalf("expected no headers without auth, got %v", cfg.Headers)
+	}
+}
+
+func TestBuildClaudeMCPRelayServers_AuthHeaderStub(t *testing.T) {
+	mcps := []config.MCPServerConfig{{Name: "srv", Auth: &config.MCPAuthConfig{Header: "X-Api-Key", Grant: "notion"}}}
+	got := buildClaudeMCPRelayServers(mcps, 9000, "tok")
+	if h := got["srv"].Headers["X-Api-Key"]; h != "moat-stub-notion" {
+		t.Fatalf("auth header = %q, want %q", h, "moat-stub-notion")
+	}
+}
+
 func TestSetupGeminiStaging_UnknownGrant(t *testing.T) {
 	m := &Manager{}
 	cfg := &config.Config{}

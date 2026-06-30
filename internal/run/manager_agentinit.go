@@ -133,6 +133,32 @@ func (m *Manager) setupGeminiStaging(ctx context.Context, geminiProvider provide
 	return geminiConfig, nil
 }
 
+// buildClaudeMCPRelayServers builds the .claude.json MCP server map, pointing
+// each entry at a proxy-relay URL instead of its direct URL.
+//
+// Proxy relay URLs work around Claude Code's MCP client not respecting
+// HTTP_PROXY, and bridge host-local MCP servers (localhost/127.0.0.1) the
+// container cannot reach directly. The relay host is the synthetic proxy host
+// (in NO_PROXY) so the client connects directly and the proxy strips the
+// per-run token via handleDirectMCPRelay; GetHostAddress is not in NO_PROXY, so
+// it would route through the CONNECT tunnel to the wrong handler -> 404.
+func buildClaudeMCPRelayServers(mcps []config.MCPServerConfig, proxyPort int, authToken string) map[string]provider.MCPServerConfig {
+	servers := make(map[string]provider.MCPServerConfig)
+	proxyAddr := fmt.Sprintf("%s:%d", syntheticProxyHost, proxyPort)
+	for _, mcp := range mcps {
+		mcpCfg := provider.MCPServerConfig{
+			URL: fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, authToken, mcp.Name),
+		}
+		if mcp.Auth != nil {
+			mcpCfg.Headers = map[string]string{
+				mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
+			}
+		}
+		servers[mcp.Name] = mcpCfg
+	}
+	return servers
+}
+
 // setupClaudeStaging builds the Claude container config via the provider
 // interface: it assembles the proxy-relay MCP server config, resolves the
 // Claude (or, for back-compat, Anthropic) credential, prepares the container,
@@ -141,31 +167,12 @@ func (m *Manager) setupGeminiStaging(ctx context.Context, geminiProvider provide
 // grants, so its local-MCP build is a plain conversion. openCredStore must be
 // non-nil when needsClaudeInit is true; claudeSettings may be nil.
 func (m *Manager) setupClaudeStaging(ctx context.Context, claudeProvider provider.AgentProvider, opts Options, r *Run, needsClaudeInit, hasPlugins, hasClaudeCode bool, claudeSettings *claude.Settings, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
-	// Build MCP server configuration for .claude.json
-	// Use proxy relay URLs instead of direct MCP server URLs to work around
-	// Claude Code's MCP client not respecting HTTP_PROXY environment variables.
-	// This also bridges host-local MCP servers (localhost/127.0.0.1) which
-	// the container cannot reach directly.
-	mcpServers := make(map[string]provider.MCPServerConfig)
-	if opts.Config != nil && len(opts.Config.MCP) > 0 {
-		// Use the synthetic proxy host (in NO_PROXY) so the MCP client
-		// connects directly and the proxy strips the per-run token via
-		// handleDirectMCPRelay. GetHostAddress is not in NO_PROXY, so it would
-		// route through the CONNECT tunnel to the wrong handler → 404.
-		proxyAddr := fmt.Sprintf("%s:%d", syntheticProxyHost, r.ProxyPort)
-		for _, mcp := range opts.Config.MCP {
-			relayURL := fmt.Sprintf("http://%s/mcp/%s/%s", proxyAddr, r.ProxyAuthToken, mcp.Name)
-			mcpCfg := provider.MCPServerConfig{
-				URL: relayURL,
-			}
-			if mcp.Auth != nil {
-				mcpCfg.Headers = map[string]string{
-					mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
-				}
-			}
-			mcpServers[mcp.Name] = mcpCfg
-		}
+	// Build the proxy-relay MCP server config for .claude.json.
+	var claudeMCPs []config.MCPServerConfig
+	if opts.Config != nil {
+		claudeMCPs = opts.Config.MCP
 	}
+	mcpServers := buildClaudeMCPRelayServers(claudeMCPs, r.ProxyPort, r.ProxyAuthToken)
 
 	// Get Claude credential for PrepareContainer
 	// Preference: claude > anthropic (for backward compatibility)
