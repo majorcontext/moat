@@ -1508,75 +1508,15 @@ region = %s
 			return nil, fmt.Errorf("gemini provider not registered")
 		}
 
-		// Get Gemini credential for PrepareContainer
-		var geminiCred *provider.Credential
-		if needsGeminiInit {
-			if store, storeErr := openCredStore(); storeErr == nil {
-				if cred, err := store.Get(credential.ProviderGemini); err == nil {
-					geminiCred = provider.FromLegacy(cred)
-				}
-			}
-		}
-
-		// Build local MCP server config from gemini.mcp entries
-		var geminiLocalMCP map[string]provider.LocalMCPServerConfig
-		if opts.Config != nil && len(opts.Config.Gemini.MCP) > 0 {
-			geminiLocalMCP = make(map[string]provider.LocalMCPServerConfig)
-			for name, spec := range opts.Config.Gemini.MCP {
-				env := spec.Env
-				if spec.Grant != "" {
-					v, ok := grantToEnvVar(spec.Grant)
-					if !ok {
-						cleanupDaemonRun()
-						cleanupSSH(sshServer)
-						cleanupAgentConfig(claudeConfig)
-						cleanupAgentConfig(codexConfig)
-						return nil, fmt.Errorf("gemini.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", name, spec.Grant)
-					}
-					if !hasGrant(opts.Config.Grants, spec.Grant) {
-						cleanupDaemonRun()
-						cleanupSSH(sshServer)
-						cleanupAgentConfig(claudeConfig)
-						cleanupAgentConfig(codexConfig)
-						return nil, fmt.Errorf("gemini.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", name, spec.Grant, spec.Grant)
-					}
-					if env == nil {
-						env = make(map[string]string)
-					} else {
-						envCopy := make(map[string]string, len(env)+1)
-						for k, v := range env {
-							envCopy[k] = v
-						}
-						env = envCopy
-					}
-					env[v] = grantToPlaceholder(spec.Grant)
-				}
-				geminiLocalMCP[name] = provider.LocalMCPServerConfig{
-					Command: spec.Command,
-					Args:    spec.Args,
-					Env:     env,
-					Cwd:     spec.Cwd,
-				}
-			}
-		}
-
-		// Call provider to prepare container config
-		var prepErr error
-		geminiConfig, prepErr = geminiProvider.PrepareContainer(ctx, provider.PrepareOpts{
-			Credential:      geminiCred,
-			ContainerHome:   containerHome,
-			RuntimeContext:  renderedContext,
-			LocalMCPServers: geminiLocalMCP,
-		})
-		if prepErr != nil {
+		cfg, stageErr := m.setupGeminiStaging(ctx, geminiProvider, opts, needsGeminiInit, containerHome, renderedContext, openCredStore)
+		if stageErr != nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
-			return nil, fmt.Errorf("preparing Gemini container config: %w", prepErr)
+			return nil, stageErr
 		}
-
-		// Add mounts and env vars from provider
+		geminiConfig = cfg
 		mounts = append(mounts, geminiConfig.Mounts...)
 		proxyEnv = append(proxyEnv, geminiConfig.Env...)
 	}
