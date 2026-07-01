@@ -54,6 +54,8 @@ Additional findings folded into the design below:
 - **Pi does not locally reject a plausible placeholder key** before sending — confirms the placeholder-then-proxy-overwrite flow.
 - **`PI_OFFLINE=1` / `--offline`** disables startup network operations (the model catalog is bundled, "updated every release"); set it in the container to avoid stray egress and keep strict-policy runs clean. The inference call is not a startup op, so it still flows through the proxy.
 
+**Full `moat pi` run verified (2026-07-01, `--no-sandbox` DIND).** Built the image (`npm install -g @earendil-works/pi-coding-agent` — 131 packages), started the container, and Pi launched `pi --provider anthropic --append-system-prompt … -p …`. Its request reached `api.anthropic.com` **through the moat proxy** and returned `401 invalid x-api-key` — the expected signal for a placeholder store credential (the proxy injects the real key for a genuinely-granted key). The fail-hard paths (no grant / unsupported provider / provider-without-grant) each exit non-zero before container creation. End-to-end plumbing confirmed.
+
 ## Architecture
 
 ### Credential flow (why this is small)
