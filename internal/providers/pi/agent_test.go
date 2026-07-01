@@ -48,6 +48,42 @@ func TestPrepareContainerStagesContext(t *testing.T) {
 	assertEnv(t, cfg.Env, "MOAT_PI_INIT="+PiInitMountPath)
 }
 
+// Companion: an empty RuntimeContext writes no context file, but the mount and
+// PI_OFFLINE/MOAT_PI_INIT env are still returned. Mirrors the equivalent tests
+// in the claude/codex/gemini providers.
+func TestPrepareContainerSkipsContextFileWhenEmpty(t *testing.T) {
+	p := &Provider{}
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		RuntimeContext: "",
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer: %v", err)
+	}
+	t.Cleanup(func() {
+		if cfg.Cleanup != nil {
+			cfg.Cleanup()
+		}
+	})
+
+	// No context file written.
+	if _, statErr := os.Stat(filepath.Join(cfg.StagingDir, ContextFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("expected no %s when RuntimeContext is empty (stat err=%v)", ContextFileName, statErr)
+	}
+
+	// Mount + env still present.
+	foundMount := false
+	for _, m := range cfg.Mounts {
+		if m.Target == PiInitMountPath && m.Source == cfg.StagingDir && m.ReadOnly {
+			foundMount = true
+		}
+	}
+	if !foundMount {
+		t.Errorf("expected read-only mount at %s, got %+v", PiInitMountPath, cfg.Mounts)
+	}
+	assertEnv(t, cfg.Env, "PI_OFFLINE=1")
+	assertEnv(t, cfg.Env, "MOAT_PI_INIT="+PiInitMountPath)
+}
+
 func assertEnv(t *testing.T, env []string, want string) {
 	t.Helper()
 	for _, e := range env {
