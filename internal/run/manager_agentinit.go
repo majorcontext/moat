@@ -133,6 +133,21 @@ func (m *Manager) setupGeminiStaging(ctx context.Context, geminiProvider provide
 	return geminiConfig, nil
 }
 
+// setupPiStaging builds the Pi container config (runtime context) via the
+// provider interface. Pi has no credential of its own; the backend credential
+// is injected by the anthropic/openai grant provider, so no credential is
+// resolved or passed here.
+func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentProvider, containerHome, renderedContext string) (*provider.ContainerConfig, error) {
+	piConfig, prepErr := piProvider.PrepareContainer(ctx, provider.PrepareOpts{
+		ContainerHome:  containerHome,
+		RuntimeContext: renderedContext,
+	})
+	if prepErr != nil {
+		return nil, fmt.Errorf("preparing Pi container config: %w", prepErr)
+	}
+	return piConfig, nil
+}
+
 // buildClaudeMCPRelayServers builds the .claude.json MCP server map, pointing
 // each entry at a proxy-relay URL instead of its direct URL.
 //

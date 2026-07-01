@@ -134,6 +134,11 @@ type Run struct {
 	// cleaned up when the run is stopped or destroyed.
 	GeminiConfigTempDir string
 
+	// PiConfigTempDir is the temporary directory containing Pi configuration files
+	// (the runtime-context file) that are mounted into the container. This should be
+	// cleaned up when the run is stopped or destroyed.
+	PiConfigTempDir string
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string
 	NetworkID           string

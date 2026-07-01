@@ -145,6 +145,23 @@ func TestResolveImageNeedsGeminiCLIDep(t *testing.T) {
 	}
 }
 
+func TestResolveImageNeedsPiCLIDep(t *testing.T) {
+	depList := []deps.Dependency{{Name: "pi-cli"}}
+	needs := resolveImageNeedsWithStore(nil, depList, nil)
+	if !contains(needs.initProviders, "pi") {
+		t.Error("pi-cli dep should add pi to initProviders via fallback")
+	}
+}
+
+// Companion: Pi has no grant of its own, so without the pi-cli dep nothing
+// should add pi to initProviders (a bare anthropic/openai grant must not).
+func TestResolveImageNeedsNoPiWithoutDep(t *testing.T) {
+	needs := resolveImageNeedsWithStore([]string{"anthropic"}, nil, nil)
+	if contains(needs.initProviders, "pi") {
+		t.Error("pi should not be in initProviders without the pi-cli dependency")
+	}
+}
+
 func TestResolveImageNeedsGrantAndDep(t *testing.T) {
 	// When a grant already covers claude, the dep fallback shouldn't duplicate.
 	depList := []deps.Dependency{{Name: "claude-code"}}

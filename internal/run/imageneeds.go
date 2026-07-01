@@ -103,6 +103,11 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	if !initSet["gemini"] && hasDep(depList, "gemini-cli") {
 		initSet["gemini"] = true
 	}
+	// Pi has no credential of its own, so it is never triggered by a grant.
+	// Its staging (runtime context) runs whenever the pi-cli dependency is present.
+	if !initSet["pi"] && hasDep(depList, "pi-cli") {
+		initSet["pi"] = true
+	}
 
 	for name := range initSet {
 		needs.initProviders = append(needs.initProviders, name)

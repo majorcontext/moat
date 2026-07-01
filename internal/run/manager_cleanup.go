@@ -247,7 +247,7 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 		}
 
 		// Clean up temp directories
-		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir} {
+		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir, r.PiConfigTempDir} {
 			if dir != "" {
 				if err := os.RemoveAll(dir); err != nil {
 					log.Debug("cleanup: failed to remove temp dir", "path", dir, "error", err)

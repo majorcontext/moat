@@ -68,7 +68,7 @@ func getWorkspaceOwner(workspace string) (uid, gid int) {
 }
 
 // Create initializes a new run without starting it.
-func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
+func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr error) {
 	// Resolve agent name
 	agentName := opts.Name
 	if agentName == "" {
@@ -1127,6 +1127,7 @@ region = %s
 	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
 	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
 	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
+	needsPiInit := slices.Contains(imgNeeds.initProviders, "pi")
 
 	// Hooks config for image hashing, Dockerfile generation, and pre_run
 	var hooks *deps.HooksConfig
@@ -1285,6 +1286,13 @@ region = %s
 		}
 	}
 
+	// A Pi run carries an anthropic/openai grant, which would otherwise trip the
+	// claude/codex/gemini staging and log-sync below (those conditions key off
+	// the grant and the ShouldSync*Logs defaults). Pi manages its own staging, so
+	// skip the other agents' machinery entirely for a Pi run. Credential injection
+	// is unaffected — it happens in the grant loop, not here.
+	isPiRun := opts.Config != nil && strings.HasPrefix(opts.Config.Agent, "pi")
+
 	// Mount Claude projects directory so logs appear in the right place on host.
 	// This is enabled when:
 	// - claude.sync_logs is explicitly true, OR
@@ -1293,7 +1301,7 @@ region = %s
 	if hostHome, err := os.UserHomeDir(); err == nil {
 		imageHome := m.defaultRuntime().BuildManager().GetImageHomeDir(ctx, containerImage)
 		containerHome = resolveContainerHome(needsCustomImage, imageHome)
-		if opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
+		if !isPiRun && opts.Config != nil && opts.Config.ShouldSyncClaudeLogs() {
 			hostClaudeProjects := claudeProjectsHostDir(hostHome, opts.Workspace)
 
 			// Ensure directory exists on host
@@ -1342,7 +1350,7 @@ region = %s
 	// Set up Claude staging directory for init script using the provider interface.
 	// This includes OAuth credentials, host files, and MCP server configuration.
 	var claudeConfig *provider.ContainerConfig
-	if needsClaudeInit || (opts.Config != nil) {
+	if !isPiRun && (needsClaudeInit || (opts.Config != nil)) {
 		// claudeSettings was loaded earlier for plugin detection
 		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
 		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
@@ -1376,7 +1384,7 @@ region = %s
 	// This includes auth config for OpenAI tokens.
 	var codexConfig *provider.ContainerConfig
 	hasCodexLocalMCP := opts.Config != nil && len(opts.Config.Codex.MCP) > 0
-	if needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()) {
+	if !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs())) {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {
 			cleanupDaemonRun()
@@ -1400,7 +1408,7 @@ region = %s
 	// This includes settings.json and optionally oauth_creds.json.
 	var geminiConfig *provider.ContainerConfig
 	hasGeminiLocalMCP := opts.Config != nil && len(opts.Config.Gemini.MCP) > 0
-	if needsGeminiInit || hasGeminiLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs()) {
+	if !isPiRun && (needsGeminiInit || hasGeminiLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncGeminiLogs())) {
 		geminiProvider := provider.GetAgent("gemini")
 		if geminiProvider == nil {
 			cleanupDaemonRun()
@@ -1420,6 +1428,42 @@ region = %s
 		geminiConfig = cfg
 		mounts = append(mounts, geminiConfig.Mounts...)
 		proxyEnv = append(proxyEnv, geminiConfig.Env...)
+	}
+
+	// Set up Pi staging directory for init script using the provider interface.
+	// Pi has no credential of its own; the backend credential is injected by the
+	// anthropic/openai grant provider. Only the runtime context is staged here.
+	var piConfig *provider.ContainerConfig
+	if needsPiInit {
+		piProvider := provider.GetAgent("pi")
+		if piProvider == nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, fmt.Errorf("pi provider not registered")
+		}
+
+		cfg, stageErr := m.setupPiStaging(ctx, piProvider, containerHome, renderedContext)
+		if stageErr != nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, stageErr
+		}
+		piConfig = cfg
+		mounts = append(mounts, piConfig.Mounts...)
+		proxyEnv = append(proxyEnv, piConfig.Env...)
+		// Clean the Pi staging dir on any later error return. On success the run
+		// owns it via r.PiConfigTempDir (cleaned when the run is stopped/destroyed).
+		defer func() {
+			if retErr != nil {
+				cleanupAgentConfig(piConfig)
+			}
+		}()
 	}
 
 	// MCP servers are now configured via .claude.json in the staging directory
@@ -1968,6 +2012,9 @@ region = %s
 	if geminiConfig != nil {
 		r.GeminiConfigTempDir = geminiConfig.StagingDir
 	}
+	if piConfig != nil {
+		r.PiConfigTempDir = piConfig.StagingDir
+	}
 
 	// Ensure proxy is running if we have ports to expose
 	if len(ports) > 0 {
@@ -2129,7 +2176,8 @@ func isAIAgent(cfg *config.Config) bool {
 	}
 	return strings.HasPrefix(cfg.Agent, "claude") ||
 		strings.HasPrefix(cfg.Agent, "codex") ||
-		strings.HasPrefix(cfg.Agent, "gemini")
+		strings.HasPrefix(cfg.Agent, "gemini") ||
+		strings.HasPrefix(cfg.Agent, "pi")
 }
 
 // resolveContainerHome returns the home directory to use for container mounts.
