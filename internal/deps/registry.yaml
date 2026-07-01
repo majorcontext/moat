@@ -93,6 +93,12 @@ gemini-cli:
   package: "@google/gemini-cli"
   requires: [node]
 
+pi-cli:
+  description: Pi coding agent CLI
+  type: npm
+  package: "@earendil-works/pi-coding-agent"
+  requires: [node]
+
 graphite-cli:
   description: Graphite CLI for stacked PRs
   type: npm

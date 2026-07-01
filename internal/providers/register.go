@@ -15,6 +15,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/meta"     // registers Meta provider
 	_ "github.com/majorcontext/moat/internal/providers/npm"      // registers npm provider
 	_ "github.com/majorcontext/moat/internal/providers/oauth"    // registers OAuth provider
+	_ "github.com/majorcontext/moat/internal/providers/pi"       // registers Pi provider
 
 	"github.com/majorcontext/moat/internal/providers/configprovider"
 )
