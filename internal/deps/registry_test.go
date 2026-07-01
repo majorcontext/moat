@@ -178,6 +178,52 @@ func TestRegistryHasMinistack(t *testing.T) {
 	assert.NotEmpty(t, ministack.Default, "ministack must have a default version to avoid 'repo:' image references")
 }
 
+func TestRegistryHasOpentofu(t *testing.T) {
+	spec, ok := GetSpec("opentofu")
+	require.True(t, ok, "Registry should have 'opentofu'")
+	assert.Equal(t, TypeGithubBinary, spec.Type)
+	assert.NotEmpty(t, spec.Default, "opentofu must have a default version")
+	// OpenTofu ships its binary as `tofu`, not `opentofu`.
+	assert.Equal(t, "tofu", spec.Command)
+
+	// Ships a tar.gz archive: the install must extract it, and the version must
+	// substitute into both the tag and the asset name.
+	cmds := getGithubBinaryCommands("opentofu", spec.Default, spec)
+	combined := strings.Join(cmds.Commands, " ")
+	assert.Contains(t, combined, "tar -xz", "opentofu (tar.gz) should extract with tar")
+	assert.Contains(t, combined, "/usr/local/bin/tofu", "opentofu should install the tofu binary")
+	wantAsset := "https://github.com/opentofu/opentofu/releases/download/v" + spec.Default +
+		"/tofu_" + spec.Default + "_linux_amd64.tar.gz"
+	assert.Contains(t, combined, wantAsset)
+
+	// Companion case: an explicit non-default version substitutes everywhere too.
+	explicit := strings.Join(getGithubBinaryCommands("opentofu", "9.9.9", spec).Commands, " ")
+	assert.Contains(t, explicit, "download/v9.9.9/tofu_9.9.9_linux_amd64.tar.gz")
+}
+
+func TestRegistryHasTerragrunt(t *testing.T) {
+	spec, ok := GetSpec("terragrunt")
+	require.True(t, ok, "Registry should have 'terragrunt'")
+	assert.Equal(t, TypeGithubBinary, spec.Type)
+	assert.NotEmpty(t, spec.Default, "terragrunt must have a default version")
+	// terragrunt pairs with terraform OR opentofu, so it declares no `requires`.
+	assert.Empty(t, spec.Requires)
+
+	// Ships a raw binary: the install must download it directly, not extract.
+	cmds := getGithubBinaryCommands("terragrunt", spec.Default, spec)
+	combined := strings.Join(cmds.Commands, " ")
+	assert.NotContains(t, combined, "tar", "terragrunt (raw binary) should not use tar")
+	assert.NotContains(t, combined, "unzip", "terragrunt (raw binary) should not use unzip")
+	assert.Contains(t, combined, "/usr/local/bin/terragrunt")
+	wantAsset := "https://github.com/gruntwork-io/terragrunt/releases/download/v" + spec.Default +
+		"/terragrunt_linux_amd64"
+	assert.Contains(t, combined, wantAsset)
+
+	// Companion case: an explicit non-default version substitutes into the tag.
+	explicit := strings.Join(getGithubBinaryCommands("terragrunt", "9.9.9", spec).Commands, " ")
+	assert.Contains(t, explicit, "download/v9.9.9/terragrunt_linux_amd64")
+}
+
 func TestServiceDepSpec(t *testing.T) {
 	spec, ok := GetSpec("postgres")
 	require.True(t, ok)

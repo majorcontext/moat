@@ -478,6 +478,33 @@ terraform:
   type: custom
   default: "1.10.0"
 
+opentofu:
+  description: Open source Terraform alternative (installs the `tofu` binary)
+  type: github-binary
+  repo: opentofu/opentofu
+  asset: "tofu_{version}_linux_{arch}.tar.gz"
+  bin: "tofu"
+  command: tofu
+  default: "1.9.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
+
+terragrunt:
+  # terragrunt is a thin wrapper that delegates to a terraform or opentofu
+  # binary on PATH, so it needs one of those installed alongside it. We do not
+  # declare `requires` because either engine satisfies it and `requires` has no
+  # OR semantics; the pairing is documented in reference/06-dependencies.md.
+  description: Terraform/OpenTofu orchestration wrapper
+  type: github-binary
+  repo: gruntwork-io/terragrunt
+  asset: "terragrunt_linux_{arch}"
+  bin: "terragrunt_linux_{arch}"
+  default: "1.0.2"
+  targets:
+    amd64: amd64
+    arm64: arm64
+
 kubectl:
   description: Kubernetes CLI
   type: custom

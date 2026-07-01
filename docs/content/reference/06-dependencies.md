@@ -124,10 +124,24 @@ See [Available services](#available-services) below for the full list, and the [
 | AI coding tools | `claude-code`, `codex-cli` | Or use `moat claude` / `moat codex` |
 | Workflow tools | `graphite-cli` | Implied by `--grant graphite` |
 | Database clients | `psql`, `mysql-client`, `redis-cli`, `sqlite3` | Pair with corresponding service |
-| Cloud tools | `aws`, `gcloud`, `kubectl`, `terraform`, `helm` | |
+| Cloud tools | `aws`, `gcloud`, `kubectl`, `terraform`, `opentofu`, `terragrunt`, `helm` | `terragrunt` needs `terraform` or `opentofu` |
 | Services | `postgres`, `mysql`, `redis`, `ollama` | Run as sidecar containers |
 
 Run `moat deps list --type <type>` to filter by category.
+
+`terragrunt` is a thin wrapper that delegates every plan/apply/state operation to a Terraform or OpenTofu binary on `PATH`, so pair it with an engine:
+
+```yaml
+# Terraform-backed (terragrunt finds `terraform` automatically):
+dependencies: [terraform, terragrunt]
+
+# OpenTofu-backed — point terragrunt at the `tofu` binary:
+dependencies: [opentofu, terragrunt]
+env:
+  TERRAGRUNT_TFPATH: tofu
+```
+
+`opentofu` installs the OpenTofu CLI as the `tofu` command.
 
 ## Version resolution
 
