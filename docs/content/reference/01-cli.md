@@ -37,7 +37,7 @@ If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for c
 
 ## Common agent flags
 
-The agent commands (`moat claude`, `moat codex`, `moat gemini`) share the following flags. These flags work identically across `moat claude`, `moat codex`, and `moat gemini`.
+The agent commands (`moat claude`, `moat codex`, `moat gemini`, `moat pi`) share the following flags. These flags work identically across `moat claude`, `moat codex`, `moat gemini`, and `moat pi`.
 
 | Flag | Description |
 |------|-------------|
@@ -388,6 +388,64 @@ moat gemini --worktree=dark-mode --prompt "implement dark mode"
 
 # Force rebuild
 moat gemini --rebuild
+```
+
+---
+
+## moat pi
+
+Run the [Pi coding agent](https://github.com/earendil-works/pi) in a container.
+
+```
+moat pi [workspace] [flags] [-- initial-prompt]
+```
+
+In addition to the command-specific flags below, `moat pi` accepts all [common agent flags](#common-agent-flags).
+
+Pi has no credential of its own — it runs against your `anthropic` or `openai` grant. When exactly one of those grants is configured it is used automatically; when both are configured you must choose one with `--provider` (or `pi.provider` in moat.yaml). Only the `anthropic` and `openai` backends are supported today; any other value fails hard. If no supported grant is configured, `moat pi` exits before creating a container and tells you to run `moat grant anthropic` or `moat grant openai`.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+| `initial-prompt` | Text after `--` is passed to Pi as an initial prompt (interactive mode) |
+
+### Command-specific flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `--provider NAME` | Model backend: `anthropic` or `openai`. Overrides `pi.provider`; required when both grants are configured. |
+| `--model PATTERN` | Model pattern to use (overrides `pi.model`). When unset, Pi's per-provider default is used. |
+
+### Examples
+
+```bash
+# Grant a backend, then run Pi (backend inferred from the single grant)
+moat grant anthropic
+moat pi
+
+# In a specific directory
+moat pi ./my-project
+
+# Non-interactive with prompt
+moat pi -p "explain this codebase"
+
+# Force the OpenAI backend (e.g. when both grants are configured)
+moat pi --provider openai
+
+# Pin a model
+moat pi --provider anthropic --model claude-opus-4-8
+
+# With GitHub access
+moat pi --grant github
+
+# Run in a git worktree (non-interactive with prompt)
+moat pi --worktree=dark-mode --prompt "implement dark mode"
+
+# Force rebuild
+moat pi --rebuild
 ```
 
 ---

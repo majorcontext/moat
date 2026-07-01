@@ -1,0 +1,25 @@
+# Example: Pi coding agent
+#
+# Run the Pi coding agent in an isolated container with credential injection.
+# Pi has no credential of its own — it runs against your anthropic or openai
+# grant. Only those two backends are supported today.
+#
+# Run with:
+#   moat pi examples/agent-pi
+#   moat pi examples/agent-pi -p "fix the bug in main.py"
+
+name: pi-test
+
+dependencies:
+  - node@22
+  - pi-cli
+  - git
+
+grants:
+  - anthropic
+
+# Backend is inferred from the single grant above. When both anthropic and
+# openai are granted, choose one explicitly:
+#   pi:
+#     provider: anthropic
+#     model: claude-opus-4-8

@@ -1632,6 +1632,41 @@ When `grant` is specified, the corresponding environment variable is set automat
 
 ---
 
+## Pi
+
+The Pi coding agent has no credential of its own — it runs against your `anthropic` or `openai` grant. Only those two backends are supported today.
+
+### pi.provider
+
+Select the model backend Pi uses.
+
+```yaml
+pi:
+  provider: anthropic
+```
+
+- Type: `string` (`anthropic` or `openai`)
+- Default: inferred from the single configured grant
+
+When unset, the backend is inferred: if exactly one of the `anthropic` / `openai` grants is configured it is used; if both are configured, `pi.provider` (or the `--provider` flag) is required and the run fails hard otherwise. Any value other than `anthropic` or `openai` fails hard — other Pi backends are planned but not yet wired up.
+
+### pi.model
+
+Pin the model Pi uses.
+
+```yaml
+pi:
+  provider: anthropic
+  model: claude-opus-4-8
+```
+
+- Type: `string`
+- Default: `""` (Pi's per-provider default is used)
+
+**Not yet supported:** `pi.mcp` (Pi core has no MCP configuration format) and `pi.sync_logs` are planned follow-ups.
+
+---
+
 ## Snapshots
 
 ### snapshots.disabled
