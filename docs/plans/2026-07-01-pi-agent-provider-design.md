@@ -35,22 +35,24 @@ The distinguishing trait is that **Pi has no credential of its own** — it runs
 | Credential model | Reuse existing `anthropic`/`openai` grants; Pi injects nothing itself |
 | Instruction file | `AGENTS.md` (Pi reads `AGENTS.md`/`CLAUDE.md`) |
 | Auth staging | Format-valid **placeholder** key in `~/.pi/agent/auth.json`; proxy overwrites the header on the wire |
+| Launch | Always explicit: `pi --provider <resolved> [--model <model>]` (Pi's default provider is `google`); set `PI_OFFLINE=1` to suppress startup network ops |
+| Transport | Confirmed: Pi honors `HTTP_PROXY` (spike, Outcome A) — no `baseUrl` relay needed |
 
-## De-risking spike (gates implementation)
+## De-risking spike — DONE (Outcome A)
 
-The one unverified assumption: **does Pi's Node HTTP client honor `HTTP_PROXY` for its outbound LLM API calls?** Moat's transparent injection depends on it — the same constraint that forces the MCP relay for Claude Code, whose HTTP client ignores `HTTP_PROXY`.
+The gating question was: **does Pi's Node HTTP client honor `HTTP_PROXY` for its outbound LLM API calls?** Moat's transparent injection depends on it — the same constraint that forces the MCP relay for Claude Code, whose HTTP client ignores `HTTP_PROXY`.
 
-Run this **before** writing provider code, using the sandbox's Docker-in-Docker (full egress is available; verify with `docker version`):
+**Run 2026-07-01 in the sandbox (Docker 29.6.1, DIND):** installed `@earendil-works/pi-coding-agent@0.80.3` with `--ignore-scripts`, set `HTTP_PROXY`/`HTTPS_PROXY` to a logging proxy, ran `pi -p "…" --provider anthropic` with a placeholder key. **The proxy captured `CONNECT api.anthropic.com:443` — Pi routes its LLM calls through `HTTP_PROXY`.**
 
-1. Install Pi in a container (`npm install -g --ignore-scripts @earendil-works/pi-coding-agent`).
-2. Set `HTTP_PROXY`/`HTTPS_PROXY` to a capturing proxy and run `pi -p "hi" --provider anthropic` with a placeholder key.
-3. Observe whether the request to `api.anthropic.com` traverses the proxy.
+**→ Outcome A: transparent injection works.** Proceed with the codex-shaped design; the `baseUrl` fallback (Outcome B) is **not** needed. (Kept for the record: Outcome B would have set the provider `baseUrl` via `settings.json`/`models.json`/`ANTHROPIC_BASE_URL` to the proxy relay.)
 
-**Outcome A — honors `HTTP_PROXY`:** proceed with the codex-shaped design below unchanged.
+Additional findings folded into the design below:
 
-**Outcome B — ignores `HTTP_PROXY`:** fall back to Pi's first-class `baseUrl` override — set the provider `baseUrl` (via `settings.json`/`models.json` or `ANTHROPIC_BASE_URL`) to the moat proxy relay, mirroring the MCP relay pattern. Same end state; the only delta is that `PrepareContainer` writes a `baseUrl` into staged config instead of relying on the transport-level proxy. The rest of the design (selection, failure paths, config, tests) is unaffected.
-
-The spike also confirms the `--ignore-scripts` install works through the deps npm installer (see Open Items).
+- **Pi's default provider is `google`** (`--provider … (default: google)`). Since v1 supports only anthropic/openai, Pi must **always** be launched with an explicit `--provider` (materialized from the resolved backend). The resolver is therefore load-bearing, not a convenience.
+- **Pi reads `AGENTS.md` and `CLAUDE.md`** (per the `--no-context-files` flag) — confirms the `AGENTS.md` instruction-file choice.
+- **`--ignore-scripts` global install works** through npm cleanly (no post-install build step needed). Resolves the Open Item.
+- **Pi does not locally reject a plausible placeholder key** before sending — confirms the placeholder-then-proxy-overwrite flow.
+- **`PI_OFFLINE=1` / `--offline`** disables startup network operations (the model catalog is bundled, "updated every release"); set it in the container to avoid stray egress and keep strict-policy runs clean. The inference call is not a startup op, so it still flows through the proxy.
 
 ## Architecture
 
@@ -115,9 +117,10 @@ Untouched (generic): `cmd/moat/cli/root.go` `RegisterProviderCLI`, `internal/ima
 
 ## Open items / risks
 
-- **HTTP_PROXY transport** — the one real unknown; the spike resolves it (Outcome A vs B) before implementation.
-- **`--ignore-scripts`** — Pi's documented install uses it. Confirm the deps npm installer can pass the flag, or that install succeeds without it. Verified during the spike.
-- **auth.json vs env-var placeholder** — leaning `auth.json` (codex-consistent; can also carry the `baseUrl`/proxy value under Outcome B). Minor, decided during implementation.
+- **HTTP_PROXY transport** — RESOLVED by the spike (Outcome A: Pi honors it).
+- **`--ignore-scripts`** — RESOLVED: global install succeeds through npm with `--ignore-scripts`, no post-install build.
+- **auth.json vs env-var placeholder** — leaning `auth.json` (codex-consistent, `0600`). Minor, decided during implementation.
+- **Launch flags** — Pi must be launched with explicit `--provider`; how `moat pi` passes the resolved provider/model into the container's launch command needs to match how codex/gemini pass their invocation (materialize into `settings.json` where possible so the launch command stays plain `pi`, with flags as the fallback). Nailed down during implementation against the codex launch path.
 
 ## Appendix: why not `--grant claude`
 
