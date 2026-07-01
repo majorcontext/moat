@@ -61,13 +61,10 @@ func (p *Provider) Cleanup(cleanupPath string) {}
 // ImpliedDependencies returns none.
 func (p *Provider) ImpliedDependencies() []string { return nil }
 
-// --- temporary interface stubs ---
-// PrepareContainer is implemented for real in agent.go; RegisterCLI in cli.go.
-// These stubs exist only so the AgentProvider assertion compiles during initial
-// scaffolding and are removed as those files land.
-
-func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOpts) (*provider.ContainerConfig, error) {
-	return nil, errors.New("pi: PrepareContainer not implemented")
-}
-
+// PrepareContainer is implemented in agent.go.
+// RegisterCLI is implemented in cli.go.
+//
+// --- temporary interface stub ---
+// RegisterCLI's real implementation lands in cli.go; this stub keeps the
+// AgentProvider assertion compiling until then.
 func (p *Provider) RegisterCLI(root *cobra.Command) {}
