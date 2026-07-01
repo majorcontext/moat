@@ -20,6 +20,14 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Set up Go so the reviewer can actually run go build/vet/test/gofmt to
+      # verify findings, instead of falling back to static-only analysis.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Collapse previous Claude reviews
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,6 +47,12 @@ jobs:
             Use the /code-review skill to review this pull request.
 
             Use the repository's CLAUDE.md for guidance on style, conventions, and architecture.
+
+            Go is set up in this job — you can and should run `go build ./...`,
+            `go vet ./...`, targeted `go test ./path/...`, and `gofmt -l` to
+            verify findings and confirm compilation/tests rather than reasoning
+            statically. Prefer targeted package tests over the full suite (CI
+            already runs `make test-unit`). Don't claim you couldn't run these.
 
             Review as a second pair of eyes — catch things the author or a coding agent
             would miss. Think about:
@@ -62,4 +76,4 @@ jobs:
             Use inline comments for specific code issues. Use a top-level PR comment for
             the overall summary.
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(go build:*),Bash(go vet:*),Bash(go test:*),Bash(gofmt:*),Bash(make:*),Bash(golangci-lint:*)"
