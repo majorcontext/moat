@@ -125,6 +125,12 @@ func runPi(cmd *cobra.Command, args []string) error {
 		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
 			return buildPiCommand(promptFlag, initialPrompt), nil
 		},
+		ConfigureAgent: func(cfg *config.Config) {
+			// Running `moat pi` means the pi agent, regardless of any `agent:`
+			// field in moat.yaml (which only sets the `moat run` default). This
+			// makes the isPiRun guard in Create reliable.
+			cfg.Agent = "pi"
+		},
 	})
 }
 
