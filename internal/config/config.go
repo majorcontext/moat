@@ -45,6 +45,7 @@ type Config struct {
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 	Codex        CodexConfig       `yaml:"codex,omitempty"`
 	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
+	Pi           PiConfig          `yaml:"pi,omitempty"`
 	Interactive  bool              `yaml:"interactive,omitempty"`
 	// Clipboard enables host clipboard bridging. Default true when nil.
 	Clipboard *bool           `yaml:"clipboard,omitempty"`
@@ -341,6 +342,17 @@ type GeminiConfig struct {
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
+// PiConfig configures the Pi coding agent integration.
+//
+// Pi has no credential of its own; it runs against the anthropic or openai
+// grant. Provider selects the backend (must be "anthropic" or "openai" in v1);
+// when unset it is inferred from the single configured grant. Model optionally
+// pins a model pattern (Pi's per-provider default is used when empty).
+type PiConfig struct {
+	Provider string `yaml:"provider,omitempty"`
+	Model    string `yaml:"model,omitempty"`
 }
 
 // MarketplaceSpec defines a plugin marketplace source.

@@ -2665,3 +2665,37 @@ func TestNetworkHostConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigParsesPiBlock(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: pi
+pi:
+  provider: anthropic
+  model: claude-opus-4-8
+`
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pi.Provider != "anthropic" {
+		t.Errorf("Pi.Provider = %q, want anthropic", cfg.Pi.Provider)
+	}
+	if cfg.Pi.Model != "claude-opus-4-8" {
+		t.Errorf("Pi.Model = %q, want claude-opus-4-8", cfg.Pi.Model)
+	}
+}
+
+// Companion: an empty pi block leaves defaults empty (provider inferred later).
+func TestLoadConfigPiBlockDefaultsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte("agent: pi\n"), 0o644)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pi.Provider != "" || cfg.Pi.Model != "" {
+		t.Errorf("expected empty Pi config, got %+v", cfg.Pi)
+	}
+}
