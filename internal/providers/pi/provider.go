@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/spf13/cobra"
-
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -61,10 +59,4 @@ func (p *Provider) Cleanup(cleanupPath string) {}
 // ImpliedDependencies returns none.
 func (p *Provider) ImpliedDependencies() []string { return nil }
 
-// PrepareContainer is implemented in agent.go.
-// RegisterCLI is implemented in cli.go.
-//
-// --- temporary interface stub ---
-// RegisterCLI's real implementation lands in cli.go; this stub keeps the
-// AgentProvider assertion compiling until then.
-func (p *Provider) RegisterCLI(root *cobra.Command) {}
+// PrepareContainer is implemented in agent.go; RegisterCLI in cli.go.
