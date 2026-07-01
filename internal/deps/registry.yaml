@@ -498,8 +498,9 @@ terragrunt:
   description: Terraform/OpenTofu orchestration wrapper
   type: github-binary
   repo: gruntwork-io/terragrunt
+  # Raw binary (no archive), so no `bin:` — the raw-download branch installs
+  # straight to /usr/local/bin/<name> and never reads it.
   asset: "terragrunt_linux_{arch}"
-  bin: "terragrunt_linux_{arch}"
   default: "1.0.2"
   targets:
     amd64: amd64
