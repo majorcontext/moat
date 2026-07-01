@@ -396,6 +396,9 @@ func TestRender_dockerSection(t *testing.T) {
 		{"dind permissive", "dind", "permissive", "Docker-in-Docker", false},
 		{"dind strict", "dind", "strict", "Docker-in-Docker", true},
 		{"host permissive", "host", "permissive", "mounted host socket", false},
+		// The strict caveat is keyed on policy, not mode, so it must also fire
+		// for host+strict — the one combination left unverified above.
+		{"host strict", "host", "strict", "mounted host socket", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
