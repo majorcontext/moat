@@ -13,12 +13,20 @@ type RuntimeContext struct {
 	RunID           string
 	Agent           string
 	Workspace       string
+	WorkspaceMode   string // "bind" or "volume"; empty is treated as bind
 	Grants          []Grant
 	Services        []Service
+	Tools           []string // installed non-service, non-docker dependencies
+	Docker          *Docker  // non-nil when Docker access is available
 	Ports           []Port
 	NetworkPolicy   *NetworkPolicy
 	MCPServers      []MCPServer
 	HasDependencies bool // true when the config declares any dependencies
+}
+
+// Docker describes Docker access available inside the container.
+type Docker struct {
+	Mode string // "dind" (Docker-in-Docker) or "host" (mounted host socket)
 }
 
 // Grant describes a credential grant available inside the container.
@@ -81,12 +89,18 @@ func Render(rc *RuntimeContext) string {
 	// Header.
 	b.WriteString("# Moat Environment\n\n")
 	b.WriteString("You are running inside a Moat sandbox — an isolated container with\n")
-	b.WriteString("credential injection and network controls.\n")
+	b.WriteString("credential injection. The sections below describe this run's actual\n")
+	b.WriteString("configuration and access.\n")
 
 	// Workspace.
 	b.WriteString("\n## Workspace\n\n")
 	fmt.Fprintf(&b, "- Path: %s\n", rc.Workspace)
-	b.WriteString("- Mount: read-write\n")
+	if rc.WorkspaceMode == "volume" {
+		b.WriteString("- Mount: volume — an ephemeral copy of the working tree. " +
+			"Changes do NOT write back to the host; use `moat snapshot` to extract them.\n")
+	} else {
+		b.WriteString("- Mount: bind, read-write — changes write through to the host working tree.\n")
+	}
 
 	// Grants.
 	if len(rc.Grants) > 0 {
@@ -105,37 +119,55 @@ func Render(rc *RuntimeContext) string {
 		}
 	}
 
-	// Network Policy.
+	// Installed tools (non-service, non-docker dependencies).
+	if len(rc.Tools) > 0 {
+		b.WriteString("\n## Installed Tools\n\n")
+		fmt.Fprintf(&b, "- %s\n", strings.Join(rc.Tools, ", "))
+	}
+
+	// Docker.
+	if rc.Docker != nil {
+		b.WriteString("\n## Docker\n\n")
+		switch rc.Docker.Mode {
+		case "dind":
+			b.WriteString("- Docker is available (Docker-in-Docker). You can build and run containers inside this sandbox.\n")
+		case "host":
+			b.WriteString("- Docker is available via the mounted host socket. Containers you start run on the host's Docker daemon.\n")
+		default:
+			b.WriteString("- Docker is available.\n")
+		}
+		// Under a strict network policy, Docker/BuildKit traffic is not proxied
+		// and so is not constrained by the host allowlist — call that out so it
+		// isn't mistaken for a covered path.
+		if rc.NetworkPolicy != nil && rc.NetworkPolicy.Policy == "strict" {
+			b.WriteString("- Note: traffic from the Docker daemon, BuildKit, and the containers they run is NOT subject to the strict host allowlist below.\n")
+		}
+	}
+
+	// Network Policy. The rendering is policy-aware: a permissive policy allows
+	// all outbound traffic, so listing hosts as "allowed" would wrongly imply a
+	// restriction. Only strict mode is a true allowlist.
 	if rc.NetworkPolicy != nil {
 		b.WriteString("\n## Network Policy\n\n")
-		fmt.Fprintf(&b, "- Policy: %s\n", rc.NetworkPolicy.Policy)
-		if len(rc.NetworkPolicy.AllowedHosts) > 0 {
-			// Check if any host has per-path rules.
-			hasRules := false
+		if rc.NetworkPolicy.Policy == "strict" {
+			b.WriteString("- Policy: strict — only the hosts listed below are reachable; all other outbound network is blocked.\n")
+			renderAllowedHosts(&b, rc.NetworkPolicy.AllowedHosts)
+		} else {
+			fmt.Fprintf(&b, "- Policy: %s — all outbound network access is allowed.\n", rc.NetworkPolicy.Policy)
+			// Even under a permissive policy, hosts with explicit per-path rules
+			// (e.g. deny rules) still apply, so surface those. Bare hosts are not
+			// restrictions and are omitted to avoid implying an allowlist.
+			var ruled []AllowedHost
 			for _, h := range rc.NetworkPolicy.AllowedHosts {
 				if len(h.Rules) > 0 {
-					hasRules = true
-					break
+					ruled = append(ruled, h)
 				}
 			}
-			if hasRules {
-				// Use nested list so per-path rules are visible.
-				b.WriteString("- Allowed hosts:\n")
-				for _, h := range rc.NetworkPolicy.AllowedHosts {
-					if len(h.Rules) == 0 {
-						fmt.Fprintf(&b, "  - %s\n", h.Host)
-					} else {
-						fmt.Fprintf(&b, "  - %s (%d rules: %s)\n",
-							h.Host, len(h.Rules), strings.Join(h.Rules, ", "))
-					}
+			if len(ruled) > 0 {
+				b.WriteString("- Operation-level rules still apply to some hosts:\n")
+				for _, h := range ruled {
+					fmt.Fprintf(&b, "  - %s (%s)\n", h.Host, strings.Join(h.Rules, ", "))
 				}
-			} else {
-				// Simple comma-separated list when no per-path rules.
-				hosts := make([]string, len(rc.NetworkPolicy.AllowedHosts))
-				for i, h := range rc.NetworkPolicy.AllowedHosts {
-					hosts[i] = h.Host
-				}
-				fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(hosts, ", "))
 			}
 		}
 	}
@@ -183,6 +215,39 @@ func Render(rc *RuntimeContext) string {
 	}
 
 	return b.String()
+}
+
+// renderAllowedHosts writes the "Allowed hosts" list for a strict policy. It
+// uses a nested list when any host carries per-path rules (so the rules are
+// visible), and a simple comma-separated list otherwise.
+func renderAllowedHosts(b *strings.Builder, hosts []AllowedHost) {
+	if len(hosts) == 0 {
+		return
+	}
+	hasRules := false
+	for _, h := range hosts {
+		if len(h.Rules) > 0 {
+			hasRules = true
+			break
+		}
+	}
+	if hasRules {
+		b.WriteString("- Allowed hosts:\n")
+		for _, h := range hosts {
+			if len(h.Rules) == 0 {
+				fmt.Fprintf(b, "  - %s\n", h.Host)
+			} else {
+				fmt.Fprintf(b, "  - %s (%d rules: %s)\n",
+					h.Host, len(h.Rules), strings.Join(h.Rules, ", "))
+			}
+		}
+		return
+	}
+	names := make([]string, len(hosts))
+	for i, h := range hosts {
+		names[i] = h.Host
+	}
+	fmt.Fprintf(b, "- Allowed hosts: %s\n", strings.Join(names, ", "))
 }
 
 // serviceDisplayName returns the human-friendly display name for a service.

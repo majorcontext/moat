@@ -1331,7 +1331,11 @@ region = %s
 	// Build and render runtime context for agent instruction files.
 	var renderedContext string
 	if opts.Config != nil {
-		rc := runctx.BuildFromConfig(opts.Config, r.ID)
+		buildOpts := runctx.BuildOptions{WorkspaceMode: opts.WorkspaceMode}
+		if dockerConfig != nil {
+			buildOpts.DockerMode = dockerConfig.Mode
+		}
+		rc := runctx.BuildFromConfig(opts.Config, r.ID, buildOpts)
 		renderedContext = runctx.Render(rc)
 	}
 

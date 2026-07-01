@@ -301,6 +301,153 @@ func TestRender_networkPolicyWithRules(t *testing.T) {
 	}
 }
 
+func TestRender_permissivePolicyDoesNotImplyAllowlist(t *testing.T) {
+	// Under a permissive policy, everything is allowed. Bare hosts carried in
+	// AllowedHosts (e.g. credential-injection endpoints) must NOT be rendered as
+	// "Allowed hosts", which would wrongly read as an egress restriction.
+	rc := &RuntimeContext{
+		RunID:     "run-perm",
+		Agent:     "claude",
+		Workspace: "/workspace",
+		NetworkPolicy: &NetworkPolicy{
+			Policy: "permissive",
+			AllowedHosts: []AllowedHost{
+				{Host: "claude.ai"},
+				{Host: "*.claude.ai"},
+			},
+		},
+	}
+
+	got := Render(rc)
+
+	if !strings.Contains(got, "all outbound network access is allowed") {
+		t.Errorf("permissive render should state all outbound is allowed, got:\n%s", got)
+	}
+	if strings.Contains(got, "Allowed hosts") {
+		t.Errorf("permissive render must not print an allowlist, got:\n%s", got)
+	}
+	if strings.Contains(got, "claude.ai") {
+		t.Errorf("permissive render must not list bare credential hosts as restrictions, got:\n%s", got)
+	}
+}
+
+func TestRender_permissivePolicySurfacesExplicitRules(t *testing.T) {
+	// Even under permissive, explicit per-path rules (e.g. deny) still apply and
+	// must be surfaced — but framed as operation-level rules, not an allowlist.
+	rc := &RuntimeContext{
+		RunID:     "run-perm-rules",
+		Agent:     "claude",
+		Workspace: "/workspace",
+		NetworkPolicy: &NetworkPolicy{
+			Policy: "permissive",
+			AllowedHosts: []AllowedHost{
+				{Host: "metadata.google.internal", Rules: []string{"deny * /**"}},
+				{Host: "claude.ai"}, // bare host: still omitted
+			},
+		},
+	}
+
+	got := Render(rc)
+
+	if !strings.Contains(got, "Operation-level rules still apply") {
+		t.Errorf("expected operation-level rules note, got:\n%s", got)
+	}
+	if !strings.Contains(got, "metadata.google.internal (deny * /**)") {
+		t.Errorf("expected the deny rule surfaced, got:\n%s", got)
+	}
+	if strings.Contains(got, "Allowed hosts") {
+		t.Errorf("permissive render must not print an allowlist, got:\n%s", got)
+	}
+	if strings.Contains(got, "claude.ai") {
+		t.Errorf("bare host should be omitted under permissive, got:\n%s", got)
+	}
+}
+
+func TestRender_strictPolicyIsAllowlist(t *testing.T) {
+	rc := &RuntimeContext{
+		RunID:     "run-strict",
+		Agent:     "claude",
+		Workspace: "/workspace",
+		NetworkPolicy: &NetworkPolicy{
+			Policy:       "strict",
+			AllowedHosts: []AllowedHost{{Host: "api.github.com"}},
+		},
+	}
+
+	got := Render(rc)
+
+	if !strings.Contains(got, "only the hosts listed below are reachable") {
+		t.Errorf("strict render should describe the allowlist, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- Allowed hosts: api.github.com") {
+		t.Errorf("strict render should list allowed hosts, got:\n%s", got)
+	}
+}
+
+func TestRender_dockerSection(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   string
+		policy string
+		want   string
+		// wantCaveat is whether the allowlist-bypass note should appear.
+		wantCaveat bool
+	}{
+		{"dind permissive", "dind", "permissive", "Docker-in-Docker", false},
+		{"dind strict", "dind", "strict", "Docker-in-Docker", true},
+		{"host permissive", "host", "permissive", "mounted host socket", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rc := &RuntimeContext{
+				RunID:         "r",
+				Agent:         "claude",
+				Workspace:     "/workspace",
+				Docker:        &Docker{Mode: tt.mode},
+				NetworkPolicy: &NetworkPolicy{Policy: tt.policy},
+			}
+			got := Render(rc)
+			if !strings.Contains(got, "## Docker") {
+				t.Error("missing Docker section")
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("missing %q, got:\n%s", tt.want, got)
+			}
+			hasCaveat := strings.Contains(got, "subject to the strict host allowlist")
+			if hasCaveat != tt.wantCaveat {
+				t.Errorf("allowlist-bypass caveat present=%v, want %v (policy=%s)", hasCaveat, tt.wantCaveat, tt.policy)
+			}
+		})
+	}
+}
+
+func TestRender_workspaceMode(t *testing.T) {
+	bind := Render(&RuntimeContext{RunID: "r", Agent: "claude", Workspace: "/workspace", WorkspaceMode: "bind"})
+	if !strings.Contains(bind, "Mount: bind") || !strings.Contains(bind, "write through to the host") {
+		t.Errorf("bind render missing bind mount description, got:\n%s", bind)
+	}
+	vol := Render(&RuntimeContext{RunID: "r", Agent: "claude", Workspace: "/workspace", WorkspaceMode: "volume"})
+	if !strings.Contains(vol, "Mount: volume") || !strings.Contains(vol, "moat snapshot") {
+		t.Errorf("volume render missing ephemeral-copy description, got:\n%s", vol)
+	}
+}
+
+func TestRender_installedTools(t *testing.T) {
+	rc := &RuntimeContext{
+		RunID:     "r",
+		Agent:     "claude",
+		Workspace: "/workspace",
+		Tools:     []string{"terraform", "opentofu", "node@22"},
+	}
+	got := Render(rc)
+	if !strings.Contains(got, "## Installed Tools") {
+		t.Error("missing Installed Tools section")
+	}
+	if !strings.Contains(got, "terraform, opentofu, node@22") {
+		t.Errorf("missing tool list, got:\n%s", got)
+	}
+}
+
 func TestRender_docsHasDependenciesWithoutServices(t *testing.T) {
 	rc := &RuntimeContext{
 		RunID:           "run-dep",

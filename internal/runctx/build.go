@@ -19,13 +19,36 @@ var grantDescriptions = map[string]string{
 	"telegram":  "Telegram Bot API access.",
 }
 
-// BuildFromConfig constructs a RuntimeContext from a moat config and run ID.
-func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
+// BuildOptions carries resolved run facts that are not derivable from the
+// moat.yaml Config alone — they come from CLI overrides or runtime resolution
+// at container-creation time.
+type BuildOptions struct {
+	// WorkspaceMode is the resolved workspace mode ("bind"/"volume"). Empty is
+	// treated as bind. Sourced from the resolved run options, not cfg, because a
+	// --workspace-mode CLI flag can override the moat.yaml value.
+	WorkspaceMode config.WorkspaceMode
+	// DockerMode is the resolved Docker mode ("host"/"dind"). Empty means Docker
+	// is not enabled for this run.
+	DockerMode deps.DockerMode
+}
+
+// BuildFromConfig constructs a RuntimeContext from a moat config, run ID, and
+// resolved run options.
+func BuildFromConfig(cfg *config.Config, runID string, opts BuildOptions) *RuntimeContext {
+	workspaceMode := opts.WorkspaceMode
+	if workspaceMode == "" {
+		workspaceMode = config.WorkspaceModeBind
+	}
 	rc := &RuntimeContext{
 		RunID:           runID,
 		Agent:           cfg.Agent,
 		Workspace:       "/workspace",
+		WorkspaceMode:   string(workspaceMode),
 		HasDependencies: len(cfg.Dependencies) > 0,
+	}
+
+	if opts.DockerMode != "" {
+		rc.Docker = &Docker{Mode: string(opts.DockerMode)}
 	}
 
 	// Grants.
@@ -40,29 +63,34 @@ func BuildFromConfig(cfg *config.Config, runID string) *RuntimeContext {
 		})
 	}
 
-	// Services from dependencies (only TypeService entries).
+	// Dependencies: split into services (their own section) and installed tools.
+	// Docker deps are skipped here — Docker is surfaced via opts.DockerMode.
 	for _, depStr := range cfg.Dependencies {
 		dep, err := deps.Parse(depStr)
 		if err != nil {
 			continue
 		}
-		spec, ok := deps.GetSpec(dep.Name)
-		if !ok {
+		// Docker deps (docker:host/docker:dind) are surfaced via opts.DockerMode,
+		// not as tools. parseDockerDep sets DockerMode but leaves Type unset, so
+		// key off the mode rather than the install type.
+		if dep.DockerMode != "" {
 			continue
 		}
-		if spec.Type != deps.TypeService {
+		if spec, ok := deps.GetSpec(dep.Name); ok && spec.Type == deps.TypeService {
+			version := dep.Version
+			if version == "" {
+				version = spec.Default
+			}
+			envURL := fmt.Sprintf("$MOAT_%s_URL", strings.ToUpper(dep.Name))
+			rc.Services = append(rc.Services, Service{
+				Name:    dep.Name,
+				Version: version,
+				EnvURL:  envURL,
+			})
 			continue
 		}
-		version := dep.Version
-		if version == "" {
-			version = spec.Default
-		}
-		envURL := fmt.Sprintf("$MOAT_%s_URL", strings.ToUpper(dep.Name))
-		rc.Services = append(rc.Services, Service{
-			Name:    dep.Name,
-			Version: version,
-			EnvURL:  envURL,
-		})
+		// Anything else declared is an installed tool.
+		rc.Tools = append(rc.Tools, depStr)
 	}
 
 	// Network policy.

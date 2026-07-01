@@ -35,7 +35,7 @@ func TestBuildFromConfig(t *testing.T) {
 		},
 	}
 
-	rc := BuildFromConfig(cfg, "run-abc123")
+	rc := BuildFromConfig(cfg, "run-abc123", BuildOptions{})
 
 	// RunID, Agent, Workspace
 	if rc.RunID != "run-abc123" {
@@ -115,6 +115,21 @@ func TestBuildFromConfig(t *testing.T) {
 	}
 	if !foundRedis {
 		t.Error("missing redis service")
+	}
+
+	// Tools: node@22 is a runtime dep, not a service — it belongs in Tools.
+	if len(rc.Tools) != 1 || rc.Tools[0] != "node@22" {
+		t.Errorf("Tools = %v, want [node@22]", rc.Tools)
+	}
+
+	// WorkspaceMode defaults to bind when no option is supplied.
+	if rc.WorkspaceMode != "bind" {
+		t.Errorf("WorkspaceMode = %q, want %q (default)", rc.WorkspaceMode, "bind")
+	}
+
+	// No docker dependency declared → Docker is nil.
+	if rc.Docker != nil {
+		t.Errorf("Docker = %+v, want nil", rc.Docker)
 	}
 
 	// Network policy
@@ -214,7 +229,7 @@ func TestBuildFromConfig_noOptionalSections(t *testing.T) {
 		Agent: "codex",
 	}
 
-	rc := BuildFromConfig(cfg, "run-minimal")
+	rc := BuildFromConfig(cfg, "run-minimal", BuildOptions{})
 
 	if rc.RunID != "run-minimal" {
 		t.Errorf("RunID = %q, want %q", rc.RunID, "run-minimal")
@@ -245,6 +260,67 @@ func TestBuildFromConfig_noOptionalSections(t *testing.T) {
 	if len(rc.MCPServers) != 0 {
 		t.Errorf("len(MCPServers) = %d, want 0", len(rc.MCPServers))
 	}
+	if len(rc.Tools) != 0 {
+		t.Errorf("len(Tools) = %d, want 0", len(rc.Tools))
+	}
+	if rc.Docker != nil {
+		t.Errorf("Docker = %+v, want nil", rc.Docker)
+	}
+}
+
+func TestBuildFromConfig_dockerAndVolume(t *testing.T) {
+	cfg := &config.Config{
+		Agent:        "claude",
+		Dependencies: []string{"docker:dind", "terraform", "postgres"},
+	}
+
+	rc := BuildFromConfig(cfg, "run-docker", BuildOptions{
+		WorkspaceMode: config.WorkspaceModeVolume,
+		DockerMode:    "dind",
+	})
+
+	// Docker is surfaced from the resolved mode, not from the dependency list.
+	if rc.Docker == nil {
+		t.Fatal("Docker is nil, want non-nil")
+	}
+	if rc.Docker.Mode != "dind" {
+		t.Errorf("Docker.Mode = %q, want %q", rc.Docker.Mode, "dind")
+	}
+
+	// Resolved volume mode is reflected.
+	if rc.WorkspaceMode != "volume" {
+		t.Errorf("WorkspaceMode = %q, want %q", rc.WorkspaceMode, "volume")
+	}
+
+	// docker:dind must NOT appear in Tools; postgres is a service, not a tool;
+	// only terraform is an installed tool.
+	if len(rc.Tools) != 1 || rc.Tools[0] != "terraform" {
+		t.Errorf("Tools = %v, want [terraform]", rc.Tools)
+	}
+	if len(rc.Services) != 1 || rc.Services[0].Name != "postgres" {
+		t.Errorf("Services = %v, want [postgres]", rc.Services)
+	}
+}
+
+// Companion to TestBuildFromConfig_dockerAndVolume: docker:host maps through
+// unchanged and the default (bind) workspace mode is reflected.
+func TestBuildFromConfig_dockerHostBindDefault(t *testing.T) {
+	cfg := &config.Config{
+		Agent:        "claude",
+		Dependencies: []string{"docker:host"},
+	}
+
+	rc := BuildFromConfig(cfg, "run-docker-host", BuildOptions{DockerMode: "host"})
+
+	if rc.Docker == nil || rc.Docker.Mode != "host" {
+		t.Fatalf("Docker = %+v, want mode host", rc.Docker)
+	}
+	if rc.WorkspaceMode != "bind" {
+		t.Errorf("WorkspaceMode = %q, want %q", rc.WorkspaceMode, "bind")
+	}
+	if len(rc.Tools) != 0 {
+		t.Errorf("Tools = %v, want empty (docker:host is not a tool)", rc.Tools)
+	}
 }
 
 func TestBuildFromConfig_unknownGrant(t *testing.T) {
@@ -253,7 +329,7 @@ func TestBuildFromConfig_unknownGrant(t *testing.T) {
 		Grants: []string{"custom-provider"},
 	}
 
-	rc := BuildFromConfig(cfg, "run-unknown")
+	rc := BuildFromConfig(cfg, "run-unknown", BuildOptions{})
 
 	if len(rc.Grants) != 1 {
 		t.Fatalf("len(Grants) = %d, want 1", len(rc.Grants))
