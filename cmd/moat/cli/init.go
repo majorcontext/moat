@@ -12,7 +12,6 @@ import (
 	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
 	codexprov "github.com/majorcontext/moat/internal/providers/codex"
 	geminiprov "github.com/majorcontext/moat/internal/providers/gemini"
-	piprov "github.com/majorcontext/moat/internal/providers/pi"
 	"github.com/majorcontext/moat/internal/quickstart"
 	"github.com/majorcontext/moat/internal/ui"
 )
@@ -61,17 +60,11 @@ func agentConfigs() []agentConfig {
 				return []string{"gemini", "-p", prompt}, nil
 			},
 		},
-		{
-			name:         "pi",
-			dependencies: piprov.DefaultDependencies(),
-			networkHosts: piprov.NetworkHosts(),
-			// Pi has no credential of its own; the backend grant is resolved at
-			// run time by `moat pi`, so scaffolding declares no credential grant.
-			getCredGrant: func() string { return "" },
-			buildCommand: func(prompt, _ string) ([]string, error) {
-				return []string{"pi", "-p", prompt}, nil
-			},
-		},
+		// Pi is intentionally omitted from init auto-detection: it has no
+		// credential of its own (it reuses the anthropic/openai grant), so it
+		// can never win the getCredGrant-based selection loop — the claude and
+		// codex entries already claim any anthropic/openai credential. Scaffold
+		// a Pi project by setting `agent: pi` in moat.yaml (see the Pi guide).
 	}
 }
 
