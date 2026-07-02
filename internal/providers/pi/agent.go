@@ -30,10 +30,11 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		}
 	}
 
-	env := []string{
-		"PI_OFFLINE=1", // suppress startup catalog fetch; does NOT block inference
-		"MOAT_PI_INIT=" + PiInitMountPath,
-	}
+	// PI_OFFLINE suppresses Pi's startup catalog fetch; it does NOT block the
+	// inference call. The context file is read directly from the mount below via
+	// --append-system-prompt, so (unlike the other agents) no MOAT_*_INIT env is
+	// needed — moat-init.sh has no Pi copy step.
+	env := []string{"PI_OFFLINE=1"}
 	mounts := []provider.MountConfig{
 		{Source: tmpDir, Target: PiInitMountPath, ReadOnly: true},
 	}
