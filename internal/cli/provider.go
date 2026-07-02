@@ -32,6 +32,14 @@ type ProviderRunConfig struct {
 	// WtFlag is the value of the --worktree flag.
 	WtFlag string
 
+	// Preflight, if set, runs after workspace/worktree/config resolution and
+	// before grant assembly. It receives the final resolved config (which may
+	// be nil when there is no moat.yaml) so a provider can validate and resolve
+	// against the config that will actually be used — including a worktree's own
+	// moat.yaml — and fail hard before anything is created. A returned error
+	// aborts the run.
+	Preflight func(cfg *config.Config) error
+
 	// GetCredentialGrant returns the grant name for the provider's credential.
 	// Returns empty string if no credential exists.
 	GetCredentialGrant func() string
@@ -112,6 +120,15 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	}
 	absPath = wtOut.Workspace
 	cfg = wtOut.Config
+
+	// Preflight runs against the final resolved config (post-worktree), before
+	// grants are assembled, so a provider can fail hard on bad configuration
+	// before any resources are created.
+	if rc.Preflight != nil {
+		if pErr := rc.Preflight(cfg); pErr != nil {
+			return pErr
+		}
+	}
 
 	// Build grants list with deduplication: credential grant first,
 	// then config grants, then flag grants. Auto-detected grants are

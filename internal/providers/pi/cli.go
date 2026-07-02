@@ -88,11 +88,40 @@ Use 'moat list' to see running and recent runs.`,
 }
 
 func runPi(cmd *cobra.Command, args []string) error {
-	// Resolve the backend up front so we fail hard (missing/ambiguous/unsupported)
-	// before Create allocates anything.
+	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
+		Name:         "pi",
+		Flags:        &piFlags,
+		PromptFlag:   piPromptFlag,
+		AllowedHosts: piAllowedHosts,
+		WtFlag:       piWtFlag,
+		// Resolve the backend against the final (post-worktree) config and fail
+		// hard on a missing/ambiguous/unsupported grant before anything is
+		// created. Runs before GetCredentialGrant/BuildCommand read the globals.
+		Preflight:             resolvePiPreflight,
+		GetCredentialGrant:    func() string { return piResolvedProvider },
+		Dependencies:          DefaultDependencies(),
+		NetworkHosts:          NetworkHosts(),
+		SupportsInitialPrompt: true,
+		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
+			return buildPiCommand(promptFlag, initialPrompt), nil
+		},
+		ConfigureAgent: func(cfg *config.Config) {
+			// Running `moat pi` means the pi agent, regardless of any `agent:`
+			// field in moat.yaml (which only sets the `moat run` default). This
+			// makes the isPiRun guard in Create reliable.
+			cfg.Agent = "pi"
+		},
+	})
+}
+
+// resolvePiPreflight resolves the Pi backend from --provider/--model flags, the
+// final config's pi block, and the credential store, then stashes the result
+// for GetCredentialGrant and buildPiCommand. It fails hard (before any resource
+// is created) on a missing, ambiguous, or unsupported backend. cfg may be nil.
+func resolvePiPreflight(cfg *config.Config) error {
 	providerOverride := piProviderFlag
 	modelOverride := piModelFlag
-	if cfg := loadWorkspaceConfig(cmd, args); cfg != nil {
+	if cfg != nil {
 		if providerOverride == "" {
 			providerOverride = cfg.Pi.Provider
 		}
@@ -111,27 +140,7 @@ func runPi(cmd *cobra.Command, args []string) error {
 	}
 	piResolvedProvider = prov
 	piResolvedModel = model
-
-	return cli.RunProvider(cmd, args, cli.ProviderRunConfig{
-		Name:                  "pi",
-		Flags:                 &piFlags,
-		PromptFlag:            piPromptFlag,
-		AllowedHosts:          piAllowedHosts,
-		WtFlag:                piWtFlag,
-		GetCredentialGrant:    func() string { return piResolvedProvider },
-		Dependencies:          DefaultDependencies(),
-		NetworkHosts:          NetworkHosts(),
-		SupportsInitialPrompt: true,
-		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
-			return buildPiCommand(promptFlag, initialPrompt), nil
-		},
-		ConfigureAgent: func(cfg *config.Config) {
-			// Running `moat pi` means the pi agent, regardless of any `agent:`
-			// field in moat.yaml (which only sets the `moat run` default). This
-			// makes the isPiRun guard in Create reliable.
-			cfg.Agent = "pi"
-		},
-	})
+	return nil
 }
 
 // buildPiCommand assembles the container command for Pi. Extracted from the
@@ -162,27 +171,4 @@ func credentialConfigured(prov credential.Provider) bool {
 	}
 	_, err = store.Get(prov)
 	return err == nil
-}
-
-// loadWorkspaceConfig best-effort loads moat.yaml from the run's workspace so
-// pi.provider/pi.model overrides are honored. It mirrors RunProvider's
-// SupportsInitialPrompt workspace parsing. Returns nil when no config is found
-// or it can't be read (the backend is then inferred from the grant store).
-func loadWorkspaceConfig(cmd *cobra.Command, args []string) *config.Config {
-	workspace := "."
-	dashIdx := cmd.ArgsLenAtDash()
-	if dashIdx > 0 {
-		workspace = args[0]
-	} else if dashIdx < 0 && len(args) > 0 {
-		workspace = args[0]
-	}
-	absPath, err := cli.ResolveWorkspacePath(workspace)
-	if err != nil {
-		return nil
-	}
-	cfg, err := config.Load(absPath)
-	if err != nil {
-		return nil
-	}
-	return cfg
 }
