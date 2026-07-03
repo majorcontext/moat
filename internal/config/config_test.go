@@ -2699,3 +2699,64 @@ func TestLoadConfigPiBlockDefaultsEmpty(t *testing.T) {
 		t.Errorf("expected empty Pi config, got %+v", cfg.Pi)
 	}
 }
+
+func TestValidatePiPackages(t *testing.T) {
+	tests := []struct {
+		name    string
+		pkgs    []string
+		wantErr bool
+	}{
+		{name: "npm ok", pkgs: []string{"npm:@acme/pi-reviewer@1.2.0"}},
+		{name: "git ok", pkgs: []string{"git:github.com/acme/pi-skills@v3"}},
+		{name: "git scp-like ok", pkgs: []string{"git:git@github.com:acme/x@v1"}},
+		{name: "https ok", pkgs: []string{"https://github.com/acme/pi-skills"}},
+		{name: "ssh ok", pkgs: []string{"ssh://git@github.com/acme/x"}},
+		{name: "empty allowed (no packages)", pkgs: nil},
+		{name: "empty string rejected", pkgs: []string{""}, wantErr: true},
+		{name: "relative path rejected", pkgs: []string{"./local/pkg"}, wantErr: true},
+		{name: "absolute path rejected", pkgs: []string{"/abs/pkg"}, wantErr: true},
+		{name: "parent path rejected", pkgs: []string{"../pkg"}, wantErr: true},
+		{name: "bare name rejected", pkgs: []string{"chalk"}, wantErr: true},
+		{name: "shell metachar rejected", pkgs: []string{"npm:x;rm -rf /"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePiPackages(tt.pkgs)
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected error for %v", tt.pkgs)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigParsesPiPackages(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+agent: pi
+pi:
+  packages:
+    - "npm:@acme/pi-reviewer@1.2.0"
+    - "git:github.com/acme/pi-skills@v3"
+`
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Pi.Packages) != 2 {
+		t.Fatalf("Pi.Packages = %v, want 2 entries", cfg.Pi.Packages)
+	}
+}
+
+// Companion: an invalid pi.packages entry fails Load.
+func TestLoadConfigRejectsBadPiPackage(t *testing.T) {
+	dir := t.TempDir()
+	content := "agent: pi\npi:\n  packages:\n    - \"./local\"\n"
+	os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(content), 0o644)
+	if _, err := Load(dir); err == nil {
+		t.Fatal("expected Load to reject a local-path pi package")
+	}
+}
