@@ -1162,6 +1162,13 @@ region = %s
 	if opts.Config != nil {
 		piPackages = opts.Config.Pi.Packages
 	}
+	// pi.packages is only baked when pi-cli is actually installed (the bake runs
+	// `pi install`). `moat pi` always adds pi-cli; a bare `moat run --agent pi`
+	// without pi-cli in dependencies would silently skip the packages, so warn.
+	if len(piPackages) > 0 && !hasDep(installableDeps, "pi-cli") {
+		ui.Warn("pi.packages is set but pi-cli is not a dependency — the packages will not be installed. " +
+			"Add pi-cli to dependencies, or run with `moat pi`.")
+	}
 	imageSpec := &deps.ImageSpec{
 		BaseImage:          baseImage,
 		NeedsSSH:           hasSSHGrants,
