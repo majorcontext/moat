@@ -63,7 +63,10 @@ func GenerateDockerfileSnippet(packages []string, containerUser string) SnippetR
 	d.WriteString("# Pi config (packages + Moat safe global settings)\n")
 	fmt.Fprintf(&d, "USER %s\n", containerUser)
 	fmt.Fprintf(&d, "WORKDIR /home/%s\n", containerUser)
-	fmt.Fprintf(&d, "COPY %s /tmp/%s\n", piConfigScriptName, piConfigScriptName)
+	// --chown so the COPY'd script is owned by containerUser; the RUN below runs
+	// as that user (USER above) and must be able to delete it afterward (a root-
+	// owned file in sticky /tmp can't be removed by the non-root user).
+	fmt.Fprintf(&d, "COPY --chown=%s %s /tmp/%s\n", containerUser, piConfigScriptName, piConfigScriptName)
 	fmt.Fprintf(&d, "RUN bash /tmp/%s && rm -f /tmp/%s\n", piConfigScriptName, piConfigScriptName)
 
 	return SnippetResult{

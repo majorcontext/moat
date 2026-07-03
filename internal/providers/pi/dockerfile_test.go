@@ -20,7 +20,7 @@ func TestGenerateDockerfileSnippet_bakesSettingsWithNoPackages(t *testing.T) {
 		}
 	}
 	// Dockerfile snippet runs as the container user and copies+runs the script.
-	for _, want := range []string{"USER moatuser", "WORKDIR /home/moatuser", "COPY " + r.ScriptName, "RUN bash /tmp/" + r.ScriptName} {
+	for _, want := range []string{"USER moatuser", "WORKDIR /home/moatuser", "COPY --chown=moatuser " + r.ScriptName, "RUN bash /tmp/" + r.ScriptName} {
 		if !strings.Contains(r.DockerfileSnippet, want) {
 			t.Errorf("dockerfile snippet missing %q, got:\n%s", want, r.DockerfileSnippet)
 		}
