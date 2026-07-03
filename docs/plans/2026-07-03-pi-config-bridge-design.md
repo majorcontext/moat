@@ -118,4 +118,4 @@ The Pi provider's runtime staging (context file mount + `--append-system-prompt`
 
 - **No checksum/lockfile** for Pi packages (Pi limitation) — pin exact `@version`/`@ref`; documented.
 - **Build-time network** for `pi install` — builds run with the builder's network (fine); documented that private registries/git auth are a container/npm/git concern, not Pi's.
-- **Baked-settings changes across Moat versions** — the `pi-settings-v1` hash marker forces a rebuild when the baked defaults change.
+- **Baked-settings changes across Moat versions** — the image tag content-hashes the generated bake script (`pi.GenerateDockerfileSnippet(...).ScriptContent`), so any change to the baked defaults or the package set invalidates cached images automatically (no manual version bump).

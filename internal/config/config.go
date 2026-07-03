@@ -365,14 +365,24 @@ var piPackageSafe = regexp.MustCompile(`^[A-Za-z0-9@:/._~%+#-]+$`)
 // can install at image build time. Local paths are rejected because
 // `pi install <path>` records a relative path that does not resolve at runtime.
 func validatePiPackages(pkgs []string) error {
+	prefixes := []string{"npm:", "git:", "https://", "ssh://"}
 	for _, p := range pkgs {
 		if p == "" {
 			return fmt.Errorf("pi.packages: empty package source")
 		}
-		if !(strings.HasPrefix(p, "npm:") || strings.HasPrefix(p, "git:") ||
-			strings.HasPrefix(p, "https://") || strings.HasPrefix(p, "ssh://")) {
+		matched := ""
+		for _, pre := range prefixes {
+			if strings.HasPrefix(p, pre) {
+				matched = pre
+				break
+			}
+		}
+		if matched == "" {
 			return fmt.Errorf("pi.packages: %q is not a remote source — use npm:, git:, https://, or ssh:// "+
 				"(local paths are not supported at build time; publish the package to npm or git)", p)
+		}
+		if strings.TrimPrefix(p, matched) == "" {
+			return fmt.Errorf("pi.packages: %q has no package after the %q scheme", p, matched)
 		}
 		if !piPackageSafe.MatchString(p) {
 			return fmt.Errorf("pi.packages: %q contains invalid characters "+

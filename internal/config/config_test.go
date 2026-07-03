@@ -2717,6 +2717,8 @@ func TestValidatePiPackages(t *testing.T) {
 		{name: "absolute path rejected", pkgs: []string{"/abs/pkg"}, wantErr: true},
 		{name: "parent path rejected", pkgs: []string{"../pkg"}, wantErr: true},
 		{name: "bare name rejected", pkgs: []string{"chalk"}, wantErr: true},
+		{name: "bare npm scheme rejected", pkgs: []string{"npm:"}, wantErr: true},
+		{name: "bare https scheme rejected", pkgs: []string{"https://"}, wantErr: true},
 		{name: "shell metachar rejected", pkgs: []string{"npm:x;rm -rf /"}, wantErr: true},
 	}
 	for _, tt := range tests {
