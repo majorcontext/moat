@@ -83,6 +83,20 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 		}
 	}
 
+	// Include the Pi settings-bake marker and packages in the hash so changing
+	// packages — or the baked-settings version — invalidates cached images.
+	if opts.PiBakeSettings {
+		hashInput += ",pi-settings:v1"
+	}
+	if len(opts.PiPackages) > 0 {
+		sortedPkgs := make([]string, len(opts.PiPackages))
+		copy(sortedPkgs, opts.PiPackages)
+		sort.Strings(sortedPkgs)
+		for _, p := range sortedPkgs {
+			hashInput += ",pi-pkg:" + p
+		}
+	}
+
 	// Include hooks in hash (different hooks = different image)
 	if opts.Hooks != nil {
 		if opts.Hooks.PostBuild != "" {

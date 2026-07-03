@@ -57,6 +57,14 @@ type ImageSpec struct {
 	// Format: "plugin-name@marketplace-name"
 	ClaudePlugins []string
 
+	// PiBakeSettings indicates the image should bake Moat's safe global Pi
+	// settings (and any PiPackages) into ~/.pi/agent/settings.json at build time.
+	PiBakeSettings bool
+
+	// PiPackages are remote Pi package sources (npm:/git:/https:/ssh:) installed
+	// via `pi install` at build time. Format validated by config.validatePiPackages.
+	PiPackages []string
+
 	// HasNamedVolumes indicates the run mounts at least one type: volume (native
 	// Docker named volume). Such volumes are created root-owned; moat-init's
 	// in-container chown is what makes them writable by the non-root run user on
@@ -82,7 +90,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
-		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume
+		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume || s.PiBakeSettings
 }
 
 // needsInit returns whether the moat-init entrypoint script is required.

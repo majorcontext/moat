@@ -2037,3 +2037,37 @@ func TestGenerateDockerfileValidForLegacyBuilder(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateDockerfilePiBake(t *testing.T) {
+	// With PiBakeSettings, the generated Dockerfile references the pi-config
+	// script and the context files include it.
+	res, err := GenerateDockerfile(
+		[]Dependency{{Name: "pi-cli", Type: TypeNpm, Package: "@earendil-works/pi-coding-agent"}},
+		&ImageSpec{PiBakeSettings: true, PiPackages: []string{"npm:@acme/x@1"}, InitProviders: []string{"pi"}},
+	)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile: %v", err)
+	}
+	if !strings.Contains(res.Dockerfile, "pi-config.sh") {
+		t.Errorf("Dockerfile should reference pi-config.sh:\n%s", res.Dockerfile)
+	}
+	if _, ok := res.ContextFiles["pi-config.sh"]; !ok {
+		t.Errorf("context files should include pi-config.sh, got keys %v", piBakeKeysOf(res.ContextFiles))
+	}
+	// Companion: without PiBakeSettings, neither appears.
+	res2, _ := GenerateDockerfile(nil, &ImageSpec{})
+	if strings.Contains(res2.Dockerfile, "pi-config.sh") {
+		t.Errorf("no bake: Dockerfile should not reference pi-config.sh")
+	}
+	if _, ok := res2.ContextFiles["pi-config.sh"]; ok {
+		t.Errorf("no bake: context files should not include pi-config.sh")
+	}
+}
+
+func piBakeKeysOf(m map[string][]byte) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}

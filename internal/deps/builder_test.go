@@ -119,3 +119,22 @@ func TestImageTagDockerModes(t *testing.T) {
 		t.Errorf("docker:host and docker:dind should have different tags, both got: %s", hostTag)
 	}
 }
+
+func TestImageTagIncludesPiPackagesAndSettings(t *testing.T) {
+	base := ImageTag(nil, &ImageSpec{})
+	bake := ImageTag(nil, &ImageSpec{PiBakeSettings: true})
+	if base == bake {
+		t.Error("PiBakeSettings should change the image tag")
+	}
+	pkgsA := ImageTag(nil, &ImageSpec{PiBakeSettings: true, PiPackages: []string{"npm:a@1"}})
+	pkgsB := ImageTag(nil, &ImageSpec{PiBakeSettings: true, PiPackages: []string{"npm:b@1"}})
+	if pkgsA == bake || pkgsA == pkgsB {
+		t.Error("different PiPackages should produce different tags")
+	}
+	// Order-independent: same set → same tag.
+	ab := ImageTag(nil, &ImageSpec{PiBakeSettings: true, PiPackages: []string{"npm:a@1", "npm:b@1"}})
+	ba := ImageTag(nil, &ImageSpec{PiBakeSettings: true, PiPackages: []string{"npm:b@1", "npm:a@1"}})
+	if ab != ba {
+		t.Error("PiPackages hash should be order-independent")
+	}
+}

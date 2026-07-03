@@ -1158,6 +1158,10 @@ region = %s
 	// gets the init script via this path. Keep that chain intact when refactoring
 	// (covered by TestProvider_ImpliedDependencies + TestImageSpecNeedsInit's
 	// GitIdentity case).
+	var piPackages []string
+	if opts.Config != nil {
+		piPackages = opts.Config.Pi.Packages
+	}
 	imageSpec := &deps.ImageSpec{
 		BaseImage:          baseImage,
 		NeedsSSH:           hasSSHGrants,
@@ -1170,6 +1174,8 @@ region = %s
 		UseBuildKit:        &useBuildKit,
 		ClaudeMarketplaces: claudeMarketplaces,
 		ClaudePlugins:      claudePlugins,
+		PiBakeSettings:     hasDep(installableDeps, "pi-cli"),
+		PiPackages:         piPackages,
 		HasNamedVolumes:    configHasNamedVolumes(opts.Config),
 		Hooks:              hooks,
 		// Volume mode requires the moat-init entrypoint to populate + chown the

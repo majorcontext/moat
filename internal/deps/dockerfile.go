@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/majorcontext/moat/internal/providers/claude"
+	"github.com/majorcontext/moat/internal/providers/pi"
 )
 
 // HooksConfig holds hook commands for Dockerfile generation and image tagging.
@@ -235,10 +236,20 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 		contextFiles[name] = content
 	}
 
+	// Pi: bake safe global settings + declared packages at build time.
+	var piResult pi.SnippetResult
+	if opts.PiBakeSettings {
+		piResult = pi.GenerateDockerfileSnippet(opts.PiPackages, containerUser)
+		b.WriteString(piResult.DockerfileSnippet)
+		if piResult.ScriptName != "" {
+			contextFiles[piResult.ScriptName] = piResult.ScriptContent
+		}
+	}
+
 	// Restore root context only if user-space sections switched to moatuser
 	// and subsequent sections need root access. This avoids redundant
 	// USER root → USER moatuser transitions in the generated Dockerfile.
-	inUserContext := len(c.userCustomDeps) > 0 || pluginResult.DockerfileSnippet != ""
+	inUserContext := len(c.userCustomDeps) > 0 || pluginResult.DockerfileSnippet != "" || piResult.DockerfileSnippet != ""
 	if inUserContext {
 		hasDynamicDeps := len(c.dynamicNpm)+len(c.dynamicPip)+len(c.dynamicUv)+len(c.dynamicCargo)+len(c.dynamicGo) > 0
 		hasBuildHooks := opts.Hooks != nil && (opts.Hooks.PostBuildRoot != "" || opts.Hooks.PostBuild != "")
