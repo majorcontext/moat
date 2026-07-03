@@ -6,6 +6,7 @@ import (
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 var (
@@ -110,6 +111,14 @@ func runPi(cmd *cobra.Command, args []string) error {
 			// field in moat.yaml (which only sets the `moat run` default). This
 			// makes the isPiRun guard in Create reliable.
 			cfg.Agent = "pi"
+
+			// Pi config (baseUrl/streamSimple/extensions) can redirect model
+			// traffic to arbitrary hosts, so only the network policy actually
+			// contains egress. Warn when it isn't strict (empty == permissive).
+			if cfg.Network.Policy != "strict" {
+				ui.Warn("Pi runs under a permissive network policy: Pi extensions/config can redirect " +
+					"model traffic to arbitrary hosts. Use `network.policy: strict` for untrusted work.")
+			}
 		},
 	})
 }
