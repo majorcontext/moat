@@ -1663,6 +1663,31 @@ pi:
 - Type: `string`
 - Default: `""` (Pi's per-provider default is used)
 
+### pi.packages
+
+Pi packages (extensions, skills, prompt templates, themes) to install into the container image at build time via `pi install`, so they are baked into a reproducible, cached layer.
+
+```yaml
+pi:
+  packages:
+    - "npm:@acme/pi-reviewer@1.2.0"
+    - "git:github.com/acme/pi-skills@v3"
+```
+
+- Type: `array[string]`
+- Default: `[]`
+
+Only **remote sources** are accepted — `npm:`, `git:`, `https://`, or `ssh://`. Local paths are rejected: `pi install <path>` records a relative path that does not resolve at runtime, so publish the package to npm or git instead. Pin an exact `@version`/`@ref` — Pi has no lockfile, so an unpinned spec is not reproducible. If a package needs a runtime tool, add it to top-level `dependencies:` (Pi does not install a package's runtime deps for you). A bad source fails the image build with the offending entry named.
+
+### Baked safe defaults
+
+For every `moat pi` image, Moat bakes a `~/.pi/agent/settings.json` with safe defaults a workspace cannot override:
+
+- `defaultProjectTrust: never` — a checked-out repo's own `.pi/` config and extensions (arbitrary code) do **not** auto-load. (`AGENTS.md`/`CLAUDE.md` still load — that is inherent to Pi.)
+- `enableInstallTelemetry: false`, `enableAnalytics: false`, `quietStartup: true`.
+
+`httpProxy` is not set here — Moat already injects `HTTP_PROXY` into the container. Note that Pi config (`baseUrl`, custom providers, extensions) can redirect model traffic to any host, so only the **network policy** actually constrains egress; `moat pi` prints a warning under a permissive policy. Use `network.policy: strict` for untrusted work.
+
 **Not yet supported:** `pi.mcp` (Pi core has no MCP configuration format) and `pi.sync_logs` are planned follow-ups.
 
 ---
