@@ -1,13 +1,13 @@
 ---
 title: "Container runtimes"
 navTitle: "Runtimes"
-description: "Docker, Apple containers, and gVisor sandbox configuration."
-keywords: ["moat", "runtime", "docker", "apple containers", "gvisor", "sandbox"]
+description: "Docker, Podman, Apple containers, and gVisor sandbox configuration."
+keywords: ["moat", "runtime", "docker", "podman", "apple containers", "gvisor", "sandbox"]
 ---
 
 # Container runtimes
 
-Moat runs agents in isolated containers using either Docker or Apple containers. This page explains how runtime detection works, the security model for each runtime, and how to configure sandboxing.
+Moat runs agents in isolated containers using Docker (or a Docker-API-compatible engine such as Podman) or Apple containers. This page explains how runtime detection works, the security model for each runtime, and how to configure sandboxing.
 
 ## Runtime detection
 
@@ -17,9 +17,9 @@ Moat detects the available runtime automatically:
 2. If Apple containers are unavailable, it uses Docker
 3. On Linux and Windows, it uses Docker
 
-If the default Docker socket is unreachable and `DOCKER_HOST` is not set, Moat checks known alternative socket locations before returning an error.
+If the default Docker socket is unreachable and `DOCKER_HOST` is not set, Moat checks known alternative socket locations before returning an error, including Podman machine sockets on macOS (`$TMPDIR/podman/*-api.sock`) and rootless/rootful Podman sockets on Linux (`$XDG_RUNTIME_DIR/podman/podman.sock`, `/run/podman/podman.sock`).
 
-The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing either `docker` or `apple`. If the requested runtime is unavailable, Moat returns an error.
+The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing `docker`, `podman`, or `apple`. `podman` selects the same Docker-API runtime as `docker`, pointed at a Podman socket — there is no separate Podman runtime implementation. If the requested runtime is unavailable, Moat returns an error.
 
 ## Docker runtime
 
@@ -65,6 +65,10 @@ Since the proxy listens only on localhost, only processes on the host machine ca
 | Windows | No | Docker Desktop does not support gVisor |
 
 On macOS and Windows, Moat automatically uses standard mode. Apple containers (macOS 26+ with Apple Silicon) provide an alternative with native macOS isolation.
+
+### Podman
+
+Podman exposes a Docker-API-compatible socket (podman machine on macOS, the native daemonless socket on Linux), and Moat's Docker runtime talks to it unmodified — set `DOCKER_HOST` or let auto-detection find it, or force it with `--runtime podman` / `MOAT_RUNTIME=podman`. See [Installation](../getting-started/02-installation.md#podman-macos-linux) for setup and [Troubleshooting](../reference/08-troubleshooting.md) for the gVisor false-positive caveat on Linux.
 
 ## Apple containers
 

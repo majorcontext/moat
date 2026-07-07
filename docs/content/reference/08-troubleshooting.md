@@ -285,13 +285,16 @@ To start Apple containers manually:
 To force a specific runtime:
   moat run --runtime apple
   moat run --runtime docker
+  moat run --runtime podman
 ```
 
-**Cause:** Neither Docker nor Apple containers are available.
+**Cause:** Neither Docker, Podman, nor Apple containers are available. Moat probes the default Docker socket, then known alternative sockets (Rancher Desktop, Podman machine on macOS, rootless/rootful Podman on Linux) before failing.
 
 **Fix:**
 
 - **Docker:** Start Docker Desktop or the Docker daemon.
+- **Podman (macOS):** `podman machine start`
+- **Podman (Linux):** `systemctl --user enable --now podman.socket` (rootless) or `sudo systemctl enable --now podman.socket` (rootful)
 - **Apple containers (macOS 26+):** Start the container system:
 
       container system start
@@ -352,6 +355,28 @@ gVisor (runsc) is required but not available
     moat run --no-sandbox ./my-project
 
 > **Warning:** Running without gVisor reduces container isolation.
+
+### gVisor check passes under Podman but the container still fails to start
+
+**Cause:** Podman's compatibility API (`/info`) lists OCI runtimes (`runsc`, `kata`, `krun`, `youki`, ...) that are configured in `containers.conf`, even if the binary isn't actually installed. On Linux, Moat's gVisor availability check can pass against this list, then container creation fails because `runsc` doesn't exist on the host.
+
+**Fix:** Either install `runsc` as a real Podman OCI runtime, or bypass the sandbox requirement:
+
+    moat run --no-sandbox ./my-project
+    # or
+    export MOAT_NO_SANDBOX=1
+
+> **Warning:** Running without gVisor reduces container isolation. This doesn't apply on macOS, where sandboxing is off by default regardless of runtime.
+
+### `podman machine start` fails with `exec: "krunkit" not found`
+
+**Cause:** Podman 6.x defaults to the `libkrun` machine provider on macOS, which requires a separate `krunkit` binary that isn't installed.
+
+**Fix:** Recreate the machine with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew `podman` formula:
+
+    podman machine rm -f <name>
+    CONTAINERS_MACHINE_PROVIDER=applehv podman machine init
+    podman machine start
 
 ### `agent is already running`
 
