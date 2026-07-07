@@ -395,6 +395,55 @@ func TestNewRuntimeWithOptionsPodmanOverrideDockerHostPodman(t *testing.T) {
 	}
 }
 
+// TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman is the
+// auto-probe companion to TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman:
+// with DOCKER_HOST unset, newPodmanRuntimeWithPing's candidate probe
+// (tryDockerSocketCandidatesVerified over podmanSocketCandidates, see
+// detect.go's newPodmanRuntimeWithPing) must reject a Docker-flavored engine
+// sitting on a podman candidate socket rather than trusting the path alone —
+// candidate-list membership is not proof of engine identity.
+func TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based candidate probing is unix/darwin-only")
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("HOME", t.TempDir())
+
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := shortTempDir(t)
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := shortTempDir(t)
+		origRootful := podmanRootfulSocket
+		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
+		t.Cleanup(func() { podmanRootfulSocket = origRootful })
+		podmanSockPath = podmanRootfulSocket
+	}
+
+	// podman=false: the fake engine answers /version without podman's
+	// "Podman Engine" component marker, as a plain Docker-compatible engine
+	// (that happened to be listening on a podman-shaped path) would.
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, false)
+
+	_, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("MOAT_RUNTIME=podman should not accept a non-podman engine found via candidate probing")
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should mention podman, got: %v", err)
+	}
+}
+
 func TestIsPodmanEngineDoesNotCacheError(t *testing.T) {
 	// Server that fails ServerVersion (/version) until toldRecovered flips,
 	// but always answers /_ping so NewDockerRuntime/Ping succeed regardless.
@@ -551,22 +600,36 @@ func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
 	t.Cleanup(func() { _ = srv.Close() })
 }
 
-// defaultDockerReachable reports whether the platform's real default Docker
-// endpoint (DOCKER_HOST unset) currently answers a ping. Used to skip tests
-// that need a genuinely dead default socket to be meaningful — on a dev
-// machine running Docker Desktop (or any live dockerd), the "default socket
-// dead" precondition doesn't hold and the fallback-probing code path these
-// tests exercise would never be reached.
-func defaultDockerReachable(t *testing.T) bool {
+// forceDefaultDockerUnreachable redirects the newDefaultDockerRuntime seam
+// (see detect.go) so the "default Docker socket" resolves to a scratch path
+// that is guaranteed to have nothing listening on it, deterministically
+// forcing the initial ping in newDockerRuntimeWithPingCandidates to fail —
+// regardless of whether this host (or CI runner, which ships a live dockerd
+// on ubuntu-latest) has a real reachable default Docker socket. Restored via
+// t.Cleanup.
+func forceDefaultDockerUnreachable(t *testing.T) {
 	t.Helper()
-	rt, err := NewDockerRuntime(false)
-	if err != nil {
-		return false
+	dead := filepath.Join(shortTempDir(t), "dead-default.sock")
+	orig := newDefaultDockerRuntime
+	newDefaultDockerRuntime = func(sandbox bool) (*DockerRuntime, error) {
+		return NewDockerRuntimeWithHost("unix://"+dead, sandbox)
 	}
-	defer rt.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	return rt.Ping(ctx) == nil
+	t.Cleanup(func() { newDefaultDockerRuntime = orig })
+}
+
+// shortTempDir creates a scratch directory directly under /tmp (bypassing
+// t.TempDir(), which nests under a per-test path derived from the test name
+// — e.g. /var/folders/.../TestMOATRuntimeAutoDetectFallsBackToPodman.../003)
+// and, combined with a unix-socket filename, can exceed macOS's ~104-byte
+// sun_path limit. Registers cleanup via t.Cleanup.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "moat")
+	if err != nil {
+		t.Fatalf("creating short scratch dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 // TestMOATRuntimeDockerDoesNotFallBackToPodman is the pinning test for the
@@ -583,9 +646,7 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	}
 
 	t.Setenv("DOCKER_HOST", "")
-	if defaultDockerReachable(t) {
-		t.Skip("a real Docker daemon is reachable on the default socket on this machine; this test needs a dead default socket to be meaningful")
-	}
+	forceDefaultDockerUnreachable(t)
 
 	// Isolate genuineDockerSockets() (HOME, for the Rancher Desktop
 	// candidate) from any real third-party tooling on this machine.
@@ -596,7 +657,7 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	var podmanSockPath string
 	switch runtime.GOOS {
 	case "darwin":
-		dir := t.TempDir()
+		dir := shortTempDir(t)
 		t.Setenv("TMPDIR", dir+"/")
 		podmanDir := filepath.Join(dir, "podman")
 		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
@@ -605,7 +666,7 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
 	case "linux":
 		t.Setenv("XDG_RUNTIME_DIR", "")
-		dir := t.TempDir()
+		dir := shortTempDir(t)
 		origRootful := podmanRootfulSocket
 		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
 		t.Cleanup(func() { podmanRootfulSocket = origRootful })
@@ -634,9 +695,7 @@ func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
 	}
 
 	t.Setenv("DOCKER_HOST", "")
-	if defaultDockerReachable(t) {
-		t.Skip("a real Docker daemon is reachable on the default socket on this machine; this test needs a dead default socket to be meaningful")
-	}
+	forceDefaultDockerUnreachable(t)
 
 	// Auto-detect tries Apple containers first on darwin/arm64 — take that
 	// branch out of the running so this test exercises the Docker fallback
@@ -648,7 +707,7 @@ func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
 	var podmanSockPath string
 	switch runtime.GOOS {
 	case "darwin":
-		dir := t.TempDir()
+		dir := shortTempDir(t)
 		t.Setenv("TMPDIR", dir+"/")
 		podmanDir := filepath.Join(dir, "podman")
 		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
@@ -657,7 +716,7 @@ func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
 		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
 	case "linux":
 		t.Setenv("XDG_RUNTIME_DIR", "")
-		dir := t.TempDir()
+		dir := shortTempDir(t)
 		origRootful := podmanRootfulSocket
 		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
 		t.Cleanup(func() { podmanRootfulSocket = origRootful })

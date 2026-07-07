@@ -126,7 +126,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 // probing the given socket candidates.
 func newDockerRuntimeWithPingCandidates(sandbox bool, fallbackCandidates []dockerSocketCandidate) (Runtime, error) {
 	var rt Runtime
-	dockerRT, err := NewDockerRuntime(sandbox)
+	dockerRT, err := newDefaultDockerRuntime(sandbox)
 	if err != nil {
 		return nil, fmt.Errorf("Docker runtime error: %w", err)
 	}
@@ -252,6 +252,16 @@ func genuineDockerSockets() []dockerSocketCandidate {
 // candidates, so a test running on a host with rootful podman active would
 // otherwise dial the real socket.
 var podmanRootfulSocket = "/run/podman/podman.sock"
+
+// newDefaultDockerRuntime constructs a Docker runtime for the default
+// endpoint (DOCKER_HOST as resolved from the environment, or the platform
+// default socket when unset). It's a package variable — defaulting to
+// NewDockerRuntime — solely so tests can substitute a runtime pinned to a
+// scratch socket, deterministically forcing the "default Docker socket is
+// unreachable" precondition that the podman-fallback tests need, even on a
+// host (or CI runner) with a live dockerd on the real default socket. Mirrors
+// the podmanRootfulSocket seam above.
+var newDefaultDockerRuntime = NewDockerRuntime
 
 // xdgRuntimeDirFallback computes the runtime-dir base to use for podman's
 // rootless socket when XDG_RUNTIME_DIR is unset. sudo/cron/CI contexts often
