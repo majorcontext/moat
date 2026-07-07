@@ -43,7 +43,7 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 		switch strings.ToLower(override) {
 		case "docker":
 			log.Debug("using Docker runtime (MOAT_RUNTIME=docker)")
-			rt, err := newDockerRuntimeWithPing(opts.Sandbox)
+			rt, err := newDockerRuntimeWithPingCandidates(opts.Sandbox, genuineDockerSockets())
 			if err != nil {
 				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from moat.yaml to use auto-detection."
 				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or moat.yaml) but not available: %w\n\n%s", err, hint)
@@ -106,10 +106,25 @@ func NewRuntime() (Runtime, error) {
 
 // newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
 // If the default Docker socket is unreachable and DOCKER_HOST is not set, it
-// probes known alternative socket locations (see tryAlternativeDockerSockets).
-// As a side effect, if an alternative socket is found, DOCKER_HOST is set
-// permanently in the process environment to point to it.
+// probes known alternative socket locations, including podman's (see
+// alternativeDockerSockets). As a side effect, if an alternative socket is
+// found, DOCKER_HOST is set permanently in the process environment to point
+// to it.
+//
+// This includes podman candidates in its fallback probe, so it must only be
+// used where landing on a podman socket found via auto-detection is
+// acceptable (auto-detect, and NewRuntimeByType's reconnection to existing
+// runs). An explicit MOAT_RUNTIME=docker request must not silently fall back
+// to podman — use newDockerRuntimeWithPingCandidates with genuineDockerSockets
+// for that case instead.
 func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
+	return newDockerRuntimeWithPingCandidates(sandbox, alternativeDockerSockets())
+}
+
+// newDockerRuntimeWithPingCandidates creates a Docker runtime and verifies
+// it's accessible, falling back (when DOCKER_HOST is not explicitly set) to
+// probing the given socket candidates.
+func newDockerRuntimeWithPingCandidates(sandbox bool, fallbackCandidates []dockerSocketCandidate) (Runtime, error) {
 	var rt Runtime
 	dockerRT, err := NewDockerRuntime(sandbox)
 	if err != nil {
@@ -127,7 +142,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 		if os.Getenv("DOCKER_HOST") != "" {
 			return nil, err
 		}
-		altRT := tryAlternativeDockerSockets(sandbox)
+		altRT, _ := tryDockerSocketCandidates(fallbackCandidates, sandbox)
 		if altRT == nil {
 			return nil, err
 		}
@@ -171,14 +186,21 @@ func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
 		if err := dockerRT.Ping(ctx); err != nil {
 			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST is unreachable: %w\n\n%s", err, hint)
 		}
-		if !dockerRT.IsPodmanEngine(ctx) {
+		isPodman, err := dockerRT.IsPodmanEngine(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but could not identify the engine behind DOCKER_HOST=%s: %w", os.Getenv("DOCKER_HOST"), err)
+		}
+		if !isPodman {
 			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST=%s points at a non-podman engine", os.Getenv("DOCKER_HOST"))
 		}
 		return dockerRT, nil
 	}
 
-	rt := tryDockerSocketCandidates(podmanSocketCandidates(), sandbox)
+	rt, probeErr := tryDockerSocketCandidates(podmanSocketCandidates(), sandbox)
 	if rt == nil {
+		if probeErr != nil {
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but the podman socket was found but unusable: %w\n\n%s", probeErr, hint)
+		}
 		return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but no podman socket was found\n\n%s", hint)
 	}
 	return rt, nil
@@ -198,14 +220,31 @@ type dockerSocketCandidate struct {
 // Entries are platform-specific: macOS-only paths are guarded by
 // runtime.GOOS so they are not probed unnecessarily on Linux.
 func alternativeDockerSockets() []dockerSocketCandidate {
+	return append(genuineDockerSockets(), podmanSocketCandidates()...)
+}
+
+// genuineDockerSockets returns paths to Docker-compatible sockets from
+// third-party tools that run a real Docker engine (as opposed to podman's
+// compat API). An explicit MOAT_RUNTIME=docker request falls back only to
+// these — never to podmanSocketCandidates — so it can't silently land on a
+// podman socket the way podman-or-docker auto-detection is allowed to.
+func genuineDockerSockets() []dockerSocketCandidate {
 	var candidates []dockerSocketCandidate
 	if runtime.GOOS == "darwin" {
 		if home, err := os.UserHomeDir(); err == nil {
 			candidates = append(candidates, dockerSocketCandidate{filepath.Join(home, ".rd", "docker.sock"), "Rancher Desktop"})
 		}
 	}
-	return append(candidates, podmanSocketCandidates()...)
+	return candidates
 }
+
+// podmanRootfulSocket is the well-known path to podman's rootful Docker-API
+// socket on Linux. It's a package variable (rather than an inline literal)
+// solely so tests can redirect it to a scratch path — the real path is fixed
+// and can't be neutralized via HOME/XDG_RUNTIME_DIR/TMPDIR like the other
+// candidates, so a test running on a host with rootful podman active would
+// otherwise dial the real socket.
+var podmanRootfulSocket = "/run/podman/podman.sock"
 
 // podmanSocketCandidates returns paths to podman's Docker-API-compatible
 // socket. Podman's compat API works with moat's Docker runtime unmodified
@@ -232,7 +271,7 @@ func podmanSocketCandidates() []dockerSocketCandidate {
 		if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
 			candidates = append(candidates, dockerSocketCandidate{filepath.Join(xdg, "podman", "podman.sock"), "Podman (rootless)"})
 		}
-		candidates = append(candidates, dockerSocketCandidate{"/run/podman/podman.sock", "Podman (rootful)"})
+		candidates = append(candidates, dockerSocketCandidate{podmanRootfulSocket, "Podman (rootful)"})
 		return candidates
 	default:
 		return nil
@@ -243,16 +282,25 @@ func podmanSocketCandidates() []dockerSocketCandidate {
 // third-party container tools when the default Docker socket is unreachable.
 //
 // If a working socket is found, DOCKER_HOST is set so all subsequent Docker
-// client creation uses the discovered socket.
+// client creation uses the discovered socket. Any candidate-probe error is
+// discarded — callers that need it should use tryDockerSocketCandidates
+// directly (see newPodmanRuntimeWithPing).
 func tryAlternativeDockerSockets(sandbox bool) Runtime {
-	return tryDockerSocketCandidates(alternativeDockerSockets(), sandbox)
+	rt, _ := tryDockerSocketCandidates(alternativeDockerSockets(), sandbox)
+	return rt
 }
 
 // tryDockerSocketCandidates checks a list of known Docker-compatible socket
 // paths, returning the Runtime for the first one that stats as a socket and
 // answers a ping. If a working socket is found, DOCKER_HOST is set so all
 // subsequent Docker client creation uses the discovered socket.
-func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool) Runtime {
+//
+// If no candidate succeeds, the returned error is the most recent
+// construction/ping failure encountered among candidates that did stat as a
+// socket (nil if no candidate path even existed as a socket), so callers can
+// distinguish "nothing was there" from "something was there but broken".
+func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool) (Runtime, error) {
+	var lastErr error
 	for _, c := range candidates {
 		// Use os.Stat (not Lstat) to follow symlinks — on macOS,
 		// ~/.rd/docker.sock is a symlink to the actual socket.
@@ -271,6 +319,7 @@ func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool)
 		rt, err := NewDockerRuntime(sandbox)
 		if err != nil {
 			os.Unsetenv("DOCKER_HOST")
+			lastErr = fmt.Errorf("%s (%s): %w", c.path, c.name, err)
 			continue
 		}
 
@@ -279,15 +328,16 @@ func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool)
 		cancel()
 		if pingErr != nil {
 			os.Unsetenv("DOCKER_HOST")
+			lastErr = fmt.Errorf("%s (%s): ping failed: %w", c.path, c.name, pingErr)
 			continue
 		}
 
 		// Socket is reachable — DOCKER_HOST is already set.
 		log.Debug("auto-detected Docker via "+c.name, "socket", c.path)
-		return rt
+		return rt, nil
 	}
 
-	return nil
+	return nil, lastErr
 }
 
 // tryAppleRuntime attempts to create and verify an Apple runtime.
