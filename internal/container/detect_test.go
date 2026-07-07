@@ -2,7 +2,11 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -275,9 +279,167 @@ func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir()+"/")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
+	// The Linux rootful podman candidate (/run/podman/podman.sock) is a fixed
+	// path that can't be neutralized via env vars — redirect it to a scratch
+	// path so this test stays hermetic even on a Linux host with rootful
+	// podman running.
+	origRootful := podmanRootfulSocket
+	podmanRootfulSocket = filepath.Join(t.TempDir(), "podman.sock")
+	t.Cleanup(func() { podmanRootfulSocket = origRootful })
+
 	rt := tryAlternativeDockerSockets(false)
 	if rt != nil {
 		t.Error("expected nil when no alternative sockets exist")
+	}
+}
+
+// newFakeDockerAPIServer starts an httptest server that serves just enough of
+// the Docker Engine API for client.Client's version negotiation, Ping, and
+// ServerVersion calls: HEAD/GET /_ping and GET .../version. If podman is
+// true, the version response includes podman's compat-API marker component
+// ("Podman Engine"), as podman's real compat API does.
+func newFakeDockerAPIServer(t *testing.T, podman bool) *httptest.Server {
+	t.Helper()
+
+	version := types.Version{APIVersion: "1.44", Version: "24.0.0"}
+	if podman {
+		version.Components = []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}}
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("API-Version", "1.44")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	_, err = NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("expected error when DOCKER_HOST points at a non-podman engine")
+	}
+	if !strings.Contains(err.Error(), "non-podman engine") {
+		t.Errorf("error should identify a non-podman engine, got: %v", err)
+	}
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideDockerHostPodman(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, true)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err != nil {
+		t.Fatalf("expected success when DOCKER_HOST points at podman's compat API, got: %v", err)
+	}
+	if rt.Type() != RuntimeDocker {
+		t.Errorf("Type() = %v, want %v (podman is served via the Docker runtime)", rt.Type(), RuntimeDocker)
+	}
+}
+
+func TestIsPodmanEngineDoesNotCacheError(t *testing.T) {
+	// Server that fails ServerVersion (/version) until toldRecovered flips,
+	// but always answers /_ping so NewDockerRuntime/Ping succeed regardless.
+	// This lets us call IsPodmanEngine twice against the *same* runtime: once
+	// while the version endpoint is broken (must return an error and must not
+	// cache "false"), and once after it recovers (must then report true).
+	var recovered bool
+	version := types.Version{
+		APIVersion: "1.44",
+		Version:    "24.0.0",
+		Components: []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}},
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("API-Version", "1.44")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			if !recovered {
+				http.Error(w, "temporarily unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	defer rt.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := rt.IsPodmanEngine(ctx); err == nil {
+		t.Fatal("expected an error while the version endpoint is broken")
+	}
+
+	recovered = true
+	isPodman, err := rt.IsPodmanEngine(ctx)
+	if err != nil {
+		t.Fatalf("expected the earlier error not to be cached, got: %v", err)
+	}
+	if !isPodman {
+		t.Error("expected IsPodmanEngine to report true once the version endpoint recovers")
 	}
 }
 

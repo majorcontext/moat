@@ -118,7 +118,10 @@ func (s *containerSection) Print(w io.Writer) error {
 		// creation doesn't dial), so ping before trusting IsPodmanEngine.
 		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if rt.Ping(pingCtx) == nil {
-			dockerIsPodman = rt.IsPodmanEngine(pingCtx)
+			isPodman, err := rt.IsPodmanEngine(pingCtx)
+			if err == nil && isPodman {
+				dockerIsPodman = isPodman
+			}
 		}
 		cancel()
 

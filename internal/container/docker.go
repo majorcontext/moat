@@ -55,6 +55,12 @@ For Docker Desktop (macOS/Windows):
 To bypass (reduced isolation):
   moat run --no-sandbox`)
 
+// podmanGvisorWarnOnce ensures the "gVisor availability is unverified under
+// podman" warning (see NewDockerRuntime) is only printed once per process,
+// even though a new DockerRuntime (and its own gvisorOnce/podmanMu) may be
+// constructed multiple times in a single run.
+var podmanGvisorWarnOnce sync.Once
+
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
 	cli        *client.Client
@@ -64,9 +70,13 @@ type DockerRuntime struct {
 	gvisorOnce  sync.Once
 	gvisorAvail bool
 
-	// podman engine identification cache (initialized once via sync.Once, safe for concurrent reads)
-	podmanOnce sync.Once
-	podmanIsRT bool
+	// podman engine identification cache. Only successful determinations are
+	// cached (nil means "not yet determined"); transient errors (e.g. a
+	// daemon hiccup) are never cached so a later call can retry. Guarded by
+	// podmanMu rather than sync.Once because an error must not "consume" the
+	// one-shot initialization.
+	podmanMu   sync.Mutex
+	podmanIsRT *bool
 
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
@@ -124,6 +134,17 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
 		}
 		ociRuntime = "runsc"
+
+		// Podman reports every OCI runtime configured in containers.conf as
+		// "available", whether or not the binary is actually installed (see
+		// gvisorAvailable's docstring). We can't tell the difference through
+		// the compat API, so best-effort warn the user once so a later
+		// container-creation failure isn't a total surprise.
+		if isPodman, err := r.IsPodmanEngine(context.Background()); err == nil && isPodman {
+			podmanGvisorWarnOnce.Do(func() {
+				ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
+			})
+		}
 	}
 
 	r.ociRuntime = ociRuntime
@@ -780,26 +801,37 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 }
 
 // IsPodmanEngine reports whether the daemon this runtime is connected to is
-// podman rather than real Docker, using cached result after the first check.
-// Thread-safe via sync.Once.
+// podman rather than real Docker. A successful determination is cached for
+// the lifetime of this runtime instance; a transient error (e.g. the daemon
+// is momentarily unreachable) is returned to the caller and never cached, so
+// a later call can retry instead of being permanently (and wrongly) treated
+// as "not podman".
 //
 // This is used to confirm MOAT_RUNTIME=podman (with an explicit DOCKER_HOST)
 // is actually pointed at podman, and by 'moat doctor' to label the detected
 // engine correctly.
-func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) bool {
-	r.podmanOnce.Do(func() {
-		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) (bool, error) {
+	r.podmanMu.Lock()
+	cached := r.podmanIsRT
+	r.podmanMu.Unlock()
+	if cached != nil {
+		return *cached, nil
+	}
 
-		version, err := r.cli.ServerVersion(checkCtx)
-		if err != nil {
-			log.Debug("podman engine check failed - caching as false", "error", err)
-			r.podmanIsRT = false
-			return
-		}
-		r.podmanIsRT = versionIsPodman(version)
-	})
-	return r.podmanIsRT
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	version, err := r.cli.ServerVersion(checkCtx)
+	if err != nil {
+		log.Debug("podman engine check failed - not caching, will retry", "error", err)
+		return false, err
+	}
+
+	isPodman := versionIsPodman(version)
+	r.podmanMu.Lock()
+	r.podmanIsRT = &isPodman
+	r.podmanMu.Unlock()
+	return isPodman, nil
 }
 
 // versionIsPodman reports whether a Docker Engine API /version response
