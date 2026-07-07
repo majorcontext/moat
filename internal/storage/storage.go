@@ -47,6 +47,12 @@ type Metadata struct {
 	// Used during reconciliation to skip cross-runtime container state checks.
 	Runtime string `json:"runtime,omitempty"`
 
+	// DockerHost records the Docker-API endpoint (DOCKER_HOST) the run's
+	// containers live on. Set when the docker runtime is used with a
+	// non-default endpoint (podman or Rancher Desktop socket); used on
+	// reconnect so lifecycle commands talk to the same engine.
+	DockerHost string `json:"docker_host,omitempty"`
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
 	NetworkID           string `json:"network_id,omitempty"`

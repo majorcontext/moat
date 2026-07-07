@@ -68,6 +68,9 @@ type Manager struct {
 // It uses the run's Runtime field to look up the matching runtime from the pool.
 // For legacy runs without a Runtime field, falls back to the default runtime.
 func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
+	if r.Runtime == string(container.RuntimeDocker) && r.DockerHost != "" {
+		return m.runtimePool.GetDockerAt(r.DockerHost)
+	}
 	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
 }
 

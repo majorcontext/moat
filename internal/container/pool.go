@@ -1,8 +1,11 @@
 package container
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"sync"
+	"time"
 )
 
 // RuntimePool manages multiple container runtime instances, keyed by RuntimeType.
@@ -15,6 +18,11 @@ type RuntimePool struct {
 	defaultRT   Runtime
 	opts        RuntimeOptions
 	closed      bool
+
+	// dockerHosts caches Docker runtimes pinned to a specific non-default
+	// DOCKER_HOST endpoint (podman or Rancher Desktop sockets), keyed by host.
+	// Populated by GetDockerAt.
+	dockerHosts map[string]Runtime
 }
 
 // NewRuntimePool creates a pool with the auto-detected default runtime.
@@ -90,6 +98,57 @@ func (p *RuntimePool) Get(typ RuntimeType) (Runtime, error) {
 	return rt, nil
 }
 
+// GetDockerAt returns a Docker runtime pinned to the given DOCKER_HOST
+// endpoint, lazily creating and caching it. Used to reconnect to runs whose
+// containers live on a non-default endpoint (podman or Rancher Desktop
+// sockets) recorded in their metadata, without mutating the process-wide
+// DOCKER_HOST environment variable.
+//
+// If host is empty, this is equivalent to Get(RuntimeDocker) — the
+// default-socket case.
+func (p *RuntimePool) GetDockerAt(host string) (Runtime, error) {
+	if host == "" {
+		return p.Get(RuntimeDocker)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return nil, fmt.Errorf("runtime pool is closed")
+	}
+
+	// If the process-wide DOCKER_HOST already matches and a default docker
+	// runtime is cached, reuse it rather than creating a second client.
+	if os.Getenv("DOCKER_HOST") == host {
+		if rt, ok := p.runtimes[RuntimeDocker]; ok {
+			return rt, nil
+		}
+	}
+
+	if rt, ok := p.dockerHosts[host]; ok {
+		return rt, nil
+	}
+
+	dockerRT, err := NewDockerRuntimeWithHost(host, p.opts.Sandbox)
+	if err != nil {
+		return nil, fmt.Errorf("docker runtime for host %s: %w", host, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := dockerRT.Ping(ctx); err != nil {
+		dockerRT.Close()
+		return nil, fmt.Errorf("docker host %s not accessible: %w", host, err)
+	}
+
+	if p.dockerHosts == nil {
+		p.dockerHosts = make(map[string]Runtime)
+	}
+	p.dockerHosts[host] = dockerRT
+	return dockerRT, nil
+}
+
 // ForEachAvailable calls fn for each runtime type that can be successfully
 // initialized, skipping unavailable runtimes. Iteration is sequential —
 // fn is never called concurrently, so closures may safely append to
@@ -123,6 +182,11 @@ func (p *RuntimePool) Close() error {
 
 	var firstErr error
 	for _, rt := range p.runtimes {
+		if err := rt.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, rt := range p.dockerHosts {
 		if err := rt.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"testing"
 )
 
@@ -255,6 +256,93 @@ func TestRuntimePoolUnavailableCached(t *testing.T) {
 	_, err2 := pool.Get(fakeType)
 	if err2 == nil {
 		t.Fatal("expected error on second Get for unavailable runtime")
+	}
+}
+
+// --- GetDockerAt tests ---
+
+func TestRuntimePoolGetDockerAtEmptyHost(t *testing.T) {
+	pool := newStubPool()
+	defer pool.Close()
+
+	dflt, _ := pool.Default()
+	rt, err := pool.GetDockerAt("")
+	if err != nil {
+		t.Fatalf("GetDockerAt(\"\"): %v", err)
+	}
+	if rt != dflt {
+		t.Fatal("GetDockerAt(\"\") should return the default runtime, same as Get(RuntimeDocker)")
+	}
+}
+
+func TestRuntimePoolGetDockerAtCachesPerHost(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	pool := newStubPool()
+	defer pool.Close()
+
+	rt1, err := pool.GetDockerAt(host)
+	if err != nil {
+		t.Fatalf("GetDockerAt(%q): %v", host, err)
+	}
+	if rt1.Type() != RuntimeDocker {
+		t.Fatalf("Type() = %v, want %v", rt1.Type(), RuntimeDocker)
+	}
+
+	rt2, err := pool.GetDockerAt(host)
+	if err != nil {
+		t.Fatalf("second GetDockerAt(%q): %v", host, err)
+	}
+	if rt1 != rt2 {
+		t.Fatal("GetDockerAt should return the same cached instance for the same host")
+	}
+}
+
+func TestRuntimePoolGetDockerAtUnreachable(t *testing.T) {
+	pool := newStubPool()
+	defer pool.Close()
+
+	// Port 1 is reserved and nothing should be listening there.
+	_, err := pool.GetDockerAt("tcp://127.0.0.1:1")
+	if err == nil {
+		t.Fatal("expected error for an unreachable docker host")
+	}
+}
+
+func TestRuntimePoolGetDockerAtAfterClose(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	pool := newStubPool()
+	if err := pool.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := pool.GetDockerAt(host); err == nil {
+		t.Fatal("expected error from GetDockerAt after Close()")
+	}
+}
+
+func TestRuntimePoolCloseClosesDockerHosts(t *testing.T) {
+	pool := newStubPool()
+
+	stub := &poolStubRuntime{}
+	pool.dockerHosts = map[string]Runtime{"tcp://127.0.0.1:1234": stub}
+
+	if err := pool.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !stub.closed {
+		t.Error("Close() should close host-pinned docker runtimes")
 	}
 }
 

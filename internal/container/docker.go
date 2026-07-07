@@ -113,7 +113,25 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
+	return newDockerRuntimeFromClient(cli, sandbox)
+}
 
+// NewDockerRuntimeWithHost creates a new Docker runtime pinned to the given
+// Docker-API endpoint (e.g. a podman or Rancher Desktop socket), without
+// reading or mutating the process-wide DOCKER_HOST environment variable.
+// Used when reconnecting to a run whose containers live on a non-default
+// endpoint recorded in its metadata (storage.Metadata.DockerHost).
+func NewDockerRuntimeWithHost(host string, sandbox bool) (*DockerRuntime, error) {
+	cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Errorf("creating docker client for host %s: %w", host, err)
+	}
+	return newDockerRuntimeFromClient(cli, sandbox)
+}
+
+// newDockerRuntimeFromClient builds a DockerRuntime around an already-constructed
+// Docker API client, shared by NewDockerRuntime and NewDockerRuntimeWithHost.
+func newDockerRuntimeFromClient(cli *client.Client, sandbox bool) (*DockerRuntime, error) {
 	r := &DockerRuntime{
 		cli: cli,
 	}
