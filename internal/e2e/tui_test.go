@@ -57,7 +57,7 @@ func TestAppleTUIWriterPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	// Create a tui.Writer with runtime="apple" to exercise the init phase.
 	// This simulates what setupStatusBar does, but without requiring a real terminal.
@@ -119,7 +119,7 @@ func TestAppleTUIWriterAltScreenDuringInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	var outputBuf bytes.Buffer
 	bar := tui.NewStatusBar(r.ID, r.Name, "apple")
@@ -181,7 +181,7 @@ func TestAppleTUIWriterMultipleWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	var outputBuf bytes.Buffer
 	bar := tui.NewStatusBar(r.ID, r.Name, "apple")

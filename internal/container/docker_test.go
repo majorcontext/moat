@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strconv"
@@ -9,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/containerd/errdefs"
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -735,5 +739,20 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 				t.Errorf("expected standalone buildkit path, but got legacy builder error: %v", err)
 			}
 		})
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	if !IsNotFound(errdefs.ErrNotFound) {
+		t.Error("IsNotFound should match errdefs.ErrNotFound")
+	}
+	// Must unwrap through the %w wrapping the runtime methods apply.
+	wrapped := fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+	if !IsNotFound(wrapped) {
+		t.Error("IsNotFound should unwrap a wrapped not-found error")
+	}
+	// Companion: an unrelated error is not a false positive.
+	if IsNotFound(errors.New("daemon unreachable")) {
+		t.Error("IsNotFound should not match an unrelated error")
 	}
 }

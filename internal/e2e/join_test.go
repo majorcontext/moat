@@ -70,7 +70,7 @@ func TestJoinHeadless(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create primary run: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), primaryRun.ID)
+		defer mgr.Destroy(context.Background(), primaryRun.ID, true)
 		defer mgr.Stop(context.Background(), primaryRun.ID)
 
 		if err := mgr.Start(ctx, primaryRun.ID); err != nil {

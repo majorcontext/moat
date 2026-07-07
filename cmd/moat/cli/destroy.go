@@ -31,7 +31,7 @@ with no extraction snapshot; pass --force to override.`,
 
 func init() {
 	rootCmd.AddCommand(destroyCmd)
-	destroyCmd.Flags().BoolVarP(&destroyForce, "force", "f", false, "force destroy even if a volume-mode run has no extraction snapshot")
+	destroyCmd.Flags().BoolVarP(&destroyForce, "force", "f", false, "force destroy: skip the volume-mode extraction-snapshot guard, and tear down a still-running run without stopping it first")
 }
 
 // hasExtractionSnapshot reports whether the run has at least one snapshot that
@@ -113,7 +113,7 @@ func destroyRun(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		if err := manager.Destroy(ctx, runID); err != nil {
+		if err := manager.Destroy(ctx, runID, destroyForce); err != nil {
 			return fmt.Errorf("destroying run %s: %w", runID, err)
 		}
 

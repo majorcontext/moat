@@ -39,7 +39,7 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Start and wait for completion (simulating attached mode)
 		if err := mgr.Start(ctx, r.ID); err != nil {
@@ -112,7 +112,7 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Start without waiting (detached mode)
 		if err := mgr.Start(ctx, r.ID); err != nil {
@@ -181,7 +181,7 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// StartAttached simulates interactive mode
 		// We can't truly test interactive mode in automated tests, but we can
@@ -247,7 +247,7 @@ func TestLogsCapturedAfterStop(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Start the run
 		if err := mgr.Start(ctx, r.ID); err != nil {
@@ -323,7 +323,7 @@ func TestLogsAlwaysExistForAudit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)

@@ -674,6 +674,15 @@ func (r *DockerRuntime) StopContainer(ctx context.Context, containerID string) e
 	return nil
 }
 
+// IsNotFound reports whether err indicates the engine has no such container
+// (or other object). It unwraps, so it still matches errors wrapped with %w by
+// the runtime methods above. Callers use it to distinguish a genuinely absent
+// container from other failures — e.g. a stop that must not silently record
+// success when it cannot confirm the container is really gone.
+func IsNotFound(err error) bool {
+	return errdefs.IsNotFound(err)
+}
+
 // WaitContainer blocks until the container exits.
 func (r *DockerRuntime) WaitContainer(ctx context.Context, containerID string) (int64, error) {
 	statusCh, errCh := r.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)

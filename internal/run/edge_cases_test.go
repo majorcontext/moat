@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/routing"
@@ -166,14 +167,19 @@ func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
+	lifecycle, err := routing.NewLifecycle(filepath.Join(tmpDir, "proxy"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { monitorCancel() })
 	return &Manager{
-		runtimePool:   container.NewRuntimePoolWithDefault(rt),
-		runs:          make(map[string]*Run),
-		routes:        routes,
-		monitorCtx:    monitorCtx,
-		monitorCancel: monitorCancel,
+		runtimePool:    container.NewRuntimePoolWithDefault(rt),
+		runs:           make(map[string]*Run),
+		routes:         routes,
+		proxyLifecycle: lifecycle,
+		monitorCtx:     monitorCtx,
+		monitorCancel:  monitorCancel,
 	}
 }
 
@@ -417,6 +423,141 @@ func TestStopHandlesContainerStopError(t *testing.T) {
 	}
 	if r.GetState() != StateStopped {
 		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+}
+
+// TestStopFailsLoudOnAmbiguousNotFound verifies that stopping a docker-type
+// run with NO recorded endpoint, whose container the engine reports as
+// not-found, fails loudly and leaves the run running — rather than silently
+// recording "stopped" and potentially orphaning a container that is really
+// alive on a different engine (e.g. started on Docker, stopped under
+// MOAT_RUNTIME=podman).
+func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		stopFn: func(_ context.Context, _ string) error {
+			return fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:          "run_ambiguous",
+		Name:        "ambiguous",
+		ContainerID: "ctr-elsewhere",
+		Runtime:     "docker",
+		DockerHost:  "", // legacy run: no recorded endpoint
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	err := m.Stop(context.Background(), r.ID)
+	if err == nil {
+		t.Fatal("Stop should fail loudly on not-found with no recorded endpoint")
+	}
+	if !strings.Contains(err.Error(), "destroy --force") {
+		t.Errorf("error should point at the recovery path, got: %v", err)
+	}
+	if r.GetState() != StateRunning {
+		t.Errorf("state should revert to running so the user can retry, got %s", r.GetState())
+	}
+}
+
+// TestStopBenignNotFoundWhenEndpointRecorded is the companion: when the run's
+// engine endpoint IS recorded, we are pinned to the right engine, so a
+// not-found container genuinely means it is gone — Stop proceeds normally.
+func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		stopFn: func(_ context.Context, _ string) error {
+			return fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:          "run_pinned",
+		Name:        "pinned",
+		ContainerID: "ctr-gone",
+		Runtime:     "docker",
+		DockerHost:  "unix:///var/run/docker.sock", // pinned endpoint
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Stop(context.Background(), r.ID); err != nil {
+		t.Fatalf("Stop should proceed when the endpoint is pinned: %v", err)
+	}
+	if r.GetState() != StateStopped {
+		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+}
+
+// TestStopBenignNotFoundOnAppleRuntime is the second companion: the loud-fail
+// is docker-only. Apple's StopContainer swallows not-found, and cross-engine
+// ambiguity does not apply, so an apple run proceeds even without an endpoint.
+func TestStopBenignNotFoundOnAppleRuntime(t *testing.T) {
+	rt := &flexibleRuntime{
+		done:        make(chan struct{}),
+		runtimeType: container.RuntimeApple,
+		stopFn: func(_ context.Context, _ string) error {
+			return fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:          "run_apple",
+		Name:        "apple",
+		ContainerID: "ctr-gone",
+		Runtime:     "apple",
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Stop(context.Background(), r.ID); err != nil {
+		t.Fatalf("Stop should proceed for apple runs: %v", err)
+	}
+	if r.GetState() != StateStopped {
+		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+}
+
+// TestDestroyForceBypassesRunningGuard verifies the escape hatch that keeps the
+// loud-fail from wedging a run: destroy refuses a running run by default but
+// --force (force=true) tears it down anyway.
+func TestDestroyForceBypassesRunningGuard(t *testing.T) {
+	rt := &flexibleRuntime{done: make(chan struct{})}
+	m := newEdgeCaseManager(t, rt)
+
+	newRunning := func(id string) *Run {
+		r := &Run{ID: id, Name: id, ContainerID: "ctr", State: StateRunning, exitCh: make(chan struct{})}
+		m.mu.Lock()
+		m.runs[r.ID] = r
+		m.mu.Unlock()
+		return r
+	}
+
+	// Default: refused, with a hint at the escape hatch.
+	newRunning("run_guard")
+	err := m.Destroy(context.Background(), "run_guard", false)
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("destroy without force should refuse a running run and mention --force, got: %v", err)
+	}
+
+	// Companion: force tears it down.
+	newRunning("run_forced")
+	if err := m.Destroy(context.Background(), "run_forced", true); err != nil {
+		t.Fatalf("destroy --force should tear down a running run: %v", err)
 	}
 }
 
