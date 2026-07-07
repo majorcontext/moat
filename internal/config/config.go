@@ -60,9 +60,10 @@ type Config struct {
 	// Empty string or omitted uses default (gVisor enabled).
 	Sandbox string `yaml:"sandbox,omitempty"`
 
-	// Runtime forces a specific container runtime ("docker" or "apple").
+	// Runtime forces a specific container runtime ("docker", "apple", or "podman").
 	// If not set, moat auto-detects the best available runtime.
 	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
+	// "podman" runs the Docker runtime against a podman socket.
 	Runtime string `yaml:"runtime,omitempty"`
 
 	Volumes         []VolumeConfig         `yaml:"volumes,omitempty"`
@@ -596,9 +597,9 @@ func Load(dir string) (*Config, error) {
 		return nil, err
 	}
 
-	// Validate runtime field (only "docker" or "apple" allowed)
-	if cfg.Runtime != "" && cfg.Runtime != "docker" && cfg.Runtime != "apple" {
-		return nil, fmt.Errorf("invalid runtime %q: must be 'docker' or 'apple'", cfg.Runtime)
+	// Validate runtime field (only "docker", "apple", or "podman" allowed)
+	if cfg.Runtime != "" && cfg.Runtime != "docker" && cfg.Runtime != "apple" && cfg.Runtime != "podman" {
+		return nil, fmt.Errorf("invalid runtime %q: must be 'docker', 'apple', or 'podman'", cfg.Runtime)
 	}
 
 	// Validate workspace mode

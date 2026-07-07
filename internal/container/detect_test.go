@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types"
 )
 
 func TestGVisorAvailable(t *testing.T) {
@@ -117,10 +119,161 @@ func TestAlternativeDockerSocketPaths(t *testing.T) {
 	}
 }
 
-func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
-	// On non-darwin, alternativeDockerSockets returns nil immediately.
-	// On darwin, point HOME at an empty dir so no candidate paths exist.
+func TestPodmanSocketCandidatesDarwin(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	// Point TMPDIR at a scratch dir containing a fake podman machine socket,
+	// so the glob in podmanSocketCandidates has something deterministic to find.
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir+"/")
+
+	podmanDir := filepath.Join(dir, "podman")
+	if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sockPath := filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	if err := os.WriteFile(sockPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := podmanSocketCandidates()
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d: %+v", len(candidates), candidates)
+	}
+	if candidates[0].path != sockPath {
+		t.Errorf("path = %q, want %q", candidates[0].path, sockPath)
+	}
+	if candidates[0].name != "Podman machine" {
+		t.Errorf("name = %q, want %q", candidates[0].name, "Podman machine")
+	}
+}
+
+func TestPodmanSocketCandidatesDarwinNoMachine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	t.Setenv("TMPDIR", t.TempDir()+"/")
+
+	if candidates := podmanSocketCandidates(); len(candidates) != 0 {
+		t.Errorf("expected no candidates when no podman machine socket exists, got %+v", candidates)
+	}
+}
+
+func TestPodmanSocketCandidatesLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only podman socket layout")
+	}
+
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	candidates := podmanSocketCandidates()
+
+	wantRootless := "/run/user/1000/podman/podman.sock"
+	wantRootful := "/run/podman/podman.sock"
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d: %+v", len(candidates), candidates)
+	}
+	if candidates[0].path != wantRootless {
+		t.Errorf("rootless path = %q, want %q", candidates[0].path, wantRootless)
+	}
+	if candidates[1].path != wantRootful {
+		t.Errorf("rootful path = %q, want %q", candidates[1].path, wantRootful)
+	}
+}
+
+func TestPodmanSocketCandidatesLinuxNoXDGRuntimeDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only podman socket layout")
+	}
+
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	candidates := podmanSocketCandidates()
+
+	if len(candidates) != 1 {
+		t.Fatalf("expected only the rootful candidate when XDG_RUNTIME_DIR is unset, got %+v", candidates)
+	}
+	if candidates[0].path != "/run/podman/podman.sock" {
+		t.Errorf("path = %q, want %q", candidates[0].path, "/run/podman/podman.sock")
+	}
+}
+
+func TestAlternativeDockerSocketsIncludesPodman(t *testing.T) {
+	// alternativeDockerSockets should append podman candidates after any
+	// platform-specific third-party sockets (Rancher Desktop on macOS keeps
+	// precedence). This just checks podman candidates aren't dropped.
+	got := alternativeDockerSockets()
+	want := podmanSocketCandidates()
+	if len(got) < len(want) {
+		t.Fatalf("alternativeDockerSockets() returned fewer entries (%d) than podmanSocketCandidates() (%d)", len(got), len(want))
+	}
+	gotTail := got[len(got)-len(want):]
+	for i := range want {
+		if gotTail[i] != want[i] {
+			t.Errorf("alternativeDockerSockets() tail[%d] = %+v, want %+v", i, gotTail[i], want[i])
+		}
+	}
+}
+
+func TestVersionIsPodman(t *testing.T) {
+	tests := []struct {
+		name       string
+		components []string
+		want       bool
+	}{
+		{"podman engine", []string{"Podman Engine"}, true},
+		{"docker engine", []string{"Engine"}, false},
+		{"docker desktop style", []string{"Engine", "containerd", "runc", "docker-init"}, false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := types.Version{}
+			for _, name := range tt.components {
+				v.Components = append(v.Components, types.ComponentVersion{Name: name})
+			}
+			if got := versionIsPodman(v); got != tt.want {
+				t.Errorf("versionIsPodman(%v) = %v, want %v", tt.components, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideNoPodman(t *testing.T) {
+	// Without a live podman socket (and no DOCKER_HOST), MOAT_RUNTIME=podman
+	// should fail with an actionable hint rather than silently falling back
+	// to another runtime.
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("HOME", t.TempDir())
+	if runtime.GOOS == "darwin" {
+		t.Setenv("TMPDIR", t.TempDir()+"/")
+	}
+	if runtime.GOOS == "linux" {
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	}
+
+	_, err := NewRuntimeWithOptions(RuntimeOptions{})
+	if err == nil {
+		t.Skip("a podman socket appears to be reachable on this machine; skipping negative-path assertion")
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should mention podman, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "podman machine start") && !strings.Contains(err.Error(), "podman.socket") {
+		t.Errorf("error should include a start hint, got: %v", err)
+	}
+}
+
+func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
+	// Point HOME (Rancher Desktop), TMPDIR (podman machine on macOS), and
+	// XDG_RUNTIME_DIR (podman rootless on Linux) at empty scratch dirs so no
+	// candidate paths exist, isolating this from any real Docker/podman
+	// tooling running on the test host.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir()+"/")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 
 	rt := tryAlternativeDockerSockets(false)
 	if rt != nil {

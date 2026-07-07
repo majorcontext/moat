@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -62,6 +63,10 @@ type DockerRuntime struct {
 	// gVisor availability cache (initialized once via sync.Once, safe for concurrent reads)
 	gvisorOnce  sync.Once
 	gvisorAvail bool
+
+	// podman engine identification cache (initialized once via sync.Once, safe for concurrent reads)
+	podmanOnce sync.Once
+	podmanIsRT bool
 
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
@@ -772,6 +777,41 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 		r.gvisorAvail = false
 	})
 	return r.gvisorAvail
+}
+
+// IsPodmanEngine reports whether the daemon this runtime is connected to is
+// podman rather than real Docker, using cached result after the first check.
+// Thread-safe via sync.Once.
+//
+// This is used to confirm MOAT_RUNTIME=podman (with an explicit DOCKER_HOST)
+// is actually pointed at podman, and by 'moat doctor' to label the detected
+// engine correctly.
+func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) bool {
+	r.podmanOnce.Do(func() {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		version, err := r.cli.ServerVersion(checkCtx)
+		if err != nil {
+			log.Debug("podman engine check failed - caching as false", "error", err)
+			r.podmanIsRT = false
+			return
+		}
+		r.podmanIsRT = versionIsPodman(version)
+	})
+	return r.podmanIsRT
+}
+
+// versionIsPodman reports whether a Docker Engine API /version response
+// describes podman's compat API rather than real Docker. Podman's compat API
+// includes a Components entry named "Podman Engine"; real Docker never does.
+func versionIsPodman(version types.Version) bool {
+	for _, c := range version.Components {
+		if strings.Contains(c.Name, "Podman") {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic
