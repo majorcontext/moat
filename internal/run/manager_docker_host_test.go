@@ -1,10 +1,12 @@
 package run
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -89,5 +91,153 @@ func TestRuntimeForRunDockerWithDockerHost(t *testing.T) {
 	}
 	if rt.Type() != container.RuntimeDocker {
 		t.Fatalf("Type() = %v, want %v", rt.Type(), container.RuntimeDocker)
+	}
+}
+
+// TestRecordedDockerHost_DockerRuntime verifies the creation-side recording
+// decision: a *container.DockerRuntime records its own resolved endpoint
+// (DaemonHost), which is never empty even though DOCKER_HOST is unset in the
+// test process. This pins the fix against regressing to reading the raw
+// DOCKER_HOST env var (which is "" for the common default-socket case) —
+// setting a bogus DOCKER_HOST here would make that regression visible
+// immediately since it wouldn't match the runtime's real endpoint.
+func TestRecordedDockerHost_DockerRuntime(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://this-is-not-the-runtimes-endpoint:9999")
+
+	srv := newFakeDockerAPIServer(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	rt, err := container.NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+
+	got := recordedDockerHost(rt)
+	if got == "" {
+		t.Fatal("recordedDockerHost returned empty for a docker runtime; want the runtime's resolved endpoint")
+	}
+	if got != rt.DaemonHost() {
+		t.Fatalf("recordedDockerHost = %q, want rt.DaemonHost() = %q", got, rt.DaemonHost())
+	}
+	if got == os.Getenv("DOCKER_HOST") {
+		t.Fatalf("recordedDockerHost returned the raw DOCKER_HOST env var (%q) instead of the runtime's actual endpoint", got)
+	}
+}
+
+// TestRecordedDockerHost_NonDockerRuntime is the companion case: a
+// non-docker runtime (Apple containers, or any Runtime that isn't a
+// *container.DockerRuntime) has no Docker-API endpoint to record.
+func TestRecordedDockerHost_NonDockerRuntime(t *testing.T) {
+	stub := &stubRuntime{}
+	if got := recordedDockerHost(stub); got != "" {
+		t.Fatalf("recordedDockerHost(non-docker runtime) = %q, want empty", got)
+	}
+}
+
+// TestRuntimeForEndpoint_RoutingDrift is the drift-guard for the shared
+// routing helper used by both runtimeForRun and loadPersistedRuns. A
+// dockerHost recorded and non-empty must pin to that exact endpoint; an
+// empty dockerHost must fall back to the pool default. Both callers route
+// through runtimeForEndpoint, so this single test covers both call sites'
+// routing behavior — there is no longer a second, independently-maintained
+// routing implementation to drift out of sync with this one.
+func TestRuntimeForEndpoint_RoutingDrift(t *testing.T) {
+	srv := newFakeDockerAPIServer(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	stub := &stubRuntime{}
+	m := mgrWithRuntime(stub)
+
+	t.Run("non-empty dockerHost routes to the pinned endpoint", func(t *testing.T) {
+		rt, err := m.runtimeForEndpoint(context.Background(), string(container.RuntimeDocker), host)
+		if err != nil {
+			t.Fatalf("runtimeForEndpoint: %v", err)
+		}
+		if rt == container.Runtime(stub) {
+			t.Fatal("expected routing to the host-pinned runtime, not the pool default")
+		}
+		dr, ok := rt.(*container.DockerRuntime)
+		if !ok {
+			t.Fatalf("expected a *container.DockerRuntime, got %T", rt)
+		}
+		if dr.DaemonHost() != host {
+			t.Fatalf("DaemonHost() = %q, want %q", dr.DaemonHost(), host)
+		}
+	})
+
+	t.Run("empty dockerHost routes to the pool default", func(t *testing.T) {
+		rt, err := m.runtimeForEndpoint(context.Background(), string(container.RuntimeDocker), "")
+		if err != nil {
+			t.Fatalf("runtimeForEndpoint: %v", err)
+		}
+		if rt != container.Runtime(stub) {
+			t.Fatal("expected routing to the pool default when dockerHost is empty")
+		}
+	})
+}
+
+// TestRuntimeForRun_ReproducedScenario recreates the reported bug: a run
+// created on the default Docker socket has its resolved endpoint recorded
+// (e.g. "unix:///var/run/docker.sock" or a real daemon's tcp endpoint), and
+// later the process reconnects with the runtime pool's default bound to a
+// DIFFERENT docker-type engine (e.g. `MOAT_RUNTIME=podman moat stop <run>`
+// picking a podman-backed DockerRuntime as the pool default). Before the
+// fix, an empty recorded DockerHost meant reconnects silently fell through
+// to whatever the pool's default docker-type engine was — here that's the
+// WRONG engine, and the real container is never found. The fix requires
+// runtimeForRun to resolve to the runtime whose DaemonHost matches the
+// recorded endpoint, never the mismatched pool default.
+func TestRuntimeForRun_ReproducedScenario(t *testing.T) {
+	// "recorded" simulates the real Docker daemon the run was created against.
+	recordedSrv := newFakeDockerAPIServer(t)
+	recordedURL, err := url.Parse(recordedSrv.URL)
+	if err != nil {
+		t.Fatalf("parsing recorded server URL: %v", err)
+	}
+	recordedHost := "tcp://" + recordedURL.Host
+
+	// "podmanDefault" simulates a podman-shaped engine that a later process
+	// (MOAT_RUNTIME=podman) resolves as its pool default. It is a genuine
+	// *container.DockerRuntime (Type() == "docker"), just pointed at a
+	// different endpoint than the run was actually created on.
+	podmanSrv := newFakeDockerAPIServer(t)
+	podmanURL, err := url.Parse(podmanSrv.URL)
+	if err != nil {
+		t.Fatalf("parsing podman server URL: %v", err)
+	}
+	podmanHost := "tcp://" + podmanURL.Host
+
+	podmanDefault, err := container.NewDockerRuntimeWithHost(podmanHost, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost(podman default): %v", err)
+	}
+	defer podmanDefault.Close()
+
+	m := mgrWithRuntime(podmanDefault)
+
+	r := &Run{Runtime: string(container.RuntimeDocker), DockerHost: recordedHost}
+	rt, err := m.runtimeForRun(r)
+	if err != nil {
+		t.Fatalf("runtimeForRun: %v", err)
+	}
+
+	dr, ok := rt.(*container.DockerRuntime)
+	if !ok {
+		t.Fatalf("expected a *container.DockerRuntime, got %T", rt)
+	}
+	if dr.DaemonHost() == podmanHost {
+		t.Fatal("runtimeForRun returned the mismatched pool default (podman-shaped engine) instead of the recorded endpoint — this is the reproduced bug")
+	}
+	if dr.DaemonHost() != recordedHost {
+		t.Fatalf("DaemonHost() = %q, want the recorded endpoint %q", dr.DaemonHost(), recordedHost)
 	}
 }

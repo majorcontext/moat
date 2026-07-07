@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/storage"
 )
@@ -97,13 +96,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				// runs recorded against a non-default endpoint (podman, Rancher
 				// Desktop) must reconnect to that same endpoint rather than the
 				// pool's default Docker runtime.
-				var rt container.Runtime
-				var rtErr error
-				if info.meta.Runtime == string(container.RuntimeDocker) && info.meta.DockerHost != "" {
-					rt, rtErr = m.runtimePool.GetDockerAt(ctx, info.meta.DockerHost)
-				} else {
-					rt, rtErr = m.runtimePool.Get(container.RuntimeType(info.meta.Runtime))
-				}
+				rt, rtErr := m.runtimeForEndpoint(ctx, info.meta.Runtime, info.meta.DockerHost)
 				if rtErr != nil {
 					log.Debug("runtime not available, preserving persisted state",
 						"id", info.runID, "runtime", info.meta.Runtime, "error", rtErr)

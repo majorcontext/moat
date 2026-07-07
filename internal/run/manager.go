@@ -64,20 +64,56 @@ type Manager struct {
 	monitorWg sync.WaitGroup
 }
 
+// runtimeForEndpoint is the single routing decision for reconnecting to a
+// run's container runtime, shared by runtimeForRun and loadPersistedRuns so
+// the two callers can't drift on how DockerHost is interpreted.
+//
+// A non-empty dockerHost on a docker-type run pins to that exact endpoint via
+// GetDockerAt (podman or Rancher Desktop sockets recorded in the run's
+// metadata). Everything else — non-docker runtimes, or docker runs with no
+// recorded endpoint (legacy runs written before endpoint recording existed) —
+// falls back to the pool's ordinary Get(), which resolves to the process's
+// default runtime for that type.
+func (m *Manager) runtimeForEndpoint(ctx context.Context, runtimeType, dockerHost string) (container.Runtime, error) {
+	if runtimeType == string(container.RuntimeDocker) && dockerHost != "" {
+		return m.runtimePool.GetDockerAt(ctx, dockerHost)
+	}
+	return m.runtimePool.Get(container.RuntimeType(runtimeType))
+}
+
 // runtimeForRun returns the correct container runtime for an existing run.
 // It uses the run's Runtime field to look up the matching runtime from the pool.
 // For legacy runs without a Runtime field, falls back to the default runtime.
 func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
-	if r.Runtime == string(container.RuntimeDocker) && r.DockerHost != "" {
-		// TODO(follow-up): runtimeForRun has no ctx parameter, so GetDockerAt's
-		// ping timeout can't be derived from a caller deadline here. Plumbing a
-		// ctx through runtimeForRun would touch every call site across the run
-		// package (manager_exec.go, manager_cleanup.go, manager_monitor.go,
-		// manager_lifecycle.go) — out of scope for this change; a follow-up
-		// implementor should thread ctx through if that matters in practice.
-		return m.runtimePool.GetDockerAt(context.Background(), r.DockerHost)
+	// TODO(follow-up): runtimeForRun has no ctx parameter, so GetDockerAt's
+	// ping timeout can't be derived from a caller deadline here. Plumbing a
+	// ctx through runtimeForRun would touch every call site across the run
+	// package (manager_exec.go, manager_cleanup.go, manager_monitor.go,
+	// manager_lifecycle.go) — out of scope for this change; a follow-up
+	// implementor should thread ctx through if that matters in practice.
+	return m.runtimeForEndpoint(context.Background(), r.Runtime, r.DockerHost)
+}
+
+// recordedDockerHost returns the Docker-API endpoint to persist in a new
+// run's metadata for a docker-type runtime: the runtime's actual resolved
+// endpoint (DaemonHost), never empty — the Docker SDK always resolves to a
+// concrete socket/URL even when DOCKER_HOST is unset. Non-docker runtimes
+// (Apple containers) have no such endpoint and record "".
+//
+// This is deliberately not "read DOCKER_HOST from the environment": the pool
+// may have selected a docker-type runtime (podman's Docker-API-emulating
+// socket, Rancher Desktop, etc.) via a mechanism other than the env var, and
+// the recorded value must match the runtime actually used so reconnects
+// (moat stop/logs in a fresh process) target the same engine rather than
+// silently falling back to whatever docker-type engine that process defaults
+// to. See the DockerHost field doc on storage.Metadata for the failure mode
+// this closes.
+func recordedDockerHost(rt container.Runtime) string {
+	dr, ok := rt.(*container.DockerRuntime)
+	if !ok {
+		return ""
 	}
-	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
+	return dr.DaemonHost()
 }
 
 // defaultRuntime returns the default runtime for new run creation.
