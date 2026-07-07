@@ -344,6 +344,9 @@ func TestRuntimeDisplayLabel(t *testing.T) {
 		{"docker no endpoint", "docker", "", "docker"},
 		// A non-podman third-party socket is not mislabeled.
 		{"rancher desktop", "docker", "unix:///Users/x/.rd/docker.sock", "docker"},
+		// A docker socket whose path merely contains "podman" (e.g. a user
+		// named podman) must not be mislabeled — only a real "/podman/" dir counts.
+		{"docker socket under podman-named home", "docker", "unix:///Users/podman/.docker/run/docker.sock", "docker"},
 		// Other runtimes and the empty legacy case are untouched.
 		{"apple", "apple", "", "apple"},
 		{"empty runtime", "", "", "-"},

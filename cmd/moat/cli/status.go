@@ -89,11 +89,18 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 
-	// Get images and runtime names from all available runtimes
+	// Get images and runtime names from all available runtimes. A podman
+	// engine reached for a host-pinned run reports Type() "docker" just like a
+	// real Docker daemon, so dedupe by type to avoid listing "docker" twice in
+	// the Runtimes header (the per-run RUNTIME column distinguishes the engine).
 	var images []imageInfo
 	var runtimeNames []string
+	seenRuntime := make(map[string]bool)
 	if err := pool.ForEachAvailable(func(rt container.Runtime) error {
-		runtimeNames = append(runtimeNames, string(rt.Type()))
+		if name := string(rt.Type()); !seenRuntime[name] {
+			seenRuntime[name] = true
+			runtimeNames = append(runtimeNames, name)
+		}
 		rtImages, err := rt.ListImages(ctx)
 		if err != nil {
 			log.Debug("listing images failed", "runtime", rt.Type(), "error", err)

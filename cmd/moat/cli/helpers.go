@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -33,7 +34,12 @@ func runtimeDisplayLabel(runtime, dockerHost string) string {
 	if runtime == "" {
 		return "-"
 	}
-	if runtime == "docker" && strings.Contains(dockerHost, "podman") {
+	// Podman sockets are named podman.sock (rootless/rootful) or
+	// podman-machine-<name>-api.sock (machine), so the socket filename always
+	// contains "podman". Match on the basename rather than the whole path so an
+	// unrelated docker socket under a directory that merely contains "podman"
+	// (e.g. a user home named podman) isn't mislabeled.
+	if runtime == "docker" && strings.Contains(path.Base(dockerHost), "podman") {
 		return "docker (podman)"
 	}
 	return runtime
