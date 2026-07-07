@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -192,14 +193,36 @@ func TestPodmanSocketCandidatesLinuxNoXDGRuntimeDir(t *testing.T) {
 		t.Skip("linux-only podman socket layout")
 	}
 
+	// Redirect the uid-fallback seam so this test doesn't depend on the
+	// actual invoking uid (sudo/cron/CI contexts lack XDG_RUNTIME_DIR but
+	// still have podman's socket under /run/user/<uid>).
+	origFallback := xdgRuntimeDirFallback
+	xdgRuntimeDirFallback = func() string { return "/run/user/9999" }
+	t.Cleanup(func() { xdgRuntimeDirFallback = origFallback })
+
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	candidates := podmanSocketCandidates()
 
-	if len(candidates) != 1 {
-		t.Fatalf("expected only the rootful candidate when XDG_RUNTIME_DIR is unset, got %+v", candidates)
+	wantRootless := "/run/user/9999/podman/podman.sock"
+	wantRootful := "/run/podman/podman.sock"
+	if len(candidates) != 2 {
+		t.Fatalf("expected the uid-fallback rootless candidate plus rootful when XDG_RUNTIME_DIR is unset, got %+v", candidates)
 	}
-	if candidates[0].path != "/run/podman/podman.sock" {
-		t.Errorf("path = %q, want %q", candidates[0].path, "/run/podman/podman.sock")
+	if candidates[0].path != wantRootless {
+		t.Errorf("rootless path = %q, want %q", candidates[0].path, wantRootless)
+	}
+	if candidates[1].path != wantRootful {
+		t.Errorf("rootful path = %q, want %q", candidates[1].path, wantRootful)
+	}
+}
+
+func TestXDGRuntimeDirFallbackUsesUID(t *testing.T) {
+	// The real (non-overridden) fallback must derive the path from the
+	// current process's uid — the systemd/podman convention — not a fixed
+	// or empty value.
+	want := fmt.Sprintf("/run/user/%d", os.Getuid())
+	if got := xdgRuntimeDirFallback(); got != want {
+		t.Errorf("xdgRuntimeDirFallback() = %q, want %q", got, want)
 	}
 }
 
@@ -483,5 +506,170 @@ func TestSocketStatFollowsSymlink(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		t.Error("os.Stat should report ModeSocket when following a symlink to a socket")
+	}
+}
+
+// serveFakeDockerAPIUnixSocket starts an HTTP server on a unix socket at
+// path, serving the same minimal Docker Engine API surface as
+// newFakeDockerAPIServer (HEAD/GET /_ping, GET .../version), so it can stand
+// in for a live podman/docker socket at a specific filesystem path (rather
+// than httptest's TCP listener). path's parent directory must already
+// exist. The server is stopped via t.Cleanup.
+func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
+	t.Helper()
+
+	version := types.Version{APIVersion: "1.44", Version: "24.0.0"}
+	if podman {
+		version.Components = []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}}
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listening on unix socket %s: %v", path, err)
+	}
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+}
+
+// defaultDockerReachable reports whether the platform's real default Docker
+// endpoint (DOCKER_HOST unset) currently answers a ping. Used to skip tests
+// that need a genuinely dead default socket to be meaningful — on a dev
+// machine running Docker Desktop (or any live dockerd), the "default socket
+// dead" precondition doesn't hold and the fallback-probing code path these
+// tests exercise would never be reached.
+func defaultDockerReachable(t *testing.T) bool {
+	t.Helper()
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		return false
+	}
+	defer rt.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return rt.Ping(ctx) == nil
+}
+
+// TestMOATRuntimeDockerDoesNotFallBackToPodman is the pinning test for the
+// genuineDockerSockets()/alternativeDockerSockets() split (see
+// NewRuntimeWithOptions's "docker" case and genuineDockerSockets's doc
+// comment). Mutation-verified: reverting the "docker" case's
+// genuineDockerSockets() argument back to alternativeDockerSockets() passes
+// the rest of the suite but must fail this test — with the default Docker
+// socket unreachable and a live podman-shaped socket sitting in the podman
+// candidate seam, MOAT_RUNTIME=docker must NOT silently land on it.
+func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fallback probing is unix/darwin-only")
+	}
+
+	t.Setenv("DOCKER_HOST", "")
+	if defaultDockerReachable(t) {
+		t.Skip("a real Docker daemon is reachable on the default socket on this machine; this test needs a dead default socket to be meaningful")
+	}
+
+	// Isolate genuineDockerSockets() (HOME, for the Rancher Desktop
+	// candidate) from any real third-party tooling on this machine.
+	t.Setenv("HOME", t.TempDir())
+
+	// Plant a live fake podman-shaped socket in the platform-specific podman
+	// candidate seam, redirecting the seams so only our fake socket is found.
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := t.TempDir()
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := t.TempDir()
+		origRootful := podmanRootfulSocket
+		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
+		t.Cleanup(func() { podmanRootfulSocket = origRootful })
+		podmanSockPath = podmanRootfulSocket
+	}
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
+
+	t.Setenv("MOAT_RUNTIME", "docker")
+	_, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("MOAT_RUNTIME=docker should not silently fall back to a podman socket")
+	}
+	if !strings.Contains(err.Error(), "Docker runtime requested") {
+		t.Errorf("error should mention Docker was requested, got: %v", err)
+	}
+}
+
+// TestMOATRuntimeAutoDetectFallsBackToPodman is the companion to
+// TestMOATRuntimeDockerDoesNotFallBackToPodman: with the same dead-default,
+// live-podman-socket setup, auto-detection (MOAT_RUNTIME unset) DOES land on
+// the podman socket, since podman-or-docker auto-detect is allowed to use
+// alternativeDockerSockets (which includes podman candidates).
+func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fallback probing is unix/darwin-only")
+	}
+
+	t.Setenv("DOCKER_HOST", "")
+	if defaultDockerReachable(t) {
+		t.Skip("a real Docker daemon is reachable on the default socket on this machine; this test needs a dead default socket to be meaningful")
+	}
+
+	// Auto-detect tries Apple containers first on darwin/arm64 — take that
+	// branch out of the running so this test exercises the Docker fallback
+	// path regardless of whether Apple's container CLI is installed here.
+	t.Setenv("PATH", "/nonexistent")
+
+	t.Setenv("HOME", t.TempDir())
+
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := t.TempDir()
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := t.TempDir()
+		origRootful := podmanRootfulSocket
+		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
+		t.Cleanup(func() { podmanRootfulSocket = origRootful })
+		podmanSockPath = podmanRootfulSocket
+	}
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
+
+	rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err != nil {
+		t.Fatalf("auto-detect should land on the fake podman socket: %v", err)
+	}
+	if rt.Type() != RuntimeDocker {
+		t.Errorf("Type() = %v, want %v (podman is served via the Docker runtime)", rt.Type(), RuntimeDocker)
 	}
 }

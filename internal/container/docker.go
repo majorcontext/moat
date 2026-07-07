@@ -121,12 +121,31 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 // reading or mutating the process-wide DOCKER_HOST environment variable.
 // Used when reconnecting to a run whose containers live on a non-default
 // endpoint recorded in its metadata (storage.Metadata.DockerHost).
+//
+// Contract: client.FromEnv is applied FIRST, then client.WithHost(host).
+// Docker SDK opts apply in order, and WithHost only overrides the client's
+// host field — it doesn't touch TLS (DOCKER_TLS_VERIFY/DOCKER_CERT_PATH) or
+// other env-driven client config that FromEnv sets up. Applying WithHost
+// alone (without FromEnv) would silently drop TLS config that was honored
+// when the runtime was first created via NewDockerRuntime, breaking
+// reconnection to a TLS-secured tcp:// endpoint. FromEnv also reads
+// DOCKER_HOST, but the subsequent WithHost(host) always wins for the host
+// field, so the caller-supplied host is never overridden by the environment.
 func NewDockerRuntimeWithHost(host string, sandbox bool) (*DockerRuntime, error) {
-	cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithHost(host), client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client for host %s: %w", host, err)
 	}
 	return newDockerRuntimeFromClient(cli, sandbox)
+}
+
+// DaemonHost returns the Docker-API endpoint this runtime is connected to
+// (e.g. "unix:///var/run/docker.sock" or "tcp://127.0.0.1:1234"). Used by
+// RuntimePool.ForEachAvailable to detect when a host-pinned runtime (from
+// GetDockerAt) points at the same engine as the pool's default Docker
+// runtime, so it isn't visited twice.
+func (r *DockerRuntime) DaemonHost() string {
+	return r.cli.DaemonHost()
 }
 
 // newDockerRuntimeFromClient builds a DockerRuntime around an already-constructed

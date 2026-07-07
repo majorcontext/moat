@@ -69,7 +69,13 @@ type Manager struct {
 // For legacy runs without a Runtime field, falls back to the default runtime.
 func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
 	if r.Runtime == string(container.RuntimeDocker) && r.DockerHost != "" {
-		return m.runtimePool.GetDockerAt(r.DockerHost)
+		// TODO(follow-up): runtimeForRun has no ctx parameter, so GetDockerAt's
+		// ping timeout can't be derived from a caller deadline here. Plumbing a
+		// ctx through runtimeForRun would touch every call site across the run
+		// package (manager_exec.go, manager_cleanup.go, manager_monitor.go,
+		// manager_lifecycle.go) — out of scope for this change; a follow-up
+		// implementor should thread ctx through if that matters in practice.
+		return m.runtimePool.GetDockerAt(context.Background(), r.DockerHost)
 	}
 	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
 }

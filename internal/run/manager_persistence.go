@@ -100,7 +100,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				var rt container.Runtime
 				var rtErr error
 				if info.meta.Runtime == string(container.RuntimeDocker) && info.meta.DockerHost != "" {
-					rt, rtErr = m.runtimePool.GetDockerAt(info.meta.DockerHost)
+					rt, rtErr = m.runtimePool.GetDockerAt(ctx, info.meta.DockerHost)
 				} else {
 					rt, rtErr = m.runtimePool.Get(container.RuntimeType(info.meta.Runtime))
 				}

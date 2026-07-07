@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
+	goruntime "runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 // newTestPool creates a RuntimePool for testing, skipping if no runtime is available.
@@ -266,7 +270,7 @@ func TestRuntimePoolGetDockerAtEmptyHost(t *testing.T) {
 	defer pool.Close()
 
 	dflt, _ := pool.Default()
-	rt, err := pool.GetDockerAt("")
+	rt, err := pool.GetDockerAt(context.Background(), "")
 	if err != nil {
 		t.Fatalf("GetDockerAt(\"\"): %v", err)
 	}
@@ -286,7 +290,7 @@ func TestRuntimePoolGetDockerAtCachesPerHost(t *testing.T) {
 	pool := newStubPool()
 	defer pool.Close()
 
-	rt1, err := pool.GetDockerAt(host)
+	rt1, err := pool.GetDockerAt(context.Background(), host)
 	if err != nil {
 		t.Fatalf("GetDockerAt(%q): %v", host, err)
 	}
@@ -294,7 +298,7 @@ func TestRuntimePoolGetDockerAtCachesPerHost(t *testing.T) {
 		t.Fatalf("Type() = %v, want %v", rt1.Type(), RuntimeDocker)
 	}
 
-	rt2, err := pool.GetDockerAt(host)
+	rt2, err := pool.GetDockerAt(context.Background(), host)
 	if err != nil {
 		t.Fatalf("second GetDockerAt(%q): %v", host, err)
 	}
@@ -308,9 +312,139 @@ func TestRuntimePoolGetDockerAtUnreachable(t *testing.T) {
 	defer pool.Close()
 
 	// Port 1 is reserved and nothing should be listening there.
-	_, err := pool.GetDockerAt("tcp://127.0.0.1:1")
+	_, err := pool.GetDockerAt(context.Background(), "tcp://127.0.0.1:1")
 	if err == nil {
 		t.Fatal("expected error for an unreachable docker host")
+	}
+}
+
+func TestRuntimePoolGetDockerAtNegativeCache(t *testing.T) {
+	// A black-hole listener that accepts but never responds, so the first
+	// (short-deadline) call is forced to fail via ping timeout rather than an
+	// instant connection-refused.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn
+		}
+	}()
+	host := "tcp://" + ln.Addr().String()
+
+	pool := newStubPool()
+	defer pool.Close()
+
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	_, err1 := pool.GetDockerAt(shortCtx, host)
+	if err1 == nil {
+		t.Fatal("expected error for an unreachable docker host")
+	}
+
+	// Second call, with a ctx that would happily wait out the full ping
+	// timeout, should instead hit the negative cache and fail immediately —
+	// proving the failure was cached rather than a new ping attempted.
+	longCtx, longCancel := context.WithTimeout(context.Background(), dockerAtPingTimeout)
+	defer longCancel()
+	start := time.Now()
+	_, err2 := pool.GetDockerAt(longCtx, host)
+	elapsed := time.Since(start)
+	if err2 == nil {
+		t.Fatal("expected cached error for an unreachable docker host")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("second GetDockerAt took %s; expected a fast-fail from the negative cache instead of re-pinging", elapsed)
+	}
+}
+
+func TestRuntimePoolGetDockerAtCtxCancellationAbortsPing(t *testing.T) {
+	// A listener that accepts connections but never responds, so the ping
+	// would otherwise block for the full dockerAtPingTimeout.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Accept and hold the connection open without responding.
+			_ = conn
+		}
+	}()
+
+	pool := newStubPool()
+	defer pool.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err = pool.GetDockerAt(ctx, "tcp://"+ln.Addr().String())
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected error from GetDockerAt against a black-hole listener")
+	}
+	if elapsed >= dockerAtPingTimeout {
+		t.Errorf("GetDockerAt took %s, expected ctx cancellation to abort the ping well before the %s ping timeout", elapsed, dockerAtPingTimeout)
+	}
+}
+
+func TestRuntimePoolGetDockerAtDoesNotBlockOtherCallsDuringPing(t *testing.T) {
+	// A listener that accepts connections but never responds, simulating a
+	// wedged endpoint whose ping hangs for the full ping timeout.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn // accept and never respond
+		}
+	}()
+
+	pool := newStubPool()
+	defer pool.Close()
+
+	host := "tcp://" + ln.Addr().String()
+
+	// Start a GetDockerAt that will block (against its own ctx deadline) for
+	// up to dockerAtPingTimeout while pinging the black-hole listener.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), dockerAtPingTimeout)
+		defer cancel()
+		_, _ = pool.GetDockerAt(ctx, host)
+	}()
+
+	// Give the goroutine above time to enter the ping (outside the pool
+	// mutex). A concurrent Default() call must return promptly rather than
+	// blocking on the wedged ping.
+	time.Sleep(50 * time.Millisecond)
+
+	start := time.Now()
+	if _, err := pool.Default(); err != nil {
+		t.Fatalf("Default(): %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("Default() took %s while a concurrent GetDockerAt was pinging a black-hole listener; the pool mutex should not be held across the ping", elapsed)
 	}
 }
 
@@ -327,7 +461,7 @@ func TestRuntimePoolGetDockerAtAfterClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if _, err := pool.GetDockerAt(host); err == nil {
+	if _, err := pool.GetDockerAt(context.Background(), host); err == nil {
 		t.Fatal("expected error from GetDockerAt after Close()")
 	}
 }
@@ -356,5 +490,138 @@ func TestRuntimePoolForEachAvailablePropagatesError(t *testing.T) {
 	})
 	if err != testErr {
 		t.Fatalf("expected ForEachAvailable to propagate callback error, got: %v", err)
+	}
+}
+
+// --- podman-aware unreachable-endpoint error tests ---
+
+func TestGetDockerAtPodmanHintOnPodmanLikeHost(t *testing.T) {
+	pool := newStubPool()
+	defer pool.Close()
+
+	// Path contains "podman" but nothing is listening there.
+	host := "unix:///tmp/does-not-exist/podman/podman.sock"
+	_, err := pool.GetDockerAt(context.Background(), host)
+	if err == nil {
+		t.Fatal("expected error for an unreachable podman-shaped host")
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should mention podman, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "metadata.json") {
+		t.Errorf("error should point at the run's recorded metadata, got: %v", err)
+	}
+	wantHint := "podman machine start"
+	if goruntime.GOOS == "linux" {
+		wantHint = "systemctl --user enable --now podman.socket"
+	}
+	if !strings.Contains(err.Error(), wantHint) {
+		t.Errorf("error should include a platform-specific restart hint (%q), got: %v", wantHint, err)
+	}
+}
+
+func TestGetDockerAtNoPodmanHintOnNonPodmanHost(t *testing.T) {
+	pool := newStubPool()
+	defer pool.Close()
+
+	host := "unix:///tmp/does-not-exist/docker.sock"
+	_, err := pool.GetDockerAt(context.Background(), host)
+	if err == nil {
+		t.Fatal("expected error for an unreachable host")
+	}
+	if strings.Contains(err.Error(), "podman") {
+		t.Errorf("error for a non-podman-shaped host should not mention podman, got: %v", err)
+	}
+}
+
+// --- ForEachAvailable host-pinned runtime tests ---
+
+func TestForEachAvailableVisitsHostPinnedRuntime(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	pool := newStubPool() // default runtime is a poolStubRuntime, Type() == RuntimeDocker
+	defer pool.Close()
+
+	dockerRT, err := NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	pool.dockerHosts = map[string]Runtime{host: dockerRT}
+
+	var visited []Runtime
+	if err := pool.ForEachAvailable(func(rt Runtime) error {
+		visited = append(visited, rt)
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEachAvailable: %v", err)
+	}
+
+	var sawPinned bool
+	for _, rt := range visited {
+		if rt == Runtime(dockerRT) {
+			sawPinned = true
+		}
+	}
+	if !sawPinned {
+		t.Error("ForEachAvailable should visit host-pinned Docker runtimes from GetDockerAt")
+	}
+}
+
+func TestForEachAvailableSkipsSameEndpointDuplicate(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	// Default runtime and a host-pinned runtime both point at the SAME
+	// endpoint (constructed independently, as would happen if a run's
+	// recorded DockerHost happens to equal the process's default docker
+	// endpoint via two different code paths).
+	defaultRT, err := NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost (default): %v", err)
+	}
+	pinnedRT, err := NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost (pinned): %v", err)
+	}
+
+	pool := NewRuntimePoolWithDefault(defaultRT)
+	defer pool.Close()
+	pool.dockerHosts = map[string]Runtime{host: pinnedRT}
+
+	var visited []Runtime
+	if err := pool.ForEachAvailable(func(rt Runtime) error {
+		visited = append(visited, rt)
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEachAvailable: %v", err)
+	}
+
+	// pinnedRT itself must never be visited (it's a same-endpoint duplicate of
+	// the default runtime). Other runtime types (e.g. Apple, if available on
+	// this machine) may legitimately also be visited, so this doesn't assert
+	// a fixed total count.
+	var sawPinned, dockerVisits int
+	for _, rt := range visited {
+		if rt == Runtime(pinnedRT) {
+			sawPinned++
+		}
+		if rt.Type() == RuntimeDocker {
+			dockerVisits++
+		}
+	}
+	if sawPinned != 0 {
+		t.Error("ForEachAvailable should not double-visit a host-pinned runtime whose endpoint matches the already-visited default runtime")
+	}
+	if dockerVisits != 1 {
+		t.Errorf("expected exactly 1 Docker-typed visit (the default runtime only), got %d: %+v", dockerVisits, visited)
 	}
 }
