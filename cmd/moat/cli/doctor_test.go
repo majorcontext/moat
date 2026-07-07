@@ -117,20 +117,22 @@ func TestDockerRuntimeEntry(t *testing.T) {
 	tests := []struct {
 		name     string
 		marker   string
-		isPodman bool
+		identity engineIdentity
 		expected string
 	}{
-		{"real docker, not default", "", false, "docker"},
-		{"real docker, default", " (default)", false, "docker (default)"},
-		{"podman, not default", "", true, "docker (podman)"},
-		{"podman, default", " (default)", true, "docker (podman) (default)"},
+		{"confirmed docker, not default", "", engineDocker, "docker"},
+		{"confirmed docker, default", " (default)", engineDocker, "docker (default)"},
+		{"confirmed podman, not default", "", enginePodman, "docker (podman)"},
+		{"confirmed podman, default", " (default)", enginePodman, "docker (podman) (default)"},
+		{"unknown identity, not default", "", engineUnknown, "docker"},
+		{"unknown identity, default", " (default)", engineUnknown, "docker (default)"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := dockerRuntimeEntry(tt.marker, tt.isPodman)
+			result := dockerRuntimeEntry(tt.marker, tt.identity)
 			if result != tt.expected {
-				t.Errorf("dockerRuntimeEntry(%q, %v) = %q, want %q", tt.marker, tt.isPodman, result, tt.expected)
+				t.Errorf("dockerRuntimeEntry(%q, %v) = %q, want %q", tt.marker, tt.identity, result, tt.expected)
 			}
 		})
 	}
@@ -139,21 +141,23 @@ func TestDockerRuntimeEntry(t *testing.T) {
 func TestGvisorLine(t *testing.T) {
 	tests := []struct {
 		name     string
-		isPodman bool
+		identity engineIdentity
 		reported bool
 		want     string
 	}{
-		{"real docker, gVisor reported", false, true, "✓ available"},
-		{"real docker, gVisor not reported", false, false, "— not available"},
-		{"podman, gVisor reported (untrustworthy)", true, true, "⚠ reported by engine — unverified (podman lists configured OCI runtimes even when not installed)"},
-		{"podman, gVisor not even listed", true, false, "— not available"},
+		{"confirmed docker, gVisor reported", engineDocker, true, "✓ available"},
+		{"confirmed docker, gVisor not reported", engineDocker, false, "— not available"},
+		{"confirmed podman, gVisor reported (untrustworthy)", enginePodman, true, "⚠ reported by engine — unverified (podman lists configured OCI runtimes even when not installed)"},
+		{"confirmed podman, gVisor not even listed", enginePodman, false, "— not available"},
+		{"unknown identity, gVisor reported", engineUnknown, true, "⚠ reported — engine identity unverified (daemon did not respond to ping)"},
+		{"unknown identity, gVisor not reported", engineUnknown, false, "— not available"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := gvisorLine(tt.isPodman, tt.reported)
+			result := gvisorLine(tt.identity, tt.reported)
 			if result != tt.want {
-				t.Errorf("gvisorLine(%v, %v) = %q, want %q", tt.isPodman, tt.reported, result, tt.want)
+				t.Errorf("gvisorLine(%v, %v) = %q, want %q", tt.identity, tt.reported, result, tt.want)
 			}
 		})
 	}
