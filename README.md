@@ -25,7 +25,7 @@ Or with Go:
 go install github.com/majorcontext/moat/cmd/moat@latest
 ```
 
-**Requirements:** Docker, Podman, or Apple containers (macOS 15+ with Apple Silicon—auto-detected).
+**Requirements:** Docker, Podman, or Apple containers (macOS 26+ with Apple Silicon—auto-detected).
 
 ## Quick start
 
@@ -174,7 +174,7 @@ See the [CLI reference](docs/content/reference/01-cli.md) for all commands and f
 
 ## How it works
 
-**Container runtimes**: Auto-detects Apple containers (macOS 15+, Apple Silicon), Docker, or a Docker-API-compatible engine like Podman.
+**Container runtimes**: Auto-detects Apple containers (macOS 26+, Apple Silicon), Docker, or a Docker-API-compatible engine like Podman.
 
 **Credential injection**: A TLS-intercepting proxy sits between the container and the internet. It inspects requests and injects `Authorization` headers for granted services. The proxy binds to localhost (Docker) or uses per-run token auth (Apple containers).
 

@@ -152,7 +152,7 @@ podman machine init
 podman machine start
 ```
 
-If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with podman's default `libkrun` provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
+Podman 6.x defaults to the `libkrun` machine provider on macOS. If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with that default provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
 
 ```bash
 podman machine rm -f <name>
@@ -172,7 +172,14 @@ This starts the rootless Podman socket at `$XDG_RUNTIME_DIR/podman/podman.sock`.
 
 **Using it with Moat:**
 
-Moat auto-detects Podman's socket the same way it detects Rancher Desktop's, when the default Docker socket is unreachable and `DOCKER_HOST` is unset. To select it explicitly:
+Runtime selection follows this precedence:
+
+1. **macOS 26+ on Apple Silicon:** Moat prefers Apple's `container` tool if it's available, before probing Docker or Podman at all. If Apple containers are running, auto-detection picks them -- it doesn't reach Podman. Use `--runtime podman` (or `MOAT_RUNTIME=podman`) to select Podman explicitly on these machines.
+2. **Everywhere else (or when Apple containers aren't available):** Moat tries the default Docker socket first, then falls back to known alternative sockets -- including Podman's, the same way it detects Rancher Desktop's -- when the default socket is unreachable and `DOCKER_HOST` is unset. On a host without Apple containers, this fallback is how auto-detection reaches Podman.
+
+   On macOS, the fallback probe matches the machine socket layout used by Podman 5.x and later (`$TMPDIR/podman/<machine>-api.sock`). Podman 4.x machines used a different socket location and aren't found by auto-detection -- set `DOCKER_HOST` directly (see below) to use one.
+
+To select Podman explicitly on any platform:
 
 ```bash
 moat run --runtime podman ...
@@ -180,7 +187,7 @@ moat run --runtime podman ...
 export MOAT_RUNTIME=podman
 ```
 
-You can also point `DOCKER_HOST` directly at the socket (useful for scripting or non-default machine names):
+You can also point `DOCKER_HOST` directly at the socket (useful for scripting, non-default machine names, or forcing Podman ahead of Apple containers):
 
 ```bash
 export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
@@ -189,11 +196,11 @@ export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.P
 Verify:
 
 ```bash
-$ moat status
-
-Runtime: docker  # podman socket, served via the docker runtime
-...
+$ moat run --runtime podman -- sh -c 'echo "$container"'
+podman
 ```
+
+Podman sets the `container=podman` environment variable inside every container it runs, so this confirms the workload actually ran under Podman.
 
 **Caveats:**
 

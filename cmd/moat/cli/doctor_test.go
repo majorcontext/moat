@@ -163,6 +163,32 @@ func TestGvisorLine(t *testing.T) {
 	}
 }
 
+func TestPodmanSocketLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity engineIdentity
+		sockets  []string
+		want     string
+	}{
+		{"confirmed docker, socket present", engineDocker, []string{"/tmp/podman.sock"}, "socket found at /tmp/podman.sock — use --runtime podman"},
+		{"confirmed docker, no socket", engineDocker, nil, ""},
+		{"unknown identity, socket present", engineUnknown, []string{"/tmp/podman.sock"}, "socket found at /tmp/podman.sock — use --runtime podman"},
+		{"unknown identity, no socket", engineUnknown, nil, ""},
+		{"confirmed podman, socket present (suppressed — Available already says podman)", enginePodman, []string{"/tmp/podman.sock"}, ""},
+		{"confirmed podman, no socket", enginePodman, nil, ""},
+		{"confirmed docker, multiple sockets", engineDocker, []string{"/tmp/a.sock", "/tmp/b.sock"}, "socket found at /tmp/a.sock, /tmp/b.sock — use --runtime podman"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := podmanSocketLine(tt.identity, tt.sockets)
+			if result != tt.want {
+				t.Errorf("podmanSocketLine(%v, %v) = %q, want %q", tt.identity, tt.sockets, result, tt.want)
+			}
+		})
+	}
+}
+
 func TestPrintClaims(t *testing.T) {
 	claims := map[string]interface{}{
 		"exp":   float64(1735689600), // Fixed timestamp

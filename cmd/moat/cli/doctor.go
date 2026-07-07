@@ -149,14 +149,15 @@ func (s *containerSection) Print(w io.Writer) error {
 		fmt.Fprintln(tw, "Available:\tnone")
 	}
 
-	// When Docker's engine identity couldn't be confirmed (no reachable
-	// daemon, so "docker" above is neither verified Docker nor podman),
-	// surface a podman socket if one is sitting right there — without
-	// dialing it or setting DOCKER_HOST, both of which doctor must avoid.
-	if identity == engineUnknown {
-		if sockets := container.PodmanSocketPaths(); len(sockets) > 0 {
-			fmt.Fprintf(tw, "Podman:\tsocket found at %s — use --runtime podman\n", strings.Join(sockets, ", "))
-		}
+	// Surface a podman socket sitting on disk whenever the connected engine
+	// isn't already confirmed to be podman — without dialing the socket or
+	// setting DOCKER_HOST, both of which doctor must avoid. This covers both
+	// engineDocker (a real Docker daemon is connected, but a podman machine
+	// may also be running alongside it) and engineUnknown (identity couldn't
+	// be confirmed). It's suppressed for enginePodman since the "Available:"
+	// line already labels that engine "docker (podman)".
+	if line := podmanSocketLine(identity, container.PodmanSocketPaths()); line != "" {
+		fmt.Fprintf(tw, "Podman:\t%s\n", line)
 	}
 
 	// Check for Docker-specific features
@@ -541,6 +542,20 @@ func gvisorLine(identity engineIdentity, reported bool) string {
 	default:
 		return ui.OKTag() + " available"
 	}
+}
+
+// podmanSocketLine formats the doctor "Podman:" status line, or returns ""
+// when nothing should be shown. sockets is the stat-only result of
+// container.PodmanSocketPaths() (never dialed). The line is suppressed for
+// enginePodman — the "Available:" line already labels that engine "docker
+// (podman)", so repeating it would be redundant — and shown for
+// engineDocker and engineUnknown, since in both cases a live podman socket
+// is real signal the user doesn't otherwise see.
+func podmanSocketLine(identity engineIdentity, sockets []string) string {
+	if identity == enginePodman || len(sockets) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("socket found at %s — use --runtime podman", strings.Join(sockets, ", "))
 }
 
 // hasBuildx checks if docker buildx is available
