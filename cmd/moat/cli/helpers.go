@@ -22,6 +22,23 @@ func parseEnvFlags(envFlags []string, cfg *config.Config) error {
 	return intcli.ParseEnvFlags(envFlags, cfg)
 }
 
+// runtimeDisplayLabel formats the runtime column shown in `moat list` and
+// `moat status`. Podman runs use the Docker runtime pointed at a podman socket,
+// so their recorded runtime type is "docker"; when the recorded DOCKER_HOST
+// endpoint is a podman socket, label it "docker (podman)" to match `moat
+// doctor` rather than leaving the user's --runtime podman run reading "docker".
+// Derived from the recorded endpoint string (no live engine call), consistent
+// with the podman-host detection used elsewhere for recovery hints.
+func runtimeDisplayLabel(runtime, dockerHost string) string {
+	if runtime == "" {
+		return "-"
+	}
+	if runtime == "docker" && strings.Contains(dockerHost, "podman") {
+		return "docker (podman)"
+	}
+	return runtime
+}
+
 // shortenPath shortens a path for display, using ~ for home directory.
 func shortenPath(path string) string {
 	home, err := os.UserHomeDir()

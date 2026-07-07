@@ -327,3 +327,36 @@ func TestFormatTimeAgo(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeDisplayLabel(t *testing.T) {
+	tests := []struct {
+		name       string
+		runtime    string
+		dockerHost string
+		want       string
+	}{
+		// Podman is surfaced when the recorded endpoint is a podman socket.
+		{"podman machine (macOS)", "docker", "unix:///var/folders/x/T/podman/podman-machine-default-api.sock", "docker (podman)"},
+		{"podman rootless (linux)", "docker", "unix:///run/user/1000/podman/podman.sock", "docker (podman)"},
+		{"podman rootful (linux)", "docker", "unix:///run/podman/podman.sock", "docker (podman)"},
+		// Companion: a docker run keeps reading "docker".
+		{"default docker socket", "docker", "unix:///var/run/docker.sock", "docker"},
+		{"docker no endpoint", "docker", "", "docker"},
+		// A non-podman third-party socket is not mislabeled.
+		{"rancher desktop", "docker", "unix:///Users/x/.rd/docker.sock", "docker"},
+		// Other runtimes and the empty legacy case are untouched.
+		{"apple", "apple", "", "apple"},
+		{"empty runtime", "", "", "-"},
+		// Guard: podman-shaped endpoint is only honored for the docker runtime.
+		{"apple with stray host", "apple", "unix:///run/podman/podman.sock", "apple"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runtimeDisplayLabel(tt.runtime, tt.dockerHost)
+			if got != tt.want {
+				t.Errorf("runtimeDisplayLabel(%q, %q) = %q, want %q", tt.runtime, tt.dockerHost, got, tt.want)
+			}
+		})
+	}
+}

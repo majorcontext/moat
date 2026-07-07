@@ -163,7 +163,7 @@ func showStatus(cmd *cobra.Command, args []string) error {
 		output.ActiveRuns = append(output.ActiveRuns, runInfo{
 			Name:      r.Name,
 			ID:        r.ID,
-			Runtime:   r.Runtime,
+			Runtime:   runtimeDisplayLabel(r.Runtime, r.DockerHost),
 			State:     string(r.GetState()),
 			Age:       age,
 			DiskMB:    diskMB,
