@@ -120,6 +120,81 @@ func TestLoadMetadataPreservesAllFields(t *testing.T) {
 	}
 }
 
+func TestLoadMetadataPreservesDockerHost(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run_dockerhost1")
+
+	meta := Metadata{
+		Name:       "test-agent",
+		Runtime:    "docker",
+		DockerHost: "tcp://127.0.0.1:12345",
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	loaded, err := s.LoadMetadata()
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if loaded.DockerHost != meta.DockerHost {
+		t.Errorf("DockerHost = %q, want %q", loaded.DockerHost, meta.DockerHost)
+	}
+}
+
+// TestLoadMetadataMissingDockerHostDefaultsEmpty is the companion to
+// TestLoadMetadataPreservesDockerHost: metadata written before DockerHost
+// existed (or simply the default-socket case, where it's never set) must
+// load with an empty DockerHost rather than erroring or defaulting to some
+// other value.
+func TestLoadMetadataMissingDockerHostDefaultsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run_dockerhost2")
+
+	meta := Metadata{
+		Name:    "test-agent",
+		Runtime: "docker",
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	loaded, err := s.LoadMetadata()
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if loaded.DockerHost != "" {
+		t.Errorf("DockerHost = %q, want empty", loaded.DockerHost)
+	}
+}
+
+// TestLoadMetadataOldFileWithoutDockerHostField simulates loading metadata
+// written by a pre-DockerHost version of moat (a JSON file that simply lacks
+// the field), verifying old metadata files load unchanged.
+func TestLoadMetadataOldFileWithoutDockerHostField(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewRunStore(dir, "run_dockerhost3")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	oldJSON := `{"name":"test-agent","workspace":"/workspace","runtime":"docker"}`
+	if err := os.WriteFile(filepath.Join(s.Dir(), "metadata.json"), []byte(oldJSON), 0o644); err != nil {
+		t.Fatalf("writing legacy metadata: %v", err)
+	}
+
+	loaded, err := s.LoadMetadata()
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if loaded.DockerHost != "" {
+		t.Errorf("DockerHost = %q, want empty for legacy metadata file", loaded.DockerHost)
+	}
+	if loaded.Runtime != "docker" {
+		t.Errorf("Runtime = %q, want %q", loaded.Runtime, "docker")
+	}
+}
+
 func TestLogWriter(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := NewRunStore(dir, "run_logs1234")

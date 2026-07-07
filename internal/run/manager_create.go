@@ -1222,6 +1222,13 @@ region = %s
 	}
 	r.Image = containerImage
 	r.Runtime = string(m.defaultRuntime().Type())
+	if r.Runtime == string(container.RuntimeDocker) {
+		// Empty when DOCKER_HOST is unset (the default-socket case) — recorded
+		// so reconnects (moat stop/logs/etc. in a fresh process) target the same
+		// engine, e.g. a podman or Rancher Desktop socket rather than falling
+		// back to the real Docker daemon if one is also running.
+		r.DockerHost = os.Getenv("DOCKER_HOST")
+	}
 
 	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)
 
