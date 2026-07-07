@@ -104,6 +104,7 @@ func (s *containerSection) Print(w io.Writer) error {
 	// Check which runtimes are available
 	var runtimes []string
 	var dockerRT *container.DockerRuntime
+	var dockerIsPodman bool
 
 	// Check Docker
 	if rt, err := container.NewDockerRuntime(false); err == nil {
@@ -112,7 +113,16 @@ func (s *containerSection) Print(w io.Writer) error {
 		if defaultRT.Type() == container.RuntimeDocker {
 			marker = " (default)"
 		}
-		runtimes = append(runtimes, "docker"+marker)
+
+		// NewDockerRuntime succeeds even with no reachable daemon (client
+		// creation doesn't dial), so ping before trusting IsPodmanEngine.
+		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if rt.Ping(pingCtx) == nil {
+			dockerIsPodman = rt.IsPodmanEngine(pingCtx)
+		}
+		cancel()
+
+		runtimes = append(runtimes, dockerRuntimeEntry(marker, dockerIsPodman))
 	}
 
 	// Check Apple Containers
@@ -134,11 +144,7 @@ func (s *containerSection) Print(w io.Writer) error {
 	// Check for Docker-specific features
 	if dockerRT != nil {
 		// Check gVisor
-		if hasGVisor() {
-			fmt.Fprintf(tw, "gVisor:\t%s available\n", ui.OKTag())
-		} else {
-			fmt.Fprintf(tw, "gVisor:\t%s not available\n", ui.Dim("—"))
-		}
+		fmt.Fprintf(tw, "gVisor:\t%s\n", gvisorLine(dockerIsPodman, hasGVisor()))
 
 		// Check BuildKit
 		buildkit := os.Getenv("DOCKER_BUILDKIT")
@@ -465,6 +471,36 @@ func (s *storageSection) Print(w io.Writer) error {
 	}
 
 	return tw.Flush()
+}
+
+// dockerRuntimeEntry formats the "Available:" list entry for the Docker
+// runtime, labeling it when the connected engine is actually podman speaking
+// Docker's compat API (see container.DockerRuntime.IsPodmanEngine). marker is
+// appended as-is (e.g. " (default)") and isPodman must only be true when a
+// successful ping already confirmed the engine identity.
+func dockerRuntimeEntry(marker string, isPodman bool) string {
+	label := "docker"
+	if isPodman {
+		label = "docker (podman)"
+	}
+	return label + marker
+}
+
+// gvisorLine formats the doctor "gVisor:" status line. Podman's compat /info
+// endpoint lists every OCI runtime configured in containers.conf — including
+// gVisor's runsc — regardless of whether it's actually installed, so a
+// "reported" runsc entry from a podman engine can't be trusted the way it can
+// for real Docker. isPodman must only be true when confirmed via a successful
+// ping (see dockerRuntimeEntry); reported is the raw hasGVisor() result.
+func gvisorLine(isPodman, reported bool) string {
+	switch {
+	case isPodman && reported:
+		return ui.WarnTag() + " reported by engine — unverified (podman lists configured OCI runtimes even when not installed)"
+	case reported:
+		return ui.OKTag() + " available"
+	default:
+		return ui.Dim("—") + " not available"
+	}
 }
 
 // hasBuildx checks if docker buildx is available
