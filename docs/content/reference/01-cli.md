@@ -47,7 +47,7 @@ The agent commands (`moat claude`, `moat codex`, `moat gemini`, `moat pi`) share
 | `-n`, `--name NAME` | Run name (default: from `moat.yaml` or random) |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
-| `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
+| `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`, `podman`) |
 | `--keep` | Keep container after run completes |
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) or `volume` (isolated Docker named volume). Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
@@ -126,7 +126,7 @@ moat run [flags] [path] [-- command]
 | `-m`, `--mount SOURCE:TARGET[:MODE]` | Additional mount (repeatable). See [Mounts reference](./05-mounts.md). |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
-| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker, podman) |
 | `--keep` | Keep container after run completes |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) mounts the host directory at `/workspace`; `volume` copies it into an isolated Docker named volume. Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
@@ -478,7 +478,7 @@ Configuration is read from `moat.yaml` in the repository root. If a run is alrea
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
 | `--rebuild` | Force image rebuild |
 | `--keep` | Keep container after completion |
-| `--runtime` | Container runtime to use (`apple`, `docker`) |
+| `--runtime` | Container runtime to use (`apple`, `docker`, `podman`) |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail instead. Also set via `MOAT_NO_PROMPT=1`. |

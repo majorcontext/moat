@@ -1,14 +1,14 @@
 ---
 title: "Installation"
-description: "Install Moat on macOS or Linux with Docker or Apple containers."
-keywords: ["moat", "installation", "docker", "apple containers", "setup", "homebrew"]
+description: "Install Moat on macOS or Linux with Docker, Podman, or Apple containers."
+keywords: ["moat", "installation", "docker", "podman", "apple containers", "setup", "homebrew"]
 ---
 
 # Installation
 
 ## Requirements
 
-- **Container runtime** -- Docker or Apple containers (macOS 26+ with Apple Silicon)
+- **Container runtime** -- Docker, Podman, or Apple containers (macOS 26+ with Apple Silicon)
 
 ## Install Moat
 
@@ -139,6 +139,67 @@ $ moat status
 Runtime: docker
 ...
 ```
+
+### Podman (macOS, Linux)
+
+Moat's Docker runtime works unmodified against Podman's Docker-API-compatible socket -- there is no separate Podman runtime, just a different socket.
+
+**macOS (Homebrew):**
+
+```bash
+brew install podman
+podman machine init
+podman machine start
+```
+
+If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with podman's default `libkrun` provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
+
+```bash
+podman machine rm -f <name>
+CONTAINERS_MACHINE_PROVIDER=applehv podman machine init
+podman machine start
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt-get update
+sudo apt-get install podman
+systemctl --user enable --now podman.socket
+```
+
+This starts the rootless Podman socket at `$XDG_RUNTIME_DIR/podman/podman.sock`. For a rootful socket, use `sudo systemctl enable --now podman.socket` instead (`/run/podman/podman.sock`).
+
+**Using it with Moat:**
+
+Moat auto-detects Podman's socket the same way it detects Rancher Desktop's, when the default Docker socket is unreachable and `DOCKER_HOST` is unset. To select it explicitly:
+
+```bash
+moat run --runtime podman ...
+# or
+export MOAT_RUNTIME=podman
+```
+
+You can also point `DOCKER_HOST` directly at the socket (useful for scripting or non-default machine names):
+
+```bash
+export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
+```
+
+Verify:
+
+```bash
+$ moat status
+
+Runtime: docker  # podman socket, served via the docker runtime
+...
+```
+
+**Caveats:**
+
+- **gVisor false positive (Linux):** Podman's compatibility API reports `runsc` (and other OCI runtimes) as available whenever they're listed in `containers.conf`, even if not installed. Moat's Linux default requires gVisor; if the check passes spuriously, container creation fails. Either install `runsc` as a Podman OCI runtime, or run with `--no-sandbox` (or `MOAT_NO_SANDBOX=1`), which accepts reduced isolation. macOS has sandboxing off by default, so this doesn't apply there.
+- **Custom base images** must default to the root user -- Moat's generated Dockerfile installs packages without a `USER root` escape. Rootless Podman's UID mapping (container root -> host user) doesn't change this requirement.
+- **Podman 4.1+** is required for the `host-gateway` sentinel that Moat uses with `--add-host`.
 
 ## GitHub authentication setup (optional)
 
