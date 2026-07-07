@@ -56,8 +56,15 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 				return rt, nil
 			}
 			return nil, fmt.Errorf("Apple container runtime not available: %s\n\nTo start the container system manually:\n  container system start", reason)
+		case "podman":
+			log.Debug("using Docker runtime over podman socket (MOAT_RUNTIME=podman)")
+			rt, err := newPodmanRuntimeWithPing(opts.Sandbox)
+			if err != nil {
+				return nil, err
+			}
+			return rt, nil
 		default:
-			return nil, fmt.Errorf("unknown MOAT_RUNTIME value %q (use 'docker' or 'apple')", override)
+			return nil, fmt.Errorf("unknown MOAT_RUNTIME value %q (use 'docker', 'apple', or 'podman')", override)
 		}
 	}
 
@@ -92,6 +99,7 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 // The MOAT_RUNTIME environment variable can override auto-detection:
 //   - MOAT_RUNTIME=docker: force Docker runtime
 //   - MOAT_RUNTIME=apple: force Apple container runtime
+//   - MOAT_RUNTIME=podman: force the Docker runtime against a podman socket
 func NewRuntime() (Runtime, error) {
 	return NewRuntimeWithOptions(DefaultRuntimeOptions())
 }
@@ -138,6 +146,44 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	return rt, nil
 }
 
+// newPodmanRuntimeWithPing creates a Docker runtime targeting a podman
+// socket. Podman's compat API works with moat's Docker runtime unmodified,
+// so there is no separate podman Runtime implementation — this just points
+// the Docker client at a podman socket instead of Docker's.
+//
+// If DOCKER_HOST is already set, it's used as-is, but the resulting engine
+// is verified to actually be podman (see DockerRuntime.IsPodmanEngine) so
+// MOAT_RUNTIME=podman doesn't silently succeed against a real Docker daemon.
+// Otherwise, known podman socket locations are probed (see
+// podmanSocketCandidates), and DOCKER_HOST is set to the first one that
+// answers.
+func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
+	hint := "To start podman:\n  macOS:  podman machine start\n  Linux:  systemctl --user enable --now podman.socket"
+
+	if os.Getenv("DOCKER_HOST") != "" {
+		dockerRT, err := NewDockerRuntime(sandbox)
+		if err != nil {
+			return nil, fmt.Errorf("podman runtime error: %w", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := dockerRT.Ping(ctx); err != nil {
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST is unreachable: %w\n\n%s", err, hint)
+		}
+		if !dockerRT.IsPodmanEngine(ctx) {
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST=%s points at a non-podman engine", os.Getenv("DOCKER_HOST"))
+		}
+		return dockerRT, nil
+	}
+
+	rt := tryDockerSocketCandidates(podmanSocketCandidates(), sandbox)
+	if rt == nil {
+		return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but no podman socket was found\n\n%s", hint)
+	}
+	return rt, nil
+}
+
 // dockerSocketCandidate represents a known Docker-compatible socket from a
 // third-party container tool.
 type dockerSocketCandidate struct {
@@ -152,15 +198,44 @@ type dockerSocketCandidate struct {
 // Entries are platform-specific: macOS-only paths are guarded by
 // runtime.GOOS so they are not probed unnecessarily on Linux.
 func alternativeDockerSockets() []dockerSocketCandidate {
-	if runtime.GOOS != "darwin" {
-		return nil
+	var candidates []dockerSocketCandidate
+	if runtime.GOOS == "darwin" {
+		if home, err := os.UserHomeDir(); err == nil {
+			candidates = append(candidates, dockerSocketCandidate{filepath.Join(home, ".rd", "docker.sock"), "Rancher Desktop"})
+		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	return append(candidates, podmanSocketCandidates()...)
+}
+
+// podmanSocketCandidates returns paths to podman's Docker-API-compatible
+// socket. Podman's compat API works with moat's Docker runtime unmodified
+// (verified against podman machine's v1.44 compat endpoint), so these are
+// just additional dockerSocketCandidate entries.
+//
+//   - macOS (podman machine): $TMPDIR/podman/<machine-name>-api.sock
+//   - Linux rootless: $XDG_RUNTIME_DIR/podman/podman.sock
+//   - Linux rootful: /run/podman/podman.sock
+func podmanSocketCandidates() []dockerSocketCandidate {
+	switch runtime.GOOS {
+	case "darwin":
+		matches, err := filepath.Glob(filepath.Join(os.TempDir(), "podman", "*-api.sock"))
+		if err != nil {
+			return nil
+		}
+		var candidates []dockerSocketCandidate
+		for _, m := range matches {
+			candidates = append(candidates, dockerSocketCandidate{m, "Podman machine"})
+		}
+		return candidates
+	case "linux":
+		var candidates []dockerSocketCandidate
+		if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+			candidates = append(candidates, dockerSocketCandidate{filepath.Join(xdg, "podman", "podman.sock"), "Podman (rootless)"})
+		}
+		candidates = append(candidates, dockerSocketCandidate{"/run/podman/podman.sock", "Podman (rootful)"})
+		return candidates
+	default:
 		return nil
-	}
-	return []dockerSocketCandidate{
-		{filepath.Join(home, ".rd", "docker.sock"), "Rancher Desktop"},
 	}
 }
 
@@ -170,7 +245,15 @@ func alternativeDockerSockets() []dockerSocketCandidate {
 // If a working socket is found, DOCKER_HOST is set so all subsequent Docker
 // client creation uses the discovered socket.
 func tryAlternativeDockerSockets(sandbox bool) Runtime {
-	for _, c := range alternativeDockerSockets() {
+	return tryDockerSocketCandidates(alternativeDockerSockets(), sandbox)
+}
+
+// tryDockerSocketCandidates checks a list of known Docker-compatible socket
+// paths, returning the Runtime for the first one that stats as a socket and
+// answers a ping. If a working socket is found, DOCKER_HOST is set so all
+// subsequent Docker client creation uses the discovered socket.
+func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool) Runtime {
+	for _, c := range candidates {
 		// Use os.Stat (not Lstat) to follow symlinks — on macOS,
 		// ~/.rd/docker.sock is a symlink to the actual socket.
 		info, err := os.Stat(c.path)
