@@ -27,13 +27,13 @@ var (
 
 func NetworkHosts() []string {
 	return []string{
-		"api.github.com",
-		"github.com",
-		"copilot-proxy.githubusercontent.com",
-		"api.githubcopilot.com",
-		"api.business.githubcopilot.com",
-		"api.mcp.github.com",
-		"telemetry.business.githubcopilot.com",
+		copilotAPIHost,
+		copilotGitHost,
+		copilotProxyHost,
+		copilotChatAPIHost,
+		copilotBusinessHost,
+		copilotMCPHost,
+		copilotTelemetry,
 	}
 }
 
@@ -43,7 +43,7 @@ func DefaultDependencies() []string {
 
 func (p *Provider) RegisterCLI(root *cobra.Command) {
 	copilotCmd := &cobra.Command{
-		Use:   "copilot [workspace] [flags]",
+		Use:   "copilot [workspace] [flags] [-- initial-prompt]",
 		Short: "Run GitHub Copilot CLI in an isolated container",
 		Long: `Run GitHub Copilot CLI in an isolated container with automatic credential injection.
 
@@ -112,6 +112,10 @@ func resolveCopilotPreflight(cfg *config.Config) error {
 		}
 	}
 	copilotFlags.Grants = filterGitHubGrant(copilotFlags.Grants, true)
+	// When no stored credential exists and copilot isn't already in the grant
+	// list, add it so validateGrants triggers the inline grant prompt. When the
+	// credential IS configured, GetCredentialGrant (called by RunProvider's
+	// buildGrants) returns "copilot" and handles insertion there instead.
 	if !cli.DryRun && !copilotCredentialConfigured() && !slices.Contains(copilotFlags.Grants, copilotProviderName) {
 		copilotFlags.Grants = append(copilotFlags.Grants, copilotProviderName)
 	}
@@ -122,7 +126,7 @@ func filterGitHubGrant(grants []string, warn bool) []string {
 	if len(grants) == 0 {
 		return grants
 	}
-	out := grants[:0]
+	out := make([]string, 0, len(grants))
 	removed := false
 	for _, grant := range grants {
 		if strings.Split(grant, ":")[0] == "github" {

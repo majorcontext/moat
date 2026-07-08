@@ -143,7 +143,7 @@ func TestRegisterCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find(copilot) error = %v", err)
 	}
-	if cmd == nil || cmd.Use != "copilot [workspace] [flags]" {
+	if cmd == nil || cmd.Use != "copilot [workspace] [flags] [-- initial-prompt]" {
 		t.Fatalf("registered command = %#v", cmd)
 	}
 	for _, flag := range []string{"prompt", "allow-all", "model", "experimental", "autopilot", "worktree"} {
@@ -191,6 +191,32 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	}
 	if !slices.Equal(copilotFlags.Grants, []string{"ssh:github.com", "copilot"}) {
 		t.Fatalf("flag grants = %v, want [ssh:github.com copilot]", copilotFlags.Grants)
+	}
+}
+
+func TestResolveCopilotPreflightModelFlagOverridesConfig(t *testing.T) {
+	origModelFlag, origResolvedModel := copilotModelFlag, copilotResolvedModel
+	origDryRun := cli.DryRun
+	origConfigured := copilotCredentialConfigured
+	t.Cleanup(func() {
+		copilotModelFlag = origModelFlag
+		copilotResolvedModel = origResolvedModel
+		cli.DryRun = origDryRun
+		copilotCredentialConfigured = origConfigured
+	})
+
+	copilotModelFlag = "gpt-5.5"
+	cli.DryRun = true
+	copilotCredentialConfigured = func() bool { return true }
+	cfg := &config.Config{
+		Copilot: config.CopilotConfig{Model: "claude-sonnet-4"},
+	}
+
+	if err := resolveCopilotPreflight(cfg); err != nil {
+		t.Fatalf("resolveCopilotPreflight() error = %v", err)
+	}
+	if copilotResolvedModel != "gpt-5.5" {
+		t.Fatalf("CLI --model flag should override config model, got %q", copilotResolvedModel)
 	}
 }
 

@@ -44,6 +44,9 @@ func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider
 }
 
 func setProxyAuth(proxy provider.ProxyConfigurer, token string) {
+	// copilotProxyHost and copilotTelemetry are excluded: they use session
+	// tokens obtained via the Copilot token exchange (through api.github.com,
+	// which does get injection), not the original PAT.
 	proxy.SetCredentialWithGrant(copilotAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
 	proxy.SetCredentialWithGrant(copilotChatAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
 	proxy.SetCredentialWithGrant(copilotBusinessHost, "Authorization", "Bearer "+token, copilotProviderName)
