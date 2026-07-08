@@ -35,7 +35,7 @@ func buildLocalMCPConfig(agentName string, specs map[string]config.MCPServerSpec
 		if spec.Grant != "" {
 			v, ok := grantToEnvVar(spec.Grant)
 			if !ok {
-				return nil, fmt.Errorf("%s.mcp.%s: unknown grant %q (supported: github, openai, anthropic, gemini)", agentName, name, spec.Grant)
+				return nil, fmt.Errorf("%s.mcp.%s: unknown grant %q (supported: github, copilot, openai, anthropic, gemini)", agentName, name, spec.Grant)
 			}
 			if !hasGrant(grants, spec.Grant) {
 				return nil, fmt.Errorf("%s.mcp.%s: grant %q not declared in top-level grants list — add 'grants: [%s]' to agent.yaml", agentName, name, spec.Grant, spec.Grant)

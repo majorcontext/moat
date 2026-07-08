@@ -1440,6 +1440,11 @@ region = %s
 		copilotConfig = cfg
 		mounts = append(mounts, copilotConfig.Mounts...)
 		proxyEnv = append(proxyEnv, copilotConfig.Env...)
+		defer func() {
+			if retErr != nil {
+				cleanupAgentConfig(copilotConfig)
+			}
+		}()
 	}
 
 	// Set up Gemini staging directory for init script using the provider interface.
@@ -2216,7 +2221,7 @@ func replaceHostInEnv(env []string, oldHost, newHost string) []string {
 }
 
 // isAIAgent returns true if the config specifies an AI coding agent
-// (claude, codex, or gemini). Used to apply agent-specific defaults
+// (claude, codex, copilot, gemini, or pi). Used to apply agent-specific defaults
 // like the 8 GB memory limit on Apple containers.
 func isAIAgent(cfg *config.Config) bool {
 	if cfg == nil {
@@ -2224,6 +2229,7 @@ func isAIAgent(cfg *config.Config) bool {
 	}
 	return strings.HasPrefix(cfg.Agent, "claude") ||
 		strings.HasPrefix(cfg.Agent, "codex") ||
+		strings.HasPrefix(cfg.Agent, "copilot") ||
 		strings.HasPrefix(cfg.Agent, "gemini") ||
 		strings.HasPrefix(cfg.Agent, "pi")
 }

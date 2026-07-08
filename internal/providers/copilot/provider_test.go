@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
@@ -69,6 +70,9 @@ func TestConfigureProxy(t *testing.T) {
 	if got := proxy.headers[copilotBusinessHost]["Authorization"]; got != "Bearer github_pat_test" {
 		t.Errorf("api.business.githubcopilot.com Authorization = %q", got)
 	}
+	if got := proxy.headers[copilotMCPHost]["Authorization"]; got == "" {
+		t.Errorf("api.mcp.github.com Authorization was not configured")
+	}
 	if got := proxy.headers[copilotGitHost]["Authorization"]; !strings.HasPrefix(got, "Basic ") {
 		t.Errorf("github.com Authorization = %q, want Basic auth", got)
 	}
@@ -127,7 +131,7 @@ func TestDefaultDependenciesAndHosts(t *testing.T) {
 	if !slices.Contains(DefaultDependencies(), "copilot-cli") {
 		t.Errorf("DefaultDependencies missing copilot-cli: %v", DefaultDependencies())
 	}
-	if !slices.Contains(NetworkHosts(), copilotAPIHost) || !slices.Contains(NetworkHosts(), copilotBusinessHost) || !slices.Contains(NetworkHosts(), copilotProxyHost) {
+	if !slices.Contains(NetworkHosts(), copilotAPIHost) || !slices.Contains(NetworkHosts(), copilotBusinessHost) || !slices.Contains(NetworkHosts(), copilotMCPHost) || !slices.Contains(NetworkHosts(), copilotProxyHost) {
 		t.Errorf("NetworkHosts missing Copilot hosts: %v", NetworkHosts())
 	}
 }
@@ -153,18 +157,24 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	origModelFlag, origResolvedModel := copilotModelFlag, copilotResolvedModel
 	origExperimental, origAutopilot := copilotExperimental, copilotAutopilot
 	origFlagGrants := copilotFlags.Grants
+	origDryRun := cli.DryRun
+	origConfigured := copilotCredentialConfigured
 	t.Cleanup(func() {
 		copilotModelFlag = origModelFlag
 		copilotResolvedModel = origResolvedModel
 		copilotExperimental = origExperimental
 		copilotAutopilot = origAutopilot
 		copilotFlags.Grants = origFlagGrants
+		cli.DryRun = origDryRun
+		copilotCredentialConfigured = origConfigured
 	})
 
 	copilotModelFlag = ""
 	copilotExperimental = false
 	copilotAutopilot = false
 	copilotFlags.Grants = []string{"github", "ssh:github.com"}
+	cli.DryRun = false
+	copilotCredentialConfigured = func() bool { return false }
 	cfg := &config.Config{
 		Grants:  []string{"github", "copilot"},
 		Copilot: config.CopilotConfig{Model: "gpt-5.4", Experimental: true, Autopilot: true},
@@ -179,8 +189,52 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	if !slices.Equal(cfg.Grants, []string{"copilot"}) {
 		t.Fatalf("config grants = %v, want [copilot]", cfg.Grants)
 	}
-	if !slices.Equal(copilotFlags.Grants, []string{"ssh:github.com"}) {
-		t.Fatalf("flag grants = %v, want [ssh:github.com]", copilotFlags.Grants)
+	if !slices.Equal(copilotFlags.Grants, []string{"ssh:github.com", "copilot"}) {
+		t.Fatalf("flag grants = %v, want [ssh:github.com copilot]", copilotFlags.Grants)
+	}
+}
+
+func TestResolveCopilotPreflightAddsRequiredGrantWhenMissing(t *testing.T) {
+	origFlagGrants := copilotFlags.Grants
+	origDryRun := cli.DryRun
+	origConfigured := copilotCredentialConfigured
+	t.Cleanup(func() {
+		copilotFlags.Grants = origFlagGrants
+		cli.DryRun = origDryRun
+		copilotCredentialConfigured = origConfigured
+	})
+
+	copilotFlags.Grants = nil
+	cli.DryRun = false
+	copilotCredentialConfigured = func() bool { return false }
+
+	if err := resolveCopilotPreflight(nil); err != nil {
+		t.Fatalf("resolveCopilotPreflight(nil) error = %v", err)
+	}
+	if !slices.Equal(copilotFlags.Grants, []string{"copilot"}) {
+		t.Fatalf("flag grants = %v, want [copilot]", copilotFlags.Grants)
+	}
+}
+
+func TestResolveCopilotPreflightDryRunDoesNotAddMissingGrant(t *testing.T) {
+	origFlagGrants := copilotFlags.Grants
+	origDryRun := cli.DryRun
+	origConfigured := copilotCredentialConfigured
+	t.Cleanup(func() {
+		copilotFlags.Grants = origFlagGrants
+		cli.DryRun = origDryRun
+		copilotCredentialConfigured = origConfigured
+	})
+
+	copilotFlags.Grants = nil
+	cli.DryRun = true
+	copilotCredentialConfigured = func() bool { return false }
+
+	if err := resolveCopilotPreflight(nil); err != nil {
+		t.Fatalf("resolveCopilotPreflight(nil) error = %v", err)
+	}
+	if len(copilotFlags.Grants) != 0 {
+		t.Fatalf("dry-run flag grants = %v, want empty", copilotFlags.Grants)
 	}
 }
 
@@ -214,8 +268,15 @@ func TestBuildCopilotCommand(t *testing.T) {
 }
 
 func TestGetCredentialName(t *testing.T) {
+	origConfigured := copilotCredentialConfigured
+	t.Cleanup(func() { copilotCredentialConfigured = origConfigured })
+	copilotCredentialConfigured = func() bool { return true }
 	if got := GetCredentialName(); got != "copilot" {
 		t.Fatalf("GetCredentialName() = %q, want copilot", got)
+	}
+	copilotCredentialConfigured = func() bool { return false }
+	if got := GetCredentialName(); got != "" {
+		t.Fatalf("GetCredentialName() = %q, want empty when missing", got)
 	}
 }
 

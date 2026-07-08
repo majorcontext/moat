@@ -47,6 +47,7 @@ func setProxyAuth(proxy provider.ProxyConfigurer, token string) {
 	proxy.SetCredentialWithGrant(copilotAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
 	proxy.SetCredentialWithGrant(copilotChatAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
 	proxy.SetCredentialWithGrant(copilotBusinessHost, "Authorization", "Bearer "+token, copilotProviderName)
+	proxy.SetCredentialWithGrant(copilotMCPHost, "Authorization", "Bearer "+token, copilotProviderName)
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 	proxy.SetCredentialWithGrant(copilotGitHost, "Authorization", "Basic "+basic, copilotProviderName)
 }

@@ -13,6 +13,7 @@ const (
 	copilotProxyHost    = "copilot-proxy.githubusercontent.com"
 	copilotChatAPIHost  = "api.githubcopilot.com"
 	copilotBusinessHost = "api.business.githubcopilot.com"
+	copilotMCPHost      = "api.mcp.github.com"
 	copilotTelemetry    = "telemetry.business.githubcopilot.com"
 	copilotProviderName = "copilot"
 )

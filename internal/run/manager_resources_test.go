@@ -42,9 +42,13 @@ func TestResolveResourceLimits_FromConfig(t *testing.T) {
 
 func TestResolveResourceLimits_AppleAIDefault(t *testing.T) {
 	m := mgrWithRuntime(appleRuntime{&stubRuntime{}})
-	mem, _, _, _ := m.resolveResourceLimits(&config.Config{Agent: "claude"})
-	if mem != container.DefaultAgentMemoryMB {
-		t.Fatalf("expected Apple agent default %d, got %d", container.DefaultAgentMemoryMB, mem)
+	for _, agent := range []string{"claude", "codex", "copilot", "gemini", "pi"} {
+		t.Run(agent, func(t *testing.T) {
+			mem, _, _, _ := m.resolveResourceLimits(&config.Config{Agent: agent})
+			if mem != container.DefaultAgentMemoryMB {
+				t.Fatalf("expected Apple agent default %d, got %d", container.DefaultAgentMemoryMB, mem)
+			}
+		})
 	}
 }
 

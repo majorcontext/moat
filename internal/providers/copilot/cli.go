@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,15 +13,16 @@ import (
 )
 
 var (
-	copilotFlags         cli.ExecFlags
-	copilotPromptFlag    string
-	copilotAllowedHosts  []string
-	copilotWtFlag        string
-	copilotAllowAll      bool
-	copilotModelFlag     string
-	copilotExperimental  bool
-	copilotAutopilot     bool
-	copilotResolvedModel string
+	copilotFlags                cli.ExecFlags
+	copilotPromptFlag           string
+	copilotAllowedHosts         []string
+	copilotWtFlag               string
+	copilotAllowAll             bool
+	copilotModelFlag            string
+	copilotExperimental         bool
+	copilotAutopilot            bool
+	copilotResolvedModel        string
+	copilotCredentialConfigured = defaultCopilotCredentialConfigured
 )
 
 func NetworkHosts() []string {
@@ -30,6 +32,7 @@ func NetworkHosts() []string {
 		"copilot-proxy.githubusercontent.com",
 		"api.githubcopilot.com",
 		"api.business.githubcopilot.com",
+		"api.mcp.github.com",
 		"telemetry.business.githubcopilot.com",
 	}
 }
@@ -109,6 +112,9 @@ func resolveCopilotPreflight(cfg *config.Config) error {
 		}
 	}
 	copilotFlags.Grants = filterGitHubGrant(copilotFlags.Grants, true)
+	if !cli.DryRun && !copilotCredentialConfigured() && !slices.Contains(copilotFlags.Grants, copilotProviderName) {
+		copilotFlags.Grants = append(copilotFlags.Grants, copilotProviderName)
+	}
 	return nil
 }
 
@@ -153,4 +159,24 @@ func buildCopilotCommand(promptFlag, initialPrompt string) []string {
 	return cmd
 }
 
-func GetCredentialName() string { return string(credential.ProviderCopilot) }
+func GetCredentialName() string {
+	if copilotCredentialConfigured() {
+		return string(credential.ProviderCopilot)
+	}
+	return ""
+}
+
+func defaultCopilotCredentialConfigured() bool {
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		return false
+	}
+	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	if err != nil {
+		return false
+	}
+	if _, err := store.Get(credential.ProviderCopilot); err == nil {
+		return true
+	}
+	return false
+}
