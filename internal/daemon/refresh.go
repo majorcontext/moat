@@ -26,6 +26,9 @@ func resolveCredName(grantName, grant string) credential.Provider {
 	if canonical == "oauth" {
 		return credential.Provider(grant)
 	}
+	if canonical == "copilot" {
+		return credential.ProviderGitHub
+	}
 	return credential.Provider(canonical)
 }
 
@@ -157,6 +160,11 @@ func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, s
 						serverHost = u.Host
 					}
 					rc.SetCredentialWithGrant(serverHost, mcp.Auth.Header, updated.Token, grant)
+				}
+			}
+			if grantName == "github" && rc.CopilotGitHubAuth {
+				if copilotProv := provider.Get("copilot"); copilotProv != nil {
+					copilotProv.ConfigureProxy(rc, updated)
 				}
 			}
 			log.Debug("token refreshed", "provider", credName)

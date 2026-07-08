@@ -139,6 +139,9 @@ func credentialStoreKey(baseName, fullGrant string) credential.Provider {
 	if canonical == providerCodex {
 		return credential.ProviderOpenAI
 	}
+	if canonical == "copilot" {
+		return credential.ProviderGitHub
+	}
 	// OAuth uses the full grant name as store key (oauth:notion → "oauth:notion")
 	// so each integration has its own credential entry.
 	if canonical == "oauth" {

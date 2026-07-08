@@ -292,9 +292,7 @@ moat copilot [workspace] [flags] [-- initial-prompt]
 
 In addition to the command-specific flags below, `moat copilot` accepts all [common agent flags](#common-agent-flags).
 
-`moat copilot` requires a `copilot` grant. The container receives only Copilot/GitHub token placeholders; Moat's proxy injects the real token for GitHub API and HTTPS git requests.
-
-If `github` is also listed in `moat.yaml` or passed with `--grant`, `moat copilot` ignores it. Both grants target `api.github.com` with the same header, and the `copilot` grant already covers GitHub API and HTTPS git auth for Copilot runs.
+`moat copilot` uses the `github` grant. The container receives only Copilot/GitHub token placeholders; Moat's proxy injects the real GitHub token for GitHub API, Copilot API, and HTTPS git requests.
 
 ### Arguments
 
@@ -317,7 +315,7 @@ If `github` is also listed in `moat.yaml` or passed with `--grant`, `moat copilo
 
 ```bash
 # One-time credential setup
-moat grant copilot
+moat grant github
 
 # Interactive Copilot CLI
 moat copilot
@@ -627,8 +625,8 @@ moat grant <provider>[:<scopes>]
 
 GitHub credentials are obtained from multiple sources, in order of preference:
 
-1. **gh CLI** -- Uses token from `gh auth token` if available
-2. **Environment variable** -- Falls back to `GITHUB_TOKEN` or `GH_TOKEN`
+1. **Environment variable** -- Uses `GITHUB_TOKEN` or `GH_TOKEN` if set
+2. **gh CLI** -- Uses token from `gh auth token` if available
 3. **Personal Access Token** -- Interactive prompt for manual entry
 
 ```bash

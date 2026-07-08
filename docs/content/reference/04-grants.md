@@ -16,7 +16,6 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | Grant | Hosts matched | Header injected | Credential source |
 |-------|---------------|-----------------|-------------------|
 | `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` (`api.github.com`); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
-| `copilot` | `api.github.com`, Copilot API hosts, `github.com` | `Authorization: Bearer <token>` (`api.github.com` and Copilot APIs); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN`, or Copilot-capable PAT prompt |
 | `claude` | `api.anthropic.com` | `Authorization: Bearer ...` | `claude setup-token` or imported OAuth |
 | `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
@@ -49,8 +48,8 @@ No flags. The command automatically detects your credential source.
 
 ### Credential sources (in order of preference)
 
-1. **gh CLI** -- Uses the token from `gh auth token` if the GitHub CLI is installed and authenticated
-2. **Environment variable** -- Falls back to `GITHUB_TOKEN` or `GH_TOKEN` if set
+1. **Environment variable** -- Uses `GITHUB_TOKEN` or `GH_TOKEN` if set
+2. **gh CLI** -- Uses the token from `gh auth token` if the GitHub CLI is installed and authenticated
 3. **Personal Access Token** -- Interactive prompt for manual PAT entry
 
 ### What it injects
@@ -64,9 +63,11 @@ The proxy injects an `Authorization` header, using the scheme each host expects:
 
 The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CLI works without prompting. Git is configured with `http.proxyAuthMethod=basic` so it authenticates to the proxy and can establish the HTTPS tunnel.
 
+For `moat copilot` runs, the same GitHub grant is also injected for Copilot API hosts, and the container receives a format-valid `COPILOT_GITHUB_TOKEN` placeholder. The GitHub token must be Copilot-capable: use a GitHub CLI OAuth token from an account with Copilot access, or a fine-grained PAT from your personal account with the **Copilot Requests** account permission.
+
 ### Refresh behavior
 
-Tokens sourced from `gh auth token` or environment variables are refreshed every 30 minutes. PATs entered manually are static.
+Tokens sourced from `gh auth token` are refreshed every 30 minutes. Environment variables and PATs entered manually are static.
 
 ### moat.yaml
 
@@ -91,28 +92,20 @@ $ moat run --grant github ./my-project
 
 ## GitHub Copilot
 
-### CLI command
+GitHub Copilot CLI uses the `github` grant. There is no separate Copilot credential to configure.
 
 ```bash
-moat grant copilot
+moat grant github
 ```
 
-No flags. The command validates that the token can call GitHub Copilot CLI's GitHub API endpoint.
-
-### Credential sources (in order of preference)
-
-1. **Environment variable** -- `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`
-2. **gh CLI** -- The token from `gh auth token`, if GitHub CLI is installed and authenticated
-3. **Copilot-capable token** -- Interactive prompt for a fine-grained PAT from your personal account with the **Copilot Requests** permission
-
-Classic PATs are not supported by GitHub Copilot CLI. Fine-grained PATs must be created for your personal account, not an organization.
+Classic PATs are not supported by GitHub Copilot CLI. Fine-grained PATs must be created for your personal account, not an organization, and need the **Copilot Requests** account permission.
 
 ### What it injects
 
-The proxy injects the token for:
+For Copilot runs, the proxy injects the GitHub token for:
 
-- `api.github.com` and Copilot API hosts -- `Authorization: Bearer <token>` for Copilot CLI authentication, model traffic, and GitHub API calls
-- `github.com` -- `Basic <base64("x-access-token:<token>")>` for HTTPS git operations
+- `api.github.com` and Copilot API hosts -- Copilot CLI authentication, model traffic, and GitHub API calls
+- `github.com` -- HTTPS git operations
 
 The container receives `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` placeholders. Copilot CLI and gh CLI authenticate normally, but the raw token stays on the host.
 
@@ -120,7 +113,7 @@ The container receives `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` placeholders. Copil
 
 ```yaml
 grants:
-  - copilot
+  - github
 ```
 
 Use this grant with `moat copilot`; the command adds it automatically.

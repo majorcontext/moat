@@ -63,12 +63,13 @@ type RunContext struct {
 	NetworkAllow  []string                 `json:"network_allow,omitempty"`
 	NetworkRules  []netrules.HostRules     `json:"network_rules,omitempty"`
 
-	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
-	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
-	Grants           []string          `json:"grants,omitempty"`
-	HostGateway      string            `json:"host_gateway,omitempty"`
-	HostGatewayIP    string            `json:"host_gateway_ip,omitempty"` // actual IP for forwarding allowed host traffic
-	AllowedHostPorts []int             `json:"allowed_host_ports,omitempty"`
+	AWSConfig         *AWSConfig        `json:"aws_config,omitempty"`
+	TransformerSpecs  []TransformerSpec `json:"transformer_specs,omitempty"`
+	Grants            []string          `json:"grants,omitempty"`
+	CopilotGitHubAuth bool              `json:"copilot_github_auth,omitempty"`
+	HostGateway       string            `json:"host_gateway,omitempty"`
+	HostGatewayIP     string            `json:"host_gateway_ip,omitempty"` // actual IP for forwarding allowed host traffic
+	AllowedHostPorts  []int             `json:"allowed_host_ports,omitempty"`
 
 	// CredProfile is the credential profile this run was created under (from
 	// the CLI's --profile/MOAT_PROFILE). The daemon is shared across profiles,

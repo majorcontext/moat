@@ -3,7 +3,6 @@ package copilot
 import (
 	"context"
 	"encoding/base64"
-	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
@@ -20,9 +19,8 @@ const (
 type Provider struct{}
 
 var (
-	_ provider.CredentialProvider  = (*Provider)(nil)
-	_ provider.AgentProvider       = (*Provider)(nil)
-	_ provider.RefreshableProvider = (*Provider)(nil)
+	_ provider.CredentialProvider = (*Provider)(nil)
+	_ provider.AgentProvider      = (*Provider)(nil)
 )
 
 func init() {
@@ -38,7 +36,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 	return g.Execute(ctx)
 }
 
-// ConfigureProxy sets up GitHub/Copilot credential injection.
+// ConfigureProxy sets up Copilot credential injection using a GitHub token.
 func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
 	setProxyAuth(proxy, cred.Token)
 }
@@ -47,22 +45,19 @@ func setProxyAuth(proxy provider.ProxyConfigurer, token string) {
 	// copilotProxyHost and copilotTelemetry are excluded: they use session
 	// tokens obtained via the Copilot token exchange (through api.github.com,
 	// which does get injection), not the original PAT.
-	proxy.SetCredentialWithGrant(copilotAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
-	proxy.SetCredentialWithGrant(copilotChatAPIHost, "Authorization", "Bearer "+token, copilotProviderName)
-	proxy.SetCredentialWithGrant(copilotBusinessHost, "Authorization", "Bearer "+token, copilotProviderName)
-	proxy.SetCredentialWithGrant(copilotMCPHost, "Authorization", "Bearer "+token, copilotProviderName)
+	proxy.SetCredentialWithGrant(copilotAPIHost, "Authorization", "Bearer "+token, "github")
+	proxy.SetCredentialWithGrant(copilotChatAPIHost, "Authorization", "Bearer "+token, "github")
+	proxy.SetCredentialWithGrant(copilotBusinessHost, "Authorization", "Bearer "+token, "github")
+	proxy.SetCredentialWithGrant(copilotMCPHost, "Authorization", "Bearer "+token, "github")
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	proxy.SetCredentialWithGrant(copilotGitHost, "Authorization", "Basic "+basic, copilotProviderName)
+	proxy.SetCredentialWithGrant(copilotGitHost, "Authorization", "Basic "+basic, "github")
 }
 
-// ContainerEnv returns Copilot auth placeholders. Copilot CLI checks
-// COPILOT_GITHUB_TOKEN before GH_TOKEN/GITHUB_TOKEN; GH_TOKEN lets gh CLI use
-// the same proxy-injected credential for GitHub operations inside the run.
+// ContainerEnv returns Copilot auth placeholders. The github grant supplies
+// GH_TOKEN and git prompt behavior; Copilot only needs its preferred env var.
 func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 	return []string{
 		"COPILOT_GITHUB_TOKEN=" + credential.CopilotTokenPlaceholder,
-		"GH_TOKEN=" + credential.CopilotTokenPlaceholder,
-		"GIT_TERMINAL_PROMPT=0",
 	}
 }
 
@@ -76,26 +71,3 @@ func (p *Provider) Cleanup(cleanupPath string) {}
 
 // ImpliedDependencies returns dependencies useful for Copilot's GitHub workflow.
 func (p *Provider) ImpliedDependencies() []string { return []string{"gh", "git"} }
-
-func (p *Provider) CanRefresh(cred *provider.Credential) bool {
-	return cred != nil && cred.Metadata != nil && cred.Metadata[provider.MetaKeyTokenSource] == SourceCLI
-}
-
-func (p *Provider) RefreshInterval() time.Duration { return 30 * time.Minute }
-
-func (p *Provider) Refresh(ctx context.Context, proxy provider.ProxyConfigurer, cred *provider.Credential) (*provider.Credential, error) {
-	if !p.CanRefresh(cred) {
-		return nil, provider.ErrRefreshNotSupported
-	}
-	token, err := getGHCLIToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCopilotToken(ctx, token); err != nil {
-		return nil, err
-	}
-	setProxyAuth(proxy, token)
-	updated := *cred
-	updated.Token = token
-	return &updated, nil
-}

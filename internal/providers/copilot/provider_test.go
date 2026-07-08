@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
@@ -64,8 +63,8 @@ func TestConfigureProxy(t *testing.T) {
 	if got := proxy.headers[copilotAPIHost]["Authorization"]; got != "Bearer github_pat_test" {
 		t.Errorf("api.github.com Authorization = %q", got)
 	}
-	if got := proxy.grants[copilotAPIHost]["Authorization"]; got != "copilot" {
-		t.Errorf("api.github.com grant = %q, want copilot", got)
+	if got := proxy.grants[copilotAPIHost]["Authorization"]; got != "github" {
+		t.Errorf("api.github.com grant = %q, want github", got)
 	}
 	if got := proxy.headers[copilotBusinessHost]["Authorization"]; got != "Bearer github_pat_test" {
 		t.Errorf("api.business.githubcopilot.com Authorization = %q", got)
@@ -82,11 +81,16 @@ func TestContainerEnv(t *testing.T) {
 	env := (&Provider{}).ContainerEnv(&provider.Credential{Provider: "copilot"})
 	for _, want := range []string{
 		"COPILOT_GITHUB_TOKEN=" + credential.CopilotTokenPlaceholder,
-		"GH_TOKEN=" + credential.CopilotTokenPlaceholder,
-		"GIT_TERMINAL_PROMPT=0",
 	} {
 		if !slices.Contains(env, want) {
 			t.Errorf("ContainerEnv missing %q in %v", want, env)
+		}
+	}
+	for _, unwanted := range []string{"GH_TOKEN=", "GIT_TERMINAL_PROMPT="} {
+		for _, got := range env {
+			if strings.HasPrefix(got, unwanted) {
+				t.Errorf("ContainerEnv contains %q; github grant owns this env: %v", unwanted, env)
+			}
 		}
 	}
 }
@@ -99,31 +103,6 @@ func TestProviderNoopMethods(t *testing.T) {
 	p.Cleanup("/tmp/unused")
 	if deps := p.ImpliedDependencies(); !slices.Equal(deps, []string{"gh", "git"}) {
 		t.Fatalf("ImpliedDependencies() = %v, want [gh git]", deps)
-	}
-	if got := p.RefreshInterval(); got != 30*time.Minute {
-		t.Fatalf("RefreshInterval() = %v, want 30m", got)
-	}
-}
-
-func TestCanRefresh(t *testing.T) {
-	p := &Provider{}
-	tests := []struct {
-		name string
-		cred *provider.Credential
-		want bool
-	}{
-		{name: "nil", cred: nil},
-		{name: "no metadata", cred: &provider.Credential{}},
-		{name: "env", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourceEnv}}},
-		{name: "pat", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourcePAT}}},
-		{name: "cli", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourceCLI}}, want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := p.CanRefresh(tt.cred); got != tt.want {
-				t.Fatalf("CanRefresh() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -172,7 +151,7 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	copilotModelFlag = ""
 	copilotExperimental = false
 	copilotAutopilot = false
-	copilotFlags.Grants = []string{"github", "ssh:github.com"}
+	copilotFlags.Grants = []string{"copilot", "ssh:github.com"}
 	cli.DryRun = false
 	copilotCredentialConfigured = func() bool { return false }
 	cfg := &config.Config{
@@ -186,11 +165,11 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	if copilotResolvedModel != "gpt-5.4" || !copilotExperimental || !copilotAutopilot {
 		t.Fatalf("resolved state = model:%q experimental:%v autopilot:%v", copilotResolvedModel, copilotExperimental, copilotAutopilot)
 	}
-	if !slices.Equal(cfg.Grants, []string{"copilot"}) {
-		t.Fatalf("config grants = %v, want [copilot]", cfg.Grants)
+	if !slices.Equal(cfg.Grants, []string{"github"}) {
+		t.Fatalf("config grants = %v, want [github]", cfg.Grants)
 	}
-	if !slices.Equal(copilotFlags.Grants, []string{"ssh:github.com", "copilot"}) {
-		t.Fatalf("flag grants = %v, want [ssh:github.com copilot]", copilotFlags.Grants)
+	if !slices.Equal(copilotFlags.Grants, []string{"github", "ssh:github.com"}) {
+		t.Fatalf("flag grants = %v, want [github ssh:github.com]", copilotFlags.Grants)
 	}
 }
 
@@ -237,8 +216,8 @@ func TestResolveCopilotPreflightAddsRequiredGrantWhenMissing(t *testing.T) {
 	if err := resolveCopilotPreflight(nil); err != nil {
 		t.Fatalf("resolveCopilotPreflight(nil) error = %v", err)
 	}
-	if !slices.Equal(copilotFlags.Grants, []string{"copilot"}) {
-		t.Fatalf("flag grants = %v, want [copilot]", copilotFlags.Grants)
+	if !slices.Equal(copilotFlags.Grants, []string{"github"}) {
+		t.Fatalf("flag grants = %v, want [github]", copilotFlags.Grants)
 	}
 }
 
@@ -297,8 +276,8 @@ func TestGetCredentialName(t *testing.T) {
 	origConfigured := copilotCredentialConfigured
 	t.Cleanup(func() { copilotCredentialConfigured = origConfigured })
 	copilotCredentialConfigured = func() bool { return true }
-	if got := GetCredentialName(); got != "copilot" {
-		t.Fatalf("GetCredentialName() = %q, want copilot", got)
+	if got := GetCredentialName(); got != "github" {
+		t.Fatalf("GetCredentialName() = %q, want github", got)
 	}
 	copilotCredentialConfigured = func() bool { return false }
 	if got := GetCredentialName(); got != "" {
@@ -306,11 +285,11 @@ func TestGetCredentialName(t *testing.T) {
 	}
 }
 
-func TestFilterGitHubGrant(t *testing.T) {
-	got := filterGitHubGrant([]string{"github", "copilot", "ssh:github.com", "aws"}, false)
-	want := []string{"copilot", "ssh:github.com", "aws"}
+func TestNormalizeCopilotGrants(t *testing.T) {
+	got := normalizeCopilotGrants([]string{"github", "copilot", "ssh:github.com", "aws"}, false)
+	want := []string{"github", "ssh:github.com", "aws"}
 	if !slices.Equal(got, want) {
-		t.Errorf("filterGitHubGrant = %v, want %v", got, want)
+		t.Errorf("normalizeCopilotGrants = %v, want %v", got, want)
 	}
 }
 

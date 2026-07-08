@@ -24,16 +24,17 @@ import (
 // plaintext, protected by file permissions (0600). On restore, provider
 // credentials are re-resolved from the encrypted credential store.
 type PersistedRun struct {
-	AuthToken        string                   `json:"auth_token"`
-	RunID            string                   `json:"run_id"`
-	ContainerID      string                   `json:"container_id,omitempty"`
-	Grants           []string                 `json:"grants,omitempty"`
-	MCPServers       []config.MCPServerConfig `json:"mcp_servers,omitempty"`
-	NetworkPolicy    string                   `json:"network_policy,omitempty"`
-	NetworkAllow     []string                 `json:"network_allow,omitempty"`
-	AWSConfig        *AWSConfig               `json:"aws_config,omitempty"`
-	TransformerSpecs []TransformerSpec        `json:"transformer_specs,omitempty"`
-	CredProfile      string                   `json:"cred_profile,omitempty"`
+	AuthToken         string                   `json:"auth_token"`
+	RunID             string                   `json:"run_id"`
+	ContainerID       string                   `json:"container_id,omitempty"`
+	Grants            []string                 `json:"grants,omitempty"`
+	MCPServers        []config.MCPServerConfig `json:"mcp_servers,omitempty"`
+	NetworkPolicy     string                   `json:"network_policy,omitempty"`
+	NetworkAllow      []string                 `json:"network_allow,omitempty"`
+	AWSConfig         *AWSConfig               `json:"aws_config,omitempty"`
+	TransformerSpecs  []TransformerSpec        `json:"transformer_specs,omitempty"`
+	CopilotGitHubAuth bool                     `json:"copilot_github_auth,omitempty"`
+	CredProfile       string                   `json:"cred_profile,omitempty"`
 }
 
 // persistedFile is the versioned on-disk format.
@@ -70,16 +71,17 @@ func (p *RunPersister) Save() error {
 	for _, rc := range entries {
 		rc.mu.RLock()
 		pr := PersistedRun{
-			AuthToken:        rc.AuthToken,
-			RunID:            rc.RunID,
-			ContainerID:      rc.ContainerID,
-			Grants:           rc.Grants,
-			MCPServers:       rc.MCPServers,
-			NetworkPolicy:    rc.NetworkPolicy,
-			NetworkAllow:     rc.NetworkAllow,
-			AWSConfig:        rc.AWSConfig,
-			TransformerSpecs: rc.TransformerSpecs,
-			CredProfile:      rc.CredProfile,
+			AuthToken:         rc.AuthToken,
+			RunID:             rc.RunID,
+			ContainerID:       rc.ContainerID,
+			Grants:            rc.Grants,
+			MCPServers:        rc.MCPServers,
+			NetworkPolicy:     rc.NetworkPolicy,
+			NetworkAllow:      rc.NetworkAllow,
+			AWSConfig:         rc.AWSConfig,
+			TransformerSpecs:  rc.TransformerSpecs,
+			CopilotGitHubAuth: rc.CopilotGitHubAuth,
+			CredProfile:       rc.CredProfile,
 		}
 		rc.mu.RUnlock()
 		runs = append(runs, pr)
@@ -212,6 +214,7 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		rc.NetworkAllow = pr.NetworkAllow
 		rc.AWSConfig = pr.AWSConfig
 		rc.TransformerSpecs = pr.TransformerSpecs
+		rc.CopilotGitHubAuth = pr.CopilotGitHubAuth
 		rc.CredProfile = pr.CredProfile
 
 		// Open the store scoped to this run's profile — the daemon serves runs
@@ -314,6 +317,11 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			continue
 		}
 		prov.ConfigureProxy(rc, provCred)
+		if grantName == "github" && rc.CopilotGitHubAuth {
+			if copilotProv := provider.Get("copilot"); copilotProv != nil {
+				copilotProv.ConfigureProxy(rc, provCred)
+			}
+		}
 	}
 	return nil
 }

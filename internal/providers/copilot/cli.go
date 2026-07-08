@@ -1,7 +1,6 @@
 package copilot
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -47,7 +46,7 @@ func (p *Provider) RegisterCLI(root *cobra.Command) {
 		Short: "Run GitHub Copilot CLI in an isolated container",
 		Long: `Run GitHub Copilot CLI in an isolated container with automatic credential injection.
 
-Your workspace is mounted at /workspace inside the container. Copilot credentials
+Your workspace is mounted at /workspace inside the container. GitHub credentials
 are injected transparently via the Moat proxy - Copilot CLI never sees the raw
 token stored by Moat.
 
@@ -87,7 +86,7 @@ func runCopilot(cmd *cobra.Command, args []string) error {
 		Dependencies:          DefaultDependencies(),
 		NetworkHosts:          NetworkHosts(),
 		SupportsInitialPrompt: true,
-		DryRunNote:            "Note: No Copilot credential configured. Run 'moat grant copilot' first.",
+		DryRunNote:            "Note: No GitHub credential configured. Run 'moat grant github' first.",
 		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
 			return buildCopilotCommand(promptFlag, initialPrompt), nil
 		},
@@ -100,7 +99,7 @@ func runCopilot(cmd *cobra.Command, args []string) error {
 func resolveCopilotPreflight(cfg *config.Config) error {
 	copilotResolvedModel = copilotModelFlag
 	if cfg != nil {
-		cfg.Grants = filterGitHubGrant(cfg.Grants, false)
+		cfg.Grants = normalizeCopilotGrants(cfg.Grants, false)
 		if copilotResolvedModel == "" {
 			copilotResolvedModel = cfg.Copilot.Model
 		}
@@ -111,34 +110,56 @@ func resolveCopilotPreflight(cfg *config.Config) error {
 			copilotAutopilot = true
 		}
 	}
-	copilotFlags.Grants = filterGitHubGrant(copilotFlags.Grants, true)
-	// When no stored credential exists and copilot isn't already in the grant
-	// list, add it so validateGrants triggers the inline grant prompt. When the
-	// credential IS configured, GetCredentialGrant (called by RunProvider's
-	// buildGrants) returns "copilot" and handles insertion there instead.
-	if !cli.DryRun && !copilotCredentialConfigured() && !slices.Contains(copilotFlags.Grants, copilotProviderName) {
-		copilotFlags.Grants = append(copilotFlags.Grants, copilotProviderName)
+	copilotFlags.Grants = normalizeCopilotGrants(copilotFlags.Grants, true)
+	// When no stored GitHub credential exists and github isn't already in the
+	// grant list, add it so validateGrants triggers the inline grant prompt.
+	// When the credential IS configured, GetCredentialGrant (called by
+	// RunProvider's buildGrants) returns "github" and handles insertion there.
+	if !cli.DryRun && !copilotCredentialConfigured() &&
+		!hasBaseGrant(copilotFlags.Grants, "github") &&
+		(cfg == nil || !hasBaseGrant(cfg.Grants, "github")) {
+		copilotFlags.Grants = append(copilotFlags.Grants, "github")
 	}
 	return nil
 }
 
-func filterGitHubGrant(grants []string, warn bool) []string {
+func normalizeCopilotGrants(grants []string, warn bool) []string {
 	if len(grants) == 0 {
 		return grants
 	}
 	out := make([]string, 0, len(grants))
-	removed := false
+	replaced := false
+	hasGitHub := false
 	for _, grant := range grants {
-		if strings.Split(grant, ":")[0] == "github" {
-			removed = true
+		switch strings.Split(grant, ":")[0] {
+		case copilotProviderName:
+			replaced = true
+			if !hasGitHub {
+				out = append(out, "github")
+				hasGitHub = true
+			}
 			continue
+		case "github":
+			if hasGitHub {
+				continue
+			}
+			hasGitHub = true
 		}
 		out = append(out, grant)
 	}
-	if removed && warn {
-		ui.Warn("ignoring github grant for moat copilot — the copilot grant already injects GitHub API and HTTPS git auth for this run")
+	if replaced && warn {
+		ui.Warn("using github grant for moat copilot — Copilot uses the existing GitHub credential")
 	}
 	return out
+}
+
+func hasBaseGrant(grants []string, name string) bool {
+	for _, grant := range grants {
+		if strings.Split(grant, ":")[0] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func buildCopilotCommand(promptFlag, initialPrompt string) []string {
@@ -165,7 +186,7 @@ func buildCopilotCommand(promptFlag, initialPrompt string) []string {
 
 func GetCredentialName() string {
 	if copilotCredentialConfigured() {
-		return string(credential.ProviderCopilot)
+		return string(credential.ProviderGitHub)
 	}
 	return ""
 }
@@ -179,7 +200,7 @@ func defaultCopilotCredentialConfigured() bool {
 	if err != nil {
 		return false
 	}
-	if _, err := store.Get(credential.ProviderCopilot); err == nil {
+	if _, err := store.Get(credential.ProviderGitHub); err == nil {
 		return true
 	}
 	return false

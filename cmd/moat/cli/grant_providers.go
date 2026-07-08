@@ -59,6 +59,9 @@ func runGrantProviders(cmd *cobra.Command, args []string) error {
 		// Skip agent-only providers (claude, codex, gemini) from grant listing
 		// if they have a CLI name alias — we show the alias instead
 		name := p.Name()
+		if name == "copilot" {
+			continue
+		}
 		if cliName, ok := goProviderCLINames[name]; ok {
 			name = cliName
 		}

@@ -1621,7 +1621,7 @@ copilot:
 - Default: `false`
 - CLI override: `moat copilot --autopilot`
 
-`moat copilot` requires the `copilot` grant. Run `moat grant copilot` before starting a session. See [Running GitHub Copilot CLI](../guides/17-copilot.md).
+`moat copilot` uses the `github` grant. Run `moat grant github` before starting a session. See [Running GitHub Copilot CLI](../guides/17-copilot.md).
 
 ---
 

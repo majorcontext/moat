@@ -346,6 +346,9 @@ func grantToCommand(grant string) string {
 	if server, ok := mcpcatalog.GrantName(grant); ok {
 		return "mcp " + server
 	}
+	if grant == "copilot" {
+		return "github"
+	}
 	if parts := strings.SplitN(grant, ":", 2); len(parts) == 2 {
 		return parts[0] + " " + parts[1]
 	}

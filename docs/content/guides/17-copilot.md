@@ -15,23 +15,21 @@ This guide covers running GitHub Copilot CLI in a Moat container.
 - An active GitHub Copilot subscription
 - A Copilot-capable GitHub token, either from `gh auth login` or a fine-grained PAT with the **Copilot Requests** permission
 
-## Granting Copilot credentials
+## Granting GitHub credentials
 
-Run `moat grant copilot` to configure authentication:
+Run `moat grant github` to configure authentication:
 
 ```bash
-moat grant copilot
+moat grant github
 ```
 
-Moat checks `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN` first. If none are set, it can use `gh auth token` from GitHub CLI, or prompt for a fine-grained PAT.
+Moat checks `GITHUB_TOKEN` and `GH_TOKEN` first. If none are set, it can use `gh auth token` from GitHub CLI, or prompt for a PAT.
 
-Classic PATs are not supported by GitHub Copilot CLI. Fine-grained PATs must be created for your personal account with the **Copilot Requests** account permission.
+The token must be able to use Copilot. GitHub CLI OAuth tokens from `gh auth login` work when the account has an active Copilot subscription. Fine-grained PATs must be created for your personal account with the **Copilot Requests** account permission. Classic PATs are not supported by GitHub Copilot CLI.
 
 ## How credentials are injected
 
-The raw credential is stored encrypted on the host. Inside the container, Moat sets format-valid placeholders in `COPILOT_GITHUB_TOKEN` and `GH_TOKEN`. The proxy intercepts GitHub and Copilot HTTPS requests and injects the real token for `api.github.com`, Copilot API hosts, and HTTPS git operations against `github.com`.
-
-Do not add a separate `github` grant to `moat copilot` runs. The `copilot` grant already covers GitHub API and HTTPS git auth, and Moat ignores `github` for Copilot runs to avoid ambiguous auth on `api.github.com`.
+The raw GitHub credential is stored encrypted on the host. Inside the container, Moat sets format-valid placeholders in `COPILOT_GITHUB_TOKEN` and `GH_TOKEN`. The proxy intercepts GitHub and Copilot HTTPS requests and injects the real GitHub token for `api.github.com`, Copilot API hosts, and HTTPS git operations against `github.com`.
 
 ## Running Copilot
 
@@ -61,7 +59,7 @@ Moat passes `--allow-all` to Copilot CLI by default so the agent can complete ta
 ```yaml
 agent: copilot
 grants:
-  - copilot
+  - github
 
 copilot:
   model: gpt-5.4
@@ -69,7 +67,7 @@ copilot:
   autopilot: false
 ```
 
-`moat copilot` adds the `copilot` grant automatically, so you do not need to list it unless you use `moat run` directly.
+`moat copilot` adds the `github` grant automatically when a GitHub credential is configured, so you do not need to list it unless you use `moat run` directly.
 
 ## Network policy
 

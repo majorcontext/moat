@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/credential"
@@ -58,5 +59,15 @@ func TestGrantMCP(t *testing.T) {
 
 	if cred.Token != "test-api-key-123" {
 		t.Errorf("expected token 'test-api-key-123', got %q", cred.Token)
+	}
+}
+
+func TestGrantCopilotUsesGitHub(t *testing.T) {
+	err := runGrant(grantCmd, []string{"copilot"})
+	if err == nil {
+		t.Fatal("runGrant(copilot) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "moat grant github") {
+		t.Fatalf("runGrant(copilot) error = %v, want moat grant github guidance", err)
 	}
 }

@@ -400,6 +400,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// Create a RunContext that implements credential.ProxyConfigurer.
 		// Providers will configure their credentials on this context.
 		runCtx := daemon.NewRunContext(r.ID)
+		runCtx.CopilotGitHubAuth = configUsesCopilotCLI(opts.Config) && hasGrant(opts.Grants, "github")
 
 		// Load credentials for granted providers
 		store, err := openCredStore()
@@ -458,6 +459,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 				// Configure the RunContext (which implements ProxyConfigurer)
 				prov.ConfigureProxy(runCtx, provCred)
+				if grantName == "github" && runCtx.CopilotGitHubAuth {
+					copilotProv := provider.Get("copilot")
+					if copilotProv == nil {
+						cleanupDaemonRun()
+						return nil, fmt.Errorf("copilot provider not registered")
+					}
+					copilotProv.ConfigureProxy(runCtx, provCred)
+				}
 				envVars := prov.ContainerEnv(provCred)
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				providerEnv = append(providerEnv, envVars...)
@@ -1126,7 +1135,7 @@ region = %s
 	imgNeeds := resolveImageNeeds(opts.Grants, depList)
 	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
 	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
-	needsCopilotInit := slices.Contains(imgNeeds.initProviders, "copilot")
+	needsCopilotInit := slices.Contains(imgNeeds.initProviders, "copilot") || (opts.Config != nil && strings.HasPrefix(opts.Config.Agent, "copilot"))
 	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
 	needsPiInit := slices.Contains(imgNeeds.initProviders, "pi")
 
@@ -2234,6 +2243,25 @@ func isAIAgent(cfg *config.Config) bool {
 		strings.HasPrefix(cfg.Agent, "pi")
 }
 
+func configUsesCopilotCLI(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if strings.HasPrefix(cfg.Agent, "copilot") {
+		return true
+	}
+	for _, dep := range cfg.Dependencies {
+		name := dep
+		if i := strings.IndexByte(dep, '@'); i >= 0 {
+			name = dep[:i]
+		}
+		if name == "copilot-cli" {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveContainerHome returns the home directory to use for container mounts.
 // Most moat runs build a custom image (needsCustomImage=true) which always creates
 // moatuser and runs as that user, so the home is /home/moatuser. We use this
@@ -2505,17 +2533,18 @@ func isMoatOwnedProxyVar(name string) bool {
 // suitable for sending to the daemon API.
 func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.RegisterRequest {
 	req := daemon.RegisterRequest{
-		RunID:            rc.RunID,
-		NetworkPolicy:    rc.NetworkPolicy,
-		NetworkAllow:     rc.NetworkAllow,
-		NetworkRules:     rc.NetworkRules,
-		HostGateway:      rc.HostGateway,
-		HostGatewayIP:    rc.HostGatewayIP,
-		AllowedHostPorts: rc.AllowedHostPorts,
-		MCPServers:       rc.MCPServers,
-		Grants:           grants,
-		AWSConfig:        rc.AWSConfig,
-		CredProfile:      credential.ActiveProfile,
+		RunID:             rc.RunID,
+		NetworkPolicy:     rc.NetworkPolicy,
+		NetworkAllow:      rc.NetworkAllow,
+		NetworkRules:      rc.NetworkRules,
+		HostGateway:       rc.HostGateway,
+		HostGatewayIP:     rc.HostGatewayIP,
+		AllowedHostPorts:  rc.AllowedHostPorts,
+		MCPServers:        rc.MCPServers,
+		Grants:            grants,
+		CopilotGitHubAuth: rc.CopilotGitHubAuth,
+		AWSConfig:         rc.AWSConfig,
+		CredProfile:       credential.ActiveProfile,
 	}
 
 	for host, creds := range rc.Credentials {
@@ -2646,8 +2675,6 @@ func grantToEnvVar(grant string) (string, bool) {
 		return "OPENAI_API_KEY", true
 	case "anthropic":
 		return "ANTHROPIC_API_KEY", true
-	case "copilot":
-		return "COPILOT_GITHUB_TOKEN", true
 	case "gemini":
 		return "GEMINI_API_KEY", true
 	default:
@@ -2664,8 +2691,6 @@ func grantToPlaceholder(grant string) string {
 	switch grant {
 	case "anthropic":
 		return credential.AnthropicAPIKeyPlaceholder
-	case "copilot":
-		return credential.CopilotTokenPlaceholder
 	case "gemini":
 		return credential.GeminiAPIKeyPlaceholder
 	case "github":

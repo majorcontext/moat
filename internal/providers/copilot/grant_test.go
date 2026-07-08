@@ -83,7 +83,7 @@ func TestValidateAndCreateCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validateAndCreateCredential() error = %v", err)
 	}
-	if cred.Provider != copilotProviderName || cred.Token != "token" {
+	if cred.Provider != "github" || cred.Token != "token" {
 		t.Fatalf("credential = %+v", cred)
 	}
 	if got := cred.Metadata[provider.MetaKeyTokenSource]; got != SourceEnv {
@@ -115,63 +115,11 @@ func TestGrantExecuteEnvToken(t *testing.T) {
 	if cred.Token != "env-token" {
 		t.Fatalf("token = %q, want env-token", cred.Token)
 	}
+	if cred.Provider != "github" {
+		t.Fatalf("provider = %q, want github", cred.Provider)
+	}
 	if got := cred.Metadata[provider.MetaKeyTokenSource]; got != SourceEnv {
 		t.Fatalf("token source = %q, want %q", got, SourceEnv)
-	}
-}
-
-func TestRefresh(t *testing.T) {
-	withCopilotValidationServer(t, http.StatusOK, `{}`, nil)
-	origGetGHCLIToken := getGHCLIToken
-	getGHCLIToken = func(context.Context) (string, error) { return "fresh-token", nil }
-	t.Cleanup(func() { getGHCLIToken = origGetGHCLIToken })
-
-	proxy := newMockProxyConfigurer()
-	cred := &provider.Credential{
-		Provider: copilotProviderName,
-		Token:    "old-token",
-		Metadata: map[string]string{provider.MetaKeyTokenSource: SourceCLI},
-	}
-
-	updated, err := (&Provider{}).Refresh(context.Background(), proxy, cred)
-	if err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if updated.Token != "fresh-token" {
-		t.Fatalf("updated token = %q, want fresh-token", updated.Token)
-	}
-	if cred.Token != "old-token" {
-		t.Fatalf("Refresh mutated original credential token = %q", cred.Token)
-	}
-	if got := proxy.headers[copilotBusinessHost]["Authorization"]; got != "Bearer fresh-token" {
-		t.Fatalf("business host auth = %q", got)
-	}
-}
-
-func TestRefreshUnsupported(t *testing.T) {
-	_, err := (&Provider{}).Refresh(context.Background(), newMockProxyConfigurer(), &provider.Credential{
-		Provider: copilotProviderName,
-		Token:    "token",
-		Metadata: map[string]string{provider.MetaKeyTokenSource: SourcePAT},
-	})
-	if !errors.Is(err, provider.ErrRefreshNotSupported) {
-		t.Fatalf("Refresh() error = %v, want ErrRefreshNotSupported", err)
-	}
-}
-
-func TestRefreshValidationError(t *testing.T) {
-	withCopilotValidationServer(t, http.StatusUnauthorized, `{}`, nil)
-	origGetGHCLIToken := getGHCLIToken
-	getGHCLIToken = func(context.Context) (string, error) { return "fresh-token", nil }
-	t.Cleanup(func() { getGHCLIToken = origGetGHCLIToken })
-
-	_, err := (&Provider{}).Refresh(context.Background(), newMockProxyConfigurer(), &provider.Credential{
-		Provider: copilotProviderName,
-		Token:    "old-token",
-		Metadata: map[string]string{provider.MetaKeyTokenSource: SourceCLI},
-	})
-	if err == nil || !strings.Contains(err.Error(), "invalid token") {
-		t.Fatalf("Refresh() error = %v, want invalid token", err)
 	}
 }
 

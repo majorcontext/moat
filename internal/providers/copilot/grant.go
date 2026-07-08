@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/provider/util"
 )
@@ -71,7 +72,7 @@ To create a fine-grained PAT:
 		return nil, &provider.GrantError{
 			Provider: copilotProviderName,
 			Cause:    fmt.Errorf("no token provided"),
-			Hint:     "Run 'moat grant copilot' and enter a Copilot-capable GitHub token",
+			Hint:     "Run 'moat grant github' and enter a Copilot-capable GitHub token",
 		}
 	}
 	return validateAndCreateCredential(ctx, token, SourcePAT)
@@ -88,7 +89,7 @@ func validateAndCreateCredential(ctx context.Context, token, source string) (*pr
 	}
 	fmt.Println("Copilot token validated successfully")
 	return &provider.Credential{
-		Provider:  copilotProviderName,
+		Provider:  string(credential.ProviderGitHub),
 		Token:     token,
 		CreatedAt: time.Now(),
 		Metadata:  map[string]string{provider.MetaKeyTokenSource: source},

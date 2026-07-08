@@ -248,6 +248,7 @@ func TestCredentialStoreKey(t *testing.T) {
 		want      credential.Provider
 	}{
 		{"github", "github", "github"},
+		{"copilot", "copilot", credential.ProviderGitHub},
 		{"claude", "claude", "claude"},
 		{"openai", "openai", credential.ProviderOpenAI},
 		{"oauth", "oauth:notion", "oauth:notion"},
@@ -277,6 +278,7 @@ func TestGrantToCommand(t *testing.T) {
 		want  string
 	}{
 		{"github", "github"},
+		{"copilot", "github"},
 		{"oauth:notion", "oauth notion"},
 		{"ssh:github.com", "ssh github.com"},
 		{"mcp:context7", "mcp context7"}, // canonical

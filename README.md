@@ -100,7 +100,7 @@ moat codex -p "explain this codebase"   # Non-interactive
 ### GitHub Copilot CLI
 
 ```bash
-moat grant copilot     # One-time: imports Copilot-capable GitHub credentials
+moat grant github      # One-time: imports GitHub credentials with Copilot access
 moat copilot           # Interactive mode
 moat copilot -p "fix the failing tests"  # Non-interactive
 ```

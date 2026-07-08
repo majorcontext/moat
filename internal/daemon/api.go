@@ -73,6 +73,7 @@ type RegisterRequest struct {
 	NetworkAllow         []string                 `json:"network_allow,omitempty"`
 	NetworkRules         []netrules.HostRules     `json:"network_rules,omitempty"`
 	Grants               []string                 `json:"grants,omitempty"`
+	CopilotGitHubAuth    bool                     `json:"copilot_github_auth,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
 	// CredProfile is the credential profile the run was created under. The
@@ -164,6 +165,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkRules = req.NetworkRules
 	rc.AWSConfig = req.AWSConfig
 	rc.Grants = req.Grants
+	rc.CopilotGitHubAuth = req.CopilotGitHubAuth
 	rc.CredProfile = req.CredProfile
 	rc.TransformerSpecs = req.ResponseTransformers
 	rc.HostGateway = req.HostGateway
