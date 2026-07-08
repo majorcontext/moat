@@ -292,7 +292,7 @@ moat copilot [workspace] [flags] [-- initial-prompt]
 
 In addition to the command-specific flags below, `moat copilot` accepts all [common agent flags](#common-agent-flags).
 
-`moat copilot` uses the `github` grant. The container receives only Copilot/GitHub token placeholders; Moat's proxy injects the real GitHub token for GitHub API, Copilot API, and HTTPS git requests.
+`moat copilot` uses the `github` grant. Before creating the run, Moat checks that the stored GitHub credential can use Copilot. The container receives only Copilot/GitHub token placeholders; Moat's proxy injects the real GitHub token for GitHub API, Copilot API, and HTTPS git requests.
 
 ### Arguments
 

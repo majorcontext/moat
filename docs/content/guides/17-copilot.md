@@ -27,6 +27,8 @@ Moat checks `GITHUB_TOKEN` and `GH_TOKEN` first. If none are set, it can use `gh
 
 The token must be able to use Copilot. GitHub CLI OAuth tokens from `gh auth login` work when the account has an active Copilot subscription. Fine-grained PATs must be created for your personal account with the **Copilot Requests** account permission. Classic PATs are not supported by GitHub Copilot CLI.
 
+Before starting a Copilot container, Moat checks the stored GitHub credential against `api.github.com/copilot_internal/user`. If the token cannot use Copilot, the run fails before building or starting the container.
+
 ## How credentials are injected
 
 The raw GitHub credential is stored encrypted on the host. Inside the container, Moat sets format-valid placeholders in `COPILOT_GITHUB_TOKEN` and `GH_TOKEN`. The proxy intercepts GitHub and Copilot HTTPS requests and injects the real GitHub token for `api.github.com`, Copilot API hosts, and HTTPS git operations against `github.com`.

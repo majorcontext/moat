@@ -40,6 +40,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
 	"github.com/majorcontext/moat/internal/snapshot"
@@ -106,6 +107,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 	}
 
+	opts.Grants = normalizeCopilotGrantNames(opts.Grants)
+	if opts.Config != nil {
+		opts.Config.Grants = normalizeCopilotGrantNames(opts.Config.Grants)
+	}
+
 	// Auto-include MCP auth grants so the credential processing loop loads
 	// them into the RunContext. Without this, users would need to duplicate
 	// each mcp[].auth.grant in the top-level grants: list.
@@ -151,6 +157,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if err := validateMCPGrants(opts.Config, store); err != nil {
 				return nil, err
 			}
+		}
+		if err := validateCopilotGitHubGrant(ctx, opts.Config, opts.Grants, store); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1135,6 +1144,8 @@ region = %s
 	imgNeeds := resolveImageNeeds(opts.Grants, depList)
 	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
 	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
+	// Copilot uses the github grant, so grant-based image analysis cannot
+	// distinguish a Copilot run from a generic GitHub-authenticated run.
 	needsCopilotInit := slices.Contains(imgNeeds.initProviders, "copilot") || (opts.Config != nil && strings.HasPrefix(opts.Config.Agent, "copilot"))
 	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
 	needsPiInit := slices.Contains(imgNeeds.initProviders, "pi")
@@ -2260,6 +2271,49 @@ func configUsesCopilotCLI(cfg *config.Config) bool {
 		}
 	}
 	return false
+}
+
+func normalizeCopilotGrantNames(grants []string) []string {
+	if len(grants) == 0 {
+		return grants
+	}
+	out := make([]string, 0, len(grants))
+	hasGitHub := false
+	for _, grant := range grants {
+		if strings.Split(grant, ":")[0] == "github" {
+			if hasGitHub {
+				continue
+			}
+			hasGitHub = true
+			out = append(out, grant)
+			continue
+		}
+		if strings.Split(grant, ":")[0] == "copilot" {
+			if !hasGitHub {
+				out = append(out, "github")
+				hasGitHub = true
+			}
+			continue
+		}
+		out = append(out, grant)
+	}
+	return out
+}
+
+var validateCopilotGitHubToken = copilotprov.ValidateGitHubToken
+
+func validateCopilotGitHubGrant(ctx context.Context, cfg *config.Config, grants []string, store credential.Store) error {
+	if !configUsesCopilotCLI(cfg) || !hasGrant(grants, "github") {
+		return nil
+	}
+	cred, err := store.Get(credential.ProviderGitHub)
+	if err != nil {
+		return fmt.Errorf("github grant: credential not found: %w", err)
+	}
+	if err := validateCopilotGitHubToken(ctx, cred.Token); err != nil {
+		return fmt.Errorf("github grant cannot use GitHub Copilot: %w\n\nRun: moat grant github with a GitHub CLI OAuth token from an account with Copilot access, or a fine-grained PAT with the Copilot Requests permission", err)
+	}
+	return nil
 }
 
 // resolveContainerHome returns the home directory to use for container mounts.

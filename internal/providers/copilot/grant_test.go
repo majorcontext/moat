@@ -3,13 +3,10 @@ package copilot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/majorcontext/moat/internal/provider"
 )
 
 func withCopilotValidationServer(t *testing.T, status int, body string, check func(*testing.T, *http.Request)) {
@@ -62,7 +59,7 @@ func TestValidateCopilotToken(t *testing.T) {
 				}
 			})
 
-			err := validateCopilotToken(context.Background(), "test-token")
+			err := ValidateGitHubToken(context.Background(), "test-token")
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateCopilotToken() error = %v", err)
@@ -76,56 +73,9 @@ func TestValidateCopilotToken(t *testing.T) {
 	}
 }
 
-func TestValidateAndCreateCredential(t *testing.T) {
-	withCopilotValidationServer(t, http.StatusOK, `{}`, nil)
-
-	cred, err := validateAndCreateCredential(context.Background(), "token", SourceEnv)
-	if err != nil {
-		t.Fatalf("validateAndCreateCredential() error = %v", err)
-	}
-	if cred.Provider != "github" || cred.Token != "token" {
-		t.Fatalf("credential = %+v", cred)
-	}
-	if got := cred.Metadata[provider.MetaKeyTokenSource]; got != SourceEnv {
-		t.Fatalf("token source = %q, want %q", got, SourceEnv)
-	}
-}
-
-func TestValidateAndCreateCredentialError(t *testing.T) {
-	withCopilotValidationServer(t, http.StatusUnauthorized, `{}`, nil)
-
-	_, err := validateAndCreateCredential(context.Background(), "bad-token", SourcePAT)
-	var grantErr *provider.GrantError
-	if !errors.As(err, &grantErr) {
-		t.Fatalf("error = %T %v, want GrantError", err, err)
-	}
-	if grantErr.Provider != copilotProviderName {
-		t.Fatalf("GrantError.Provider = %q", grantErr.Provider)
-	}
-}
-
-func TestGrantExecuteEnvToken(t *testing.T) {
-	withCopilotValidationServer(t, http.StatusOK, `{}`, nil)
-	t.Setenv("COPILOT_GITHUB_TOKEN", "env-token")
-
-	cred, err := NewGrant().Execute(context.Background())
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if cred.Token != "env-token" {
-		t.Fatalf("token = %q, want env-token", cred.Token)
-	}
-	if cred.Provider != "github" {
-		t.Fatalf("provider = %q, want github", cred.Provider)
-	}
-	if got := cred.Metadata[provider.MetaKeyTokenSource]; got != SourceEnv {
-		t.Fatalf("token source = %q, want %q", got, SourceEnv)
-	}
-}
-
 func TestValidationResponseBodyNeedNotBeJSON(t *testing.T) {
 	withCopilotValidationServer(t, http.StatusInternalServerError, `not-json`, nil)
-	err := validateCopilotToken(context.Background(), "test-token")
+	err := ValidateGitHubToken(context.Background(), "test-token")
 	if err == nil || !strings.Contains(err.Error(), "unexpected status validating token: 500") {
 		t.Fatalf("validateCopilotToken() error = %v", err)
 	}
@@ -137,8 +87,18 @@ func TestValidationMessageJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	withCopilotValidationServer(t, http.StatusForbidden, string(body), nil)
-	err = validateCopilotToken(context.Background(), "test-token")
+	err = ValidateGitHubToken(context.Background(), "test-token")
 	if err == nil || !strings.Contains(err.Error(), "rate limited") {
 		t.Fatalf("validateCopilotToken() error = %v", err)
+	}
+}
+
+func TestGrantUsesGitHubCredential(t *testing.T) {
+	_, err := (&Provider{}).Grant(context.Background())
+	if err == nil {
+		t.Fatal("Grant() = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "moat grant github") {
+		t.Fatalf("Grant() error = %v, want moat grant github guidance", err)
 	}
 }

@@ -3,15 +3,10 @@ package copilot
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
-)
-
-const (
-	SourceCLI = "cli"
-	SourceEnv = "env"
-	SourcePAT = "pat"
 )
 
 // Provider implements provider.CredentialProvider and provider.AgentProvider
@@ -30,10 +25,10 @@ func init() {
 // Name returns the provider identifier.
 func (p *Provider) Name() string { return copilotProviderName }
 
-// Grant acquires a Copilot-capable GitHub credential.
+// Grant intentionally does not acquire a separate credential. Copilot CLI uses
+// the github grant so there is one GitHub token to rotate and audit.
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
-	g := NewGrant()
-	return g.Execute(ctx)
+	return nil, fmt.Errorf("GitHub Copilot CLI uses GitHub credentials.\n\nRun: moat grant github")
 }
 
 // ConfigureProxy sets up Copilot credential injection using a GitHub token.

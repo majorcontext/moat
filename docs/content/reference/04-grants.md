@@ -65,6 +65,8 @@ The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CL
 
 For `moat copilot` runs, the same GitHub grant is also injected for Copilot API hosts, and the container receives a format-valid `COPILOT_GITHUB_TOKEN` placeholder. The GitHub token must be Copilot-capable: use a GitHub CLI OAuth token from an account with Copilot access, or a fine-grained PAT from your personal account with the **Copilot Requests** account permission.
 
+Moat validates Copilot access before starting a Copilot run by calling `api.github.com/copilot_internal/user` with the stored GitHub credential.
+
 ### Refresh behavior
 
 Tokens sourced from `gh auth token` are refreshed every 30 minutes. Environment variables and PATs entered manually are static.
