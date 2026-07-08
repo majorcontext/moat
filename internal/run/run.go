@@ -134,6 +134,11 @@ type Run struct {
 	// cleaned up when the run is stopped or destroyed.
 	GeminiConfigTempDir string
 
+	// CopilotConfigTempDir is the temporary directory containing Copilot configuration files
+	// and runtime context that are mounted into the container. This should be
+	// cleaned up when the run is stopped or destroyed.
+	CopilotConfigTempDir string
+
 	// PiConfigTempDir is the temporary directory containing Pi configuration files
 	// (the runtime-context file) that are mounted into the container. This should be
 	// cleaned up when the run is stopped or destroyed.

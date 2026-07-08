@@ -148,6 +148,19 @@ func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentP
 	return piConfig, nil
 }
 
+// setupCopilotStaging builds the GitHub Copilot CLI container config
+// (runtime context and first-run config) via the provider interface.
+func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provider.AgentProvider, containerHome, renderedContext string) (*provider.ContainerConfig, error) {
+	copilotConfig, prepErr := copilotProvider.PrepareContainer(ctx, provider.PrepareOpts{
+		ContainerHome:  containerHome,
+		RuntimeContext: renderedContext,
+	})
+	if prepErr != nil {
+		return nil, fmt.Errorf("preparing Copilot container config: %w", prepErr)
+	}
+	return copilotConfig, nil
+}
+
 // buildClaudeMCPRelayServers builds the .claude.json MCP server map, pointing
 // each entry at a proxy-relay URL instead of its direct URL.
 //

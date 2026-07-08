@@ -16,6 +16,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | Grant | Hosts matched | Header injected | Credential source |
 |-------|---------------|-----------------|-------------------|
 | `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` (`api.github.com`); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
+| `copilot` | `api.github.com`, Copilot API hosts, `github.com` | `Authorization: Bearer <token>` (`api.github.com` and Copilot APIs); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN`, or Copilot-capable PAT prompt |
 | `claude` | `api.anthropic.com` | `Authorization: Bearer ...` | `claude setup-token` or imported OAuth |
 | `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
@@ -87,6 +88,42 @@ GitHub credential saved
 
 $ moat run --grant github ./my-project
 ```
+
+## GitHub Copilot
+
+### CLI command
+
+```bash
+moat grant copilot
+```
+
+No flags. The command validates that the token can call GitHub Copilot CLI's GitHub API endpoint.
+
+### Credential sources (in order of preference)
+
+1. **Environment variable** -- `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`
+2. **gh CLI** -- The token from `gh auth token`, if GitHub CLI is installed and authenticated
+3. **Copilot-capable token** -- Interactive prompt for a fine-grained PAT from your personal account with the **Copilot Requests** permission
+
+Classic PATs are not supported by GitHub Copilot CLI. Fine-grained PATs must be created for your personal account, not an organization.
+
+### What it injects
+
+The proxy injects the token for:
+
+- `api.github.com` and Copilot API hosts -- `Authorization: Bearer <token>` for Copilot CLI authentication, model traffic, and GitHub API calls
+- `github.com` -- `Basic <base64("x-access-token:<token>")>` for HTTPS git operations
+
+The container receives `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` placeholders. Copilot CLI and gh CLI authenticate normally, but the raw token stays on the host.
+
+### moat.yaml
+
+```yaml
+grants:
+  - copilot
+```
+
+Use this grant with `moat copilot`; the command adds it automatically.
 
 ## Anthropic / Claude
 

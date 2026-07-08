@@ -259,6 +259,36 @@ if [ -n "$MOAT_GEMINI_INIT" ] && [ -d "$MOAT_GEMINI_INIT" ]; then
   fi
 fi
 
+# GitHub Copilot CLI Setup
+# When MOAT_COPILOT_INIT is set to the staging directory path, copy files
+# from the staging area to their final locations (~/.copilot). Runtime context
+# stays mounted in the staging directory and is referenced via
+# COPILOT_CUSTOM_INSTRUCTIONS_DIRS.
+if [ -n "$MOAT_COPILOT_INIT" ] && [ -d "$MOAT_COPILOT_INIT" ]; then
+  # Determine target home directory
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    TARGET_HOME="/home/moatuser"
+  else
+    TARGET_HOME="$HOME"
+  fi
+
+  # Create ~/.copilot directory
+  mkdir -p "$TARGET_HOME/.copilot"
+
+  # Copy config/state files if present (preserve permissions)
+  [ -f "$MOAT_COPILOT_INIT/config.json" ] && \
+    cp -p "$MOAT_COPILOT_INIT/config.json" "$TARGET_HOME/.copilot/"
+  [ -f "$MOAT_COPILOT_INIT/settings.json" ] && \
+    cp -p "$MOAT_COPILOT_INIT/settings.json" "$TARGET_HOME/.copilot/"
+  [ -f "$MOAT_COPILOT_INIT/permissions-config.json" ] && \
+    cp -p "$MOAT_COPILOT_INIT/permissions-config.json" "$TARGET_HOME/.copilot/"
+
+  # Ensure moatuser owns all the files if we're running as root
+  if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
+    chown -R moatuser:moatuser "$TARGET_HOME/.copilot" 2>/dev/null || true
+  fi
+fi
+
 # Provider Init Files
 # When MOAT_INIT_FILES is set, it contains tab-delimited records (one per line):
 #   <absolute-path><TAB><base64-encoded-content>

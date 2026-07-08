@@ -112,7 +112,7 @@ type JoinableAgent interface {
 }
 
 // AgentProvider extends CredentialProvider for AI agent runtimes.
-// Implemented by claude, codex, and gemini providers.
+// Implemented by claude, copilot, codex, gemini, and pi providers.
 type AgentProvider interface {
 	CredentialProvider
 

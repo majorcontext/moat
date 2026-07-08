@@ -43,6 +43,7 @@ type Config struct {
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
+	Copilot      CopilotConfig     `yaml:"copilot,omitempty"`
 	Codex        CodexConfig       `yaml:"codex,omitempty"`
 	Gemini       GeminiConfig      `yaml:"gemini,omitempty"`
 	Pi           PiConfig          `yaml:"pi,omitempty"`
@@ -331,6 +332,18 @@ type CodexConfig struct {
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
+}
+
+// CopilotConfig configures GitHub Copilot CLI integration options.
+type CopilotConfig struct {
+	// Model optionally selects the model passed to `copilot --model`.
+	Model string `yaml:"model,omitempty"`
+
+	// Experimental starts Copilot CLI with --experimental.
+	Experimental bool `yaml:"experimental,omitempty"`
+
+	// Autopilot starts Copilot CLI in autopilot mode.
+	Autopilot bool `yaml:"autopilot,omitempty"`
 }
 
 // GeminiConfig configures Google Gemini CLI integration options.

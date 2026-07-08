@@ -145,11 +145,26 @@ func TestResolveImageNeedsGeminiCLIDep(t *testing.T) {
 	}
 }
 
+func TestResolveImageNeedsCopilotCLIDep(t *testing.T) {
+	depList := []deps.Dependency{{Name: "copilot-cli"}}
+	needs := resolveImageNeedsWithStore(nil, depList, nil)
+	if !contains(needs.initProviders, "copilot") {
+		t.Error("copilot-cli dep should add copilot to initProviders via fallback")
+	}
+}
+
 func TestResolveImageNeedsPiCLIDep(t *testing.T) {
 	depList := []deps.Dependency{{Name: "pi-cli"}}
 	needs := resolveImageNeedsWithStore(nil, depList, nil)
 	if !contains(needs.initProviders, "pi") {
 		t.Error("pi-cli dep should add pi to initProviders via fallback")
+	}
+}
+
+func TestResolveImageNeedsNoCopilotWithoutDep(t *testing.T) {
+	needs := resolveImageNeedsWithStore([]string{"copilot"}, nil, nil)
+	if contains(needs.initProviders, "copilot") {
+		t.Error("copilot grant alone should not add copilot init without the copilot-cli dependency")
 	}
 }
 

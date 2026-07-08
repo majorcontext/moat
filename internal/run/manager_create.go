@@ -1126,6 +1126,7 @@ region = %s
 	imgNeeds := resolveImageNeeds(opts.Grants, depList)
 	needsClaudeInit := slices.Contains(imgNeeds.initProviders, "claude")
 	needsCodexInit := slices.Contains(imgNeeds.initProviders, "codex")
+	needsCopilotInit := slices.Contains(imgNeeds.initProviders, "copilot")
 	needsGeminiInit := slices.Contains(imgNeeds.initProviders, "gemini")
 	needsPiInit := slices.Contains(imgNeeds.initProviders, "pi")
 
@@ -1417,6 +1418,30 @@ region = %s
 		proxyEnv = append(proxyEnv, codexConfig.Env...)
 	}
 
+	// Set up GitHub Copilot CLI staging directory using the provider interface.
+	var copilotConfig *provider.ContainerConfig
+	if needsCopilotInit {
+		copilotProvider := provider.GetAgent("copilot")
+		if copilotProvider == nil {
+			cleanupDaemonRun()
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, fmt.Errorf("copilot provider not registered")
+		}
+
+		cfg, stageErr := m.setupCopilotStaging(ctx, copilotProvider, containerHome, renderedContext)
+		if stageErr != nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			return nil, stageErr
+		}
+		copilotConfig = cfg
+		mounts = append(mounts, copilotConfig.Mounts...)
+		proxyEnv = append(proxyEnv, copilotConfig.Env...)
+	}
+
 	// Set up Gemini staging directory for init script using the provider interface.
 	// This includes settings.json and optionally oauth_creds.json.
 	var geminiConfig *provider.ContainerConfig
@@ -1427,6 +1452,7 @@ region = %s
 			cleanupDaemonRun()
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			return nil, fmt.Errorf("gemini provider not registered")
 		}
 
@@ -1436,6 +1462,7 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			return nil, stageErr
 		}
 		geminiConfig = cfg
@@ -1454,6 +1481,7 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			cleanupAgentConfig(geminiConfig)
 			return nil, fmt.Errorf("pi provider not registered")
 		}
@@ -1464,6 +1492,7 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			cleanupAgentConfig(geminiConfig)
 			return nil, stageErr
 		}
@@ -1546,6 +1575,7 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			return nil, fmt.Errorf("BuildKit requires Docker runtime (networks not supported by %s)", m.defaultRuntime().Type())
 		}
 		netID, netErr := netMgr.CreateNetwork(ctx, buildkitCfg.NetworkName)
@@ -1554,6 +1584,7 @@ region = %s
 			cleanupSSH(sshServer)
 			cleanupAgentConfig(claudeConfig)
 			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(copilotConfig)
 			return nil, fmt.Errorf("failed to create Docker network for buildkit sidecar: %w", netErr)
 		}
 		networkID = netID
@@ -2003,6 +2034,7 @@ region = %s
 		cleanupAgentConfig(claudeConfig)
 		cleanupAgentConfig(codexConfig)
 		cleanupAgentConfig(geminiConfig)
+		cleanupAgentConfig(copilotConfig)
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -2024,6 +2056,9 @@ region = %s
 	}
 	if geminiConfig != nil {
 		r.GeminiConfigTempDir = geminiConfig.StagingDir
+	}
+	if copilotConfig != nil {
+		r.CopilotConfigTempDir = copilotConfig.StagingDir
 	}
 	if piConfig != nil {
 		r.PiConfigTempDir = piConfig.StagingDir
@@ -2605,6 +2640,8 @@ func grantToEnvVar(grant string) (string, bool) {
 		return "OPENAI_API_KEY", true
 	case "anthropic":
 		return "ANTHROPIC_API_KEY", true
+	case "copilot":
+		return "COPILOT_GITHUB_TOKEN", true
 	case "gemini":
 		return "GEMINI_API_KEY", true
 	default:
@@ -2621,6 +2658,8 @@ func grantToPlaceholder(grant string) string {
 	switch grant {
 	case "anthropic":
 		return credential.AnthropicAPIKeyPlaceholder
+	case "copilot":
+		return credential.CopilotTokenPlaceholder
 	case "gemini":
 		return credential.GeminiAPIKeyPlaceholder
 	case "github":

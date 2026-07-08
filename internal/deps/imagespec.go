@@ -23,7 +23,7 @@ type ImageSpec struct {
 	// Used only by Dockerfile generation.
 	SSHHosts []string
 
-	// InitProviders lists agent provider names (e.g., "claude", "codex", "gemini")
+	// InitProviders lists agent provider names (e.g., "claude", "copilot", "codex", "gemini")
 	// that need configuration files staged at container startup. Each entry
 	// triggers the moat-init entrypoint and contributes to the image tag hash.
 	InitProviders []string

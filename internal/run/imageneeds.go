@@ -100,6 +100,9 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	if !initSet["claude"] && hasDep(depList, "claude-code") {
 		initSet["claude"] = true
 	}
+	if !initSet["copilot"] && hasDep(depList, "copilot-cli") {
+		initSet["copilot"] = true
+	}
 	if !initSet["gemini"] && hasDep(depList, "gemini-cli") {
 		initSet["gemini"] = true
 	}

@@ -37,7 +37,7 @@ If a name matches multiple runs, batch commands (`stop`, `destroy`) prompt for c
 
 ## Common agent flags
 
-The agent commands (`moat claude`, `moat codex`, `moat gemini`, `moat pi`) share the following flags. These flags work identically across `moat claude`, `moat codex`, `moat gemini`, and `moat pi`.
+The agent commands (`moat claude`, `moat copilot`, `moat codex`, `moat gemini`, `moat pi`) share the following flags. These flags work identically across `moat claude`, `moat copilot`, `moat codex`, `moat gemini`, and `moat pi`.
 
 | Flag | Description |
 |------|-------------|
@@ -62,6 +62,7 @@ All agent commands support passing an initial prompt after `--`. Unlike `-p`, wh
 
 ```bash
 moat claude -- "is this thing on?"
+moat copilot -- "explain this codebase"
 moat codex -- "explain this codebase"
 ```
 
@@ -277,6 +278,64 @@ moat claude --worktree=dark-mode --prompt "implement dark mode"
 
 # Require manual approval for each tool use
 moat claude --noyolo
+```
+
+---
+
+## moat copilot
+
+Run GitHub Copilot CLI in a container.
+
+```
+moat copilot [workspace] [flags] [-- initial-prompt]
+```
+
+In addition to the command-specific flags below, `moat copilot` accepts all [common agent flags](#common-agent-flags).
+
+`moat copilot` requires a `copilot` grant. The container receives only Copilot/GitHub token placeholders; Moat's proxy injects the real token for GitHub API and HTTPS git requests.
+
+If `github` is also listed in `moat.yaml` or passed with `--grant`, `moat copilot` ignores it. Both grants target `api.github.com` with the same header, and the `copilot` grant already covers GitHub API and HTTPS git auth for Copilot runs.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `workspace` | Workspace directory (default: current directory) |
+| `initial-prompt` | Text after `--` is passed to Copilot as an initial prompt (interactive mode) |
+
+### Command-specific flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--prompt TEXT` | Run non-interactive with prompt |
+| `--allow-all` | Allow all Copilot tools, paths, and URLs without prompting. Default: `true`. |
+| `--model MODEL` | Select the model to use. Overrides `copilot.model`. |
+| `--experimental` | Enable Copilot CLI experimental features. |
+| `--autopilot` | Start Copilot CLI in autopilot mode. |
+
+### Examples
+
+```bash
+# One-time credential setup
+moat grant copilot
+
+# Interactive Copilot CLI
+moat copilot
+
+# In specific directory
+moat copilot ./my-project
+
+# Interactive with initial prompt
+moat copilot -- "explain this codebase"
+
+# Non-interactive with prompt
+moat copilot -p "fix the failing tests"
+
+# Select a model
+moat copilot --model gpt-5.4
+
+# Run in a git worktree
+moat copilot --worktree=dark-mode --prompt "implement dark mode"
 ```
 
 ---

@@ -126,6 +126,12 @@ codex:
       grant: openai
       cwd: /workspace
 
+# GitHub Copilot CLI
+copilot:
+  model: gpt-5.4
+  experimental: false
+  autopilot: false
+
 # Gemini CLI
 gemini:
   sync_logs: true
@@ -1571,6 +1577,51 @@ When `grant` is specified, the corresponding environment variable is set automat
 | `gemini` | `GEMINI_API_KEY` |
 
 **Note:** For remote HTTP-based MCP servers, use the top-level `mcp:` field instead. See [MCP servers guide](../guides/09-mcp.md#remote-mcp-servers).
+
+---
+
+## GitHub Copilot CLI
+
+### copilot.model
+
+Model to pass to `copilot --model`.
+
+```yaml
+copilot:
+  model: gpt-5.4
+```
+
+- Type: `string`
+- Default: Copilot CLI default
+- CLI override: `moat copilot --model`
+
+### copilot.experimental
+
+Start Copilot CLI with experimental features enabled.
+
+```yaml
+copilot:
+  experimental: true
+```
+
+- Type: `boolean`
+- Default: `false`
+- CLI override: `moat copilot --experimental`
+
+### copilot.autopilot
+
+Start Copilot CLI in autopilot mode.
+
+```yaml
+copilot:
+  autopilot: true
+```
+
+- Type: `boolean`
+- Default: `false`
+- CLI override: `moat copilot --autopilot`
+
+`moat copilot` requires the `copilot` grant. Run `moat grant copilot` before starting a session. See [Running GitHub Copilot CLI](../guides/17-copilot.md).
 
 ---
 

@@ -97,7 +97,15 @@ moat codex             # Interactive mode
 moat codex -p "explain this codebase"   # Non-interactive
 ```
 
-Both agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-claude-code.md) and [Running Codex](docs/content/guides/02-codex.md) guides for details.
+### GitHub Copilot CLI
+
+```bash
+moat grant copilot     # One-time: imports Copilot-capable GitHub credentials
+moat copilot           # Interactive mode
+moat copilot -p "fix the failing tests"  # Non-interactive
+```
+
+Agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-claude-code.md), [Running Codex](docs/content/guides/02-codex.md), and [Running GitHub Copilot CLI](docs/content/guides/17-copilot.md) guides for details.
 
 ## Configuration
 
@@ -136,6 +144,7 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | Command | Description |
 |---------|-------------|
 | `moat claude [workspace]` | Run Claude Code |
+| `moat copilot [workspace]` | Run GitHub Copilot CLI |
 | `moat codex [workspace]` | Run Codex |
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat join <run> <agent>` | Run another agent in a running container |

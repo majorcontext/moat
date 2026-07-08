@@ -34,6 +34,12 @@ const OpenAIAPIKeyPlaceholder = "sk-moat-proxy-injected-placeholder-000000000000
 // Authorization headers, so this placeholder never reaches GitHub's servers.
 const GitHubTokenPlaceholder = "ghp_moatProxyInjectedPlaceholder000000000000"
 
+// CopilotTokenPlaceholder is a placeholder that looks like a GitHub fine-grained
+// personal access token. GitHub Copilot CLI rejects classic PAT-shaped tokens
+// locally, but accepts fine-grained PATs, GitHub CLI OAuth tokens, and Copilot
+// CLI OAuth tokens. The real credential is injected by the proxy.
+const CopilotTokenPlaceholder = "github_pat_11MOATPROXYINJECTEDPLACEHOLDER000000000000000000000000000000000000000000"
+
 // AnthropicAPIKeyPlaceholder is a placeholder that looks like a valid Anthropic
 // API key.
 // Some tools validate the API key format locally before making requests.

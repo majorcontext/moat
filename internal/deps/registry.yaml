@@ -87,6 +87,12 @@ codex-cli:
   package: "@openai/codex"
   requires: [node]
 
+copilot-cli:
+  description: GitHub Copilot CLI
+  type: npm
+  package: "@github/copilot"
+  requires: [node]
+
 gemini-cli:
   description: Google Gemini CLI
   type: npm
