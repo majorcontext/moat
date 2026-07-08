@@ -75,6 +75,12 @@ func TestConfigureProxy(t *testing.T) {
 	if got := proxy.headers[copilotGitHost]["Authorization"]; !strings.HasPrefix(got, "Basic ") {
 		t.Errorf("github.com Authorization = %q, want Basic auth", got)
 	}
+	if _, ok := proxy.headers[copilotProxyHost]; ok {
+		t.Error("copilotProxyHost should NOT have credentials; it uses Copilot session tokens")
+	}
+	if _, ok := proxy.headers[copilotTelemetry]; ok {
+		t.Error("copilotTelemetry should NOT have credentials; it uses Copilot session tokens")
+	}
 }
 
 func TestContainerEnv(t *testing.T) {

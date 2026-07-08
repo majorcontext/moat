@@ -144,7 +144,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	}
 
 	// Validate grants before allocating any resources (proxy, container, etc.)
-	needsGrantValidation := len(opts.Grants) > 0 || (opts.Config != nil && len(opts.Config.MCP) > 0)
+	needsGrantValidation := len(opts.Grants) > 0 || (opts.Config != nil && len(opts.Config.MCP) > 0) || configUsesCopilotCLI(opts.Config)
 	if needsGrantValidation {
 		store, err := openCredStore()
 		if err != nil {
@@ -1449,7 +1449,7 @@ region = %s
 			return nil, fmt.Errorf("copilot provider not registered")
 		}
 
-		cfg, stageErr := m.setupCopilotStaging(ctx, copilotProvider, containerHome, renderedContext)
+		cfg, stageErr := m.setupCopilotStaging(ctx, copilotProvider, containerHome, renderedContext, openCredStore)
 		if stageErr != nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
@@ -2303,8 +2303,11 @@ func normalizeCopilotGrantNames(grants []string) []string {
 var validateCopilotGitHubToken = copilotprov.ValidateGitHubToken
 
 func validateCopilotGitHubGrant(ctx context.Context, cfg *config.Config, grants []string, store credential.Store) error {
-	if !configUsesCopilotCLI(cfg) || !hasGrant(grants, "github") {
+	if !configUsesCopilotCLI(cfg) {
 		return nil
+	}
+	if !hasGrant(grants, "github") {
+		return fmt.Errorf("GitHub Copilot CLI requires the github grant\n\nRun: moat grant github")
 	}
 	cred, err := store.Get(credential.ProviderGitHub)
 	if err != nil {

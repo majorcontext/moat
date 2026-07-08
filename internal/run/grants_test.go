@@ -109,6 +109,22 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	if detected || rejected {
 		t.Fatalf("present case: detector=%v validators=%v — both must report none", detected, rejected)
 	}
+
+	// Legacy copilot grants resolve to the github credential store key. Keep
+	// that path in the drift guard so a future caller cannot accidentally make
+	// detector/validator behavior diverge if a copilot grant slips past
+	// normalization.
+	copilotGrants := []string{"copilot"}
+	detected = len(DetectMissingGrants(copilotGrants, nil, store)) > 0
+	rejected = validateGrants(copilotGrants, store) != nil
+	if detected != rejected {
+		t.Fatalf("copilot missing case: detector=%v validators=%v — they must agree", detected, rejected)
+	}
+	detected = len(DetectMissingGrants(copilotGrants, nil, full)) > 0
+	rejected = validateGrants(copilotGrants, full) != nil
+	if detected || rejected {
+		t.Fatalf("copilot present case: detector=%v validators=%v — both must report none", detected, rejected)
+	}
 }
 
 func TestClassifyMissingReason(t *testing.T) {

@@ -150,8 +150,16 @@ func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentP
 
 // setupCopilotStaging builds the GitHub Copilot CLI container config
 // (runtime context and first-run config) via the provider interface.
-func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provider.AgentProvider, containerHome, renderedContext string) (*provider.ContainerConfig, error) {
+func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provider.AgentProvider, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
+	var copilotCred *provider.Credential
+	if store, storeErr := openCredStore(); storeErr == nil {
+		if cred, err := store.Get(credential.ProviderGitHub); err == nil {
+			copilotCred = provider.FromLegacy(cred)
+		}
+	}
+
 	copilotConfig, prepErr := copilotProvider.PrepareContainer(ctx, provider.PrepareOpts{
+		Credential:     copilotCred,
 		ContainerHome:  containerHome,
 		RuntimeContext: renderedContext,
 	})

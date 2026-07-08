@@ -74,6 +74,23 @@ func TestValidateCopilotGitHubGrantSkippedForNonCopilotRun(t *testing.T) {
 	}
 }
 
+func TestValidateCopilotGitHubGrantRequiresGitHubGrant(t *testing.T) {
+	origValidate := validateCopilotGitHubToken
+	t.Cleanup(func() { validateCopilotGitHubToken = origValidate })
+	validateCopilotGitHubToken = func(ctx context.Context, token string) error {
+		t.Fatal("validateCopilotGitHubToken should not be called without github grant")
+		return nil
+	}
+
+	err := validateCopilotGitHubGrant(context.Background(), &config.Config{Agent: "copilot"}, nil, newMockStore())
+	if err == nil {
+		t.Fatal("validateCopilotGitHubGrant() = nil, want missing github grant error")
+	}
+	if !strings.Contains(err.Error(), "requires the github grant") || !strings.Contains(err.Error(), "moat grant github") {
+		t.Fatalf("validateCopilotGitHubGrant() error = %v, want github grant guidance", err)
+	}
+}
+
 func TestNormalizeCopilotGrantNames(t *testing.T) {
 	got := normalizeCopilotGrantNames([]string{"copilot", "ssh:github.com", "github", "aws", "copilot"})
 	want := []string{"github", "ssh:github.com", "aws"}
