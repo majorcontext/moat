@@ -6,9 +6,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/spf13/cobra"
 )
 
 type mockProxyConfigurer struct {
@@ -84,12 +87,100 @@ func TestContainerEnv(t *testing.T) {
 	}
 }
 
+func TestProviderNoopMethods(t *testing.T) {
+	p := &Provider{}
+	if mounts, cleanupPath, err := p.ContainerMounts(&provider.Credential{}, "/home/moatuser"); err != nil || mounts != nil || cleanupPath != "" {
+		t.Fatalf("ContainerMounts() = (%v, %q, %v), want nil empty nil", mounts, cleanupPath, err)
+	}
+	p.Cleanup("/tmp/unused")
+	if deps := p.ImpliedDependencies(); !slices.Equal(deps, []string{"gh", "git"}) {
+		t.Fatalf("ImpliedDependencies() = %v, want [gh git]", deps)
+	}
+	if got := p.RefreshInterval(); got != 30*time.Minute {
+		t.Fatalf("RefreshInterval() = %v, want 30m", got)
+	}
+}
+
+func TestCanRefresh(t *testing.T) {
+	p := &Provider{}
+	tests := []struct {
+		name string
+		cred *provider.Credential
+		want bool
+	}{
+		{name: "nil", cred: nil},
+		{name: "no metadata", cred: &provider.Credential{}},
+		{name: "env", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourceEnv}}},
+		{name: "pat", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourcePAT}}},
+		{name: "cli", cred: &provider.Credential{Metadata: map[string]string{provider.MetaKeyTokenSource: SourceCLI}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := p.CanRefresh(tt.cred); got != tt.want {
+				t.Fatalf("CanRefresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultDependenciesAndHosts(t *testing.T) {
 	if !slices.Contains(DefaultDependencies(), "copilot-cli") {
 		t.Errorf("DefaultDependencies missing copilot-cli: %v", DefaultDependencies())
 	}
 	if !slices.Contains(NetworkHosts(), copilotAPIHost) || !slices.Contains(NetworkHosts(), copilotBusinessHost) || !slices.Contains(NetworkHosts(), copilotProxyHost) {
 		t.Errorf("NetworkHosts missing Copilot hosts: %v", NetworkHosts())
+	}
+}
+
+func TestRegisterCLI(t *testing.T) {
+	root := &cobra.Command{Use: "moat"}
+	(&Provider{}).RegisterCLI(root)
+	cmd, _, err := root.Find([]string{"copilot"})
+	if err != nil {
+		t.Fatalf("Find(copilot) error = %v", err)
+	}
+	if cmd == nil || cmd.Use != "copilot [workspace] [flags]" {
+		t.Fatalf("registered command = %#v", cmd)
+	}
+	for _, flag := range []string{"prompt", "allow-all", "model", "experimental", "autopilot", "worktree"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("copilot command missing --%s flag", flag)
+		}
+	}
+}
+
+func TestResolveCopilotPreflight(t *testing.T) {
+	origModelFlag, origResolvedModel := copilotModelFlag, copilotResolvedModel
+	origExperimental, origAutopilot := copilotExperimental, copilotAutopilot
+	origFlagGrants := copilotFlags.Grants
+	t.Cleanup(func() {
+		copilotModelFlag = origModelFlag
+		copilotResolvedModel = origResolvedModel
+		copilotExperimental = origExperimental
+		copilotAutopilot = origAutopilot
+		copilotFlags.Grants = origFlagGrants
+	})
+
+	copilotModelFlag = ""
+	copilotExperimental = false
+	copilotAutopilot = false
+	copilotFlags.Grants = []string{"github", "ssh:github.com"}
+	cfg := &config.Config{
+		Grants:  []string{"github", "copilot"},
+		Copilot: config.CopilotConfig{Model: "gpt-5.4", Experimental: true, Autopilot: true},
+	}
+
+	if err := resolveCopilotPreflight(cfg); err != nil {
+		t.Fatalf("resolveCopilotPreflight() error = %v", err)
+	}
+	if copilotResolvedModel != "gpt-5.4" || !copilotExperimental || !copilotAutopilot {
+		t.Fatalf("resolved state = model:%q experimental:%v autopilot:%v", copilotResolvedModel, copilotExperimental, copilotAutopilot)
+	}
+	if !slices.Equal(cfg.Grants, []string{"copilot"}) {
+		t.Fatalf("config grants = %v, want [copilot]", cfg.Grants)
+	}
+	if !slices.Equal(copilotFlags.Grants, []string{"ssh:github.com"}) {
+		t.Fatalf("flag grants = %v, want [ssh:github.com]", copilotFlags.Grants)
 	}
 }
 
@@ -119,6 +210,12 @@ func TestBuildCopilotCommand(t *testing.T) {
 	}
 	if !slices.Contains(got, "-i") || !slices.Contains(got, "hello") {
 		t.Errorf("initial prompt not passed via -i: %v", got)
+	}
+}
+
+func TestGetCredentialName(t *testing.T) {
+	if got := GetCredentialName(); got != "copilot" {
+		t.Fatalf("GetCredentialName() = %q, want copilot", got)
 	}
 }
 

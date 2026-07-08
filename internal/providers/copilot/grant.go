@@ -19,6 +19,14 @@ type Grant struct{}
 
 func NewGrant() *Grant { return &Grant{} }
 
+var (
+	copilotValidationURL = "https://api.github.com/copilot_internal/user"
+	newCopilotHTTPClient = func() *http.Client {
+		return &http.Client{Timeout: 10 * time.Second}
+	}
+	getGHCLIToken = getGHCLITokenFromCLI
+)
+
 func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
 	if token, name := util.CheckEnvVarWithName("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"); token != "" {
 		fmt.Printf("Using token from %s environment variable\n", name)
@@ -88,11 +96,11 @@ func validateAndCreateCredential(ctx context.Context, token, source string) (*pr
 }
 
 func validateCopilotToken(ctx context.Context, token string) error {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newCopilotHTTPClient()
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://api.github.com/copilot_internal/user", nil)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", copilotValidationURL, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -131,7 +139,7 @@ func validateCopilotToken(ctx context.Context, token string) error {
 	}
 }
 
-func getGHCLIToken(ctx context.Context) (string, error) {
+func getGHCLITokenFromCLI(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
 	out, err := cmd.Output()
 	if err != nil {
