@@ -129,6 +129,8 @@ codex:
 # GitHub Copilot CLI
 copilot:
   model: gpt-5.4
+  context: long_context
+  reasoning_effort: high
   experimental: false
   autopilot: false
 
@@ -1594,6 +1596,34 @@ copilot:
 - Type: `string`
 - Default: Copilot CLI default
 - CLI override: `moat copilot --model`
+
+### copilot.context
+
+Context window tier to pass to `copilot --context`.
+
+```yaml
+copilot:
+  context: long_context
+```
+
+- Type: `string`
+- Values: `default`, `long_context`
+- Default: Copilot CLI default
+- CLI override: `moat copilot --context`
+
+### copilot.reasoning_effort
+
+Reasoning effort level to pass to `copilot --reasoning-effort`.
+
+```yaml
+copilot:
+  reasoning_effort: high
+```
+
+- Type: `string`
+- Values: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`
+- Default: Copilot CLI default
+- CLI override: `moat copilot --reasoning-effort`
 
 ### copilot.experimental
 

@@ -131,7 +131,7 @@ func TestRegisterCLI(t *testing.T) {
 	if cmd == nil || cmd.Use != "copilot [workspace] [flags] [-- initial-prompt]" {
 		t.Fatalf("registered command = %#v", cmd)
 	}
-	for _, flag := range []string{"prompt", "allow-all", "model", "experimental", "autopilot", "worktree"} {
+	for _, flag := range []string{"prompt", "allow-all", "model", "context", "reasoning-effort", "experimental", "autopilot", "worktree"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("copilot command missing --%s flag", flag)
 		}
@@ -140,6 +140,8 @@ func TestRegisterCLI(t *testing.T) {
 
 func TestResolveCopilotPreflight(t *testing.T) {
 	origModelFlag, origResolvedModel := copilotModelFlag, copilotResolvedModel
+	origContextFlag, origResolvedContext := copilotContextFlag, copilotResolvedContext
+	origEffortFlag, origResolvedEffort := copilotReasoningEffortFlag, copilotResolvedEffort
 	origExperimental, origAutopilot := copilotExperimental, copilotAutopilot
 	origFlagGrants := copilotFlags.Grants
 	origDryRun := cli.DryRun
@@ -147,6 +149,10 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	t.Cleanup(func() {
 		copilotModelFlag = origModelFlag
 		copilotResolvedModel = origResolvedModel
+		copilotContextFlag = origContextFlag
+		copilotResolvedContext = origResolvedContext
+		copilotReasoningEffortFlag = origEffortFlag
+		copilotResolvedEffort = origResolvedEffort
 		copilotExperimental = origExperimental
 		copilotAutopilot = origAutopilot
 		copilotFlags.Grants = origFlagGrants
@@ -155,14 +161,22 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	})
 
 	copilotModelFlag = ""
+	copilotContextFlag = ""
+	copilotReasoningEffortFlag = ""
 	copilotExperimental = false
 	copilotAutopilot = false
 	copilotFlags.Grants = []string{"copilot", "ssh:github.com"}
 	cli.DryRun = false
 	copilotCredentialConfigured = func() bool { return false }
 	cfg := &config.Config{
-		Grants:  []string{"github", "copilot"},
-		Copilot: config.CopilotConfig{Model: "gpt-5.4", Experimental: true, Autopilot: true},
+		Grants: []string{"github", "copilot"},
+		Copilot: config.CopilotConfig{
+			Model:           "gpt-5.4",
+			Context:         "long_context",
+			ReasoningEffort: "high",
+			Experimental:    true,
+			Autopilot:       true,
+		},
 	}
 
 	if err := resolveCopilotPreflight(cfg); err != nil {
@@ -170,6 +184,12 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	}
 	if copilotResolvedModel != "gpt-5.4" || !copilotExperimental || !copilotAutopilot {
 		t.Fatalf("resolved state = model:%q experimental:%v autopilot:%v", copilotResolvedModel, copilotExperimental, copilotAutopilot)
+	}
+	if copilotResolvedContext != "long_context" {
+		t.Fatalf("resolved context = %q, want long_context", copilotResolvedContext)
+	}
+	if copilotResolvedEffort != "high" {
+		t.Fatalf("resolved effort = %q, want high", copilotResolvedEffort)
 	}
 	if !slices.Equal(cfg.Grants, []string{"github"}) {
 		t.Fatalf("config grants = %v, want [github]", cfg.Grants)
@@ -179,22 +199,34 @@ func TestResolveCopilotPreflight(t *testing.T) {
 	}
 }
 
-func TestResolveCopilotPreflightModelFlagOverridesConfig(t *testing.T) {
+func TestResolveCopilotPreflightFlagOverridesConfig(t *testing.T) {
 	origModelFlag, origResolvedModel := copilotModelFlag, copilotResolvedModel
+	origContextFlag, origResolvedContext := copilotContextFlag, copilotResolvedContext
+	origEffortFlag, origResolvedEffort := copilotReasoningEffortFlag, copilotResolvedEffort
 	origDryRun := cli.DryRun
 	origConfigured := copilotCredentialConfigured
 	t.Cleanup(func() {
 		copilotModelFlag = origModelFlag
 		copilotResolvedModel = origResolvedModel
+		copilotContextFlag = origContextFlag
+		copilotResolvedContext = origResolvedContext
+		copilotReasoningEffortFlag = origEffortFlag
+		copilotResolvedEffort = origResolvedEffort
 		cli.DryRun = origDryRun
 		copilotCredentialConfigured = origConfigured
 	})
 
 	copilotModelFlag = "gpt-5.5"
+	copilotContextFlag = "default"
+	copilotReasoningEffortFlag = "max"
 	cli.DryRun = true
 	copilotCredentialConfigured = func() bool { return true }
 	cfg := &config.Config{
-		Copilot: config.CopilotConfig{Model: "claude-sonnet-4"},
+		Copilot: config.CopilotConfig{
+			Model:           "claude-sonnet-4",
+			Context:         "long_context",
+			ReasoningEffort: "high",
+		},
 	}
 
 	if err := resolveCopilotPreflight(cfg); err != nil {
@@ -202,6 +234,12 @@ func TestResolveCopilotPreflightModelFlagOverridesConfig(t *testing.T) {
 	}
 	if copilotResolvedModel != "gpt-5.5" {
 		t.Fatalf("CLI --model flag should override config model, got %q", copilotResolvedModel)
+	}
+	if copilotResolvedContext != "default" {
+		t.Fatalf("CLI --context flag should override config context, got %q", copilotResolvedContext)
+	}
+	if copilotResolvedEffort != "max" {
+		t.Fatalf("CLI --reasoning-effort flag should override config effort, got %q", copilotResolvedEffort)
 	}
 }
 
@@ -250,21 +288,26 @@ func TestResolveCopilotPreflightDryRunDoesNotAddMissingGrant(t *testing.T) {
 }
 
 func TestBuildCopilotCommand(t *testing.T) {
-	origModel, origExperimental, origAutopilot, origAllowAll := copilotResolvedModel, copilotExperimental, copilotAutopilot, copilotAllowAll
+	origModel, origContext, origEffort := copilotResolvedModel, copilotResolvedContext, copilotResolvedEffort
+	origExperimental, origAutopilot, origAllowAll := copilotExperimental, copilotAutopilot, copilotAllowAll
 	t.Cleanup(func() {
 		copilotResolvedModel = origModel
+		copilotResolvedContext = origContext
+		copilotResolvedEffort = origEffort
 		copilotExperimental = origExperimental
 		copilotAutopilot = origAutopilot
 		copilotAllowAll = origAllowAll
 	})
 
 	copilotResolvedModel = "gpt-5.4"
+	copilotResolvedContext = "long_context"
+	copilotResolvedEffort = "high"
 	copilotExperimental = true
 	copilotAutopilot = true
 	copilotAllowAll = true
 
 	got := buildCopilotCommand("fix it", "")
-	want := []string{"copilot", "--no-auto-update", "--model", "gpt-5.4", "--experimental", "--autopilot", "--allow-all", "-p", "fix it"}
+	want := []string{"copilot", "--no-auto-update", "--model", "gpt-5.4", "--context", "long_context", "--reasoning-effort", "high", "--experimental", "--autopilot", "--allow-all", "-p", "fix it"}
 	if !slices.Equal(got, want) {
 		t.Errorf("buildCopilotCommand = %v, want %v", got, want)
 	}
@@ -275,6 +318,17 @@ func TestBuildCopilotCommand(t *testing.T) {
 	}
 	if !slices.Contains(got, "-i") || !slices.Contains(got, "hello") {
 		t.Errorf("initial prompt not passed via -i: %v", got)
+	}
+
+	// Companion case: empty context/effort must not produce flags.
+	copilotResolvedContext = ""
+	copilotResolvedEffort = ""
+	got = buildCopilotCommand("fix it", "")
+	if slices.Contains(got, "--context") {
+		t.Errorf("empty context should not produce --context flag: %v", got)
+	}
+	if slices.Contains(got, "--reasoning-effort") {
+		t.Errorf("empty effort should not produce --reasoning-effort flag: %v", got)
 	}
 }
 

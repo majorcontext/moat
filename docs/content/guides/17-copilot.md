@@ -65,6 +65,8 @@ grants:
 
 copilot:
   model: gpt-5.4
+  context: long_context
+  reasoning_effort: high
   experimental: false
   autopilot: false
 ```

@@ -308,6 +308,8 @@ In addition to the command-specific flags below, `moat copilot` accepts all [com
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `--allow-all` | Allow all Copilot tools, paths, and URLs without prompting. Default: `true`. |
 | `--model MODEL` | Select the model to use. Overrides `copilot.model`. |
+| `--context TIER` | Set context window tier (`default` or `long_context`). Overrides `copilot.context`. |
+| `--reasoning-effort LEVEL` | Set reasoning effort level (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Overrides `copilot.reasoning_effort`. |
 | `--experimental` | Enable Copilot CLI experimental features. |
 | `--autopilot` | Start Copilot CLI in autopilot mode. |
 

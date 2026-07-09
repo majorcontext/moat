@@ -18,9 +18,13 @@ var (
 	copilotWtFlag               string
 	copilotAllowAll             bool
 	copilotModelFlag            string
+	copilotContextFlag          string
+	copilotReasoningEffortFlag  string
 	copilotExperimental         bool
 	copilotAutopilot            bool
 	copilotResolvedModel        string
+	copilotResolvedContext      string
+	copilotResolvedEffort       string
 	copilotCredentialConfigured = defaultCopilotCredentialConfigured
 )
 
@@ -65,6 +69,8 @@ Examples:
 	copilotCmd.Flags().StringSliceVar(&copilotAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	copilotCmd.Flags().BoolVar(&copilotAllowAll, "allow-all", true, "allow all Copilot tools, paths, and URLs without prompting")
 	copilotCmd.Flags().StringVar(&copilotModelFlag, "model", "", "model to use (overrides copilot.model)")
+	copilotCmd.Flags().StringVar(&copilotContextFlag, "context", "", "context window tier: default or long_context (overrides copilot.context)")
+	copilotCmd.Flags().StringVar(&copilotReasoningEffortFlag, "reasoning-effort", "", "reasoning effort level (overrides copilot.reasoning_effort)")
 	copilotCmd.Flags().BoolVar(&copilotExperimental, "experimental", false, "enable Copilot CLI experimental features")
 	copilotCmd.Flags().BoolVar(&copilotAutopilot, "autopilot", false, "start Copilot CLI in autopilot mode")
 	copilotCmd.Flags().StringVar(&copilotWtFlag, "worktree", "", "run in a git worktree for this branch")
@@ -98,10 +104,18 @@ func runCopilot(cmd *cobra.Command, args []string) error {
 
 func resolveCopilotPreflight(cfg *config.Config) error {
 	copilotResolvedModel = copilotModelFlag
+	copilotResolvedContext = copilotContextFlag
+	copilotResolvedEffort = copilotReasoningEffortFlag
 	if cfg != nil {
 		cfg.Grants = normalizeCopilotGrants(cfg.Grants, false)
 		if copilotResolvedModel == "" {
 			copilotResolvedModel = cfg.Copilot.Model
+		}
+		if copilotResolvedContext == "" {
+			copilotResolvedContext = cfg.Copilot.Context
+		}
+		if copilotResolvedEffort == "" {
+			copilotResolvedEffort = cfg.Copilot.ReasoningEffort
 		}
 		if cfg.Copilot.Experimental {
 			copilotExperimental = true
@@ -166,6 +180,12 @@ func buildCopilotCommand(promptFlag, initialPrompt string) []string {
 	cmd := []string{"copilot", "--no-auto-update"}
 	if copilotResolvedModel != "" {
 		cmd = append(cmd, "--model", copilotResolvedModel)
+	}
+	if copilotResolvedContext != "" {
+		cmd = append(cmd, "--context", copilotResolvedContext)
+	}
+	if copilotResolvedEffort != "" {
+		cmd = append(cmd, "--reasoning-effort", copilotResolvedEffort)
 	}
 	if copilotExperimental {
 		cmd = append(cmd, "--experimental")

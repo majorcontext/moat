@@ -339,6 +339,14 @@ type CopilotConfig struct {
 	// Model optionally selects the model passed to `copilot --model`.
 	Model string `yaml:"model,omitempty"`
 
+	// Context sets the context window tier passed to `copilot --context`.
+	// Valid values: "default", "long_context".
+	Context string `yaml:"context,omitempty"`
+
+	// ReasoningEffort sets the reasoning effort level passed to `copilot --reasoning-effort`.
+	// Valid values: "none", "minimal", "low", "medium", "high", "xhigh", "max".
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
+
 	// Experimental starts Copilot CLI with --experimental.
 	Experimental bool `yaml:"experimental,omitempty"`
 
