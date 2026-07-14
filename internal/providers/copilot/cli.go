@@ -96,10 +96,20 @@ func runCopilot(cmd *cobra.Command, args []string) error {
 		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
 			return buildCopilotCommand(promptFlag, initialPrompt), nil
 		},
-		ConfigureAgent: func(cfg *config.Config) {
-			cfg.Agent = copilotProviderName
-		},
+		ConfigureAgent: configureCopilotAgent,
 	})
+}
+
+// configureCopilotAgent writes the flag-resolved copilot values back into the
+// config so downstream consumers (e.g. the run manager populating
+// provider.PrepareOpts) see the same precedence the CLI applied: flag over
+// moat.yaml. RunProvider calls this after guaranteeing cfg is non-nil, unlike
+// Preflight which may receive nil when no moat.yaml exists.
+func configureCopilotAgent(cfg *config.Config) {
+	cfg.Agent = copilotProviderName
+	cfg.Copilot.Model = copilotResolvedModel
+	cfg.Copilot.Context = copilotResolvedContext
+	cfg.Copilot.ReasoningEffort = copilotResolvedEffort
 }
 
 func resolveCopilotPreflight(cfg *config.Config) error {

@@ -1449,7 +1449,7 @@ region = %s
 			return nil, fmt.Errorf("copilot provider not registered")
 		}
 
-		cfg, stageErr := m.setupCopilotStaging(ctx, copilotProvider, containerHome, renderedContext, openCredStore)
+		cfg, stageErr := m.setupCopilotStaging(ctx, copilotProvider, opts, containerHome, renderedContext, openCredStore)
 		if stageErr != nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)

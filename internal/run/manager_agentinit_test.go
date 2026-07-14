@@ -2,10 +2,13 @@ package run
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/provider"
 )
 
 func TestSetupCodexStaging_UnknownGrant(t *testing.T) {
@@ -28,6 +31,59 @@ func TestSetupCodexStaging_GrantNotDeclared(t *testing.T) {
 	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, false, "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("expected grant-not-declared error, got %v", err)
+	}
+}
+
+// captureAgentProvider records the PrepareOpts passed to PrepareContainer.
+// The embedded interface is nil; only PrepareContainer may be called.
+type captureAgentProvider struct {
+	provider.AgentProvider
+	got provider.PrepareOpts
+}
+
+func (c *captureAgentProvider) PrepareContainer(ctx context.Context, opts provider.PrepareOpts) (*provider.ContainerConfig, error) {
+	c.got = opts
+	return &provider.ContainerConfig{}, nil
+}
+
+func TestSetupCopilotStaging_PassesCopilotOverrides(t *testing.T) {
+	m := &Manager{}
+	cfg := &config.Config{
+		Copilot: config.CopilotConfig{
+			Model:           "claude-opus-4.6",
+			Context:         "long_context",
+			ReasoningEffort: "high",
+		},
+	}
+	fake := &captureAgentProvider{}
+	openStore := func() (*credential.FileStore, error) { return nil, errors.New("no store") }
+
+	if _, err := m.setupCopilotStaging(context.Background(), fake, Options{Config: cfg}, "/home/moatuser", "", openStore); err != nil {
+		t.Fatalf("setupCopilotStaging: %v", err)
+	}
+
+	if fake.got.CopilotModel != "claude-opus-4.6" {
+		t.Errorf("CopilotModel = %q, want claude-opus-4.6", fake.got.CopilotModel)
+	}
+	if fake.got.CopilotContext != "long_context" {
+		t.Errorf("CopilotContext = %q, want long_context", fake.got.CopilotContext)
+	}
+	if fake.got.CopilotReasoningEffort != "high" {
+		t.Errorf("CopilotReasoningEffort = %q, want high", fake.got.CopilotReasoningEffort)
+	}
+}
+
+func TestSetupCopilotStaging_NilConfigNoOverrides(t *testing.T) {
+	m := &Manager{}
+	fake := &captureAgentProvider{}
+	openStore := func() (*credential.FileStore, error) { return nil, errors.New("no store") }
+
+	if _, err := m.setupCopilotStaging(context.Background(), fake, Options{}, "/home/moatuser", "", openStore); err != nil {
+		t.Fatalf("setupCopilotStaging: %v", err)
+	}
+
+	if fake.got.CopilotModel != "" || fake.got.CopilotContext != "" || fake.got.CopilotReasoningEffort != "" {
+		t.Errorf("expected empty copilot overrides with nil config, got %+v", fake.got)
 	}
 }
 

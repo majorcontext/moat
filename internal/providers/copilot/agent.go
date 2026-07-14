@@ -34,7 +34,9 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 
 	// Merge host settings (~/.copilot/settings.json) with moat overrides.
 	mergeOpts := MergeOpts{
-		ModelOverride: copilotResolvedModel,
+		ModelOverride:   opts.CopilotModel,
+		ContextOverride: opts.CopilotContext,
+		EffortOverride:  opts.CopilotReasoningEffort,
 	}
 	if settingsJSON, mergeErr := MergeSettings(mergeOpts); mergeErr != nil {
 		log.Warn("failed to merge Copilot settings, continuing without",

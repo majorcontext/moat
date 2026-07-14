@@ -42,6 +42,15 @@ type PrepareOpts struct {
 	// other agents.
 	SubscriptionType string
 	RateLimitTier    string
+
+	// CopilotModel, CopilotContext, and CopilotReasoningEffort strip the
+	// corresponding keys (model, contextTier, effortLevel) from the Copilot
+	// settings.json staged into the container, because the value is pinned by
+	// moat.yaml copilot.* or a CLI flag. Empty means "no override".
+	// Copilot-specific; ignored by other agents.
+	CopilotModel           string
+	CopilotContext         string
+	CopilotReasoningEffort string
 }
 
 // MCPServerConfig defines a remote/relay MCP server configuration.

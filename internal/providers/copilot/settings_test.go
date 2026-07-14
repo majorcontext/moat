@@ -326,7 +326,7 @@ func TestMergeSettings_ModelStrippedOthersPreserved(t *testing.T) {
 		t.Error("model should be stripped when ModelOverride is set")
 	}
 
-	// effortLevel and contextTier pass through (no CLI override exists for them yet)
+	// effortLevel and contextTier pass through when their overrides are unset
 	if _, ok := got["effortLevel"]; !ok {
 		t.Error("effortLevel should be preserved")
 	}
@@ -335,6 +335,84 @@ func TestMergeSettings_ModelStrippedOthersPreserved(t *testing.T) {
 	}
 
 	// theme should always be present
+	if _, ok := got["theme"]; !ok {
+		t.Error("expected theme to remain")
+	}
+}
+
+func TestMergeSettings_ContextTierStrippedWhenOverridden(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	copilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	hostSettings := map[string]any{
+		"contextTier": "long_context",
+		"theme":       "dim",
+	}
+	data, _ := json.Marshal(hostSettings)
+	if err := os.WriteFile(filepath.Join(copilotDir, "settings.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{
+		ContextOverride: "default",
+	})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	if _, ok := got["contextTier"]; ok {
+		t.Error("contextTier should be stripped when ContextOverride is set")
+	}
+	if _, ok := got["theme"]; !ok {
+		t.Error("expected theme to remain")
+	}
+}
+
+func TestMergeSettings_EffortLevelStrippedWhenOverridden(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	copilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	hostSettings := map[string]any{
+		"effortLevel": "high",
+		"theme":       "dim",
+	}
+	data, _ := json.Marshal(hostSettings)
+	if err := os.WriteFile(filepath.Join(copilotDir, "settings.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{
+		EffortOverride: "low",
+	})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	if _, ok := got["effortLevel"]; ok {
+		t.Error("effortLevel should be stripped when EffortOverride is set")
+	}
 	if _, ok := got["theme"]; !ok {
 		t.Error("expected theme to remain")
 	}

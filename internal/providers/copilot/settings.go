@@ -90,7 +90,9 @@ func loadSettingsFile(path string) (map[string]json.RawMessage, error) {
 // These correspond to CLI flags or moat.yaml copilot.* fields that are passed
 // as --flags to the Copilot CLI (which naturally override settings.json).
 type MergeOpts struct {
-	ModelOverride string
+	ModelOverride   string
+	ContextOverride string
+	EffortOverride  string
 }
 
 // MergeSettings builds the container settings.json by:
@@ -147,6 +149,12 @@ func MergeSettings(opts MergeOpts) ([]byte, error) {
 	// Strip settings that are overridden by moat.yaml or CLI flags.
 	if opts.ModelOverride != "" {
 		delete(result, "model")
+	}
+	if opts.ContextOverride != "" {
+		delete(result, "contextTier")
+	}
+	if opts.EffortOverride != "" {
+		delete(result, "effortLevel")
 	}
 
 	if len(result) == 0 {
