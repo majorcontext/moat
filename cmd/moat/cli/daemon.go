@@ -44,6 +44,19 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		daemonDir = filepath.Join(config.GlobalConfigDir(), "proxy")
 	}
 
+	// Raise the file-descriptor limit before the proxy starts accepting. The
+	// daemon is the single shared egress proxy for every run, so a burst of
+	// concurrent connections from one container (e.g. `bun install` opens up to
+	// 64 parallel connections) must not exhaust its FDs and stall every other
+	// run's traffic. Best-effort: a failure is non-fatal.
+	if oldSoft, newSoft, ferr := daemon.RaiseFileLimit(); ferr != nil {
+		log.Warn("could not raise daemon file-descriptor limit", "error", ferr, "soft", oldSoft)
+	} else if newSoft > oldSoft {
+		log.Info("raised daemon file-descriptor limit", "from", oldSoft, "to", newSoft)
+	} else {
+		log.Debug("daemon file-descriptor limit already sufficient", "soft", oldSoft)
+	}
+
 	// Expose build version to daemon package so the health endpoint can
 	// report it. This allows detecting version skew between daemon and CLI.
 	daemon.BuildCommit = commit
