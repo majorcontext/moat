@@ -49,6 +49,190 @@ func TestMergeSettings_HostSettingsCarriedOver(t *testing.T) {
 	}
 }
 
+func TestMergeSettings_UsesCopilotHomeWhenSet(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	homeCopilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(homeCopilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	homeData, _ := json.Marshal(map[string]any{"theme": "dim"})
+	if err := os.WriteFile(filepath.Join(homeCopilotDir, "settings.json"), homeData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	copilotHome := t.TempDir()
+	t.Setenv("COPILOT_HOME", copilotHome)
+	copilotHomeData, _ := json.Marshal(map[string]any{"theme": "high-contrast"})
+	if err := os.WriteFile(filepath.Join(copilotHome, "settings.json"), copilotHomeData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	var theme string
+	if err := json.Unmarshal(got["theme"], &theme); err != nil {
+		t.Fatalf("unmarshal theme: %v", err)
+	}
+	if theme != "high-contrast" {
+		t.Errorf("theme = %q, want %q", theme, "high-contrast")
+	}
+}
+
+func TestMergeSettings_CopilotHomeDoesNotFallBackToDefaultHome(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	homeCopilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(homeCopilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	homeData, _ := json.Marshal(map[string]any{"theme": "dim"})
+	if err := os.WriteFile(filepath.Join(homeCopilotDir, "settings.json"), homeData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("COPILOT_HOME", t.TempDir())
+
+	result, err := MergeSettings(MergeOpts{})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil when COPILOT_HOME has no settings file, got %s", result)
+	}
+}
+
+func TestMergeSettings_LegacyColorModeNormalizedToTheme(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	copilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(map[string]any{"colorMode": "high-contrast"})
+	if err := os.WriteFile(filepath.Join(copilotDir, "settings.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	if _, ok := got["colorMode"]; ok {
+		t.Error("legacy colorMode should be normalized to theme")
+	}
+	var theme string
+	if err := json.Unmarshal(got["theme"], &theme); err != nil {
+		t.Fatalf("unmarshal theme: %v", err)
+	}
+	if theme != "high-contrast" {
+		t.Errorf("theme = %q, want %q", theme, "high-contrast")
+	}
+}
+
+func TestMergeSettings_ThemePreferredOverLegacyColorMode(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("MOAT_HOME", t.TempDir())
+
+	copilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(map[string]any{
+		"theme":     "github",
+		"colorMode": "dim",
+	})
+	if err := os.WriteFile(filepath.Join(copilotDir, "settings.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	var theme string
+	if err := json.Unmarshal(got["theme"], &theme); err != nil {
+		t.Fatalf("unmarshal theme: %v", err)
+	}
+	if theme != "github" {
+		t.Errorf("theme = %q, want %q", theme, "github")
+	}
+	if _, ok := got["colorMode"]; ok {
+		t.Error("legacy colorMode should not be written when theme is present")
+	}
+}
+
+func TestMergeSettings_MoatLegacyColorModeOverridesHostTheme(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	moatHome := t.TempDir()
+	t.Setenv("MOAT_HOME", moatHome)
+
+	copilotDir := filepath.Join(fakeHome, ".copilot")
+	if err := os.MkdirAll(copilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hostData, _ := json.Marshal(map[string]any{"theme": "github"})
+	if err := os.WriteFile(filepath.Join(copilotDir, "settings.json"), hostData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	moatCopilotDir := filepath.Join(moatHome, "copilot")
+	if err := os.MkdirAll(moatCopilotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moatData, _ := json.Marshal(map[string]any{"colorMode": "dim"})
+	if err := os.WriteFile(filepath.Join(moatCopilotDir, "settings.json"), moatData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MergeSettings(MergeOpts{})
+	if err != nil {
+		t.Fatalf("MergeSettings: %v", err)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	var theme string
+	if err := json.Unmarshal(got["theme"], &theme); err != nil {
+		t.Fatalf("unmarshal theme: %v", err)
+	}
+	if theme != "dim" {
+		t.Errorf("theme = %q, want %q", theme, "dim")
+	}
+}
+
 func TestMergeSettings_DisallowedKeysFiltered(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)

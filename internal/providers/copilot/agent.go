@@ -32,7 +32,8 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		return nil, fmt.Errorf("writing copilot config: %w", err)
 	}
 
-	// Merge host settings (~/.copilot/settings.json) with moat overrides.
+	// Merge host settings (COPILOT_HOME/settings.json or
+	// ~/.copilot/settings.json) with moat overrides.
 	mergeOpts := MergeOpts{
 		ModelOverride:   opts.CopilotModel,
 		ContextOverride: opts.CopilotContext,

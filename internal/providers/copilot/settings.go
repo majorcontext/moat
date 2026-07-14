@@ -47,8 +47,13 @@ var moatOnlySettings = map[string]bool{
 	"statusLine": true,
 }
 
-// loadHostSettings reads ~/.copilot/settings.json from the host.
+// loadHostSettings reads Copilot's host user settings from COPILOT_HOME when
+// set, or ~/.copilot/settings.json otherwise.
 func loadHostSettings() (map[string]json.RawMessage, error) {
+	if copilotHome := os.Getenv("COPILOT_HOME"); copilotHome != "" {
+		return loadSettingsFile(filepath.Join(copilotHome, "settings.json"))
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Debug("cannot determine home directory, skipping host Copilot settings",
@@ -86,6 +91,21 @@ func loadSettingsFile(path string) (map[string]json.RawMessage, error) {
 	return raw, nil
 }
 
+// normalizeSettingsAliases maps legacy Copilot setting names to their current
+// keys before source precedence is applied.
+func normalizeSettingsAliases(raw map[string]json.RawMessage) map[string]json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	if _, ok := raw["theme"]; !ok {
+		if v, ok := raw["colorMode"]; ok {
+			raw["theme"] = v
+		}
+	}
+	delete(raw, "colorMode")
+	return raw
+}
+
 // MergeOpts provides override values that take precedence over settings.json.
 // These correspond to CLI flags or moat.yaml copilot.* fields that are passed
 // as --flags to the Copilot CLI (which naturally override settings.json).
@@ -96,7 +116,7 @@ type MergeOpts struct {
 }
 
 // MergeSettings builds the container settings.json by:
-// 1. Reading ~/.copilot/settings.json (host defaults)
+// 1. Reading COPILOT_HOME/settings.json or ~/.copilot/settings.json (host defaults)
 // 2. Reading <MOAT_HOME>/copilot/settings.json (moat user overrides)
 // 3. Filtering to the allowlist
 // 4. Stripping settings overridden by moat.yaml/CLI flags
@@ -111,11 +131,13 @@ func MergeSettings(opts MergeOpts) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	host = normalizeSettingsAliases(host)
 
 	moat, err := loadMoatSettings()
 	if err != nil {
 		return nil, err
 	}
+	moat = normalizeSettingsAliases(moat)
 
 	if host == nil && moat == nil {
 		return nil, nil

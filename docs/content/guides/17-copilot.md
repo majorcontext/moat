@@ -75,11 +75,11 @@ copilot:
 
 ## User settings
 
-Moat carries these settings from your host's `~/.copilot/settings.json` into the container:
+Moat carries these settings from your host's Copilot settings file into the container. By default, that file is `~/.copilot/settings.json`. If `COPILOT_HOME` is set, Moat reads `$COPILOT_HOME/settings.json` instead.
 
 `contextTier`, `effortLevel`, `footer`, `includeCoAuthoredBy`, `model`, `mouse`, `subagents`, `tabs`, `theme`
 
-Other settings stay on the host. Settings that conflict with moat's proxy and network layer (`proxyUrl`, `allowedUrls`, `deniedUrls`), depend on host services the container cannot reach (`notifications`, `keepAlive`, `copyOnSelect`), or execute commands (`hooks`, `statusLine`) are not carried over. `trustedFolders` is always set to `/workspace`.
+Other settings stay on the host. Settings that conflict with moat's proxy and network layer (`proxyUrl`, `allowedUrls`, `deniedUrls`), depend on host services the container cannot reach (`notifications`, `keepAlive`, `copyOnSelect`), or execute commands (`hooks`, `statusLine`) are not carried over. `trustedFolders` is always set to `/workspace`. Moat also accepts Copilot's legacy `colorMode` setting and writes it as the current `theme` setting.
 
 ### Moat-specific overrides
 
