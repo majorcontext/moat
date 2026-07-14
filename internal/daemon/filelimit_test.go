@@ -41,17 +41,19 @@ func TestRaiseFileLimit(t *testing.T) {
 }
 
 // TestRaiseFileLimitNonLowering asserts a second call never reduces the limit —
-// it either reaches the target once and no-ops, or (on systems that cap the soft
-// limit below the hard limit, e.g. macOS) stays put. It deliberately does not
-// require err==nil on the second call, since a system already at its effective
-// ceiling legitimately reports that it could not climb further.
+// it either reaches the target once and no-ops, or (on systems that cap the
+// soft limit below the hard limit, e.g. macOS) stays put. A limit that cannot
+// be raised further is reported as success, not an error.
 func TestRaiseFileLimitNonLowering(t *testing.T) {
 	_, firstNew, err := RaiseFileLimit()
 	if err != nil {
 		t.Fatalf("first RaiseFileLimit: %v", err)
 	}
 
-	_, secondNew, _ := RaiseFileLimit()
+	_, secondNew, err := RaiseFileLimit()
+	if err != nil {
+		t.Fatalf("second RaiseFileLimit: %v", err)
+	}
 	if secondNew < firstNew {
 		t.Errorf("second call lowered the soft limit: %d -> %d", firstNew, secondNew)
 	}

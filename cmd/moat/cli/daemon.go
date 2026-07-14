@@ -50,11 +50,11 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// 64 parallel connections) must not exhaust its FDs and stall every other
 	// run's traffic. Best-effort: a failure is non-fatal.
 	if oldSoft, newSoft, ferr := daemon.RaiseFileLimit(); ferr != nil {
-		log.Warn("could not raise daemon file-descriptor limit", "error", ferr, "soft", oldSoft)
+		log.Warn("could not read daemon file-descriptor limit", "error", ferr)
 	} else if newSoft > oldSoft {
 		log.Info("raised daemon file-descriptor limit", "from", oldSoft, "to", newSoft)
 	} else {
-		log.Debug("daemon file-descriptor limit already sufficient", "soft", oldSoft)
+		log.Debug("daemon file-descriptor limit unchanged", "soft", oldSoft)
 	}
 
 	// Expose build version to daemon package so the health endpoint can
