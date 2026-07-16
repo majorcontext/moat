@@ -58,10 +58,10 @@ Every Moat container starts through the `moat-init` entrypoint, which runs befor
 
 Two implementations of the entrypoint ship in every image during the current migration window: the original shell script and a Go binary with identical behavior. A dispatcher selects between them; the shell implementation is the default. `MOAT_INIT_IMPL` and `MOAT_INIT_LEGACY` are reserved control variables managed by Moat itself — setting them in `moat.yaml` `env:` or via `-e` fails the run.
 
-The Go implementation supports a dry-run: running `moat-commit --plan` inside a container prints the ordered actions the entrypoint would take for the current environment — one line per decision — without performing any of them. This is useful when debugging why a feature did or did not activate:
+The Go implementation supports a dry-run: running `moat-init --plan` inside a container prints the ordered actions the entrypoint would take for the current environment — one line per decision — without performing any of them. This is useful when debugging why a feature did or did not activate:
 
 ```bash
-moat exec <agent> -- /usr/local/bin/moat-commit --plan
+moat exec <agent> -- /usr/local/bin/moat-init --plan
 ```
 
 ## Limitations

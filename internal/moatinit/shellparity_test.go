@@ -44,7 +44,7 @@ func builtGoEntrypoint(t *testing.T) string {
 			buildErr = err
 			return
 		}
-		goBinPath = filepath.Join(dir, "moat-commit")
+		goBinPath = filepath.Join(dir, "moat-init")
 		cmd := exec.Command("go", "build", "-o", goBinPath, "github.com/majorcontext/moat/cmd/moat-init")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			buildErr = fmt.Errorf("building entrypoint: %v\n%s", err, out)

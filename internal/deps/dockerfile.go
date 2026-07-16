@@ -618,28 +618,30 @@ func formatHookCommand(cmd string) string {
 // binary and COPY'd from the local build context — zero network at image
 // build time.
 //
-// During the shell->Go migration window the ENTRYPOINT is a dispatcher that
-// selects between the shell script (moat-init-sh, the default) and the Go
-// binary (moat-commit) via the operator-only MOAT_INIT_IMPL /
-// MOAT_INIT_LEGACY variables, so one cached image carries both
-// implementations. The Go binary is arch-matched: run images are always
-// built for the host's own architecture, so the runtime.GOARCH blob from
-// internal/initbin is the right one.
+// During the shell->Go migration window the ENTRYPOINT is a dispatcher
+// (moat-init-dispatch) that selects between the legacy shell script
+// (moat-init.sh, the default) and the Go binary (moat-init) via the
+// operator-only MOAT_INIT_IMPL / MOAT_INIT_LEGACY variables, so one cached
+// image carries both implementations. At cutover the dispatcher and shell
+// are dropped and the ENTRYPOINT becomes /usr/local/bin/moat-init directly.
+// The Go binary is arch-matched: run images are always built for the host's
+// own architecture, so the runtime.GOARCH blob from internal/initbin is the
+// right one.
 func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) {
 	if opts.needsInit(dockerMode) {
 		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
 		contextFiles["moat-init-dispatch.sh"] = []byte(MoatInitDispatcher)
 		b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
-		b.WriteString("COPY moat-init-dispatch.sh /usr/local/bin/moat-init\n")
-		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init-sh\n")
-		chmodPaths := "/usr/local/bin/moat-init /usr/local/bin/moat-init-sh"
+		b.WriteString("COPY moat-init-dispatch.sh /usr/local/bin/moat-init-dispatch\n")
+		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init.sh\n")
+		chmodPaths := "/usr/local/bin/moat-init-dispatch /usr/local/bin/moat-init.sh"
 		if goBin := initbin.Binary(); goBin != nil {
-			contextFiles["moat-commit"] = goBin
-			b.WriteString("COPY moat-commit /usr/local/bin/moat-commit\n")
-			chmodPaths += " /usr/local/bin/moat-commit"
+			contextFiles["moat-init"] = goBin
+			b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
+			chmodPaths += " /usr/local/bin/moat-init"
 		}
 		b.WriteString("RUN chmod +x " + chmodPaths + "\n")
-		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
+		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init-dispatch\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}

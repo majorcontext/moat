@@ -21,11 +21,11 @@ func TestWriteEntrypointDualShip(t *testing.T) {
 	df := result.Dockerfile
 
 	for _, want := range []string{
-		"COPY moat-init-dispatch.sh /usr/local/bin/moat-init\n",
-		"COPY moat-init.sh /usr/local/bin/moat-init-sh\n",
-		"COPY moat-commit /usr/local/bin/moat-commit\n",
-		"RUN chmod +x /usr/local/bin/moat-init /usr/local/bin/moat-init-sh /usr/local/bin/moat-commit\n",
-		"ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n",
+		"COPY moat-init-dispatch.sh /usr/local/bin/moat-init-dispatch\n",
+		"COPY moat-init.sh /usr/local/bin/moat-init.sh\n",
+		"COPY moat-init /usr/local/bin/moat-init\n",
+		"RUN chmod +x /usr/local/bin/moat-init-dispatch /usr/local/bin/moat-init.sh /usr/local/bin/moat-init\n",
+		"ENTRYPOINT [\"/usr/local/bin/moat-init-dispatch\"]\n",
 	} {
 		if !strings.Contains(df, want) {
 			t.Errorf("Dockerfile missing %q\nGenerated Dockerfile:\n%s", want, df)
@@ -38,8 +38,8 @@ func TestWriteEntrypointDualShip(t *testing.T) {
 	if got := string(result.ContextFiles["moat-init-dispatch.sh"]); got != MoatInitDispatcher {
 		t.Error("context file moat-init-dispatch.sh does not carry MoatInitDispatcher")
 	}
-	if got := result.ContextFiles["moat-commit"]; string(got) != string(initbin.Binary()) {
-		t.Error("context file moat-commit does not carry the arch-matched embedded binary")
+	if got := result.ContextFiles["moat-init"]; string(got) != string(initbin.Binary()) {
+		t.Error("context file moat-init does not carry the arch-matched embedded binary")
 	}
 
 	// Offline-build contract: the entrypoint must be materialized from
@@ -63,7 +63,7 @@ func TestWriteEntrypointCompanionNoInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDockerfile error: %v", err)
 	}
-	for _, name := range []string{"moat-init.sh", "moat-init-dispatch.sh", "moat-commit"} {
+	for _, name := range []string{"moat-init.sh", "moat-init-dispatch.sh", "moat-init"} {
 		if _, ok := result.ContextFiles[name]; ok {
 			t.Errorf("context file %s present in a no-init image", name)
 		}
@@ -82,8 +82,8 @@ func TestDispatcherContract(t *testing.T) {
 	for _, want := range []string{
 		`impl="${MOAT_INIT_IMPL:-sh}"`,
 		"unset MOAT_INIT_IMPL MOAT_INIT_LEGACY",
-		"exec /usr/local/bin/moat-commit \"$@\"",
-		"exec /usr/local/bin/moat-init-sh \"$@\"",
+		"exec /usr/local/bin/moat-init \"$@\"",
+		"exec /usr/local/bin/moat-init.sh \"$@\"",
 		"Error: invalid MOAT_INIT_IMPL",
 		"Error: invalid MOAT_INIT_LEGACY",
 	} {
