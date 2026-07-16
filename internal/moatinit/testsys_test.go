@@ -2,6 +2,8 @@ package moatinit
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -35,6 +37,9 @@ type testSys struct {
 	runs    []Cmd
 	runHook func(c Cmd) (int, error)
 
+	pipes    [][2]Cmd
+	pipeHook func(src, dst Cmd) (int, int, error) // nil = run the real pipe
+
 	missingBinaries map[string]bool
 
 	sleeps int
@@ -44,8 +49,14 @@ type testSys struct {
 
 func newTestSys(t *testing.T, euid int, withMoatuser bool) *testSys {
 	t.Helper()
+	root := t.TempDir()
+	// A minimal container-like tree: /tmp always exists (the exclude temp
+	// file lands there).
+	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o777); err != nil {
+		t.Fatal(err)
+	}
 	ts := &testSys{
-		OSSys:           &OSSys{Root: t.TempDir()},
+		OSSys:           &OSSys{Root: root},
 		t:               t,
 		euid:            euid,
 		users:           map[string]User{},
@@ -106,6 +117,14 @@ func (ts *testSys) Run(c Cmd) (int, error) {
 		return ts.runHook(c)
 	}
 	return 0, nil
+}
+
+func (ts *testSys) Pipe(src, dst Cmd) (int, int, error) {
+	ts.pipes = append(ts.pipes, [2]Cmd{src, dst})
+	if ts.pipeHook != nil {
+		return ts.pipeHook(src, dst)
+	}
+	return ts.OSSys.Pipe(src, dst)
 }
 
 func (ts *testSys) Getenv(key string) string { return ts.env[key] }

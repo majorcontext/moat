@@ -53,8 +53,12 @@ func phases() []Phase {
 		{Name: "init-files", Run: initFilesPhase},
 		// clipboard and docker land with the long-lived-children commit.
 		{Name: "git-config", Run: gitConfigPhase},
-		// named-volume-chown and populate-workspace-volume land next;
-		// populate must precede workspace-mcp-json (INIT-11).
+		// The named-volume chown block is inline in the script BEFORE the
+		// populate/mcp/hook tail calls — script order, kept exactly.
+		{Name: "named-volume-chown", Run: namedVolumeChownPhase},
+		// populate must precede workspace-mcp-json (INIT-11): in volume
+		// mode the tar extract would otherwise clobber moat's .mcp.json.
+		{Name: "populate-workspace-volume", Run: populateWorkspaceVolumePhase},
 		{Name: "workspace-mcp-json", Run: workspaceMCPJSONPhase},
 		// pre-run-hook and exec-dispatch land last.
 	}

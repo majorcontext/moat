@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -72,6 +73,13 @@ type Sys interface {
 	CopyTreePreserving(src, dst string) error // cp -rp
 	WalkDir(root string, fn fs.WalkDirFunc) error
 	Getpid() int
+
+	// RealPath maps a container-absolute path to the path a SUBPROCESS must
+	// use to reach it. In production this is the identity; under an
+	// injected test root it prefixes the root, so phases that hand paths to
+	// tar/git/socat (argv or working directory) stay testable against the
+	// same tree the filesystem methods manipulate.
+	RealPath(path string) string
 
 	// Subprocesses.
 	LookPath(file string) (string, error)
@@ -195,6 +203,8 @@ func (s *OSSys) AppendFile(path string, data []byte) error {
 }
 
 func (s *OSSys) Remove(path string) error { return os.Remove(s.path(path)) }
+
+func (s *OSSys) RealPath(path string) string { return s.path(path) }
 
 // CopyFilePreserving mirrors `cp -p src dst`: bytes, mode, and timestamps are
 // preserved (failure is an error); ownership preservation is attempted but,
@@ -321,10 +331,32 @@ func (s *OSSys) ProcessAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
+// lockedWriter serializes writes from the two pipe legs when they share a
+// destination that is not an *os.File (files are handed to the children as
+// fds with no in-process copy goroutine, so os.Stderr needs no locking —
+// but a shared in-memory writer, as tests use, would race).
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
 // Pipe runs `src | dst` and returns both exit codes, mirroring the script's
 // capture of the source tar's status alongside the destination's ($? after a
 // POSIX pipeline only reports the rightmost command).
 func (s *OSSys) Pipe(src, dst Cmd) (int, int, error) {
+	if src.Stderr != nil && src.Stderr == dst.Stderr {
+		if _, isFile := src.Stderr.(*os.File); !isFile {
+			shared := &lockedWriter{w: src.Stderr}
+			src.Stderr = shared
+			dst.Stderr = shared
+		}
+	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		return -1, -1, err
