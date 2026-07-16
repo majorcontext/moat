@@ -32,7 +32,7 @@ test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -race $(ARGS) ./...
 
-test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
+test-e2e: generate-init ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -tags=e2e -timeout=30m $(ARGS) ./internal/e2e/
 
 test-bats: ## Run bats tests for Claude Code hooks

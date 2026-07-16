@@ -12,6 +12,7 @@ type Context struct {
 	Sys    Sys
 	Cfg    *Config
 	Argv   []string  // the user command (the entrypoint's "$@")
+	Stdin  io.Reader // inherited by interactive children (pre_run hook)
 	Stdout io.Writer // inherited by children that surface output (pre_run hook)
 	Stderr io.Writer
 }

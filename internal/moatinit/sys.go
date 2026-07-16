@@ -28,6 +28,7 @@ type Cmd struct {
 	Argv   []string
 	Dir    string    // working directory ("" = inherit)
 	Env    []string  // nil = inherit the current process environment
+	Stdin  io.Reader // nil = /dev/null
 	Stdout io.Writer // nil = discard
 	Stderr io.Writer // nil = discard
 
@@ -311,6 +312,7 @@ func (s *OSSys) Run(c Cmd) (int, error) {
 	}
 	cmd.Dir = c.Dir
 	cmd.Env = c.Env
+	cmd.Stdin = c.Stdin
 	cmd.Stdout = c.Stdout
 	cmd.Stderr = c.Stderr
 	err := cmd.Run()

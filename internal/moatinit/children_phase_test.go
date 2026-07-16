@@ -346,6 +346,17 @@ func TestPreRunHookPhase(t *testing.T) {
 		t.Error("empty hook ran")
 	}
 
+	// EXEC-01 companion: a whitespace-only hook is NOT empty ([ -z ] is
+	// false for " ") — it runs.
+	tsWS := newTestSys(t, 1000, true)
+	ctxWS, _ := newTestContext(tsWS, Config{PreRun: " "})
+	if err := preRunHookPhase(ctxWS); err != nil {
+		t.Fatal(err)
+	}
+	if len(tsWS.runs) != 1 {
+		t.Error("whitespace-only hook did not run")
+	}
+
 	// EXEC-02: non-root runs sh -c in /workspace (child-confined cwd).
 	ts2 := newTestSys(t, 1000, true)
 	ctx2, _ := newTestContext(ts2, Config{PreRun: "npm install"})

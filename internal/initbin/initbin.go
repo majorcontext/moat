@@ -60,11 +60,15 @@ func Binary() []byte {
 }
 
 // IsStub reports whether b is the committed fail-closed placeholder rather
-// than a real cross-compiled entrypoint. Release checks refuse to ship an
-// image whose entrypoint bytes are the stub; the stub itself also fails
-// loudly at runtime (defense in depth — a checksum test alone cannot catch a
-// regenerated-but-defective blob, which is why the release pipeline also
-// execs the binary; see the plan's positive functional gate).
+// than a real cross-compiled entrypoint. Three layers keep a stub from
+// serving as PID 1: the release gate (internal/initbin/gate, wired into the
+// goreleaser before hooks) refuses to release stub bytes and execs the
+// regenerated binary's --plan as a positive functional check; the parity
+// harness skips its go legs when the test binary embeds a stub; and the
+// stub itself fails loudly at runtime — the backstop for channels that
+// bypass generation entirely (`go install`, bare `go build`), where the
+// dispatcher's sh default keeps runs working and MOAT_INIT_IMPL=go fails
+// closed with the stub's message.
 func IsStub(b []byte) bool {
 	return bytes.HasPrefix(b, []byte(stubMarker))
 }
