@@ -236,9 +236,9 @@ func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, 
 
 // volumeOwnershipHelperConfig builds the container config for the ownership helper.
 //
-// The chown command goes in Entrypoint, NOT Cmd. moat-built images set
-// ENTRYPOINT ["/usr/local/bin/moat-init"], which (running as root) drops to moatuser
-// via gosu before exec'ing its arguments — so a Cmd-only helper would run chown as
+// The chown command goes in Entrypoint, NOT Cmd. moat-built images set the
+// moat-init entrypoint, which (running as root) drops to moatuser via gosu
+// before exec'ing its arguments — so a Cmd-only helper would run chown as
 // moatuser (uid 5000), which lacks CAP_CHOWN, and fail with EPERM. Overriding
 // Entrypoint runs chown directly as the root container user. cfg.Image is the run
 // image (already pulled by CreateContainer's ensureImage) and has chown.

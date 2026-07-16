@@ -16,8 +16,8 @@ var MoatInitScript string
 // MoatInitDispatcher selects between the shell and Go entrypoint
 // implementations during the moat-init shell->Go migration window
 // (docs/plans/2026-07-01-moat-init-go-rewrite-plan.md). It is installed as
-// /usr/local/bin/moat-init (the ENTRYPOINT); the script and the Go binary
-// are installed next to it as moat-init-sh and moat-commit.
+// /usr/local/bin/moat-init-dispatch (the ENTRYPOINT); the legacy script and
+// the Go binary are installed next to it as moat-init.sh and moat-init.
 //
 //go:embed scripts/moat-init-dispatch.sh
 var MoatInitDispatcher string
