@@ -65,7 +65,7 @@ func phases() []Phase {
 		{Name: "populate-workspace-volume", Run: populateWorkspaceVolumePhase},
 		{Name: "workspace-mcp-json", Run: workspaceMCPJSONPhase},
 		{Name: "pre-run-hook", Run: preRunHookPhase},
-		// exec-dispatch lands last.
+		{Name: "exec-dispatch", Run: execDispatchPhase},
 	}
 }
 
@@ -80,6 +80,9 @@ func phases() []Phase {
 func Run(ctx *Context) int {
 	for _, p := range phases() {
 		if err := p.Run(ctx); err != nil {
+			if errors.Is(err, errHandoffComplete) {
+				return 0 // test-only: a fake Exec recorded the handoff
+			}
 			var exit exitError
 			if errors.As(err, &exit) {
 				return exit.code

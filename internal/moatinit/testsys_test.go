@@ -4,9 +4,16 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 )
+
+// execCall records one process-handoff request.
+type execCall struct {
+	argv []string
+	env  []string
+}
 
 // chownCall records one (l)chown request so tests can assert ownership
 // behavior without root privileges (the real syscall would fail under go
@@ -46,6 +53,9 @@ type testSys struct {
 	detached   []Cmd
 	detachHook func(c Cmd) (int, error) // nil = fake pid 4242
 	alive      map[int]bool             // ProcessAlive results (default true)
+
+	execs   []execCall
+	execErr error // returned after recording; nil = "handoff succeeded"
 
 	missingBinaries map[string]bool
 
@@ -165,6 +175,24 @@ func (ts *testSys) LookupGroupByGID(gid string) (string, bool) {
 func (ts *testSys) Getenv(key string) string { return ts.env[key] }
 func (ts *testSys) Setenv(key, value string) { ts.env[key] = value }
 func (ts *testSys) Unsetenv(key string)      { delete(ts.env, key) }
+
+func (ts *testSys) Environ() []string {
+	keys := make([]string, 0, len(ts.env))
+	for k := range ts.env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+ts.env[k])
+	}
+	return out
+}
+
+func (ts *testSys) Exec(argv []string, env []string) error {
+	ts.execs = append(ts.execs, execCall{argv: argv, env: env})
+	return ts.execErr
+}
 
 // chowned reports whether a chown for path was recorded.
 func (ts *testSys) chowned(path string) bool {
