@@ -10,6 +10,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/majorcontext/moat/internal/moatinit"
@@ -24,5 +25,20 @@ func main() {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
+
+	// --plan: print the ordered actions the entrypoint would take for this
+	// environment, without performing any of them. A permanent, documented
+	// debugging affordance — and the release pipeline's functional gate.
+	if len(ctx.Argv) > 0 && ctx.Argv[0] == "--plan" {
+		ctx.Argv = ctx.Argv[1:]
+		if len(ctx.Argv) == 0 {
+			ctx.Argv = []string{"<command>"}
+		}
+		for _, line := range moatinit.Plan(ctx) {
+			fmt.Println(line)
+		}
+		return
+	}
+
 	os.Exit(moatinit.Run(ctx))
 }

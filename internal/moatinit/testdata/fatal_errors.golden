@@ -1,0 +1,31 @@
+== unresolvable extra host (exit 1) ==
+Error: moat-init.sh could not resolve 'nope.invalid' for /etc/hosts entry 'moat-proxy'.
+The container's DNS should answer this name. On Docker Desktop, verify that
+'getent hosts nope.invalid' works inside this container.
+== unwritable /etc/hosts (exit 1) ==
+Error: moat-init.sh cannot write moat-proxy to /etc/hosts (required for moat proxy resolution).
+The container user (UID 1000) lacks permission to modify /etc/hosts.
+Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE.
+== docker mutex (exit 1) ==
+Error: MOAT_DOCKER_DIND and MOAT_DOCKER_GID are mutually exclusive
+Use MOAT_DOCKER_GID when mounting host's docker socket
+Use MOAT_DOCKER_DIND when running Docker-in-Docker
+== populate as non-root (exit 1) ==
+moat: populate_workspace_volume must run as root
+== pre_run hook failure (exit 42) ==
+
+moat: pre_run hook failed (exit code 42)
+moat:   command: echo doing-setup; exit 42
+moat:   the pre_run hook runs as moatuser in /workspace before your command.
+moat:   fix the command above, or remove hooks.pre_run from moat.yaml.
+== root without moatuser (exit 1) ==
+Error: Container started as root but moatuser does not exist.
+This is a security issue - running as root defeats container isolation.
+
+If you're using a custom image, ensure it creates a 'moatuser' account:
+  RUN useradd -m -u 5000 -s /bin/bash moatuser
+
+Or run the container with a non-root user:
+  docker run --user 1000:1000 ...
+== populate pipe failure (exit 1) ==
+moat: failed to populate workspace volume (src=2 dst=0)
