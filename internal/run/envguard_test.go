@@ -51,6 +51,28 @@ func TestValidateReservedEnv(t *testing.T) {
 	}
 }
 
+// TestOperatorInitEnv covers the operator-only injection channel: host
+// process env in, container env entries out — and the companion, nothing
+// injected when the host env is clean.
+func TestOperatorInitEnv(t *testing.T) {
+	host := map[string]string{"MOAT_INIT_IMPL": "go", "MOAT_INIT_LEGACY": "", "PATH": "/bin"}
+	got := operatorInitEnv(func(k string) string { return host[k] })
+	if len(got) != 1 || got[0] != "MOAT_INIT_IMPL=go" {
+		t.Errorf("operatorInitEnv = %v, want [MOAT_INIT_IMPL=go]", got)
+	}
+	if got := operatorInitEnv(func(string) string { return "" }); len(got) != 0 {
+		t.Errorf("clean host env injected %v", got)
+	}
+	if got := operatorInitEnv(func(k string) string {
+		if k == "MOAT_INIT_LEGACY" {
+			return "1"
+		}
+		return ""
+	}); len(got) != 1 || got[0] != "MOAT_INIT_LEGACY=1" {
+		t.Errorf("operatorInitEnv = %v, want [MOAT_INIT_LEGACY=1]", got)
+	}
+}
+
 // TestReservedInitVarsUnfiltered pins the division of labor: the reserved
 // dispatcher vars are NOT part of the proxy-var filter (which only runs when
 // a proxy is active and warns-and-skips). They must be rejected by
