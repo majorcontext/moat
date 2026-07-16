@@ -107,6 +107,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 	}
 
+	// Reject reserved entrypoint-dispatcher variables before any resources are
+	// staged. Always on — unlike the isMoatOwnedProxyVar filter below, this
+	// must hold for grantless/proxyless runs too.
+	if err := validateReservedEnv(opts.Config, opts.Env); err != nil {
+		return nil, err
+	}
+
 	opts.Grants = normalizeCopilotGrantNames(opts.Grants)
 	if opts.Config != nil {
 		opts.Config.Grants = normalizeCopilotGrantNames(opts.Config.Grants)
