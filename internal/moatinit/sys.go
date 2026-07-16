@@ -30,6 +30,17 @@ type Cmd struct {
 	Env    []string  // nil = inherit the current process environment
 	Stdout io.Writer // nil = discard
 	Stderr io.Writer // nil = discard
+
+	// LogFile, when set, redirects both stdout and stderr to this file
+	// (container-absolute; re-rooted like other fs paths), truncating it —
+	// the Go form of `>/var/log/dockerd.log 2>&1`. Overrides Stdout/Stderr.
+	LogFile string
+
+	// Timeout, when positive, bounds the run so a hanging probe inside a
+	// bounded retry loop cannot consume the loop's whole budget (plan
+	// Appendix B: per-attempt timeout below the loop budget). A timed-out
+	// command reports a non-zero exit code.
+	Timeout time.Duration
 }
 
 // Sys abstracts every identity, filesystem, subprocess, and DNS operation the
@@ -290,7 +301,14 @@ func (s *OSSys) WalkDir(root string, fn fs.WalkDirFunc) error {
 func (s *OSSys) LookPath(file string) (string, error) { return exec.LookPath(file) }
 
 func (s *OSSys) Run(c Cmd) (int, error) {
-	cmd := exec.Command(c.Argv[0], c.Argv[1:]...)
+	var cmd *exec.Cmd
+	if c.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
+	} else {
+		cmd = exec.Command(c.Argv[0], c.Argv[1:]...)
+	}
 	cmd.Dir = c.Dir
 	cmd.Env = c.Env
 	cmd.Stdout = c.Stdout
@@ -301,7 +319,7 @@ func (s *OSSys) Run(c Cmd) (int, error) {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), nil
+		return exitCodeOf(err), nil
 	}
 	return -1, err
 }
@@ -320,6 +338,16 @@ func (s *OSSys) StartDetached(c Cmd) (int, error) {
 	cmd.Env = c.Env
 	cmd.Stdout = c.Stdout
 	cmd.Stderr = c.Stderr
+	if c.LogFile != "" {
+		f, err := os.OpenFile(s.path(c.LogFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return 0, err
+		}
+		// The child inherits the fd; our copy closes after Start.
+		defer f.Close()
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -393,12 +421,18 @@ func (s *OSSys) Pipe(src, dst Cmd) (int, int, error) {
 	return srcRC, dstRC, nil
 }
 
+// exitCodeOf translates a Wait error into a shell-style exit code,
+// including the 128+signal convention for signal-terminated children (the
+// shell's $? would report 128+n; exec.ExitError.ExitCode() reports -1).
 func exitCodeOf(err error) int {
 	if err == nil {
 		return 0
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return 128 + int(ws.Signal())
+		}
 		return exitErr.ExitCode()
 	}
 	return -1

@@ -15,6 +15,12 @@ func isDir(sys Sys, path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// isSocket mirrors `[ -S path ]`.
+func isSocket(sys Sys, path string) bool {
+	info, err := sys.Stat(path)
+	return err == nil && info.Mode()&fs.ModeSocket != 0
+}
+
 // moatuserExists mirrors `id moatuser >/dev/null 2>&1` (EXEC-14: every
 // branch uses the same existence check).
 func moatuserExists(sys Sys) bool {

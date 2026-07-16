@@ -21,6 +21,7 @@ func main() {
 		Sys:    sys,
 		Cfg:    moatinit.LoadConfig(sys),
 		Argv:   os.Args[1:],
+		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
 	os.Exit(moatinit.Run(ctx))

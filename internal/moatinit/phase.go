@@ -11,7 +11,8 @@ import (
 type Context struct {
 	Sys    Sys
 	Cfg    *Config
-	Argv   []string // the user command (the entrypoint's "$@")
+	Argv   []string  // the user command (the entrypoint's "$@")
+	Stdout io.Writer // inherited by children that surface output (pre_run hook)
 	Stderr io.Writer
 }
 
@@ -45,14 +46,17 @@ type Phase struct {
 func phases() []Phase {
 	return []Phase{
 		{Name: "extra-hosts", Run: extraHostsPhase},
-		// ssh-agent-bridge lands with the long-lived-children commit.
+		{Name: "ssh-agent-bridge", Run: sshAgentBridgePhase},
 		{Name: "claude-staging", Run: claudeStagingPhase},
 		{Name: "codex-staging", Run: codexStagingPhase},
 		{Name: "gemini-staging", Run: geminiStagingPhase},
 		{Name: "copilot-staging", Run: copilotStagingPhase},
 		{Name: "init-files", Run: initFilesPhase},
-		// clipboard and docker land with the long-lived-children commit.
+		// The clipboard branch precedes the git block, which precedes
+		// docker setup (GIT-08).
+		{Name: "clipboard", Run: clipboardPhase},
 		{Name: "git-config", Run: gitConfigPhase},
+		{Name: "docker-setup", Run: dockerSetupPhase},
 		// The named-volume chown block is inline in the script BEFORE the
 		// populate/mcp/hook tail calls — script order, kept exactly.
 		{Name: "named-volume-chown", Run: namedVolumeChownPhase},
@@ -60,7 +64,8 @@ func phases() []Phase {
 		// mode the tar extract would otherwise clobber moat's .mcp.json.
 		{Name: "populate-workspace-volume", Run: populateWorkspaceVolumePhase},
 		{Name: "workspace-mcp-json", Run: workspaceMCPJSONPhase},
-		// pre-run-hook and exec-dispatch land last.
+		{Name: "pre-run-hook", Run: preRunHookPhase},
+		// exec-dispatch lands last.
 	}
 }
 
