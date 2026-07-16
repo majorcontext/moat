@@ -44,11 +44,19 @@ type Phase struct {
 // user command without the privilege-drop contract.
 func phases() []Phase {
 	return []Phase{
-		// Commit 2–6 land: extra-hosts, ssh-agent-bridge, claude-staging,
-		// codex-staging, gemini-staging, copilot-staging, init-files,
-		// clipboard, git-config, docker, named-volume-chown,
-		// populate-workspace-volume, workspace-mcp-json, pre-run-hook,
-		// exec-dispatch.
+		{Name: "extra-hosts", Run: extraHostsPhase},
+		// ssh-agent-bridge lands with the long-lived-children commit.
+		{Name: "claude-staging", Run: claudeStagingPhase},
+		{Name: "codex-staging", Run: codexStagingPhase},
+		{Name: "gemini-staging", Run: geminiStagingPhase},
+		{Name: "copilot-staging", Run: copilotStagingPhase},
+		{Name: "init-files", Run: initFilesPhase},
+		// clipboard and docker land with the long-lived-children commit.
+		{Name: "git-config", Run: gitConfigPhase},
+		// named-volume-chown and populate-workspace-volume land next;
+		// populate must precede workspace-mcp-json (INIT-11).
+		{Name: "workspace-mcp-json", Run: workspaceMCPJSONPhase},
+		// pre-run-hook and exec-dispatch land last.
 	}
 }
 

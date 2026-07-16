@@ -11,10 +11,11 @@ import (
 // privilege-drop contract) — it exits 1 with a loud FATAL instead.
 func TestRunFailsClosedWithoutExecPhase(t *testing.T) {
 	var stderr strings.Builder
-	sys := NewSys()
+	// An empty Config (not LoadConfig): the test process may itself run
+	// inside a moat sandbox with live MOAT_* variables set.
 	ctx := &Context{
-		Sys:    sys,
-		Cfg:    LoadConfig(sys),
+		Sys:    NewSys(),
+		Cfg:    &Config{},
 		Argv:   []string{"true"},
 		Stderr: &stderr,
 	}
