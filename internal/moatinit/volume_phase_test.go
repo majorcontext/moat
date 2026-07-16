@@ -97,6 +97,31 @@ func TestPopulateWorkspaceVolumeRealTar(t *testing.T) {
 	}
 }
 
+// TestPopulateWorkspaceVolumeEmptyExcludes is the WS-06 companion to the
+// exclude-applying test: an empty exclude file excludes nothing, so the
+// whole staging tree lands in /workspace.
+func TestPopulateWorkspaceVolumeEmptyExcludes(t *testing.T) {
+	if _, err := exec.LookPath("tar"); err != nil {
+		t.Skip("tar not installed")
+	}
+	ts := newTestSys(t, 0, true)
+	setupStagingTree(t, ts)
+	ctx, _ := newTestContext(ts, Config{WorkspaceVolume: "1", Home: "/root"})
+	if err := populateWorkspaceVolumePhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"/workspace/main.go",
+		"/workspace/node_modules/pkg.json",
+		"/workspace/dist/sub/bundle.js",
+		"/workspace/dist/keep/artifact.txt",
+	} {
+		if !exists(ts, p) {
+			t.Errorf("%s missing with empty excludes", p)
+		}
+	}
+}
+
 func TestPopulateWorkspaceVolumeGate(t *testing.T) {
 	// WS-01: any non-"1" value is a no-op — checked BEFORE the root guard,
 	// so a disabled populate as non-root is fine.

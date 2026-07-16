@@ -22,6 +22,7 @@ func main() {
 		Sys:    sys,
 		Cfg:    moatinit.LoadConfig(sys),
 		Argv:   os.Args[1:],
+		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}

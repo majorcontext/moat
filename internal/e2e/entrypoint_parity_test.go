@@ -12,6 +12,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/initbin"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
 )
@@ -40,7 +41,15 @@ env | sort \
   | sed -E "s#^(MOAT_SSH_TCP_ADDR)=.*#\1=REDACTED#" \
   | sed -E "s#^(SSH_AUTH_SOCK)=.*#\1=REDACTED#"
 echo "[hosts]"
-cat /etc/hosts 2>/dev/null || echo none
+# Docker writes a unique self-entry "<ip> <container-id>" into every
+# container's /etc/hosts; drop the self line (each leg is its own
+# container) so the moat-appended entries are what gets compared.
+SELF="$(cat /etc/hostname 2>/dev/null)"
+if [ -n "$SELF" ]; then
+  grep -v "$SELF" /etc/hosts 2>/dev/null || echo none
+else
+  cat /etc/hosts 2>/dev/null || echo none
+fi
 echo "[gitconfig]"
 { git config --system --list 2>/dev/null || echo none; } | sort
 echo "[tree]"
@@ -75,6 +84,12 @@ echo MOAT-MANIFEST-END
 // completion, and returns the extracted manifest plus the full log text.
 func runEntrypointLeg(t *testing.T, impl, name string, opts run.Options) (manifest, allLogs string, waitErr error) {
 	t.Helper()
+	if impl == "go" && initbin.IsStub(initbin.Binary()) {
+		// The test binary embeds the same initbin blobs writeEntrypoint
+		// ships: a stub go leg would exec the fail-closed placeholder as
+		// PID 1 and fail confusingly instead of exercising parity.
+		t.Skip("embedded moat-init binary is the committed stub — run 'make generate-init' (or 'make test-e2e', which does) first")
+	}
 	t.Setenv("MOAT_INIT_IMPL", impl)
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -292,7 +307,8 @@ func TestEntrypointParityPreRunFailure(t *testing.T) {
 			if strings.Contains(logs, "SHOULD-NOT-RUN") {
 				t.Error("user command ran after a failing pre_run hook")
 			}
-			if waitErr == nil || !strings.Contains(waitErr.Error(), "7") {
+			// "exit code 7" (not a bare "7", which 17/27/127 would satisfy).
+			if waitErr == nil || !strings.Contains(waitErr.Error(), "exit code 7") {
 				t.Errorf("wait error = %v, want the hook's literal exit code 7", waitErr)
 			}
 		})

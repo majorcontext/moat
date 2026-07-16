@@ -6,6 +6,9 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # Ship-refusal + functional gate for the embedded moat-init binaries:
+    # refuses stub/stale blobs and execs the regenerated binary's --plan.
+    - go run ./internal/initbin/gate
 
 builds:
   - main: ./cmd/moat

@@ -83,7 +83,10 @@ func stageAgent(ctx *Context, agent, staging, agentDir string, entries []stagedE
 	}
 
 	home := targetHome(sys.Geteuid(), moatuserExists(sys), cfg.Home)
-	destDir := filepath.Join(home, agentDir)
+	// Shell-style concatenation, not filepath.Join: the script builds
+	// "$TARGET_HOME/.claude", so an empty HOME yields the root-anchored
+	// "/.claude" (which then fails loudly), never a cwd-relative path.
+	destDir := home + "/" + agentDir
 	if err := sys.MkdirAll(destDir, 0o755); err != nil {
 		return fatalPhaseError(ctx, "creating "+destDir, err)
 	}
@@ -95,16 +98,16 @@ func stageAgent(ctx *Context, agent, staging, agentDir string, entries []stagedE
 			if !isDir(sys, src) {
 				continue
 			}
-			if err := sys.CopyTreePreserving(src, filepath.Join(destDir, e.name)); err != nil {
+			if err := sys.CopyTreePreserving(src, destDir+"/"+e.name); err != nil {
 				return fatalPhaseError(ctx, "staging "+agent+" "+e.name, err)
 			}
 		default:
 			if !isFile(sys, src) {
 				continue
 			}
-			dst := filepath.Join(destDir, e.name)
+			dst := destDir + "/" + e.name
 			if e.home {
-				dst = filepath.Join(home, e.name)
+				dst = home + "/" + e.name
 			}
 			if err := sys.CopyFilePreserving(src, dst); err != nil {
 				return fatalPhaseError(ctx, "staging "+agent+" "+e.name, err)
@@ -126,7 +129,7 @@ func stageAgent(ctx *Context, agent, staging, agentDir string, entries []stagedE
 				if !e.home {
 					continue
 				}
-				dst := filepath.Join(home, e.name)
+				dst := home + "/" + e.name
 				if isFile(sys, dst) {
 					_ = sys.Chown(dst, u.UID, u.GID)
 				}

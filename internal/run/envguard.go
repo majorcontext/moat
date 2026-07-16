@@ -37,14 +37,21 @@ func isReservedInitVar(name string) bool {
 }
 
 // validateReservedEnv rejects reserved entrypoint-dispatcher variables in
-// user-supplied environment sources (moat.yaml env: and -e/--env flags). An
-// -e entry without '=' is a host-passthrough form and is matched on its full
-// name.
+// every user-supplied environment source: moat.yaml env:, moat.yaml
+// secrets: (secret KEYS are user-chosen and appended to the container env
+// verbatim, so a `secrets: {MOAT_INIT_IMPL: env://X}` entry would otherwise
+// smuggle the switch past the env guard), and -e/--env flags. An -e entry
+// without '=' is a host-passthrough form and is matched on its full name.
 func validateReservedEnv(cfg *config.Config, explicitEnv []string) error {
 	if cfg != nil {
 		for k := range cfg.Env {
 			if isReservedInitVar(k) {
 				return reservedEnvError(k, "moat.yaml env")
+			}
+		}
+		for k := range cfg.Secrets {
+			if isReservedInitVar(k) {
+				return reservedEnvError(k, "moat.yaml secrets")
 			}
 		}
 	}

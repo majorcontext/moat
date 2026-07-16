@@ -30,6 +30,12 @@ func TestValidateReservedEnv(t *testing.T) {
 		{"empty value in -e", nil, []string{"MOAT_INIT_IMPL="}, "MOAT_INIT_IMPL is reserved"},
 		// Companion: prefix/suffix near-misses are not reserved.
 		{"near-miss names pass", &config.Config{Env: map[string]string{"MOAT_INIT_IMPL_X": "1", "XMOAT_INIT_IMPL": "1"}}, []string{"MOAT_INIT=1"}, ""},
+		// Secret KEYS are user-chosen and land in the container env
+		// verbatim — the guard must cover them too.
+		{"MOAT_INIT_IMPL as secret key", &config.Config{Secrets: map[string]string{"MOAT_INIT_IMPL": "env://X"}}, nil, "MOAT_INIT_IMPL is reserved"},
+		{"MOAT_INIT_LEGACY as secret key", &config.Config{Secrets: map[string]string{"moat_init_legacy": "env://X"}}, nil, "is reserved"},
+		// Companion: benign secret keys pass.
+		{"benign secret keys pass", &config.Config{Secrets: map[string]string{"API_KEY": "env://X"}}, nil, ""},
 	}
 
 	for _, tt := range tests {

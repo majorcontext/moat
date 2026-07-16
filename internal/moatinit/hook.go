@@ -29,6 +29,7 @@ func preRunHookPhase(ctx *Context) error {
 		rc, err := sys.Run(Cmd{
 			Argv:   []string{"sh", "-c", cfg.PreRun},
 			Dir:    sys.RealPath("/workspace"),
+			Stdin:  ctx.Stdin,
 			Stdout: ctx.Stdout,
 			Stderr: ctx.Stderr,
 		})
@@ -41,6 +42,7 @@ func preRunHookPhase(ctx *Context) error {
 	case moatuserExists(sys):
 		rc, err := sys.Run(Cmd{
 			Argv:   []string{"gosu", "moatuser", "sh", "-c", "cd /workspace && " + cfg.PreRun},
+			Stdin:  ctx.Stdin,
 			Stdout: ctx.Stdout,
 			Stderr: ctx.Stderr,
 		})

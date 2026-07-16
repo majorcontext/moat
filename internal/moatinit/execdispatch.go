@@ -37,6 +37,13 @@ func execDispatchPhase(ctx *Context) error {
 	switch {
 	case sys.Geteuid() != 0:
 		// Already non-root (e.g. --user was passed to docker run).
+		// With no command at all, the script's `exec "$@"` is a no-op and
+		// the script simply ends: exit 0 without running anything. (On the
+		// root path below, `exec gosu moatuser` with no command is handed
+		// to gosu, whose own usage error is the parity behavior.)
+		if len(ctx.Argv) == 0 {
+			return exitError{code: 0}
+		}
 		return execFailure(ctx, ctx.Argv, sys.Exec(ctx.Argv, env))
 	case moatuserExists(sys):
 		// Running as root, moatuser exists - drop privileges.

@@ -105,8 +105,8 @@ func dindSetup(ctx *Context) error {
 // port of `tail -20 /var/log/dockerd.log 2>/dev/null || true`).
 func tailDockerdLog(ctx *Context) {
 	data, err := ctx.Sys.ReadFile("/var/log/dockerd.log")
-	if err != nil {
-		return
+	if err != nil || len(data) == 0 {
+		return // tail of a missing/empty log prints nothing
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(lines) > 20 {
