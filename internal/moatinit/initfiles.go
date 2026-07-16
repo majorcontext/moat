@@ -2,6 +2,7 @@ package moatinit
 
 import (
 	"encoding/base64"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,6 +54,78 @@ func splitInitRecord(line string) (path, content string) {
 	content = strings.TrimLeft(line[idx:], "\t")
 	content = strings.TrimRight(content, "\t")
 	return path, content
+}
+
+// initFilesPhase writes the MOAT_INIT_FILES records to disk (INIT region):
+// per record, create the parent chain (0755 on the immediate parent, even a
+// pre-existing stricter one — parity), decode the payload to a buffer,
+// write the file, force 0600, and on the root+moatuser path chown the file
+// plus every ancestor directory up to but excluding INIT_HOME (the walk
+// deliberately climbs to '/' for out-of-home paths — parity).
+//
+// Decode/mkdir/write/chmod failures are fatal and abort before exec: a
+// partial secret or a world-readable credential file must never start the
+// user command. Chown failures are best-effort and silent.
+//
+// After the loop the variable is removed from the process environment (the
+// script's `unset MOAT_INIT_FILES`) so no later child — the pre_run hook,
+// gosu, the exec'd command — inherits the base64 secret payload (INIT-10).
+func initFilesPhase(ctx *Context) error {
+	cfg, sys := ctx.Cfg, ctx.Sys
+	if cfg.InitFiles == "" {
+		return nil // INIT-01: no work, no ownership resolution
+	}
+	chown, initHome := initFilesOwnership(sys.Geteuid(), moatuserExists(sys), cfg.Home)
+	var owner User
+	if chown {
+		u, ok := sys.LookupUser("moatuser")
+		if !ok {
+			chown = false
+		}
+		owner = u
+	}
+
+	for _, rec := range parseInitFiles(cfg.InitFiles) {
+		if rec.path == "" {
+			continue // INIT-04: harmless trailing-newline record
+		}
+		// Decode first (buffer, not stream): an invalid payload aborts
+		// before any directory or file is touched (Appendix B P1 — the
+		// shell could leave a truncated file; failing earlier is the
+		// sanctioned fail-closed ordering of the same fatal).
+		data, err := decodeInitContent(rec.content)
+		if err != nil {
+			return fatalPhaseError(ctx, "decoding init file "+rec.path, err)
+		}
+		dir := filepath.Dir(rec.path)
+		if err := sys.MkdirAll(dir, 0o755); err != nil {
+			return fatalPhaseError(ctx, "creating "+dir, err)
+		}
+		// chmod 755 applies to the immediate parent only, including a
+		// pre-existing one at a stricter mode (INIT-05, Appendix B P2 —
+		// documented parity, not an accident).
+		if err := sys.Chmod(dir, 0o755); err != nil {
+			return fatalPhaseError(ctx, "setting mode on "+dir, err)
+		}
+		if err := sys.WriteFile(rec.path, data, 0o600); err != nil {
+			return fatalPhaseError(ctx, "writing "+rec.path, err)
+		}
+		// Force 0600 even when the file pre-existed at a wider mode
+		// (WriteFile only applies the mode at creation — INIT-07).
+		if err := sys.Chmod(rec.path, 0o600); err != nil {
+			return fatalPhaseError(ctx, "restricting "+rec.path, err)
+		}
+
+		if chown {
+			_ = sys.Chown(rec.path, owner.UID, owner.GID)
+			for d := dir; d != "/" && d != "." && d != initHome; d = filepath.Dir(d) {
+				_ = sys.Chown(d, owner.UID, owner.GID)
+			}
+		}
+	}
+
+	sys.Unsetenv("MOAT_INIT_FILES")
+	return nil
 }
 
 // decodeInitContent decodes a record's base64 payload (INIT-06). Go's
