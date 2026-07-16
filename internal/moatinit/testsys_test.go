@@ -27,6 +27,9 @@ type testSys struct {
 	euid  int
 	users map[string]User
 
+	groupsByName map[string]string // name -> gid
+	groupsByGID  map[string]string // gid -> name
+
 	chowns   []chownCall
 	chownErr error // returned (after recording) to prove best-effort paths
 
@@ -39,6 +42,10 @@ type testSys struct {
 
 	pipes    [][2]Cmd
 	pipeHook func(src, dst Cmd) (int, int, error) // nil = run the real pipe
+
+	detached   []Cmd
+	detachHook func(c Cmd) (int, error) // nil = fake pid 4242
+	alive      map[int]bool             // ProcessAlive results (default true)
 
 	missingBinaries map[string]bool
 
@@ -60,10 +67,13 @@ func newTestSys(t *testing.T, euid int, withMoatuser bool) *testSys {
 		t:               t,
 		euid:            euid,
 		users:           map[string]User{},
+		groupsByName:    map[string]string{},
+		groupsByGID:     map[string]string{},
 		resolve4:        map[string]string{},
 		resolveAny:      map[string]string{},
 		missingBinaries: map[string]bool{},
 		env:             map[string]string{},
+		alive:           map[int]bool{},
 	}
 	if withMoatuser {
 		ts.users["moatuser"] = User{UID: 5000, GID: 5000}
@@ -125,6 +135,31 @@ func (ts *testSys) Pipe(src, dst Cmd) (int, int, error) {
 		return ts.pipeHook(src, dst)
 	}
 	return ts.OSSys.Pipe(src, dst)
+}
+
+func (ts *testSys) StartDetached(c Cmd) (int, error) {
+	ts.detached = append(ts.detached, c)
+	if ts.detachHook != nil {
+		return ts.detachHook(c)
+	}
+	return 4242, nil
+}
+
+func (ts *testSys) ProcessAlive(pid int) bool {
+	if v, ok := ts.alive[pid]; ok {
+		return v
+	}
+	return true
+}
+
+func (ts *testSys) LookupGroupByName(name string) (string, bool) {
+	gid, ok := ts.groupsByName[name]
+	return gid, ok
+}
+
+func (ts *testSys) LookupGroupByGID(gid string) (string, bool) {
+	name, ok := ts.groupsByGID[gid]
+	return name, ok
 }
 
 func (ts *testSys) Getenv(key string) string { return ts.env[key] }
