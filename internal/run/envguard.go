@@ -60,6 +60,23 @@ func validateReservedEnv(cfg *config.Config, explicitEnv []string) error {
 	return nil
 }
 
+// operatorInitEnv returns the entrypoint-dispatcher variables to inject
+// into the container, read from the moat PROCESS's own environment — the
+// operator-only channel. Users cannot set these through moat.yaml or -e
+// (validateReservedEnv rejects them); an operator exports them on the host
+// to select the entrypoint implementation: the parity harness drives both
+// legs this way, and MOAT_INIT_LEGACY=1 is the one-release rollback lever
+// after the Go cutover.
+func operatorInitEnv(getenv func(string) string) []string {
+	var env []string
+	for _, key := range reservedInitEnvVars {
+		if v := getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
+}
+
 func reservedEnvError(name, source string) error {
 	return fmt.Errorf("%s is reserved for moat's entrypoint dispatcher and cannot be set via %s.\n"+
 		"It selects which container entrypoint implementation runs and is managed by moat itself.\n"+
