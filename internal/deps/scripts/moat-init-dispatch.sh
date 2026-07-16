@@ -3,7 +3,7 @@
 #
 # Selects which moat-init implementation runs as PID 1:
 #   /usr/local/bin/moat-init-sh  - the original shell entrypoint
-#   /usr/local/bin/moat-init-go  - the Go entrypoint (cmd/moat-init)
+#   /usr/local/bin/moat-commit  - the Go entrypoint (cmd/moat-init)
 #
 # MOAT_INIT_IMPL and MOAT_INIT_LEGACY are operator-only controls injected by
 # the moat host binary; run.Create() rejects them in moat.yaml env and -e
@@ -39,6 +39,6 @@ esac
 unset MOAT_INIT_IMPL MOAT_INIT_LEGACY
 
 if [ "$impl" = "go" ]; then
-  exec /usr/local/bin/moat-init-go "$@"
+  exec /usr/local/bin/moat-commit "$@"
 fi
 exec /usr/local/bin/moat-init-sh "$@"

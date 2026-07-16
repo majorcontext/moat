@@ -620,7 +620,7 @@ func formatHookCommand(cmd string) string {
 //
 // During the shell->Go migration window the ENTRYPOINT is a dispatcher that
 // selects between the shell script (moat-init-sh, the default) and the Go
-// binary (moat-init-go) via the operator-only MOAT_INIT_IMPL /
+// binary (moat-commit) via the operator-only MOAT_INIT_IMPL /
 // MOAT_INIT_LEGACY variables, so one cached image carries both
 // implementations. The Go binary is arch-matched: run images are always
 // built for the host's own architecture, so the runtime.GOARCH blob from
@@ -634,9 +634,9 @@ func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode,
 		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init-sh\n")
 		chmodPaths := "/usr/local/bin/moat-init /usr/local/bin/moat-init-sh"
 		if goBin := initbin.Binary(); goBin != nil {
-			contextFiles["moat-init-go"] = goBin
-			b.WriteString("COPY moat-init-go /usr/local/bin/moat-init-go\n")
-			chmodPaths += " /usr/local/bin/moat-init-go"
+			contextFiles["moat-commit"] = goBin
+			b.WriteString("COPY moat-commit /usr/local/bin/moat-commit\n")
+			chmodPaths += " /usr/local/bin/moat-commit"
 		}
 		b.WriteString("RUN chmod +x " + chmodPaths + "\n")
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")

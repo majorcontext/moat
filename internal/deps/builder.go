@@ -126,7 +126,7 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 // The "moat-init-v2" label is a deliberate salt bump: images cached before
 // the dispatcher existed hashed only the script under the "moat-init" label,
 // and a warm-cache lookup must not resolve to a pre-dispatcher image that
-// lacks the moat-init-go/moat-init-sh split. Note this re-keys the `moat
+// lacks the moat-commit/moat-init-sh split. Note this re-keys the `moat
 // run` build/lookup path only — a workflow pinning a concrete moat/run:<hash>
 // tag still resolves the old image and must re-tag/rebuild at cutover.
 func initHashComponent() string {
