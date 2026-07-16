@@ -173,6 +173,33 @@ func TestExecDispatchEnvScrub(t *testing.T) {
 	}
 }
 
+func TestExecDispatchEmptyArgv(t *testing.T) {
+	// Non-root with no command: the script's bare `exec` is a no-op and the
+	// script simply ends — exit 0, nothing exec'd (and no panic).
+	ts := newTestSys(t, 1000, false)
+	ctx, _ := newTestContext(ts, Config{Home: "/tmp/h"})
+	ctx.Argv = nil
+	err := execDispatchPhase(ctx)
+	if exit, ok := err.(exitError); !ok || exit.code != 0 {
+		t.Fatalf("err = %v, want exitError{0}", err)
+	}
+	if len(ts.execs) != 0 {
+		t.Error("empty argv still exec'd something on the non-root path")
+	}
+
+	// Root+moatuser with no command: `exec gosu moatuser` runs and gosu
+	// itself reports the missing command (parity — Go does not pre-empt it).
+	ts2 := newTestSys(t, 0, true)
+	ctx2, _ := newTestContext(ts2, Config{Home: "/root"})
+	ctx2.Argv = nil
+	if err := execDispatchPhase(ctx2); err != errHandoffComplete {
+		t.Fatalf("err = %v, want handoff to gosu", err)
+	}
+	if got := strings.Join(ts2.execs[0].argv, " "); got != "gosu moatuser" {
+		t.Errorf("argv = %q, want bare 'gosu moatuser'", got)
+	}
+}
+
 func TestExecDispatchExecFailureCodes(t *testing.T) {
 	// Shell parity for a failed exec: 127 when the command is not found.
 	ts := newTestSys(t, 1000, false)

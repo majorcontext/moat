@@ -81,9 +81,15 @@ func TestDecodeInitContent(t *testing.T) {
 		t.Errorf("decodeInitContent(\"\") = (%q, %v), want empty, nil", got, err)
 	}
 
-	// Wrapped payloads (embedded CR/LF) decode like coreutils base64 -d.
-	if got, err := decodeInitContent("YW\r\nJj"); err != nil || string(got) != "abc" {
-		t.Errorf("wrapped payload = (%q, %v), want (abc, nil)", got, err)
+	// Newline-wrapped payloads decode like coreutils base64 -d...
+	if got, err := decodeInitContent("YW\nJj"); err != nil || string(got) != "abc" {
+		t.Errorf("newline-wrapped payload = (%q, %v), want (abc, nil)", got, err)
+	}
+	// ...but carriage returns are invalid input, exactly as base64 -d
+	// rejects them (a CRLF-joined record must fail closed, not silently
+	// decode where the shell would abort).
+	if _, err := decodeInitContent("YW\r\nJj"); err == nil {
+		t.Error("CR-tainted payload decoded; base64 -d rejects it")
 	}
 
 	// Companion: invalid base64 fails closed (the phase aborts before any
