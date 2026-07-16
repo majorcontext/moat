@@ -1,4 +1,4 @@
-.PHONY: all help build test test-unit test-e2e test-bats lint fix clean coverage snapshot
+.PHONY: all help build build-cli generate-init restore-init-stubs test test-unit test-e2e test-bats lint fix clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -15,11 +15,17 @@ help: ## Show this help message
 	@echo "  make test-unit ARGS='-run TestName'           # Run specific unit test"
 	@echo "  make test-unit ARGS='-run TestName ./internal/proxy'"  # Run test in specific package"
 
-build: ## Build the project
+build: generate-init ## Build the project (regenerates the embedded moat-init binaries)
 	go build ./...
 
-build-cli: ## Build the CLI binary ./moat
+build-cli: generate-init ## Build the CLI binary ./moat
 	go build -ldflags "-s -w -X github.com/majorcontext/moat/cmd/moat/cli.version=dev -X github.com/majorcontext/moat/cmd/moat/cli.commit=$$(git rev-parse --short HEAD) -X github.com/majorcontext/moat/cmd/moat/cli.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o moat ./cmd/moat
+
+generate-init: ## Cross-compile cmd/moat-init into internal/initbin/embed (over the committed stubs)
+	go generate ./internal/initbin
+
+restore-init-stubs: ## Restore the committed moat-init stub blobs after a local build
+	git checkout -- internal/initbin/embed internal/initbin/checksums.txt
 
 test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 
