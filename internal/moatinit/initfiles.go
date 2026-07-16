@@ -128,15 +128,23 @@ func initFilesPhase(ctx *Context) error {
 	return nil
 }
 
-// decodeInitContent decodes a record's base64 payload (INIT-06). Go's
-// StdEncoding decoder already ignores \r and \n like coreutils `base64 -d`
-// (embedded newlines cannot occur here anyway — a newline would split the
-// record), and rejects other non-alphabet bytes exactly as `base64 -d`
-// rejects "invalid input". Decoding happens to a buffer BEFORE any file is
-// touched, so an invalid payload aborts fail-closed without leaving a
-// partial secret on disk (plan Appendix B P1; the shell's `base64 -d >
-// "$filepath"` could leave a truncated file behind before aborting — the
-// buffer-first port is the sanctioned hardening of that same fatal path).
+// decodeInitContent decodes a record's base64 payload (INIT-06) with
+// coreutils `base64 -d` acceptance semantics: newlines are tolerated
+// anywhere (they cannot occur inside a record anyway — a newline splits the
+// record), but carriage returns are INVALID INPUT — Go's decoder would
+// silently strip \r where the shell fails closed (a CRLF-joined
+// MOAT_INIT_FILES leaves a trailing \r on each payload), and the
+// differential shell-parity harness pins that divergence. All other
+// non-alphabet bytes are rejected exactly like `base64 -d`.
+//
+// Decoding happens to a buffer BEFORE any file is touched, so an invalid
+// payload aborts fail-closed without leaving a partial secret on disk (plan
+// Appendix B P1; the shell's `base64 -d > "$filepath"` can leave a
+// truncated file behind before aborting — the buffer-first port is the
+// sanctioned hardening of that same fatal path).
 func decodeInitContent(content string) ([]byte, error) {
+	if strings.ContainsRune(content, '\r') {
+		return nil, base64.CorruptInputError(strings.IndexByte(content, '\r'))
+	}
 	return base64.StdEncoding.DecodeString(content)
 }

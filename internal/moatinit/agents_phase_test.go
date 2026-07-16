@@ -197,6 +197,22 @@ func TestCopilotStaging(t *testing.T) {
 	}
 }
 
+func TestAgentStagingEmptyHomeStaysRootAnchored(t *testing.T) {
+	// The script builds "$TARGET_HOME/.codex" by concatenation, so an empty
+	// HOME yields the root-anchored "/.codex" — never a cwd-relative path.
+	// Under the injected root that absolute path is creatable, proving the
+	// destination stayed anchored.
+	ts := newTestSys(t, 1000, false)
+	staging := stageFile(t, ts, "mnt/codex-init", "config.toml", 0o644, "cfg")
+	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: ""})
+	if err := codexStagingPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(ts, "/.codex/config.toml") {
+		t.Error("empty HOME did not stage to the root-anchored /.codex")
+	}
+}
+
 func TestAgentBlockIndependence(t *testing.T) {
 	// AGENT-BLOCK-INDEPENDENCE-ORDER: with only Codex set, .claude and
 	// .gemini are absent; blocks are guarded solely by their own var.
