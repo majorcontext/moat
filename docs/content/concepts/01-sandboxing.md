@@ -52,6 +52,18 @@ When using `docker+gvisor`, the container runs inside gVisor, but Docker-in-Dock
 
 Both modes require Docker as the container runtime. Apple containers do not support Docker socket mounting or privileged mode. See [Dependencies](../reference/06-dependencies.md#docker-dependencies) for configuration details.
 
+## Container startup (the moat-init entrypoint)
+
+Every Moat container starts through the `moat-init` entrypoint, which runs before your command to set up features declared in `moat.yaml`: `/etc/hosts` entries for the proxy, the SSH agent bridge, agent config staging (Claude/Codex/Gemini/Copilot), provider credential files, git configuration, Docker access, workspace volume population, and the `pre_run` hook. Its final act is dropping privileges (via `gosu`) to the non-root `moatuser` account and replacing itself with your command.
+
+Two implementations of the entrypoint ship in every image during the current migration window: the original shell script and a Go binary with identical behavior. A dispatcher selects between them; the shell implementation is the default. `MOAT_INIT_IMPL` and `MOAT_INIT_LEGACY` are reserved control variables managed by Moat itself — setting them in `moat.yaml` `env:` or via `-e` fails the run.
+
+The Go implementation supports a dry-run: running `moat-init-go --plan` inside a container prints the ordered actions the entrypoint would take for the current environment — one line per decision — without performing any of them. This is useful when debugging why a feature did or did not activate:
+
+```bash
+moat exec <agent> -- /usr/local/bin/moat-init-go --plan
+```
+
 ## Limitations
 
 Container isolation is not a security boundary against a determined attacker. It provides:
