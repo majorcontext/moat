@@ -150,7 +150,7 @@ func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentP
 
 // setupCopilotStaging builds the GitHub Copilot CLI container config
 // (runtime context and first-run config) via the provider interface.
-func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provider.AgentProvider, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
+func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provider.AgentProvider, opts Options, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
 	var copilotCred *provider.Credential
 	if store, storeErr := openCredStore(); storeErr == nil {
 		if cred, err := store.Get(credential.ProviderGitHub); err == nil {
@@ -158,10 +158,23 @@ func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provi
 		}
 	}
 
+	// Copilot values pinned by moat.yaml or CLI flags (the copilot command's
+	// ConfigureAgent writes flag-resolved values back into the config) strip
+	// the matching keys from the staged settings.json.
+	var copilotModel, copilotContext, copilotEffort string
+	if opts.Config != nil {
+		copilotModel = opts.Config.Copilot.Model
+		copilotContext = opts.Config.Copilot.Context
+		copilotEffort = opts.Config.Copilot.ReasoningEffort
+	}
+
 	copilotConfig, prepErr := copilotProvider.PrepareContainer(ctx, provider.PrepareOpts{
-		Credential:     copilotCred,
-		ContainerHome:  containerHome,
-		RuntimeContext: renderedContext,
+		Credential:             copilotCred,
+		ContainerHome:          containerHome,
+		RuntimeContext:         renderedContext,
+		CopilotModel:           copilotModel,
+		CopilotContext:         copilotContext,
+		CopilotReasoningEffort: copilotEffort,
 	})
 	if prepErr != nil {
 		return nil, fmt.Errorf("preparing Copilot container config: %w", prepErr)

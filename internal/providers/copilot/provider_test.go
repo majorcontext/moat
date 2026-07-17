@@ -243,6 +243,37 @@ func TestResolveCopilotPreflightFlagOverridesConfig(t *testing.T) {
 	}
 }
 
+func TestConfigureCopilotAgentWritesResolvedValues(t *testing.T) {
+	origModel := copilotResolvedModel
+	origContext := copilotResolvedContext
+	origEffort := copilotResolvedEffort
+	t.Cleanup(func() {
+		copilotResolvedModel = origModel
+		copilotResolvedContext = origContext
+		copilotResolvedEffort = origEffort
+	})
+
+	copilotResolvedModel = "claude-opus-4.6"
+	copilotResolvedContext = "long_context"
+	copilotResolvedEffort = "high"
+
+	cfg := &config.Config{}
+	configureCopilotAgent(cfg)
+
+	if cfg.Agent != copilotProviderName {
+		t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, copilotProviderName)
+	}
+	if cfg.Copilot.Model != "claude-opus-4.6" {
+		t.Errorf("cfg.Copilot.Model = %q, want claude-opus-4.6", cfg.Copilot.Model)
+	}
+	if cfg.Copilot.Context != "long_context" {
+		t.Errorf("cfg.Copilot.Context = %q, want long_context", cfg.Copilot.Context)
+	}
+	if cfg.Copilot.ReasoningEffort != "high" {
+		t.Errorf("cfg.Copilot.ReasoningEffort = %q, want high", cfg.Copilot.ReasoningEffort)
+	}
+}
+
 func TestResolveCopilotPreflightAddsRequiredGrantWhenMissing(t *testing.T) {
 	origFlagGrants := copilotFlags.Grants
 	origDryRun := cli.DryRun

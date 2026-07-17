@@ -73,6 +73,34 @@ copilot:
 
 `moat copilot` adds the `github` grant automatically when a GitHub credential is configured, so you do not need to list it unless you use `moat run` directly.
 
+## User settings
+
+Moat carries these settings from your host's Copilot settings file into the container. By default, that file is `~/.copilot/settings.json`. If `COPILOT_HOME` is set, Moat reads `$COPILOT_HOME/settings.json` instead.
+
+`contextTier`, `effortLevel`, `footer`, `includeCoAuthoredBy`, `model`, `mouse`, `subagents`, `tabs`, `theme`
+
+Other settings stay on the host. Settings that conflict with moat's proxy and network layer (`proxyUrl`, `allowedUrls`, `deniedUrls`), depend on host services the container cannot reach (`notifications`, `keepAlive`, `copyOnSelect`), or execute commands (`hooks`, `statusLine`) are not carried over. `trustedFolders` is always set to `/workspace`. Moat also accepts Copilot's legacy `colorMode` setting and writes it as the current `theme` setting.
+
+### Moat-specific overrides
+
+`~/.moat/copilot/settings.json` is your Copilot settings layer for moat containers. Values in this file win over the host settings, and it is the only place `statusLine` is read from — a status line command executes inside the container, so it requires this explicit opt-in:
+
+```json
+{
+  "theme": "high-contrast",
+  "statusLine": {
+    "type": "command",
+    "command": "~/.copilot/statusline.sh"
+  }
+}
+```
+
+### Precedence
+
+CLI flags and `moat.yaml` win over settings.json: when `--model`, `--context`, or `--reasoning-effort` (or the matching `copilot.*` fields) are set, the corresponding `model`, `contextTier`, and `effortLevel` keys are dropped from the container's settings.json. Everything else in settings.json falls back to Copilot's defaults when unset.
+
+Set `MOAT_SKIP_HOST_COPILOT_SETTINGS=1` to disable the passthrough entirely, for example in CI.
+
 ## Network policy
 
 `moat copilot` adds the GitHub and Copilot hosts it needs to the run's network rules. Under `network.policy: strict`, add any extra hosts your task needs with `--allow-host` or `network.rules`.

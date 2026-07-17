@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -29,6 +30,24 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), configJSON, 0o600); err != nil {
 		cleanupFn()
 		return nil, fmt.Errorf("writing copilot config: %w", err)
+	}
+
+	// Merge host settings (COPILOT_HOME/settings.json or
+	// ~/.copilot/settings.json) with moat overrides.
+	mergeOpts := MergeOpts{
+		ModelOverride:   opts.CopilotModel,
+		ContextOverride: opts.CopilotContext,
+		EffortOverride:  opts.CopilotReasoningEffort,
+	}
+	if settingsJSON, mergeErr := MergeSettings(mergeOpts); mergeErr != nil {
+		log.Warn("failed to merge Copilot settings, continuing without",
+			"error", mergeErr,
+		)
+	} else if settingsJSON != nil {
+		if writeErr := os.WriteFile(filepath.Join(tmpDir, "settings.json"), settingsJSON, 0o600); writeErr != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing copilot settings: %w", writeErr)
+		}
 	}
 
 	env := p.ContainerEnv(opts.Credential)
