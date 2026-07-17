@@ -66,6 +66,28 @@ func TestIsStub(t *testing.T) {
 	}
 }
 
+// TestCommittedBlobsAreStubs is the commit guard: the embed blobs tracked in
+// git must be the fail-closed stubs, never the real cross-compiled binaries
+// (which are ~2.5 MB build artifacts, not source). `go generate` overwrites
+// them during a build; the build/test Makefile targets restore them
+// afterward, so a clean checkout — and therefore CI and any commit — always
+// carries stubs.
+//
+// This closes the gap TestEmbeddedChecksums leaves: that test only checks the
+// blobs match checksums.txt, so a real binary committed together with its
+// regenerated checksum passes it. This test fails on that state.
+//
+// If this fails locally, you have generated real binaries in your tree (e.g.
+// via `make generate-init` or a bare `go generate`): run `make
+// restore-init-stubs` before committing.
+func TestCommittedBlobsAreStubs(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		if !IsStub(BinaryFor(arch)) {
+			t.Errorf("embed/moat-init-linux-%s is a real binary, not the committed stub — run 'make restore-init-stubs' before committing (the real binaries are build artifacts, baked into ./moat at compile time, and must never be committed)", arch)
+		}
+	}
+}
+
 // TestStubFailsClosed pins the fail-closed contract of the committed stub:
 // it must be a shell script that prints a FATAL message and exits 1, never
 // a silent no-op that would start the user command as root.
