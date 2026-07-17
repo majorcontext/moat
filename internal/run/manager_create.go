@@ -107,13 +107,6 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 	}
 
-	// Reject reserved entrypoint-dispatcher variables before any resources are
-	// staged. Always on — unlike the isMoatOwnedProxyVar filter below, this
-	// must hold for grantless/proxyless runs too.
-	if err := validateReservedEnv(opts.Config, opts.Env); err != nil {
-		return nil, err
-	}
-
 	opts.Grants = normalizeCopilotGrantNames(opts.Grants)
 	if opts.Config != nil {
 		opts.Config.Grants = normalizeCopilotGrantNames(opts.Config.Grants)
@@ -908,10 +901,6 @@ region = %s
 	if needsClipboard {
 		proxyEnv = append(proxyEnv, "MOAT_CLIPBOARD=1", "DISPLAY=:99")
 	}
-
-	// Forward the operator-only entrypoint dispatcher controls from the moat
-	// process's own environment (user-supplied sources are rejected above).
-	proxyEnv = append(proxyEnv, operatorInitEnv(os.Getenv)...)
 
 	// Add explicit env vars (highest priority - can override config),
 	// but filter proxy-related vars when proxy is active.

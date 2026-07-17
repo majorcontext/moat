@@ -63,12 +63,13 @@ func Binary() []byte {
 // than a real cross-compiled entrypoint. Three layers keep a stub from
 // serving as PID 1: the release gate (internal/initbin/gate, wired into the
 // goreleaser before hooks) refuses to release stub bytes and execs the
-// regenerated binary's --plan as a positive functional check; the parity
-// harness skips its go legs when the test binary embeds a stub; and the
-// stub itself fails loudly at runtime — the backstop for channels that
-// bypass generation entirely (`go install`, bare `go build`), where the
-// dispatcher's sh default keeps runs working and MOAT_INIT_IMPL=go fails
-// closed with the stub's message.
+// regenerated binary's --plan as a positive functional check; the e2e
+// acceptance harness skips when the test binary embeds a stub; and the stub
+// itself fails loudly at runtime — the backstop for channels that bypass
+// generation entirely (`go install`, bare `go build`). Because the Go binary
+// is now the sole entrypoint (no shell fallback), a stub shipped that way
+// makes the container fail closed at PID 1 with the stub's rebuild message
+// rather than silently skipping the privilege drop.
 func IsStub(b []byte) bool {
 	return bytes.HasPrefix(b, []byte(stubMarker))
 }

@@ -93,6 +93,6 @@ func Run(ctx *Context) int {
 		}
 	}
 	fmt.Fprintln(ctx.Stderr, "FATAL: moat-init reached the end of its phase list without exec'ing the command.")
-	fmt.Fprintln(ctx.Stderr, "This build of moat-init is incomplete; use MOAT_INIT_IMPL=sh (the default) or rebuild moat.")
+	fmt.Fprintln(ctx.Stderr, "This build of moat-init is incomplete; rebuild moat via 'make build'.")
 	return 1
 }

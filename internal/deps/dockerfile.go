@@ -611,37 +611,27 @@ func formatHookCommand(cmd string) string {
 }
 
 // writeEntrypoint writes the entrypoint configuration and working directory.
-// When the init entrypoint is needed, its pieces are added as context files
-// and COPYed into the image. This avoids embedding large base64 blobs inline
-// in a RUN command, which triggers gRPC transport errors in Apple's container
-// builder. Everything is materialized from bytes embedded in the moat host
-// binary and COPY'd from the local build context — zero network at image
-// build time.
+// When the init entrypoint is needed, the compiled moat-init binary
+// (cmd/moat-init, embedded in internal/initbin) is added as a context file
+// and COPYed to /usr/local/bin/moat-init as the image ENTRYPOINT. Copying a
+// prebuilt binary rather than embedding a large base64 blob inline in a RUN
+// command avoids the gRPC transport errors Apple's container builder hits;
+// everything is materialized from bytes in the moat host binary and COPY'd
+// from the local build context — zero network at image build time.
 //
-// During the shell->Go migration window the ENTRYPOINT is a dispatcher
-// (moat-init-dispatch) that selects between the legacy shell script
-// (moat-init.sh, the default) and the Go binary (moat-init) via the
-// operator-only MOAT_INIT_IMPL / MOAT_INIT_LEGACY variables, so one cached
-// image carries both implementations. At cutover the dispatcher and shell
-// are dropped and the ENTRYPOINT becomes /usr/local/bin/moat-init directly.
-// The Go binary is arch-matched: run images are always built for the host's
-// own architecture, so the runtime.GOARCH blob from internal/initbin is the
-// right one.
+// The binary is arch-matched: run images are always built for the host's own
+// architecture, so the runtime.GOARCH blob from internal/initbin is the right
+// one. On architectures moat does not build run images for, Binary() is nil
+// and there is no entrypoint to install (such a host cannot run moat images).
 func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) {
 	if opts.needsInit(dockerMode) {
-		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
-		contextFiles["moat-init-dispatch.sh"] = []byte(MoatInitDispatcher)
-		b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
-		b.WriteString("COPY moat-init-dispatch.sh /usr/local/bin/moat-init-dispatch\n")
-		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init.sh\n")
-		chmodPaths := "/usr/local/bin/moat-init-dispatch /usr/local/bin/moat-init.sh"
 		if goBin := initbin.Binary(); goBin != nil {
 			contextFiles["moat-init"] = goBin
+			b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
 			b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
-			chmodPaths += " /usr/local/bin/moat-init"
+			b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
+			b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 		}
-		b.WriteString("RUN chmod +x " + chmodPaths + "\n")
-		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init-dispatch\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}

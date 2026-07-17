@@ -22,8 +22,6 @@
 // temp root with no container and no root privileges.
 //
 // The compiled binary (cmd/moat-init) is embedded into the moat host binary
-// by internal/initbin and shipped into run images by writeEntrypoint. During
-// the migration window a dispatcher selects between the shell script and
-// this implementation via MOAT_INIT_IMPL (operator-only; see internal/run's
-// reserved-key validation).
+// by internal/initbin and shipped into run images as /usr/local/bin/moat-init
+// (the container ENTRYPOINT) by writeEntrypoint.
 package moatinit
