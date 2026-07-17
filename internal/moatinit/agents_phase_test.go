@@ -48,7 +48,8 @@ func exists(ts *testSys, path string) bool {
 	return err == nil
 }
 
-func TestClaudeStagingFullSet(t *testing.T) {
+func TestAgentStagingFullSet(t *testing.T) {
+	// (renamed from TestClaudeStagingFullSet when the env-shell files were added)
 	ts := newTestSys(t, 0, true)
 	staging := stageFile(t, ts, "mnt/claude-init", "settings.json", 0o640, `{"s":1}`)
 	stageFile(t, ts, "mnt/claude-init", ".credentials.json", 0o644, `{"token":"x"}`)
@@ -56,6 +57,7 @@ func TestClaudeStagingFullSet(t *testing.T) {
 	stageFile(t, ts, "mnt/claude-init", "stats-cache.json", 0o644, `{}`)
 	stageFile(t, ts, "mnt/claude-init", "CLAUDE.md", 0o644, "ctx")
 	stageFile(t, ts, "mnt/claude-init", ".claude.json", 0o644, `{"onboarded":true}`)
+	stageFile(t, ts, "mnt/claude-init", "anthropic-env.sh", 0o644, "export ANTHROPIC_API_KEY=x")
 	stageFile(t, ts, "mnt/claude-init/statsig", "cache.db", 0o600, "st")
 	// Allowlist companions: strays must NOT be copied.
 	stageFile(t, ts, "mnt/claude-init", "stray.txt", 0o644, "no")
@@ -87,6 +89,11 @@ func TestClaudeStagingFullSet(t *testing.T) {
 	// .claude.json lands at the HOME ROOT, not inside .claude/.
 	if !exists(ts, "/home/moatuser/.claude.json") {
 		t.Error(".claude.json missing from home root")
+	}
+	// The BASH_ENV file is copied into .claude/ so $HOME/.claude/anthropic-env.sh
+	// exists at runtime (non-secret: source mode preserved).
+	if got := statMode(t, ts, "/home/moatuser/.claude/anthropic-env.sh"); got != 0o644 {
+		t.Errorf("anthropic-env.sh mode = %o, want 644 preserved", got)
 	}
 	if exists(ts, "/home/moatuser/.claude/.claude.json") {
 		t.Error(".claude.json wrongly copied into .claude/")
@@ -270,5 +277,118 @@ func TestAgentCopyFailureIsFatal(t *testing.T) {
 	}
 	if stderr.Len() == 0 {
 		t.Error("fatal copy failure produced no stderr")
+	}
+}
+
+func TestCodexStagingOpenAIEnvFile(t *testing.T) {
+	// Companion to the anthropic-env.sh copy: the OpenAI BASH_ENV file must
+	// land at $HOME/.codex/openai-env.sh or BASH_ENV points at nothing.
+	ts := newTestSys(t, 0, true)
+	staging := stageFile(t, ts, "mnt/codex-init", "config.toml", 0o644, "cfg")
+	stageFile(t, ts, "mnt/codex-init", "openai-env.sh", 0o600, "export OPENAI_API_KEY=x")
+	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: "/root"})
+	if err := codexStagingPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := statMode(t, ts, "/home/moatuser/.codex/openai-env.sh"); got != 0o600 {
+		t.Errorf("openai-env.sh mode = %o, want 600 preserved", got)
+	}
+}
+
+func TestCodexSubscriptionVersionGate(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		missing bool
+		wantErr bool
+	}{
+		{name: "supported floor", version: "codex-cli 0.146.0"},
+		{name: "supported ceiling", version: "codex-cli 0.154.0"},
+		{name: "unsupported high", version: "codex-cli 0.155.0", wantErr: true},
+		{name: "unsupported low", version: "codex-cli 0.145.9", wantErr: true},
+		{name: "unknown output", version: "", wantErr: true},
+		{name: "binary missing", missing: true, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newTestSys(t, 0, true)
+			staging := stageFile(t, ts, "mnt/codex-init", "config.toml", 0o644, "cfg")
+			if tc.missing {
+				ts.missingBinaries["codex"] = true
+			}
+			ts.runHook = func(c Cmd) (int, error) {
+				if len(c.Argv) >= 2 && c.Argv[0] == "codex" && c.Argv[1] == "--version" {
+					if w, ok := c.Stdout.(interface{ Write([]byte) (int, error) }); ok && tc.version != "" {
+						_, _ = w.Write([]byte(tc.version + "\n"))
+					}
+				}
+				return 0, nil
+			}
+			ctx, stderr := newTestContext(ts, Config{
+				CodexInit:             staging,
+				CodexSubscriptionAuth: "1",
+				Home:                  "/root",
+			})
+			err := codexStagingPhase(ctx)
+			if tc.wantErr {
+				if exit, ok := err.(exitError); !ok || exit.code != 1 {
+					t.Fatalf("err = %v, want exitError{1}", err)
+				}
+				if stderr.Len() == 0 {
+					t.Error("fatal version gate produced no stderr")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("version %q rejected: %v", tc.version, err)
+			}
+			if !exists(ts, "/home/moatuser/.codex/config.toml") {
+				t.Error("supported version did not stage config.toml")
+			}
+		})
+	}
+}
+
+func TestCodexSubscriptionGateOnlyForSubscription(t *testing.T) {
+	// Companion: without MOAT_CODEX_SUBSCRIPTION_AUTH=1 an unsupported codex
+	// must not block staging (API-key/MCP-only modes stage version-agnostic
+	// files).
+	ts := newTestSys(t, 0, true)
+	staging := stageFile(t, ts, "mnt/codex-init", "auth.json", 0o644, `{"k":"v"}`)
+	ts.runHook = func(Cmd) (int, error) { return 0, nil } // would report empty version
+	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: "/root"})
+	if err := codexStagingPhase(ctx); err != nil {
+		t.Fatalf("non-subscription staging gated on version: %v", err)
+	}
+	if !exists(ts, "/home/moatuser/.codex/auth.json") {
+		t.Error("auth.json not staged without subscription auth")
+	}
+}
+
+func TestCodexChownPrunesSessions(t *testing.T) {
+	// The ~/.codex/sessions bind mount must not be re-owned: neither the
+	// directory itself nor anything beneath it.
+	ts := newTestSys(t, 0, true)
+	staging := stageFile(t, ts, "mnt/codex-init", "config.toml", 0o644, "cfg")
+	// A pre-existing sessions tree inside the target home (the bind mount).
+	sessions := filepath.Join(ts.Root, "home/moatuser/.codex/sessions/2026/01/01")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessions, "rollout.jsonl"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: "/root"})
+	if err := codexStagingPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ts.chowned("/home/moatuser/.codex/sessions") {
+		t.Error("sessions directory itself was chowned")
+	}
+	if ts.chowned("/home/moatuser/.codex/sessions/2026/01/01/rollout.jsonl") {
+		t.Error("file under sessions was chowned")
+	}
+	if !ts.chowned("/home/moatuser/.codex/config.toml") {
+		t.Error("config.toml was not chowned (prune over-applied)")
 	}
 }

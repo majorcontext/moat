@@ -13,9 +13,9 @@ func TestWorkspaceMCPJSONPhase(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ts.Root, "workspace"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	staging := stageFile(t, ts, "mnt/codex-init", "mcp.json", 0o644, `{"mcpServers":{}}`)
+	staging := stageFile(t, ts, "mnt/gemini-init", "mcp.json", 0o644, `{"mcpServers":{}}`)
 
-	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: "/root"})
+	ctx, _ := newTestContext(ts, Config{GeminiInit: staging, Home: "/root"})
 	if err := workspaceMCPJSONPhase(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +27,24 @@ func TestWorkspaceMCPJSONPhase(t *testing.T) {
 	}
 	if !ts.chowned("/workspace/.mcp.json") {
 		t.Error("no chown recorded for .mcp.json on the root path")
+	}
+}
+
+// TestWorkspaceMCPJSONIgnoresCodex pins the post-rebase behavior: Codex reads
+// MCP servers from ~/.codex/config.toml and no longer uses /workspace/.mcp.json,
+// so a Codex-staged mcp.json must not be copied.
+func TestWorkspaceMCPJSONIgnoresCodex(t *testing.T) {
+	ts := newTestSys(t, 0, true)
+	if err := os.MkdirAll(filepath.Join(ts.Root, "workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staging := stageFile(t, ts, "mnt/codex-init", "mcp.json", 0o644, `{"ignored":true}`)
+	ctx, _ := newTestContext(ts, Config{CodexInit: staging, Home: "/root"})
+	if err := workspaceMCPJSONPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if exists(ts, "/workspace/.mcp.json") {
+		t.Error("Codex-staged mcp.json was copied to /workspace/.mcp.json")
 	}
 }
 

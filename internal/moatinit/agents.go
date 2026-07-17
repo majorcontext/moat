@@ -3,7 +3,17 @@ package moatinit
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
+
+// chownPrune lists, per agent, the subdirectories under the agent's home that
+// must NOT be recursed into during the ownership hand-off. Codex's
+// ~/.codex/sessions is a bind mount of the host's session directory when
+// codex.sync_logs is on, so recursing would re-own the host user's files.
+var chownPrune = map[string][]string{
+	"codex": {"sessions"},
+}
 
 // stagedEntry is one allowlisted item an agent staging block may copy. The
 // blocks copy ONLY explicitly named files — an allowlist, never a recursive
@@ -31,16 +41,77 @@ func claudeStagingPhase(ctx *Context) error {
 		{name: "CLAUDE.md"},
 		// Onboarding/trust state lands at the HOME ROOT, not in .claude/.
 		{name: ".claude.json", home: true},
+		// The BASH_ENV file is read at runtime, not only during init, so it
+		// must live outside the 0700 staging mount.
+		{name: "anthropic-env.sh"},
 	})
 }
 
 // codexStagingPhase mirrors the Codex CLI setup block.
 func codexStagingPhase(ctx *Context) error {
+	if err := codexSubscriptionVersionGate(ctx); err != nil {
+		return err
+	}
 	return stageAgent(ctx, "codex", ctx.Cfg.CodexInit, ".codex", []stagedEntry{
 		{name: "config.toml"},
 		{name: "auth.json", secret: true},
 		{name: "AGENTS.md"},
+		{name: "openai-env.sh"},
 	})
+}
+
+// codexSubscriptionGateRan reports whether the subscription-auth version check
+// applies: the subscription mode is set AND a Codex staging dir is present (the
+// gate lives inside the staging block, so it fires only when staging would run).
+func codexSubscriptionGateRan(cfg *Config, sys Sys) bool {
+	return cfg.CodexSubscriptionAuth == "1" && cfg.CodexInit != "" && isDir(sys, cfg.CodexInit)
+}
+
+// codexSubscriptionVersionGate mirrors the shell's subscription-auth guard:
+// the synthetic auth.json is only known to work on Codex CLI 0.146.x–0.154.x,
+// so when the subscription grant is active the executable actually installed is
+// re-checked. Every other mode stages files any Codex version can read and must
+// not be blocked.
+func codexSubscriptionVersionGate(ctx *Context) error {
+	if !codexSubscriptionGateRan(ctx.Cfg, ctx.Sys) {
+		return nil
+	}
+	sys := ctx.Sys
+	if _, err := sys.LookPath("codex"); err != nil {
+		fmt.Fprintln(ctx.Stderr, "Moat: the codex grant needs the codex-cli dependency; add 'codex-cli' to dependencies in moat.yaml")
+		return exitError{code: 1}
+	}
+	var out strings.Builder
+	_, _ = sys.Run(Cmd{Argv: []string{"codex", "--version"}, Stdout: &out})
+	version := secondField(out.String())
+	if !supportedCodexVersion(version) {
+		v := version
+		if v == "" {
+			v = "unknown"
+		}
+		fmt.Fprintf(ctx.Stderr, "Moat: unsupported Codex CLI version %s for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n", v)
+		return exitError{code: 1}
+	}
+	return nil
+}
+
+// secondField mirrors `awk '{print $2}'` on the version line.
+func secondField(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) < 2 {
+		return ""
+	}
+	return fields[1]
+}
+
+// supportedCodexVersion mirrors the shell case arms 0.146.* .. 0.154.*.
+func supportedCodexVersion(v string) bool {
+	for minor := 146; minor <= 154; minor++ {
+		if strings.HasPrefix(v, "0."+strconv.Itoa(minor)+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // geminiStagingPhase mirrors the Gemini CLI setup block. Note settings.json
@@ -124,7 +195,7 @@ func stageAgent(ctx *Context, agent, staging, agentDir string, entries []stagedE
 	// the contract; a chown failure must not abort the start).
 	if chownToMoatuser(sys.Geteuid(), moatuserExists(sys)) {
 		if u, ok := sys.LookupUser("moatuser"); ok {
-			recursiveChownBestEffort(sys, destDir, u.UID, u.GID)
+			recursiveChownBestEffortPruned(sys, destDir, u.UID, u.GID, chownPrune[agent])
 			for _, e := range entries {
 				if !e.home {
 					continue

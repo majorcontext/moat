@@ -6,15 +6,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
-// TestVolumeCopyInPipeline exercises the tar pipeline that
-// populate_workspace_volume() in moat-init.sh uses.  The script does NOT pass
-// --no-dereference: GNU tar 1.34 (in the container image) does not recognize the
-// long flag name, and symlink-preservation is already tar's default for `-cf`.
-// See TestMoatInitNoNoDeref, which asserts the flag is absent from the script.
+// TestVolumeCopyInPipeline exercises the tar pipeline that the moat-init
+// entrypoint's populate-workspace-volume phase runs (internal/moatinit
+// shells to tar for the byte copy). It does NOT pass --no-dereference: GNU
+// tar 1.34 (in the container image) does not recognize the long flag name,
+// and symlink-preservation is already tar's default for `-cf`.
 //
 // The pipeline under test:
 //
@@ -131,46 +130,6 @@ func TestVolumeCopyInPipelineEmptyExcludes(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(workspace, f)); err != nil {
 			t.Errorf("%s should be copied with empty excludes: %v", f, err)
 		}
-	}
-}
-
-// TestMoatInitScriptVolumePopulate checks that the embedded moat-init.sh
-// contains the key markers for the populate_workspace_volume function and that
-// it runs before the privilege drop (so chown /workspace can succeed as root).
-func TestMoatInitScriptVolumePopulate(t *testing.T) {
-	if !strings.Contains(MoatInitScript, "populate_workspace_volume") {
-		t.Error("moat-init.sh should define populate_workspace_volume")
-	}
-	if !strings.Contains(MoatInitScript, "MOAT_WORKSPACE_VOLUME") {
-		t.Error("moat-init.sh should guard on MOAT_WORKSPACE_VOLUME")
-	}
-	if !strings.Contains(MoatInitScript, "MOAT_WORKSPACE_STAGING") {
-		t.Error("moat-init.sh should reference MOAT_WORKSPACE_STAGING")
-	}
-	if !strings.Contains(MoatInitScript, "MOAT_WORKSPACE_EXCLUDES") {
-		t.Error("moat-init.sh should reference MOAT_WORKSPACE_EXCLUDES")
-	}
-	// The script must NOT pass --no-dereference: that long option only exists in
-	// GNU tar 1.35+, but the container base (debian bookworm) ships GNU tar 1.34,
-	// which rejects it and aborts the copy. Symlink preservation is tar's default,
-	// so no flag is needed (TestVolumeCopyInPipeline verifies symlinks survive).
-	if strings.Contains(MoatInitScript, "--no-dereference") {
-		t.Error("moat-init.sh must not use tar --no-dereference (unsupported by GNU tar 1.34 in the container base)")
-	}
-	if !strings.Contains(MoatInitScript, "chown -R moatuser:moatuser /workspace") {
-		t.Error("moat-init.sh should chown /workspace to moatuser")
-	}
-
-	// The call/definition must come before the privilege drop (exec gosu
-	// moatuser), so the root-only chown -R /workspace runs before we drop to
-	// moatuser. Guards against a refactor that reorders the entrypoint.
-	popIdx := strings.Index(MoatInitScript, "populate_workspace_volume")
-	gosuIdx := strings.Index(MoatInitScript, "exec gosu moatuser")
-	if popIdx == -1 || gosuIdx == -1 {
-		t.Fatalf("missing markers: populate_workspace_volume=%d, exec gosu moatuser=%d", popIdx, gosuIdx)
-	}
-	if popIdx >= gosuIdx {
-		t.Errorf("populate_workspace_volume (index %d) must appear before the privilege drop 'exec gosu moatuser' (index %d)", popIdx, gosuIdx)
 	}
 }
 

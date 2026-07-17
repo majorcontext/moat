@@ -62,6 +62,9 @@ func Plan(ctx *Context) []string {
 			add("%s: skip (%s is not a directory)", a.name, a.staging)
 		default:
 			add("%s: copy allowlisted files from %s into %s/%s (credential files forced 0600)", a.name, a.staging, home, a.dir)
+			if a.name == "codex-staging" && cfg.CodexSubscriptionAuth == "1" {
+				add("codex-staging: verify the installed codex --version is 0.146.x–0.154.x for subscription auth — fatal otherwise")
+			}
 		}
 	}
 
@@ -119,8 +122,6 @@ func Plan(ctx *Context) []string {
 	}
 
 	switch {
-	case cfg.CodexInit != "" && isFile(sys, cfg.CodexInit+"/mcp.json"):
-		add("workspace-mcp-json: copy %s/mcp.json -> /workspace/.mcp.json", cfg.CodexInit)
 	case cfg.GeminiInit != "" && isFile(sys, cfg.GeminiInit+"/mcp.json"):
 		add("workspace-mcp-json: copy %s/mcp.json -> /workspace/.mcp.json", cfg.GeminiInit)
 	default:

@@ -36,29 +36,34 @@ func checkGolden(t *testing.T, name, got string) {
 // environment: every feature active, every decision visible.
 func TestPlanGoldenFull(t *testing.T) {
 	ts := newTestSys(t, 0, true)
-	for _, dir := range []string{"mnt/claude-init", "mnt/codex-init"} {
+	for _, dir := range []string{"mnt/claude-init", "mnt/codex-init", "mnt/gemini-init"} {
 		if err := os.MkdirAll(filepath.Join(ts.Root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// Codex's mcp.json is deliberately present but must be ignored (Codex
+	// reads config.toml); only Gemini's drives workspace-mcp-json.
 	stageFile(t, ts, "mnt/codex-init", "mcp.json", 0o644, "{}")
+	stageFile(t, ts, "mnt/gemini-init", "mcp.json", 0o644, "{}")
 
 	ctx, _ := newTestContext(ts, Config{
-		ExtraHosts:        "moat-proxy:192.0.2.5 moat-host:@host.docker.internal bad:",
-		SSHTCPAddr:        "192.168.65.2:5522",
-		ClaudeInit:        "/mnt/claude-init",
-		CodexInit:         "/mnt/codex-init",
-		GeminiInit:        "/mnt/missing",
-		InitFiles:         "/home/moatuser/.config/g/cfg\tYWJj\n",
-		Clipboard:         "1",
-		GitUserName:       "Ada",
-		GitSSHGitHub:      "1",
-		DockerDIND:        "1",
-		WorkspaceVolume:   "1",
-		WorkspaceExcludes: "./node_modules\n./dist",
-		VolumeChown:       "/workspace/.cache",
-		PreRun:            "npm install",
-		Home:              "/root",
+		ExtraHosts: "moat-proxy:192.0.2.5 moat-host:@host.docker.internal bad:",
+		SSHTCPAddr: "192.168.65.2:5522",
+		ClaudeInit: "/mnt/claude-init",
+		CodexInit:  "/mnt/codex-init",
+		// Exercises the subscription-auth gate plan line.
+		CodexSubscriptionAuth: "1",
+		GeminiInit:            "/mnt/gemini-init",
+		InitFiles:             "/home/moatuser/.config/g/cfg\tYWJj\n",
+		Clipboard:             "1",
+		GitUserName:           "Ada",
+		GitSSHGitHub:          "1",
+		DockerDIND:            "1",
+		WorkspaceVolume:       "1",
+		WorkspaceExcludes:     "./node_modules\n./dist",
+		VolumeChown:           "/workspace/.cache",
+		PreRun:                "npm install",
+		Home:                  "/root",
 	})
 	ctx.Argv = []string{"claude", "--continue"}
 	checkGolden(t, "plan_full.golden", strings.Join(Plan(ctx), "\n")+"\n")

@@ -4,7 +4,8 @@ extra-hosts: skip malformed entry "bad:"
 ssh-agent-bridge: start socat /run/moat/ssh/agent.sock (0660) <-> TCP:192.168.65.2:5522 as a long-lived child
 claude-staging: copy allowlisted files from /mnt/claude-init into /home/moatuser/.claude (credential files forced 0600)
 codex-staging: copy allowlisted files from /mnt/codex-init into /home/moatuser/.codex (credential files forced 0600)
-gemini-staging: skip (/mnt/missing is not a directory)
+codex-staging: verify the installed codex --version is 0.146.x–0.154.x for subscription auth — fatal otherwise
+gemini-staging: copy allowlisted files from /mnt/gemini-init into /home/moatuser/.gemini (credential files forced 0600)
 copilot-staging: skip (staging var unset)
 init-files: write 1 file(s) at 0600 (parents 0755), then scrub MOAT_INIT_FILES from the environment
 clipboard: start Xvfb :99 as a long-lived child and export DISPLAY=:99
@@ -15,6 +16,6 @@ git-config: git config --system url.git@github.com:.insteadOf https://github.com
 docker: start dockerd (dind, vfs) as a long-lived child, wait up to 30s, add moatuser to the docker group
 named-volume-chown: chown /workspace/.cache to moatuser (non-recursive, best-effort)
 populate-workspace-volume: tar-copy /mnt/host-workspace -> /workspace (2 exclude pattern(s), both pipe exit codes checked), then chown -R moatuser — requires root, fatal otherwise
-workspace-mcp-json: copy /mnt/codex-init/mcp.json -> /workspace/.mcp.json
+workspace-mcp-json: copy /mnt/gemini-init/mcp.json -> /workspace/.mcp.json
 pre-run-hook: run "npm install" via gosu moatuser sh -c in /workspace; a non-zero exit aborts with that code
 privilege drop: exec gosu moatuser "claude --continue" (MOAT_INIT_FILES scrubbed from the exec environment)
