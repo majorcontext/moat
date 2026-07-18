@@ -1,0 +1,14 @@
+#!/bin/sh
+# moat-init-stub
+#
+# Committed placeholder for the real moat-init entrypoint binary so a fresh
+# clone compiles (go:embed requires the file to exist). The real binary is
+# cross-compiled over this file by `go generate ./internal/initbin`, which
+# `make build` and the release pipeline run automatically.
+#
+# Fail closed: if this stub ever ships as a container entrypoint, running it
+# must refuse loudly rather than silently skip the privilege drop, the
+# chmod-600 secret contracts, /etc/hosts injection, and the MOAT_INIT_FILES
+# scrub.
+echo "FATAL: moat-init stub embedded — rebuild moat via 'make build' (runs go generate ./internal/initbin)" >&2
+exit 1

@@ -1,4 +1,4 @@
-.PHONY: all help build test test-unit test-e2e test-bats lint fix clean coverage snapshot
+.PHONY: all help build build-cli generate-init restore-init-stubs test test-unit test-e2e test-bats lint fix clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -15,19 +15,39 @@ help: ## Show this help message
 	@echo "  make test-unit ARGS='-run TestName'           # Run specific unit test"
 	@echo "  make test-unit ARGS='-run TestName ./internal/proxy'"  # Run test in specific package"
 
-build: ## Build the project
-	go build ./...
+# The committed moat-init entrypoint blobs (tracked as fail-closed stubs so a
+# fresh clone compiles). `go generate` overwrites them with the real
+# cross-compiled binaries; the build/test targets below restore the stubs
+# afterward so the real ~2.5 MB artifacts never linger as tracked-file
+# modifications waiting to be committed by accident. Restoring the source
+# stubs is safe because the binaries are baked into the built artifact at
+# compile time — reverting the embed files does not change what was built.
+INIT_STUBS := internal/initbin/embed internal/initbin/checksums.txt
 
-build-cli: ## Build the CLI binary ./moat
-	go build -ldflags "-s -w -X github.com/majorcontext/moat/cmd/moat/cli.version=dev -X github.com/majorcontext/moat/cmd/moat/cli.commit=$$(git rev-parse --short HEAD) -X github.com/majorcontext/moat/cmd/moat/cli.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o moat ./cmd/moat
+build: ## Build the project (regenerates the embedded moat-init binaries, then restores the committed stubs)
+	@go generate ./internal/initbin && go build ./...; rc=$$?; \
+	git checkout -- $(INIT_STUBS); exit $$rc
+
+build-cli: ## Build the CLI binary ./moat (regenerates the embedded moat-init binaries, then restores the committed stubs)
+	@go generate ./internal/initbin && \
+	go build -ldflags "-s -w -X github.com/majorcontext/moat/cmd/moat/cli.version=dev -X github.com/majorcontext/moat/cmd/moat/cli.commit=$$(git rev-parse --short HEAD) -X github.com/majorcontext/moat/cmd/moat/cli.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o moat ./cmd/moat; rc=$$?; \
+	git checkout -- $(INIT_STUBS); exit $$rc
+
+generate-init: ## Cross-compile cmd/moat-init into internal/initbin/embed (over the committed stubs; run 'make restore-init-stubs' before committing)
+	go generate ./internal/initbin
+
+restore-init-stubs: ## Restore the committed moat-init stub blobs after a manual generate-init
+	git checkout -- $(INIT_STUBS)
 
 test: test-unit test-e2e test-bats ## Run all tests (unit + E2E + hooks)
 
 test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -race $(ARGS) ./...
 
-test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
-	go test -tags=e2e -timeout=30m $(ARGS) ./internal/e2e/
+test-e2e: ## Run E2E tests (regenerates the embedded moat-init binaries, then restores the committed stubs)
+	@go generate ./internal/initbin && \
+	go test -tags=e2e -timeout=30m $(ARGS) ./internal/e2e/; rc=$$?; \
+	git checkout -- $(INIT_STUBS); exit $$rc
 
 test-bats: ## Run bats tests for Claude Code hooks
 	@which bats > /dev/null || (echo "bats not installed. Install from https://github.com/bats-core/bats-core" && exit 1)

@@ -1,0 +1,16 @@
+extra-hosts: skip (MOAT_EXTRA_HOSTS unset)
+ssh-agent-bridge: skip (MOAT_SSH_TCP_ADDR unset)
+claude-staging: skip (staging var unset)
+codex-staging: skip (staging var unset)
+gemini-staging: skip (staging var unset)
+copilot-staging: skip (staging var unset)
+init-files: skip (MOAT_INIT_FILES unset)
+clipboard: skip (MOAT_CLIPBOARD != 1)
+git-config: git config --system --add safe.directory /workspace (best-effort)
+git-config: git config --system http.proxyAuthMethod basic (best-effort)
+docker: skip
+named-volume-chown: skip
+populate-workspace-volume: skip (MOAT_WORKSPACE_VOLUME != 1)
+workspace-mcp-json: skip (no staged mcp.json)
+pre-run-hook: skip (MOAT_PRE_RUN unset)
+privilege drop: exec "bash" directly (already non-root; MOAT_INIT_FILES scrubbed from the exec environment)
