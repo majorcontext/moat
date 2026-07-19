@@ -152,7 +152,7 @@ podman machine init
 podman machine start
 ```
 
-Podman 6.x defaults to the `libkrun` machine provider on macOS. If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with that default provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
+Some Podman 6.x builds default to the `libkrun` machine provider on macOS (observed with podman 6.0.0; Homebrew's 6.0.1 came up with `applehv` directly). If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with the `libkrun` provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
 
 ```bash
 podman machine rm -f <name>

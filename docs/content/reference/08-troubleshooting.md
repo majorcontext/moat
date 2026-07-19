@@ -370,7 +370,7 @@ gVisor (runsc) is required but not available
 
 ### `podman machine start` fails with `exec: "krunkit" not found`
 
-**Cause:** Podman 6.x defaults to the `libkrun` machine provider on macOS, which requires a separate `krunkit` binary that isn't installed.
+**Cause:** The machine was created with the `libkrun` machine provider (the default in some Podman 6.x builds on macOS), which requires a separate `krunkit` binary that isn't installed.
 
 **Fix:** Recreate the machine with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew `podman` formula:
 
