@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 func TestGVisorAvailable(t *testing.T) {
@@ -681,6 +683,58 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Docker runtime requested") {
 		t.Errorf("error should mention Docker was requested, got: %v", err)
+	}
+}
+
+// TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds pins the
+// warn-not-fail behavior of warnIfForcedDockerHostIsPodman (see
+// NewRuntimeWithOptions's "docker" case): with MOAT_RUNTIME=docker and
+// DOCKER_HOST explicitly pointing at a podman engine, runtime creation must
+// SUCCEED — the mismatch is only surfaced as a ui.Warn — unlike
+// MOAT_RUNTIME=podman against a non-podman engine, which fails hard
+// (TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman). The genuine
+// docker-engine subtest is the companion assertion: same setup, no warning.
+func TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fake engines are unix/darwin-only")
+	}
+
+	tests := []struct {
+		name     string
+		podman   bool
+		wantWarn bool
+	}{
+		{"podman engine behind DOCKER_HOST warns and proceeds", true, true},
+		{"genuine docker engine behind DOCKER_HOST proceeds silently", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sockPath := filepath.Join(shortTempDir(t), "engine.sock")
+			serveFakeDockerAPIUnixSocket(t, sockPath, tt.podman)
+
+			t.Setenv("MOAT_RUNTIME", "docker")
+			t.Setenv("DOCKER_HOST", "unix://"+sockPath)
+
+			var buf bytes.Buffer
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(os.Stderr) })
+
+			rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+			if err != nil {
+				t.Fatalf("MOAT_RUNTIME=docker with a reachable DOCKER_HOST engine (podman=%v) must succeed, got: %v", tt.podman, err)
+			}
+			if rt == nil {
+				t.Fatal("expected a non-nil runtime")
+			}
+
+			warned := strings.Contains(buf.String(), "podman engine")
+			if tt.wantWarn && !warned {
+				t.Errorf("expected a podman-mismatch warning, ui output was: %q", buf.String())
+			}
+			if !tt.wantWarn && warned {
+				t.Errorf("unexpected podman-mismatch warning for a genuine docker engine: %q", buf.String())
+			}
+		})
 	}
 }
 

@@ -48,6 +48,7 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from moat.yaml to use auto-detection."
 				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or moat.yaml) but not available: %w\n\n%s", err, hint)
 			}
+			warnIfForcedDockerHostIsPodman(rt)
 			return rt, nil
 		case "apple":
 			log.Debug("using Apple container runtime (MOAT_RUNTIME=apple)")
@@ -102,6 +103,41 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 //   - MOAT_RUNTIME=podman: force the Docker runtime against a podman socket
 func NewRuntime() (Runtime, error) {
 	return NewRuntimeWithOptions(DefaultRuntimeOptions())
+}
+
+// warnIfForcedDockerHostIsPodman warns (without failing) when
+// MOAT_RUNTIME=docker was explicitly requested but DOCKER_HOST points at a
+// podman engine. It applies only to the explicit "docker" override in
+// NewRuntimeWithOptions — not to auto-detection or to
+// newDockerRuntimeWithPingCandidates' fallback probing.
+//
+// The asymmetry with the "podman" case is deliberate: MOAT_RUNTIME=podman is
+// purely an identity claim about the engine behind the socket, so a mismatch
+// there fails hard (see newPodmanRuntimeWithPing). MOAT_RUNTIME=docker also
+// names the client implementation in use — moat's Docker-API runtime, which
+// works unmodified against podman's compat API — so an identity mismatch
+// only warns and proceeds. The safety concern is already backstopped by the
+// warn-once gVisor notice and by engine-side creation failure if the engine
+// can't actually honor what's asked of it.
+//
+// Identity detection is best-effort: if IsPodmanEngine errors, no warning is
+// emitted (matching how doctor treats unknown engine identity — say nothing
+// rather than speculate).
+func warnIfForcedDockerHostIsPodman(rt Runtime) {
+	if os.Getenv("DOCKER_HOST") == "" {
+		return
+	}
+	dockerRT, ok := rt.(*DockerRuntime)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	isPodman, err := dockerRT.IsPodmanEngine(ctx)
+	if err != nil || !isPodman {
+		return
+	}
+	ui.Warn("MOAT_RUNTIME=docker was requested but DOCKER_HOST points at a podman engine; proceeding with the Docker runtime over that socket. Use --runtime podman to make this explicit.")
 }
 
 // newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
