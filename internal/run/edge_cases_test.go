@@ -499,6 +499,50 @@ func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
 	}
 }
 
+// TestStopRestoresStateWhenRuntimeResolutionFails verifies that when Stop
+// cannot resolve the run's runtime (e.g. the pinned DOCKER_HOST endpoint is
+// unreachable — a stopped podman machine), the run's state is restored rather
+// than left in StateStopping. Without the restore, the next Stop would hit the
+// "already stopped" early return and silently no-op while the container may
+// still exist.
+func TestStopRestoresStateWhenRuntimeResolutionFails(t *testing.T) {
+	rt := &flexibleRuntime{done: make(chan struct{})}
+	m := newEdgeCaseManager(t, rt)
+
+	// A docker-type run pinned to an endpoint that cannot exist: GetDockerAt
+	// fails to connect/ping and negative-caches the endpoint.
+	r := &Run{
+		ID:          "run_rt_unreachable",
+		Name:        "rt-unreachable",
+		ContainerID: "ctr-somewhere",
+		Runtime:     "docker",
+		DockerHost:  "unix://" + filepath.Join(t.TempDir(), "no-such-machine.sock"),
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	err := m.Stop(context.Background(), r.ID)
+	if err == nil {
+		t.Fatal("Stop should fail when the run's runtime cannot be resolved")
+	}
+	if got := r.GetState(); got != StateRunning {
+		t.Fatalf("state should be restored to running after resolution failure, got %s", got)
+	}
+
+	// Second Stop must not be a silent no-op: with the state restored it
+	// re-attempts resolution and errors again (negative-cached endpoint).
+	err = m.Stop(context.Background(), r.ID)
+	if err == nil {
+		t.Fatal("second Stop should also fail, not silently succeed")
+	}
+	if got := r.GetState(); got != StateRunning {
+		t.Fatalf("state should still be running after second failed Stop, got %s", got)
+	}
+}
+
 // TestStopBenignNotFoundOnAppleRuntime is the second companion: the loud-fail
 // is docker-only. Apple's StopContainer swallows not-found, and cross-engine
 // ambiguity does not apply, so an apple run proceeds even without an endpoint.

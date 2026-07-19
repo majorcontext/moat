@@ -285,6 +285,10 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
+		// Restore the prior state: leaving the run in StateStopping would make
+		// every subsequent Stop hit the "already stopped" early return above and
+		// silently no-op while the container may still exist.
+		r.SetState(currentState)
 		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
 	}
 
