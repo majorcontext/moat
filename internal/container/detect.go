@@ -242,7 +242,7 @@ func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
 	rt, probeErr := tryDockerSocketCandidatesVerified(podmanSocketCandidates(), sandbox, verifyPodman)
 	if rt == nil {
 		if probeErr != nil {
-			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but the podman socket was found but unusable: %w\n\n%s", probeErr, hint)
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml): a podman socket was found but is unusable: %w\n\n%s", probeErr, hint)
 		}
 		return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but no podman socket was found\n\n%s", hint)
 	}
