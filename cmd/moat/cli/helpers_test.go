@@ -337,6 +337,9 @@ func TestRuntimeDisplayLabel(t *testing.T) {
 	}{
 		// Podman is surfaced when the recorded endpoint is a podman socket.
 		{"podman machine (macOS)", "docker", "unix:///var/folders/x/T/podman/podman-machine-default-api.sock", "docker (podman)"},
+		// A custom-named machine's socket (dev-api.sock) lacks "podman" in the
+		// filename; the parent directory named exactly "podman" matches instead.
+		{"custom-named podman machine (macOS)", "docker", "unix:///var/folders/x/T/podman/dev-api.sock", "docker (podman)"},
 		{"podman rootless (linux)", "docker", "unix:///run/user/1000/podman/podman.sock", "docker (podman)"},
 		{"podman rootful (linux)", "docker", "unix:///run/podman/podman.sock", "docker (podman)"},
 		// Companion: a docker run keeps reading "docker".
@@ -345,7 +348,9 @@ func TestRuntimeDisplayLabel(t *testing.T) {
 		// A non-podman third-party socket is not mislabeled.
 		{"rancher desktop", "docker", "unix:///Users/x/.rd/docker.sock", "docker"},
 		// A docker socket whose path merely contains "podman" (e.g. a user
-		// named podman) must not be mislabeled — only a real "/podman/" dir counts.
+		// named podman) must not be mislabeled — the socket basename must
+		// contain "podman" or its immediate parent dir must be exactly
+		// "podman"; here the basename is docker.sock and the parent is "run".
 		{"docker socket under podman-named home", "docker", "unix:///Users/podman/.docker/run/docker.sock", "docker"},
 		// Other runtimes and the empty legacy case are untouched.
 		{"apple", "apple", "", "apple"},

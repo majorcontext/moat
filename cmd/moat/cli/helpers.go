@@ -34,12 +34,18 @@ func runtimeDisplayLabel(runtime, dockerHost string) string {
 	if runtime == "" {
 		return "-"
 	}
-	// Podman sockets are named podman.sock (rootless/rootful) or
-	// podman-machine-<name>-api.sock (machine), so the socket filename always
-	// contains "podman". Match on the basename rather than the whole path so an
+	// Podman sockets usually carry "podman" in the filename: podman.sock
+	// (rootless/rootful) or podman-machine-<name>-api.sock (default machine).
+	// But on macOS a custom-named machine lives at $TMPDIR/podman/<name>-api.sock
+	// (e.g. dev-api.sock), which loses the "podman" filename prefix while
+	// keeping the podman parent directory. So match when either the socket
+	// basename contains "podman" OR its parent directory is exactly "podman".
+	// Checking the basename/parent rather than the whole path keeps an
 	// unrelated docker socket under a directory that merely contains "podman"
-	// (e.g. a user home named podman) isn't mislabeled.
-	if runtime == "docker" && strings.Contains(path.Base(dockerHost), "podman") {
+	// (e.g. a user home named podman) from being mislabeled.
+	if runtime == "docker" &&
+		(strings.Contains(path.Base(dockerHost), "podman") ||
+			path.Base(path.Dir(dockerHost)) == "podman") {
 		return "docker (podman)"
 	}
 	return runtime
