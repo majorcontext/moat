@@ -211,6 +211,18 @@ gh:
     amd64: amd64
     arm64: arm64
 
+gitleaks:
+  description: Secret scanner for git repositories
+  type: github-binary
+  repo: gitleaks/gitleaks
+  # Release tarballs use `x64`/`arm64` (not `amd64`), so the targets map remaps.
+  asset: "gitleaks_{version}_linux_{arch}.tar.gz"
+  bin: "gitleaks"
+  default: "8.30.1"
+  targets:
+    amd64: x64
+    arm64: arm64
+
 # Database clients (apt)
 psql:
   description: PostgreSQL client

@@ -224,6 +224,33 @@ func TestRegistryHasTerragrunt(t *testing.T) {
 	assert.Contains(t, explicit, "download/v9.9.9/terragrunt_linux_amd64")
 }
 
+func TestRegistryHasGitleaks(t *testing.T) {
+	spec, ok := GetSpec("gitleaks")
+	require.True(t, ok, "Registry should have 'gitleaks'")
+	assert.Equal(t, TypeGithubBinary, spec.Type)
+	assert.NotEmpty(t, spec.Default, "gitleaks must have a default version")
+	// gitleaks ships its binary as `gitleaks`, matching the dependency name,
+	// so no `command` override is needed.
+	assert.Empty(t, spec.Command)
+	// Release tarballs name the amd64 arch `x64`, not `amd64`.
+	assert.Equal(t, "x64", spec.Targets["amd64"])
+	assert.Equal(t, "arm64", spec.Targets["arm64"])
+
+	// Ships a tar.gz archive: the install must extract it, and the version must
+	// substitute into both the tag and the asset name.
+	cmds := getGithubBinaryCommands("gitleaks", spec.Default, spec)
+	combined := strings.Join(cmds.Commands, " ")
+	assert.Contains(t, combined, "tar -xz", "gitleaks (tar.gz) should extract with tar")
+	assert.Contains(t, combined, "/usr/local/bin/gitleaks", "gitleaks should install the gitleaks binary")
+	wantAsset := "https://github.com/gitleaks/gitleaks/releases/download/v" + spec.Default +
+		"/gitleaks_" + spec.Default + "_linux_x64.tar.gz"
+	assert.Contains(t, combined, wantAsset)
+
+	// Companion case: an explicit non-default version substitutes everywhere too.
+	explicit := strings.Join(getGithubBinaryCommands("gitleaks", "9.9.9", spec).Commands, " ")
+	assert.Contains(t, explicit, "download/v9.9.9/gitleaks_9.9.9_linux_x64.tar.gz")
+}
+
 func TestServiceDepSpec(t *testing.T) {
 	spec, ok := GetSpec("postgres")
 	require.True(t, ok)
