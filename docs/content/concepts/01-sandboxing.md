@@ -52,6 +52,31 @@ When using `docker+gvisor`, the container runs inside gVisor, but Docker-in-Dock
 
 Both modes require Docker as the container runtime. Apple containers do not support Docker socket mounting or privileged mode. See [Dependencies](../reference/06-dependencies.md#docker-dependencies) for configuration details.
 
+## Kernel sandbox (Landlock)
+
+The container boundary is Moat's outer wall. `isolation.kernel_sandbox` adds an inner one: a [Landlock](https://docs.kernel.org/userspace-api/landlock.html) filesystem sandbox applied to the agent process itself, just after the container entrypoint drops privileges. Landlock restrictions are enforced by the kernel, inherited by every child process, and cannot be widened once applied — even code with arbitrary execution inside the run stays behind them.
+
+```yaml
+# moat.yaml
+isolation:
+  kernel_sandbox: true
+  sandbox:
+    allow_write:      # extra writable container paths (optional)
+      - /data
+```
+
+Or ad hoc: `moat run --kernel-sandbox -- <command>`.
+
+The policy is a write allowlist: the whole container filesystem stays readable, and writes are limited to `/workspace`, the agent's home directory, `/tmp`, `/var/tmp`, `/dev`, `/proc`, `/run`, every read-write mount target, and any `allow_write` entries. Everything else — `/usr`, `/etc`, paths owned by the run user but outside the allowlist — is write-denied by the kernel regardless of file permissions.
+
+What it guarantees, and what it does not:
+
+- **Best-effort by design.** Landlock needs Linux 5.13+ with the `landlock_*` syscalls permitted (Docker 23+ allows them by default; gVisor does not implement them). When unavailable, the run starts anyway and logs a warning — check `moat logs` for the `kernel sandbox active (Landlock ABI vN)` line to confirm enforcement.
+- **Allowlist-only.** Landlock cannot deny a subpath inside an allowed tree, so there is no `deny_paths` support yet (tracked in [#396](https://github.com/majorcontext/moat/issues/396)). Use read-only mounts or mount `exclude:` lists to mask paths instead.
+- **Filesystem only.** Network policy stays with the proxy (see [Network policies](./05-networking.md)); the kernel sandbox does not restrict sockets in this first cut.
+- **`sudo` stops working.** Landlock requires `no_new_privs`, which disables setuid binaries inside the sandboxed process tree. Install dependencies at build time or via `hooks.pre_run` (which runs before the sandbox is applied).
+- **Complements, not replaces, the container.** Under gVisor the guest kernel provides no Landlock and the gVisor boundary is already stronger; the kernel sandbox matters most with `sandbox: none`/`--no-sandbox` and on Apple containers.
+
 ## Limitations
 
 Container isolation is not a security boundary against a determined attacker. It provides:

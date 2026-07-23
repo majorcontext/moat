@@ -52,6 +52,7 @@ The agent commands (`moat claude`, `moat copilot`, `moat codex`, `moat gemini`, 
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) or `volume` (isolated Docker named volume). Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
+| `--kernel-sandbox` | Apply a Landlock kernel sandbox to the agent process (Linux, filesystem write allowlist) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 | `--worktree BRANCH` | Run in a git worktree for this branch (alias: `--wt`) |
@@ -132,6 +133,7 @@ moat run [flags] [path] [-- command]
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) mounts the host directory at `/workspace`; `volume` copies it into an isolated Docker named volume. Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-sandbox` | Disable gVisor sandboxing (Docker only) |
+| `--kernel-sandbox` | Apply a Landlock kernel sandbox to the agent process (Linux, filesystem write allowlist) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
@@ -211,6 +213,16 @@ Disables gVisor sandboxing for Docker containers. By default, Moat runs Docker c
 
 ```bash
 moat run --no-sandbox ./my-project
+```
+
+### --kernel-sandbox
+
+Applies a Landlock kernel sandbox to the agent process inside the container: the filesystem stays readable, but writes are limited to the workspace, the agent home, scratch paths, read-write mounts, and any `isolation.sandbox.allow_write` entries from `moat.yaml`. The restriction is inherited by every child process and cannot be lifted for the lifetime of the run. Equivalent to `isolation.kernel_sandbox: true` in `moat.yaml`.
+
+**When to use:** Defense-in-depth for runs of untrusted or exploratory code — even if the agent escapes its intended workflow, it cannot modify files outside the allowlist. Requires Linux 5.13+ in the container's kernel; degrades with a logged warning otherwise. Not compatible with `sudo` inside the run (Landlock sets `no_new_privs`). See [Sandboxing](../concepts/01-sandboxing.md#kernel-sandbox-landlock).
+
+```bash
+moat run --kernel-sandbox ./my-project -- npm test
 ```
 
 ---

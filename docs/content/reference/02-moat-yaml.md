@@ -1007,6 +1007,51 @@ Setting `sandbox: none` is equivalent to running with `--no-sandbox`. Use this w
 
 ---
 
+## Isolation
+
+OS-native kernel sandboxing applied to the agent process inside the container. See [Sandboxing](../concepts/01-sandboxing.md#kernel-sandbox-landlock) for the security model.
+
+### isolation.kernel_sandbox
+
+Applies a Landlock filesystem sandbox (Linux kernel 5.13+) to the agent process before it starts. The restriction is a write allowlist — reads work everywhere, writes are limited to the workspace, the agent home, `/tmp`, `/var/tmp`, `/dev`, `/proc`, `/run`, read-write mount targets, and `isolation.sandbox.allow_write` entries. It is inherited by every child process and cannot be lifted for the lifetime of the run.
+
+```yaml
+isolation:
+  kernel_sandbox: true
+```
+
+- Type: `boolean`
+- Default: `false`
+- CLI override: `--kernel-sandbox` (enable only; the flag cannot disable a config-enabled sandbox)
+
+Enforcement is best-effort: on kernels without Landlock (pre-5.13, gVisor) the run starts unsandboxed and logs a warning. The container log shows `kernel sandbox active (Landlock ABI vN)` when enforcement is live. Because Landlock requires `no_new_privs`, setuid binaries (`sudo`) do not work inside a sandboxed run; `hooks.pre_run` executes before the sandbox is applied and is unaffected.
+
+### isolation.sandbox.allow_write
+
+Extra absolute container paths the agent may write to, in addition to the defaults above.
+
+```yaml
+isolation:
+  kernel_sandbox: true
+  sandbox:
+    allow_write:
+      - /data
+```
+
+- Type: `string[]` (absolute container paths)
+- Default: `[]`
+- Requires `kernel_sandbox: true`
+
+### isolation.mode
+
+Reserved for the containerless local mode planned in [#396](https://github.com/majorcontext/moat/issues/396). Only `container` (the default) is accepted today.
+
+### isolation.sandbox.deny_paths
+
+Reserved and currently rejected with an error: Landlock policies are allowlist-only, so denying a path inside an allowed tree is not enforceable. Use read-only mounts or mount `exclude:` lists to mask paths instead.
+
+---
+
 ## Container
 
 Container resource limits and settings that apply to both Docker and Apple container runtimes.
