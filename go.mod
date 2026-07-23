@@ -15,6 +15,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/go-git/go-git/v5 v5.17.1
+	github.com/landlock-lsm/go-landlock v0.9.0
 	github.com/majorcontext/gatekeeper v0.13.0
 	github.com/majorcontext/keep v0.6.0
 	github.com/mattn/go-isatty v0.0.20
@@ -200,6 +201,7 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/majorcontext/moat/internal/providers/pi"
+	"github.com/majorcontext/moat/internal/sandboxbin"
 )
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
@@ -52,6 +53,17 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 	}
 	if opts.NeedsClipboard {
 		hashInput += ",clipboard:xvfb"
+	}
+	// Content-hash the embedded moat-sandbox helper so toggling the kernel
+	// sandbox — or a rebuilt helper (new go-landlock version, new toolchain) —
+	// invalidates cached images that carry a stale or missing binary.
+	if opts.NeedsKernelSandbox {
+		if bin := sandboxbin.Binary(); bin != nil {
+			bh := sha256.Sum256(bin)
+			hashInput += ",kernel-sandbox:" + hex.EncodeToString(bh[:])[:8]
+		} else {
+			hashInput += ",kernel-sandbox:unsupported-arch"
+		}
 	}
 
 	// When the moat-init entrypoint is used, hash the script contents so that

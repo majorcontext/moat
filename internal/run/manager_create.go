@@ -42,6 +42,8 @@ import (
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
 	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
+	"github.com/majorcontext/moat/internal/sandbox"
+	"github.com/majorcontext/moat/internal/sandboxbin"
 	"github.com/majorcontext/moat/internal/secrets"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
@@ -160,6 +162,22 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 		if err := validateCopilotGitHubGrant(ctx, opts.Config, opts.Grants, store); err != nil {
 			return nil, err
+		}
+	}
+
+	// Kernel sandbox pre-flight: fail before allocating any resources when the
+	// embedded moat-sandbox helper cannot be shipped. Binary() is nil on
+	// architectures moat builds no run images for, and IsStub catches builds
+	// that bypassed `go generate` (bare `go build`, `go install`) — shipping
+	// the stub would fail closed at container start with a worse error.
+	kernelSandbox := opts.Config != nil && opts.Config.Isolation.KernelSandbox
+	if kernelSandbox {
+		bin := sandboxbin.Binary()
+		if bin == nil {
+			return nil, fmt.Errorf("isolation.kernel_sandbox is not supported on %s: no moat-sandbox helper is built for this architecture (supported: amd64, arm64)", goruntime.GOARCH)
+		}
+		if sandboxbin.IsStub(bin) {
+			return nil, fmt.Errorf("isolation.kernel_sandbox requires the embedded moat-sandbox helper, but this moat binary carries the placeholder stub — rebuild with 'make build-cli' (or run 'go generate ./internal/sandboxbin' before 'go build')")
 		}
 	}
 
@@ -1206,6 +1224,7 @@ region = %s
 		PiPackages:         piPackages,
 		HasNamedVolumes:    configHasNamedVolumes(opts.Config),
 		Hooks:              hooks,
+		NeedsKernelSandbox: kernelSandbox,
 		// Volume mode requires the moat-init entrypoint to populate + chown the
 		// named volume as root; force a custom image with init even when the run
 		// has no deps/grants (otherwise the volume is silently left empty).
@@ -2018,6 +2037,30 @@ region = %s
 				}
 			}
 		}()
+	}
+
+	// Kernel sandbox: compute the Landlock write-allowlist from the final
+	// mount set (every read-write target must stay writable — the workspace,
+	// worktree git dirs, named volumes, docker.sock) plus the config's
+	// allow_write entries, and ship it to the in-container moat-sandbox
+	// helper. moat-init.sh routes its final exec through the helper whenever
+	// MOAT_SANDBOX_POLICY is set.
+	if kernelSandbox {
+		var rwTargets []string
+		for _, mnt := range mounts {
+			if !mnt.ReadOnly {
+				rwTargets = append(rwTargets, mnt.Target)
+			}
+		}
+		var allowWrite []string
+		if opts.Config != nil {
+			allowWrite = opts.Config.Isolation.Sandbox.AllowWrite
+		}
+		encoded, encErr := sandbox.BuildPolicy(rwTargets, allowWrite).Encode()
+		if encErr != nil {
+			return nil, encErr
+		}
+		proxyEnv = append(proxyEnv, sandbox.PolicyEnv+"="+encoded)
 	}
 
 	// Create container

@@ -8,6 +8,8 @@ import (
 
 	"github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/providers/pi"
+	"github.com/majorcontext/moat/internal/sandbox"
+	"github.com/majorcontext/moat/internal/sandboxbin"
 )
 
 // HooksConfig holds hook commands for Dockerfile generation and image tagging.
@@ -619,6 +621,20 @@ func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode,
 		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
 		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init\n")
 		b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
+		// The moat-sandbox helper (embedded in the moat host binary,
+		// arch-matched via runtime.GOARCH like run images themselves) applies
+		// the Landlock kernel sandbox as the last link of the exec chain. The
+		// run manager rejects kernel-sandboxed runs on architectures without
+		// an embedded helper, so Binary() is non-nil whenever
+		// NeedsKernelSandbox is set; the guard is defense-in-depth.
+		if opts.NeedsKernelSandbox {
+			if sandboxBin := sandboxbin.Binary(); sandboxBin != nil {
+				contextFiles["moat-sandbox"] = sandboxBin
+				b.WriteString("# Moat kernel sandbox helper (Landlock, applied before agent exec)\n")
+				b.WriteString("COPY moat-sandbox " + sandbox.HelperPath + "\n")
+				b.WriteString("RUN chmod +x " + sandbox.HelperPath + "\n")
+			}
+		}
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))

@@ -60,6 +60,10 @@ type Config struct {
 	// Empty string or omitted uses default (gVisor enabled).
 	Sandbox string `yaml:"sandbox,omitempty"`
 
+	// Isolation configures OS-native kernel sandboxing (Landlock) applied to
+	// the agent process inside the container. See IsolationConfig.
+	Isolation IsolationConfig `yaml:"isolation,omitempty"`
+
 	// Runtime forces a specific container runtime ("docker" or "apple").
 	// If not set, moat auto-detects the best available runtime.
 	// Useful when agent needs docker:dind on macOS (Apple containers can't run dind).
@@ -78,6 +82,40 @@ type Config struct {
 
 	// Deprecated: old runtime field for language versions
 	DeprecatedRuntime *deprecatedRuntime `yaml:"-"`
+}
+
+// IsolationConfig configures OS-native kernel sandboxing for the agent
+// process (issue #396). The first cut supports Linux Landlock applied inside
+// the container: the whole filesystem stays readable, writes are limited to
+// the workspace, the agent home, scratch paths, read-write mounts, and
+// sandbox.allow_write entries. Enforcement is best-effort: kernels without
+// Landlock (pre-5.13, gVisor) log a warning and run unsandboxed.
+type IsolationConfig struct {
+	// Mode selects the isolation mode. Only "container" (the default) is
+	// supported today; "local" (containerless kernel-sandbox-only runs) is
+	// planned in issue #396.
+	Mode string `yaml:"mode,omitempty"`
+
+	// KernelSandbox applies a Landlock filesystem sandbox to the agent
+	// process before it starts. Inherited by all child processes and
+	// irreversible for the lifetime of the run.
+	KernelSandbox bool `yaml:"kernel_sandbox,omitempty"`
+
+	// Sandbox tunes the kernel sandbox policy.
+	Sandbox SandboxPathsConfig `yaml:"sandbox,omitempty"`
+}
+
+// SandboxPathsConfig tunes the kernel sandbox filesystem policy.
+type SandboxPathsConfig struct {
+	// AllowWrite lists extra absolute container paths the agent may write
+	// to, in addition to the defaults (workspace, home, /tmp, /var/tmp,
+	// /dev, /proc, /run, and read-write mount targets).
+	AllowWrite []string `yaml:"allow_write,omitempty"`
+
+	// DenyPaths is reserved and currently rejected: Landlock policies are
+	// allowlist-only, so denying a path inside an allowed tree is not
+	// expressible. Tracked in issue #396.
+	DenyPaths []string `yaml:"deny_paths,omitempty"`
 }
 
 // UlimitSpec defines a resource limit with soft and hard values.
@@ -382,6 +420,38 @@ type PiConfig struct {
 // (the source is also single-quoted when written into the build script).
 var piPackageSafe = regexp.MustCompile(`^[A-Za-z0-9@:/._~%+#-]+$`)
 
+// validateIsolation checks the isolation block. Unsupported settings fail
+// loudly instead of being silently ignored: a user who writes deny_paths and
+// gets no error would believe those paths are protected when they are not.
+func validateIsolation(iso IsolationConfig) error {
+	switch iso.Mode {
+	case "", "container":
+		// supported
+	case "local":
+		return fmt.Errorf("isolation.mode \"local\" is not yet supported — the containerless kernel-sandbox mode is tracked in https://github.com/majorcontext/moat/issues/396; remove the mode field to use container isolation")
+	default:
+		return fmt.Errorf("invalid isolation.mode %q: must be omitted or 'container'", iso.Mode)
+	}
+	if len(iso.Sandbox.DenyPaths) > 0 {
+		return fmt.Errorf("isolation.sandbox.deny_paths is not yet supported — Landlock policies are allowlist-only, so denying paths inside an allowed tree is not enforceable (tracked in https://github.com/majorcontext/moat/issues/396); remove deny_paths, or narrow isolation.sandbox.allow_write instead")
+	}
+	if !iso.KernelSandbox {
+		if len(iso.Sandbox.AllowWrite) > 0 {
+			return fmt.Errorf("isolation.sandbox.allow_write is set but isolation.kernel_sandbox is false — set kernel_sandbox: true to enable the sandbox, or remove allow_write")
+		}
+		return nil
+	}
+	for _, p := range iso.Sandbox.AllowWrite {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("isolation.sandbox.allow_write: entries must not be empty")
+		}
+		if !strings.HasPrefix(p, "/") {
+			return fmt.Errorf("isolation.sandbox.allow_write: %q is not an absolute path — entries are container paths (the workspace is mounted at /workspace and is already writable)", p)
+		}
+	}
+	return nil
+}
+
 // validatePiPackages checks that each pi.packages entry is a remote source Moat
 // can install at image build time. Local paths are rejected because
 // `pi install <path>` records a relative path that does not resolve at runtime.
@@ -671,6 +741,11 @@ func Load(dir string) (*Config, error) {
 	// Validate sandbox setting
 	if cfg.Sandbox != "" && cfg.Sandbox != "none" {
 		return nil, fmt.Errorf("invalid sandbox value %q: must be empty (default) or 'none'", cfg.Sandbox)
+	}
+
+	// Validate isolation settings
+	if err := validateIsolation(cfg.Isolation); err != nil {
+		return nil, err
 	}
 
 	// Validate base_image: prevent Dockerfile injection via newlines/whitespace.

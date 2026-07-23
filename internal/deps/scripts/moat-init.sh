@@ -617,14 +617,32 @@ fi
 # This happens when Docker is started with --user to match host UID on Linux.
 # If we're root and moatuser exists, drop privileges with gosu.
 # If moatuser doesn't exist, fail - running as root defeats the security model.
+#
+# When MOAT_SANDBOX_POLICY is set (isolation.kernel_sandbox), the final exec
+# routes through the moat-sandbox helper, which applies a Landlock filesystem
+# sandbox to itself and execs the command; the restriction is inherited by
+# every child process. The helper runs after the privilege drop so exactly the
+# agent process tree is confined. Fail closed if the helper is missing: a
+# requested kernel sandbox must never be skipped silently.
 populate_workspace_volume
 setup_workspace_mcp_json
 run_pre_run_hook
+if [ -n "$MOAT_SANDBOX_POLICY" ] && [ ! -x /usr/local/bin/moat-sandbox ]; then
+  echo "Error: kernel sandbox requested (MOAT_SANDBOX_POLICY set) but /usr/local/bin/moat-sandbox is missing from the image." >&2
+  echo "Rebuild the run image with 'moat run --rebuild' using a moat binary that supports isolation.kernel_sandbox." >&2
+  exit 1
+fi
 if [ "$(id -u)" != "0" ]; then
   # Already non-root (e.g., --user was passed to docker run)
+  if [ -n "$MOAT_SANDBOX_POLICY" ]; then
+    exec /usr/local/bin/moat-sandbox "$@"
+  fi
   exec "$@"
 elif id moatuser >/dev/null 2>&1; then
   # Running as root, moatuser exists - drop privileges
+  if [ -n "$MOAT_SANDBOX_POLICY" ]; then
+    exec gosu moatuser /usr/local/bin/moat-sandbox "$@"
+  fi
   exec gosu moatuser "$@"
 else
   # Running as root, no moatuser - fail with clear error

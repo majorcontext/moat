@@ -1,0 +1,2 @@
+e00d5d9cf8b1557361d3e43df37c3bd40577f011fe754a07ce7f65fcb083f499  moat-sandbox-linux-amd64
+e00d5d9cf8b1557361d3e43df37c3bd40577f011fe754a07ce7f65fcb083f499  moat-sandbox-linux-arm64

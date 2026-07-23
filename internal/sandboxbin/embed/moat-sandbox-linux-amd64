@@ -1,0 +1,13 @@
+#!/bin/sh
+# moat-sandbox-stub
+#
+# Committed placeholder for the real moat-sandbox helper binary so a fresh
+# clone compiles (go:embed requires the file to exist). The real binary is
+# cross-compiled over this file by `go generate ./internal/sandboxbin`, which
+# `make build-cli` and the release pipeline run automatically.
+#
+# Fail closed: if this stub ever ships into a run image, running it must
+# refuse loudly rather than exec the agent without the requested kernel
+# sandbox.
+echo "FATAL: moat-sandbox stub embedded - rebuild moat via 'make build-cli' (runs go generate ./internal/sandboxbin)" >&2
+exit 1

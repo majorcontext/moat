@@ -255,6 +255,16 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		clipboard = false
 	}
 
+	// --kernel-sandbox enables the Landlock kernel sandbox ad hoc; moat.yaml's
+	// isolation.kernel_sandbox is the declarative equivalent. Flag only adds —
+	// there is no flag to disable a config-enabled kernel sandbox.
+	if opts.Flags.KernelSandbox {
+		if opts.Config == nil {
+			opts.Config = &config.Config{}
+		}
+		opts.Config.Isolation.KernelSandbox = true
+	}
+
 	// Append CLI --mount flags to config mounts
 	for _, ms := range opts.Flags.Mounts {
 		me, parseErr := config.ParseMount(ms)

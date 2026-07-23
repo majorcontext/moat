@@ -74,6 +74,12 @@ type ImageSpec struct {
 	// Hooks contains user-defined lifecycle hook commands.
 	Hooks *HooksConfig
 
+	// NeedsKernelSandbox indicates the run applies a Landlock kernel sandbox
+	// to the agent process (isolation.kernel_sandbox). Requires the moat-init
+	// entrypoint so the final exec chain can route through the moat-sandbox
+	// helper binary, which this flag COPYs into the image.
+	NeedsKernelSandbox bool
+
 	// NeedsWorkspaceVolume indicates the run uses volume-mode workspaces, which
 	// require the moat-init entrypoint to populate the named volume from the
 	// read-only staging bind and chown it (both as root, before the privilege
@@ -90,7 +96,8 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
-		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume || s.PiBakeSettings
+		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume || s.PiBakeSettings ||
+		s.NeedsKernelSandbox
 }
 
 // needsInit returns whether the moat-init entrypoint script is required.
@@ -106,6 +113,10 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 // the non-root user (USER moatuser) with no entrypoint; named volumes are created
 // root-owned, and moat-init is what chowns them so that user can write — without
 // it the run hits EACCES on first write to the volume.
+//
+// NeedsKernelSandbox is included because the sandbox is applied by routing the
+// entrypoint's final exec through the moat-sandbox helper; without moat-init
+// there is no exec chain to hook into and MOAT_SANDBOX_POLICY would be ignored.
 func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	if s == nil {
 		return dockerMode != ""
@@ -113,7 +124,8 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
-		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume
+		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume ||
+		s.NeedsKernelSandbox
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.
