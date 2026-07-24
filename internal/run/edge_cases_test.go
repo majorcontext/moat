@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,6 +162,19 @@ func (f *flexibleRuntime) ExecInteractive(context.Context, string, []string, con
 // routes directory. The returned cleanup function should be deferred.
 func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 	t.Helper()
+	return newEdgeCaseManagerPool(t, container.NewRuntimePoolWithDefault(rt))
+}
+
+// newEdgeCaseManagerAtHost is newEdgeCaseManager with rt also pinned as the
+// runtime for dockerHost, so runs carrying that recorded endpoint resolve to
+// the stub rather than dialing a real engine.
+func newEdgeCaseManagerAtHost(t *testing.T, rt container.Runtime, dockerHost string) *Manager {
+	t.Helper()
+	return newEdgeCaseManagerPool(t, container.NewRuntimePoolWithDockerHost(rt, dockerHost))
+}
+
+func newEdgeCaseManagerPool(t *testing.T, pool *container.RuntimePool) *Manager {
+	t.Helper()
 	tmpDir := t.TempDir()
 	routeDir := filepath.Join(tmpDir, "routes")
 	routes, err := routing.NewRouteTable(routeDir)
@@ -174,7 +188,7 @@ func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { monitorCancel() })
 	return &Manager{
-		runtimePool:    container.NewRuntimePoolWithDefault(rt),
+		runtimePool:    pool,
 		runs:           make(map[string]*Run),
 		routes:         routes,
 		proxyLifecycle: lifecycle,
@@ -432,7 +446,31 @@ func TestStopHandlesContainerStopError(t *testing.T) {
 // recording "stopped" and potentially orphaning a container that is really
 // alive on a different engine (e.g. started on Docker, stopped under
 // MOAT_RUNTIME=podman).
+// withPodmanSockets pins the podman-presence seam so the ambiguity
+// precondition is set by the test rather than by whatever engines the host
+// happens to have installed.
+func withPodmanSockets(t *testing.T, sockets []string) {
+	t.Helper()
+	prev := podmanSocketsPresent
+	podmanSocketsPresent = func() []string { return sockets }
+	t.Cleanup(func() { podmanSocketsPresent = prev })
+}
+
+func newLegacyNotFoundRun(id string) *Run {
+	return &Run{
+		ID:          id,
+		Name:        id,
+		ContainerID: "ctr-elsewhere",
+		Runtime:     "docker",
+		DockerHost:  "", // legacy run: no recorded endpoint
+		State:       StateRunning,
+		exitCh:      make(chan struct{}),
+	}
+}
+
 func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
+	withPodmanSockets(t, []string{"/tmp/podman/podman.sock"})
+
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
 		stopFn: func(_ context.Context, _ string) error {
@@ -441,15 +479,7 @@ func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
 	}
 	m := newEdgeCaseManager(t, rt)
 
-	r := &Run{
-		ID:          "run_ambiguous",
-		Name:        "ambiguous",
-		ContainerID: "ctr-elsewhere",
-		Runtime:     "docker",
-		DockerHost:  "", // legacy run: no recorded endpoint
-		State:       StateRunning,
-		exitCh:      make(chan struct{}),
-	}
+	r := newLegacyNotFoundRun("run_ambiguous")
 	m.mu.Lock()
 	m.runs[r.ID] = r
 	m.mu.Unlock()
@@ -458,7 +488,7 @@ func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("Stop should fail loudly on not-found with no recorded endpoint")
 	}
-	if !strings.Contains(err.Error(), "destroy --force") {
+	if !strings.Contains(err.Error(), "destroy --force-running") {
 		t.Errorf("error should point at the recovery path, got: %v", err)
 	}
 	if r.GetState() != StateRunning {
@@ -466,10 +496,14 @@ func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
 	}
 }
 
-// TestStopBenignNotFoundWhenEndpointRecorded is the companion: when the run's
-// engine endpoint IS recorded, we are pinned to the right engine, so a
-// not-found container genuinely means it is gone — Stop proceeds normally.
-func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
+// TestStopBenignNotFoundWhenNoPodmanPresent is the companion to
+// TestStopFailsLoudOnAmbiguousNotFound: on a host with no podman socket there
+// is no second engine to be ambiguous about, so a legacy run whose container
+// was removed out of band (docker rm, a prune) must still stop cleanly. This
+// is the pre-existing Docker behavior and must not regress.
+func TestStopBenignNotFoundWhenNoPodmanPresent(t *testing.T) {
+	withPodmanSockets(t, nil)
+
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
 		stopFn: func(_ context.Context, _ string) error {
@@ -478,12 +512,46 @@ func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
 	}
 	m := newEdgeCaseManager(t, rt)
 
+	r := newLegacyNotFoundRun("run_docker_only")
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Stop(context.Background(), r.ID); err != nil {
+		t.Fatalf("Stop should proceed on a host with no podman engine: %v", err)
+	}
+	if r.GetState() != StateStopped {
+		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+}
+
+// TestStopBenignNotFoundWhenEndpointRecorded is the companion: when the run's
+// engine endpoint IS recorded, we are pinned to the right engine, so a
+// not-found container genuinely means it is gone — Stop proceeds normally.
+func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
+	// A path that no engine listens on: the pool is seeded with the stub for
+	// this host, so resolution must come from the seam rather than a dial. A
+	// real socket path here would route through GetDockerAt to the host's own
+	// daemon and silently bypass stopFn.
+	const pinnedHost = "unix:///nonexistent/moat-test-pinned.sock"
+
+	var stopCalls int32
+	rt := &flexibleRuntime{
+		done:        make(chan struct{}),
+		runtimeType: container.RuntimeDocker,
+		stopFn: func(_ context.Context, _ string) error {
+			atomic.AddInt32(&stopCalls, 1)
+			return fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+		},
+	}
+	m := newEdgeCaseManagerAtHost(t, rt, pinnedHost)
+
 	r := &Run{
 		ID:          "run_pinned",
 		Name:        "pinned",
 		ContainerID: "ctr-gone",
 		Runtime:     "docker",
-		DockerHost:  "unix:///var/run/docker.sock", // pinned endpoint
+		DockerHost:  pinnedHost, // pinned endpoint
 		State:       StateRunning,
 		exitCh:      make(chan struct{}),
 	}
@@ -496,6 +564,10 @@ func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
 	}
 	if r.GetState() != StateStopped {
 		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+	// Without this the test passes even if Stop never reached the runtime.
+	if n := atomic.LoadInt32(&stopCalls); n != 1 {
+		t.Errorf("StopContainer should have been called once on the pinned runtime, got %d", n)
 	}
 }
 
@@ -594,14 +666,14 @@ func TestDestroyForceBypassesRunningGuard(t *testing.T) {
 	// Default: refused, with a hint at the escape hatch.
 	newRunning("run_guard")
 	err := m.Destroy(context.Background(), "run_guard", false)
-	if err == nil || !strings.Contains(err.Error(), "--force") {
-		t.Fatalf("destroy without force should refuse a running run and mention --force, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "--force-running") {
+		t.Fatalf("destroy without force should refuse a running run and mention --force-running, got: %v", err)
 	}
 
 	// Companion: force tears it down.
 	newRunning("run_forced")
 	if err := m.Destroy(context.Background(), "run_forced", true); err != nil {
-		t.Fatalf("destroy --force should tear down a running run: %v", err)
+		t.Fatalf("destroy --force-running should tear down a running run: %v", err)
 	}
 }
 

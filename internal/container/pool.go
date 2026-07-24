@@ -58,6 +58,17 @@ func NewRuntimePoolWithDefault(rt Runtime) *RuntimePool {
 	}
 }
 
+// NewRuntimePoolWithDockerHost is NewRuntimePoolWithDefault with rt also seeded
+// as the host-pinned runtime for host. Used in tests so a run carrying a
+// recorded endpoint resolves to the stub instead of dialing a real engine.
+func NewRuntimePoolWithDockerHost(rt Runtime, host string) *RuntimePool {
+	return &RuntimePool{
+		runtimes:    map[RuntimeType]Runtime{rt.Type(): rt},
+		defaultRT:   rt,
+		dockerHosts: map[string]Runtime{host: rt},
+	}
+}
+
 // Default returns the auto-detected default runtime.
 // Used for creating new runs. Returns an error if the pool has been closed.
 func (p *RuntimePool) Default() (Runtime, error) {
