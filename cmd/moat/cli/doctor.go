@@ -114,10 +114,8 @@ func (s *containerSection) Print(w io.Writer) error {
 			marker = " (default)"
 		}
 
-		// NewDockerRuntime succeeds even with no reachable daemon (client
-		// creation doesn't dial), so ping before trusting IsPodmanEngine. If
-		// the ping times out or IsPodmanEngine errors, identity stays
-		// engineUnknown — callers must not fail open and assume real Docker.
+		// Client creation doesn't dial, so ping before trusting IsPodmanEngine.
+		// On timeout or error identity stays engineUnknown — never fail open.
 		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if rt.Ping(pingCtx) == nil {
 			if isPodman, err := rt.IsPodmanEngine(pingCtx); err == nil {
@@ -149,13 +147,8 @@ func (s *containerSection) Print(w io.Writer) error {
 		fmt.Fprintln(tw, "Available:\tnone")
 	}
 
-	// Surface a podman socket sitting on disk whenever the connected engine
-	// isn't already confirmed to be podman — without dialing the socket or
-	// setting DOCKER_HOST, both of which doctor must avoid. This covers both
-	// engineDocker (a real Docker daemon is connected, but a podman machine
-	// may also be running alongside it) and engineUnknown (identity couldn't
-	// be confirmed). It's suppressed for enginePodman since the "Available:"
-	// line already labels that engine "docker (podman)".
+	// Surface an idle podman socket when the engine isn't already confirmed
+	// podman — a machine may be running alongside a real Docker daemon.
 	if line := podmanSocketLine(identity, container.PodmanSocketPaths()); line != "" {
 		fmt.Fprintf(tw, "Podman:\t%s\n", line)
 	}
@@ -492,11 +485,9 @@ func (s *storageSection) Print(w io.Writer) error {
 	return tw.Flush()
 }
 
-// engineIdentity captures what doctor could confirm about the engine behind
-// the Docker-API-compatible client. A failed or skipped ping (or an
-// IsPodmanEngine error) leaves this at engineUnknown — that state must be
-// treated as untrusted, not silently coerced into "real Docker". This is the
-// three-state model dockerRuntimeEntry and gvisorLine key off of.
+// engineIdentity is what doctor could confirm about the engine behind the
+// Docker-API client. A failed ping or IsPodmanEngine error leaves it
+// engineUnknown, which must be treated as untrusted rather than real Docker.
 type engineIdentity int
 
 const (
@@ -505,14 +496,10 @@ const (
 	enginePodman
 )
 
-// dockerRuntimeEntry formats the "Available:" list entry for the Docker
-// runtime, labeling it when the connected engine is confirmed to be podman
-// speaking Docker's compat API (see container.DockerRuntime.IsPodmanEngine).
-// marker is appended as-is (e.g. " (default)"). identity must only be
-// enginePodman or engineDocker when a successful ping actually confirmed the
-// engine; engineUnknown (ping failed/timed out, or IsPodmanEngine errored)
-// intentionally renders the same as engineDocker — the label must not
-// speculate about an identity doctor never confirmed.
+// dockerRuntimeEntry formats the "Available:" entry for the Docker runtime,
+// labeling it when the engine is confirmed podman. marker is appended as-is
+// (e.g. " (default)"). engineUnknown renders as plain docker — the label must
+// not speculate about an identity doctor never confirmed.
 func dockerRuntimeEntry(marker string, identity engineIdentity) string {
 	label := "docker"
 	if identity == enginePodman {
@@ -522,15 +509,9 @@ func dockerRuntimeEntry(marker string, identity engineIdentity) string {
 }
 
 // gvisorLine formats the doctor "gVisor:" status line. Podman's compat /info
-// endpoint lists every OCI runtime configured in containers.conf — including
-// gVisor's runsc — regardless of whether it's actually installed, so a
-// "reported" runsc entry from a podman engine can't be trusted the way it can
-// for real Docker. When the engine identity itself is unknown (ping failed or
-// IsPodmanEngine errored), a reported runsc is equally untrustworthy — worse,
-// even — since doctor doesn't even know it's talking to podman, so this must
-// not fall through to the confirmed-Docker "available" line. identity must
-// only be enginePodman/engineDocker when a successful ping confirmed it (see
-// dockerRuntimeEntry); reported is the raw hasGVisor() result.
+// lists every OCI runtime in containers.conf — runsc included — whether or not
+// it's installed, so a reported runsc can't be trusted from podman, nor from
+// an unidentified engine that may well be podman. reported is raw hasGVisor().
 func gvisorLine(identity engineIdentity, reported bool) string {
 	switch {
 	case !reported:
@@ -544,13 +525,9 @@ func gvisorLine(identity engineIdentity, reported bool) string {
 	}
 }
 
-// podmanSocketLine formats the doctor "Podman:" status line, or returns ""
-// when nothing should be shown. sockets is the stat-only result of
-// container.PodmanSocketPaths() (never dialed). The line is suppressed for
-// enginePodman — the "Available:" line already labels that engine "docker
-// (podman)", so repeating it would be redundant — and shown for
-// engineDocker and engineUnknown, since in both cases a live podman socket
-// is real signal the user doesn't otherwise see.
+// podmanSocketLine formats the doctor "Podman:" status line, or "" when it
+// should be suppressed — for enginePodman the "Available:" line already says
+// so. sockets is the stat-only result of container.PodmanSocketPaths().
 func podmanSocketLine(identity engineIdentity, sockets []string) string {
 	if identity == enginePodman || len(sockets) == 0 {
 		return ""

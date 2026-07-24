@@ -23,26 +23,18 @@ func parseEnvFlags(envFlags []string, cfg *config.Config) error {
 	return intcli.ParseEnvFlags(envFlags, cfg)
 }
 
-// runtimeDisplayLabel formats the runtime column shown in `moat list` and
-// `moat status`. Podman runs use the Docker runtime pointed at a podman socket,
-// so their recorded runtime type is "docker"; when the recorded DOCKER_HOST
-// endpoint is a podman socket, label it "docker (podman)" to match `moat
-// doctor` rather than leaving the user's --runtime podman run reading "docker".
-// Derived from the recorded endpoint string (no live engine call), consistent
-// with the podman-host detection used elsewhere for recovery hints.
+// runtimeDisplayLabel formats the runtime column in `moat list` and `moat
+// status`. Podman runs record their type as "docker", so a recorded endpoint
+// that is a podman socket is labeled "docker (podman)" to match `moat doctor`.
+// Derived from the endpoint string alone — no live engine call.
 func runtimeDisplayLabel(runtime, dockerHost string) string {
 	if runtime == "" {
 		return "-"
 	}
-	// Podman sockets usually carry "podman" in the filename: podman.sock
-	// (rootless/rootful) or podman-machine-<name>-api.sock (default machine).
-	// But on macOS a custom-named machine lives at $TMPDIR/podman/<name>-api.sock
-	// (e.g. dev-api.sock), which loses the "podman" filename prefix while
-	// keeping the podman parent directory. So match when either the socket
-	// basename contains "podman" OR its parent directory is exactly "podman".
-	// Checking the basename/parent rather than the whole path keeps an
-	// unrelated docker socket under a directory that merely contains "podman"
-	// (e.g. a user home named podman) from being mislabeled.
+	// Podman sockets usually carry "podman" in the filename, but a custom-named
+	// macOS machine lives at $TMPDIR/podman/<name>-api.sock, which keeps only
+	// the parent directory. Matching basename/parent rather than the whole path
+	// avoids mislabeling a docker socket under an unrelated "podman" ancestor.
 	if runtime == "docker" &&
 		(strings.Contains(path.Base(dockerHost), "podman") ||
 			path.Base(path.Dir(dockerHost)) == "podman") {

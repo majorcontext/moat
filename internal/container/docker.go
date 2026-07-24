@@ -55,10 +55,8 @@ For Docker Desktop (macOS/Windows):
 To bypass (reduced isolation):
   moat run --no-sandbox`)
 
-// podmanGvisorWarnOnce ensures the "gVisor availability is unverified under
-// podman" warning (see NewDockerRuntime) is only printed once per process,
-// even though a new DockerRuntime (and its own gvisorOnce/podmanMu) may be
-// constructed multiple times in a single run.
+// podmanGvisorWarnOnce keeps the unverified-gVisor warning to once per process,
+// since several DockerRuntimes may be constructed in a single run.
 var podmanGvisorWarnOnce sync.Once
 
 // DockerRuntime implements Runtime using Docker.
@@ -70,11 +68,9 @@ type DockerRuntime struct {
 	gvisorOnce  sync.Once
 	gvisorAvail bool
 
-	// podman engine identification cache. Only successful determinations are
-	// cached (nil means "not yet determined"); transient errors (e.g. a
-	// daemon hiccup) are never cached so a later call can retry. Guarded by
-	// podmanMu rather than sync.Once because an error must not "consume" the
-	// one-shot initialization.
+	// podman engine identification cache; nil means "not yet determined".
+	// Guarded by podmanMu rather than sync.Once so a transient error doesn't
+	// consume the one-shot initialization.
 	podmanMu   sync.Mutex
 	podmanIsRT *bool
 
@@ -122,15 +118,11 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 // Used when reconnecting to a run whose containers live on a non-default
 // endpoint recorded in its metadata (storage.Metadata.DockerHost).
 //
-// Contract: client.FromEnv is applied FIRST, then client.WithHost(host).
-// Docker SDK opts apply in order, and WithHost only overrides the client's
-// host field — it doesn't touch TLS (DOCKER_TLS_VERIFY/DOCKER_CERT_PATH) or
-// other env-driven client config that FromEnv sets up. Applying WithHost
-// alone (without FromEnv) would silently drop TLS config that was honored
-// when the runtime was first created via NewDockerRuntime, breaking
-// reconnection to a TLS-secured tcp:// endpoint. FromEnv also reads
-// DOCKER_HOST, but the subsequent WithHost(host) always wins for the host
-// field, so the caller-supplied host is never overridden by the environment.
+// FromEnv must be applied before WithHost: opts apply in order, and WithHost
+// overrides only the host field, so FromEnv still supplies TLS config
+// (DOCKER_TLS_VERIFY/DOCKER_CERT_PATH) needed to reconnect to a secured tcp://
+// endpoint. The later WithHost always wins, so the environment's DOCKER_HOST
+// can't override the caller's.
 func NewDockerRuntimeWithHost(host string, sandbox bool) (*DockerRuntime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithHost(host), client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -139,11 +131,9 @@ func NewDockerRuntimeWithHost(host string, sandbox bool) (*DockerRuntime, error)
 	return newDockerRuntimeFromClient(cli, sandbox)
 }
 
-// DaemonHost returns the Docker-API endpoint this runtime is connected to
-// (e.g. "unix:///var/run/docker.sock" or "tcp://127.0.0.1:1234"). Used by
-// RuntimePool.ForEachAvailable to detect when a host-pinned runtime (from
-// GetDockerAt) points at the same engine as the pool's default Docker
-// runtime, so it isn't visited twice.
+// DaemonHost returns the Docker-API endpoint this runtime is connected to,
+// e.g. "unix:///var/run/docker.sock". ForEachAvailable uses it to spot a
+// host-pinned runtime that points at the pool's default engine.
 func (r *DockerRuntime) DaemonHost() string {
 	return r.cli.DaemonHost()
 }
@@ -173,10 +163,9 @@ func newDockerRuntimeFromClient(cli *client.Client, sandbox bool) (*DockerRuntim
 		ociRuntime = "runsc"
 
 		// Podman reports every OCI runtime configured in containers.conf as
-		// "available", whether or not the binary is actually installed (see
-		// gvisorAvailable's docstring). We can't tell the difference through
-		// the compat API, so best-effort warn the user once so a later
-		// container-creation failure isn't a total surprise.
+		// available whether or not the binary is installed, and the compat API
+		// can't tell the difference — warn so a later creation failure isn't a
+		// surprise.
 		if isPodman, err := r.IsPodmanEngine(context.Background()); err == nil && isPodman {
 			podmanGvisorWarnOnce.Do(func() {
 				ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
@@ -676,9 +665,7 @@ func (r *DockerRuntime) StopContainer(ctx context.Context, containerID string) e
 
 // IsNotFound reports whether err indicates the engine has no such container
 // (or other object). It unwraps, so it still matches errors wrapped with %w by
-// the runtime methods above. Callers use it to distinguish a genuinely absent
-// container from other failures — e.g. a stop that must not silently record
-// success when it cannot confirm the container is really gone.
+// the runtime methods above.
 func IsNotFound(err error) bool {
 	return errdefs.IsNotFound(err)
 }
@@ -846,16 +833,10 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 	return r.gvisorAvail
 }
 
-// IsPodmanEngine reports whether the daemon this runtime is connected to is
-// podman rather than real Docker. A successful determination is cached for
-// the lifetime of this runtime instance; a transient error (e.g. the daemon
-// is momentarily unreachable) is returned to the caller and never cached, so
-// a later call can retry instead of being permanently (and wrongly) treated
-// as "not podman".
-//
-// This is used to confirm MOAT_RUNTIME=podman (with an explicit DOCKER_HOST)
-// is actually pointed at podman, and by 'moat doctor' to label the detected
-// engine correctly.
+// IsPodmanEngine reports whether the connected daemon is podman rather than
+// real Docker. A successful determination is cached for this runtime's
+// lifetime; a transient error is returned and never cached, so a later call
+// can retry instead of being permanently treated as "not podman".
 func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) (bool, error) {
 	r.podmanMu.Lock()
 	cached := r.podmanIsRT

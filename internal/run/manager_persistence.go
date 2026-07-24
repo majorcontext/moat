@@ -92,10 +92,8 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				}
 				defer func() { <-sem }()
 
-				// Look up the runtime for this run (lazy-init if needed). Docker
-				// runs recorded against a non-default endpoint (podman, Rancher
-				// Desktop) must reconnect to that same endpoint rather than the
-				// pool's default Docker runtime.
+				// Look up the runtime for this run (lazy-init if needed),
+				// pinned to the endpoint it was recorded against.
 				rt, rtErr := m.runtimeForEndpoint(ctx, info.meta.Runtime, info.meta.DockerHost)
 				if rtErr != nil {
 					log.Debug("runtime not available, preserving persisted state",

@@ -285,24 +285,19 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
-		// Restore the prior state: leaving the run in StateStopping would make
-		// every subsequent Stop hit the "already stopped" early return above and
-		// silently no-op while the container may still exist.
+		// Leaving the run in StateStopping would make every later Stop hit the
+		// "already stopped" early return above and silently no-op.
 		r.SetState(currentState)
 		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
 	}
 
 	// Stop the main container
 	if err := rt.StopContainer(ctx, r.ContainerID); err != nil {
-		// A not-found container on a docker-type engine for a run with no
-		// recorded endpoint is ambiguous: the run predates per-engine tracking
-		// (docker_host), so moat cannot tell whether the container is genuinely
-		// gone or still running on a different engine than the one resolved here
-		// (e.g. started on Docker, stopped with MOAT_RUNTIME=podman). Fail loudly
-		// instead of recording a false "stopped" and orphaning a live container.
-		// When the endpoint IS recorded we are pinned to the right engine, so
-		// not-found means genuinely gone and cleanup proceeds. Apple's
-		// StopContainer swallows not-found, so this only fires for docker.
+		// Not-found on a run with no recorded endpoint is ambiguous: moat can't
+		// tell whether the container is gone or still running on another engine
+		// (started on Docker, stopped under MOAT_RUNTIME=podman). Fail loudly
+		// rather than record a false "stopped". With an endpoint recorded we're
+		// pinned to the right engine, so not-found means genuinely gone.
 		if container.IsNotFound(err) && r.DockerHost == "" && rt.Type() == container.RuntimeDocker {
 			r.SetState(currentState)
 			return fmt.Errorf("run %s: no such container on the docker engine, and this run has no recorded engine endpoint, so moat cannot confirm it is not still running on another engine (e.g. started on Docker, stopped under MOAT_RUNTIME=podman). Retry 'moat stop' with the runtime the run was created on; if the container is genuinely gone, clear the run with 'moat destroy --force %s'", runID, runID)
@@ -370,10 +365,8 @@ func (m *Manager) Destroy(ctx context.Context, runID string, force bool) error {
 	}
 	m.mu.Unlock()
 
-	// force bypasses the running-state guard so a run that can't be stopped
-	// cleanly (e.g. its container is on an engine this process can't reach, or
-	// 'moat stop' failed loudly for a legacy run with no recorded endpoint) can
-	// still be torn down. Resource cleanup below is best-effort and idempotent.
+	// force tears down a run that can't be stopped cleanly — its container is
+	// on an engine this process can't reach. Cleanup below is idempotent.
 	if r.GetState() == StateRunning && !force {
 		return fmt.Errorf("cannot destroy running run %s; stop it first (or use 'moat destroy --force %s')", runID, runID)
 	}

@@ -94,13 +94,9 @@ func TestRuntimeForRunDockerWithDockerHost(t *testing.T) {
 	}
 }
 
-// TestRecordedDockerHost_DockerRuntime verifies the creation-side recording
-// decision: a *container.DockerRuntime records its own resolved endpoint
-// (DaemonHost), which is never empty even though DOCKER_HOST is unset in the
-// test process. This pins the fix against regressing to reading the raw
-// DOCKER_HOST env var (which is "" for the common default-socket case) —
-// setting a bogus DOCKER_HOST here would make that regression visible
-// immediately since it wouldn't match the runtime's real endpoint.
+// TestRecordedDockerHost_DockerRuntime pins the creation-side decision: a
+// DockerRuntime records its resolved DaemonHost, non-empty even with
+// DOCKER_HOST unset, guarding against regressing to the raw env var.
 func TestRecordedDockerHost_DockerRuntime(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://this-is-not-the-runtimes-endpoint:9999")
 
@@ -139,13 +135,9 @@ func TestRecordedDockerHost_NonDockerRuntime(t *testing.T) {
 	}
 }
 
-// TestRuntimeForEndpoint_RoutingDrift is the drift-guard for the shared
-// routing helper used by both runtimeForRun and loadPersistedRuns. A
-// dockerHost recorded and non-empty must pin to that exact endpoint; an
-// empty dockerHost must fall back to the pool default. Both callers route
-// through runtimeForEndpoint, so this single test covers both call sites'
-// routing behavior — there is no longer a second, independently-maintained
-// routing implementation to drift out of sync with this one.
+// TestRuntimeForEndpoint_RoutingDrift is the drift-guard for the routing
+// helper shared by runtimeForRun and loadPersistedRuns: a recorded endpoint
+// pins to it, an empty one falls back to the pool default.
 func TestRuntimeForEndpoint_RoutingDrift(t *testing.T) {
 	srv := newFakeDockerAPIServer(t)
 	u, err := url.Parse(srv.URL)
@@ -186,16 +178,9 @@ func TestRuntimeForEndpoint_RoutingDrift(t *testing.T) {
 }
 
 // TestRuntimeForRun_ReproducedScenario recreates the reported bug: a run
-// created on the default Docker socket has its resolved endpoint recorded
-// (e.g. "unix:///var/run/docker.sock" or a real daemon's tcp endpoint), and
-// later the process reconnects with the runtime pool's default bound to a
-// DIFFERENT docker-type engine (e.g. `MOAT_RUNTIME=podman moat stop <run>`
-// picking a podman-backed DockerRuntime as the pool default). Before the
-// fix, an empty recorded DockerHost meant reconnects silently fell through
-// to whatever the pool's default docker-type engine was — here that's the
-// WRONG engine, and the real container is never found. The fix requires
-// runtimeForRun to resolve to the runtime whose DaemonHost matches the
-// recorded endpoint, never the mismatched pool default.
+// created on one docker-type engine, reconnected in a process whose pool
+// default is a different one (`MOAT_RUNTIME=podman moat stop <run>`).
+// runtimeForRun must resolve by recorded endpoint, not the pool default.
 func TestRuntimeForRun_ReproducedScenario(t *testing.T) {
 	// "recorded" simulates the real Docker daemon the run was created against.
 	recordedSrv := newFakeDockerAPIServer(t)

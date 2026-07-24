@@ -1223,12 +1223,7 @@ region = %s
 	r.Image = containerImage
 	r.Runtime = string(m.defaultRuntime().Type())
 	if r.Runtime == string(container.RuntimeDocker) {
-		// The runtime's actual resolved endpoint (never empty), not the raw
-		// DOCKER_HOST env var — see recordedDockerHost's doc comment for why
-		// that distinction matters. Recorded so reconnects (moat stop/logs/etc.
-		// in a fresh process) target the same engine, e.g. a podman or Rancher
-		// Desktop socket rather than falling back to whatever docker-type
-		// engine that process defaults to.
+		// Pin the resolved endpoint so reconnects reach the same engine.
 		r.DockerHost = recordedDockerHost(m.defaultRuntime())
 	}
 

@@ -47,22 +47,12 @@ type Metadata struct {
 	// Used during reconciliation to skip cross-runtime container state checks.
 	Runtime string `json:"runtime,omitempty"`
 
-	// DockerHost records the Docker-API endpoint the run's containers live
-	// on — the runtime's actual resolved endpoint at creation time (never
-	// empty for docker-type runs), not the raw DOCKER_HOST env var. Used on
-	// reconnect so lifecycle commands (moat stop/logs/etc.) talk to the same
-	// engine, e.g. a podman or Rancher Desktop socket, rather than falling
-	// back to whatever docker-type engine the reconnecting process defaults
-	// to.
-	//
-	// This field is additive: an older moat CLI that reads and rewrites
-	// metadata.json (e.g. via a struct that doesn't know this field) will
-	// silently drop it on save. A run whose metadata loses DockerHost this
-	// way reverts to legacy routing — reconnects fall through to the pool's
-	// default runtime instead of the pinned endpoint, reintroducing the
-	// wrong-engine failure mode this field exists to prevent. There is no
-	// detection for this; it's a known limitation of storing engine identity
-	// in mutable per-run metadata.
+	// DockerHost records the Docker-API endpoint the run's containers live on
+	// (the runtime's resolved endpoint, not the raw DOCKER_HOST env var), so
+	// lifecycle commands reconnect to the same engine — a podman or Rancher
+	// Desktop socket rather than the reconnecting process's default. Additive:
+	// an older CLI that rewrites metadata drops it, reverting that run to
+	// legacy default-runtime routing.
 	DockerHost string `json:"docker_host,omitempty"`
 
 	// BuildKit sidecar fields (docker:dind only)

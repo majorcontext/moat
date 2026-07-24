@@ -107,22 +107,10 @@ func NewRuntime() (Runtime, error) {
 
 // warnIfForcedDockerHostIsPodman warns (without failing) when
 // MOAT_RUNTIME=docker was explicitly requested but DOCKER_HOST points at a
-// podman engine. It applies only to the explicit "docker" override in
-// NewRuntimeWithOptions — not to auto-detection or to
-// newDockerRuntimeWithPingCandidates' fallback probing.
-//
-// The asymmetry with the "podman" case is deliberate: MOAT_RUNTIME=podman is
-// purely an identity claim about the engine behind the socket, so a mismatch
-// there fails hard (see newPodmanRuntimeWithPing). MOAT_RUNTIME=docker also
-// names the client implementation in use — moat's Docker-API runtime, which
-// works unmodified against podman's compat API — so an identity mismatch
-// only warns and proceeds. The safety concern is already backstopped by the
-// warn-once gVisor notice and by engine-side creation failure if the engine
-// can't actually honor what's asked of it.
-//
-// Identity detection is best-effort: if IsPodmanEngine errors, no warning is
-// emitted (matching how doctor treats unknown engine identity — say nothing
-// rather than speculate).
+// podman engine. Unlike the podman case, which fails hard, "docker" also names
+// the client implementation actually in use — moat's Docker-API runtime, which
+// works unmodified against podman's compat API — so a mismatch only warns.
+// Best-effort: if IsPodmanEngine errors, nothing is emitted.
 func warnIfForcedDockerHostIsPodman(rt Runtime) {
 	if os.Getenv("DOCKER_HOST") == "" {
 		return
@@ -147,12 +135,9 @@ func warnIfForcedDockerHostIsPodman(rt Runtime) {
 // found, DOCKER_HOST is set permanently in the process environment to point
 // to it.
 //
-// This includes podman candidates in its fallback probe, so it must only be
-// used where landing on a podman socket found via auto-detection is
-// acceptable (auto-detect, and NewRuntimeByType's reconnection to existing
-// runs). An explicit MOAT_RUNTIME=docker request must not silently fall back
-// to podman — use newDockerRuntimeWithPingCandidates with genuineDockerSockets
-// for that case instead.
+// The probe includes podman candidates, so use it only where landing on a
+// podman socket is acceptable. An explicit MOAT_RUNTIME=docker request must
+// instead pass genuineDockerSockets to newDockerRuntimeWithPingCandidates.
 func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 	return newDockerRuntimeWithPingCandidates(sandbox, alternativeDockerSockets())
 }
@@ -197,17 +182,12 @@ func newDockerRuntimeWithPingCandidates(sandbox bool, fallbackCandidates []docke
 	return rt, nil
 }
 
-// newPodmanRuntimeWithPing creates a Docker runtime targeting a podman
-// socket. Podman's compat API works with moat's Docker runtime unmodified,
-// so there is no separate podman Runtime implementation — this just points
-// the Docker client at a podman socket instead of Docker's.
-//
-// If DOCKER_HOST is already set, it's used as-is, but the resulting engine
-// is verified to actually be podman (see DockerRuntime.IsPodmanEngine) so
-// MOAT_RUNTIME=podman doesn't silently succeed against a real Docker daemon.
-// Otherwise, known podman socket locations are probed (see
-// podmanSocketCandidates), and DOCKER_HOST is set to the first one that
-// answers.
+// newPodmanRuntimeWithPing creates a Docker runtime targeting a podman socket;
+// podman's compat API works with it unmodified, so there is no separate podman
+// Runtime implementation. A preset DOCKER_HOST is used as-is but verified to
+// actually be podman, so MOAT_RUNTIME=podman can't silently succeed against a
+// real Docker daemon. Otherwise podmanSocketCandidates are probed and
+// DOCKER_HOST is set to the first that answers.
 func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
 	hint := "To start podman:\n  macOS:  podman machine start\n  Linux:  systemctl --user enable --now podman.socket"
 
@@ -232,10 +212,8 @@ func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
 		return dockerRT, nil
 	}
 
-	// Verify each candidate is actually podman's compat API, not just some
-	// Docker-compatible engine that happens to answer on a podman-looking
-	// path — mirrors the DOCKER_HOST branch above, which never trusts the
-	// endpoint's identity without calling IsPodmanEngine.
+	// Verify each candidate is actually podman's compat API, not some other
+	// engine answering on a podman-looking path.
 	verifyPodman := func(dockerRT *DockerRuntime, ctx context.Context) (bool, error) {
 		return dockerRT.IsPodmanEngine(ctx)
 	}
@@ -266,11 +244,9 @@ func alternativeDockerSockets() []dockerSocketCandidate {
 	return append(genuineDockerSockets(), podmanSocketCandidates()...)
 }
 
-// genuineDockerSockets returns paths to Docker-compatible sockets from
-// third-party tools that run a real Docker engine (as opposed to podman's
-// compat API). An explicit MOAT_RUNTIME=docker request falls back only to
-// these — never to podmanSocketCandidates — so it can't silently land on a
-// podman socket the way podman-or-docker auto-detection is allowed to.
+// genuineDockerSockets returns sockets backed by a real Docker engine, as
+// opposed to podman's compat API. An explicit MOAT_RUNTIME=docker falls back
+// only to these, so it can't silently land on a podman socket.
 func genuineDockerSockets() []dockerSocketCandidate {
 	var candidates []dockerSocketCandidate
 	if runtime.GOOS == "darwin" {
@@ -282,38 +258,27 @@ func genuineDockerSockets() []dockerSocketCandidate {
 }
 
 // podmanRootfulSocket is the well-known path to podman's rootful Docker-API
-// socket on Linux. It's a package variable (rather than an inline literal)
-// solely so tests can redirect it to a scratch path — the real path is fixed
-// and can't be neutralized via HOME/XDG_RUNTIME_DIR/TMPDIR like the other
-// candidates, so a test running on a host with rootful podman active would
-// otherwise dial the real socket.
+// socket on Linux. A package variable so tests can redirect it: unlike the
+// other candidates it can't be neutralized via HOME/XDG_RUNTIME_DIR/TMPDIR,
+// so a test host running rootful podman would otherwise dial the real socket.
 var podmanRootfulSocket = "/run/podman/podman.sock"
 
-// newDefaultDockerRuntime constructs a Docker runtime for the default
-// endpoint (DOCKER_HOST as resolved from the environment, or the platform
-// default socket when unset). It's a package variable — defaulting to
-// NewDockerRuntime — solely so tests can substitute a runtime pinned to a
-// scratch socket, deterministically forcing the "default Docker socket is
-// unreachable" precondition that the podman-fallback tests need, even on a
-// host (or CI runner) with a live dockerd on the real default socket. Mirrors
-// the podmanRootfulSocket seam above.
+// newDefaultDockerRuntime constructs a Docker runtime for the default endpoint.
+// A package variable so tests can pin it to a scratch socket and force the
+// "default socket unreachable" precondition the podman-fallback tests need,
+// even on a host with a live dockerd. Mirrors the podmanRootfulSocket seam.
 var newDefaultDockerRuntime = NewDockerRuntime
 
-// xdgRuntimeDirFallback computes the runtime-dir base to use for podman's
-// rootless socket when XDG_RUNTIME_DIR is unset. sudo/cron/CI contexts often
-// lack XDG_RUNTIME_DIR even though podman still creates its socket at
-// /run/user/<uid>/podman/podman.sock — systemd's standard per-user runtime
-// directory, which podman uses regardless of whether the variable is
-// exported in the current shell. A package variable (rather than an inline
-// call) so tests can override the uid seam deterministically.
+// xdgRuntimeDirFallback is the runtime-dir base for podman's rootless socket
+// when XDG_RUNTIME_DIR is unset, as in sudo/cron/CI — podman still uses
+// systemd's /run/user/<uid> regardless of whether the variable is exported.
+// A package variable so tests can override the uid seam.
 var xdgRuntimeDirFallback = func() string {
 	return fmt.Sprintf("/run/user/%d", os.Getuid())
 }
 
 // podmanSocketCandidates returns paths to podman's Docker-API-compatible
-// socket. Podman's compat API works with moat's Docker runtime unmodified
-// (verified against podman machine's v1.44 compat endpoint), so these are
-// just additional dockerSocketCandidate entries.
+// socket:
 //
 //   - macOS (podman machine): $TMPDIR/podman/<machine-name>-api.sock
 //   - Linux rootless: $XDG_RUNTIME_DIR/podman/podman.sock, falling back to
@@ -364,24 +329,17 @@ func tryAlternativeDockerSockets(sandbox bool) Runtime {
 // answers a ping. If a working socket is found, DOCKER_HOST is set so all
 // subsequent Docker client creation uses the discovered socket.
 //
-// If no candidate succeeds, the returned error is the most recent
-// construction/ping failure encountered among candidates that did stat as a
-// socket (nil if no candidate path even existed as a socket), so callers can
-// distinguish "nothing was there" from "something was there but broken".
+// If none succeeds, the returned error is the last failure among candidates
+// that did stat as a socket, and nil if no candidate path existed at all — so
+// callers can tell "nothing there" from "something there but broken".
 func tryDockerSocketCandidates(candidates []dockerSocketCandidate, sandbox bool) (Runtime, error) {
 	return tryDockerSocketCandidatesVerified(candidates, sandbox, nil)
 }
 
 // tryDockerSocketCandidatesVerified is tryDockerSocketCandidates with an
-// optional identity check. When verify is non-nil, it's called after a
-// successful ping with the candidate's *DockerRuntime; a false result skips
-// the candidate (logged at debug level) rather than accepting it, and an
-// error is treated the same as a failed ping (recorded and the next
-// candidate is tried). This is used by the podman auto-probe
-// (newPodmanRuntimeWithPing) to confirm a candidate socket is actually
-// podman's compat API rather than some other Docker-compatible engine that
-// happens to be listening on a podman-looking path — candidate-list
-// construction alone (a matching path) is not proof of engine identity.
+// optional identity check, called after a successful ping. A false result
+// skips the candidate; an error is treated as a failed ping. The podman probe
+// uses it because a matching socket path alone is no proof of engine identity.
 func tryDockerSocketCandidatesVerified(candidates []dockerSocketCandidate, sandbox bool, verify func(*DockerRuntime, context.Context) (bool, error)) (Runtime, error) {
 	var lastErr error
 	for _, c := range candidates {

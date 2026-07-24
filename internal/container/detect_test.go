@@ -398,12 +398,9 @@ func TestNewRuntimeWithOptionsPodmanOverrideDockerHostPodman(t *testing.T) {
 }
 
 // TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman is the
-// auto-probe companion to TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman:
-// with DOCKER_HOST unset, newPodmanRuntimeWithPing's candidate probe
-// (tryDockerSocketCandidatesVerified over podmanSocketCandidates, see
-// detect.go's newPodmanRuntimeWithPing) must reject a Docker-flavored engine
-// sitting on a podman candidate socket rather than trusting the path alone —
-// candidate-list membership is not proof of engine identity.
+// auto-probe companion to the DockerHost case: with DOCKER_HOST unset, the
+// candidate probe must reject a Docker engine on a podman candidate socket
+// rather than trusting the path alone.
 func TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("unix-socket-based candidate probing is unix/darwin-only")
@@ -602,13 +599,9 @@ func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
 	t.Cleanup(func() { _ = srv.Close() })
 }
 
-// forceDefaultDockerUnreachable redirects the newDefaultDockerRuntime seam
-// (see detect.go) so the "default Docker socket" resolves to a scratch path
-// that is guaranteed to have nothing listening on it, deterministically
-// forcing the initial ping in newDockerRuntimeWithPingCandidates to fail —
-// regardless of whether this host (or CI runner, which ships a live dockerd
-// on ubuntu-latest) has a real reachable default Docker socket. Restored via
-// t.Cleanup.
+// forceDefaultDockerUnreachable redirects the newDefaultDockerRuntime seam to
+// a scratch path with nothing listening, so the initial ping fails even on a
+// host with a live dockerd (as ubuntu-latest has). Restored via t.Cleanup.
 func forceDefaultDockerUnreachable(t *testing.T) {
 	t.Helper()
 	dead := filepath.Join(shortTempDir(t), "dead-default.sock")
@@ -634,14 +627,10 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
-// TestMOATRuntimeDockerDoesNotFallBackToPodman is the pinning test for the
-// genuineDockerSockets()/alternativeDockerSockets() split (see
-// NewRuntimeWithOptions's "docker" case and genuineDockerSockets's doc
-// comment). Mutation-verified: reverting the "docker" case's
-// genuineDockerSockets() argument back to alternativeDockerSockets() passes
-// the rest of the suite but must fail this test — with the default Docker
-// socket unreachable and a live podman-shaped socket sitting in the podman
-// candidate seam, MOAT_RUNTIME=docker must NOT silently land on it.
+// TestMOATRuntimeDockerDoesNotFallBackToPodman pins the genuineDockerSockets
+// /alternativeDockerSockets split: with the default socket unreachable and a
+// live podman-shaped socket in the candidate seam, MOAT_RUNTIME=docker must
+// not land on it. Reverting the split passes the rest of the suite, not this.
 func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("unix-socket-based fallback probing is unix/darwin-only")
@@ -687,13 +676,9 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 }
 
 // TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds pins the
-// warn-not-fail behavior of warnIfForcedDockerHostIsPodman (see
-// NewRuntimeWithOptions's "docker" case): with MOAT_RUNTIME=docker and
-// DOCKER_HOST explicitly pointing at a podman engine, runtime creation must
-// SUCCEED — the mismatch is only surfaced as a ui.Warn — unlike
-// MOAT_RUNTIME=podman against a non-podman engine, which fails hard
-// (TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman). The genuine
-// docker-engine subtest is the companion assertion: same setup, no warning.
+// warn-not-fail behavior: MOAT_RUNTIME=docker with DOCKER_HOST on a podman
+// engine must succeed with only a warning, unlike the podman override, which
+// fails hard. The genuine-docker subtest is the companion: no warning.
 func TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("unix-socket-based fake engines are unix/darwin-only")
