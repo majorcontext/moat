@@ -206,7 +206,7 @@ Podman sets the `container=podman` environment variable inside every container i
 
 - **gVisor false positive (Linux):** Podman's compatibility API reports `runsc` (and other OCI runtimes) as available whenever they're listed in `containers.conf`, even if not installed. Moat's Linux default requires gVisor; if the check passes spuriously, container creation fails. Either install `runsc` as a Podman OCI runtime, or run with `--no-sandbox` (or `MOAT_NO_SANDBOX=1`), which accepts reduced isolation. macOS has sandboxing off by default, so this doesn't apply there.
 - **Custom base images** must default to the root user -- Moat's generated Dockerfile installs packages without a `USER root` escape. Rootless Podman's UID mapping (container root -> host user) doesn't change this requirement.
-- **Podman 4.1+** is required for the `host-gateway` sentinel that Moat uses with `--add-host`.
+- **Versions.** Podman 4.1+ is required for the `host-gateway` sentinel that Moat uses with `--add-host`. On macOS, socket auto-detection additionally needs the 5.x machine socket layout; a 4.x machine works only if you set `DOCKER_HOST` yourself. Moat's Podman support was developed and verified against Podman 6.0.0 and 6.0.1 on macOS arm64 (compatibility API v1.44); other versions meeting the above are expected to work but weren't exercised.
 
 ## GitHub authentication setup (optional)
 

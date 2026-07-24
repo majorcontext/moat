@@ -70,6 +70,10 @@ On macOS and Windows, Moat automatically uses standard mode. Apple containers (m
 
 Podman exposes a Docker-API-compatible socket (podman machine on macOS, the native daemonless socket on Linux), and Moat's Docker runtime talks to it unmodified — set `DOCKER_HOST` or let auto-detection find it, or force it with `--runtime podman` / `MOAT_RUNTIME=podman`. See [Installation](../getting-started/02-installation.md#podman-macos-linux) for setup and [Troubleshooting](../reference/08-troubleshooting.md) for the gVisor false-positive caveat on Linux.
 
+**Why `podman` is a runtime value when it isn't a separate runtime.** Auto-detection only probes alternative sockets when the default Docker socket is *unreachable*, so on a machine running Docker and Podman side by side it will always pick Docker. Selecting Podman there otherwise means locating the machine socket yourself and exporting `DOCKER_HOST`. The `podman` value does two things that neither auto-detection nor `DOCKER_HOST` can: it asserts engine identity — Moat verifies the endpoint really answers as Podman and fails if it doesn't, where a mis-set `DOCKER_HOST` would silently run on Docker — and it produces actionable errors (how to start a machine) when no Podman socket answers.
+
+On macOS with several machines running, Moat probes the one Podman itself targets, honoring `CONTAINER_CONNECTION` and otherwise the default connection from `podman-connections.json`.
+
 ## Apple containers
 
 Apple containers require macOS 26+ (Tahoe) on Apple Silicon, with the `container` CLI installed from the [Apple container releases](https://github.com/apple/container/releases) page. They use macOS virtualization frameworks rather than Docker.

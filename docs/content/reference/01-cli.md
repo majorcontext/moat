@@ -1315,10 +1315,13 @@ moat destroy [run] [flags]
 | Flag | Description |
 |------|-------------|
 | `-f`, `--force` | Destroy even if a volume-mode run has no extraction snapshot |
+| `--force-running` | Destroy a run that is still running, without stopping it first |
 
 If a name matches multiple runs, you'll be prompted to confirm destroying all of them.
 
 For volume-mode runs, the workspace lives only in the Docker named volume. Destroying such a run without first capturing a snapshot permanently deletes the agent's work. The command refuses unless an extraction snapshot exists; pass `-f`/`--force` to override.
+
+A run whose container lives on an engine this process can't reach can't be stopped cleanly. `--force-running` skips the running-state guard so such a run can still be torn down. The two flags are independent: `--force` never waives the running-run guard, and `--force-running` never waives the snapshot guard.
 
 ### Examples
 
@@ -1331,6 +1334,9 @@ moat destroy run_a1b2c3d4e5f6
 
 # Destroy a volume-mode run even without an extraction snapshot
 moat destroy --force run_a1b2c3d4e5f6
+
+# Tear down a run whose engine is unreachable, without stopping it first
+moat destroy --force-running run_a1b2c3d4e5f6
 ```
 
 ---
