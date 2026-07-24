@@ -152,8 +152,45 @@ func TestPodmanSocketCandidatesDarwin(t *testing.T) {
 	if candidates[0].path != sockPath {
 		t.Errorf("path = %q, want %q", candidates[0].path, sockPath)
 	}
-	if candidates[0].name != "Podman machine" {
-		t.Errorf("name = %q, want %q", candidates[0].name, "Podman machine")
+	if want := "Podman machine podman-machine-default"; candidates[0].name != want {
+		t.Errorf("name = %q, want %q", candidates[0].name, want)
+	}
+}
+
+// TestPodmanSocketCandidatesDarwinPrefersDefaultMachine covers the multi-machine
+// case the single-machine test above cannot: with two machines running, the
+// candidate order must follow podman's own default connection rather than the
+// glob's alphabetical order.
+func TestPodmanSocketCandidatesDarwinPrefersDefaultMachine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir+"/")
+	t.Setenv("CONTAINER_CONNECTION", "")
+
+	podmanDir := filepath.Join(dir, "podman")
+	if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// "dev" sorts first and would win on glob order alone.
+	for _, name := range []string{"dev", "podman-machine-default"} {
+		if err := os.WriteFile(filepath.Join(podmanDir, name+"-api.sock"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePodmanConnections(t, "podman-machine-default")
+
+	candidates := podmanSocketCandidates()
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d: %+v", len(candidates), candidates)
+	}
+	if got := podmanMachineName(candidates[0].path); got != "podman-machine-default" {
+		t.Errorf("first candidate = %q, want the default machine", got)
+	}
+	if got := podmanMachineName(candidates[1].path); got != "dev" {
+		t.Errorf("second candidate = %q, want the non-default machine preserved", got)
 	}
 }
 

@@ -280,7 +280,8 @@ var xdgRuntimeDirFallback = func() string {
 // podmanSocketCandidates returns paths to podman's Docker-API-compatible
 // socket:
 //
-//   - macOS (podman machine): $TMPDIR/podman/<machine-name>-api.sock
+//   - macOS (podman machine): $TMPDIR/podman/<machine-name>-api.sock, with
+//     podman's own default connection probed first
 //   - Linux rootless: $XDG_RUNTIME_DIR/podman/podman.sock, falling back to
 //     /run/user/<uid>/podman/podman.sock when XDG_RUNTIME_DIR is unset
 //   - Linux rootful: /run/podman/podman.sock
@@ -293,9 +294,15 @@ func podmanSocketCandidates() []dockerSocketCandidate {
 		}
 		var candidates []dockerSocketCandidate
 		for _, m := range matches {
-			candidates = append(candidates, dockerSocketCandidate{m, "Podman machine"})
+			desc := "Podman machine"
+			if name := podmanMachineName(m); name != "" {
+				desc = "Podman machine " + name
+			}
+			candidates = append(candidates, dockerSocketCandidate{m, desc})
 		}
-		return candidates
+		// Glob is sorted, so with several machines running the alphabetically
+		// first would win regardless of which one podman itself targets.
+		return preferDefaultPodmanMachine(candidates)
 	case "linux":
 		var candidates []dockerSocketCandidate
 		xdg := os.Getenv("XDG_RUNTIME_DIR")
