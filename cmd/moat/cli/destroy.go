@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var destroyForce bool
+var (
+	destroyForce        bool
+	destroyForceRunning bool
+)
 
 var destroyCmd = &cobra.Command{
 	Use:   "destroy [run]",
@@ -24,14 +27,19 @@ If a name matches multiple runs, you'll be prompted to confirm.
 For volume-mode runs, the workspace lives only in a Docker volume. Destroying
 such a run deletes that volume and loses all agent changes unless an extraction
 snapshot was captured first. The command refuses to destroy a volume-mode run
-with no extraction snapshot; pass --force to override.`,
+with no extraction snapshot; pass --force to override.
+
+A run that cannot be stopped cleanly — its container lives on an engine this
+process cannot reach — can be torn down with --force-running, which skips the
+running-state guard. The two flags are independent.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: destroyRun,
 }
 
 func init() {
 	rootCmd.AddCommand(destroyCmd)
-	destroyCmd.Flags().BoolVarP(&destroyForce, "force", "f", false, "force destroy: skip the volume-mode extraction-snapshot guard, and tear down a still-running run without stopping it first")
+	destroyCmd.Flags().BoolVarP(&destroyForce, "force", "f", false, "force destroy even if a volume-mode run has no extraction snapshot")
+	destroyCmd.Flags().BoolVar(&destroyForceRunning, "force-running", false, "destroy a run that is still running, without stopping it first")
 }
 
 // hasExtractionSnapshot reports whether the run has at least one snapshot that
@@ -113,7 +121,7 @@ func destroyRun(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		if err := manager.Destroy(ctx, runID, destroyForce); err != nil {
+		if err := manager.Destroy(ctx, runID, destroyForceRunning); err != nil {
 			return fmt.Errorf("destroying run %s: %w", runID, err)
 		}
 
