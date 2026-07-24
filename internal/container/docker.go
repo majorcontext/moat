@@ -55,8 +55,17 @@ For Docker Desktop (macOS/Windows):
 To bypass (reduced isolation):
   moat run --no-sandbox`)
 
-// podmanGvisorWarnOnce keeps the unverified-gVisor warning to once per process,
-// since several DockerRuntimes may be constructed in a single run.
+// warnPodmanGvisorUnverified emits the unverified-gVisor warning, at most once
+// per process since several DockerRuntimes may be constructed in a single run.
+func warnPodmanGvisorUnverified() {
+	podmanGvisorWarnOnce.Do(func() {
+		ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
+	})
+}
+
+// podmanGvisorWarnOnce guards warnPodmanGvisorUnverified. Because it is
+// process-global, a test asserting the warning must reset it (see
+// resetPodmanGvisorWarnOnce) rather than depend on running first.
 var podmanGvisorWarnOnce sync.Once
 
 // DockerRuntime implements Runtime using Docker.
@@ -167,9 +176,7 @@ func newDockerRuntimeFromClient(cli *client.Client, sandbox bool) (*DockerRuntim
 		// can't tell the difference — warn so a later creation failure isn't a
 		// surprise.
 		if isPodman, err := r.IsPodmanEngine(context.Background()); err == nil && isPodman {
-			podmanGvisorWarnOnce.Do(func() {
-				ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
-			})
+			warnPodmanGvisorUnverified()
 		}
 	}
 
