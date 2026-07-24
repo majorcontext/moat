@@ -597,7 +597,7 @@ func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
 	if err != nil {
 		t.Fatalf("listening on unix socket %s: %v", path, err)
 	}
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 }

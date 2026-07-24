@@ -219,8 +219,8 @@ func newPodmanRuntimeWithPing(sandbox bool) (Runtime, error) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := dockerRT.Ping(ctx); err != nil {
-			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST is unreachable: %w\n\n%s", err, hint)
+		if pingErr := dockerRT.Ping(ctx); pingErr != nil {
+			return nil, fmt.Errorf("podman runtime requested (via MOAT_RUNTIME or moat.yaml) but DOCKER_HOST is unreachable: %w\n\n%s", pingErr, hint)
 		}
 		isPodman, err := dockerRT.IsPodmanEngine(ctx)
 		if err != nil {
