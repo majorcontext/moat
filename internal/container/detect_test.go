@@ -235,9 +235,11 @@ func TestPodmanSocketCandidatesLinuxNoXDGRuntimeDir(t *testing.T) {
 	// Redirect the uid-fallback seam so this test doesn't depend on the
 	// actual invoking uid (sudo/cron/CI contexts lack XDG_RUNTIME_DIR but
 	// still have podman's socket under /run/user/<uid>).
-	origFallback := xdgRuntimeDirFallback
-	xdgRuntimeDirFallback = func() string { return "/run/user/9999" }
-	t.Cleanup(func() { xdgRuntimeDirFallback = origFallback })
+	restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.xdgRuntimeDir = func() string { return "/run/user/9999" }
+		return e
+	})
+	t.Cleanup(restore)
 
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	candidates := podmanSocketCandidates()
@@ -257,11 +259,14 @@ func TestPodmanSocketCandidatesLinuxNoXDGRuntimeDir(t *testing.T) {
 
 func TestXDGRuntimeDirFallbackUsesUID(t *testing.T) {
 	// The real (non-overridden) fallback must derive the path from the
-	// current process's uid — the systemd/podman convention — not a fixed
-	// or empty value.
+	// current process's uid — the systemd/podman convention — not a fixed or
+	// empty value. Checked against defaultDetectEnviron() directly (rather
+	// than the possibly-swapped package var detectEnv) so this test's result
+	// doesn't depend on whether it happens to run while some other test has
+	// detectEnv redirected.
 	want := fmt.Sprintf("/run/user/%d", os.Getuid())
-	if got := xdgRuntimeDirFallback(); got != want {
-		t.Errorf("xdgRuntimeDirFallback() = %q, want %q", got, want)
+	if got := defaultDetectEnviron().xdgRuntimeDir(); got != want {
+		t.Errorf("defaultDetectEnviron().xdgRuntimeDir() = %q, want %q", got, want)
 	}
 }
 
@@ -345,9 +350,11 @@ func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
 	// path that can't be neutralized via env vars — redirect it to a scratch
 	// path so this test stays hermetic even on a Linux host with rootful
 	// podman running.
-	origRootful := podmanRootfulSocket
-	podmanRootfulSocket = filepath.Join(t.TempDir(), "podman.sock")
-	t.Cleanup(func() { podmanRootfulSocket = origRootful })
+	restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.rootfulSocket = filepath.Join(t.TempDir(), "podman.sock")
+		return e
+	})
+	t.Cleanup(restoreRootful)
 
 	rt := tryAlternativeDockerSockets(false)
 	if rt != nil {
@@ -460,10 +467,13 @@ func TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman(t *testing
 	case "linux":
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		dir := shortTempDir(t)
-		origRootful := podmanRootfulSocket
-		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
-		t.Cleanup(func() { podmanRootfulSocket = origRootful })
-		podmanSockPath = podmanRootfulSocket
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
 	}
 
 	// podman=false: the fake engine answers /version without podman's
@@ -636,17 +646,19 @@ func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
 	t.Cleanup(func() { _ = srv.Close() })
 }
 
-// forceDefaultDockerUnreachable redirects the newDefaultDockerRuntime seam to
-// a scratch path with nothing listening, so the initial ping fails even on a
+// forceDefaultDockerUnreachable redirects the newDockerRuntime seam to a
+// scratch path with nothing listening, so the initial ping fails even on a
 // host with a live dockerd (as ubuntu-latest has). Restored via t.Cleanup.
 func forceDefaultDockerUnreachable(t *testing.T) {
 	t.Helper()
 	dead := filepath.Join(shortTempDir(t), "dead-default.sock")
-	orig := newDefaultDockerRuntime
-	newDefaultDockerRuntime = func(sandbox bool) (*DockerRuntime, error) {
-		return NewDockerRuntimeWithHost("unix://"+dead, sandbox)
-	}
-	t.Cleanup(func() { newDefaultDockerRuntime = orig })
+	restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.newDockerRuntime = func(sandbox bool) (*DockerRuntime, error) {
+			return NewDockerRuntimeWithHost("unix://"+dead, sandbox)
+		}
+		return e
+	})
+	t.Cleanup(restore)
 }
 
 // shortTempDir creates a scratch directory directly under /tmp (bypassing
@@ -695,10 +707,13 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	case "linux":
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		dir := shortTempDir(t)
-		origRootful := podmanRootfulSocket
-		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
-		t.Cleanup(func() { podmanRootfulSocket = origRootful })
-		podmanSockPath = podmanRootfulSocket
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
 	}
 	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
 
@@ -712,22 +727,27 @@ func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
 	}
 }
 
-// TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds pins the
-// warn-not-fail behavior: MOAT_RUNTIME=docker with DOCKER_HOST on a podman
-// engine must succeed with only a warning, unlike the podman override, which
-// fails hard. The genuine-docker subtest is the companion: no warning.
-func TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds(t *testing.T) {
+// TestMOATRuntimeDockerWithPodmanDockerHostSucceedsSilently pins the F5
+// behavior: MOAT_RUNTIME=docker against a podman-backed DOCKER_HOST succeeds
+// (unlike the podman override, which fails hard on a genuine mismatch)
+// without eagerly probing for or warning about the mismatch at construction
+// time. An eager probe here would tax every startup with DOCKER_HOST set —
+// including the common remote-Docker and Rancher Desktop paths — with a
+// blocking ServerVersion call for a warning most of them would never see.
+// Engine identity is available lazily instead, via EngineName, exercised
+// below for both the podman and genuine-docker cases.
+func TestMOATRuntimeDockerWithPodmanDockerHostSucceedsSilently(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("unix-socket-based fake engines are unix/darwin-only")
 	}
 
 	tests := []struct {
-		name     string
-		podman   bool
-		wantWarn bool
+		name       string
+		podman     bool
+		wantEngine string
 	}{
-		{"podman engine behind DOCKER_HOST warns and proceeds", true, true},
-		{"genuine docker engine behind DOCKER_HOST proceeds silently", false, false},
+		{"podman engine behind DOCKER_HOST", true, "podman"},
+		{"genuine docker engine behind DOCKER_HOST", false, "docker"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -749,12 +769,27 @@ func TestMOATRuntimeDockerWithPodmanDockerHostWarnsAndProceeds(t *testing.T) {
 				t.Fatal("expected a non-nil runtime")
 			}
 
-			warned := strings.Contains(buf.String(), "podman engine")
-			if tt.wantWarn && !warned {
-				t.Errorf("expected a podman-mismatch warning, ui output was: %q", buf.String())
+			// No eager probe means no engine-identity output at construction
+			// time, regardless of whether the engine turns out to be podman
+			// or genuine docker. (The unrelated "without gVisor sandbox"
+			// warning is expected here since Sandbox is false — only the
+			// podman-mismatch warning is what F5 removed.)
+			if got := buf.String(); strings.Contains(got, "podman") {
+				t.Errorf("MOAT_RUNTIME=docker should not eagerly warn about engine identity, got: %q", got)
 			}
-			if !tt.wantWarn && warned {
-				t.Errorf("unexpected podman-mismatch warning for a genuine docker engine: %q", buf.String())
+
+			dockerRT, ok := rt.(*DockerRuntime)
+			if !ok {
+				t.Fatalf("expected *DockerRuntime, got %T", rt)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			name, err := dockerRT.EngineName(ctx)
+			if err != nil {
+				t.Fatalf("EngineName: %v", err)
+			}
+			if name != tt.wantEngine {
+				t.Errorf("EngineName() = %q, want %q", name, tt.wantEngine)
 			}
 		})
 	}
@@ -793,10 +828,13 @@ func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
 	case "linux":
 		t.Setenv("XDG_RUNTIME_DIR", "")
 		dir := shortTempDir(t)
-		origRootful := podmanRootfulSocket
-		podmanRootfulSocket = filepath.Join(dir, "podman.sock")
-		t.Cleanup(func() { podmanRootfulSocket = origRootful })
-		podmanSockPath = podmanRootfulSocket
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
 	}
 	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
 
@@ -806,5 +844,75 @@ func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
 	}
 	if rt.Type() != RuntimeDocker {
 		t.Errorf("Type() = %v, want %v (podman is served via the Docker runtime)", rt.Type(), RuntimeDocker)
+	}
+}
+
+// TestTryDockerSocketCandidatesVerifiedGivesVerifyFreshTimeout pins F7: verify
+// must get its own timeout rather than inheriting whatever's left of the
+// ping's context. It proves this by inspecting the deadline verify actually
+// receives after a slow-but-successful ping, rather than depending on a
+// ~5s-long timeout race (which the old shared-context code would only fail
+// once the ping had eaten nearly all 5s).
+func TestTryDockerSocketCandidatesVerifiedGivesVerifyFreshTimeout(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fake engines are unix/darwin-only")
+	}
+
+	// A successful candidate leaves DOCKER_HOST set (see
+	// tryDockerSocketCandidate) — t.Setenv here, rather than leaving it to
+	// production code's os.Setenv, ensures it's restored to its prior value
+	// once this test ends instead of leaking into later tests.
+	t.Setenv("DOCKER_HOST", "")
+
+	const pingDelay = 2 * time.Second
+	sockPath := filepath.Join(shortTempDir(t), "slow-ping.sock")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			time.Sleep(pingDelay)
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	var verifyDeadline time.Time
+	verify := func(rt *DockerRuntime, ctx context.Context) (bool, error) {
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected verify's context to carry a deadline")
+		}
+		verifyDeadline = dl
+		return true, nil
+	}
+
+	candidates := []dockerSocketCandidate{{path: sockPath, name: "test"}}
+	beforeVerify := time.Now()
+	rt, err := tryDockerSocketCandidatesVerified(candidates, false, verify)
+	if err != nil {
+		t.Fatalf("tryDockerSocketCandidatesVerified: %v", err)
+	}
+	if rt == nil {
+		t.Fatal("expected a non-nil runtime")
+	}
+
+	// A fresh 5s timeout starting when verify runs (after the pingDelay-long
+	// ping already completed) deadlines close to 5s from beforeVerify. A
+	// timeout inherited from the ping's own context (created before the
+	// ping, also with a 5s budget) would instead deadline close to
+	// 5s-pingDelay from beforeVerify — pingDelay earlier.
+	remaining := verifyDeadline.Sub(beforeVerify)
+	if remaining < 4*time.Second {
+		t.Errorf("verify's context deadline was %s after the call started; expected close to a fresh 5s timeout, not one inherited from the %s ping (which would leave ~%s)",
+			remaining, pingDelay, 5*time.Second-pingDelay)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"testing"
@@ -80,11 +81,12 @@ func TestRuntimePoolCloseIdempotent(t *testing.T) {
 // poolStubRuntime is a minimal Runtime implementation for pool-level tests.
 // It only implements Type() and Close(); other methods panic if called.
 type poolStubRuntime struct {
-	closed bool
+	closed     bool
+	closeCount int
 }
 
 func (s *poolStubRuntime) Type() RuntimeType          { return RuntimeDocker }
-func (s *poolStubRuntime) Close() error               { s.closed = true; return nil }
+func (s *poolStubRuntime) Close() error               { s.closed = true; s.closeCount++; return nil }
 func (s *poolStubRuntime) Ping(context.Context) error { panic("not implemented") }
 func (s *poolStubRuntime) CreateContainer(context.Context, Config) (string, error) {
 	panic("not implemented")
@@ -623,5 +625,91 @@ func TestForEachAvailableSkipsSameEndpointDuplicate(t *testing.T) {
 	}
 	if dockerVisits != 1 {
 		t.Errorf("expected exactly 1 Docker-typed visit (the default runtime only), got %d: %+v", dockerVisits, visited)
+	}
+}
+
+// --- F2: NewRuntimePoolWithDockerHost double-insert tests ---
+
+// TestNewRuntimePoolWithDockerHostClosesRuntimeOnce pins the Close() half of
+// F2: the runtime seeded as both the default and a host-pinned entry must be
+// closed exactly once, not once per map it appears in.
+func TestNewRuntimePoolWithDockerHostClosesRuntimeOnce(t *testing.T) {
+	stub := &poolStubRuntime{}
+	pool := NewRuntimePoolWithDockerHost(stub, "tcp://127.0.0.1:1234")
+
+	if err := pool.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if stub.closeCount != 1 {
+		t.Errorf("Close() should close the seeded runtime exactly once, got %d closes", stub.closeCount)
+	}
+}
+
+// TestNewRuntimePoolWithDockerHostForEachAvailableVisitsOnce pins the
+// ForEachAvailable half of F2: the old dedupe only recognized *DockerRuntime
+// via DaemonHost(), so a non-*DockerRuntime stub seeded into both maps (as
+// NewRuntimePoolWithDockerHost does) was visited twice.
+func TestNewRuntimePoolWithDockerHostForEachAvailableVisitsOnce(t *testing.T) {
+	stub := &poolStubRuntime{}
+	pool := NewRuntimePoolWithDockerHost(stub, "tcp://127.0.0.1:1234")
+	defer pool.Close()
+
+	var visits int
+	if err := pool.ForEachAvailable(func(rt Runtime) error {
+		if rt == Runtime(stub) {
+			visits++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEachAvailable: %v", err)
+	}
+	if visits != 1 {
+		t.Errorf("ForEachAvailable should visit the seeded runtime exactly once (once as default, not again as host-pinned), got %d", visits)
+	}
+}
+
+// --- F4: dockerHostsUnavailable TTL ---
+
+// TestRuntimePoolGetDockerAtNegativeCacheExpires proves a negative-cache
+// entry is retried once dockerHostNegativeCacheTTL has elapsed, using an
+// injected clock rather than sleeping: the endpoint starts unreachable (no
+// socket), and only starts answering after the fake clock has been advanced,
+// so a stale success would be impossible — only a genuine retry after
+// expiry can produce it.
+func TestRuntimePoolGetDockerAtNegativeCacheExpires(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "engine.sock")
+	host := "unix://" + sockPath
+
+	pool := newStubPool()
+	defer pool.Close()
+
+	fakeNow := time.Now()
+	pool.now = func() time.Time { return fakeNow }
+
+	// Nothing listening yet: first call fails and populates the negative
+	// cache, timestamped at fakeNow.
+	if _, err := pool.GetDockerAt(context.Background(), host); err == nil {
+		t.Fatal("expected an error before the endpoint exists")
+	}
+
+	// Bring the endpoint up, but stay within the TTL: the cached failure
+	// must still be returned, proving GetDockerAt didn't just get lucky by
+	// retrying regardless of TTL.
+	serveFakeDockerAPIUnixSocket(t, sockPath, false)
+	fakeNow = fakeNow.Add(dockerHostNegativeCacheTTL - time.Second)
+	if _, err := pool.GetDockerAt(context.Background(), host); err == nil {
+		t.Fatal("expected the still-cached failure to be returned before TTL expiry")
+	}
+
+	// Past the TTL: the entry must be treated as a miss and retried,
+	// succeeding now that the endpoint answers.
+	fakeNow = fakeNow.Add(2 * time.Second)
+	rt, err := pool.GetDockerAt(context.Background(), host)
+	if err != nil {
+		t.Fatalf("expected the negative-cache entry to expire and retry successfully, got: %v", err)
+	}
+	if rt == nil {
+		t.Fatal("expected a non-nil runtime after cache expiry")
 	}
 }

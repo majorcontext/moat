@@ -27,9 +27,27 @@ type RuntimePool struct {
 	dockerHosts map[string]Runtime
 
 	// dockerHostsUnavailable negatively caches hosts that failed construction
-	// or ping in GetDockerAt, mirroring the unavailable map's per-process,
-	// no-TTL semantics so a dead endpoint isn't re-pinged on every reconnect.
-	dockerHostsUnavailable map[string]error
+	// or ping in GetDockerAt, so a dead endpoint isn't re-pinged on every
+	// reconnect. Unlike the unavailable map above (which caches runtime
+	// *types* — these don't appear mid-process), a podman machine restarting
+	// mid-session is routine, and moat runs as a long-lived daemon, so
+	// entries expire after dockerHostNegativeCacheTTL rather than living for
+	// the life of the process.
+	dockerHostsUnavailable map[string]dockerHostFailure
+
+	// now returns the current time; overridable so tests can exercise TTL
+	// expiry in dockerHostsUnavailable without sleeping. An unexported field
+	// rather than a package-global clock, since tests here are in-package and
+	// can set it directly per-pool. Defaults to time.Now in every
+	// constructor.
+	now func() time.Time
+}
+
+// dockerHostFailure is a cached GetDockerAt failure, timestamped so it can
+// expire (see dockerHostNegativeCacheTTL).
+type dockerHostFailure struct {
+	err error
+	at  time.Time
 }
 
 // NewRuntimePool creates a pool with the auto-detected default runtime.
@@ -45,6 +63,7 @@ func NewRuntimePool(opts RuntimeOptions) (*RuntimePool, error) {
 		runtimes:  map[RuntimeType]Runtime{rt.Type(): rt},
 		defaultRT: rt,
 		opts:      opts,
+		now:       time.Now,
 	}
 	return pool, nil
 }
@@ -55,17 +74,31 @@ func NewRuntimePoolWithDefault(rt Runtime) *RuntimePool {
 	return &RuntimePool{
 		runtimes:  map[RuntimeType]Runtime{rt.Type(): rt},
 		defaultRT: rt,
+		now:       time.Now,
 	}
 }
 
-// NewRuntimePoolWithDockerHost is NewRuntimePoolWithDefault with rt also seeded
-// as the host-pinned runtime for host. Used in tests so a run carrying a
-// recorded endpoint resolves to the stub instead of dialing a real engine.
+// NewRuntimePoolWithDockerHost is NewRuntimePoolWithDefault with rt also
+// resolvable as the host-pinned runtime for host — GetDockerAt(ctx, host)
+// returns the same rt rather than dialing a real engine. Used by
+// internal/run's tests so a run carrying a recorded DockerHost resolves to
+// the stub.
+//
+// rt is deliberately the identical object in both p.runtimes and
+// p.dockerHosts — a test needs Get(RuntimeDocker) and GetDockerAt(ctx, host)
+// to both return the same stub. That double-insertion used to cost two
+// things it shouldn't have: Close would close rt twice (fixed below by
+// deduping by pointer identity before closing), and ForEachAvailable would
+// invoke fn on it twice, because its dedupe only recognized *DockerRuntime
+// and this constructor's rt is typically an arbitrary test stub (fixed in
+// ForEachAvailable by also comparing against the visited default runtime by
+// identity, not just by *DockerRuntime.DaemonHost()).
 func NewRuntimePoolWithDockerHost(rt Runtime, host string) *RuntimePool {
 	return &RuntimePool{
 		runtimes:    map[RuntimeType]Runtime{rt.Type(): rt},
 		defaultRT:   rt,
 		dockerHosts: map[string]Runtime{host: rt},
+		now:         time.Now,
 	}
 }
 
@@ -120,14 +153,25 @@ func (p *RuntimePool) Get(typ RuntimeType) (Runtime, error) {
 // to answer, capped further by the caller's ctx.
 const dockerAtPingTimeout = 5 * time.Second
 
+// dockerHostNegativeCacheTTL bounds how long a GetDockerAt failure is cached
+// in dockerHostsUnavailable before being retried. 30s is short enough that a
+// podman machine or Rancher Desktop VM restarting mid-session — routine, and
+// something moat's long-lived daemon will observe — recovers on its own
+// within a session, while still being long enough to fail fast against a
+// genuinely dead endpoint that's polled repeatedly in a tight loop.
+const dockerHostNegativeCacheTTL = 30 * time.Second
+
 // GetDockerAt returns a Docker runtime pinned to the given endpoint, lazily
 // creating and caching it, without mutating the process-wide DOCKER_HOST. Used
 // to reconnect to runs recorded against a podman or Rancher Desktop socket. An
 // empty host is equivalent to Get(RuntimeDocker).
 //
 // Construction and the ping happen outside the pool mutex, so a wedged endpoint
-// doesn't block unrelated callers. Failures are negatively cached per host, no
-// TTL, so repeat attempts fail fast rather than re-paying the timeout.
+// doesn't block unrelated callers. Failures are negatively cached per host so
+// repeat attempts fail fast rather than re-paying the timeout, but the cache
+// entry expires after dockerHostNegativeCacheTTL — unlike the unavailable map
+// above, whose entries are valid for the process lifetime because a runtime
+// *type* doesn't come and go, a specific endpoint can recover mid-process.
 func (p *RuntimePool) GetDockerAt(ctx context.Context, host string) (Runtime, error) {
 	if host == "" {
 		return p.Get(RuntimeDocker)
@@ -153,9 +197,13 @@ func (p *RuntimePool) GetDockerAt(ctx context.Context, host string) (Runtime, er
 		return rt, nil
 	}
 
-	if err, failed := p.dockerHostsUnavailable[host]; failed {
-		p.mu.Unlock()
-		return nil, err
+	if failure, failed := p.dockerHostsUnavailable[host]; failed {
+		if p.now().Sub(failure.at) < dockerHostNegativeCacheTTL {
+			p.mu.Unlock()
+			return nil, failure.err
+		}
+		// Entry has expired: fall through and retry construction/ping below,
+		// same as if nothing had been cached for this host.
 	}
 	p.mu.Unlock()
 
@@ -203,15 +251,16 @@ func (p *RuntimePool) GetDockerAt(ctx context.Context, host string) (Runtime, er
 	return dockerRT, nil
 }
 
-// cacheDockerHostFailure records a GetDockerAt failure for host so
-// subsequent calls fail fast instead of re-attempting construction/ping.
+// cacheDockerHostFailure records a GetDockerAt failure for host, timestamped
+// so it expires after dockerHostNegativeCacheTTL, so subsequent calls within
+// the TTL fail fast instead of re-attempting construction/ping.
 func (p *RuntimePool) cacheDockerHostFailure(host string, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.dockerHostsUnavailable == nil {
-		p.dockerHostsUnavailable = make(map[string]error)
+		p.dockerHostsUnavailable = make(map[string]dockerHostFailure)
 	}
-	p.dockerHostsUnavailable[host] = err
+	p.dockerHostsUnavailable[host] = dockerHostFailure{err: err, at: p.now()}
 }
 
 // podmanUnreachableHint returns a recovery hint for GetDockerAt errors when
@@ -230,14 +279,30 @@ func podmanUnreachableHint(host string) string {
 }
 
 // ForEachAvailable calls fn for each runtime type that initializes, then for
-// each host-pinned Docker runtime cached via GetDockerAt — without those,
-// podman and Rancher Desktop engines are invisible to `moat clean`/`status`.
-// A pinned runtime matching the already-visited default endpoint is skipped.
-// Iteration is sequential, so fn may append to external slices unsynchronized.
+// each host-pinned Docker runtime already sitting in dockerHosts. It does not
+// populate dockerHosts itself — that only happens via GetDockerAt — so a
+// podman or Rancher Desktop engine is visited here only if something already
+// called GetDockerAt for its host before this ran. An engine that's up but
+// has zero persisted runs pinned to it (so nothing has ever called
+// GetDockerAt for its host) is NOT discovered and will NOT be visited: this
+// method has no way to enumerate engines it hasn't been told about.
+//
+// In practice this works for `moat clean` and `moat status` today because
+// NewManagerWithOptions calls loadPersistedRuns — which calls GetDockerAt for
+// every run's recorded DockerHost — before either command calls
+// ForEachAvailable. That's an ordering contract between internal/run and this
+// method that ForEachAvailable itself neither documents in code nor can
+// verify; a caller that invoked it before loadPersistedRuns would silently
+// see only the default runtime's engine.
+//
+// A pinned runtime matching the already-visited default runtime — by
+// identity, or by DaemonHost() for *DockerRuntime — is skipped. Iteration is
+// sequential, so fn may append to external slices unsynchronized.
 //
 // Note: this lazily initializes runtimes as a side effect. Runtimes
 // initialized here will be closed when the pool is closed.
 func (p *RuntimePool) ForEachAvailable(fn func(Runtime) error) error {
+	var visitedDockerRuntime Runtime
 	var visitedDockerEndpoint string
 	for _, typ := range AllRuntimeTypes() {
 		rt, err := p.Get(typ)
@@ -245,6 +310,7 @@ func (p *RuntimePool) ForEachAvailable(fn func(Runtime) error) error {
 			continue // Runtime not available (or pool closed)
 		}
 		if typ == RuntimeDocker {
+			visitedDockerRuntime = rt
 			if dr, ok := rt.(*DockerRuntime); ok {
 				visitedDockerEndpoint = dr.DaemonHost()
 			}
@@ -262,6 +328,13 @@ func (p *RuntimePool) ForEachAvailable(fn func(Runtime) error) error {
 	p.mu.Unlock()
 
 	for _, rt := range hostRuntimes {
+		// Pointer-identity check first: robust regardless of the runtime's
+		// concrete type, and catches e.g. NewRuntimePoolWithDockerHost, which
+		// seeds the very same object as both the default runtime and a
+		// host-pinned one (typically a test stub, not a *DockerRuntime).
+		if visitedDockerRuntime != nil && rt == visitedDockerRuntime {
+			continue // identical object already visited as the default runtime
+		}
 		if dr, ok := rt.(*DockerRuntime); ok && visitedDockerEndpoint != "" && dr.DaemonHost() == visitedDockerEndpoint {
 			continue // same engine as the already-visited default Docker runtime
 		}
@@ -274,6 +347,13 @@ func (p *RuntimePool) ForEachAvailable(fn func(Runtime) error) error {
 
 // Close closes all runtimes in the pool. After Close, Get and Default
 // return errors.
+//
+// A runtime is closed at most once even if it appears in both p.runtimes and
+// p.dockerHosts — which NewRuntimePoolWithDockerHost deliberately does, to
+// make a single stub resolve from both Get(RuntimeDocker) and GetDockerAt.
+// Deduping by pointer identity (rather than, say, only checking
+// *DockerRuntime) keeps that safe for any Runtime implementation, including
+// test stubs.
 func (p *RuntimePool) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -283,16 +363,27 @@ func (p *RuntimePool) Close() error {
 	}
 	p.closed = true
 
+	// Runtime is an interface, so keying a map by it is only safe while
+	// every implementation is a pointer type — true today (*DockerRuntime,
+	// *AppleRuntime, and the test stubs). A future value-receiver Runtime
+	// would still satisfy the interface but panic with "hash of unhashable
+	// type" the moment it's inserted here.
+	closed := make(map[Runtime]struct{}, len(p.runtimes)+len(p.dockerHosts))
 	var firstErr error
-	for _, rt := range p.runtimes {
+	closeOnce := func(rt Runtime) {
+		if _, ok := closed[rt]; ok {
+			return
+		}
+		closed[rt] = struct{}{}
 		if err := rt.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
+	for _, rt := range p.runtimes {
+		closeOnce(rt)
+	}
 	for _, rt := range p.dockerHosts {
-		if err := rt.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		closeOnce(rt)
 	}
 	return firstErr
 }

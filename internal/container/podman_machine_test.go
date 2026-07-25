@@ -16,9 +16,11 @@ func writePodmanConnections(t *testing.T, def string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write connections file: %v", err)
 	}
-	prev := podmanConnectionsPath
-	podmanConnectionsPath = func() string { return path }
-	t.Cleanup(func() { podmanConnectionsPath = prev })
+	restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.connectionsPath = func() string { return path }
+		return e
+	})
+	t.Cleanup(restore)
 }
 
 func machineCandidates(names ...string) []dockerSocketCandidate {
@@ -77,9 +79,11 @@ func TestPreferDefaultPodmanMachineNoDefault(t *testing.T) {
 	t.Setenv("CONTAINER_CONNECTION", "")
 
 	t.Run("no connections file", func(t *testing.T) {
-		prev := podmanConnectionsPath
-		podmanConnectionsPath = func() string { return filepath.Join(t.TempDir(), "absent.json") }
-		t.Cleanup(func() { podmanConnectionsPath = prev })
+		restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.connectionsPath = func() string { return filepath.Join(t.TempDir(), "absent.json") }
+			return e
+		})
+		t.Cleanup(restore)
 
 		got := preferDefaultPodmanMachine(machineCandidates("dev", "prod"))
 		if name := firstMachine(t, got); name != "dev" {
@@ -104,9 +108,11 @@ func TestPreferDefaultPodmanMachineNoDefault(t *testing.T) {
 		if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		prev := podmanConnectionsPath
-		podmanConnectionsPath = func() string { return path }
-		t.Cleanup(func() { podmanConnectionsPath = prev })
+		restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.connectionsPath = func() string { return path }
+			return e
+		})
+		t.Cleanup(restore)
 
 		got := preferDefaultPodmanMachine(machineCandidates("dev", "prod"))
 		if name := firstMachine(t, got); name != "dev" {

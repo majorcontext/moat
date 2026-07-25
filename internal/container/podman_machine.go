@@ -16,20 +16,6 @@ type podmanConnectionsFile struct {
 	} `json:"Connection"`
 }
 
-// podmanConnectionsPath locates podman's connections file. A package variable
-// so tests can redirect it without touching the caller's HOME.
-var podmanConnectionsPath = func() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "containers", "podman-connections.json")
-}
-
 // podmanDefaultConnection returns the name of podman's active connection, or ""
 // when it can't be determined. CONTAINER_CONNECTION is podman's own per-command
 // override and wins over the stored default, matching what `podman` itself
@@ -38,7 +24,7 @@ func podmanDefaultConnection() string {
 	if name := os.Getenv("CONTAINER_CONNECTION"); name != "" {
 		return name
 	}
-	path := podmanConnectionsPath()
+	path := detectEnv.connectionsPath()
 	if path == "" {
 		return ""
 	}

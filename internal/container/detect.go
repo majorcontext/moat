@@ -48,7 +48,14 @@ func NewRuntimeWithOptions(opts RuntimeOptions) (Runtime, error) {
 				hint := "Set MOAT_RUNTIME=apple, use --runtime apple, or remove 'runtime: docker' from moat.yaml to use auto-detection."
 				return nil, fmt.Errorf("Docker runtime requested (via MOAT_RUNTIME or moat.yaml) but not available: %w\n\n%s", err, hint)
 			}
-			warnIfForcedDockerHostIsPodman(rt)
+			// A mismatch here (DOCKER_HOST pointing at a podman engine while
+			// "docker" was explicitly requested) is not probed for eagerly:
+			// that would cost every startup with DOCKER_HOST set — including
+			// the common remote-Docker and Rancher Desktop paths — a blocking
+			// ServerVersion call purely on the chance of a warning most of
+			// them would never see. Identity is instead reported lazily via
+			// (*DockerRuntime).EngineName wherever it's first determined
+			// (e.g. at run-creation time), reusing IsPodmanEngine's cache.
 			return rt, nil
 		case "apple":
 			log.Debug("using Apple container runtime (MOAT_RUNTIME=apple)")
@@ -105,29 +112,6 @@ func NewRuntime() (Runtime, error) {
 	return NewRuntimeWithOptions(DefaultRuntimeOptions())
 }
 
-// warnIfForcedDockerHostIsPodman warns (without failing) when
-// MOAT_RUNTIME=docker was explicitly requested but DOCKER_HOST points at a
-// podman engine. Unlike the podman case, which fails hard, "docker" also names
-// the client implementation actually in use — moat's Docker-API runtime, which
-// works unmodified against podman's compat API — so a mismatch only warns.
-// Best-effort: if IsPodmanEngine errors, nothing is emitted.
-func warnIfForcedDockerHostIsPodman(rt Runtime) {
-	if os.Getenv("DOCKER_HOST") == "" {
-		return
-	}
-	dockerRT, ok := rt.(*DockerRuntime)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	isPodman, err := dockerRT.IsPodmanEngine(ctx)
-	if err != nil || !isPodman {
-		return
-	}
-	ui.Warn("MOAT_RUNTIME=docker was requested but DOCKER_HOST points at a podman engine; proceeding with the Docker runtime over that socket. Use --runtime podman to make this explicit.")
-}
-
 // newDockerRuntimeWithPing creates a Docker runtime and verifies it's accessible.
 // If the default Docker socket is unreachable and DOCKER_HOST is not set, it
 // probes known alternative socket locations, including podman's (see
@@ -147,7 +131,7 @@ func newDockerRuntimeWithPing(sandbox bool) (Runtime, error) {
 // probing the given socket candidates.
 func newDockerRuntimeWithPingCandidates(sandbox bool, fallbackCandidates []dockerSocketCandidate) (Runtime, error) {
 	var rt Runtime
-	dockerRT, err := newDefaultDockerRuntime(sandbox)
+	dockerRT, err := detectEnv.newDockerRuntime(sandbox)
 	if err != nil {
 		return nil, fmt.Errorf("Docker runtime error: %w", err)
 	}
@@ -257,25 +241,75 @@ func genuineDockerSockets() []dockerSocketCandidate {
 	return candidates
 }
 
-// podmanRootfulSocket is the well-known path to podman's rootful Docker-API
-// socket on Linux. A package variable so tests can redirect it: unlike the
-// other candidates it can't be neutralized via HOME/XDG_RUNTIME_DIR/TMPDIR,
-// so a test host running rootful podman would otherwise dial the real socket.
-var podmanRootfulSocket = "/run/podman/podman.sock"
+// detectEnviron holds the filesystem/constructor seams that tests need to
+// redirect in order to exercise fallback and auto-detection paths
+// hermetically (without touching the real HOME, XDG_RUNTIME_DIR, or an
+// actual dockerd). Consolidated into a single struct — rather than one
+// package variable per seam — so tests have exactly one thing to save and
+// restore (see SwapDetectEnv in export_test.go) instead of several
+// independent globals that could be left half-restored between tests. This
+// also keeps the shipped binary from carrying more test-only mutable state
+// than necessary: production code reads through detectEnv, but there's one
+// declaration site for what the seams are, not five scattered across the
+// file.
+//
+// Tests that call SwapDetectEnv must not use t.Parallel(): detectEnv is
+// package-level mutable state, and a parallel test could observe another
+// test's swapped values.
+type detectEnviron struct {
+	// rootfulSocket is the well-known path to podman's rootful Docker-API
+	// socket on Linux. Redirected in tests: unlike the other candidates it
+	// can't be neutralized via HOME/XDG_RUNTIME_DIR/TMPDIR, so a test host
+	// running rootful podman would otherwise dial the real socket.
+	rootfulSocket string
 
-// newDefaultDockerRuntime constructs a Docker runtime for the default endpoint.
-// A package variable so tests can pin it to a scratch socket and force the
-// "default socket unreachable" precondition the podman-fallback tests need,
-// even on a host with a live dockerd. Mirrors the podmanRootfulSocket seam.
-var newDefaultDockerRuntime = NewDockerRuntime
+	// xdgRuntimeDir returns the runtime-dir base for podman's rootless socket
+	// when XDG_RUNTIME_DIR is unset, as in sudo/cron/CI — podman still uses
+	// systemd's /run/user/<uid> regardless of whether the variable is
+	// exported. Redirected in tests to avoid depending on the invoking uid.
+	xdgRuntimeDir func() string
 
-// xdgRuntimeDirFallback is the runtime-dir base for podman's rootless socket
-// when XDG_RUNTIME_DIR is unset, as in sudo/cron/CI — podman still uses
-// systemd's /run/user/<uid> regardless of whether the variable is exported.
-// A package variable so tests can override the uid seam.
-var xdgRuntimeDirFallback = func() string {
-	return fmt.Sprintf("/run/user/%d", os.Getuid())
+	// connectionsPath locates podman's connections file
+	// ($XDG_CONFIG_HOME/containers/podman-connections.json by default, see
+	// podmanDefaultConnection in podman_machine.go). Redirected in tests so
+	// they don't touch the caller's real HOME.
+	connectionsPath func() string
+
+	// newDockerRuntime constructs a Docker runtime for the default endpoint.
+	// Redirected in tests to pin the "default socket unreachable"
+	// precondition the podman-fallback tests need, even on a host with a
+	// live dockerd.
+	newDockerRuntime func(sandbox bool) (*DockerRuntime, error)
 }
+
+// defaultDetectEnviron returns detectEnviron's production values — the real
+// filesystem paths and constructors, as opposed to whatever a test has
+// substituted via SwapDetectEnv.
+func defaultDetectEnviron() detectEnviron {
+	return detectEnviron{
+		rootfulSocket: "/run/podman/podman.sock",
+		xdgRuntimeDir: func() string {
+			return fmt.Sprintf("/run/user/%d", os.Getuid())
+		},
+		connectionsPath: func() string {
+			base := os.Getenv("XDG_CONFIG_HOME")
+			if base == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return ""
+				}
+				base = filepath.Join(home, ".config")
+			}
+			return filepath.Join(base, "containers", "podman-connections.json")
+		},
+		newDockerRuntime: NewDockerRuntime,
+	}
+}
+
+// detectEnv is the package's single instance of the seams above. Production
+// code reads fields off this variable rather than holding independent
+// package-level vars; tests redirect it via SwapDetectEnv (export_test.go).
+var detectEnv = defaultDetectEnviron()
 
 // podmanSocketCandidates returns paths to podman's Docker-API-compatible
 // socket:
@@ -307,12 +341,12 @@ func podmanSocketCandidates() []dockerSocketCandidate {
 		var candidates []dockerSocketCandidate
 		xdg := os.Getenv("XDG_RUNTIME_DIR")
 		if xdg == "" {
-			xdg = xdgRuntimeDirFallback()
+			xdg = detectEnv.xdgRuntimeDir()
 		}
 		if xdg != "" {
 			candidates = append(candidates, dockerSocketCandidate{filepath.Join(xdg, "podman", "podman.sock"), "Podman (rootless)"})
 		}
-		candidates = append(candidates, dockerSocketCandidate{podmanRootfulSocket, "Podman (rootful)"})
+		candidates = append(candidates, dockerSocketCandidate{detectEnv.rootfulSocket, "Podman (rootful)"})
 		return candidates
 	default:
 		return nil
@@ -357,44 +391,15 @@ func tryDockerSocketCandidatesVerified(candidates []dockerSocketCandidate, sandb
 			continue
 		}
 
-		host := "unix://" + c.path
-		log.Debug("trying alternative Docker socket", "path", c.path, "tool", c.name)
-
-		// Set DOCKER_HOST so NewDockerRuntime picks up the socket, then
-		// ping to verify it's reachable before committing to it.
-		os.Setenv("DOCKER_HOST", host)
-
-		rt, err := NewDockerRuntime(sandbox)
+		rt, err := tryDockerSocketCandidate(c, sandbox, verify)
 		if err != nil {
-			os.Unsetenv("DOCKER_HOST")
-			lastErr = fmt.Errorf("%s (%s): %w", c.path, c.name, err)
+			lastErr = err
 			continue
 		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		pingErr := rt.Ping(ctx)
-		if pingErr != nil {
-			cancel()
-			os.Unsetenv("DOCKER_HOST")
-			lastErr = fmt.Errorf("%s (%s): ping failed: %w", c.path, c.name, pingErr)
+		if rt == nil {
+			// Candidate answered but failed the identity check; already
+			// logged by tryDockerSocketCandidate.
 			continue
-		}
-
-		if verify != nil {
-			ok, verr := verify(rt, ctx)
-			cancel()
-			if verr != nil {
-				os.Unsetenv("DOCKER_HOST")
-				lastErr = fmt.Errorf("%s (%s): identifying engine: %w", c.path, c.name, verr)
-				continue
-			}
-			if !ok {
-				os.Unsetenv("DOCKER_HOST")
-				log.Debug("candidate socket is not the expected engine, skipping", "path", c.path, "tool", c.name)
-				continue
-			}
-		} else {
-			cancel()
 		}
 
 		// Socket is reachable (and, if verify was given, confirmed to be the
@@ -404,6 +409,67 @@ func tryDockerSocketCandidatesVerified(candidates []dockerSocketCandidate, sandb
 	}
 
 	return nil, lastErr
+}
+
+// tryDockerSocketCandidate dials a single socket candidate: sets DOCKER_HOST,
+// constructs a client, pings, and (if verify is given) checks engine
+// identity. Split out of tryDockerSocketCandidatesVerified's loop body so
+// each candidate's ping context can be released via a single deferred
+// cancel() instead of three separate manual cancel() calls scattered across
+// the failure exits — one call away from a leak on the old shape.
+//
+// Returns (rt, nil) on success; (nil, nil) if the candidate answered the ping
+// but verify rejected it (not an error worth reporting — already logged); or
+// (nil, err) if stat/construction/ping/verify failed outright.
+func tryDockerSocketCandidate(c dockerSocketCandidate, sandbox bool, verify func(*DockerRuntime, context.Context) (bool, error)) (*DockerRuntime, error) {
+	host := "unix://" + c.path
+	log.Debug("trying alternative Docker socket", "path", c.path, "tool", c.name)
+
+	// Set DOCKER_HOST so NewDockerRuntime picks up the socket, then ping to
+	// verify it's reachable before committing to it. Left set only if this
+	// candidate is ultimately accepted.
+	os.Setenv("DOCKER_HOST", host)
+	accepted := false
+	defer func() {
+		if !accepted {
+			os.Unsetenv("DOCKER_HOST")
+		}
+	}()
+
+	rt, err := NewDockerRuntime(sandbox)
+	if err != nil {
+		return nil, fmt.Errorf("%s (%s): %w", c.path, c.name, err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if pingErr := rt.Ping(pingCtx); pingErr != nil {
+		rt.Close()
+		return nil, fmt.Errorf("%s (%s): ping failed: %w", c.path, c.name, pingErr)
+	}
+
+	if verify != nil {
+		// A fresh timeout rather than reusing pingCtx: pingCtx may already be
+		// mostly spent by a slow-but-successful ping, and IsPodmanEngine (the
+		// verify implementation in practice) layers its own 5s on top of
+		// whatever it's handed — so a slow ping must not be allowed to starve
+		// identification of a genuinely-alive engine.
+		verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer verifyCancel()
+		ok, verr := verify(rt, verifyCtx)
+		if verr != nil {
+			rt.Close()
+			return nil, fmt.Errorf("%s (%s): identifying engine: %w", c.path, c.name, verr)
+		}
+		if !ok {
+			log.Debug("candidate socket is not the expected engine, skipping", "path", c.path, "tool", c.name)
+			rt.Close()
+			return nil, nil
+		}
+	}
+
+	accepted = true
+	return rt, nil
 }
 
 // tryAppleRuntime attempts to create and verify an Apple runtime.
