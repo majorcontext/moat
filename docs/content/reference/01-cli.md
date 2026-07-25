@@ -1070,7 +1070,7 @@ moat list
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique identifier |
-| RUNTIME | Container runtime (docker, apple) |
+| RUNTIME | Container runtime (`docker`, `apple`, or `docker (podman)` for a run recorded against a Podman engine) |
 | STATE | running, stopped, failed |
 | AGE | Time since run was created |
 | WORKTREE | Branch name (appears when any run has a worktree) |
@@ -1146,7 +1146,7 @@ moat status
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique run identifier |
-| RUNTIME | Container runtime (docker or apple) |
+| RUNTIME | Container runtime (`docker`, `apple`, or `docker (podman)` for a run recorded against a Podman engine) |
 | AGE | Time since run was created |
 | DISK | Disk usage in MB |
 | ENDPOINTS | Exposed services (from ports) |

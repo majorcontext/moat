@@ -358,9 +358,28 @@ gVisor (runsc) is required but not available
 
 ### gVisor check passes under Podman but the container still fails to start
 
-**Cause:** Podman's compatibility API (`/info`) lists OCI runtimes (`runsc`, `kata`, `krun`, `youki`, ...) that are configured in `containers.conf`, even if the binary isn't actually installed. On Linux, Moat's gVisor availability check can pass against this list, then container creation fails because `runsc` doesn't exist on the host.
+**Cause:** Podman's compatibility API (`/info`) lists OCI runtimes (`runsc`, `kata`, `krun`, `youki`, ...) that are configured in `containers.conf`, even if the binary isn't actually installed. Moat's gVisor availability check can pass against this list, then container creation fails because `runsc` doesn't actually exist. Moat cannot tell the two cases apart from the engine's report alone, so it warns once per run (`gVisor availability is engine-reported and unverified under podman...`) rather than trusting podman's claim outright.
 
-**Fix:** Either install `runsc` as a real Podman OCI runtime, or bypass the sandbox requirement:
+If container creation then fails, the error is annotated with the same diagnosis:
+
+```
+podman reported runsc as available but creating the container with it failed;
+runsc is very likely not actually installed. Check with: podman machine ssh --
+which runsc (macOS) or which runsc (Linux). Use --no-sandbox or
+MOAT_NO_SANDBOX=1 to bypass: ...
+```
+
+**Check whether runsc is actually installed:**
+
+- **macOS** (podman machine runs the OCI runtime inside its VM):
+
+      podman machine ssh -- which runsc
+
+- **Linux** (podman runs directly on the host):
+
+      which runsc
+
+**Fix:** Either install `runsc` as a real Podman OCI runtime, or bypass the sandbox requirement and accept reduced isolation:
 
     moat run --no-sandbox ./my-project
     # or
