@@ -59,7 +59,7 @@ To bypass (reduced isolation):
 // per process since several DockerRuntimes may be constructed in a single run.
 func warnPodmanGvisorUnverified() {
 	podmanGvisorWarnOnce.Do(func() {
-		ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
+		ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Check with: podman machine ssh -- which runsc (macOS) or which runsc (Linux). Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
 	})
 }
 
@@ -485,10 +485,38 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		cfg.Name,
 	)
 	if err != nil {
-		return "", fmt.Errorf("creating container: %w", err)
+		return "", r.diagnoseRunscPodmanCreateError(ctx, fmt.Errorf("creating container: %w", err))
 	}
 
 	return resp.ID, nil
+}
+
+// diagnoseRunscPodmanCreateError wraps a container-creation failure with a
+// diagnostic when the runtime requested runsc and the engine is podman:
+// podman reports every OCI runtime configured in containers.conf as
+// available whether or not the binary is installed (see
+// warnPodmanGvisorUnverified), so a creation failure in this exact
+// configuration is very likely explained by runsc simply not being
+// installed, rather than by whatever the raw engine error says on its own.
+//
+// Uses IsPodmanEngine's cache rather than probing: by the time
+// CreateContainer can fail with r.ociRuntime == "runsc", the sandbox path in
+// newDockerRuntimeFromClient has already populated it, so this does not add
+// a new network round trip to the error path. If the cache was never
+// populated and the lookup itself errors, the original error is returned
+// unwrapped rather than risk masking it with a diagnostic we can't confirm.
+//
+// err is wrapped with %w so errdefs-based classification (e.g. IsNotFound)
+// keeps working through the added diagnostic.
+func (r *DockerRuntime) diagnoseRunscPodmanCreateError(ctx context.Context, err error) error {
+	if r.ociRuntime != "runsc" {
+		return err
+	}
+	isPodman, ierr := r.IsPodmanEngine(ctx)
+	if ierr != nil || !isPodman {
+		return err
+	}
+	return fmt.Errorf("podman reported runsc as available but creating the container with it failed; runsc is very likely not actually installed. Check with: podman machine ssh -- which runsc (macOS) or which runsc (Linux). Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass: %w", err)
 }
 
 // StartContainer starts an existing container.
@@ -866,6 +894,24 @@ func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) (bool, error) {
 	r.podmanIsRT = &isPodman
 	r.podmanMu.Unlock()
 	return isPodman, nil
+}
+
+// EngineName returns the identity of the engine behind this runtime's
+// Docker-API client — "podman" or "docker". It's a thin, human-readable
+// wrapper over IsPodmanEngine and shares that method's cache, so calling both
+// (or calling EngineName repeatedly) never costs more than one probe per
+// runtime. Callers that want to report a "you asked for X but got Y" mismatch
+// (see the forced-docker path in NewRuntimeWithOptions) should call this
+// lazily, only once identity is otherwise needed — not as a dedicated probe.
+func (r *DockerRuntime) EngineName(ctx context.Context) (string, error) {
+	isPodman, err := r.IsPodmanEngine(ctx)
+	if err != nil {
+		return "", err
+	}
+	if isPodman {
+		return "podman", nil
+	}
+	return "docker", nil
 }
 
 // versionIsPodman reports whether a Docker Engine API /version response

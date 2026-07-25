@@ -4,21 +4,13 @@ import (
 	"bytes"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/ui"
 )
 
-// resetPodmanGvisorWarnOnce clears the process-global warn-once guard so a test
-// can observe the warning regardless of whether an earlier test already
-// consumed it. Without this the warning is only ever visible to whichever test
-// happens to run first.
-func resetPodmanGvisorWarnOnce(t *testing.T) {
-	t.Helper()
-	podmanGvisorWarnOnce = sync.Once{}
-	t.Cleanup(func() { podmanGvisorWarnOnce = sync.Once{} })
-}
+// resetPodmanGvisorWarnOnce lives in export_test.go, alongside SwapDetectEnv,
+// as the package's other test-only global-state reset helper.
 
 // TestWarnPodmanGvisorUnverified pins both halves of the contract: the warning
 // says something actionable, and it fires at most once per process no matter
