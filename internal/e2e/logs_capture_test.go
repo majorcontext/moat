@@ -39,6 +39,11 @@ func TestLogsCapturedInAttachedMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
+		// forceRunning=true is deliberate here and at every other e2e cleanup
+		// site: this is teardown, not the behavior under test, and a failing
+		// cleanup must not mask the real assertion. The forceRunning==false
+		// guard itself is covered by unit tests
+		// (TestDestroyForceBypassesRunningGuard in internal/run).
 		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Start and wait for completion (simulating attached mode)

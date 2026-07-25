@@ -2,11 +2,15 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +18,7 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types"
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/deps"
 	"github.com/majorcontext/moat/internal/routing"
@@ -445,15 +450,18 @@ func TestStopHandlesContainerStopError(t *testing.T) {
 // not-found, fails loudly and leaves the run running — rather than silently
 // recording "stopped" and potentially orphaning a container that is really
 // alive on a different engine (e.g. started on Docker, stopped under
-// MOAT_RUNTIME=podman).
-// withPodmanSockets pins the podman-presence seam so the ambiguity
+// MOAT_RUNTIME=podman). This is a wiring test: it mocks the probe seam
+// directly to pin Stop's branching regardless of the seam's own semantics
+// (self-exclusion etc.), which the end-to-end tests further down cover
+// against the real probe.
+// withReachablePodmanEndpoint pins the probe seam so the ambiguity
 // precondition is set by the test rather than by whatever engines the host
 // happens to have installed.
-func withPodmanSockets(t *testing.T, sockets []string) {
+func withReachablePodmanEndpoint(t *testing.T, endpoint string, ok bool) {
 	t.Helper()
-	prev := podmanSocketsPresent
-	podmanSocketsPresent = func() []string { return sockets }
-	t.Cleanup(func() { podmanSocketsPresent = prev })
+	prev := reachablePodmanEndpointOtherThan
+	reachablePodmanEndpointOtherThan = func(context.Context, string) (string, bool) { return endpoint, ok }
+	t.Cleanup(func() { reachablePodmanEndpointOtherThan = prev })
 }
 
 func newLegacyNotFoundRun(id string) *Run {
@@ -469,7 +477,7 @@ func newLegacyNotFoundRun(id string) *Run {
 }
 
 func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
-	withPodmanSockets(t, []string{"/tmp/podman/podman.sock"})
+	withReachablePodmanEndpoint(t, "unix:///tmp/podman/podman.sock", true)
 
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
@@ -486,10 +494,13 @@ func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
 
 	err := m.Stop(context.Background(), r.ID)
 	if err == nil {
-		t.Fatal("Stop should fail loudly on not-found with no recorded endpoint")
+		t.Fatal("Stop should fail loudly on not-found with no recorded endpoint and a reachable, distinct podman engine")
 	}
 	if !strings.Contains(err.Error(), "destroy --force-running") {
 		t.Errorf("error should point at the recovery path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should say a podman engine was detected, got: %v", err)
 	}
 	if r.GetState() != StateRunning {
 		t.Errorf("state should revert to running so the user can retry, got %s", r.GetState())
@@ -497,12 +508,13 @@ func TestStopFailsLoudOnAmbiguousNotFound(t *testing.T) {
 }
 
 // TestStopBenignNotFoundWhenNoPodmanPresent is the companion to
-// TestStopFailsLoudOnAmbiguousNotFound: on a host with no podman socket there
-// is no second engine to be ambiguous about, so a legacy run whose container
-// was removed out of band (docker rm, a prune) must still stop cleanly. This
-// is the pre-existing Docker behavior and must not regress.
+// TestStopFailsLoudOnAmbiguousNotFound: with no other live podman engine
+// reachable, there is no second engine to be ambiguous about, so a legacy
+// run whose container was removed out of band (docker rm, a prune) must
+// still stop cleanly. This is the pre-existing Docker behavior and must not
+// regress.
 func TestStopBenignNotFoundWhenNoPodmanPresent(t *testing.T) {
-	withPodmanSockets(t, nil)
+	withReachablePodmanEndpoint(t, "", false)
 
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
@@ -518,7 +530,7 @@ func TestStopBenignNotFoundWhenNoPodmanPresent(t *testing.T) {
 	m.mu.Unlock()
 
 	if err := m.Stop(context.Background(), r.ID); err != nil {
-		t.Fatalf("Stop should proceed on a host with no podman engine: %v", err)
+		t.Fatalf("Stop should proceed when no other podman engine is reachable: %v", err)
 	}
 	if r.GetState() != StateStopped {
 		t.Errorf("state should be stopped, got %s", r.GetState())
@@ -568,6 +580,167 @@ func TestStopBenignNotFoundWhenEndpointRecorded(t *testing.T) {
 	// Without this the test passes even if Stop never reached the runtime.
 	if n := atomic.LoadInt32(&stopCalls); n != 1 {
 		t.Errorf("StopContainer should have been called once on the pinned runtime, got %d", n)
+	}
+}
+
+// --- End-to-end coverage of the reachable-podman probe itself ---
+//
+// The two tests below drive Stop against the real
+// container.ReachablePodmanEndpointOtherThan (the default value of the
+// reachablePodmanEndpointOtherThan seam), rather than mocking it, so they
+// pin the actual self-exclusion semantics — not just Stop's branching on
+// whatever a mock hands back. They need a real *container.DockerRuntime (so
+// Stop's rt.(*container.DockerRuntime) type assertion succeeds and produces
+// a real, comparable DaemonHost()) and a real socket file at a path
+// podmanSocketCandidates() will actually scan.
+//
+// rootfulPodmanSocketPath is podmanSocketCandidates' hardcoded Linux rootful
+// default (see internal/container/detect.go's defaultDetectEnviron). It is
+// not reachable via a seam from outside that package, so these tests claim
+// the literal path; the rootless candidate, by contrast, is fully
+// controllable via XDG_RUNTIME_DIR.
+const rootfulPodmanSocketPath = "/run/podman/podman.sock"
+
+// serveFakePodmanUnixSocket starts a minimal Docker-Engine-API server on ln
+// whose /version response carries podman's "Podman Engine" component marker
+// (see container.IsPodmanEngine), and whose every other route 404s — which
+// the docker client surfaces as errdefs.ErrNotFound, standing in for
+// StopContainer on a container that's genuinely gone. Closed via t.Cleanup.
+func serveFakePodmanUnixSocket(t *testing.T, ln net.Listener) {
+	t.Helper()
+
+	version := types.Version{
+		APIVersion: "1.44",
+		Version:    "24.0.0",
+		Components: []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}},
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r) // e.g. .../containers/<id>/stop -> ErrNotFound
+	})
+
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+}
+
+// claimRootfulPodmanSocketPath serves a fake podman engine at the literal
+// rootfulPodmanSocketPath, skipping (not failing) the test if the path can't
+// be claimed — e.g. a sandboxed CI runner without permission to create
+// /run/podman, or a real podman.sock already listening there. Removes the
+// socket file via t.Cleanup.
+func claimRootfulPodmanSocketPath(t *testing.T) {
+	t.Helper()
+	dir := filepath.Dir(rootfulPodmanSocketPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Skipf("cannot create %s (need root in this environment): %v", dir, err)
+	}
+	_ = os.Remove(rootfulPodmanSocketPath) // stale socket from a prior run
+	ln, err := net.Listen("unix", rootfulPodmanSocketPath)
+	if err != nil {
+		t.Skipf("cannot claim %s: %v", rootfulPodmanSocketPath, err)
+	}
+	t.Cleanup(func() { os.Remove(rootfulPodmanSocketPath) })
+	serveFakePodmanUnixSocket(t, ln)
+}
+
+// TestStopWarnsWhenPodmanIsOnlyEngine is the regression this ticket fixes:
+// on a host where podman is present but IS the same engine Stop already
+// queried (moat auto-detected it, or MOAT_RUNTIME=podman was used), a
+// not-found container is not ambiguous — podman is the only engine in play,
+// so Stop must warn and record stopped, not hard-fail. The old condition (a
+// podman socket merely exists on disk) could not tell this case apart from a
+// genuinely different second engine and would wrongly hard-fail it; this
+// test fails against that condition (see the ticket's load-bearing check).
+func TestStopWarnsWhenPodmanIsOnlyEngine(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("relies on the linux rootful podman socket path")
+	}
+	claimRootfulPodmanSocketPath(t)
+	// No rootless candidate present, so the rootful one (which equals the
+	// queried endpoint below) is the only candidate in play.
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
+	dockerRT, err := container.NewDockerRuntimeWithHost("unix://"+rootfulPodmanSocketPath, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	t.Cleanup(func() { dockerRT.Close() })
+
+	m := newEdgeCaseManager(t, dockerRT)
+
+	r := newLegacyNotFoundRun("run_podman_only")
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Stop(context.Background(), r.ID); err != nil {
+		t.Fatalf("Stop should warn, not fail, when the only reachable podman engine is the one it already queried: %v", err)
+	}
+	if r.GetState() != StateStopped {
+		t.Errorf("state should be stopped, got %s", r.GetState())
+	}
+}
+
+// TestStopFailsLoudOnDistinctReachablePodmanEngine is the companion: a
+// second, distinct, live podman engine (the rootless candidate) is reachable
+// alongside the one Stop already queried (the rootful candidate) — a
+// genuinely ambiguous case that must still fail loudly.
+func TestStopFailsLoudOnDistinctReachablePodmanEngine(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("relies on the linux rootful podman socket path")
+	}
+	claimRootfulPodmanSocketPath(t) // this becomes the queried endpoint
+
+	xdgDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", xdgDir)
+	rootlessDir := filepath.Join(xdgDir, "podman")
+	if err := os.MkdirAll(rootlessDir, 0o755); err != nil {
+		t.Fatalf("mkdir rootless podman dir: %v", err)
+	}
+	rootlessLn, err := net.Listen("unix", filepath.Join(rootlessDir, "podman.sock"))
+	if err != nil {
+		t.Fatalf("listen on rootless podman socket: %v", err)
+	}
+	serveFakePodmanUnixSocket(t, rootlessLn) // a second, distinct engine
+
+	dockerRT, err := container.NewDockerRuntimeWithHost("unix://"+rootfulPodmanSocketPath, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	t.Cleanup(func() { dockerRT.Close() })
+
+	m := newEdgeCaseManager(t, dockerRT)
+
+	r := newLegacyNotFoundRun("run_ambiguous_real")
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	err = m.Stop(context.Background(), r.ID)
+	if err == nil {
+		t.Fatal("Stop should fail loudly: a second, distinct, live podman engine is reachable")
+	}
+	if !strings.Contains(err.Error(), "destroy --force-running") {
+		t.Errorf("error should point at the recovery path, got: %v", err)
+	}
+	if r.GetState() != StateRunning {
+		t.Errorf("state should revert to running so the user can retry, got %s", r.GetState())
 	}
 }
 

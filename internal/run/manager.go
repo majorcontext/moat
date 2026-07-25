@@ -90,11 +90,6 @@ func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
 // ambiguous-not-found guard without a live podman engine.
 var reachablePodmanEndpointOtherThan = container.ReachablePodmanEndpointOtherThan
 
-// podmanSocketsPresent reports podman sockets that exist on disk (stat only,
-// never dialed). A package variable so tests can control the precondition for
-// Stop's ambiguous-not-found path.
-var podmanSocketsPresent = container.PodmanSocketPaths
-
 // recordedDockerHost returns the endpoint to persist for a new docker-type
 // run: the runtime's resolved DaemonHost rather than the DOCKER_HOST env var,
 // since the pool may have selected a podman or Rancher Desktop socket by some
