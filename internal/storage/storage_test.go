@@ -49,6 +49,37 @@ func TestRunStoreMetadata(t *testing.T) {
 	}
 }
 
+// TestRunStoreMetadata_EngineRoundTrip pins that Engine — the authoritative
+// engine identity recorded at run creation (see storage.Metadata.Engine) —
+// survives a save/load cycle distinctly from DockerHost, which has a
+// different job (reconnection, not reporting).
+func TestRunStoreMetadata_EngineRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run_test8901")
+
+	meta := Metadata{
+		Name:       "claude-code",
+		Workspace:  "/home/user/project",
+		Runtime:    "docker",
+		DockerHost: "unix:///run/podman/podman.sock",
+		Engine:     "podman",
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	loaded, err := s.LoadMetadata()
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	if loaded.Engine != "podman" {
+		t.Errorf("Engine = %q, want %q", loaded.Engine, "podman")
+	}
+	if loaded.DockerHost != meta.DockerHost {
+		t.Errorf("DockerHost = %q, want %q (Engine round-trip must not affect it)", loaded.DockerHost, meta.DockerHost)
+	}
+}
+
 func TestRunStoreDir(t *testing.T) {
 	dir := t.TempDir()
 	s, err := NewRunStore(dir, "run_dirtest1")

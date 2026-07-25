@@ -55,6 +55,7 @@ type Run struct {
 	Image             string            // Container image used for this run
 	Runtime           string            // Container runtime type ("docker" or "apple")
 	DockerHost        string            // DOCKER_HOST endpoint the run's containers live on, when non-default (docker runtime only)
+	Engine            string            // Engine actually behind the docker runtime at creation time ("docker" or "podman"), for display only — see storage.Metadata.Engine
 	ProviderMeta      map[string]string // Provider-specific metadata (e.g., claude_session_id)
 	Ports             map[string]int    // endpoint name -> container port
 	HostPorts         map[string]int    // endpoint name -> host port (after binding)
@@ -212,6 +213,7 @@ func (r *Run) SaveMetadata() error {
 		WorktreeRepoID:      r.WorktreeRepoID,
 		Runtime:             r.Runtime,
 		DockerHost:          r.DockerHost,
+		Engine:              r.Engine,
 		BuildkitContainerID: r.BuildkitContainerID,
 		NetworkID:           r.NetworkID,
 		ServiceContainers:   r.ServiceContainers,

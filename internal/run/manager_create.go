@@ -1225,6 +1225,13 @@ region = %s
 	if r.Runtime == string(container.RuntimeDocker) {
 		// Pin the resolved endpoint so reconnects reach the same engine.
 		r.DockerHost = recordedDockerHost(m.defaultRuntime())
+		// Ask the connected daemon which engine it actually is, for display
+		// only (see storage.Metadata.Engine). Bounded so a slow/unreachable
+		// daemon can't stall run creation; identification failure must never
+		// fail Create — record "" and move on.
+		engineCtx, engineCancel := context.WithTimeout(ctx, 5*time.Second)
+		r.Engine = recordedEngine(engineCtx, m.defaultRuntime())
+		engineCancel()
 	}
 
 	needsCustomImage := imageSpec.NeedsCustomImage(hasDeps)

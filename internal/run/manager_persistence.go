@@ -196,6 +196,7 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		Image:             meta.Image,
 		Runtime:           meta.Runtime,
 		DockerHost:        meta.DockerHost,
+		Engine:            meta.Engine,
 		Ports:             meta.Ports,
 		State:             runState,
 		ContainerID:       meta.ContainerID,

@@ -135,6 +135,122 @@ func TestRecordedDockerHost_NonDockerRuntime(t *testing.T) {
 	}
 }
 
+// newFakePodmanAPIServer is like newFakeDockerAPIServer, but its /version
+// response carries the "Podman Engine" component podman's real compat API
+// reports — the marker DockerRuntime.EngineName uses to identify podman.
+func newFakePodmanAPIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	version := types.Version{
+		APIVersion: "1.44",
+		Version:    "4.9.0",
+		Components: []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}},
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestRecordedEngine_Docker pins the creation-side identity call: a
+// DockerRuntime backed by a real-Docker-shaped compat API asks the engine via
+// EngineName and records "docker" — not a guess derived from the endpoint.
+func TestRecordedEngine_Docker(t *testing.T) {
+	srv := newFakeDockerAPIServer(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	rt, err := container.NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+
+	if got := recordedEngine(context.Background(), rt); got != "docker" {
+		t.Fatalf("recordedEngine = %q, want %q", got, "docker")
+	}
+}
+
+// TestRecordedEngine_Podman is the companion case: a DockerRuntime backed by
+// a podman-shaped compat API (the "Podman Engine" component marker) records
+// "podman" — the exact scenario the path-sniffing heuristic could miss (a
+// podman machine whose name lacks "podman", or podman over tcp://).
+func TestRecordedEngine_Podman(t *testing.T) {
+	srv := newFakePodmanAPIServer(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	// Deliberately a tcp:// endpoint with no "podman" in the path at all, so a
+	// path-sniffing heuristic would have mislabeled this "docker".
+	host := "tcp://" + u.Host
+
+	rt, err := container.NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+
+	if got := recordedEngine(context.Background(), rt); got != "podman" {
+		t.Fatalf("recordedEngine = %q, want %q", got, "podman")
+	}
+}
+
+// TestRecordedEngine_NonDockerRuntime is the companion case: a non-docker
+// runtime has no engine identity to probe.
+func TestRecordedEngine_NonDockerRuntime(t *testing.T) {
+	stub := &stubRuntime{}
+	if got := recordedEngine(context.Background(), stub); got != "" {
+		t.Fatalf("recordedEngine(non-docker runtime) = %q, want empty", got)
+	}
+}
+
+// TestRecordedEngine_ProbeFailureNeverPanics guards the "must never fail
+// creation" contract at the recordedEngine call site: a runtime whose
+// EngineName call errors (server closed) must yield "" rather than a panic
+// or propagated error.
+func TestRecordedEngine_ProbeFailureNeverPanics(t *testing.T) {
+	srv := newFakeDockerAPIServer(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	host := "tcp://" + u.Host
+
+	rt, err := container.NewDockerRuntimeWithHost(host, false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+	srv.Close() // Engine probe will now fail to connect.
+
+	if got := recordedEngine(context.Background(), rt); got != "" {
+		t.Fatalf("recordedEngine after server close = %q, want empty", got)
+	}
+}
+
 // TestRuntimeForEndpoint_RoutingDrift is the drift-guard for the routing
 // helper shared by runtimeForRun and loadPersistedRuns: a recorded endpoint
 // pins to it, an empty one falls back to the pool default.

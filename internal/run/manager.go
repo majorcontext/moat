@@ -84,6 +84,12 @@ func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
 	return m.runtimeForEndpoint(context.Background(), r.Runtime, r.DockerHost)
 }
 
+// reachablePodmanEndpointOtherThan reports a live podman endpoint distinct
+// from the one Stop just queried, or "", false if none is reachable. A
+// package variable so tests can drive both branches of Stop's
+// ambiguous-not-found guard without a live podman engine.
+var reachablePodmanEndpointOtherThan = container.ReachablePodmanEndpointOtherThan
+
 // podmanSocketsPresent reports podman sockets that exist on disk (stat only,
 // never dialed). A package variable so tests can control the precondition for
 // Stop's ambiguous-not-found path.
@@ -99,6 +105,24 @@ func recordedDockerHost(rt container.Runtime) string {
 		return ""
 	}
 	return dr.DaemonHost()
+}
+
+// recordedEngine returns the engine identity to persist for a new docker-type
+// run: an authoritative "docker" or "podman" asked of the connected daemon at
+// creation time, rather than guessed later from the endpoint string. Non-docker
+// runtimes have no such identity and record "". Callers must not fail run
+// creation when this returns "" — see the call site in Create().
+func recordedEngine(ctx context.Context, rt container.Runtime) string {
+	dr, ok := rt.(*container.DockerRuntime)
+	if !ok {
+		return ""
+	}
+	engine, err := dr.EngineName(ctx)
+	if err != nil {
+		log.Debug("engine identification failed, recording no engine", "error", err)
+		return ""
+	}
+	return engine
 }
 
 // defaultRuntime returns the default runtime for new run creation.

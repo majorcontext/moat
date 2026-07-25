@@ -55,6 +55,16 @@ type Metadata struct {
 	// legacy default-runtime routing.
 	DockerHost string `json:"docker_host,omitempty"`
 
+	// Engine records which engine was actually behind the Docker-API endpoint
+	// when the run was created ("docker" or "podman"), for display only (e.g.
+	// `moat list`/`moat status` labeling a podman run "docker (podman)").
+	// Distinct from DockerHost: DockerHost exists so lifecycle commands can
+	// *reconnect* to the right endpoint; Engine exists so they can *report*
+	// the right identity. Neither is derived from the other. Additive: a run
+	// persisted before this field existed has Engine == "" and must render as
+	// plain "docker" rather than being guessed from DockerHost.
+	Engine string `json:"engine,omitempty"`
+
 	// BuildKit sidecar fields (docker:dind only)
 	BuildkitContainerID string `json:"buildkit_container_id,omitempty"`
 	NetworkID           string `json:"network_id,omitempty"`

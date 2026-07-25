@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -24,20 +23,17 @@ func parseEnvFlags(envFlags []string, cfg *config.Config) error {
 }
 
 // runtimeDisplayLabel formats the runtime column in `moat list` and `moat
-// status`. Podman runs record their type as "docker", so a recorded endpoint
-// that is a podman socket is labeled "docker (podman)" to match `moat doctor`.
-// Derived from the endpoint string alone — no live engine call.
-func runtimeDisplayLabel(runtime, dockerHost string) string {
+// status`. Podman runs record their type as "docker", so a recorded engine
+// of "podman" is labeled "docker (podman)" to match `moat doctor`. engine is
+// the value recorded at run creation (storage.Metadata.Engine / run.Run.Engine)
+// — never guessed here. A legacy run persisted before that field existed has
+// engine == "" and renders as plain "docker": empty means "unknown", not
+// "not podman", so it must not fall back to sniffing DockerHost.
+func runtimeDisplayLabel(runtime, engine string) string {
 	if runtime == "" {
 		return "-"
 	}
-	// Podman sockets usually carry "podman" in the filename, but a custom-named
-	// macOS machine lives at $TMPDIR/podman/<name>-api.sock, which keeps only
-	// the parent directory. Matching basename/parent rather than the whole path
-	// avoids mislabeling a docker socket under an unrelated "podman" ancestor.
-	if runtime == "docker" &&
-		(strings.Contains(path.Base(dockerHost), "podman") ||
-			path.Base(path.Dir(dockerHost)) == "podman") {
+	if runtime == "docker" && engine == "podman" {
 		return "docker (podman)"
 	}
 	return runtime

@@ -330,40 +330,31 @@ func TestFormatTimeAgo(t *testing.T) {
 
 func TestRuntimeDisplayLabel(t *testing.T) {
 	tests := []struct {
-		name       string
-		runtime    string
-		dockerHost string
-		want       string
+		name    string
+		runtime string
+		engine  string
+		want    string
 	}{
-		// Podman is surfaced when the recorded endpoint is a podman socket.
-		{"podman machine (macOS)", "docker", "unix:///var/folders/x/T/podman/podman-machine-default-api.sock", "docker (podman)"},
-		// A custom-named machine's socket (dev-api.sock) lacks "podman" in the
-		// filename; the parent directory named exactly "podman" matches instead.
-		{"custom-named podman machine (macOS)", "docker", "unix:///var/folders/x/T/podman/dev-api.sock", "docker (podman)"},
-		{"podman rootless (linux)", "docker", "unix:///run/user/1000/podman/podman.sock", "docker (podman)"},
-		{"podman rootful (linux)", "docker", "unix:///run/podman/podman.sock", "docker (podman)"},
+		// Podman is surfaced only from the recorded engine identity.
+		{"recorded podman engine", "docker", "podman", "docker (podman)"},
 		// Companion: a docker run keeps reading "docker".
-		{"default docker socket", "docker", "unix:///var/run/docker.sock", "docker"},
-		{"docker no endpoint", "docker", "", "docker"},
-		// A non-podman third-party socket is not mislabeled.
-		{"rancher desktop", "docker", "unix:///Users/x/.rd/docker.sock", "docker"},
-		// A docker socket whose path merely contains "podman" (e.g. a user
-		// named podman) must not be mislabeled — the socket basename must
-		// contain "podman" or its immediate parent dir must be exactly
-		// "podman"; here the basename is docker.sock and the parent is "run".
-		{"docker socket under podman-named home", "docker", "unix:///Users/podman/.docker/run/docker.sock", "docker"},
+		{"recorded docker engine", "docker", "docker", "docker"},
+		// Legacy run persisted before Engine existed: Engine == "" MUST render
+		// as plain "docker", never guessed from anything else (there is no
+		// dockerHost parameter anymore — this is the whole point of D2).
+		{"legacy run, no recorded engine", "docker", "", "docker"},
 		// Other runtimes and the empty legacy case are untouched.
 		{"apple", "apple", "", "apple"},
 		{"empty runtime", "", "", "-"},
-		// Guard: podman-shaped endpoint is only honored for the docker runtime.
-		{"apple with stray host", "apple", "unix:///run/podman/podman.sock", "apple"},
+		// Guard: a "podman" engine value is only honored for the docker runtime.
+		{"apple with stray engine value", "apple", "podman", "apple"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := runtimeDisplayLabel(tt.runtime, tt.dockerHost)
+			got := runtimeDisplayLabel(tt.runtime, tt.engine)
 			if got != tt.want {
-				t.Errorf("runtimeDisplayLabel(%q, %q) = %q, want %q", tt.runtime, tt.dockerHost, got, tt.want)
+				t.Errorf("runtimeDisplayLabel(%q, %q) = %q, want %q", tt.runtime, tt.engine, got, tt.want)
 			}
 		})
 	}
