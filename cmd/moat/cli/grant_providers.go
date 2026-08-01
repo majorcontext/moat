@@ -28,21 +28,38 @@ func init() {
 }
 
 // goProviderDescriptions provides descriptions for Go-implemented providers
-// that don't implement DescribableProvider.
+// that don't implement DescribableProvider. Every provider that survives
+// agentOnlyProviders needs an entry here or its own Description() — a blank
+// description column is a bug, and TestGrantProviderInfosAllDescribed guards it.
 var goProviderDescriptions = map[string]string{
-	"github":   "GitHub token",
-	"claude":   "Anthropic API key or OAuth credentials",
-	"codex":    "OpenAI API key or OAuth credentials",
-	"gemini":   "Gemini API key or OAuth credentials",
-	"aws":      "AWS IAM role assumption",
-	"npm":      "npm registry credentials",
-	"graphite": "Graphite API token for stacked PRs",
+	"github":    "GitHub token",
+	"claude":    "Claude Pro/Max OAuth token (for moat claude)",
+	"anthropic": "Anthropic API key from console.anthropic.com",
+	"codex":     "OpenAI API key or OAuth credentials",
+	"gemini":    "Gemini API key or OAuth credentials",
+	"aws":       "AWS IAM role assumption",
+	"npm":       "npm registry credentials",
+	"graphite":  "Graphite API token for stacked PRs",
+	"meta":      "Meta Graph API access token",
+	"oauth":     "OAuth for a catalog service ('moat grant oauth <name>')",
 }
 
 // goProviderCLINames maps internal provider names to their CLI-facing names.
+// Only for providers whose canonical name is not what users type: `codex` is
+// granted as `openai` via a registry alias. `claude` is NOT aliased here — it
+// and `anthropic` are two separate grants (OAuth vs API key), so renaming one
+// to the other collapses them into a duplicate row.
 var goProviderCLINames = map[string]string{
-	"claude": "anthropic",
-	"codex":  "openai",
+	"codex": "openai",
+}
+
+// agentOnlyProviders are registered as CredentialProviders to carry agent
+// runtime behavior, but have no credential of their own — their Grant()
+// always errors and points at the real grant. Listing them under
+// 'moat grant providers' invites users to run a command that cannot work.
+var agentOnlyProviders = map[string]bool{
+	"copilot": true, // runs on the github grant
+	"pi":      true, // runs on the anthropic or openai grant
 }
 
 type providerInfo struct {
@@ -51,17 +68,20 @@ type providerInfo struct {
 	Type        string `json:"type"`
 }
 
-func runGrantProviders(cmd *cobra.Command, args []string) error {
+// grantProviderInfos returns the provider rows for 'moat grant providers',
+// sorted by CLI-facing name.
+func grantProviderInfos() []providerInfo {
 	all := provider.All()
 
 	infos := make([]providerInfo, 0, len(all))
 	for _, p := range all {
-		// Skip agent-only providers (claude, codex, gemini) from grant listing
-		// if they have a CLI name alias — we show the alias instead
-		name := p.Name()
-		if name == "copilot" {
+		// Agent-only providers cannot be granted directly — skip them so the
+		// listing only shows names that work as 'moat grant <name>'.
+		if agentOnlyProviders[p.Name()] {
 			continue
 		}
+		// Show the CLI-facing name where it differs from the canonical one.
+		name := p.Name()
 		if cliName, ok := goProviderCLINames[name]; ok {
 			name = cliName
 		}
@@ -86,6 +106,12 @@ func runGrantProviders(cmd *cobra.Command, args []string) error {
 	sort.Slice(infos, func(i, j int) bool {
 		return infos[i].Name < infos[j].Name
 	})
+
+	return infos
+}
+
+func runGrantProviders(cmd *cobra.Command, args []string) error {
+	infos := grantProviderInfos()
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(infos)
