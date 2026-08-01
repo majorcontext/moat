@@ -73,9 +73,17 @@ func getRuntimeCommands(name, version string) InstallCommands {
 		//
 		// This fallback installs Ubuntu's system Python for cases where Python is
 		// needed alongside other runtimes (e.g., node + python).
+		//
+		// Debian/Ubuntu mark their system Python as externally managed (PEP 668),
+		// which makes `pip install <pkg>` fail with "externally-managed-environment"
+		// — including for pip: dependencies and user pre_run hooks. The container is
+		// disposable and isolated, so system-wide installs are the expected workflow
+		// here; remove the marker. `rm -f` succeeds when the glob matches nothing
+		// (e.g. a base image that never had the marker).
 		return InstallCommands{
 			Commands: []string{
 				"apt-get update && apt-get install -y python3 python3-pip python3-venv",
+				"rm -f /usr/lib/python3*/EXTERNALLY-MANAGED /usr/local/lib/python3*/EXTERNALLY-MANAGED",
 				"update-alternatives --install /usr/bin/python python /usr/bin/python3 1",
 			},
 		}
