@@ -105,7 +105,21 @@ moat copilot           # Interactive mode
 moat copilot -p "fix the failing tests"  # Non-interactive
 ```
 
-Agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-claude-code.md), [Running Codex](docs/content/guides/02-codex.md), and [Running GitHub Copilot CLI](docs/content/guides/17-copilot.md) guides for details.
+### Gemini
+
+```bash
+moat grant gemini      # One-time: imports your Gemini credentials
+moat gemini            # Interactive mode
+```
+
+### Pi
+
+```bash
+moat grant anthropic   # Or: moat grant openai — Pi runs on whichever you grant
+moat pi                # Interactive mode
+```
+
+Agents run in isolated containers with credentials injected at the network layer. See the [Running Claude Code](docs/content/guides/01-claude-code.md), [Running Codex](docs/content/guides/02-codex.md), [Running Gemini](docs/content/guides/03-gemini.md), [Running Pi](docs/content/guides/16-pi.md), and [Running GitHub Copilot CLI](docs/content/guides/17-copilot.md) guides for details.
 
 ## Configuration
 
@@ -146,9 +160,11 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | `moat claude [workspace]` | Run Claude Code |
 | `moat copilot [workspace]` | Run GitHub Copilot CLI |
 | `moat codex [workspace]` | Run Codex |
+| `moat gemini [workspace]` | Run Gemini CLI |
+| `moat pi [workspace]` | Run the Pi coding agent |
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat join <run> <agent>` | Run another agent in a running container |
-| `moat attach <run-id>` | Attach to a running agent |
+| `moat open [agent] [endpoint]` | Open an agent's endpoint in your browser |
 | `moat grant <provider>` | Store credentials (github, anthropic, openai, aws, ssh) |
 | `moat grant list` | List stored credentials |
 | `moat revoke <provider>` | Remove credentials |

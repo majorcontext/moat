@@ -136,6 +136,8 @@ moat grant claude       # OAuth token (for moat claude / Claude Code)
 moat grant anthropic    # API key (for any agent or tool)
 ```
 
+`moat pi` runs on the `anthropic` grant when that is its resolved backend. Pi has no credential of its own — see [Running Pi](../guides/16-pi.md) for how the backend is chosen.
+
 No flags.
 
 ### `moat grant claude`
@@ -248,6 +250,8 @@ No flags.
 The proxy injects an `Authorization: Bearer <token>` header for requests to `api.openai.com`, `chatgpt.com`, and `*.openai.com`.
 
 The container receives `OPENAI_API_KEY` set to a format-valid placeholder so OpenAI SDKs work without prompting.
+
+`moat pi` runs on this grant when `openai` is its resolved backend. See [Running Pi](../guides/16-pi.md).
 
 ### Refresh behavior
 

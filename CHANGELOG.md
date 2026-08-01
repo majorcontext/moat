@@ -4,9 +4,9 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.7.0 — 2026-08-01
 
-Adds HTTP request-body inspection to Keep policies. File- and pack-based `network.keep_policy` rules can now match on the parsed JSON request body, so policies can enforce content-based rules (e.g. block requests whose body carries a secret) instead of host/method/path alone. Also adds native volume backing for `volumes:` (`type: volume`) — a Docker named volume on the engine's native filesystem, for container-only working directories that should bypass the host↔VM filesystem-sharing layer a bind mount crosses. The routing proxy now serves a discovery index at its bare hosts so you can browse an agent's endpoints instead of memorizing hostnames.
+Adds two agents: `moat pi` runs the Pi coding agent against your existing `anthropic` or `openai` grant, and `moat copilot` runs GitHub Copilot CLI on the `github` grant. Keep policies gain HTTP request-body inspection — file- and pack-based `network.keep_policy` rules can match on the parsed JSON request body, so policies can enforce content-based rules (e.g. block requests whose body carries a secret) instead of host/method/path alone. Workspaces and volumes can now be backed by Docker named volumes (`workspace.mode: volume`, `type: volume`) to bypass the host↔VM filesystem-sharing layer a bind mount crosses, and the routing proxy serves a discovery index at its bare hosts so you can browse an agent's endpoints with `moat open` instead of memorizing hostnames.
 
 ### Added
 
