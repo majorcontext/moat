@@ -884,7 +884,7 @@ moat run --grant gitlab ./my-project
 
 ### Custom providers
 
-Add your own providers by creating YAML files in `~/.moat/providers/`. Each file defines a provider with host matching rules, header injection, and credential sources. See [Provider YAML reference](./provider-yaml) for the full schema.
+Add your own providers by creating YAML files in `~/.moat/providers/`. Each file defines a provider with host matching rules, header injection, and credential sources. See [Provider YAML reference](./07-provider-yaml.md) for the full schema.
 
 ### Listing providers
 
@@ -901,4 +901,4 @@ moat grant providers --json
 - [Security model](../concepts/08-security.md) -- Threat model and security properties
 - [CLI reference](./01-cli.md) -- Full CLI command reference, including `moat grant` subcommands
 - [moat.yaml reference](./02-moat-yaml.md) -- All `moat.yaml` fields, including `grants` and `mcp`
-- [Provider YAML reference](./provider-yaml) -- Schema for YAML-defined credential providers
+- [Provider YAML reference](./07-provider-yaml.md) -- Schema for YAML-defined credential providers
