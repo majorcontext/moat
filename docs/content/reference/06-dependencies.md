@@ -77,6 +77,8 @@ dependencies:
 
 Moat validates that the required runtime is present and returns an error if it is missing.
 
+`pip:` packages install into the container's system Python, not a virtual environment. When Python comes from Debian's `python3` package (which happens whenever Python is not the sole runtime, e.g. `python` alongside `node`), Moat removes the PEP 668 `EXTERNALLY-MANAGED` marker so `pip install` and `uv pip install --system` work — in `pip:` dependencies, in build hooks, and in the running container.
+
 ### Meta
 
 Bundles that expand to multiple packages during resolution.

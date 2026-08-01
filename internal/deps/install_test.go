@@ -33,6 +33,15 @@ func TestGetRuntimeCommands(t *testing.T) {
 	}
 }
 
+// Debian marks its apt-installed Python as externally managed (PEP 668), which
+// makes `pip install` fail. The fallback runtime install must clear the marker.
+func TestGetRuntimeCommandsPythonClearsExternallyManaged(t *testing.T) {
+	combined := strings.Join(getRuntimeCommands("python", "3.11").Commands, " ")
+	if !strings.Contains(combined, "EXTERNALLY-MANAGED") {
+		t.Errorf("python runtime install should remove the PEP 668 marker, got: %s", combined)
+	}
+}
+
 func TestGetRuntimeCommandsUnknown(t *testing.T) {
 	cmds := getRuntimeCommands("unknown", "1.0")
 	if len(cmds.Commands) != 0 {

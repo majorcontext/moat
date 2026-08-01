@@ -416,6 +416,54 @@ func TestGenerateDockerfileDynamicPip(t *testing.T) {
 	}
 }
 
+// When python is not the base runtime (e.g. python + node), python comes from
+// Debian apt, which ships the PEP 668 "externally managed" marker and breaks
+// `pip install`. The generated Dockerfile must clear it.
+func TestGenerateDockerfileDynamicPipWithNonPythonBase(t *testing.T) {
+	deps := []Dependency{
+		{Name: "python", Version: "3.11"},
+		{Name: "node", Version: "22"},
+		{Type: TypeDynamicPip, Package: "numpy", Name: "numpy"},
+	}
+	result, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	if !strings.Contains(result.Dockerfile, "FROM debian:bookworm-slim") {
+		t.Fatalf("expected debian base for multi-runtime deps, got:\n%s", result.Dockerfile)
+	}
+	if !strings.Contains(result.Dockerfile, "EXTERNALLY-MANAGED") {
+		t.Error("Dockerfile should remove the PEP 668 marker when python is apt-installed")
+	}
+	if !strings.Contains(result.Dockerfile, "pip install numpy") {
+		t.Error("Dockerfile should install numpy")
+	}
+}
+
+// Companion case: with python as the sole runtime the official python image is
+// used, which has no PEP 668 marker and no apt python install to patch.
+func TestGenerateDockerfileDynamicPipWithPythonBase(t *testing.T) {
+	deps := []Dependency{
+		{Name: "python", Version: "3.11"},
+		{Type: TypeDynamicPip, Package: "numpy", Name: "numpy"},
+	}
+	result, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile error: %v", err)
+	}
+
+	if !strings.Contains(result.Dockerfile, "FROM python:3.11-slim") {
+		t.Fatalf("expected python base image, got:\n%s", result.Dockerfile)
+	}
+	if strings.Contains(result.Dockerfile, "EXTERNALLY-MANAGED") {
+		t.Error("python base image needs no PEP 668 marker removal")
+	}
+	if !strings.Contains(result.Dockerfile, "pip install numpy") {
+		t.Error("Dockerfile should install numpy")
+	}
+}
+
 func TestGenerateDockerfileDynamicUv(t *testing.T) {
 	deps := []Dependency{
 		{Name: "python", Version: "3.11"},
