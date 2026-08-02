@@ -28,8 +28,8 @@ func init() {
 }
 
 // goProviderDescriptions provides descriptions for Go-implemented providers
-// that don't implement DescribableProvider. Every provider that survives
-// agentOnlyProviders needs an entry here or its own Description() — a blank
+// that don't implement DescribableProvider. Every provider that survives the
+// isAgentOnly filter needs an entry here or its own Description() — a blank
 // description column is a bug, and TestGrantProviderInfosAllDescribed guards it.
 var goProviderDescriptions = map[string]string{
 	"github":    "GitHub token",
