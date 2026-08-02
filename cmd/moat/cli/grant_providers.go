@@ -53,13 +53,15 @@ var goProviderCLINames = map[string]string{
 	"codex": "openai",
 }
 
-// agentOnlyProviders are registered as CredentialProviders to carry agent
-// runtime behavior, but have no credential of their own — their Grant()
-// always errors and points at the real grant. Listing them under
-// 'moat grant providers' invites users to run a command that cannot work.
-var agentOnlyProviders = map[string]bool{
-	"copilot": true, // runs on the github grant
-	"pi":      true, // runs on the anthropic or openai grant
+// isAgentOnly reports whether a provider has no credential of its own — it
+// runs on another provider's grant and its Grant() always errors. Listing one
+// under 'moat grant providers' invites users to run a command that cannot
+// work. Providers declare this themselves via provider.AgentOnlyProvider, so a
+// new agent runtime that borrows a grant is excluded by implementing the
+// interface rather than by being added to a list here.
+func isAgentOnly(p provider.CredentialProvider) bool {
+	_, ok := p.(provider.AgentOnlyProvider)
+	return ok
 }
 
 type providerInfo struct {
@@ -77,7 +79,7 @@ func grantProviderInfos() []providerInfo {
 	for _, p := range all {
 		// Agent-only providers cannot be granted directly — skip them so the
 		// listing only shows names that work as 'moat grant <name>'.
-		if agentOnlyProviders[p.Name()] {
+		if isAgentOnly(p) {
 			continue
 		}
 		// Show the CLI-facing name where it differs from the canonical one.

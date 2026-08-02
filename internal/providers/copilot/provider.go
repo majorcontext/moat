@@ -16,6 +16,7 @@ type Provider struct{}
 var (
 	_ provider.CredentialProvider = (*Provider)(nil)
 	_ provider.AgentProvider      = (*Provider)(nil)
+	_ provider.AgentOnlyProvider  = (*Provider)(nil)
 )
 
 func init() {
@@ -24,6 +25,10 @@ func init() {
 
 // Name returns the provider identifier.
 func (p *Provider) Name() string { return copilotProviderName }
+
+// AgentOnly marks Copilot as having no credential of its own: it runs on the
+// github grant, so credential listings exclude it.
+func (p *Provider) AgentOnly() {}
 
 // Grant intentionally does not acquire a separate credential. Copilot CLI uses
 // the github grant so there is one GitHub token to rotate and audit.

@@ -20,6 +20,7 @@ type Provider struct{}
 var (
 	_ provider.CredentialProvider = (*Provider)(nil)
 	_ provider.AgentProvider      = (*Provider)(nil)
+	_ provider.AgentOnlyProvider  = (*Provider)(nil)
 )
 
 func init() {
@@ -28,6 +29,10 @@ func init() {
 
 // Name returns the provider identifier.
 func (p *Provider) Name() string { return "pi" }
+
+// AgentOnly marks Pi as having no credential of its own: it runs on the
+// anthropic or openai grant, so credential listings exclude it.
+func (p *Provider) AgentOnly() {}
 
 // Grant always errors: Pi has no credential of its own. Users grant a model
 // backend with `moat grant anthropic` or `moat grant openai` instead.
