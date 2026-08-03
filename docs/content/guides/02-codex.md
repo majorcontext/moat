@@ -202,8 +202,10 @@ network:
 When the `openai` grant is configured, Codex session transcripts written inside the container appear on the host at:
 
 ```
-~/.moat/codex/sessions/<workspace>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
+~/.moat/codex/sessions/<workspace>-<id>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
 ```
+
+The directory name renders the workspace path for readability and appends a short digest of it, so two projects whose paths differ only in punctuation (`my-project` and `my_project`) get separate directories rather than sharing one.
 
 The directory is per-workspace and separate from your own `~/.codex/sessions`, so a container working on one project cannot read transcripts from another. That matters because transcripts contain whatever the agent saw -- source, data, credentials in error messages -- and one project's data should not reach another project's agent.
 

@@ -1538,7 +1538,7 @@ codex:
 - Type: `boolean`
 - Default: `true` (when the `openai` grant is used)
 
-Sessions land in `~/.moat/codex/sessions/<workspace>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`, in Codex's own format. The directory is per-workspace, so one project's transcripts are never visible to another project's agent — see [codex.shared_sessions](#codexshared_sessions) to use the host's own history instead.
+Sessions land in `~/.moat/codex/sessions/<workspace>-<id>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`, in Codex's own format. The directory name renders the workspace path and appends a short digest of it, so paths differing only in punctuation do not collide. It is per-workspace, so one project's transcripts are never visible to another project's agent — see [codex.shared_sessions](#codexshared_sessions) to use the host's own history instead.
 
 Only transcripts are synced. The sibling SQLite databases (`state_*.sqlite` and friends) are not, because concurrent runs writing one shared SQLite file risks corrupting it. A consequence is that `codex resume` on the host may not list sessions created inside a container, since resume reads that index.
 

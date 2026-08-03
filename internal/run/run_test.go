@@ -224,16 +224,42 @@ func TestCodexSessionsHostDir(t *testing.T) {
 	t.Setenv("MOAT_HOME", moatHome)
 
 	// Default: a moat-owned per-workspace directory, so one project's
-	// transcripts are never visible to another project's agent.
+	// transcripts are never visible to another project's agent. The leaf keeps
+	// a readable rendering of the path plus a digest that disambiguates it.
 	got := codexSessionsHostDir("/home/u", "/Users/dev/repo", false)
-	want := filepath.Join(moatHome, "codex", "sessions", "Users-dev-repo")
-	if got != want {
-		t.Errorf("codexSessionsHostDir(host, %q, false) = %q, want %q", "/Users/dev/repo", got, want)
+	wantPrefix := filepath.Join(moatHome, "codex", "sessions") + string(filepath.Separator)
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("codexSessionsHostDir(host, %q, false) = %q, want a path under %q", "/Users/dev/repo", got, wantPrefix)
+	}
+	if !strings.Contains(filepath.Base(got), "Users-dev-repo") {
+		t.Errorf("sessions dir should stay recognizable, got leaf %q", filepath.Base(got))
 	}
 
 	// Distinct workspaces must not collide.
 	if other := codexSessionsHostDir("/home/u", "/Users/dev/other", false); other == got {
 		t.Errorf("distinct workspaces share a sessions dir: %q", got)
+	}
+
+	// Paths differing only in punctuation must not collide either: every
+	// non-alphanumeric rune renders as "-", so without a disambiguating digest
+	// these two unrelated projects would share a directory and each one's
+	// container would see the other's transcripts.
+	for _, pair := range [][2]string{
+		{"/Users/dev/my-repo", "/Users/dev/my_repo"},
+		{"/Users/dev/api-server", "/Users/dev/api.server"},
+		{"/Users/dev/a b", "/Users/dev/a-b"},
+	} {
+		first := codexSessionsHostDir("/home/u", pair[0], false)
+		second := codexSessionsHostDir("/home/u", pair[1], false)
+		if first == second {
+			t.Errorf("workspaces %q and %q share a sessions dir %q — one project's transcripts would be visible to the other", pair[0], pair[1], first)
+		}
+	}
+
+	// Same workspace, same directory: transcripts must accumulate across runs
+	// rather than scattering.
+	if again := codexSessionsHostDir("/home/u", "/Users/dev/repo", false); again != got {
+		t.Errorf("same workspace produced two dirs: %q then %q", got, again)
 	}
 
 	// The host's own directory must never be the default — that cross-project

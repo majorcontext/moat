@@ -263,14 +263,27 @@ func TestCodexSessionSync_E2E(t *testing.T) {
 
 	// The transcript must have landed on the host, under moat's per-workspace
 	// directory rather than the host's shared Codex history.
-	// Not fatal: the isolation assertions below are independent, and a failure
-	// here must not mask a leak.
-	slug := workspaceSlugForTest(workspace)
-	hostRollout := filepath.Join(moatHome, "codex", "sessions", slug, "2026", "08", "03", "rollout-e2e.jsonl")
-	if data, err := os.ReadFile(hostRollout); err != nil {
-		t.Errorf("session transcript did not sync to the host at %s: %v", hostRollout, err)
-	} else if !strings.Contains(string(data), "session_meta") {
-		t.Errorf("host transcript has unexpected content: %s", data)
+	// Globbed rather than recomputed: the workspace-to-directory mapping is an
+	// internal detail of the run package, and a test that reimplements it would
+	// pass even if that mapping broke. Not fatal either — the isolation
+	// assertions below are independent and must not be masked by a failure here.
+	pattern := filepath.Join(moatHome, "codex", "sessions", "*", "2026", "08", "03", "rollout-e2e.jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Glob(%q): %v", pattern, err)
+	}
+	switch {
+	case len(matches) == 0:
+		t.Errorf("session transcript did not sync to the host; no match for %s", pattern)
+	case len(matches) > 1:
+		t.Errorf("expected one synced transcript, got %v", matches)
+	default:
+		data, readErr := os.ReadFile(matches[0])
+		if readErr != nil {
+			t.Errorf("reading synced transcript %s: %v", matches[0], readErr)
+		} else if !strings.Contains(string(data), "session_meta") {
+			t.Errorf("host transcript has unexpected content: %s", data)
+		}
 	}
 
 	// It must NOT have gone into the host's own Codex history.
@@ -302,20 +315,4 @@ func TestCodexSessionSync_E2E(t *testing.T) {
 	if strings.Contains(out, "other-project-phi") {
 		t.Errorf("container could read another project's Codex transcript, output:\n%s", out)
 	}
-}
-
-// workspaceSlugForTest mirrors the run package's unexported workspaceSlug.
-// Duplicated rather than exported: the mapping is an internal path detail, and
-// a test that recomputes it independently would not catch the rule changing.
-func workspaceSlugForTest(absPath string) string {
-	var b strings.Builder
-	for _, r := range absPath {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }

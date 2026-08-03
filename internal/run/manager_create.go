@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -2405,15 +2406,29 @@ func codexSessionsHostDir(hostHome, workspace string, shared bool) string {
 	return filepath.Join(config.GlobalConfigDir(), "codex", "sessions", slug)
 }
 
-// workspaceSlug converts an absolute workspace path into a single path segment.
+// workspaceSlug converts an absolute workspace path into a single, collision-free
+// path segment: a readable rendering of the path followed by a short digest of
+// the full path. Returns "" for an empty path.
+//
+// The digest is load-bearing, not decoration. The readable rendering maps every
+// non-alphanumeric rune to "-", so "/srv/my-project" and "/srv/my_project"
+// render identically; without the digest those two unrelated projects would
+// share one session directory, and each one's container would see the other's
+// Codex transcripts — exactly the cross-project exposure codexSessionsHostDir
+// exists to prevent.
 //
 // This is moat's own rule and is deliberately not claude.WorkspaceToClaudeDir,
-// which is contractually pinned to Claude Code's slug algorithm so that
-// container and host sessions land in the same directory. Nothing outside moat
-// reads these paths, so they must not move if Claude Code changes its rule.
+// which is contractually pinned to Claude Code's slug algorithm (and inherits
+// its collisions) so that container and host sessions land in the same
+// directory. Nothing outside moat reads these paths, so they are free to be
+// unambiguous.
 func workspaceSlug(absPath string) string {
+	if absPath == "" {
+		return ""
+	}
+
 	var b strings.Builder
-	b.Grow(len(absPath))
+	b.Grow(len(absPath) + 9)
 	for _, r := range absPath {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
@@ -2422,7 +2437,14 @@ func workspaceSlug(absPath string) string {
 			b.WriteByte('-')
 		}
 	}
-	return strings.Trim(b.String(), "-")
+
+	sum := sha256.Sum256([]byte(absPath))
+	digest := hex.EncodeToString(sum[:4])
+	readable := strings.Trim(b.String(), "-")
+	if readable == "" {
+		return digest
+	}
+	return readable + "-" + digest
 }
 
 // agentImpliedDependencies returns dependencies implicitly required by an agent.
