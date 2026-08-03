@@ -89,6 +89,7 @@ const (
 	// Kitty event types, reported when the "report event types" flag is on
 	// (bit 2, which Codex's flag 7 includes). Absent means press.
 	kittyEventPress   = 1
+	kittyEventRepeat  = 2
 	kittyEventRelease = 3
 
 	// maxKittySeqLen bounds how many bytes may be held while waiting for a
@@ -165,9 +166,11 @@ func matchKittyPrefix(data []byte, awaitingCommand bool) (kittyMatch, int) {
 	if !ok {
 		return kittyNone, 0
 	}
-	// Any key-up while the prefix is armed: swallow it so it cannot be
-	// mistaken for the command key.
-	if awaitingCommand && event == kittyEventRelease {
+	// While the prefix is armed, swallow anything that is not a fresh key
+	// press: key-ups, and the autorepeat that holding the chord produces.
+	// Neither can be the command key, and treating a repeat as a second
+	// deliberate Ctrl+/ would cancel the prefix mid-chord.
+	if awaitingCommand && (event == kittyEventRelease || event == kittyEventRepeat) {
 		return kittyRelease, i + 1
 	}
 	if key != kittyPrefixKeyCode || mods != kittyPrefixMods {

@@ -593,3 +593,63 @@ func TestEscapeProxy_KittyPressWhileArmedIsNotSwallowed(t *testing.T) {
 		t.Errorf("the arrow key should reach the child, got %q", out)
 	}
 }
+
+// A realistic chord: the terminal reports a press, then autorepeat while the
+// keys are held, then releases. Only the press arms the prefix; nothing else
+// in that stream may cancel it.
+func TestEscapeProxy_KittyHeldChordKeepsPrefixArmed(t *testing.T) {
+	for name, stream := range map[string]string{
+		"tap":                 "\x1b[47;5:1u\x1b[47;5:3u",
+		"held with repeats":   "\x1b[47;5:1u\x1b[47;5:2u\x1b[47;5:2u\x1b[47;5:3u",
+		"repeat then ctrl up": "\x1b[47;5:1u\x1b[47;5:2u\x1b[47;1:3u\x1b[57442;1:3u",
+	} {
+		t.Run(name, func(t *testing.T) {
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(stream+"s"))))
+			if len(actions) != 1 || actions[0] != EscapeSnapshot {
+				t.Fatalf("prefix did not survive the chord: got actions %v", actions)
+			}
+			if len(out) != 0 {
+				t.Errorf("nothing should leak to the child, got %q", out)
+			}
+		})
+	}
+}
+
+// Bytes captured from Ghostty with the kitty protocol enabled (printf '\033[>7u').
+// Pinning the real encoding matters: the press carries NO event sub-parameter,
+// and a release can report different modifiers than the press did.
+//
+//	^[[47;5u    ctrl+/ press
+//	^[[47;5:3u  ctrl+/ release
+//	^[[99;5u    ctrl+c press      (99 = 'c')
+//	^[[99;1:3u  ctrl+c release, modifiers already lifted
+func TestEscapeProxy_GhosttyCapturedBytes(t *testing.T) {
+	t.Run("prefix then command survives the real chord", func(t *testing.T) {
+		input := []byte("\x1b[47;5u\x1b[47;5:3u" + "s")
+		actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+		if len(actions) != 1 || actions[0] != EscapeSnapshot {
+			t.Fatalf("expected snapshot from the captured chord, got %v", actions)
+		}
+		if len(out) != 0 {
+			t.Errorf("nothing should leak to the child, got %q", out)
+		}
+	})
+
+	t.Run("other ctrl chords reach the child untouched", func(t *testing.T) {
+		// Ctrl+C and Ctrl+D are CSI-u encoded too and must not be disturbed;
+		// the agent depends on receiving them.
+		for _, seq := range []string{
+			"\x1b[99;5u\x1b[99;5:3u",
+			"\x1b[100;5u\x1b[100;5:3u",
+			"\x1b[99;5u\x1b[99;1:3u",
+		} {
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(seq))))
+			if len(actions) != 0 {
+				t.Errorf("%q should not trigger moat, got %v", seq, actions)
+			}
+			if string(out) != seq {
+				t.Errorf("%q should pass through unchanged, got %q", seq, out)
+			}
+		}
+	})
+}
