@@ -452,8 +452,12 @@ func matchControlSeq(data []byte) controlSeqResult {
 }
 
 // handleControlSeqLocked applies the policy for a matched DECSTBM/DECSTR/RIS:
-//   - DECSTBM (any args from the child) is swallowed; moat's own scroll
-//     region command is emitted in its place.
+//   - DECSTBM is clamped, not discarded: the child's requested band is
+//     forwarded with its bottom margin held above the footer row. A bare
+//     reset (ESC[r), which asks for the whole page, becomes moat's own
+//     region — that is the case #349 fixed, where Ink's defensive reset let
+//     the footer scroll into scrollback. See clampScrollRegion for why the
+//     band must survive.
 //   - DECSTR passes through (other resets may be intended), and moat's
 //     DECSTBM is re-asserted right after so the footer slot stays reserved.
 //     The pair is wrapped in DECSC/DECRC so the cursor — which DECSTR
@@ -472,6 +476,9 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// new controlSeqKind can't silently slip through.
 		return nil
 	case ctrlDECSTBM:
+		if clamped := clampScrollRegion(raw, w.height-1); clamped != nil {
+			return w.outputLocked(clamped)
+		}
 		return w.outputLocked(w.scrollRegionBytes())
 	case ctrlDECSTR:
 		// Deviation: DECSTR resets the DECSC slot to home (1,1). Our
@@ -505,6 +512,70 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		return w.outputLocked(buf.Bytes())
 	}
 	return nil
+}
+
+// clampScrollRegion rewrites a child's DECSTBM so its bottom margin cannot
+// reach the footer row, preserving the band the child asked for. It returns nil
+// when the child's request carries no usable band and moat's own region should
+// be emitted instead — a bare ESC[r, an explicit request for the whole page, or
+// a degenerate range.
+//
+// Discarding the band instead is what broke inline-rendering agents. Codex
+// draws without the alternate screen and uses scroll regions as a drawing
+// primitive: restrict to a band, reverse-index (ESC M) to open space inside it,
+// reset, redraw. Replacing "ESC[46;94r" with moat's full-content region turned
+// those reverse-indexes into full-screen scrolls, so the transcript shifted
+// wholesale on every update — a smeared prompt area, a cursor landing nowhere
+// sensible, and a footer scrolled through.
+//
+// Clamping keeps what #349 needed. moat still owns the bottom bound, so no
+// region the child can name will include the footer row; only the child's
+// choice of top margin and of a shallower bottom is honored.
+func clampScrollRegion(raw []byte, contentBottom int) []byte {
+	if contentBottom < 2 || len(raw) < 3 {
+		return nil
+	}
+	// raw is ESC [ <params> r
+	params := string(raw[2 : len(raw)-1])
+	if params == "" {
+		return nil // bare reset: the child is asking for the whole page
+	}
+
+	fields := strings.SplitN(params, ";", 2)
+	top := 1
+	if fields[0] != "" {
+		n, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return nil
+		}
+		top = n
+	}
+	// An omitted bottom margin means the last line of the page, which for the
+	// child is the content area moat gave it.
+	bottom := contentBottom
+	if len(fields) == 2 && fields[1] != "" {
+		n, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil
+		}
+		bottom = n
+	}
+
+	if top < 1 {
+		top = 1
+	}
+	if bottom > contentBottom {
+		bottom = contentBottom
+	}
+	// DECSTBM requires at least two lines; a degenerate range would be ignored
+	// by the terminal, leaving whatever region was active. Fall back so moat's
+	// region is the one left in place.
+	if top >= bottom {
+		return nil
+	}
+	// A request for the entire content area is moat's own region; emitting it
+	// verbatim keeps the byte stream identical to the pre-clamping behavior.
+	return []byte(fmt.Sprintf("\x1b[%d;%dr", top, bottom))
 }
 
 // mouseModeSet is the set of DEC private modes that control host-global mouse
