@@ -515,6 +515,16 @@ scan:
 			return 1, err2
 		}
 
+		// An ESC here may begin a multi-byte sequence rather than being a
+		// command key — most often the release of the very chord that just
+		// armed the prefix, which arrives in its own read. Hand it back to the
+		// main scanner, which can match the whole sequence, instead of judging
+		// it one byte at a time.
+		if oneByte[0] == 0x1b {
+			e.partialSeq = append(e.partialSeq, oneByte[0])
+			return e.Read(p)
+		}
+
 		// Process this byte as if it followed the prefix
 		b := oneByte[0]
 		e.setPrefixState(false)

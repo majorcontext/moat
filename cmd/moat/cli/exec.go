@@ -163,7 +163,16 @@ type ttyTracer struct {
 
 // setupTTYTracer creates a TTY tracer if trace path is specified.
 // Returns nil if tracing is disabled or setup fails.
+//
+// The path comes from --tty-trace, falling back to MOAT_TTY_TRACE. The env var
+// exists because the sessions worth tracing are the broken ones: when input
+// handling misbehaves, the in-session ctrl+/ d dump may itself be unreachable,
+// and exporting a variable captures every subsequent run without editing each
+// command line.
 func setupTTYTracer(tracePath string, r *run.Run, command []string) *ttyTracer {
+	if tracePath == "" {
+		tracePath = os.Getenv("MOAT_TTY_TRACE")
+	}
 	if tracePath == "" {
 		return nil
 	}

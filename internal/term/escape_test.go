@@ -653,3 +653,50 @@ func TestEscapeProxy_GhosttyCapturedBytes(t *testing.T) {
 		}
 	})
 }
+
+// Real terminals deliver the press and the release in separate reads. When the
+// buffer ends while the prefix is armed, Read takes a one-byte shortcut to get
+// the command key; that byte can be the ESC that begins the release sequence,
+// which must not be mistaken for a command.
+//
+// Captured from Ghostty: moat emitted "\x1f\x1b[47;5:3ud" — a literal prefix,
+// the leaked release, and the command key handed to the agent instead.
+func TestEscapeProxy_KittyReleaseInSeparateRead(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+
+	var out []byte
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 64)
+		for {
+			n, err := r.Read(buf)
+			out = append(out, buf[:n]...)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Each write lands as its own Read, as a terminal would deliver them.
+	for _, chunk := range []string{"\x1b[47;5u", "\x1b[47;5:3u", "d"} {
+		if _, err := pw.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	pw.Close()
+	<-done
+
+	if len(actions) != 1 || actions[0] != EscapeDumpTUI {
+		t.Fatalf("expected the dump action, got %v", actions)
+	}
+	if bytes.Contains(out, []byte{EscapePrefix}) {
+		t.Errorf("a literal prefix leaked to the child: %q", out)
+	}
+	if bytes.Contains(out, []byte("d")) {
+		t.Errorf("the command key leaked to the child: %q", out)
+	}
+}

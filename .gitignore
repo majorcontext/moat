@@ -57,3 +57,6 @@ internal/run/helpers/aws-credential-helper-*
 .worktrees/
 .private-journal/
 .worktrees/
+
+# Terminal I/O traces (--tty-trace / MOAT_TTY_TRACE)
+*.tty
