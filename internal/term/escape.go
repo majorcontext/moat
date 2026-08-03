@@ -121,6 +121,7 @@ const (
 // the child untouched. Buffering for kittyPartial is likewise limited to input
 // that could still become this one sequence, so unrelated escape sequences are
 // never delayed.
+//
 // awaitingCommand widens matching while the escape prefix is armed: any key
 // release is swallowed, not just Ctrl+/'s own. Releasing the chord can report
 // the '/' key with different modifiers (lifting Ctrl first yields
@@ -132,7 +133,16 @@ func matchKittyPrefix(data []byte, awaitingCommand bool) (kittyMatch, int) {
 		return kittyNone, 0
 	}
 	if len(data) == 1 {
-		return kittyPartial, 0
+		// A lone ESC is itself a complete, meaningful keypress, and a common
+		// one — "esc to interrupt" in Codex, dismissing a prompt in Claude
+		// Code. Holding it to see whether a sequence follows would delay every
+		// Esc until the user pressed another key. Only hold it while waiting
+		// for the command key, where it is most likely the chord's release
+		// arriving in its own read.
+		if awaitingCommand {
+			return kittyPartial, 0
+		}
+		return kittyNone, 0
 	}
 	if data[1] != '[' {
 		return kittyNone, 0
@@ -357,22 +367,23 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 	buf := make([]byte, len(p))
 	n, err := e.r.Read(buf)
 	if n == 0 {
-		// If we had a pending prefix and hit EOF, return the prefix as literal
-		if e.sawPrefix && err != nil {
-			e.setPrefixState(false)
-			p[0] = EscapePrefix
-			return 1, err
-		}
-		// A held partial sequence can no longer complete; release its bytes to
-		// the child rather than swallowing them.
-		if len(e.partialSeq) > 0 && err != nil {
-			held := e.partialSeq
+		// At EOF, flush everything being held. Both an armed prefix and a
+		// partial sequence can be outstanding at once — the prefix arms, then
+		// an ESC is queued while waiting for the command key — so this must
+		// not return after handling only the first.
+		if err != nil && (e.sawPrefix || len(e.partialSeq) > 0) {
+			var held []byte
+			if e.sawPrefix {
+				e.setPrefixState(false)
+				held = append(held, EscapePrefix)
+			}
+			held = append(held, e.partialSeq...)
 			e.partialSeq = nil
 			copied := copy(p, held)
 			if copied < len(held) {
 				e.buf = append(e.buf, held[copied:]...)
 			}
-			return copied, nil
+			return copied, err
 		}
 		return 0, err
 	}
@@ -509,10 +520,16 @@ scan:
 		oneByte := make([]byte, 1)
 		n2, err2 := e.r.Read(oneByte)
 		if n2 == 0 {
-			// EOF or error after prefix - treat prefix as literal
+			// EOF or error after prefix - treat prefix as literal, and flush
+			// any partial sequence held alongside it.
 			e.setPrefixState(false)
-			p[0] = EscapePrefix
-			return 1, err2
+			held := append([]byte{EscapePrefix}, e.partialSeq...)
+			e.partialSeq = nil
+			copied := copy(p, held)
+			if copied < len(held) {
+				e.buf = append(e.buf, held[copied:]...)
+			}
+			return copied, err2
 		}
 
 		// An ESC here may begin a multi-byte sequence rather than being a

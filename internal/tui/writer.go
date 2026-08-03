@@ -452,8 +452,19 @@ func matchControlSeq(data []byte) controlSeqResult {
 	// ED: digit params (or none), no intermediates, final 'J'. The private
 	// form (CSI ? Ps J, selective erase) has a '?' in its parameters, so
 	// onlyDigitsAndSemi already excludes it.
+	//
+	// Only the variants that reach the footer row are intercepted: Ps=0 (or
+	// omitted, erase to end of display) and Ps=2 (erase all). Ps=1 erases from
+	// the start of the display to the cursor, which cannot pass the footer
+	// because the child's screen ends a row above it, and Ps=3 clears
+	// scrollback without touching the visible screen. Those flow through
+	// untouched rather than triggering a needless repaint.
 	if final == 'J' && intLen == 0 && onlyDigitsAndSemi {
-		return controlSeqResult{kind: ctrlED, length: length}
+		switch string(data[paramStart : paramStart+paramLen]) {
+		case "", "0", "2":
+			return controlSeqResult{kind: ctrlED, length: length}
+		}
+		return controlSeqResult{}
 	}
 	return controlSeqResult{}
 }
@@ -534,10 +545,7 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// the rest of the frame, so the row does not flicker.
 		var buf bytes.Buffer
 		buf.Write(raw)
-		buf.WriteString("\x1b7") // save cursor
-		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
-		buf.WriteString(w.bar.Render())
-		buf.WriteString("\x1b8") // restore cursor
+		buf.Write(w.footerRepaintBytes())
 		return w.outputLocked(buf.Bytes())
 	}
 	return nil
@@ -1348,11 +1356,22 @@ func (w *Writer) scheduleFooterRedrawLocked() {
 // direct cursor addressing to the footer line).
 // Caller must hold the mutex.
 func (w *Writer) redrawFooterLocked() {
+	w.out.Write(w.footerRepaintBytes()) //nolint:errcheck
+}
+
+// footerRepaintBytes returns the sequence that repaints the footer row and
+// leaves the cursor where it found it, for callers that must repair the footer
+// without disturbing a child mid-frame.
+//
+// The RIS path deliberately does not use this: it homes the cursor afterwards
+// rather than restoring it, because RIS itself homes the cursor and the child
+// resumes drawing from there.
+func (w *Writer) footerRepaintBytes() []byte {
 	var buf bytes.Buffer
 	buf.WriteString("\x1b7")                  // DECSC: save cursor + attrs
 	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height) // Move to footer line
 	buf.WriteString("\x1b[2K")                // Clear the line
 	buf.WriteString(w.bar.Render())           // Draw footer
 	buf.WriteString("\x1b8")                  // DECRC: restore cursor + attrs
-	w.out.Write(buf.Bytes())                  //nolint:errcheck
+	return buf.Bytes()
 }

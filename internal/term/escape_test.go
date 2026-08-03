@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestEscapeProxy_PassThrough(t *testing.T) {
@@ -698,5 +699,74 @@ func TestEscapeProxy_KittyReleaseInSeparateRead(t *testing.T) {
 	}
 	if bytes.Contains(out, []byte("d")) {
 		t.Errorf("the command key leaked to the child: %q", out)
+	}
+}
+
+// A lone Esc is a complete keypress and a common one — "esc to interrupt" in
+// Codex, dismissing a prompt in Claude Code. It must not be held back waiting
+// to see whether a kitty sequence follows, or Esc appears dead until the user
+// presses another key.
+func TestEscapeProxy_BareEscIsNotDelayed(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+
+	go func() {
+		pw.Write([]byte{0x1b})
+		time.Sleep(60 * time.Millisecond)
+		pw.Write([]byte("x"))
+		pw.Close()
+	}()
+
+	buf := make([]byte, 16)
+	start := time.Now()
+	n, err := r.Read(buf)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if n == 0 || buf[0] != 0x1b {
+		t.Fatalf("expected the Esc byte, got %q", buf[:n])
+	}
+	if elapsed > 40*time.Millisecond {
+		t.Errorf("Esc was withheld for %v awaiting a following key", elapsed.Round(time.Millisecond))
+	}
+}
+
+// stepEOFReader delivers each chunk in its own Read, then EOF.
+type stepEOFReader struct {
+	steps [][]byte
+	i     int
+}
+
+func (s *stepEOFReader) Read(p []byte) (int, error) {
+	if s.i >= len(s.steps) {
+		return 0, io.EOF
+	}
+	n := copy(p, s.steps[s.i])
+	s.i++
+	return n, nil
+}
+
+// An armed prefix and a held partial sequence can be outstanding at the same
+// time. At EOF both must reach the child; handling only the prefix silently
+// dropped the buffered bytes.
+func TestEscapeProxy_FlushesPrefixAndPartialAtEOF(t *testing.T) {
+	r := NewEscapeProxy(&stepEOFReader{steps: [][]byte{{EscapePrefix}, {0x1b}}})
+
+	var got []byte
+	buf := make([]byte, 16)
+	for {
+		n, err := r.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	if !bytes.Contains(got, []byte{EscapePrefix}) {
+		t.Errorf("the armed prefix should be flushed at EOF, got %q", got)
+	}
+	if !bytes.Contains(got, []byte{0x1b}) {
+		t.Errorf("the held partial should be flushed at EOF, got %q", got)
 	}
 }

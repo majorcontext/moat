@@ -1616,7 +1616,8 @@ func TestClampScrollRegion_FooterRowNeverInRegion(t *testing.T) {
 // reappeared once the agent settled.
 
 func TestWriter_RepairsFooterAfterEraseDisplay(t *testing.T) {
-	for _, seq := range []string{"\x1b[J", "\x1b[0J", "\x1b[2J", "\x1b[3J"} {
+	// Only the variants that reach the footer row: erase-to-end and erase-all.
+	for _, seq := range []string{"\x1b[J", "\x1b[0J", "\x1b[2J"} {
 		t.Run(seq[1:], func(t *testing.T) {
 			var buf bytes.Buffer
 			bar := NewStatusBar("run_abc123", "my-agent", "docker")
@@ -1640,6 +1641,31 @@ func TestWriter_RepairsFooterAfterEraseDisplay(t *testing.T) {
 			// The child is mid-frame: its cursor must be preserved.
 			if !strings.Contains(out, "\x1b7") || !strings.Contains(out, "\x1b8") {
 				t.Errorf("expected the cursor to be saved and restored, got %q", out)
+			}
+			w.Cleanup()
+		})
+	}
+}
+
+// Ps=1 erases from the start of the display to the cursor, which cannot reach
+// the footer because the child's screen ends a row above it. Ps=3 clears
+// scrollback without touching the visible screen. Neither needs a repaint.
+func TestWriter_EraseVariantsThatCannotReachFooterPassThrough(t *testing.T) {
+	for _, seq := range []string{"\x1b[1J", "\x1b[3J"} {
+		t.Run(seq[1:], func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			buf.Reset()
+
+			if _, err := w.Write([]byte(seq)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			out := buf.String()
+			if out != seq {
+				t.Errorf("%q should pass through untouched, got %q", seq, out)
 			}
 			w.Cleanup()
 		})
