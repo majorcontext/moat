@@ -19,5 +19,8 @@ grants:
 command: ["codex"]
 interactive: true
 
-# Codex session logs are automatically synced to the host when "openai" grant
-# is configured. To disable, set: codex: { sync_logs: false }
+# Codex session transcripts sync to the host under
+# ~/.moat/codex/sessions/<workspace> when the "openai" grant is configured.
+# To disable: codex: { sync_logs: false }
+# To use your own ~/.codex/sessions instead (shares every project's history
+# with the container): codex: { shared_sessions: true }

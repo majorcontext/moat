@@ -33,8 +33,17 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		return nil, fmt.Errorf("populating staging dir: %w", err)
 	}
 
-	// Write Codex config.toml
-	if err := WriteCodexConfig(tmpDir); err != nil {
+	// Write Codex config.toml, including any MCP servers. Codex reads MCP
+	// servers from config.toml only, so both the remote (relay) and local
+	// (child process) servers go into the same [mcp_servers] table.
+	codexCfg := NewConfig(opts.CodexRequireApproval)
+	mcpServers, mcpErr := buildMCPServers(opts)
+	if mcpErr != nil {
+		cleanupFn()
+		return nil, mcpErr
+	}
+	codexCfg.MCPServers = mcpServers
+	if err := WriteCodexConfig(tmpDir, codexCfg); err != nil {
 		cleanupFn()
 		return nil, fmt.Errorf("writing codex config: %w", err)
 	}
@@ -44,30 +53,6 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(opts.RuntimeContext), 0o644); err != nil {
 			cleanupFn()
 			return nil, fmt.Errorf("writing context file: %w", err)
-		}
-	}
-
-	// Write local MCP server configuration if present
-	if len(opts.LocalMCPServers) > 0 {
-		mcpConfig := MCPConfig{
-			MCPServers: make(map[string]MCPServer),
-		}
-		for name, cfg := range opts.LocalMCPServers {
-			mcpConfig.MCPServers[name] = MCPServer{
-				Command: cfg.Command,
-				Args:    cfg.Args,
-				Env:     cfg.Env,
-				Cwd:     cfg.Cwd,
-			}
-		}
-		mcpJSON, err := json.MarshalIndent(mcpConfig, "", "  ")
-		if err != nil {
-			cleanupFn()
-			return nil, fmt.Errorf("marshaling MCP config: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, "mcp.json"), mcpJSON, 0o644); err != nil {
-			cleanupFn()
-			return nil, fmt.Errorf("writing MCP config: %w", err)
 		}
 	}
 
@@ -91,6 +76,39 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 		StagingDir: tmpDir,
 		Cleanup:    cleanupFn,
 	}, nil
+}
+
+// buildMCPServers merges the remote (proxy-relay) and local (child process)
+// MCP servers into a single [mcp_servers] table. Remote servers become
+// streamable HTTP entries (url + http_headers); local ones become stdio
+// entries (command/args/env/cwd).
+//
+// Names must be unique across both kinds because they share one table -
+// silently letting one overwrite the other would drop a configured server.
+func buildMCPServers(opts provider.PrepareOpts) (map[string]MCPServer, error) {
+	if len(opts.MCPServers) == 0 && len(opts.LocalMCPServers) == 0 {
+		return nil, nil
+	}
+
+	servers := make(map[string]MCPServer, len(opts.MCPServers)+len(opts.LocalMCPServers))
+	for name, cfg := range opts.MCPServers {
+		servers[name] = MCPServer{
+			URL:         cfg.URL,
+			HTTPHeaders: cfg.Headers,
+		}
+	}
+	for name, cfg := range opts.LocalMCPServers {
+		if _, exists := servers[name]; exists {
+			return nil, fmt.Errorf("mcp server name %q is used by both a remote and a local server — names must be unique", name)
+		}
+		servers[name] = MCPServer{
+			Command: cfg.Command,
+			Args:    cfg.Args,
+			Env:     cfg.Env,
+			Cwd:     cfg.Cwd,
+		}
+	}
+	return servers, nil
 }
 
 // PopulateStagingDir populates the Codex staging directory with auth configuration.

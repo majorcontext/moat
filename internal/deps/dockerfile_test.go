@@ -366,6 +366,48 @@ func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 
 // Tests for dynamic package manager dependencies
 
+// Registry npm deps take their version from the dependency, then the
+// registry's pin, then nothing (npm resolves latest).
+func TestGenerateDockerfileRegistryNpmVersions(t *testing.T) {
+	t.Run("registry pin is applied", func(t *testing.T) {
+		result, err := GenerateDockerfile([]Dependency{{Name: "node"}, {Name: "codex-cli"}}, nil)
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		spec, ok := GetSpec("codex-cli")
+		if !ok || spec.Default == "" {
+			t.Fatal("codex-cli should be pinned in the registry")
+		}
+		want := "npm install -g @openai/codex@" + spec.Default
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("Dockerfile should contain %q, got:\n%s", want, result.Dockerfile)
+		}
+	})
+
+	t.Run("explicit version overrides the pin", func(t *testing.T) {
+		result, err := GenerateDockerfile([]Dependency{{Name: "node"}, {Name: "codex-cli", Version: "0.140.0"}}, nil)
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		if !strings.Contains(result.Dockerfile, "npm install -g @openai/codex@0.140.0") {
+			t.Errorf("Dockerfile should install the requested version, got:\n%s", result.Dockerfile)
+		}
+	})
+
+	t.Run("unpinned registry package stays bare", func(t *testing.T) {
+		result, err := GenerateDockerfile([]Dependency{{Name: "node"}, {Name: "typescript"}}, nil)
+		if err != nil {
+			t.Fatalf("GenerateDockerfile error: %v", err)
+		}
+		if spec, _ := GetSpec("typescript"); spec.Default != "" {
+			t.Skip("typescript is now pinned; pick another unpinned package")
+		}
+		if !strings.Contains(result.Dockerfile, "npm install -g typescript\n") {
+			t.Errorf("unpinned package should install without a version, got:\n%s", result.Dockerfile)
+		}
+	})
+}
+
 func TestGenerateDockerfileDynamicNpm(t *testing.T) {
 	deps := []Dependency{
 		{Name: "node", Version: "22"},

@@ -219,9 +219,16 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
   [ -f "$MOAT_CODEX_INIT/AGENTS.md" ] && \
     cp -p "$MOAT_CODEX_INIT/AGENTS.md" "$TARGET_HOME/.codex/"
 
-  # Ensure moatuser owns all the files if we're running as root
+  # Ensure moatuser owns the staged files if we're running as root.
+  #
+  # ~/.codex/sessions is pruned deliberately: when codex.sync_logs is on it is a
+  # bind mount of the host's ~/.codex/sessions, and chown there rewrites the
+  # HOST user's files (and the host directory itself, since the mount point is
+  # the same inode). Recursing would hand this user's entire Codex session
+  # history to uid 5000 and lock them out of their own transcripts.
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-    chown -R moatuser:moatuser "$TARGET_HOME/.codex" 2>/dev/null || true
+    find "$TARGET_HOME/.codex" -path "$TARGET_HOME/.codex/sessions" -prune -o \
+      -exec chown moatuser:moatuser {} + 2>/dev/null || true
   fi
 fi
 
@@ -328,27 +335,21 @@ fi
 # Remote/host-local MCP servers are configured via .claude.json for Claude Code.
 # Local process MCP servers (sandbox-local) are configured per-agent:
 # - Claude: Written to .claude.json mcpServers (type: stdio) by the claude provider
-# - Codex: Written to .mcp.json in workspace by the codex provider
+# - Codex: Written to ~/.codex/config.toml [mcp_servers] by the codex provider
+#   (Codex reads MCP servers from config.toml only — it ignores .mcp.json)
 # - Gemini: Written to .mcp.json in workspace by the gemini provider
 #
-# setup_workspace_mcp_json copies the local-process MCP config (.mcp.json) for
-# Codex/Gemini into /workspace. It is a function (not inline) so it can be called
+# setup_workspace_mcp_json copies Gemini's local-process MCP config (.mcp.json)
+# into /workspace. It is a function (not inline) so it can be called
 # AFTER populate_workspace_volume: in volume mode populate tar-extracts the
 # staging tree over /workspace, so writing .mcp.json earlier would let the user's
 # own .mcp.json clobber moat's. Running it last makes moat's config win in both
 # modes (in bind mode populate is a no-op, so ordering is unchanged there).
 #
-# Both Codex and Gemini write the same destination path. This is safe because
-# config validation rejects runs that activate both agents simultaneously — at
-# most one block executes. A third agent with its own .mcp.json must preserve
-# this mutual-exclusion invariant.
+# Only Gemini writes this path today. An agent added later that also writes
+# .mcp.json would collide with it, so prefer that agent's own config file
+# (as Codex does) rather than sharing this one.
 setup_workspace_mcp_json() {
-  if [ -n "$MOAT_CODEX_INIT" ] && [ -f "$MOAT_CODEX_INIT/mcp.json" ]; then
-    cp -p "$MOAT_CODEX_INIT/mcp.json" /workspace/.mcp.json
-    if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
-      chown moatuser:moatuser /workspace/.mcp.json 2>/dev/null || true
-    fi
-  fi
   if [ -n "$MOAT_GEMINI_INIT" ] && [ -f "$MOAT_GEMINI_INIT/mcp.json" ]; then
     cp -p "$MOAT_GEMINI_INIT/mcp.json" /workspace/.mcp.json
     if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then

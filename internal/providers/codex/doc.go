@@ -26,6 +26,21 @@
 //   - CLI registration for `moat codex` commands
 //   - Doctor diagnostics for Codex configuration
 //
+// # Generated Configuration
+//
+// PrepareContainer writes a ~/.codex/config.toml (see NewConfig) that adapts
+// Codex to running inside a moat container:
+//
+//   - Approvals and Codex's own sandbox are off. The container is already the
+//     isolation boundary, and Codex's sandbox blocks the network the proxy
+//     provides. `moat codex --noyolo` restores Codex's own defaults.
+//   - shell_environment_policy.inherit = "all", so commands Codex runs keep the
+//     proxy variables (HTTP_PROXY, SSL_CERT_FILE, ...). Codex's "core" default
+//     strips them.
+//   - /workspace is marked trusted, skipping the first-run trust prompt.
+//   - Remote (proxy-relay) and local MCP servers both go in [mcp_servers].
+//     Codex reads MCP servers from config.toml only; it ignores .mcp.json.
+//
 // # Placeholder Tokens
 //
 // The container receives placeholder values that pass format validation:

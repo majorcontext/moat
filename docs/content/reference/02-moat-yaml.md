@@ -1528,7 +1528,7 @@ Set `mode: audit` to log policy decisions without enforcing them.
 
 ### codex.sync_logs
 
-Mount Codex's log directory for observability.
+Mount the host's Codex session directory so transcripts written inside the container appear on the host.
 
 ```yaml
 codex:
@@ -1536,13 +1536,31 @@ codex:
 ```
 
 - Type: `boolean`
-- Default: `true` (when `openai` grant is used)
+- Default: `true` (when the `openai` grant is used)
 
-When enabled, Codex session logs are synced to the host at `~/.moat/runs/<run-id>/codex/`.
+Sessions land in `~/.moat/codex/sessions/<workspace>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`, in Codex's own format. The directory is per-workspace, so one project's transcripts are never visible to another project's agent — see [codex.shared_sessions](#codexshared_sessions) to use the host's own history instead.
+
+Only transcripts are synced. The sibling SQLite databases (`state_*.sqlite` and friends) are not, because concurrent runs writing one shared SQLite file risks corrupting it. A consequence is that `codex resume` on the host may not list sessions created inside a container, since resume reads that index.
+
+### codex.shared_sessions
+
+Mount the host's own `~/.codex/sessions` instead of the per-workspace directory, so container sessions join the history the host Codex CLI reads.
+
+```yaml
+codex:
+  shared_sessions: true
+```
+
+- Type: `boolean`
+- Default: `false`
+
+Codex partitions sessions by date rather than by workspace, and provides no configuration key to relocate the directory, so this is all-or-nothing: enabling it lets the agent read **your Codex transcripts from every project**, including any carrying regulated or confidential data. Unlike [claude.sync_logs](#claudesync_logs), which mounts only the current project's directory, there is no per-project middle ground. Enable it only when cross-project history in one place is worth that exposure.
+
+Has no effect unless `sync_logs` is on.
 
 ### codex.mcp
 
-Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to `.mcp.json` in the workspace directory.
+Sandbox-local MCP servers that run as child processes inside the container. Configuration is written to the `[mcp_servers]` table of the generated `~/.codex/config.toml` — Codex reads MCP servers from `config.toml` only.
 
 ```yaml
 codex:

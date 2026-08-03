@@ -43,6 +43,13 @@ type PrepareOpts struct {
 	SubscriptionType string
 	RateLimitTier    string
 
+	// CodexRequireApproval keeps Codex's own approval prompts and sandbox
+	// enabled instead of moat's default of turning both off (the container is
+	// already the isolation boundary, and Codex's sandbox blocks the network
+	// the moat proxy provides). Set from `moat codex --noyolo`.
+	// Codex-specific; ignored by other agents.
+	CodexRequireApproval bool
+
 	// CopilotModel, CopilotContext, and CopilotReasoningEffort strip the
 	// corresponding keys (model, contextTier, effortLevel) from the Copilot
 	// settings.json staged into the container, because the value is pinned by

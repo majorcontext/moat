@@ -325,10 +325,26 @@ type ClaudeConfig struct {
 
 // CodexConfig configures OpenAI Codex CLI integration options.
 type CodexConfig struct {
-	// SyncLogs enables mounting Codex's session logs directory so logs from
-	// inside the container appear on the host at the correct project location.
+	// SyncLogs enables mounting a session directory so Codex transcripts
+	// written inside the container appear on the host.
 	// Default: false, unless the "openai" grant is configured (then true).
 	SyncLogs *bool `yaml:"sync_logs,omitempty"`
+
+	// SharedSessions mounts the host's own ~/.codex/sessions instead of the
+	// per-workspace directory under ~/.moat/codex/sessions.
+	//
+	// Codex partitions sessions by date rather than by workspace and offers no
+	// config key to relocate the directory, so sharing it exposes this host
+	// user's Codex transcripts from every project to the container — including
+	// projects whose transcripts may carry regulated or confidential data.
+	// moat therefore isolates per workspace by default; set this to true only
+	// when cross-project history in one place is worth that exposure.
+	SharedSessions bool `yaml:"shared_sessions,omitempty"`
+
+	// RequireApproval keeps Codex's own approval prompts and sandbox enabled
+	// instead of moat's default of turning both off. Set automatically by moat
+	// when `moat codex --noyolo` is used. Not a moat.yaml field.
+	RequireApproval bool `yaml:"-"`
 
 	// MCP defines MCP (Model Context Protocol) server configurations.
 	MCP map[string]MCPServerSpec `yaml:"mcp,omitempty"`
@@ -517,7 +533,7 @@ func (c *Config) ShouldSyncClaudeLogs() bool {
 	return false
 }
 
-// ShouldSyncCodexLogs returns true if Codex session logs should be synced.
+// ShouldSyncCodexLogs returns true if Codex session transcripts should be synced.
 // The logic is:
 // - If codex.sync_logs is explicitly set, use that value
 // - Otherwise, enable sync_logs if "openai" is in grants (Codex integration)
@@ -752,12 +768,6 @@ func Load(dir string) (*Config, error) {
 	// Validate Pi packages
 	if err := validatePiPackages(cfg.Pi.Packages); err != nil {
 		return nil, err
-	}
-
-	// Validate that codex.mcp and gemini.mcp don't both define local MCP servers.
-	// Both write to /workspace/.mcp.json, so only one can be used at a time.
-	if len(cfg.Codex.MCP) > 0 && len(cfg.Gemini.MCP) > 0 {
-		return nil, fmt.Errorf("both codex.mcp and gemini.mcp define local MCP servers, but they share the same .mcp.json file — only one agent section can define local MCP servers")
 	}
 
 	// Validate top-level MCP server specs

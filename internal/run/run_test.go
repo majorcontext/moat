@@ -217,6 +217,52 @@ func TestClaudeProjectsHostDir(t *testing.T) {
 	}
 }
 
+func TestCodexSessionsHostDir(t *testing.T) {
+	// MOAT_HOME pins GlobalConfigDir so the expected path is not the
+	// developer's real ~/.moat.
+	moatHome := t.TempDir()
+	t.Setenv("MOAT_HOME", moatHome)
+
+	// Default: a moat-owned per-workspace directory, so one project's
+	// transcripts are never visible to another project's agent.
+	got := codexSessionsHostDir("/home/u", "/Users/dev/repo", false)
+	want := filepath.Join(moatHome, "codex", "sessions", "Users-dev-repo")
+	if got != want {
+		t.Errorf("codexSessionsHostDir(host, %q, false) = %q, want %q", "/Users/dev/repo", got, want)
+	}
+
+	// Distinct workspaces must not collide.
+	if other := codexSessionsHostDir("/home/u", "/Users/dev/other", false); other == got {
+		t.Errorf("distinct workspaces share a sessions dir: %q", got)
+	}
+
+	// The host's own directory must never be the default — that cross-project
+	// exposure is what the isolation exists to prevent.
+	if strings.Contains(got, filepath.Join(".codex", "sessions")) {
+		t.Errorf("default must not touch the host's ~/.codex/sessions, got %q", got)
+	}
+
+	// Opt-in: the host's own directory, where the host CLI reads its history.
+	shared := codexSessionsHostDir("/home/u", "/Users/dev/repo", true)
+	if wantShared := filepath.Join("/home/u", ".codex", "sessions"); shared != wantShared {
+		t.Errorf("codexSessionsHostDir(host, ws, true) = %q, want %q", shared, wantShared)
+	}
+	// Not a parent of it: ~/.codex holds auth.json and the state databases.
+	if filepath.Base(shared) != "sessions" || filepath.Base(filepath.Dir(shared)) != ".codex" {
+		t.Errorf("shared mode must resolve to ~/.codex/sessions, got %q", shared)
+	}
+
+	// An empty workspace must not collapse to ~/.moat/codex/sessions, which
+	// would share every workspace's transcripts. The caller skips the mount.
+	if got := codexSessionsHostDir("/home/u", "", false); got != "" {
+		t.Errorf("codexSessionsHostDir(host, \"\", false) = %q, want \"\" (mount must be skipped)", got)
+	}
+	// Shared mode does not depend on the workspace, so it still resolves.
+	if got := codexSessionsHostDir("/home/u", "", true); got == "" {
+		t.Error("shared mode should not depend on the workspace path")
+	}
+}
+
 func TestValidateGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()

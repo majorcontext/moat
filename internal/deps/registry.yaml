@@ -85,6 +85,12 @@ codex-cli:
   description: OpenAI Codex CLI
   type: npm
   package: "@openai/codex"
+  # Pinned: Codex ships breaking CLI/config changes on a fast release cadence,
+  # and moat generates ~/.codex/config.toml against a known schema. Bump this
+  # deliberately (and re-check the generated config with `codex --strict-config
+  # doctor`) rather than letting every image build pick up a new major.
+  # Override per project with `codex-cli@<version>` in moat.yaml dependencies.
+  default: "0.146.0"
   requires: [node]
 
 copilot-cli:

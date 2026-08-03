@@ -19,6 +19,7 @@ require (
 	github.com/majorcontext/keep v0.6.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/moby/buildkit v0.28.1
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tonistiigi/fsutil v0.0.0-20251211185533-a2aa163d723f
@@ -141,7 +142,6 @@ require (
 	github.com/nwaples/rardecode/v2 v2.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect

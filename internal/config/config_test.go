@@ -888,6 +888,61 @@ command: ["", "arg1"]
 	}
 }
 
+func TestShouldSyncCodexLogs(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "default without openai grant",
+			config:   Config{Grants: []string{"github"}},
+			expected: false,
+		},
+		{
+			name:     "default with openai grant",
+			config:   Config{Grants: []string{"openai"}},
+			expected: true,
+		},
+		{
+			name:     "default with openai:scope grant",
+			config:   Config{Grants: []string{"openai:admin"}},
+			expected: true,
+		},
+		{
+			name:     "explicit true without openai",
+			config:   Config{Codex: CodexConfig{SyncLogs: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "explicit false with openai",
+			config:   Config{Grants: []string{"openai"}, Codex: CodexConfig{SyncLogs: boolPtr(false)}},
+			expected: false,
+		},
+		{
+			name:     "explicit true with openai",
+			config:   Config{Grants: []string{"openai"}, Codex: CodexConfig{SyncLogs: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "empty config",
+			config:   Config{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.ShouldSyncCodexLogs()
+			if result != tt.expected {
+				t.Errorf("ShouldSyncCodexLogs() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestShouldSyncClaudeLogs(t *testing.T) {
 	boolPtr := func(b bool) *bool { return &b }
 
@@ -2144,7 +2199,10 @@ mcp:
 	}
 }
 
-func TestLoadConfigRejectsCodexAndGeminiLocalMCP(t *testing.T) {
+// Codex and Gemini local MCP servers used to be mutually exclusive because
+// both were written to /workspace/.mcp.json. Codex now writes its servers to
+// ~/.codex/config.toml, so the two no longer collide.
+func TestLoadConfigAllowsCodexAndGeminiLocalMCP(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "moat.yaml")
 
@@ -2163,15 +2221,12 @@ gemini:
 `
 	os.WriteFile(configPath, []byte(content), 0o644)
 
-	_, err := Load(dir)
-	if err == nil {
-		t.Fatal("Load should error when both codex.mcp and gemini.mcp have local MCP servers")
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(err.Error(), "codex.mcp and gemini.mcp") {
-		t.Errorf("error should mention codex.mcp and gemini.mcp conflict, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), ".mcp.json") {
-		t.Errorf("error should mention .mcp.json file, got: %v", err)
+	if len(cfg.Codex.MCP) != 1 || len(cfg.Gemini.MCP) != 1 {
+		t.Errorf("expected both agents' local MCP servers to load, got codex=%v gemini=%v", cfg.Codex.MCP, cfg.Gemini.MCP)
 	}
 }
 

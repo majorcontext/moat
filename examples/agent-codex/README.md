@@ -56,8 +56,9 @@ moat codex examples/agent-codex -p "what does this code do?"
 moat codex examples/agent-codex -p "fix the bug in main.py"
 ```
 
-By default, one-shot mode uses `--full-auto` since the container provides isolation.
-Use `--noyolo` to require manual approval for each action:
+By default Codex runs with approvals off and its own sandbox disabled, since the
+container provides isolation. Use `--noyolo` to require manual approval for each
+action:
 
 ```bash
 moat codex examples/agent-codex -p "fix the bug" --noyolo
