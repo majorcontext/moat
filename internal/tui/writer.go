@@ -367,6 +367,7 @@ const (
 	ctrlDECSTBM                // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
 	ctrlDECSTR                 // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
 	ctrlRIS                    // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
+	ctrlED                     // CSI Ps J — erase in display; can wipe the footer row. Pass through, then repair the footer.
 )
 
 // controlSeqResult is the outcome of matchControlSeq.
@@ -448,6 +449,12 @@ func matchControlSeq(data []byte) controlSeqResult {
 	if final == 'p' && paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
 		return controlSeqResult{kind: ctrlDECSTR, length: length}
 	}
+	// ED: digit params (or none), no intermediates, final 'J'. The private
+	// form (CSI ? Ps J, selective erase) has a '?' in its parameters, so
+	// onlyDigitsAndSemi already excludes it.
+	if final == 'J' && intLen == 0 && onlyDigitsAndSemi {
+		return controlSeqResult{kind: ctrlED, length: length}
+	}
 	return controlSeqResult{}
 }
 
@@ -465,6 +472,10 @@ func matchControlSeq(data []byte) controlSeqResult {
 //   - RIS passes through (it clears the screen and homes the cursor), then
 //     moat re-establishes its scroll region and footer and returns the
 //     cursor to home so the child can resume drawing.
+//   - ED (CSI Ps J) passes through, then the footer is repaired inline with
+//     the cursor saved and restored. Erasing to the end of the display
+//     reaches the footer row, and waiting for the debounced redraw left the
+//     footer missing for as long as the child kept rendering.
 //
 // Caller passes raw bytes of the matched sequence so RIS/DECSTR can be
 // forwarded verbatim.
@@ -509,6 +520,24 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		buf.WriteString(w.bar.Render())
 		// Return cursor to home so child resumes drawing where RIS left it.
 		buf.WriteString("\x1b[H")
+		return w.outputLocked(buf.Bytes())
+	case ctrlED:
+		// "Erase from the cursor to the end of the display" reaches past the
+		// child's content area into the footer row, so the footer is gone the
+		// moment the child repaints. The debounced redraw only fires after a
+		// quiet period, so during continuous rendering the footer stayed
+		// missing until the child settled.
+		//
+		// Repair it inline, as RIS does. The cursor is saved and restored
+		// because the child is mid-frame; children that wrap frames in
+		// synchronized output (DECSET 2026) have this applied atomically with
+		// the rest of the frame, so the row does not flicker.
+		var buf bytes.Buffer
+		buf.Write(raw)
+		buf.WriteString("\x1b7") // save cursor
+		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", w.height)
+		buf.WriteString(w.bar.Render())
+		buf.WriteString("\x1b8") // restore cursor
 		return w.outputLocked(buf.Bytes())
 	}
 	return nil

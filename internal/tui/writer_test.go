@@ -1607,3 +1607,64 @@ func TestClampScrollRegion_FooterRowNeverInRegion(t *testing.T) {
 		}
 	}
 }
+
+// --- Erase-in-display footer repair ---
+//
+// "Erase from the cursor to the end of the display" reaches past the child's
+// content area into the footer row. Waiting for the debounced redraw left the
+// footer missing for as long as the child kept rendering, which is why it only
+// reappeared once the agent settled.
+
+func TestWriter_RepairsFooterAfterEraseDisplay(t *testing.T) {
+	for _, seq := range []string{"\x1b[J", "\x1b[0J", "\x1b[2J", "\x1b[3J"} {
+		t.Run(seq[1:], func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			buf.Reset()
+
+			if _, err := w.Write([]byte(seq)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			out := buf.String()
+
+			if !strings.Contains(out, seq) {
+				t.Errorf("the child's erase must reach the terminal, got %q", out)
+			}
+			// Footer repainted at the reserved row, without waiting for quiet.
+			if !strings.Contains(out, "\x1b[24;1H") {
+				t.Errorf("expected the footer row to be repainted, got %q", out)
+			}
+			// The child is mid-frame: its cursor must be preserved.
+			if !strings.Contains(out, "\x1b7") || !strings.Contains(out, "\x1b8") {
+				t.Errorf("expected the cursor to be saved and restored, got %q", out)
+			}
+			w.Cleanup()
+		})
+	}
+}
+
+func TestWriter_SelectiveEraseIsNotIntercepted(t *testing.T) {
+	// CSI ? Ps J (DECSED) is a different command; it must pass through
+	// untouched rather than triggering a footer repaint.
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	if _, err := w.Write([]byte("\x1b[?0J")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[?0J") {
+		t.Errorf("selective erase should pass through, got %q", out)
+	}
+	if strings.Contains(out, "\x1b7") {
+		t.Errorf("selective erase should not trigger a footer repair, got %q", out)
+	}
+	w.Cleanup()
+}
