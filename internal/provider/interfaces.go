@@ -130,6 +130,20 @@ type DescribableProvider interface {
 	Source() string // "builtin" or "custom"
 }
 
+// AgentOnlyProvider is an optional interface for providers that register as
+// CredentialProviders to carry agent runtime behavior but have no credential
+// of their own — they run on another provider's grant, and their Grant()
+// always errors pointing at it (see the pi and copilot providers).
+//
+// Credential listings such as 'moat grant providers' must exclude these, so
+// they never advertise a `moat grant <name>` that cannot work. Implement it on
+// any agent provider that borrows another grant, and say which one in the
+// method's doc comment.
+type AgentOnlyProvider interface {
+	// AgentOnly is a marker method; it does nothing.
+	AgentOnly()
+}
+
 // InitFileProvider is an optional interface for providers that need config
 // files written into the container at startup. The run manager collects
 // init files from all providers and passes them to moat-init.sh via the

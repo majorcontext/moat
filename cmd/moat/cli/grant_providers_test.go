@@ -15,18 +15,67 @@ import (
 // Agent-only providers register as CredentialProviders but their Grant()
 // always errors, so listing them tells users to run a command that cannot work.
 func TestGrantProviderInfosExcludesAgentOnly(t *testing.T) {
-	for name := range agentOnlyProviders {
-		if provider.Get(name) == nil {
+	// Checked by literal name so that dropping the marker from a provider
+	// fails here rather than silently narrowing the test to whatever still
+	// implements the interface.
+	for _, name := range []string{"pi", "copilot"} {
+		p := provider.Get(name)
+		if p == nil {
 			t.Fatalf("provider %q is not registered — this test would pass vacuously", name)
+		}
+		if _, ok := p.(provider.AgentOnlyProvider); !ok {
+			t.Errorf("provider %q has no credential of its own and must implement provider.AgentOnlyProvider", name)
 		}
 	}
 
-	// Checked by literal name, not via agentOnlyProviders, so that deleting an
-	// entry from that map fails here instead of silently narrowing the test.
 	excluded := map[string]bool{"pi": true, "copilot": true}
 	for _, info := range grantProviderInfos() {
-		if excluded[info.Name] || agentOnlyProviders[info.Name] {
+		if excluded[info.Name] {
 			t.Errorf("agent-only provider %q must not be listed under 'moat grant providers'", info.Name)
+		}
+	}
+}
+
+// The structural half of the guard: whatever declares itself agent-only stays
+// out of the listing, including providers added after this test was written.
+func TestGrantProviderInfosExcludesEveryAgentOnlyMarker(t *testing.T) {
+	markers := make(map[string]bool)
+	for _, p := range provider.All() {
+		if _, ok := p.(provider.AgentOnlyProvider); ok {
+			markers[p.Name()] = true
+		}
+	}
+	if len(markers) == 0 {
+		t.Fatal("no registered provider implements AgentOnlyProvider — this test would pass vacuously")
+	}
+
+	for _, info := range grantProviderInfos() {
+		if markers[info.Name] {
+			t.Errorf("provider %q implements AgentOnlyProvider but is still listed", info.Name)
+		}
+	}
+}
+
+// Companion direction: the marker must not swallow providers that do have a
+// credential of their own. Every agent provider that owns a grant stays listed.
+func TestGrantProviderInfosKeepsCredentialOwningAgents(t *testing.T) {
+	listed := make(map[string]bool)
+	for _, info := range grantProviderInfos() {
+		listed[info.Name] = true
+	}
+
+	// gemini owns its credential; claude and codex own theirs and are listed
+	// under the names users type (codex as its openai alias).
+	for _, name := range []string{"gemini", "claude", "openai"} {
+		p := provider.Get(name)
+		if p == nil {
+			t.Fatalf("provider %q is not registered — this test would pass vacuously", name)
+		}
+		if _, ok := p.(provider.AgentOnlyProvider); ok {
+			t.Errorf("provider %q owns a credential and must not be marked agent-only", name)
+		}
+		if !listed[name] {
+			t.Errorf("credential-owning provider %q should be listed", name)
 		}
 	}
 }
