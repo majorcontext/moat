@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -159,26 +161,147 @@ func TestPopulateStagingDir(t *testing.T) {
 	}
 }
 
-func TestWriteCodexConfig(t *testing.T) {
-	tmpDir := t.TempDir()
+// writeAndParseConfig writes cfg to a temp staging dir and reads config.toml
+// back through a TOML parser, so assertions test what Codex would load rather
+// than how it happens to be formatted.
+func writeAndParseConfig(t *testing.T, cfg Config) Config {
+	t.Helper()
 
-	err := WriteCodexConfig(tmpDir)
-	if err != nil {
+	tmpDir := t.TempDir()
+	if err := WriteCodexConfig(tmpDir, cfg); err != nil {
 		t.Fatalf("WriteCodexConfig() error = %v", err)
 	}
 
-	// Check config.toml exists
-	configPath := filepath.Join(tmpDir, "config.toml")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(filepath.Join(tmpDir, "config.toml"))
 	if err != nil {
 		t.Fatalf("reading config.toml: %v", err)
 	}
 
-	// Verify content has shell_environment_policy
-	content := string(data)
-	if !contains(content, "[shell_environment_policy]") {
-		t.Errorf("config.toml should contain [shell_environment_policy], got: %s", content)
+	var got Config
+	if err := toml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("config.toml is not valid TOML: %v\n%s", err, data)
 	}
+	return got
+}
+
+func TestWriteCodexConfig_Defaults(t *testing.T) {
+	got := writeAndParseConfig(t, NewConfig(false))
+
+	// Approvals and Codex's own sandbox are off: the container is the
+	// isolation boundary, and Codex's sandbox would block the moat proxy.
+	if got.ApprovalPolicy != ApprovalNever {
+		t.Errorf("approval_policy = %q, want %q", got.ApprovalPolicy, ApprovalNever)
+	}
+	if got.SandboxMode != SandboxFullAccess {
+		t.Errorf("sandbox_mode = %q, want %q", got.SandboxMode, SandboxFullAccess)
+	}
+	// "core" would strip HTTP_PROXY/SSL_CERT_FILE from commands Codex runs.
+	if got.ShellEnvironmentPolicy.Inherit != "all" {
+		t.Errorf("shell_environment_policy.inherit = %q, want all", got.ShellEnvironmentPolicy.Inherit)
+	}
+	if lvl := got.Projects[WorkspacePath].TrustLevel; lvl != "trusted" {
+		t.Errorf("projects[%q].trust_level = %q, want trusted", WorkspacePath, lvl)
+	}
+	if got.MCPServers != nil {
+		t.Errorf("expected no mcp_servers by default, got %v", got.MCPServers)
+	}
+}
+
+func TestWriteCodexConfig_RequireApproval(t *testing.T) {
+	got := writeAndParseConfig(t, NewConfig(true))
+
+	// --noyolo restores Codex's own defaults...
+	if got.ApprovalPolicy != ApprovalOnRequest {
+		t.Errorf("approval_policy = %q, want %q", got.ApprovalPolicy, ApprovalOnRequest)
+	}
+	if got.SandboxMode != SandboxWorkspaceWrite {
+		t.Errorf("sandbox_mode = %q, want %q", got.SandboxMode, SandboxWorkspaceWrite)
+	}
+	// ...but not the environment policy or the trust entry, which are about
+	// moat's container setup rather than how much the agent may do.
+	if got.ShellEnvironmentPolicy.Inherit != "all" {
+		t.Errorf("shell_environment_policy.inherit = %q, want all", got.ShellEnvironmentPolicy.Inherit)
+	}
+	if lvl := got.Projects[WorkspacePath].TrustLevel; lvl != "trusted" {
+		t.Errorf("projects[%q].trust_level = %q, want trusted", WorkspacePath, lvl)
+	}
+}
+
+func TestWriteCodexConfig_MCPServers(t *testing.T) {
+	cfg := NewConfig(false)
+	cfg.MCPServers = map[string]MCPServer{
+		"relay": {URL: "http://proxy:8080/mcp/tok/relay", HTTPHeaders: map[string]string{"Authorization": "moat-stub-github"}},
+		"local": {Command: "run-server", Args: []string{"-x"}, Env: map[string]string{"K": "v"}, Cwd: "/workspace"},
+	}
+
+	got := writeAndParseConfig(t, cfg)
+
+	relay, ok := got.MCPServers["relay"]
+	if !ok {
+		t.Fatalf("mcp_servers.relay missing, got %v", got.MCPServers)
+	}
+	if relay.URL != "http://proxy:8080/mcp/tok/relay" {
+		t.Errorf("relay url = %q", relay.URL)
+	}
+	if relay.HTTPHeaders["Authorization"] != "moat-stub-github" {
+		t.Errorf("relay http_headers = %v", relay.HTTPHeaders)
+	}
+	if relay.Command != "" {
+		t.Errorf("remote server should not have a command, got %q", relay.Command)
+	}
+
+	local, ok := got.MCPServers["local"]
+	if !ok {
+		t.Fatalf("mcp_servers.local missing, got %v", got.MCPServers)
+	}
+	if local.Command != "run-server" || len(local.Args) != 1 || local.Cwd != "/workspace" {
+		t.Errorf("local server not round-tripped: %+v", local)
+	}
+	if local.Env["K"] != "v" {
+		t.Errorf("local env = %v", local.Env)
+	}
+	if local.URL != "" {
+		t.Errorf("local server should not have a url, got %q", local.URL)
+	}
+}
+
+func TestBuildMCPServers(t *testing.T) {
+	t.Run("none", func(t *testing.T) {
+		got, err := buildMCPServers(provider.PrepareOpts{})
+		if err != nil || got != nil {
+			t.Fatalf("expected (nil, nil), got (%v, %v)", got, err)
+		}
+	})
+
+	t.Run("remote and local merge", func(t *testing.T) {
+		got, err := buildMCPServers(provider.PrepareOpts{
+			MCPServers: map[string]provider.MCPServerConfig{
+				"remote": {URL: "http://relay/mcp", Headers: map[string]string{"Authorization": "stub"}},
+			},
+			LocalMCPServers: map[string]provider.LocalMCPServerConfig{
+				"local": {Command: "srv"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("buildMCPServers() error = %v", err)
+		}
+		if got["remote"].URL != "http://relay/mcp" || got["remote"].HTTPHeaders["Authorization"] != "stub" {
+			t.Errorf("remote server not converted: %+v", got["remote"])
+		}
+		if got["local"].Command != "srv" {
+			t.Errorf("local server not converted: %+v", got["local"])
+		}
+	})
+
+	t.Run("name collision", func(t *testing.T) {
+		_, err := buildMCPServers(provider.PrepareOpts{
+			MCPServers:      map[string]provider.MCPServerConfig{"dup": {URL: "http://relay/mcp"}},
+			LocalMCPServers: map[string]provider.LocalMCPServerConfig{"dup": {Command: "srv"}},
+		})
+		if err == nil || !contains(err.Error(), "must be unique") {
+			t.Fatalf("expected a name-collision error, got %v", err)
+		}
+	})
 }
 
 func TestNetworkHosts(t *testing.T) {
@@ -228,6 +351,27 @@ func TestDefaultDependencies(t *testing.T) {
 	}
 }
 
+// stagedConfig parses the config.toml PrepareContainer wrote, and asserts the
+// staging dir has no mcp.json: Codex reads MCP servers from config.toml only,
+// and a stale mcp.json would be copied into the workspace by moat-init.
+func stagedConfig(t *testing.T, stagingDir string) Config {
+	t.Helper()
+
+	if _, err := os.Stat(filepath.Join(stagingDir, "mcp.json")); err == nil {
+		t.Error("mcp.json should not be staged — Codex ignores it")
+	}
+
+	data, err := os.ReadFile(filepath.Join(stagingDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("reading config.toml: %v", err)
+	}
+	var cfg Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("config.toml is not valid TOML: %v\n%s", err, data)
+	}
+	return cfg
+}
+
 func TestPrepareContainer_LocalMCP(t *testing.T) {
 	p := &Provider{}
 
@@ -247,50 +391,79 @@ func TestPrepareContainer_LocalMCP(t *testing.T) {
 	}
 	defer cfg.Cleanup()
 
-	// Verify mcp.json was written to staging dir
-	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
-	data, err := os.ReadFile(mcpPath)
-	if err != nil {
-		t.Fatalf("mcp.json not found in staging dir: %v", err)
+	srv, ok := stagedConfig(t, cfg.StagingDir).MCPServers["my-server"]
+	if !ok {
+		t.Fatal("mcp_servers.my-server missing from config.toml")
 	}
-
-	// Verify content
-	want := `"my-server"`
-	if !contains(string(data), want) {
-		t.Errorf("mcp.json should contain %q, got: %s", want, data)
+	if srv.Command != "/usr/local/bin/mcp-server" {
+		t.Errorf("command = %q", srv.Command)
 	}
-	if !contains(string(data), `"command": "/usr/local/bin/mcp-server"`) {
-		t.Errorf("mcp.json should contain command, got: %s", data)
+	if len(srv.Args) != 1 || srv.Args[0] != "--verbose" {
+		t.Errorf("args = %v", srv.Args)
 	}
-	if !contains(string(data), `"--verbose"`) {
-		t.Errorf("mcp.json should contain args, got: %s", data)
+	if srv.Env["DEBUG"] != "1" {
+		t.Errorf("env = %v", srv.Env)
+	}
+	if srv.Cwd != "/workspace" {
+		t.Errorf("cwd = %q", srv.Cwd)
 	}
 }
 
-func TestPrepareContainer_NoLocalMCP(t *testing.T) {
+func TestPrepareContainer_RemoteMCP(t *testing.T) {
 	p := &Provider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
-		// No LocalMCPServers
+		MCPServers: map[string]provider.MCPServerConfig{
+			"linear": {
+				URL:     "http://moat-proxy:8080/mcp/tok123/linear",
+				Headers: map[string]string{"Authorization": "moat-stub-linear"},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("PrepareContainer() error = %v", err)
 	}
 	defer cfg.Cleanup()
 
-	// mcp.json should NOT exist in staging dir when no local MCP servers
-	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
-	if _, err := os.Stat(mcpPath); err == nil {
-		t.Error("mcp.json should NOT exist when no local MCP servers configured")
+	srv, ok := stagedConfig(t, cfg.StagingDir).MCPServers["linear"]
+	if !ok {
+		t.Fatal("mcp_servers.linear missing from config.toml")
+	}
+	// The relay URL, not the server's real URL — the proxy injects credentials.
+	if srv.URL != "http://moat-proxy:8080/mcp/tok123/linear" {
+		t.Errorf("url = %q", srv.URL)
+	}
+	if srv.HTTPHeaders["Authorization"] != "moat-stub-linear" {
+		t.Errorf("http_headers = %v", srv.HTTPHeaders)
 	}
 }
 
-func TestPrepareContainer_LocalMCP_MultipleServers(t *testing.T) {
+func TestPrepareContainer_NoMCP(t *testing.T) {
 	p := &Provider{}
 
 	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
 		ContainerHome: "/home/moatuser",
+		// No MCP servers of either kind
+	})
+	if err != nil {
+		t.Fatalf("PrepareContainer() error = %v", err)
+	}
+	defer cfg.Cleanup()
+
+	if servers := stagedConfig(t, cfg.StagingDir).MCPServers; len(servers) != 0 {
+		t.Errorf("expected no mcp_servers, got %v", servers)
+	}
+}
+
+func TestPrepareContainer_MCP_MultipleServers(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome: "/home/moatuser",
+		MCPServers: map[string]provider.MCPServerConfig{
+			"remote": {URL: "http://moat-proxy:8080/mcp/tok/remote"},
+		},
 		LocalMCPServers: map[string]provider.LocalMCPServerConfig{
 			"server-a": {
 				Command: "mcp-a",
@@ -308,24 +481,35 @@ func TestPrepareContainer_LocalMCP_MultipleServers(t *testing.T) {
 	}
 	defer cfg.Cleanup()
 
-	mcpPath := filepath.Join(cfg.StagingDir, "mcp.json")
-	data, err := os.ReadFile(mcpPath)
-	if err != nil {
-		t.Fatalf("mcp.json not found: %v", err)
+	servers := stagedConfig(t, cfg.StagingDir).MCPServers
+	if len(servers) != 3 {
+		t.Fatalf("expected 3 mcp servers, got %v", servers)
 	}
+	if servers["server-a"].Command != "mcp-a" {
+		t.Errorf("server-a = %+v", servers["server-a"])
+	}
+	if servers["server-b"].Command != "mcp-b" || servers["server-b"].Cwd != "/opt/tools" {
+		t.Errorf("server-b = %+v", servers["server-b"])
+	}
+	if servers["remote"].URL != "http://moat-proxy:8080/mcp/tok/remote" {
+		t.Errorf("remote = %+v", servers["remote"])
+	}
+}
 
-	content := string(data)
-	if !contains(content, `"server-a"`) {
-		t.Error("mcp.json should contain server-a")
+func TestPrepareContainer_MCP_NameCollision(t *testing.T) {
+	p := &Provider{}
+
+	cfg, err := p.PrepareContainer(context.Background(), provider.PrepareOpts{
+		ContainerHome:   "/home/moatuser",
+		MCPServers:      map[string]provider.MCPServerConfig{"dup": {URL: "http://relay/mcp"}},
+		LocalMCPServers: map[string]provider.LocalMCPServerConfig{"dup": {Command: "srv"}},
+	})
+	if err == nil {
+		cfg.Cleanup()
+		t.Fatal("expected an error when a remote and local server share a name")
 	}
-	if !contains(content, `"server-b"`) {
-		t.Error("mcp.json should contain server-b")
-	}
-	if !contains(content, `"command": "mcp-a"`) {
-		t.Error("mcp.json should contain mcp-a command")
-	}
-	if !contains(content, `"command": "mcp-b"`) {
-		t.Error("mcp.json should contain mcp-b command")
+	if !contains(err.Error(), "must be unique") {
+		t.Errorf("error = %v, want a name-collision error", err)
 	}
 }
 
@@ -345,21 +529,24 @@ func TestPrepareContainer_LocalMCP_MinimalFields(t *testing.T) {
 	}
 	defer cfg.Cleanup()
 
-	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, "mcp.json"))
+	data, err := os.ReadFile(filepath.Join(cfg.StagingDir, "config.toml"))
 	if err != nil {
-		t.Fatalf("mcp.json not found: %v", err)
+		t.Fatalf("reading config.toml: %v", err)
 	}
 
 	content := string(data)
-	if !contains(content, `"command": "bare-mcp"`) {
-		t.Errorf("mcp.json should contain command, got: %s", content)
+	if !contains(content, `command = 'bare-mcp'`) && !contains(content, `command = "bare-mcp"`) {
+		t.Errorf("config.toml should contain the command, got: %s", content)
 	}
-	// Should not have env or cwd fields when not set
-	if contains(content, `"env"`) {
-		t.Error("mcp.json should not contain env when not set")
+	// Unset optional fields must be omitted rather than emitted empty.
+	if contains(content, "env =") || contains(content, "[mcp_servers.simple.env]") {
+		t.Errorf("config.toml should not contain env when not set, got: %s", content)
 	}
-	if contains(content, `"cwd"`) {
-		t.Error("mcp.json should not contain cwd when not set")
+	if contains(content, "cwd =") {
+		t.Errorf("config.toml should not contain cwd when not set, got: %s", content)
+	}
+	if contains(content, "url =") {
+		t.Errorf("config.toml should not contain url for a stdio server, got: %s", content)
 	}
 }
 

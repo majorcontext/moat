@@ -17,7 +17,7 @@ func TestSetupCodexStaging_UnknownGrant(t *testing.T) {
 	cfg.Codex.MCP = map[string]config.MCPServerSpec{"srv": {Grant: "bogus"}}
 	// The provider is nil here: grant validation errors return before
 	// PrepareContainer is ever called.
-	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, false, "", "", nil)
+	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, &Run{}, false, "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "unknown grant") {
 		t.Fatalf("expected unknown-grant error, got %v", err)
 	}
@@ -28,7 +28,7 @@ func TestSetupCodexStaging_GrantNotDeclared(t *testing.T) {
 	cfg := &config.Config{}
 	// "github" is a known grant but is not in the top-level grants list.
 	cfg.Codex.MCP = map[string]config.MCPServerSpec{"srv": {Grant: "github"}}
-	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, false, "", "", nil)
+	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, &Run{}, false, "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("expected grant-not-declared error, got %v", err)
 	}
@@ -126,14 +126,14 @@ func TestBuildLocalMCPConfig_GrantInjectsEnvWithoutMutatingSpec(t *testing.T) {
 }
 
 func TestBuildClaudeMCPRelayServers_Empty(t *testing.T) {
-	if got := buildClaudeMCPRelayServers(nil, 8080, "tok"); len(got) != 0 {
+	if got := buildMCPRelayServers(nil, 8080, "tok"); len(got) != 0 {
 		t.Fatalf("expected empty map for no MCP servers, got %v", got)
 	}
 }
 
 func TestBuildClaudeMCPRelayServers_RelayURLNoAuth(t *testing.T) {
 	mcps := []config.MCPServerConfig{{Name: "srv"}}
-	got := buildClaudeMCPRelayServers(mcps, 8080, "tok123")
+	got := buildMCPRelayServers(mcps, 8080, "tok123")
 	cfg, ok := got["srv"]
 	if !ok {
 		t.Fatalf("missing server entry: %v", got)
@@ -150,7 +150,7 @@ func TestBuildClaudeMCPRelayServers_RelayURLNoAuth(t *testing.T) {
 
 func TestBuildClaudeMCPRelayServers_AuthHeaderStub(t *testing.T) {
 	mcps := []config.MCPServerConfig{{Name: "srv", Auth: &config.MCPAuthConfig{Header: "X-Api-Key", Grant: "notion"}}}
-	got := buildClaudeMCPRelayServers(mcps, 9000, "tok")
+	got := buildMCPRelayServers(mcps, 9000, "tok")
 	if h := got["srv"].Headers["X-Api-Key"]; h != "moat-stub-notion" {
 		t.Fatalf("auth header = %q, want %q", h, "moat-stub-notion")
 	}

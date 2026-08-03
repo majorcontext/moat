@@ -62,10 +62,10 @@ func buildLocalMCPConfig(agentName string, specs map[string]config.MCPServerSpec
 	return out, nil
 }
 
-// setupCodexStaging builds the Codex container config (OpenAI auth + local MCP
-// servers) via the provider interface. openCredStore must be non-nil when
-// needsCodexInit is true (Create always passes a real closure).
-func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.AgentProvider, opts Options, needsCodexInit bool, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
+// setupCodexStaging builds the Codex container config (OpenAI auth + remote and
+// local MCP servers) via the provider interface. openCredStore must be non-nil
+// when needsCodexInit is true (Create always passes a real closure).
+func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.AgentProvider, opts Options, r *Run, needsCodexInit bool, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
 	// Get Codex credential for PrepareContainer
 	var codexCred *provider.Credential
 	if needsCodexInit {
@@ -76,7 +76,8 @@ func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.
 		}
 	}
 
-	// Build local MCP server config from codex.mcp entries.
+	// Build local MCP server config from codex.mcp entries. This validates
+	// grants, so it runs before anything that reads the run.
 	var codexLocalMCP map[string]provider.LocalMCPServerConfig
 	if opts.Config != nil {
 		var err error
@@ -86,11 +87,22 @@ func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.
 		}
 	}
 
+	// Build the proxy-relay MCP server config for ~/.codex/config.toml.
+	var codexMCPs []config.MCPServerConfig
+	var requireApproval bool
+	if opts.Config != nil {
+		codexMCPs = opts.Config.MCP
+		requireApproval = opts.Config.Codex.RequireApproval
+	}
+	mcpServers := buildMCPRelayServers(codexMCPs, r.ProxyPort, r.ProxyAuthToken)
+
 	codexConfig, prepErr := codexProvider.PrepareContainer(ctx, provider.PrepareOpts{
-		Credential:      codexCred,
-		ContainerHome:   containerHome,
-		RuntimeContext:  renderedContext,
-		LocalMCPServers: codexLocalMCP,
+		Credential:           codexCred,
+		ContainerHome:        containerHome,
+		MCPServers:           mcpServers,
+		RuntimeContext:       renderedContext,
+		LocalMCPServers:      codexLocalMCP,
+		CodexRequireApproval: requireApproval,
 	})
 	if prepErr != nil {
 		return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)
@@ -182,16 +194,17 @@ func (m *Manager) setupCopilotStaging(ctx context.Context, copilotProvider provi
 	return copilotConfig, nil
 }
 
-// buildClaudeMCPRelayServers builds the .claude.json MCP server map, pointing
-// each entry at a proxy-relay URL instead of its direct URL.
+// buildMCPRelayServers builds an agent's remote MCP server map (Claude's
+// .claude.json, Codex's config.toml), pointing each entry at a proxy-relay URL
+// instead of its direct URL.
 //
-// Proxy relay URLs work around Claude Code's MCP client not respecting
+// Proxy relay URLs work around agent MCP clients not respecting
 // HTTP_PROXY, and bridge host-local MCP servers (localhost/127.0.0.1) the
 // container cannot reach directly. The relay host is the synthetic proxy host
 // (in NO_PROXY) so the client connects directly and the proxy strips the
 // per-run token via handleDirectMCPRelay; GetHostAddress is not in NO_PROXY, so
 // it would route through the CONNECT tunnel to the wrong handler -> 404.
-func buildClaudeMCPRelayServers(mcps []config.MCPServerConfig, proxyPort int, authToken string) map[string]provider.MCPServerConfig {
+func buildMCPRelayServers(mcps []config.MCPServerConfig, proxyPort int, authToken string) map[string]provider.MCPServerConfig {
 	servers := make(map[string]provider.MCPServerConfig)
 	proxyAddr := fmt.Sprintf("%s:%d", syntheticProxyHost, proxyPort)
 	for _, mcp := range mcps {
@@ -221,7 +234,7 @@ func (m *Manager) setupClaudeStaging(ctx context.Context, claudeProvider provide
 	if opts.Config != nil {
 		claudeMCPs = opts.Config.MCP
 	}
-	mcpServers := buildClaudeMCPRelayServers(claudeMCPs, r.ProxyPort, r.ProxyAuthToken)
+	mcpServers := buildMCPRelayServers(claudeMCPs, r.ProxyPort, r.ProxyAuthToken)
 
 	// Get Claude credential for PrepareContainer
 	// Preference: claude > anthropic (for backward compatibility)

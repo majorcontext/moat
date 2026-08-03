@@ -217,6 +217,78 @@ func TestClaudeProjectsHostDir(t *testing.T) {
 	}
 }
 
+func TestCodexSessionsHostDir(t *testing.T) {
+	// MOAT_HOME pins GlobalConfigDir so the expected path is not the
+	// developer's real ~/.moat.
+	moatHome := t.TempDir()
+	t.Setenv("MOAT_HOME", moatHome)
+
+	// Default: a moat-owned per-workspace directory, so one project's
+	// transcripts are never visible to another project's agent. The leaf keeps
+	// a readable rendering of the path plus a digest that disambiguates it.
+	got := codexSessionsHostDir("/home/u", "/Users/dev/repo", false)
+	wantPrefix := filepath.Join(moatHome, "codex", "sessions") + string(filepath.Separator)
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("codexSessionsHostDir(host, %q, false) = %q, want a path under %q", "/Users/dev/repo", got, wantPrefix)
+	}
+	if !strings.Contains(filepath.Base(got), "Users-dev-repo") {
+		t.Errorf("sessions dir should stay recognizable, got leaf %q", filepath.Base(got))
+	}
+
+	// Distinct workspaces must not collide.
+	if other := codexSessionsHostDir("/home/u", "/Users/dev/other", false); other == got {
+		t.Errorf("distinct workspaces share a sessions dir: %q", got)
+	}
+
+	// Paths differing only in punctuation must not collide either: every
+	// non-alphanumeric rune renders as "-", so without a disambiguating digest
+	// these two unrelated projects would share a directory and each one's
+	// container would see the other's transcripts.
+	for _, pair := range [][2]string{
+		{"/Users/dev/my-repo", "/Users/dev/my_repo"},
+		{"/Users/dev/api-server", "/Users/dev/api.server"},
+		{"/Users/dev/a b", "/Users/dev/a-b"},
+	} {
+		first := codexSessionsHostDir("/home/u", pair[0], false)
+		second := codexSessionsHostDir("/home/u", pair[1], false)
+		if first == second {
+			t.Errorf("workspaces %q and %q share a sessions dir %q — one project's transcripts would be visible to the other", pair[0], pair[1], first)
+		}
+	}
+
+	// Same workspace, same directory: transcripts must accumulate across runs
+	// rather than scattering.
+	if again := codexSessionsHostDir("/home/u", "/Users/dev/repo", false); again != got {
+		t.Errorf("same workspace produced two dirs: %q then %q", got, again)
+	}
+
+	// The host's own directory must never be the default — that cross-project
+	// exposure is what the isolation exists to prevent.
+	if strings.Contains(got, filepath.Join(".codex", "sessions")) {
+		t.Errorf("default must not touch the host's ~/.codex/sessions, got %q", got)
+	}
+
+	// Opt-in: the host's own directory, where the host CLI reads its history.
+	shared := codexSessionsHostDir("/home/u", "/Users/dev/repo", true)
+	if wantShared := filepath.Join("/home/u", ".codex", "sessions"); shared != wantShared {
+		t.Errorf("codexSessionsHostDir(host, ws, true) = %q, want %q", shared, wantShared)
+	}
+	// Not a parent of it: ~/.codex holds auth.json and the state databases.
+	if filepath.Base(shared) != "sessions" || filepath.Base(filepath.Dir(shared)) != ".codex" {
+		t.Errorf("shared mode must resolve to ~/.codex/sessions, got %q", shared)
+	}
+
+	// An empty workspace must not collapse to ~/.moat/codex/sessions, which
+	// would share every workspace's transcripts. The caller skips the mount.
+	if got := codexSessionsHostDir("/home/u", "", false); got != "" {
+		t.Errorf("codexSessionsHostDir(host, \"\", false) = %q, want \"\" (mount must be skipped)", got)
+	}
+	// Shared mode does not depend on the workspace, so it still resolves.
+	if got := codexSessionsHostDir("/home/u", "", true); got == "" {
+		t.Error("shared mode should not depend on the workspace path")
+	}
+}
+
 func TestValidateGrants(t *testing.T) {
 	// Set up temporary credential store
 	tmpDir := t.TempDir()

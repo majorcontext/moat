@@ -329,7 +329,7 @@ codex:
       cwd: /workspace
 ```
 
-Moat writes the server configuration to `.mcp.json` in the workspace directory.
+Moat writes the server configuration to the `[mcp_servers]` table of the generated `~/.codex/config.toml`. Codex reads MCP servers from `config.toml` only -- it ignores `.mcp.json`.
 
 #### Gemini
 
@@ -612,7 +612,7 @@ Remote and sandbox-local MCP servers are configured in the generated `.claude.js
 
 ### Codex
 
-Sandbox-local MCP servers are configured under `codex.mcp:` in `moat.yaml`. Configuration is written to `.mcp.json` in the workspace. See [Running Codex](./02-codex.md) for Codex-specific configuration.
+Remote and sandbox-local MCP servers are both written to the `[mcp_servers]` table of the generated `~/.codex/config.toml` -- Codex reads MCP servers from `config.toml` only. Remote servers become streamable HTTP entries whose `url` points at the proxy relay; sandbox-local servers become stdio entries with the command and arguments from `moat.yaml`. See [Running Codex](./02-codex.md) for Codex-specific configuration.
 
 ### Gemini
 

@@ -4,6 +4,33 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+Realigns the Codex integration with the current Codex CLI (0.146). Codex's own approval prompts and sandbox are now turned off inside the container, its MCP servers moved to the config file it actually reads, and the environment policy no longer strips the variables that route container commands through the Moat proxy.
+
+### Added
+
+- **Remote MCP servers for Codex** — top-level `mcp:` entries are now wired into Codex, not just Claude Code. They are written to the `[mcp_servers]` table of the generated `~/.codex/config.toml` as streamable HTTP servers whose `url` points at the proxy relay, so the proxy injects the real credential exactly as it does for Claude Code. Previously `mcp:` was silently ignored for Codex runs. See [MCP servers](https://majorcontext.com/moat/guides/mcp). ([#449](https://github.com/majorcontext/moat/pull/449))
+
+### Changed
+
+- **`codex-cli` is now version-pinned** (0.146.0) instead of installing whatever npm resolves as latest at image-build time. Codex ships breaking CLI and config changes on a fast cadence, and Moat generates `~/.codex/config.toml` against a known schema, so the version now moves deliberately. Override per project with `codex-cli@<version>` in `dependencies`. Registry npm dependencies now honor an explicit `@version` at all — previously the version was parsed and silently dropped for registry entries (dynamic `npm:pkg@version` deps were unaffected). ([#449](https://github.com/majorcontext/moat/pull/449))
+
+### Fixed
+
+- Fix commands run by Codex having no network access — previously the generated `~/.codex/config.toml` set `shell_environment_policy.inherit = "core"`, and Codex's `core` set is a fixed allowlist (`PATH`, `SHELL`, `TMPDIR`, `TEMP`, `TMP`, `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `USER`). Every command Codex ran therefore lost `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` — the variables that route a container command through the Moat proxy — so `npm install`, `pip`, `git push`, and `gh` all failed inside a Codex session. The policy is now `inherit = "all"`; Moat curates the container environment already. ([#449](https://github.com/majorcontext/moat/pull/449))
+- Fix Codex nesting its own sandbox inside the container — previously Moat passed no approval or sandbox settings, so Codex applied its defaults: approval on every action, plus a sandbox that blocks the network and confines writes to the workspace. Inside a Moat container that adds prompts without adding protection, and its network block defeats the proxy. The generated config now sets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`. Use `moat codex --noyolo` to keep Codex's own approvals and sandbox. ([#449](https://github.com/majorcontext/moat/pull/449))
+- Fix `codex.mcp` sandbox-local servers never loading — previously they were written to `/workspace/.mcp.json`, which Codex does not read (verified against Codex CLI 0.146: a server declared there is not registered). They are now written to the `[mcp_servers]` table of `~/.codex/config.toml`. ([#449](https://github.com/majorcontext/moat/pull/449))
+- Fix `moat codex -p` emitting a deprecation warning — it passed `codex exec --full-auto`, which the Codex CLI now reports as deprecated (and which no longer exists at all on the interactive command). Approval policy and sandbox mode are configured in `config.toml` instead, so no such flag is passed. ([#449](https://github.com/majorcontext/moat/pull/449))
+- Fix `codex.sync_logs` never syncing anything — the setting was documented as writing session logs to the host, and defaulted on whenever the `openai` grant was configured, but no mount was ever created: the flag only influenced whether the Codex staging directory was built. Codex session transcripts now appear on the host at `~/.moat/codex/sessions/<workspace>-<id>/YYYY/MM/DD/rollout-*.jsonl`, in Codex's own format. ([#449](https://github.com/majorcontext/moat/pull/449))
+- Fix Codex prompting to trust `/workspace` on first run — the generated config now marks the workspace trusted. ([#449](https://github.com/majorcontext/moat/pull/449))
+- `codex.mcp` and `gemini.mcp` may now both declare local MCP servers in one `moat.yaml`. They previously collided on `/workspace/.mcp.json` and were rejected at config load; Codex no longer uses that file. ([#449](https://github.com/majorcontext/moat/pull/449))
+
+### Breaking
+
+- **`moat codex --full-auto` is deprecated** — use `--noyolo` to require manual approval. `--full-auto=false` is still accepted and maps to `--noyolo`; `--full-auto=true` is a no-op, since auto-approval is the default. The flag is hidden from help and will be removed in a future release. The Codex CLI itself removed `--full-auto` from its interactive command and deprecated it on `codex exec`. ([#449](https://github.com/majorcontext/moat/pull/449))
+- **`codex.sync_logs` writes to a new location** — the setting previously did nothing at all, so nothing moves for existing users, but the documented destination has changed. Codex session transcripts now sync to `~/.moat/codex/sessions/<workspace>-<id>/`, a per-workspace directory, rather than the host's own `~/.codex/sessions`. Codex partitions sessions by date rather than by workspace and offers no config key to relocate the directory, so mounting its real directory would expose this host user's transcripts from every project — including any carrying regulated or confidential data — to whatever agent is running. Set `codex: { shared_sessions: true }` to mount the host's directory anyway and keep one combined history. ([#449](https://github.com/majorcontext/moat/pull/449))
+
 ## v0.7.0 — 2026-08-01
 
 Adds two agents: `moat pi` runs the Pi coding agent against your existing `anthropic` or `openai` grant, and `moat copilot` runs GitHub Copilot CLI on the `github` grant. Keep policies gain HTTP request-body inspection — file- and pack-based `network.keep_policy` rules can match on the parsed JSON request body, so policies can enforce content-based rules (e.g. block requests whose body carries a secret) instead of host/method/path alone. Workspaces and volumes can now be backed by Docker named volumes (`workspace.mode: volume`, `type: volume`) to bypass the host↔VM filesystem-sharing layer a bind mount crosses, and the routing proxy serves a discovery index at its bare hosts so you can browse an agent's endpoints with `moat open` instead of memorizing hostnames.

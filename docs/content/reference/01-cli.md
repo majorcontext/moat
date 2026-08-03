@@ -362,7 +362,8 @@ In addition to the command-specific flags below, `moat codex` accepts all [commo
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
-| `--full-auto` | Enable full-auto mode (auto-approve tool use). Default: `true`. Set `--full-auto=false` to require manual approval for each action. This is analogous to `--noyolo` on `moat claude` -- the container provides isolation, so auto-approval is the default. |
+| `--noyolo` | Keep Codex's own approval prompts and sandbox enabled. By default moat turns both off (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"` in the generated `~/.codex/config.toml`), because the container is already the isolation boundary and Codex's sandbox blocks the network the moat proxy provides. Same meaning as `--noyolo` on `moat claude`. |
+| `--full-auto` | Deprecated, hidden. `--full-auto=false` is treated as `--noyolo`; `--full-auto=true` is a no-op. The Codex CLI removed this flag from its interactive mode and deprecated it on `codex exec`. |
 
 ### Examples
 
@@ -393,8 +394,8 @@ moat codex --worktree=dark-mode --prompt "implement dark mode"
 # Force rebuild
 moat codex --rebuild
 
-# Disable full-auto mode (require manual approval)
-moat codex --full-auto=false
+# Require manual approval for each action
+moat codex --noyolo
 ```
 
 ---
@@ -421,7 +422,7 @@ In addition to the command-specific flags below, `moat gemini` accepts all [comm
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 
-Gemini does not have a `--noyolo` or `--full-auto` equivalent. The Gemini CLI does not expose a flag to skip confirmation prompts.
+Gemini does not have a `--noyolo` equivalent. The Gemini CLI does not expose a flag to skip confirmation prompts.
 
 ### Examples
 

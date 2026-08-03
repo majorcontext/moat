@@ -434,6 +434,16 @@ func writeNpmPackages(b *strings.Builder, deps []Dependency) {
 		if pkg == "" {
 			pkg = dep.Name
 		}
+		// Version precedence matches the other writers: an explicit
+		// `name@version` in moat.yaml, else the registry's pin, else whatever
+		// npm resolves as latest.
+		version := dep.Version
+		if version == "" {
+			version = spec.Default
+		}
+		if version != "" {
+			pkg = pkg + "@" + version
+		}
 		pkgNames = append(pkgNames, pkg)
 	}
 	b.WriteString("# npm packages\n")

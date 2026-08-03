@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -1354,6 +1355,33 @@ region = %s
 				})
 			}
 		}
+
+		// Mount a session directory so Codex transcripts written inside the
+		// container appear on the host. Enabled when codex.sync_logs is true,
+		// or by default when the openai grant is configured.
+		//
+		// The source is per-workspace (~/.moat/codex/sessions/<slug>) unless
+		// codex.shared_sessions opts into the host's own ~/.codex/sessions —
+		// see codexSessionsHostDir for why the default isolates.
+		//
+		// Only transcripts are shared, never the sibling SQLite databases
+		// (state_*.sqlite and friends) — concurrent runs writing one shared
+		// SQLite file risks corrupting it. Rollout filenames carry a timestamp
+		// and UUID, so concurrent runs cannot collide on a file.
+		if !isPiRun && opts.Config != nil && opts.Config.ShouldSyncCodexLogs() {
+			hostCodexSessions := codexSessionsHostDir(hostHome, opts.Workspace, opts.Config.Codex.SharedSessions)
+			if hostCodexSessions == "" {
+				log.Warn("skipping Codex session sync mount: empty workspace path")
+			} else if err := os.MkdirAll(hostCodexSessions, 0o755); err != nil {
+				ui.Warnf("Failed to create Codex sessions directory: %v", err)
+			} else {
+				mounts = append(mounts, container.MountConfig{
+					Source:   hostCodexSessions,
+					Target:   filepath.Join(containerHome, ".codex", "sessions"),
+					ReadOnly: false,
+				})
+			}
+		}
 	}
 
 	// Set up provider-specific container mounts and init files.
@@ -1426,7 +1454,7 @@ region = %s
 			return nil, fmt.Errorf("codex provider not registered")
 		}
 
-		cfg, stageErr := m.setupCodexStaging(ctx, codexProvider, opts, needsCodexInit, containerHome, renderedContext, openCredStore)
+		cfg, stageErr := m.setupCodexStaging(ctx, codexProvider, opts, r, needsCodexInit, containerHome, renderedContext, openCredStore)
 		if stageErr != nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)
@@ -2350,6 +2378,73 @@ func claudeProjectsHostDir(hostHome, workspace string) string {
 		return ""
 	}
 	return filepath.Join(hostHome, ".claude", "projects", claudeDir)
+}
+
+// codexSessionsHostDir returns the host-side directory to bind-mount at the
+// container's ~/.codex/sessions, or "" if the mount should be skipped.
+//
+// By default this is a moat-owned per-workspace directory, because Codex
+// partitions sessions by date rather than by project and cannot be told to put
+// them elsewhere: mounting its real directory would expose this host user's
+// transcripts from every project to the container. Isolating per workspace
+// keeps one project's history out of another project's agent.
+//
+// shared opts into the host's own ~/.codex/sessions, so container sessions join
+// the same history the host CLI reads.
+//
+// An empty workspace yields "" rather than collapsing to the parent directory,
+// which would share every workspace's sessions — the same guard, and for the
+// same reason, as claudeProjectsHostDir.
+func codexSessionsHostDir(hostHome, workspace string, shared bool) string {
+	if shared {
+		return filepath.Join(hostHome, ".codex", "sessions")
+	}
+	slug := workspaceSlug(workspace)
+	if slug == "" {
+		return ""
+	}
+	return filepath.Join(config.GlobalConfigDir(), "codex", "sessions", slug)
+}
+
+// workspaceSlug converts an absolute workspace path into a single, collision-free
+// path segment: a readable rendering of the path followed by a short digest of
+// the full path. Returns "" for an empty path.
+//
+// The digest is load-bearing, not decoration. The readable rendering maps every
+// non-alphanumeric rune to "-", so "/srv/my-project" and "/srv/my_project"
+// render identically; without the digest those two unrelated projects would
+// share one session directory, and each one's container would see the other's
+// Codex transcripts — exactly the cross-project exposure codexSessionsHostDir
+// exists to prevent.
+//
+// This is moat's own rule and is deliberately not claude.WorkspaceToClaudeDir,
+// which is contractually pinned to Claude Code's slug algorithm (and inherits
+// its collisions) so that container and host sessions land in the same
+// directory. Nothing outside moat reads these paths, so they are free to be
+// unambiguous.
+func workspaceSlug(absPath string) string {
+	if absPath == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(absPath) + 9)
+	for _, r := range absPath {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+
+	sum := sha256.Sum256([]byte(absPath))
+	digest := hex.EncodeToString(sum[:4])
+	readable := strings.Trim(b.String(), "-")
+	if readable == "" {
+		return digest
+	}
+	return readable + "-" + digest
 }
 
 // agentImpliedDependencies returns dependencies implicitly required by an agent.

@@ -123,7 +123,7 @@ See [Available services](#available-services) below for the full list, and the [
 | Language tools | `golangci-lint`, `ruff`, `typescript` | Go, Python, Node tool ecosystems |
 | Protobuf | `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`, `protoc-gen-es` | Or use `protobuf` / `protobuf-es` meta bundles |
 | CLI tools | `jq`, `yq`, `ripgrep`, `fd`, `bat` | |
-| AI coding tools | `claude-code`, `codex-cli` | Or use `moat claude` / `moat codex` |
+| AI coding tools | `claude-code`, `codex-cli` | Or use `moat claude` / `moat codex`. `codex-cli` is pinned; override with `codex-cli@<version>` |
 | Workflow tools | `graphite-cli` | Implied by `--grant graphite` |
 | Database clients | `psql`, `mysql-client`, `redis-cli`, `sqlite3` | Pair with corresponding service |
 | Cloud tools | `aws`, `gcloud`, `kubectl`, `terraform`, `opentofu`, `terragrunt`, `helm` | `terragrunt` needs `terraform` or `opentofu` |
