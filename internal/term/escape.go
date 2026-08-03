@@ -146,7 +146,7 @@ func matchKittyPrefix(data []byte, awaitingCommand bool) (kittyMatch, int) {
 		// Bail out as soon as the parameters cannot become "47;5". While the
 		// prefix is armed any key's release qualifies, so every parameter
 		// string stays viable.
-		if !awaitingCommand && !viableKittyParams(string(data[2 : i+1])) {
+		if !awaitingCommand && !viableKittyParams(string(data[2:i+1])) {
 			return kittyNone, 0
 		}
 		i++
