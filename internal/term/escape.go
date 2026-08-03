@@ -120,7 +120,13 @@ const (
 // the child untouched. Buffering for kittyPartial is likewise limited to input
 // that could still become this one sequence, so unrelated escape sequences are
 // never delayed.
-func matchKittyPrefix(data []byte) (kittyMatch, int) {
+// awaitingCommand widens matching while the escape prefix is armed: any key
+// release is swallowed, not just Ctrl+/'s own. Releasing the chord can report
+// the '/' key with different modifiers (lifting Ctrl first yields
+// "CSI 47;1:3u") or report the modifier key itself, and any of those reaching
+// the command-key branch would be read as an unrecognized command and cancel
+// the prefix — the prefix would appear to "not stick".
+func matchKittyPrefix(data []byte, awaitingCommand bool) (kittyMatch, int) {
 	if len(data) == 0 || data[0] != 0x1b {
 		return kittyNone, 0
 	}
@@ -137,8 +143,10 @@ func matchKittyPrefix(data []byte) (kittyMatch, int) {
 	// Scan the parameter bytes up to the final byte.
 	i := 2
 	for i < len(data) && ((data[i] >= '0' && data[i] <= '9') || data[i] == ';' || data[i] == ':') {
-		// Bail out as soon as the parameters cannot become "47;5".
-		if !viableKittyParams(string(data[2 : i+1])) {
+		// Bail out as soon as the parameters cannot become "47;5". While the
+		// prefix is armed any key's release qualifies, so every parameter
+		// string stays viable.
+		if !awaitingCommand && !viableKittyParams(string(data[2 : i+1])) {
 			return kittyNone, 0
 		}
 		i++
@@ -154,7 +162,15 @@ func matchKittyPrefix(data []byte) (kittyMatch, int) {
 	}
 
 	key, mods, event, ok := parseKittyParams(string(data[2:i]))
-	if !ok || key != kittyPrefixKeyCode || mods != kittyPrefixMods {
+	if !ok {
+		return kittyNone, 0
+	}
+	// Any key-up while the prefix is armed: swallow it so it cannot be
+	// mistaken for the command key.
+	if awaitingCommand && event == kittyEventRelease {
+		return kittyRelease, i + 1
+	}
+	if key != kittyPrefixKeyCode || mods != kittyPrefixMods {
 		return kittyNone, 0
 	}
 	if event == kittyEventRelease {
@@ -375,7 +391,7 @@ scan:
 		// Check for the kitty encoding of Ctrl+/ before anything else, so a
 		// release event is swallowed rather than mistaken for a command key.
 		if data[i] == 0x1b {
-			switch m, length := matchKittyPrefix(data[i:]); m {
+			switch m, length := matchKittyPrefix(data[i:], e.sawPrefix); m {
 			case kittyNone:
 				// Not our sequence; fall through to normal byte handling.
 

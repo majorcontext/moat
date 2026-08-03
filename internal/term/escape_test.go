@@ -556,3 +556,40 @@ func TestEscapeProxy_KittyPrefixThenStop(t *testing.T) {
 		t.Errorf("expected EscapeStop, got %v", got)
 	}
 }
+
+// Releasing the chord does not always report the '/' key with Ctrl still held.
+// Lifting Ctrl first reports different modifiers, and the modifier key itself
+// has its own release event. None of these are the command key, so none may
+// cancel the armed prefix.
+func TestEscapeProxy_KittyReleaseVariantsDoNotCancelPrefix(t *testing.T) {
+	for name, release := range map[string]string{
+		"ctrl lifted first":  "\x1b[47;1:3u",
+		"ctrl still held":    "\x1b[47;5:3u",
+		"left ctrl key up":   "\x1b[57442;1:3u",
+		"alternate key form": "\x1b[47:47;5:3u",
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := []byte("\x1b[47;5:1u" + release + "s")
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+			if len(actions) != 1 || actions[0] != EscapeSnapshot {
+				t.Fatalf("prefix did not survive the release: got actions %v", actions)
+			}
+			if len(out) != 0 {
+				t.Errorf("nothing should leak to the child, got %q", out)
+			}
+		})
+	}
+}
+
+func TestEscapeProxy_KittyPressWhileArmedIsNotSwallowed(t *testing.T) {
+	// A different key *press* after the prefix is not a command; the existing
+	// contract passes the prefix and the unrecognized bytes through.
+	input := []byte("\x1b[47;5u\x1b[A")
+	_, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+	if !bytes.Contains(out, []byte{EscapePrefix}) {
+		t.Errorf("unrecognized command should emit the literal prefix, got %q", out)
+	}
+	if !bytes.Contains(out, []byte("\x1b[A")) {
+		t.Errorf("the arrow key should reach the child, got %q", out)
+	}
+}
