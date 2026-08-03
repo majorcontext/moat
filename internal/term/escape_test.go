@@ -770,3 +770,51 @@ func TestEscapeProxy_FlushesPrefixAndPartialAtEOF(t *testing.T) {
 		t.Errorf("the held partial should be flushed at EOF, got %q", got)
 	}
 }
+
+// chunkReader delivers each chunk in its own Read, as a terminal would.
+type chunkReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (c *chunkReader) Read(p []byte) (int, error) {
+	if c.i >= len(c.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, c.chunks[c.i])
+	c.i++
+	return n, nil
+}
+
+// A sequence can be split more than once. The one-byte fallback that fetches
+// the command key must not run while a partial sequence is still buffered, or
+// it judges a mid-sequence byte as the command, drops the buffered bytes, and
+// swallows the real command key.
+func TestEscapeProxy_KittyReleaseSplitThreeWays(t *testing.T) {
+	r := NewEscapeProxy(&chunkReader{chunks: [][]byte{
+		[]byte("\x1b[47;5u"), // press, arms the prefix
+		[]byte("\x1b"),       // release, split across three reads
+		[]byte("[47"),
+		[]byte(";5:3u"),
+		[]byte("d"), // the command key
+	}})
+
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	var out []byte
+	buf := make([]byte, 64)
+	for {
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	if len(actions) != 1 || actions[0] != EscapeDumpTUI {
+		t.Fatalf("expected the dump action, got %v (leaked %q)", actions, out)
+	}
+	if len(out) != 0 {
+		t.Errorf("nothing should leak to the child, got %q", out)
+	}
+}

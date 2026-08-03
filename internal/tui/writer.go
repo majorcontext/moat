@@ -440,6 +440,13 @@ func matchControlSeq(data []byte) controlSeqResult {
 		if paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
 			return controlSeqResult{needsMore: true} // could be DECSTR
 		}
+		// Could be a kitty push/pop: those lead with '>' or '<', which clears
+		// onlyDigitsAndSemi and so is not covered above. Container stdout can
+		// chunk at any byte, and missing a split push would leave moat unable
+		// to restore the terminal on cleanup.
+		if intLen == 0 && paramLen > 0 && (data[paramStart] == '>' || data[paramStart] == '<') {
+			return controlSeqResult{needsMore: true}
+		}
 		return controlSeqResult{}
 	}
 
@@ -557,8 +564,13 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		w.kittyPushDepth++
 		return w.outputLocked(raw)
 	case ctrlKittyPop:
-		if w.kittyPushDepth > 0 {
-			w.kittyPushDepth--
+		// "CSI < Pn u" pops Pn entries, defaulting to 1. Treating every pop as
+		// one entry leaves phantom depth behind, and cleanup would then pop
+		// levels the child never pushed — possibly ones the user's terminal or
+		// multiplexer set up before moat started.
+		w.kittyPushDepth -= kittyPopCount(raw)
+		if w.kittyPushDepth < 0 {
+			w.kittyPushDepth = 0
 		}
 		return w.outputLocked(raw)
 	case ctrlED:
@@ -642,6 +654,24 @@ func clampScrollRegion(raw []byte, contentBottom int) []byte {
 	// A request for the entire content area is moat's own region; emitting it
 	// verbatim keeps the byte stream identical to the pre-clamping behavior.
 	return []byte(fmt.Sprintf("\x1b[%d;%dr", top, bottom))
+}
+
+// kittyPopCount returns how many keyboard-protocol stack entries a
+// "CSI < Pn u" sequence pops. Pn defaults to 1 when omitted or unparsable.
+func kittyPopCount(raw []byte) int {
+	if len(raw) < 4 {
+		return 1
+	}
+	// raw is ESC [ < <digits> u
+	digits := strings.TrimSuffix(string(raw[3:]), "u")
+	if digits == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }
 
 // mouseModeSet is the set of DEC private modes that control host-global mouse

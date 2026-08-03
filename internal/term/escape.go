@@ -381,6 +381,11 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 			e.partialSeq = nil
 			copied := copy(p, held)
 			if copied < len(held) {
+				// Only reachable if a caller passes a buffer smaller than the
+				// prefix plus a partial sequence (a few dozen bytes at most).
+				// Production callers read through io.Copy's 32KB buffer. A
+				// caller that small would strand these bytes, because io.Copy
+				// stops on the non-nil error below without draining e.buf.
 				e.buf = append(e.buf, held[copied:]...)
 			}
 			return copied, err
@@ -513,8 +518,14 @@ scan:
 		return copied, nil
 	}
 
-	// If we ended with sawPrefix=true and no output, we need to read more
-	if e.sawPrefix && len(out) == 0 && err == nil {
+	// If we ended with sawPrefix=true and no output, we need to read more.
+	//
+	// A held partial sequence disqualifies this path: the single byte it reads
+	// would be judged as the command key while the buffered bytes are still
+	// mid-sequence, dropping them and swallowing the real command. The tail
+	// below re-enters Read so the main scanner resumes with partialSeq
+	// prepended, which is what handles a sequence split more than once.
+	if e.sawPrefix && len(out) == 0 && err == nil && len(e.partialSeq) == 0 {
 		// We consumed all input and ended on a prefix - need to read one more byte
 		// to determine the action.
 		oneByte := make([]byte, 1)

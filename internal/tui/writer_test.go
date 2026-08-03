@@ -1771,3 +1771,65 @@ func TestWriter_NeverPopsWhenChildNeverPushed(t *testing.T) {
 		t.Errorf("cleanup must not touch a protocol moat never saw enabled, got %q", buf.String())
 	}
 }
+
+// "CSI < Pn u" pops Pn stack entries. Counting every pop as one leaves phantom
+// depth, and cleanup would then pop levels the child never pushed — possibly
+// ones the user's terminal or multiplexer established before moat started.
+func TestWriter_MultiLevelKittyPopIsCounted(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		child   string
+		wantPop bool
+	}{
+		{"two pushes, one two-level pop", "\x1b[>1u\x1b[>1u\x1b[<2u", false},
+		{"three pushes, one three-level pop", "\x1b[>1u\x1b[>1u\x1b[>1u\x1b[<3u", false},
+		{"two pushes, one single pop leaves one", "\x1b[>1u\x1b[>1u\x1b[<u", true},
+		{"pop larger than depth does not go negative", "\x1b[>1u\x1b[<9u", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			if _, err := w.Write([]byte(tc.child)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			buf.Reset()
+			if err := w.Cleanup(); err != nil {
+				t.Fatalf("Cleanup: %v", err)
+			}
+			got := strings.Contains(buf.String(), "\x1b[<u")
+			if got != tc.wantPop {
+				t.Errorf("cleanup pop = %v, want %v (emitted %q)", got, tc.wantPop, buf.String())
+			}
+		})
+	}
+}
+
+// Container stdout chunks at arbitrary byte boundaries, so a push or pop can
+// arrive split. Missing one leaves moat unable to restore the terminal.
+func TestWriter_KittyPushSplitAcrossWritesIsCounted(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	for _, chunk := range []string{"\x1b[>", "7", "u"} {
+		if _, err := w.Write([]byte(chunk)); err != nil {
+			t.Fatalf("Write(%q): %v", chunk, err)
+		}
+	}
+	if !strings.Contains(buf.String(), "\x1b[>7u") {
+		t.Errorf("the reassembled push must still reach the terminal, got %q", buf.String())
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("a split push must still be restored on cleanup, got %q", buf.String())
+	}
+}
