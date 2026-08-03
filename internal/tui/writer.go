@@ -94,6 +94,13 @@ type Writer struct {
 	// user's terminal stuck reporting mouse events.
 	hostMouseModes map[int]bool
 
+	// kittyPushDepth counts keyboard-protocol stack entries the child pushed
+	// (CSI > flags u) and has not popped (CSI < u). A child that is killed,
+	// crashes, or is stopped with ctrl+/ k never pops, which would leave the
+	// user's terminal reporting keys in a form the shell cannot parse long
+	// after moat exited. Cleanup drains the outstanding depth.
+	kittyPushDepth int
+
 	// cleanedUp is set once Cleanup() has torn down the status bar. Guards
 	// late repaints (e.g. a footer-count poll firing RefreshFooter after exit)
 	// from painting a stray status line over the reset screen.
@@ -363,11 +370,13 @@ const maxControlSeqBufLen = 256
 type controlSeqKind int
 
 const (
-	ctrlNone    controlSeqKind = iota
-	ctrlDECSTBM                // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
-	ctrlDECSTR                 // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
-	ctrlRIS                    // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
-	ctrlED                     // CSI Ps J — erase in display; can wipe the footer row. Pass through, then repair the footer.
+	ctrlNone      controlSeqKind = iota
+	ctrlDECSTBM                  // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
+	ctrlDECSTR                   // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
+	ctrlRIS                      // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
+	ctrlED                       // CSI Ps J — erase in display; can wipe the footer row. Pass through, then repair the footer.
+	ctrlKittyPush                // CSI > flags u — push keyboard-protocol flags. Pass through, count so cleanup can undo.
+	ctrlKittyPop                 // CSI < [n] u — pop them. Pass through, uncount.
 )
 
 // controlSeqResult is the outcome of matchControlSeq.
@@ -448,6 +457,18 @@ func matchControlSeq(data []byte) controlSeqResult {
 	// DECSTR: no params, single '!' intermediate, final 'p'.
 	if final == 'p' && paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
 		return controlSeqResult{kind: ctrlDECSTR, length: length}
+	}
+	// Kitty keyboard protocol: CSI > flags u pushes, CSI < [n] u pops. Both
+	// pass through untouched — the child and the terminal negotiate this
+	// between themselves — but moat counts them so a child that dies without
+	// popping does not strand the terminal. See kittyPushDepth.
+	if final == 'u' && intLen == 0 && paramLen > 0 {
+		switch data[paramStart] {
+		case '>':
+			return controlSeqResult{kind: ctrlKittyPush, length: length}
+		case '<':
+			return controlSeqResult{kind: ctrlKittyPop, length: length}
+		}
 	}
 	// ED: digit params (or none), no intermediates, final 'J'. The private
 	// form (CSI ? Ps J, selective erase) has a '?' in its parameters, so
@@ -532,6 +553,14 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// Return cursor to home so child resumes drawing where RIS left it.
 		buf.WriteString("\x1b[H")
 		return w.outputLocked(buf.Bytes())
+	case ctrlKittyPush:
+		w.kittyPushDepth++
+		return w.outputLocked(raw)
+	case ctrlKittyPop:
+		if w.kittyPushDepth > 0 {
+			w.kittyPushDepth--
+		}
+		return w.outputLocked(raw)
 	case ctrlED:
 		// "Erase from the cursor to the end of the display" reaches past the
 		// child's content area into the footer row, so the footer is gone the
@@ -1213,6 +1242,16 @@ func (w *Writer) Cleanup() error {
 	// events after moat exits.
 	if dis := w.disableHostMouseModesLocked(); dis != nil {
 		buf.Write(dis)
+	}
+
+	// Pop any keyboard-protocol flags the child pushed and never popped, for
+	// the same reason as the mouse modes above: a killed or crashed child
+	// leaves the terminal encoding keys in a form the user's shell cannot
+	// parse, so typing produces fragments like "s5;1:3u" after moat exits.
+	// Only the outstanding depth is popped, so a protocol the user's own
+	// terminal or multiplexer enabled outside moat is left alone.
+	for ; w.kittyPushDepth > 0; w.kittyPushDepth-- {
+		buf.WriteString("\x1b[<u")
 	}
 
 	// Reset scrolling region to full screen (DECSTBM with no params)

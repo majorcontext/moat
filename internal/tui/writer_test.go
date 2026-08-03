@@ -1694,3 +1694,80 @@ func TestWriter_SelectiveEraseIsNotIntercepted(t *testing.T) {
 	}
 	w.Cleanup()
 }
+
+// --- Keyboard-protocol restore ---
+//
+// A child that enables the kitty keyboard protocol and is then killed, crashed,
+// or stopped with ctrl+/ k never pops its flags. Without moat undoing them the
+// user's terminal keeps encoding keys as CSI-u sequences their shell cannot
+// parse, so typing produces fragments like "s5;1:3u" long after moat exited.
+
+func TestWriter_PopsKittyFlagsLeftByTheChild(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// The child enables the protocol and dies without popping.
+	if _, err := w.Write([]byte("\x1b[>7u")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[>7u") {
+		t.Errorf("the push must reach the terminal, got %q", buf.String())
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("expected cleanup to pop the child's keyboard flags, got %q", buf.String())
+	}
+}
+
+func TestWriter_DoesNotPopFlagsTheChildAlreadyPopped(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// A clean exit: the child pushes and pops for itself.
+	if _, err := w.Write([]byte("\x1b[>7u\x1b[<u")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[>7u") || !strings.Contains(out, "\x1b[<u") {
+		t.Errorf("both push and pop must reach the terminal, got %q", out)
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	// Popping again would disturb a protocol enabled outside moat, by the
+	// user's own terminal or multiplexer.
+	if strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("cleanup must not pop flags the child already popped, got %q", buf.String())
+	}
+}
+
+func TestWriter_NeverPopsWhenChildNeverPushed(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	if _, err := w.Write([]byte("plain output\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("cleanup must not touch a protocol moat never saw enabled, got %q", buf.String())
+	}
+}
