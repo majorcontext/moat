@@ -405,3 +405,154 @@ func TestEscapeProxy_DumpAndResetContinueReading(t *testing.T) {
 		t.Errorf("expected [EscapeDumpTUI, EscapeResetTUI], got %v", actions)
 	}
 }
+
+// --- Kitty keyboard protocol ---
+//
+// Agents that enable the kitty keyboard protocol (Codex pushes CSI > 7 u at
+// startup) change how the terminal encodes Ctrl+/: instead of the legacy 0x1f
+// byte it sends CSI 47 ; 5 u. Without recognizing that form, moat's escape
+// prefix silently stops working for those agents while continuing to work for
+// agents that leave the protocol off, such as Claude Code.
+
+// drainActions reads r to completion, collecting escape actions and output.
+func drainActions(t *testing.T, r *EscapeProxy) ([]EscapeAction, []byte) {
+	t.Helper()
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	var out []byte
+	buf := make([]byte, 64)
+	for {
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	return actions, out
+}
+
+func TestEscapeProxy_KittyPrefixSnapshot(t *testing.T) {
+	// CSI 47;5u is Ctrl+/ under the kitty protocol; 's' still arrives as a
+	// plain byte because flag 7 does not report text keys as escape codes.
+	input := append([]byte("\x1b[47;5u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixWithPressEvent(t *testing.T) {
+	// Flag 7 includes "report event types", so the press carries :1.
+	input := append([]byte("\x1b[47;5:1u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyReleaseDoesNotDoubleFire(t *testing.T) {
+	// A real key press emits press (:1) then release (:3). The release must not
+	// be treated as the command key, and must not fire a second action.
+	input := append([]byte("\x1b[47;5:1u\x1b[47;5:3u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected exactly one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequences should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixSplitAcrossReads(t *testing.T) {
+	// The sequence can arrive in pieces; a partial prefix must not be lost.
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+	var actions []EscapeAction
+	done := make(chan struct{})
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	go func() {
+		defer close(done)
+		buf := make([]byte, 64)
+		for {
+			if _, err := r.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	for _, chunk := range []string{"\x1b[4", "7;5", "u", "s"} {
+		if _, err := pw.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	pw.Close()
+	<-done
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action across split reads, got %v", actions)
+	}
+}
+
+func TestEscapeProxy_NonPrefixCSIUPassesThrough(t *testing.T) {
+	// Other kitty-encoded keys must reach the child untouched. CSI 97;5u is
+	// Ctrl+A; CSI 47;6u is Ctrl+Shift+/ (a different chord).
+	for _, seq := range []string{"\x1b[97;5u", "\x1b[47;6u", "\x1b[47;5~", "\x1b[A"} {
+		actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(seq))))
+		if len(actions) != 0 {
+			t.Errorf("%q should not trigger an action, got %v", seq, actions)
+		}
+		if string(out) != seq {
+			t.Errorf("%q should pass through unchanged, got %q", seq, out)
+		}
+	}
+}
+
+func TestEscapeProxy_LegacyPrefixStillWorks(t *testing.T) {
+	// Agents that leave the protocol off keep sending the raw byte.
+	input := []byte{EscapePrefix, 's'}
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPartialAtEOFIsReleased(t *testing.T) {
+	// A truncated sequence must reach the child rather than vanish.
+	input := []byte("\x1b[47;5")
+	_, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+	if !bytes.Equal(out, input) {
+		t.Errorf("truncated sequence should pass through, got %q want %q", out, input)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixThenStop(t *testing.T) {
+	// The stop action unwinds Read with an error, unlike snapshot.
+	r := NewEscapeProxy(bytes.NewReader(append([]byte("\x1b[47;5u"), 'k')))
+	buf := make([]byte, 32)
+	var got EscapeAction
+	for {
+		_, err := r.Read(buf)
+		if err == nil {
+			continue
+		}
+		if IsEscapeError(err) {
+			got = GetEscapeAction(err)
+		}
+		break
+	}
+	if got != EscapeStop {
+		t.Errorf("expected EscapeStop, got %v", got)
+	}
+}
