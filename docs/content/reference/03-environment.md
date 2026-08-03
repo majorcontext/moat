@@ -139,6 +139,22 @@ Set this to `file` on headless or locked-down macOS where touching the keychain 
 
 Set it consistently across every Moat process for a given `MOAT_HOME`, including the proxy daemon (which inherits the variable from the CLI that spawns it). The credential store is encrypted with a key resolved from the selected backend, so mixing backends across processes — for example, switching this variable on while a daemon started without it is still running — makes them resolve different keys and credentials fail to decrypt. After changing the value on a host with a running daemon, run `moat proxy restart` so the daemon picks up the new backend.
 
+### MOAT_TTY_TRACE
+
+Record the terminal I/O of every interactive run to a file, for debugging TUI and input problems.
+
+```bash
+export MOAT_TTY_TRACE=session.tty
+moat codex
+moat tty-trace analyze session.tty --decode
+```
+
+Equivalent to passing `--tty-trace <path>`, which takes precedence when both are set. Use the variable when the sessions worth tracing are the broken ones: if input handling misbehaves, the in-session `ctrl+/ d` dump may itself be unreachable, and exporting a variable captures every subsequent run without editing each command line.
+
+The trace records terminal output, terminal input, and resize events with timestamps. Input is recorded **after** moat's escape-sequence handling, so a `ctrl+/` that moat consumed does not appear — its absence is the signal that moat recognized it, and its presence means moat passed it through untouched.
+
+Each run overwrites the file, so give concurrent runs distinct paths. Traces are JSON regardless of the name; the `.tty` suffix used here is what moat's `.gitignore` excludes, so captures taken inside a repo are not committed by accident.
+
 ### AWS credentials
 
 For AWS SSM secrets, standard AWS environment variables are used:

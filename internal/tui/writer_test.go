@@ -967,17 +967,20 @@ func TestWriter_InterceptsDECSTBM_WithArgs(t *testing.T) {
 	_ = w.Setup()
 	buf.Reset()
 
-	// Child tries to set its own scroll region — must be overridden.
+	// A band that fits inside the content area is the child's to choose.
+	// Inline-rendering agents (Codex) scroll by restricting to a band and
+	// reverse-indexing inside it; replacing the band makes those scrolls
+	// affect the whole screen.
 	if _, err := w.Write([]byte("\x1b[5;15r")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
 	out := buf.String()
-	if strings.Contains(out, "\x1b[5;15r") {
-		t.Errorf("expected child's DECSTBM (ESC[5;15r) to be swallowed, got %q", out)
+	if !strings.Contains(out, "\x1b[5;15r") {
+		t.Errorf("expected the child's band (ESC[5;15r) to be forwarded, got %q", out)
 	}
-	if !strings.Contains(out, "\x1b[1;23r") {
-		t.Errorf("expected moat's DECSTBM to be re-emitted, got %q", out)
+	if strings.Contains(out, "\x1b[1;23r") {
+		t.Errorf("moat's region must not replace a band that already fits, got %q", out)
 	}
 	w.Cleanup()
 }
@@ -1178,18 +1181,21 @@ func TestWriter_InterceptsDECSTBM_MultipleInOneWrite(t *testing.T) {
 	_ = w.Setup()
 	buf.Reset()
 
-	// Two DECSTBMs back-to-back in a single Write — both must be swallowed,
-	// and moat's region must appear twice.
+	// Two DECSTBMs back-to-back in a single Write. The bare reset becomes
+	// moat's region; the explicit band is forwarded.
 	if _, err := w.Write([]byte("\x1b[r\x1b[5;15r")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
 	out := buf.String()
-	if strings.Contains(out, "\x1b[r") || strings.Contains(out, "\x1b[5;15r") {
-		t.Errorf("expected both child DECSTBMs to be swallowed, got %q", out)
+	if strings.Contains(out, "\x1b[r\x1b") {
+		t.Errorf("expected the bare reset to be replaced, got %q", out)
 	}
-	if got := strings.Count(out, "\x1b[1;23r"); got != 2 {
-		t.Errorf("expected moat's DECSTBM emitted twice (once per intercept), got %d in %q", got, out)
+	if got := strings.Count(out, "\x1b[1;23r"); got != 1 {
+		t.Errorf("expected moat's region once, for the bare reset, got %d in %q", got, out)
+	}
+	if !strings.Contains(out, "\x1b[5;15r") {
+		t.Errorf("expected the explicit band to be forwarded, got %q", out)
 	}
 	w.Cleanup()
 }
@@ -1515,5 +1521,315 @@ func TestWriter_CompositorMode_InjectsEmulatorReplies(t *testing.T) {
 	// Primary DA reply begins with CSI '?' on real VT100+ terminals.
 	if !bytes.HasPrefix(got, []byte("\x1b[?")) {
 		t.Errorf("expected reply to begin with CSI '?' (Primary DA), got %q", got)
+	}
+}
+
+// --- Scroll-region clamping ---
+//
+// moat owns the bottom margin so the footer row can never be scrolled, but the
+// band above it belongs to the child. Discarding the band broke inline agents:
+// Codex renders without the alternate screen and scrolls by restricting to a
+// band and reverse-indexing inside it.
+
+func TestClampScrollRegion(t *testing.T) {
+	const contentBottom = 94 // a 95-row terminal, last row reserved for the footer
+
+	tests := []struct {
+		name string
+		raw  string
+		want string // "" means fall back to moat's own region
+	}{
+		{"band inside content is preserved", "\x1b[46;94r", "\x1b[46;94r"},
+		{"band well above the footer", "\x1b[1;50r", "\x1b[1;50r"},
+		{"bottom margin over the footer is clamped", "\x1b[46;95r", "\x1b[46;94r"},
+		{"full host height is clamped to content", "\x1b[1;95r", "\x1b[1;94r"},
+		{"bare reset falls back to moat's region", "\x1b[r", ""},
+		{"omitted bottom means the content area", "\x1b[5r", "\x1b[5;94r"},
+		{"zero top is raised to one", "\x1b[0;40r", "\x1b[1;40r"},
+		{"degenerate range falls back", "\x1b[50;50r", ""},
+		{"inverted range falls back", "\x1b[60;40r", ""},
+		{"non-numeric falls back", "\x1b[x;yr", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampScrollRegion([]byte(tt.raw), contentBottom)
+			if tt.want == "" {
+				if got != nil {
+					t.Errorf("clampScrollRegion(%q) = %q, want fallback (nil)", tt.raw, got)
+				}
+				return
+			}
+			if string(got) != tt.want {
+				t.Errorf("clampScrollRegion(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// Every scroll region Codex requested in a captured session must survive, or
+// its inline rendering scrolls the whole screen instead of the intended band.
+// Regions taken from a real trace.tty (181x95 terminal, 94-row content area).
+func TestClampScrollRegion_CodexTraceRegionsSurvive(t *testing.T) {
+	const contentBottom = 94
+	captured := []string{
+		"\x1b[4;94r", "\x1b[1;13r", "\x1b[14;94r", "\x1b[1;17r",
+		"\x1b[18;94r", "\x1b[1;20r", "\x1b[21;94r", "\x1b[1;27r",
+		"\x1b[28;94r", "\x1b[1;29r", "\x1b[30;94r", "\x1b[1;31r",
+		"\x1b[32;94r", "\x1b[1;40r", "\x1b[41;94r", "\x1b[1;42r",
+		"\x1b[43;94r", "\x1b[1;45r", "\x1b[46;94r", "\x1b[1;50r",
+	}
+	for _, raw := range captured {
+		got := clampScrollRegion([]byte(raw), contentBottom)
+		if string(got) != raw {
+			t.Errorf("Codex region %q was altered to %q; its banded scrolling depends on it", raw, got)
+		}
+	}
+}
+
+// The guarantee from #349: nothing the child sends may put the footer row
+// inside the scroll region.
+func TestClampScrollRegion_FooterRowNeverInRegion(t *testing.T) {
+	const contentBottom = 94
+	for _, raw := range []string{
+		"\x1b[r", "\x1b[1;95r", "\x1b[46;95r", "\x1b[1;200r", "\x1b[95;95r", "\x1b[90r",
+	} {
+		got := clampScrollRegion([]byte(raw), contentBottom)
+		if got == nil {
+			continue // falls back to moat's own region, which excludes the footer
+		}
+		var top, bottom int
+		if _, err := fmt.Sscanf(string(got), "\x1b[%d;%dr", &top, &bottom); err != nil {
+			t.Fatalf("clamped output %q is not a well-formed DECSTBM: %v", got, err)
+		}
+		if bottom > contentBottom {
+			t.Errorf("%q clamped to %q, which includes the footer row", raw, got)
+		}
+	}
+}
+
+// --- Erase-in-display footer repair ---
+//
+// "Erase from the cursor to the end of the display" reaches past the child's
+// content area into the footer row. Waiting for the debounced redraw left the
+// footer missing for as long as the child kept rendering, which is why it only
+// reappeared once the agent settled.
+
+func TestWriter_RepairsFooterAfterEraseDisplay(t *testing.T) {
+	// Only the variants that reach the footer row: erase-to-end and erase-all.
+	for _, seq := range []string{"\x1b[J", "\x1b[0J", "\x1b[2J"} {
+		t.Run(seq[1:], func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			buf.Reset()
+
+			if _, err := w.Write([]byte(seq)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			out := buf.String()
+
+			if !strings.Contains(out, seq) {
+				t.Errorf("the child's erase must reach the terminal, got %q", out)
+			}
+			// Footer repainted at the reserved row, without waiting for quiet.
+			if !strings.Contains(out, "\x1b[24;1H") {
+				t.Errorf("expected the footer row to be repainted, got %q", out)
+			}
+			// The child is mid-frame: its cursor must be preserved.
+			if !strings.Contains(out, "\x1b7") || !strings.Contains(out, "\x1b8") {
+				t.Errorf("expected the cursor to be saved and restored, got %q", out)
+			}
+			w.Cleanup()
+		})
+	}
+}
+
+// Ps=1 erases from the start of the display to the cursor, which cannot reach
+// the footer because the child's screen ends a row above it. Ps=3 clears
+// scrollback without touching the visible screen. Neither needs a repaint.
+func TestWriter_EraseVariantsThatCannotReachFooterPassThrough(t *testing.T) {
+	for _, seq := range []string{"\x1b[1J", "\x1b[3J"} {
+		t.Run(seq[1:], func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			buf.Reset()
+
+			if _, err := w.Write([]byte(seq)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			out := buf.String()
+			if out != seq {
+				t.Errorf("%q should pass through untouched, got %q", seq, out)
+			}
+			w.Cleanup()
+		})
+	}
+}
+
+func TestWriter_SelectiveEraseIsNotIntercepted(t *testing.T) {
+	// CSI ? Ps J (DECSED) is a different command; it must pass through
+	// untouched rather than triggering a footer repaint.
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	buf.Reset()
+
+	if _, err := w.Write([]byte("\x1b[?0J")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[?0J") {
+		t.Errorf("selective erase should pass through, got %q", out)
+	}
+	if strings.Contains(out, "\x1b7") {
+		t.Errorf("selective erase should not trigger a footer repair, got %q", out)
+	}
+	w.Cleanup()
+}
+
+// --- Keyboard-protocol restore ---
+//
+// A child that enables the kitty keyboard protocol and is then killed, crashed,
+// or stopped with ctrl+/ k never pops its flags. Without moat undoing them the
+// user's terminal keeps encoding keys as CSI-u sequences their shell cannot
+// parse, so typing produces fragments like "s5;1:3u" long after moat exited.
+
+func TestWriter_PopsKittyFlagsLeftByTheChild(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// The child enables the protocol and dies without popping.
+	if _, err := w.Write([]byte("\x1b[>7u")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[>7u") {
+		t.Errorf("the push must reach the terminal, got %q", buf.String())
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("expected cleanup to pop the child's keyboard flags, got %q", buf.String())
+	}
+}
+
+func TestWriter_DoesNotPopFlagsTheChildAlreadyPopped(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	// A clean exit: the child pushes and pops for itself.
+	if _, err := w.Write([]byte("\x1b[>7u\x1b[<u")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[>7u") || !strings.Contains(out, "\x1b[<u") {
+		t.Errorf("both push and pop must reach the terminal, got %q", out)
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	// Popping again would disturb a protocol enabled outside moat, by the
+	// user's own terminal or multiplexer.
+	if strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("cleanup must not pop flags the child already popped, got %q", buf.String())
+	}
+}
+
+func TestWriter_NeverPopsWhenChildNeverPushed(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+	if _, err := w.Write([]byte("plain output\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("cleanup must not touch a protocol moat never saw enabled, got %q", buf.String())
+	}
+}
+
+// "CSI < Pn u" pops Pn stack entries. Counting every pop as one leaves phantom
+// depth, and cleanup would then pop levels the child never pushed — possibly
+// ones the user's terminal or multiplexer established before moat started.
+func TestWriter_MultiLevelKittyPopIsCounted(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		child   string
+		wantPop bool
+	}{
+		{"two pushes, one two-level pop", "\x1b[>1u\x1b[>1u\x1b[<2u", false},
+		{"three pushes, one three-level pop", "\x1b[>1u\x1b[>1u\x1b[>1u\x1b[<3u", false},
+		{"two pushes, one single pop leaves one", "\x1b[>1u\x1b[>1u\x1b[<u", true},
+		{"pop larger than depth does not go negative", "\x1b[>1u\x1b[<9u", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			bar := NewStatusBar("run_abc123", "my-agent", "docker")
+			bar.SetDimensions(60, 24)
+			w := NewWriter(&buf, bar, "docker")
+			_ = w.Setup()
+			if _, err := w.Write([]byte(tc.child)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			buf.Reset()
+			if err := w.Cleanup(); err != nil {
+				t.Fatalf("Cleanup: %v", err)
+			}
+			got := strings.Contains(buf.String(), "\x1b[<u")
+			if got != tc.wantPop {
+				t.Errorf("cleanup pop = %v, want %v (emitted %q)", got, tc.wantPop, buf.String())
+			}
+		})
+	}
+}
+
+// Container stdout chunks at arbitrary byte boundaries, so a push or pop can
+// arrive split. Missing one leaves moat unable to restore the terminal.
+func TestWriter_KittyPushSplitAcrossWritesIsCounted(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewStatusBar("run_abc123", "my-agent", "docker")
+	bar.SetDimensions(60, 24)
+	w := NewWriter(&buf, bar, "docker")
+	_ = w.Setup()
+
+	for _, chunk := range []string{"\x1b[>", "7", "u"} {
+		if _, err := w.Write([]byte(chunk)); err != nil {
+			t.Fatalf("Write(%q): %v", chunk, err)
+		}
+	}
+	if !strings.Contains(buf.String(), "\x1b[>7u") {
+		t.Errorf("the reassembled push must still reach the terminal, got %q", buf.String())
+	}
+	buf.Reset()
+
+	if err := w.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\x1b[<u") {
+		t.Errorf("a split push must still be restored on cleanup, got %q", buf.String())
 	}
 }

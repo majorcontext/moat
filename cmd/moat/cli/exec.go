@@ -155,6 +155,16 @@ func setupStatusBar(manager *run.Manager, r *run.Run, session string) (writer *t
 	return writer, cleanup, writer
 }
 
+// resolveTracePath returns the trace destination: the --tty-trace flag when
+// given, otherwise MOAT_TTY_TRACE, otherwise "" for no tracing. The flag wins
+// so a one-off run can override an exported variable.
+func resolveTracePath(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv("MOAT_TTY_TRACE")
+}
+
 // ttyTracer holds the state for TTY tracing during an interactive session.
 type ttyTracer struct {
 	recorder *trace.Recorder
@@ -163,7 +173,14 @@ type ttyTracer struct {
 
 // setupTTYTracer creates a TTY tracer if trace path is specified.
 // Returns nil if tracing is disabled or setup fails.
+//
+// The path comes from --tty-trace, falling back to MOAT_TTY_TRACE. The env var
+// exists because the sessions worth tracing are the broken ones: when input
+// handling misbehaves, the in-session ctrl+/ d dump may itself be unreachable,
+// and exporting a variable captures every subsequent run without editing each
+// command line.
 func setupTTYTracer(tracePath string, r *run.Run, command []string) *ttyTracer {
+	tracePath = resolveTracePath(tracePath)
 	if tracePath == "" {
 		return nil
 	}

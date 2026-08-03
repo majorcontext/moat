@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestEscapeProxy_PassThrough(t *testing.T) {
@@ -403,5 +404,417 @@ func TestEscapeProxy_DumpAndResetContinueReading(t *testing.T) {
 	}
 	if len(actions) != 2 || actions[0] != EscapeDumpTUI || actions[1] != EscapeResetTUI {
 		t.Errorf("expected [EscapeDumpTUI, EscapeResetTUI], got %v", actions)
+	}
+}
+
+// --- Kitty keyboard protocol ---
+//
+// Agents that enable the kitty keyboard protocol (Codex pushes CSI > 7 u at
+// startup) change how the terminal encodes Ctrl+/: instead of the legacy 0x1f
+// byte it sends CSI 47 ; 5 u. Without recognizing that form, moat's escape
+// prefix silently stops working for those agents while continuing to work for
+// agents that leave the protocol off, such as Claude Code.
+
+// drainActions reads r to completion, collecting escape actions and output.
+func drainActions(t *testing.T, r *EscapeProxy) ([]EscapeAction, []byte) {
+	t.Helper()
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	var out []byte
+	buf := make([]byte, 64)
+	for {
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	return actions, out
+}
+
+func TestEscapeProxy_KittyPrefixSnapshot(t *testing.T) {
+	// CSI 47;5u is Ctrl+/ under the kitty protocol; 's' still arrives as a
+	// plain byte because flag 7 does not report text keys as escape codes.
+	input := append([]byte("\x1b[47;5u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixWithPressEvent(t *testing.T) {
+	// Flag 7 includes "report event types", so the press carries :1.
+	input := append([]byte("\x1b[47;5:1u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyReleaseDoesNotDoubleFire(t *testing.T) {
+	// A real key press emits press (:1) then release (:3). The release must not
+	// be treated as the command key, and must not fire a second action.
+	input := append([]byte("\x1b[47;5:1u\x1b[47;5:3u"), 's')
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected exactly one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequences should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixSplitAcrossReads(t *testing.T) {
+	// The sequence can arrive in pieces; a partial prefix must not be lost.
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+	var actions []EscapeAction
+	done := make(chan struct{})
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	go func() {
+		defer close(done)
+		buf := make([]byte, 64)
+		for {
+			if _, err := r.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	for _, chunk := range []string{"\x1b[4", "7;5", "u", "s"} {
+		if _, err := pw.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	pw.Close()
+	<-done
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action across split reads, got %v", actions)
+	}
+}
+
+func TestEscapeProxy_NonPrefixCSIUPassesThrough(t *testing.T) {
+	// Other kitty-encoded keys must reach the child untouched. CSI 97;5u is
+	// Ctrl+A; CSI 47;6u is Ctrl+Shift+/ (a different chord).
+	for _, seq := range []string{"\x1b[97;5u", "\x1b[47;6u", "\x1b[47;5~", "\x1b[A"} {
+		actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(seq))))
+		if len(actions) != 0 {
+			t.Errorf("%q should not trigger an action, got %v", seq, actions)
+		}
+		if string(out) != seq {
+			t.Errorf("%q should pass through unchanged, got %q", seq, out)
+		}
+	}
+}
+
+func TestEscapeProxy_LegacyPrefixStillWorks(t *testing.T) {
+	// Agents that leave the protocol off keep sending the raw byte.
+	input := []byte{EscapePrefix, 's'}
+	actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+
+	if len(actions) != 1 || actions[0] != EscapeSnapshot {
+		t.Fatalf("expected one snapshot action, got %v", actions)
+	}
+	if len(out) != 0 {
+		t.Errorf("escape sequence should be consumed, leaked %q", out)
+	}
+}
+
+func TestEscapeProxy_KittyPartialAtEOFIsReleased(t *testing.T) {
+	// A truncated sequence must reach the child rather than vanish.
+	input := []byte("\x1b[47;5")
+	_, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+	if !bytes.Equal(out, input) {
+		t.Errorf("truncated sequence should pass through, got %q want %q", out, input)
+	}
+}
+
+func TestEscapeProxy_KittyPrefixThenStop(t *testing.T) {
+	// The stop action unwinds Read with an error, unlike snapshot.
+	r := NewEscapeProxy(bytes.NewReader(append([]byte("\x1b[47;5u"), 'k')))
+	buf := make([]byte, 32)
+	var got EscapeAction
+	for {
+		_, err := r.Read(buf)
+		if err == nil {
+			continue
+		}
+		if IsEscapeError(err) {
+			got = GetEscapeAction(err)
+		}
+		break
+	}
+	if got != EscapeStop {
+		t.Errorf("expected EscapeStop, got %v", got)
+	}
+}
+
+// Releasing the chord does not always report the '/' key with Ctrl still held.
+// Lifting Ctrl first reports different modifiers, and the modifier key itself
+// has its own release event. None of these are the command key, so none may
+// cancel the armed prefix.
+func TestEscapeProxy_KittyReleaseVariantsDoNotCancelPrefix(t *testing.T) {
+	for name, release := range map[string]string{
+		"ctrl lifted first":  "\x1b[47;1:3u",
+		"ctrl still held":    "\x1b[47;5:3u",
+		"left ctrl key up":   "\x1b[57442;1:3u",
+		"alternate key form": "\x1b[47:47;5:3u",
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := []byte("\x1b[47;5:1u" + release + "s")
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+			if len(actions) != 1 || actions[0] != EscapeSnapshot {
+				t.Fatalf("prefix did not survive the release: got actions %v", actions)
+			}
+			if len(out) != 0 {
+				t.Errorf("nothing should leak to the child, got %q", out)
+			}
+		})
+	}
+}
+
+func TestEscapeProxy_KittyPressWhileArmedIsNotSwallowed(t *testing.T) {
+	// A different key *press* after the prefix is not a command; the existing
+	// contract passes the prefix and the unrecognized bytes through.
+	input := []byte("\x1b[47;5u\x1b[A")
+	_, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+	if !bytes.Contains(out, []byte{EscapePrefix}) {
+		t.Errorf("unrecognized command should emit the literal prefix, got %q", out)
+	}
+	if !bytes.Contains(out, []byte("\x1b[A")) {
+		t.Errorf("the arrow key should reach the child, got %q", out)
+	}
+}
+
+// A realistic chord: the terminal reports a press, then autorepeat while the
+// keys are held, then releases. Only the press arms the prefix; nothing else
+// in that stream may cancel it.
+func TestEscapeProxy_KittyHeldChordKeepsPrefixArmed(t *testing.T) {
+	for name, stream := range map[string]string{
+		"tap":                 "\x1b[47;5:1u\x1b[47;5:3u",
+		"held with repeats":   "\x1b[47;5:1u\x1b[47;5:2u\x1b[47;5:2u\x1b[47;5:3u",
+		"repeat then ctrl up": "\x1b[47;5:1u\x1b[47;5:2u\x1b[47;1:3u\x1b[57442;1:3u",
+	} {
+		t.Run(name, func(t *testing.T) {
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(stream+"s"))))
+			if len(actions) != 1 || actions[0] != EscapeSnapshot {
+				t.Fatalf("prefix did not survive the chord: got actions %v", actions)
+			}
+			if len(out) != 0 {
+				t.Errorf("nothing should leak to the child, got %q", out)
+			}
+		})
+	}
+}
+
+// Bytes captured from Ghostty with the kitty protocol enabled (printf '\033[>7u').
+// Pinning the real encoding matters: the press carries NO event sub-parameter,
+// and a release can report different modifiers than the press did.
+//
+//	^[[47;5u    ctrl+/ press
+//	^[[47;5:3u  ctrl+/ release
+//	^[[99;5u    ctrl+c press      (99 = 'c')
+//	^[[99;1:3u  ctrl+c release, modifiers already lifted
+func TestEscapeProxy_GhosttyCapturedBytes(t *testing.T) {
+	t.Run("prefix then command survives the real chord", func(t *testing.T) {
+		input := []byte("\x1b[47;5u\x1b[47;5:3u" + "s")
+		actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader(input)))
+		if len(actions) != 1 || actions[0] != EscapeSnapshot {
+			t.Fatalf("expected snapshot from the captured chord, got %v", actions)
+		}
+		if len(out) != 0 {
+			t.Errorf("nothing should leak to the child, got %q", out)
+		}
+	})
+
+	t.Run("other ctrl chords reach the child untouched", func(t *testing.T) {
+		// Ctrl+C and Ctrl+D are CSI-u encoded too and must not be disturbed;
+		// the agent depends on receiving them.
+		for _, seq := range []string{
+			"\x1b[99;5u\x1b[99;5:3u",
+			"\x1b[100;5u\x1b[100;5:3u",
+			"\x1b[99;5u\x1b[99;1:3u",
+		} {
+			actions, out := drainActions(t, NewEscapeProxy(bytes.NewReader([]byte(seq))))
+			if len(actions) != 0 {
+				t.Errorf("%q should not trigger moat, got %v", seq, actions)
+			}
+			if string(out) != seq {
+				t.Errorf("%q should pass through unchanged, got %q", seq, out)
+			}
+		}
+	})
+}
+
+// Real terminals deliver the press and the release in separate reads. When the
+// buffer ends while the prefix is armed, Read takes a one-byte shortcut to get
+// the command key; that byte can be the ESC that begins the release sequence,
+// which must not be mistaken for a command.
+//
+// Captured from Ghostty: moat emitted "\x1f\x1b[47;5:3ud" — a literal prefix,
+// the leaked release, and the command key handed to the agent instead.
+func TestEscapeProxy_KittyReleaseInSeparateRead(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+
+	var out []byte
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 64)
+		for {
+			n, err := r.Read(buf)
+			out = append(out, buf[:n]...)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Each write lands as its own Read, as a terminal would deliver them.
+	for _, chunk := range []string{"\x1b[47;5u", "\x1b[47;5:3u", "d"} {
+		if _, err := pw.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	pw.Close()
+	<-done
+
+	if len(actions) != 1 || actions[0] != EscapeDumpTUI {
+		t.Fatalf("expected the dump action, got %v", actions)
+	}
+	if bytes.Contains(out, []byte{EscapePrefix}) {
+		t.Errorf("a literal prefix leaked to the child: %q", out)
+	}
+	if bytes.Contains(out, []byte("d")) {
+		t.Errorf("the command key leaked to the child: %q", out)
+	}
+}
+
+// A lone Esc is a complete keypress and a common one — "esc to interrupt" in
+// Codex, dismissing a prompt in Claude Code. It must not be held back waiting
+// to see whether a kitty sequence follows, or Esc appears dead until the user
+// presses another key.
+func TestEscapeProxy_BareEscIsNotDelayed(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewEscapeProxy(pr)
+
+	go func() {
+		pw.Write([]byte{0x1b})
+		time.Sleep(60 * time.Millisecond)
+		pw.Write([]byte("x"))
+		pw.Close()
+	}()
+
+	buf := make([]byte, 16)
+	start := time.Now()
+	n, err := r.Read(buf)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if n == 0 || buf[0] != 0x1b {
+		t.Fatalf("expected the Esc byte, got %q", buf[:n])
+	}
+	if elapsed > 40*time.Millisecond {
+		t.Errorf("Esc was withheld for %v awaiting a following key", elapsed.Round(time.Millisecond))
+	}
+}
+
+// stepEOFReader delivers each chunk in its own Read, then EOF.
+type stepEOFReader struct {
+	steps [][]byte
+	i     int
+}
+
+func (s *stepEOFReader) Read(p []byte) (int, error) {
+	if s.i >= len(s.steps) {
+		return 0, io.EOF
+	}
+	n := copy(p, s.steps[s.i])
+	s.i++
+	return n, nil
+}
+
+// An armed prefix and a held partial sequence can be outstanding at the same
+// time. At EOF both must reach the child; handling only the prefix silently
+// dropped the buffered bytes.
+func TestEscapeProxy_FlushesPrefixAndPartialAtEOF(t *testing.T) {
+	r := NewEscapeProxy(&stepEOFReader{steps: [][]byte{{EscapePrefix}, {0x1b}}})
+
+	var got []byte
+	buf := make([]byte, 16)
+	for {
+		n, err := r.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	if !bytes.Contains(got, []byte{EscapePrefix}) {
+		t.Errorf("the armed prefix should be flushed at EOF, got %q", got)
+	}
+	if !bytes.Contains(got, []byte{0x1b}) {
+		t.Errorf("the held partial should be flushed at EOF, got %q", got)
+	}
+}
+
+// chunkReader delivers each chunk in its own Read, as a terminal would.
+type chunkReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (c *chunkReader) Read(p []byte) (int, error) {
+	if c.i >= len(c.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, c.chunks[c.i])
+	c.i++
+	return n, nil
+}
+
+// A sequence can be split more than once. The one-byte fallback that fetches
+// the command key must not run while a partial sequence is still buffered, or
+// it judges a mid-sequence byte as the command, drops the buffered bytes, and
+// swallows the real command key.
+func TestEscapeProxy_KittyReleaseSplitThreeWays(t *testing.T) {
+	r := NewEscapeProxy(&chunkReader{chunks: [][]byte{
+		[]byte("\x1b[47;5u"), // press, arms the prefix
+		[]byte("\x1b"),       // release, split across three reads
+		[]byte("[47"),
+		[]byte(";5:3u"),
+		[]byte("d"), // the command key
+	}})
+
+	var actions []EscapeAction
+	r.OnAction(func(a EscapeAction) { actions = append(actions, a) })
+	var out []byte
+	buf := make([]byte, 64)
+	for {
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	if len(actions) != 1 || actions[0] != EscapeDumpTUI {
+		t.Fatalf("expected the dump action, got %v (leaked %q)", actions, out)
+	}
+	if len(out) != 0 {
+		t.Errorf("nothing should leak to the child, got %q", out)
 	}
 }

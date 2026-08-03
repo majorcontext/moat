@@ -94,6 +94,13 @@ type Writer struct {
 	// user's terminal stuck reporting mouse events.
 	hostMouseModes map[int]bool
 
+	// kittyPushDepth counts keyboard-protocol stack entries the child pushed
+	// (CSI > flags u) and has not popped (CSI < u). A child that is killed,
+	// crashes, or is stopped with ctrl+/ k never pops, which would leave the
+	// user's terminal reporting keys in a form the shell cannot parse long
+	// after moat exited. Cleanup drains the outstanding depth.
+	kittyPushDepth int
+
 	// cleanedUp is set once Cleanup() has torn down the status bar. Guards
 	// late repaints (e.g. a footer-count poll firing RefreshFooter after exit)
 	// from painting a stray status line over the reset screen.
@@ -363,10 +370,13 @@ const maxControlSeqBufLen = 256
 type controlSeqKind int
 
 const (
-	ctrlNone    controlSeqKind = iota
-	ctrlDECSTBM                // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
-	ctrlDECSTR                 // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
-	ctrlRIS                    // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
+	ctrlNone      controlSeqKind = iota
+	ctrlDECSTBM                  // CSI Pt;Pb r — set scroll region. Swallow and re-emit moat's region.
+	ctrlDECSTR                   // CSI ! p — soft terminal reset; clears DECSTBM as a side effect. Pass through, then re-emit.
+	ctrlRIS                      // ESC c — hard reset; clears screen and DECSTBM. Pass through, then re-establish layout.
+	ctrlED                       // CSI Ps J — erase in display; can wipe the footer row. Pass through, then repair the footer.
+	ctrlKittyPush                // CSI > flags u — push keyboard-protocol flags. Pass through, count so cleanup can undo.
+	ctrlKittyPop                 // CSI < [n] u — pop them. Pass through, uncount.
 )
 
 // controlSeqResult is the outcome of matchControlSeq.
@@ -430,6 +440,13 @@ func matchControlSeq(data []byte) controlSeqResult {
 		if paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
 			return controlSeqResult{needsMore: true} // could be DECSTR
 		}
+		// Could be a kitty push/pop: those lead with '>' or '<', which clears
+		// onlyDigitsAndSemi and so is not covered above. Container stdout can
+		// chunk at any byte, and missing a split push would leave moat unable
+		// to restore the terminal on cleanup.
+		if intLen == 0 && paramLen > 0 && (data[paramStart] == '>' || data[paramStart] == '<') {
+			return controlSeqResult{needsMore: true}
+		}
 		return controlSeqResult{}
 	}
 
@@ -448,12 +465,45 @@ func matchControlSeq(data []byte) controlSeqResult {
 	if final == 'p' && paramLen == 0 && intLen == 1 && firstIntermediate == '!' {
 		return controlSeqResult{kind: ctrlDECSTR, length: length}
 	}
+	// Kitty keyboard protocol: CSI > flags u pushes, CSI < [n] u pops. Both
+	// pass through untouched — the child and the terminal negotiate this
+	// between themselves — but moat counts them so a child that dies without
+	// popping does not strand the terminal. See kittyPushDepth.
+	if final == 'u' && intLen == 0 && paramLen > 0 {
+		switch data[paramStart] {
+		case '>':
+			return controlSeqResult{kind: ctrlKittyPush, length: length}
+		case '<':
+			return controlSeqResult{kind: ctrlKittyPop, length: length}
+		}
+	}
+	// ED: digit params (or none), no intermediates, final 'J'. The private
+	// form (CSI ? Ps J, selective erase) has a '?' in its parameters, so
+	// onlyDigitsAndSemi already excludes it.
+	//
+	// Only the variants that reach the footer row are intercepted: Ps=0 (or
+	// omitted, erase to end of display) and Ps=2 (erase all). Ps=1 erases from
+	// the start of the display to the cursor, which cannot pass the footer
+	// because the child's screen ends a row above it, and Ps=3 clears
+	// scrollback without touching the visible screen. Those flow through
+	// untouched rather than triggering a needless repaint.
+	if final == 'J' && intLen == 0 && onlyDigitsAndSemi {
+		switch string(data[paramStart : paramStart+paramLen]) {
+		case "", "0", "2":
+			return controlSeqResult{kind: ctrlED, length: length}
+		}
+		return controlSeqResult{}
+	}
 	return controlSeqResult{}
 }
 
 // handleControlSeqLocked applies the policy for a matched DECSTBM/DECSTR/RIS:
-//   - DECSTBM (any args from the child) is swallowed; moat's own scroll
-//     region command is emitted in its place.
+//   - DECSTBM is clamped, not discarded: the child's requested band is
+//     forwarded with its bottom margin held above the footer row. A bare
+//     reset (ESC[r), which asks for the whole page, becomes moat's own
+//     region — that is the case #349 fixed, where Ink's defensive reset let
+//     the footer scroll into scrollback. See clampScrollRegion for why the
+//     band must survive.
 //   - DECSTR passes through (other resets may be intended), and moat's
 //     DECSTBM is re-asserted right after so the footer slot stays reserved.
 //     The pair is wrapped in DECSC/DECRC so the cursor — which DECSTR
@@ -461,6 +511,10 @@ func matchControlSeq(data []byte) controlSeqResult {
 //   - RIS passes through (it clears the screen and homes the cursor), then
 //     moat re-establishes its scroll region and footer and returns the
 //     cursor to home so the child can resume drawing.
+//   - ED (CSI Ps J) passes through, then the footer is repaired inline with
+//     the cursor saved and restored. Erasing to the end of the display
+//     reaches the footer row, and waiting for the debounced redraw left the
+//     footer missing for as long as the child kept rendering.
 //
 // Caller passes raw bytes of the matched sequence so RIS/DECSTR can be
 // forwarded verbatim.
@@ -472,6 +526,9 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// new controlSeqKind can't silently slip through.
 		return nil
 	case ctrlDECSTBM:
+		if clamped := clampScrollRegion(raw, w.height-1); clamped != nil {
+			return w.outputLocked(clamped)
+		}
 		return w.outputLocked(w.scrollRegionBytes())
 	case ctrlDECSTR:
 		// Deviation: DECSTR resets the DECSC slot to home (1,1). Our
@@ -503,8 +560,118 @@ func (w *Writer) handleControlSeqLocked(res controlSeqResult, raw []byte) error 
 		// Return cursor to home so child resumes drawing where RIS left it.
 		buf.WriteString("\x1b[H")
 		return w.outputLocked(buf.Bytes())
+	case ctrlKittyPush:
+		w.kittyPushDepth++
+		return w.outputLocked(raw)
+	case ctrlKittyPop:
+		// "CSI < Pn u" pops Pn entries, defaulting to 1. Treating every pop as
+		// one entry leaves phantom depth behind, and cleanup would then pop
+		// levels the child never pushed — possibly ones the user's terminal or
+		// multiplexer set up before moat started.
+		w.kittyPushDepth -= kittyPopCount(raw)
+		if w.kittyPushDepth < 0 {
+			w.kittyPushDepth = 0
+		}
+		return w.outputLocked(raw)
+	case ctrlED:
+		// "Erase from the cursor to the end of the display" reaches past the
+		// child's content area into the footer row, so the footer is gone the
+		// moment the child repaints. The debounced redraw only fires after a
+		// quiet period, so during continuous rendering the footer stayed
+		// missing until the child settled.
+		//
+		// Repair it inline, as RIS does. The cursor is saved and restored
+		// because the child is mid-frame; children that wrap frames in
+		// synchronized output (DECSET 2026) have this applied atomically with
+		// the rest of the frame, so the row does not flicker.
+		var buf bytes.Buffer
+		buf.Write(raw)
+		buf.Write(w.footerRepaintBytes())
+		return w.outputLocked(buf.Bytes())
 	}
 	return nil
+}
+
+// clampScrollRegion rewrites a child's DECSTBM so its bottom margin cannot
+// reach the footer row, preserving the band the child asked for. It returns nil
+// when the child's request carries no usable band and moat's own region should
+// be emitted instead — a bare ESC[r, an explicit request for the whole page, or
+// a degenerate range.
+//
+// Discarding the band instead is what broke inline-rendering agents. Codex
+// draws without the alternate screen and uses scroll regions as a drawing
+// primitive: restrict to a band, reverse-index (ESC M) to open space inside it,
+// reset, redraw. Replacing "ESC[46;94r" with moat's full-content region turned
+// those reverse-indexes into full-screen scrolls, so the transcript shifted
+// wholesale on every update — a smeared prompt area, a cursor landing nowhere
+// sensible, and a footer scrolled through.
+//
+// Clamping keeps what #349 needed. moat still owns the bottom bound, so no
+// region the child can name will include the footer row; only the child's
+// choice of top margin and of a shallower bottom is honored.
+func clampScrollRegion(raw []byte, contentBottom int) []byte {
+	if contentBottom < 2 || len(raw) < 3 {
+		return nil
+	}
+	// raw is ESC [ <params> r
+	params := string(raw[2 : len(raw)-1])
+	if params == "" {
+		return nil // bare reset: the child is asking for the whole page
+	}
+
+	fields := strings.SplitN(params, ";", 2)
+	top := 1
+	if fields[0] != "" {
+		n, err := strconv.Atoi(fields[0])
+		if err != nil {
+			return nil
+		}
+		top = n
+	}
+	// An omitted bottom margin means the last line of the page, which for the
+	// child is the content area moat gave it.
+	bottom := contentBottom
+	if len(fields) == 2 && fields[1] != "" {
+		n, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil
+		}
+		bottom = n
+	}
+
+	if top < 1 {
+		top = 1
+	}
+	if bottom > contentBottom {
+		bottom = contentBottom
+	}
+	// DECSTBM requires at least two lines; a degenerate range would be ignored
+	// by the terminal, leaving whatever region was active. Fall back so moat's
+	// region is the one left in place.
+	if top >= bottom {
+		return nil
+	}
+	// A request for the entire content area is moat's own region; emitting it
+	// verbatim keeps the byte stream identical to the pre-clamping behavior.
+	return []byte(fmt.Sprintf("\x1b[%d;%dr", top, bottom))
+}
+
+// kittyPopCount returns how many keyboard-protocol stack entries a
+// "CSI < Pn u" sequence pops. Pn defaults to 1 when omitted or unparsable.
+func kittyPopCount(raw []byte) int {
+	if len(raw) < 4 {
+		return 1
+	}
+	// raw is ESC [ < <digits> u
+	digits := strings.TrimSuffix(string(raw[3:]), "u")
+	if digits == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }
 
 // mouseModeSet is the set of DEC private modes that control host-global mouse
@@ -1107,6 +1274,16 @@ func (w *Writer) Cleanup() error {
 		buf.Write(dis)
 	}
 
+	// Pop any keyboard-protocol flags the child pushed and never popped, for
+	// the same reason as the mouse modes above: a killed or crashed child
+	// leaves the terminal encoding keys in a form the user's shell cannot
+	// parse, so typing produces fragments like "s5;1:3u" after moat exits.
+	// Only the outstanding depth is popped, so a protocol the user's own
+	// terminal or multiplexer enabled outside moat is left alone.
+	for ; w.kittyPushDepth > 0; w.kittyPushDepth-- {
+		buf.WriteString("\x1b[<u")
+	}
+
 	// Reset scrolling region to full screen (DECSTBM with no params)
 	buf.WriteString("\x1b[r")
 
@@ -1248,11 +1425,22 @@ func (w *Writer) scheduleFooterRedrawLocked() {
 // direct cursor addressing to the footer line).
 // Caller must hold the mutex.
 func (w *Writer) redrawFooterLocked() {
+	w.out.Write(w.footerRepaintBytes()) //nolint:errcheck
+}
+
+// footerRepaintBytes returns the sequence that repaints the footer row and
+// leaves the cursor where it found it, for callers that must repair the footer
+// without disturbing a child mid-frame.
+//
+// The RIS path deliberately does not use this: it homes the cursor afterwards
+// rather than restoring it, because RIS itself homes the cursor and the child
+// resumes drawing from there.
+func (w *Writer) footerRepaintBytes() []byte {
 	var buf bytes.Buffer
 	buf.WriteString("\x1b7")                  // DECSC: save cursor + attrs
 	fmt.Fprintf(&buf, "\x1b[%d;1H", w.height) // Move to footer line
 	buf.WriteString("\x1b[2K")                // Clear the line
 	buf.WriteString(w.bar.Render())           // Draw footer
 	buf.WriteString("\x1b8")                  // DECRC: restore cursor + attrs
-	w.out.Write(buf.Bytes())                  //nolint:errcheck
+	return buf.Bytes()
 }

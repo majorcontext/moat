@@ -4,6 +4,8 @@ package term
 import (
 	"errors"
 	"io"
+	"strconv"
+	"strings"
 )
 
 // EscapeAction represents an action triggered by an escape sequence.
@@ -68,6 +70,211 @@ const (
 	escapeKeyResetTUI byte = 'r'
 )
 
+// Ctrl+/ under the kitty keyboard protocol.
+//
+// The legacy encoding of Ctrl+/ is the single byte 0x1f, which is
+// indistinguishable from Ctrl+_ . An agent that enables the kitty keyboard
+// protocol — Codex pushes "CSI > 7 u" at startup, Claude Code does not — asks
+// the terminal to disambiguate those chords, and the terminal then reports
+// Ctrl+/ as "CSI 47 ; 5 u" instead. Recognizing only the legacy byte means the
+// escape prefix silently stops working under such an agent, including the
+// ctrl+/ d dump that exists to debug it.
+//
+//	47 = '/' as a Unicode code point
+//	 5 = Ctrl (bitmask 4) encoded as bitmask+1
+const (
+	kittyPrefixKeyCode = 47
+	kittyPrefixMods    = 5
+
+	// Kitty event types, reported when the "report event types" flag is on
+	// (bit 2, which Codex's flag 7 includes). Absent means press.
+	kittyEventPress   = 1
+	kittyEventRepeat  = 2
+	kittyEventRelease = 3
+
+	// maxKittySeqLen bounds how many bytes may be held while waiting for a
+	// sequence to complete, so malformed input cannot stall the input stream.
+	maxKittySeqLen = 24
+)
+
+// kittyMatch is the outcome of matchKittyPrefix.
+type kittyMatch int
+
+const (
+	// kittyNone means data does not begin with the Ctrl+/ escape sequence.
+	kittyNone kittyMatch = iota
+	// kittyActivate means a press or repeat: treat it as the escape prefix.
+	kittyActivate
+	// kittyRelease means the key-up event for Ctrl+/. It must be swallowed
+	// rather than acted on, otherwise the release that inevitably follows a
+	// press would be read as the command key and eat the real one.
+	kittyRelease
+	// kittyPartial means data is a viable prefix and more bytes are needed.
+	kittyPartial
+)
+
+// matchKittyPrefix reports whether data begins with the kitty encoding of
+// Ctrl+/, returning the number of bytes the sequence occupies.
+//
+// Matching is deliberately narrow: only "CSI 47 ; 5 [:event] u" qualifies, so
+// every other kitty-encoded key (and every other CSI sequence) flows through to
+// the child untouched. Buffering for kittyPartial is likewise limited to input
+// that could still become this one sequence, so unrelated escape sequences are
+// never delayed.
+//
+// awaitingCommand widens matching while the escape prefix is armed: any key
+// release is swallowed, not just Ctrl+/'s own. Releasing the chord can report
+// the '/' key with different modifiers (lifting Ctrl first yields
+// "CSI 47;1:3u") or report the modifier key itself, and any of those reaching
+// the command-key branch would be read as an unrecognized command and cancel
+// the prefix — the prefix would appear to "not stick".
+func matchKittyPrefix(data []byte, awaitingCommand bool) (kittyMatch, int) {
+	if len(data) == 0 || data[0] != 0x1b {
+		return kittyNone, 0
+	}
+	if len(data) == 1 {
+		// A lone ESC is itself a complete, meaningful keypress, and a common
+		// one — "esc to interrupt" in Codex, dismissing a prompt in Claude
+		// Code. Holding it to see whether a sequence follows would delay every
+		// Esc until the user pressed another key. Only hold it while waiting
+		// for the command key, where it is most likely the chord's release
+		// arriving in its own read.
+		if awaitingCommand {
+			return kittyPartial, 0
+		}
+		return kittyNone, 0
+	}
+	if data[1] != '[' {
+		return kittyNone, 0
+	}
+	if len(data) > maxKittySeqLen {
+		data = data[:maxKittySeqLen]
+	}
+
+	// Scan the parameter bytes up to the final byte.
+	i := 2
+	for i < len(data) && ((data[i] >= '0' && data[i] <= '9') || data[i] == ';' || data[i] == ':') {
+		// Bail out as soon as the parameters cannot become "47;5". While the
+		// prefix is armed any key's release qualifies, so every parameter
+		// string stays viable.
+		if !awaitingCommand && !viableKittyParams(string(data[2:i+1])) {
+			return kittyNone, 0
+		}
+		i++
+	}
+	if i >= len(data) {
+		if len(data) >= maxKittySeqLen {
+			return kittyNone, 0
+		}
+		return kittyPartial, 0
+	}
+	if data[i] != 'u' {
+		return kittyNone, 0
+	}
+
+	key, mods, event, ok := parseKittyParams(string(data[2:i]))
+	if !ok {
+		return kittyNone, 0
+	}
+	// While the prefix is armed, swallow anything that is not a fresh key
+	// press: key-ups, and the autorepeat that holding the chord produces.
+	// Neither can be the command key, and treating a repeat as a second
+	// deliberate Ctrl+/ would cancel the prefix mid-chord.
+	if awaitingCommand && (event == kittyEventRelease || event == kittyEventRepeat) {
+		return kittyRelease, i + 1
+	}
+	if key != kittyPrefixKeyCode || mods != kittyPrefixMods {
+		return kittyNone, 0
+	}
+	if event == kittyEventRelease {
+		return kittyRelease, i + 1
+	}
+	return kittyActivate, i + 1
+}
+
+// viableKittyParams reports whether a partial parameter string could still
+// grow into the Ctrl+/ parameters ("47;5" with an optional event sub-param).
+func viableKittyParams(params string) bool {
+	fields := strings.Split(params, ";")
+	if len(fields) > 2 {
+		return false
+	}
+	// First field: the key code, optionally with alternate-key sub-params.
+	key := fields[0]
+	if idx := strings.IndexByte(key, ':'); idx >= 0 {
+		key = key[:idx]
+	}
+	want := "47"
+	if len(key) > len(want) {
+		return false
+	}
+	if key != want[:len(key)] {
+		return false
+	}
+	if len(fields) == 1 {
+		return true
+	}
+	// Second field: modifiers, optionally with an event sub-param.
+	mods := fields[1]
+	if idx := strings.IndexByte(mods, ':'); idx >= 0 {
+		// Event sub-param may be anything; modifiers must already be complete.
+		return mods[:idx] == "5"
+	}
+	return len(mods) == 0 || mods == "5"
+}
+
+// parseKittyParams extracts the key code, modifier field, and event type from
+// a kitty CSI-u parameter string such as "47;5:3". Sub-parameters beyond the
+// ones consulted (alternate key codes, text-as-codepoints) are ignored.
+func parseKittyParams(params string) (key, mods, event int, ok bool) {
+	fields := strings.Split(params, ";")
+	if len(fields) == 0 || len(fields) > 2 {
+		return 0, 0, 0, false
+	}
+
+	key, ok = atoiField(fields[0])
+	if !ok {
+		return 0, 0, 0, false
+	}
+
+	// A bare "CSI 47 u" carries no modifiers, so it is not Ctrl+/.
+	if len(fields) == 1 {
+		return key, 0, kittyEventPress, true
+	}
+
+	modField := fields[1]
+	event = kittyEventPress
+	if idx := strings.IndexByte(modField, ':'); idx >= 0 {
+		var evOK bool
+		event, evOK = atoiField(modField[idx+1:])
+		if !evOK {
+			return 0, 0, 0, false
+		}
+		modField = modField[:idx]
+	}
+	mods, ok = atoiField(modField)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return key, mods, event, true
+}
+
+// atoiField parses a single numeric parameter, taking only the portion before
+// any sub-parameter separator.
+func atoiField(s string) (int, bool) {
+	if idx := strings.IndexByte(s, ':'); idx >= 0 {
+		s = s[:idx]
+	}
+	if s == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // EscapeProxy wraps a reader and watches for escape sequences.
 //
 // Escape sequences are: Ctrl-/ followed by:
@@ -85,6 +292,10 @@ type EscapeProxy struct {
 
 	sawPrefix     bool         // true if we've seen Ctrl-/ and are waiting for next byte
 	pendingEscape *EscapeError // escape detected but output pending first
+
+	// partialSeq holds the start of a kitty Ctrl+/ sequence split across
+	// reads, so it can be completed by the bytes of the next one.
+	partialSeq []byte
 
 	// onPrefixChange is called when the escape prefix state changes.
 	// The callback receives true when Ctrl-/ is pressed (waiting for next key),
@@ -156,21 +367,78 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 	buf := make([]byte, len(p))
 	n, err := e.r.Read(buf)
 	if n == 0 {
-		// If we had a pending prefix and hit EOF, return the prefix as literal
-		if e.sawPrefix && err != nil {
-			e.setPrefixState(false)
-			p[0] = EscapePrefix
-			return 1, err
+		// At EOF, flush everything being held. Both an armed prefix and a
+		// partial sequence can be outstanding at once — the prefix arms, then
+		// an ESC is queued while waiting for the command key — so this must
+		// not return after handling only the first.
+		if err != nil && (e.sawPrefix || len(e.partialSeq) > 0) {
+			var held []byte
+			if e.sawPrefix {
+				e.setPrefixState(false)
+				held = append(held, EscapePrefix)
+			}
+			held = append(held, e.partialSeq...)
+			e.partialSeq = nil
+			copied := copy(p, held)
+			if copied < len(held) {
+				// Only reachable if a caller passes a buffer smaller than the
+				// prefix plus a partial sequence (a few dozen bytes at most).
+				// Production callers read through io.Copy's 32KB buffer. A
+				// caller that small would strand these bytes, because io.Copy
+				// stops on the non-nil error below without draining e.buf.
+				e.buf = append(e.buf, held[copied:]...)
+			}
+			return copied, err
 		}
 		return 0, err
 	}
+
+	// Prepend any partial kitty sequence held from the previous read.
+	data := buf[:n]
+	if len(e.partialSeq) > 0 {
+		data = append(e.partialSeq, data...)
+		e.partialSeq = nil
+	}
+	n = len(data)
 
 	// Process the bytes, looking for escape sequences
 	out := make([]byte, 0, n)
 	var pendingEscape *EscapeError
 
+scan:
 	for i := 0; i < n; i++ {
-		b := buf[i]
+		// Check for the kitty encoding of Ctrl+/ before anything else, so a
+		// release event is swallowed rather than mistaken for a command key.
+		if data[i] == 0x1b {
+			switch m, length := matchKittyPrefix(data[i:], e.sawPrefix); m {
+			case kittyNone:
+				// Not our sequence; fall through to normal byte handling.
+
+			case kittyPartial:
+				// Hold the tail until the rest of the sequence arrives.
+				e.partialSeq = append(e.partialSeq, data[i:]...)
+				break scan
+
+			case kittyRelease:
+				// Key-up for Ctrl+/: consume without changing state.
+				i += length - 1
+				continue
+
+			case kittyActivate:
+				i += length - 1
+				if e.sawPrefix {
+					// Ctrl+/ Ctrl+/ sends a literal Ctrl+/, matching the
+					// legacy double-prefix behavior.
+					e.setPrefixState(false)
+					out = append(out, EscapePrefix)
+				} else {
+					e.setPrefixState(true)
+				}
+				continue
+			}
+		}
+
+		b := data[i]
 
 		if e.sawPrefix {
 			e.setPrefixState(false)
@@ -179,7 +447,7 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 			switch b {
 			case escapeKeyStop:
 				if i+1 < n {
-					e.buf = append(e.buf, buf[i+1:n]...)
+					e.buf = append(e.buf, data[i+1:n]...)
 				}
 				if len(out) > 0 {
 					pendingEscape = &EscapeError{Action: EscapeStop}
@@ -250,17 +518,39 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 		return copied, nil
 	}
 
-	// If we ended with sawPrefix=true and no output, we need to read more
-	if e.sawPrefix && len(out) == 0 && err == nil {
+	// If we ended with sawPrefix=true and no output, we need to read more.
+	//
+	// A held partial sequence disqualifies this path: the single byte it reads
+	// would be judged as the command key while the buffered bytes are still
+	// mid-sequence, dropping them and swallowing the real command. The tail
+	// below re-enters Read so the main scanner resumes with partialSeq
+	// prepended, which is what handles a sequence split more than once.
+	if e.sawPrefix && len(out) == 0 && err == nil && len(e.partialSeq) == 0 {
 		// We consumed all input and ended on a prefix - need to read one more byte
 		// to determine the action.
 		oneByte := make([]byte, 1)
 		n2, err2 := e.r.Read(oneByte)
 		if n2 == 0 {
-			// EOF or error after prefix - treat prefix as literal
+			// EOF or error after prefix - treat prefix as literal, and flush
+			// any partial sequence held alongside it.
 			e.setPrefixState(false)
-			p[0] = EscapePrefix
-			return 1, err2
+			held := append([]byte{EscapePrefix}, e.partialSeq...)
+			e.partialSeq = nil
+			copied := copy(p, held)
+			if copied < len(held) {
+				e.buf = append(e.buf, held[copied:]...)
+			}
+			return copied, err2
+		}
+
+		// An ESC here may begin a multi-byte sequence rather than being a
+		// command key — most often the release of the very chord that just
+		// armed the prefix, which arrives in its own read. Hand it back to the
+		// main scanner, which can match the whole sequence, instead of judging
+		// it one byte at a time.
+		if oneByte[0] == 0x1b {
+			e.partialSeq = append(e.partialSeq, oneByte[0])
+			return e.Read(p)
 		}
 
 		// Process this byte as if it followed the prefix
@@ -306,6 +596,20 @@ func (e *EscapeProxy) Read(p []byte) (int, error) {
 	if e.sawPrefix && err != nil {
 		e.setPrefixState(false)
 		out = append(out, EscapePrefix)
+	}
+
+	// A held partial sequence that will never complete is not an escape prefix
+	// after all — release the bytes to the child rather than swallowing them.
+	if len(e.partialSeq) > 0 && err != nil {
+		out = append(out, e.partialSeq...)
+		e.partialSeq = nil
+	}
+
+	// Holding a partial with nothing else to return would mean (0, nil), which
+	// callers are entitled to treat as "nothing happened". Read again so the
+	// sequence can complete instead.
+	if len(out) == 0 && len(e.partialSeq) > 0 && err == nil {
+		return e.Read(p)
 	}
 
 	// Copy output to caller's buffer
