@@ -2140,6 +2140,13 @@ region = %s
 			cleanupAgentConfig(codexConfig)
 			return nil, fmt.Errorf("starting routing proxy: %w", proxyErr)
 		}
+		// Taking ownership means no routing proxy was running, so the shared
+		// route table may have gone stale while nothing was serving it. Rebuild
+		// it from the containers that are actually up before it starts
+		// answering hostname lookups again.
+		if m.proxyLifecycle.IsOwner() {
+			m.reconcileRoutes(ctx)
+		}
 	}
 
 	// Ensure run storage exists (may have been created early for service provisioning,
