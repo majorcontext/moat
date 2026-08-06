@@ -415,53 +415,6 @@ func setLogContext(r *Run) {
 	})
 }
 
-// setupPortBindings retrieves the host-side port mappings for a container's
-// exposed ports and registers them as routes with both the local route table
-// and the proxy daemon. Port binding lookup is retried because the container
-// runtime may not have mappings ready immediately after start.
-func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
-	if len(r.Ports) == 0 {
-		return
-	}
-
-	var bindings map[int]int
-	var err error
-	for i := 0; i < 5; i++ {
-		bindings, err = m.defaultRuntime().GetPortBindings(ctx, r.ContainerID)
-		if err != nil || len(bindings) >= len(r.Ports) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if err != nil {
-		ui.Warnf("Getting port bindings: %v", err)
-		return
-	}
-
-	r.HostPorts = make(map[string]int)
-	services := make(map[string]string)
-	for serviceName, containerPort := range r.Ports {
-		if hostPort, ok := bindings[containerPort]; ok {
-			r.HostPorts[serviceName] = hostPort
-			services[serviceName] = fmt.Sprintf("127.0.0.1:%d", hostPort)
-		}
-	}
-	if len(services) > 0 {
-		if err := m.routes.Add(r.Name, services); err != nil {
-			ui.Warnf("Registering routes: %v", err)
-		}
-		// Snapshot daemonClient under lock to avoid racing with Create()
-		m.mu.RLock()
-		dc := m.daemonClient
-		m.mu.RUnlock()
-		if dc != nil {
-			if err := dc.RegisterRoutes(ctx, r.Name, services); err != nil {
-				log.Debug("failed to register routes via daemon", "error", err)
-			}
-		}
-	}
-}
-
 // setupFirewall configures iptables-based network isolation inside the
 // container so that only traffic through the credential-injecting proxy is
 // allowed. Returns an error if firewall setup fails, since a strict network

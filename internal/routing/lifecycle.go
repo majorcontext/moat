@@ -132,6 +132,14 @@ func (lc *Lifecycle) Port() int {
 	return lc.port
 }
 
+// IsOwner reports whether this process started the routing proxy currently
+// serving the port, as opposed to attaching to one another process owns.
+// Callers use this to run work that must happen exactly once per proxy
+// lifetime, such as reconciling the route table against running containers.
+func (lc *Lifecycle) IsOwner() bool {
+	return lc.isOwner
+}
+
 // Routes returns the route table.
 func (lc *Lifecycle) Routes() *RouteTable {
 	return lc.routes
