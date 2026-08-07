@@ -1427,8 +1427,13 @@ region = %s
 	scopeAnthropicKeyToShell = scopeAnthropicKeyToShell && willStageClaude
 
 	// Build and render runtime context for agent instruction files.
+	//
+	// Rendered without a moat.yaml too when the Anthropic key is shell-scoped:
+	// `moat run --grant claude --grant anthropic` is a documented pattern that
+	// needs no config file, and the section explaining the scoping is what stops
+	// an agent from "fixing" the placeholder key by exporting it globally.
 	var renderedContext string
-	if opts.Config != nil {
+	if opts.Config != nil || scopeAnthropicKeyToShell {
 		buildOpts := runctx.BuildOptions{WorkspaceMode: opts.WorkspaceMode}
 		if dockerConfig != nil {
 			buildOpts.DockerMode = dockerConfig.Mode

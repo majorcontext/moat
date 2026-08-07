@@ -219,7 +219,9 @@ func Render(rc *RuntimeContext) string {
 	// Run Metadata.
 	b.WriteString("\n## Run Metadata\n\n")
 	fmt.Fprintf(&b, "- Run ID: %s\n", rc.RunID)
-	fmt.Fprintf(&b, "- Agent: %s\n", rc.Agent)
+	if rc.Agent != "" {
+		fmt.Fprintf(&b, "- Agent: %s\n", rc.Agent)
+	}
 
 	// Documentation — always-present index plus context-specific references.
 	b.WriteString("\n## Documentation\n\n")

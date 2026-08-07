@@ -39,7 +39,13 @@ type BuildOptions struct {
 
 // BuildFromConfig constructs a RuntimeContext from a moat config, run ID, and
 // resolved run options.
+// A nil cfg means the workspace has no moat.yaml. That is a valid run — grants
+// can come entirely from --grant flags — and resolved facts in opts may still
+// be worth rendering, so it is treated as an empty config rather than refused.
 func BuildFromConfig(cfg *config.Config, runID string, opts BuildOptions) *RuntimeContext {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
 	workspaceMode := opts.WorkspaceMode
 	if workspaceMode == "" {
 		workspaceMode = config.WorkspaceModeBind

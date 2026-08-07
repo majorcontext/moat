@@ -36,12 +36,34 @@ func TestRenderAnthropicShellEnv_guardUnsetsBashEnv(t *testing.T) {
 	}
 }
 
-func TestAnthropicShellEnvVars_pointsAtStagedFile(t *testing.T) {
+func TestAnthropicShellEnvVars_pointsAtCopiedFile(t *testing.T) {
 	vars := AnthropicShellEnvVars()
 
-	want := "BASH_ENV=" + ClaudeInitMountPath + "/" + AnthropicShellEnvFileName
+	want := "BASH_ENV=$HOME/.claude/" + AnthropicShellEnvFileName
 	if !slices.Contains(vars, want) {
 		t.Errorf("AnthropicShellEnvVars() = %v, want it to contain %q", vars, want)
+	}
+}
+
+// BASH_ENV must not point into the staging mount. That directory is a 0700 bind
+// of a host directory, and the shell that sources the file can run as a
+// different UID (volume-mode drops root->moatuser; Apple containers do not
+// remap bind-mount ownership). Bash treats an unreadable BASH_ENV as a silent
+// no-op, so this regression would not fail loudly — the key would just never
+// arrive. moat-init.sh copies the file out to $HOME/.claude instead.
+func TestAnthropicShellEnvVars_notInStagingMount(t *testing.T) {
+	for _, v := range AnthropicShellEnvVars() {
+		if strings.HasPrefix(v, "BASH_ENV=") && strings.Contains(v, ClaudeInitMountPath) {
+			t.Errorf("BASH_ENV points into the 0700 staging mount (%q); it must point at the copy moat-init.sh makes", v)
+		}
+	}
+}
+
+// The staged filename and the path moat-init.sh copies from must agree.
+func TestAnthropicShellEnvStagedPath_matchesStagedFileName(t *testing.T) {
+	want := ClaudeInitMountPath + "/" + AnthropicShellEnvFileName
+	if AnthropicShellEnvStagedPath != want {
+		t.Errorf("AnthropicShellEnvStagedPath = %q, want %q", AnthropicShellEnvStagedPath, want)
 	}
 }
 

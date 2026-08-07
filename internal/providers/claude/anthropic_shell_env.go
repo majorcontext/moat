@@ -9,8 +9,26 @@ import (
 // Claude init directory when the Anthropic API key is scoped to shell commands.
 const AnthropicShellEnvFileName = "anthropic-env.sh"
 
-// AnthropicShellEnvPath is the in-container path of the shell env file.
-var AnthropicShellEnvPath = path.Join(ClaudeInitMountPath, AnthropicShellEnvFileName)
+// AnthropicShellEnvPath is the in-container path of the shell env file, after
+// moat-init.sh copies it out of the staging mount.
+//
+// The staging mount itself is not usable here. It is a bind of a host directory
+// at mode 0700, and the shell that sources this file may run as a different UID
+// than the host user who owns it (volume-mode runs start as root and drop to
+// moatuser, and Apple containers do not remap bind-mount ownership). A
+// non-owner cannot traverse a 0700 directory, and bash treats an unreadable
+// BASH_ENV as a silent no-op — the key would simply never arrive. Every other
+// staged file avoids this by being copied out as root before the privilege
+// drop; this one does the same.
+//
+// $HOME is left unexpanded deliberately: bash expands BASH_ENV's value before
+// using it as a path, so this resolves to the runtime user's home whether
+// moat-init.sh targeted /home/moatuser or an alternate $HOME.
+var AnthropicShellEnvPath = path.Join("$HOME", ".claude", AnthropicShellEnvFileName)
+
+// AnthropicShellEnvStagedPath is the path of the file inside the staging mount,
+// where moat-init.sh reads it from.
+var AnthropicShellEnvStagedPath = path.Join(ClaudeInitMountPath, AnthropicShellEnvFileName)
 
 // RenderAnthropicShellEnv returns the contents of the BASH_ENV file that
 // exports the Anthropic API key to shell commands only.

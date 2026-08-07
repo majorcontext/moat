@@ -184,6 +184,13 @@ if [ -n "$MOAT_CLAUDE_INIT" ] && [ -d "$MOAT_CLAUDE_INIT" ]; then
   [ -f "$MOAT_CLAUDE_INIT/.claude.json" ] && \
     cp -p "$MOAT_CLAUDE_INIT/.claude.json" "$TARGET_HOME/"
 
+  # Copy the shell env file that scopes ANTHROPIC_API_KEY to shell commands.
+  # Unlike every other file here, this one is read at runtime (BASH_ENV) rather
+  # than only during init, so it must live outside the 0700 staging mount —
+  # the shell sourcing it may run as a different UID than the mount's owner.
+  [ -f "$MOAT_CLAUDE_INIT/anthropic-env.sh" ] && \
+    cp -p "$MOAT_CLAUDE_INIT/anthropic-env.sh" "$TARGET_HOME/.claude/"
+
   # Ensure moatuser owns all the files if we're running as root
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
     chown -R moatuser:moatuser "$TARGET_HOME/.claude" 2>/dev/null || true
