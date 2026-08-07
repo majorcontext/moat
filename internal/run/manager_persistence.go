@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/storage"
 )
@@ -93,8 +92,9 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 				}
 				defer func() { <-sem }()
 
-				// Look up the runtime for this run (lazy-init if needed).
-				rt, rtErr := m.runtimePool.Get(container.RuntimeType(info.meta.Runtime))
+				// Look up the runtime for this run (lazy-init if needed),
+				// pinned to the endpoint it was recorded against.
+				rt, rtErr := m.runtimeForEndpoint(ctx, info.meta.Runtime, info.meta.DockerHost)
 				if rtErr != nil {
 					log.Debug("runtime not available, preserving persisted state",
 						"id", info.runID, "runtime", info.meta.Runtime, "error", rtErr)
@@ -195,6 +195,8 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		Agent:             meta.Agent,
 		Image:             meta.Image,
 		Runtime:           meta.Runtime,
+		DockerHost:        meta.DockerHost,
+		Engine:            meta.Engine,
 		Ports:             meta.Ports,
 		State:             runState,
 		ContainerID:       meta.ContainerID,

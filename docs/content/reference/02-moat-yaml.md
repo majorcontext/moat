@@ -227,14 +227,14 @@ version: 1.0.0
 
 ### runtime
 
-Force a specific container runtime (Docker or Apple containers).
+Force a specific container runtime (Docker, Apple containers, or Podman).
 
 ```yaml
 runtime: docker  # Force Docker runtime
 ```
 
 - Type: `string`
-- Values: `docker` | `apple`
+- Values: `docker` | `apple` | `podman` (`podman` runs the Docker runtime against a Podman socket)
 - Default: Auto-detected (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise)
 - CLI override: `--runtime`
 

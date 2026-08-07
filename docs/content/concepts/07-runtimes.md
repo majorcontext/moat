@@ -1,13 +1,13 @@
 ---
 title: "Container runtimes"
 navTitle: "Runtimes"
-description: "Docker, Apple containers, and gVisor sandbox configuration."
-keywords: ["moat", "runtime", "docker", "apple containers", "gvisor", "sandbox"]
+description: "Docker, Podman, Apple containers, and gVisor sandbox configuration."
+keywords: ["moat", "runtime", "docker", "podman", "apple containers", "gvisor", "sandbox"]
 ---
 
 # Container runtimes
 
-Moat runs agents in isolated containers using either Docker or Apple containers. This page explains how runtime detection works, the security model for each runtime, and how to configure sandboxing.
+Moat runs agents in isolated containers using Docker (or a Docker-API-compatible engine such as Podman) or Apple containers. This page explains how runtime detection works, the security model for each runtime, and how to configure sandboxing.
 
 ## Runtime detection
 
@@ -17,9 +17,9 @@ Moat detects the available runtime automatically:
 2. If Apple containers are unavailable, it uses Docker
 3. On Linux and Windows, it uses Docker
 
-If the default Docker socket is unreachable and `DOCKER_HOST` is not set, Moat checks known alternative socket locations before returning an error.
+If the default Docker socket is unreachable and `DOCKER_HOST` is not set, Moat checks known alternative socket locations before returning an error: Podman machine sockets on macOS (`$TMPDIR/podman/*-api.sock`) and rootless/rootful Podman sockets on Linux (`$XDG_RUNTIME_DIR/podman/podman.sock`, `/run/podman/podman.sock`). **This fallback probe has no Windows candidates**, so a Podman endpoint on Windows is never auto-detected. Setting `DOCKER_HOST` to a Podman `npipe://` endpoint yourself (with `--runtime podman` / `MOAT_RUNTIME=podman` to also assert engine identity) isn't blocked by anything Windows-specific in Moat's own code, but this configuration hasn't been verified.
 
-The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing either `docker` or `apple`. If the requested runtime is unavailable, Moat returns an error.
+The `MOAT_RUNTIME` environment variable overrides automatic detection, forcing `docker`, `podman`, or `apple`. `podman` selects the same Docker-API runtime as `docker`, pointed at a Podman socket — there is no separate Podman runtime implementation. If the requested runtime is unavailable, Moat returns an error.
 
 ## Docker runtime
 
@@ -65,6 +65,16 @@ Since the proxy listens only on localhost, only processes on the host machine ca
 | Windows | No | Docker Desktop does not support gVisor |
 
 On macOS and Windows, Moat automatically uses standard mode. Apple containers (macOS 26+ with Apple Silicon) provide an alternative with native macOS isolation.
+
+### Podman
+
+Podman exposes a Docker-API-compatible socket (podman machine on macOS, the native daemonless socket on Linux), and Moat's Docker runtime talks to it unmodified — set `DOCKER_HOST` or let auto-detection find it, or force it with `--runtime podman` / `MOAT_RUNTIME=podman`. See [Installation](../getting-started/02-installation.md#podman-macos-linux) for setup and [Troubleshooting](../reference/08-troubleshooting.md) for the gVisor false-positive caveat on Linux.
+
+**Why `podman` is a runtime value when it isn't a separate runtime.** Auto-detection only probes alternative sockets when the default Docker socket is *unreachable*, so on a machine running Docker and Podman side by side it will always pick Docker. Selecting Podman there otherwise means locating the machine socket yourself and exporting `DOCKER_HOST`. The `podman` value does two things that neither auto-detection nor `DOCKER_HOST` can: it asserts engine identity — Moat verifies the endpoint really answers as Podman and fails if it doesn't, where a mis-set `DOCKER_HOST` would silently run on Docker — and it produces actionable errors (how to start a machine) when no Podman socket answers.
+
+On macOS with several machines running, Moat probes the one Podman itself targets, honoring `CONTAINER_CONNECTION` and otherwise the default connection from `podman-connections.json`.
+
+**Engine identity is recorded, not guessed.** At run creation, Moat asks the connected daemon which engine it actually is and stores the answer (`docker` or `podman`) alongside the endpoint the run's containers live on. `moat list` and `moat status` display each run's recorded identity as `docker (podman)` for a Podman-backed run; a run created before this existed has no recorded identity and shows as plain `docker`. `moat doctor` is different: it has no per-run display at all, and instead separately reports the identity of the engine behind whatever endpoint it can currently reach — a live probe, not a lookup of any run's recorded value. The recorded endpoint is also what lets lifecycle commands (`moat stop`, `moat logs`, ...) reconnect to the right engine when Docker and Podman are both present. Moat does not warn when `MOAT_RUNTIME=docker` happens to land on a Podman endpoint — checking eagerly would cost every startup with `DOCKER_HOST` set a blocking round trip for a warning most would never see. Forcing `MOAT_RUNTIME=podman` is the only case that hard-errors on engine identity, and its hard-error isn't limited to a confirmed non-Podman engine: it also fires when a preset `DOCKER_HOST` is unreachable, when the engine behind it can't be identified, when a Podman socket is found but unusable, or when no Podman socket is found at all — in short, whenever a usable Podman engine cannot be reached.
 
 ## Apple containers
 

@@ -31,7 +31,7 @@ func AddExecFlags(cmd *cobra.Command, flags *ExecFlags) {
 	cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "name for this run (default: from moat.yaml or random)")
 	cmd.Flags().BoolVar(&flags.Rebuild, "rebuild", false, "force rebuild of container image")
 	cmd.Flags().BoolVar(&flags.KeepContainer, "keep", false, "keep container after run completes (for debugging)")
-	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker)")
+	cmd.Flags().StringVar(&flags.Runtime, "runtime", "", "container runtime to use (apple, docker, podman)")
 	cmd.Flags().StringVar(&flags.WorkspaceMode, "workspace-mode", "", "workspace mode: 'bind' (default) or 'volume' (isolated copy in a named volume)")
 	cmd.Flags().BoolVar(&flags.NoSandbox, "no-sandbox", false, "disable gVisor sandbox (reduced isolation, Docker only)")
 	cmd.Flags().BoolVar(&flags.NoClipboard, "no-clipboard", false, "disable host clipboard bridging")

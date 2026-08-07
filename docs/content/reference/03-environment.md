@@ -46,10 +46,12 @@ Force a specific container runtime instead of auto-detection.
 
 ```bash
 export MOAT_RUNTIME=docker  # Force Docker runtime
+export MOAT_RUNTIME=podman  # Force Docker runtime over a Podman socket
 export MOAT_RUNTIME=apple   # Force Apple containers runtime
 ```
 
-- Default: Auto-detect (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise)
+- Default: Auto-detect (Apple containers on macOS 26+ with Apple Silicon, Docker otherwise -- including Docker-API-compatible sockets like Podman machine or Rancher Desktop)
+- `podman` is not a separate runtime implementation; it points the Docker runtime at a Podman socket
 - When the requested runtime is unavailable, Moat returns an error
 
 See [Runtimes](../concepts/07-runtimes.md) for details on runtime selection.

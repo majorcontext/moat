@@ -64,11 +64,60 @@ type Manager struct {
 	monitorWg sync.WaitGroup
 }
 
+// runtimeForEndpoint resolves the runtime for an existing run, shared by
+// runtimeForRun and loadPersistedRuns so the two can't drift on how DockerHost
+// is interpreted. A docker-type run with a recorded endpoint pins to it;
+// everything else (including legacy runs with none) uses the pool's default.
+func (m *Manager) runtimeForEndpoint(ctx context.Context, runtimeType, dockerHost string) (container.Runtime, error) {
+	if runtimeType == string(container.RuntimeDocker) && dockerHost != "" {
+		return m.runtimePool.GetDockerAt(ctx, dockerHost)
+	}
+	return m.runtimePool.Get(container.RuntimeType(runtimeType))
+}
+
 // runtimeForRun returns the correct container runtime for an existing run.
 // It uses the run's Runtime field to look up the matching runtime from the pool.
 // For legacy runs without a Runtime field, falls back to the default runtime.
 func (m *Manager) runtimeForRun(r *Run) (container.Runtime, error) {
-	return m.runtimePool.Get(container.RuntimeType(r.Runtime))
+	// TODO: no ctx parameter here, so GetDockerAt can't derive its ping
+	// timeout from a caller deadline.
+	return m.runtimeForEndpoint(context.Background(), r.Runtime, r.DockerHost)
+}
+
+// reachablePodmanEndpointOtherThan reports a live podman endpoint distinct
+// from the one Stop just queried, or "", false if none is reachable. A
+// package variable so tests can drive both branches of Stop's
+// ambiguous-not-found guard without a live podman engine.
+var reachablePodmanEndpointOtherThan = container.ReachablePodmanEndpointOtherThan
+
+// recordedDockerHost returns the endpoint to persist for a new docker-type
+// run: the runtime's resolved DaemonHost rather than the DOCKER_HOST env var,
+// since the pool may have selected a podman or Rancher Desktop socket by some
+// other route. Non-docker runtimes have no such endpoint and record "".
+func recordedDockerHost(rt container.Runtime) string {
+	dr, ok := rt.(*container.DockerRuntime)
+	if !ok {
+		return ""
+	}
+	return dr.DaemonHost()
+}
+
+// recordedEngine returns the engine identity to persist for a new docker-type
+// run: an authoritative "docker" or "podman" asked of the connected daemon at
+// creation time, rather than guessed later from the endpoint string. Non-docker
+// runtimes have no such identity and record "". Callers must not fail run
+// creation when this returns "" — see the call site in Create().
+func recordedEngine(ctx context.Context, rt container.Runtime) string {
+	dr, ok := rt.(*container.DockerRuntime)
+	if !ok {
+		return ""
+	}
+	engine, err := dr.EngineName(ctx)
+	if err != nil {
+		log.Debug("engine identification failed, recording no engine", "error", err)
+		return ""
+	}
+	return engine
 }
 
 // defaultRuntime returns the default runtime for new run creation.

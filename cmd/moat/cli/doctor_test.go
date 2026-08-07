@@ -113,6 +113,82 @@ func TestGetTokenPrefix(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeEntry(t *testing.T) {
+	tests := []struct {
+		name     string
+		marker   string
+		identity engineIdentity
+		expected string
+	}{
+		{"confirmed docker, not default", "", engineDocker, "docker"},
+		{"confirmed docker, default", " (default)", engineDocker, "docker (default)"},
+		{"confirmed podman, not default", "", enginePodman, "docker (podman)"},
+		{"confirmed podman, default", " (default)", enginePodman, "docker (podman) (default)"},
+		{"unknown identity, not default", "", engineUnknown, "docker"},
+		{"unknown identity, default", " (default)", engineUnknown, "docker (default)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dockerRuntimeEntry(tt.marker, tt.identity)
+			if result != tt.expected {
+				t.Errorf("dockerRuntimeEntry(%q, %v) = %q, want %q", tt.marker, tt.identity, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGvisorLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity engineIdentity
+		reported bool
+		want     string
+	}{
+		{"confirmed docker, gVisor reported", engineDocker, true, "✓ available"},
+		{"confirmed docker, gVisor not reported", engineDocker, false, "— not available"},
+		{"confirmed podman, gVisor reported (untrustworthy)", enginePodman, true, "⚠ reported by engine — unverified (podman lists configured OCI runtimes even when not installed)"},
+		{"confirmed podman, gVisor not even listed", enginePodman, false, "— not available"},
+		{"unknown identity, gVisor reported", engineUnknown, true, "⚠ reported — engine identity unverified (daemon did not respond to ping)"},
+		{"unknown identity, gVisor not reported", engineUnknown, false, "— not available"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := gvisorLine(tt.identity, tt.reported)
+			if result != tt.want {
+				t.Errorf("gvisorLine(%v, %v) = %q, want %q", tt.identity, tt.reported, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestPodmanSocketLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity engineIdentity
+		sockets  []string
+		want     string
+	}{
+		{"confirmed docker, socket present", engineDocker, []string{"/tmp/podman.sock"}, "socket found at /tmp/podman.sock — use --runtime podman"},
+		{"confirmed docker, no socket", engineDocker, nil, ""},
+		{"unknown identity, socket present", engineUnknown, []string{"/tmp/podman.sock"}, "socket found at /tmp/podman.sock — use --runtime podman"},
+		{"unknown identity, no socket", engineUnknown, nil, ""},
+		{"confirmed podman, socket present (suppressed — Available already says podman)", enginePodman, []string{"/tmp/podman.sock"}, ""},
+		{"confirmed podman, no socket", enginePodman, nil, ""},
+		{"confirmed docker, multiple sockets", engineDocker, []string{"/tmp/a.sock", "/tmp/b.sock"}, "socket found at /tmp/a.sock, /tmp/b.sock — use --runtime podman"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := podmanSocketLine(tt.identity, tt.sockets)
+			if result != tt.want {
+				t.Errorf("podmanSocketLine(%v, %v) = %q, want %q", tt.identity, tt.sockets, result, tt.want)
+			}
+		})
+	}
+}
+
 func TestPrintClaims(t *testing.T) {
 	claims := map[string]interface{}{
 		"exp":   float64(1735689600), // Fixed timestamp

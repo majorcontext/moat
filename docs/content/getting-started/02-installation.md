@@ -1,14 +1,14 @@
 ---
 title: "Installation"
-description: "Install Moat on macOS or Linux with Docker or Apple containers."
-keywords: ["moat", "installation", "docker", "apple containers", "setup", "homebrew"]
+description: "Install Moat on macOS or Linux with Docker, Podman, or Apple containers."
+keywords: ["moat", "installation", "docker", "podman", "apple containers", "setup", "homebrew"]
 ---
 
 # Installation
 
 ## Requirements
 
-- **Container runtime** -- Docker or Apple containers (macOS 26+ with Apple Silicon)
+- **Container runtime** -- Docker, Podman, or Apple containers (macOS 26+ with Apple Silicon)
 
 ## Install Moat
 
@@ -139,6 +139,91 @@ $ moat status
 Runtime: docker
 ...
 ```
+
+### Podman (macOS, Linux)
+
+Moat's Docker runtime works unmodified against Podman's Docker-API-compatible socket -- there is no separate Podman runtime, just a different socket.
+
+**macOS (Homebrew):**
+
+```bash
+brew install podman
+podman machine init
+podman machine start
+```
+
+Some Podman 6.x builds default to the `libkrun` machine provider on macOS (observed with podman 6.0.0; Homebrew's 6.0.1 came up with `applehv` directly). If `podman machine start` fails with `exec: "krunkit" not found`, the machine was created with the `libkrun` provider, which needs a separate `krunkit` binary. Recreate it with the `applehv` provider, which uses the `vfkit` binary bundled with the Homebrew formula:
+
+```bash
+podman machine rm -f <name>
+CONTAINERS_MACHINE_PROVIDER=applehv podman machine init
+podman machine start
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt-get update
+sudo apt-get install podman
+systemctl --user enable --now podman.socket
+```
+
+This starts the rootless Podman socket at `$XDG_RUNTIME_DIR/podman/podman.sock`. For a rootful socket, use `sudo systemctl enable --now podman.socket` instead (`/run/podman/podman.sock`).
+
+**Using it with Moat:**
+
+Runtime selection follows this precedence:
+
+1. **macOS 26+ on Apple Silicon:** Moat prefers Apple's `container` tool if it's available, before probing Docker or Podman at all. If Apple containers are running, auto-detection picks them -- it doesn't reach Podman. Use `--runtime podman` (or `MOAT_RUNTIME=podman`) to select Podman explicitly on these machines.
+2. **Everywhere else (or when Apple containers aren't available):** Moat tries the default Docker socket first, then falls back to known alternative sockets -- including Podman's, the same way it detects Rancher Desktop's -- when the default socket is unreachable and `DOCKER_HOST` is unset. On a host without Apple containers, this fallback is how auto-detection reaches Podman.
+
+   On macOS, the fallback probe matches the machine socket layout used by Podman 5.x and later (`$TMPDIR/podman/<machine>-api.sock`). Podman 4.x machines used a different socket location and aren't found by auto-detection -- set `DOCKER_HOST` directly (see below) to use one.
+
+To select Podman explicitly on any platform:
+
+```bash
+moat run --runtime podman ...
+# or
+export MOAT_RUNTIME=podman
+```
+
+You can also point `DOCKER_HOST` directly at the socket (useful for scripting, non-default machine names, or forcing Podman ahead of Apple containers):
+
+```bash
+export DOCKER_HOST=unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')
+```
+
+Verify:
+
+```bash
+$ moat run --runtime podman -- sh -c 'echo "$container"'
+podman
+```
+
+Podman sets the `container=podman` environment variable inside every container it runs, so this confirms the workload actually ran under Podman.
+
+**Caveats:**
+
+- **gVisor false positive (Linux):** Podman's compatibility API reports `runsc` (and other OCI runtimes) as available whenever they're listed in `containers.conf`, even if not installed. Moat's Linux default requires gVisor; if the check passes spuriously, container creation fails. Either install `runsc` as a Podman OCI runtime, or run with `--no-sandbox` (or `MOAT_NO_SANDBOX=1`), which accepts reduced isolation. macOS has sandboxing off by default, so this doesn't apply there.
+- **Custom base images** must default to the root user -- Moat's generated Dockerfile installs packages without a `USER root` escape. Rootless Podman's UID mapping (container root -> host user) doesn't change this requirement.
+- **Versions and platforms.**
+
+  | Platform | Podman version | Support |
+  |----------|-----------------|---------|
+  | Linux | below 4.7 | Not supported — on Linux Moat passes the `host-gateway` sentinel to `--add-host`, which Podman only accepts from 4.7.0 |
+  | Linux | 4.7+ | Full support, socket auto-detected (rootless and rootful) |
+  | macOS | 4.x | Expected to work, but the machine socket isn't auto-detected — set `DOCKER_HOST` yourself (see above). Not exercised |
+  | macOS | 5.x+ | Full support, machine socket auto-detected |
+  | macOS, arm64 | 6.0.0, 6.0.1 | The specific builds this support was developed and verified against; other versions meeting the floors above are expected to work but weren't exercised |
+
+  The `host-gateway` floor is Linux-only: Moat emits that sentinel just for a
+  Docker-API runtime on a Linux host. On macOS it reaches the host through
+  `MOAT_EXTRA_HOSTS` instead, so `host-gateway` support is irrelevant there and
+  the macOS floor is set by the machine socket layout alone.
+
+  On macOS with more than one machine running, auto-detection probes the machine Podman itself targets by reading `podman-connections.json` (a Podman 5+ file, at `$XDG_CONFIG_HOME/containers/` or `~/.config/containers/`). If that file is missing or unreadable, probing silently falls back to alphabetical machine-name order instead of matching the active connection -- harmless with a single machine, but worth knowing if you run several.
+
+  Windows is not covered by this table: Podman auto-detection has no Windows candidates at all today. See [Container runtimes](../concepts/07-runtimes.md#runtime-detection).
 
 ## GitHub authentication setup (optional)
 
