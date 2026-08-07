@@ -43,6 +43,14 @@ type PrepareOpts struct {
 	SubscriptionType string
 	RateLimitTier    string
 
+	// ScopeAnthropicKeyToShell stages a BASH_ENV file that exports
+	// ANTHROPIC_API_KEY to shell commands only, instead of placing it in the
+	// container environment. Set when a run holds both the "claude" (OAuth) and
+	// "anthropic" (API key) grants, where a container-wide key would take
+	// precedence over Claude Code's OAuth login and move the session onto API
+	// billing. Claude-specific; ignored by other agents.
+	ScopeAnthropicKeyToShell bool
+
 	// CodexRequireApproval keeps Codex's own approval prompts and sandbox
 	// enabled instead of moat's default of turning both off (the container is
 	// already the isolation boundary, and Codex's sandbox blocks the network
