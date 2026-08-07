@@ -101,6 +101,15 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 		}
 	}
 
+	// Stage the shell-scoped Anthropic API key file. Written here rather than
+	// exported into the container environment so Claude Code's own OAuth login
+	// is not overridden. See RenderAnthropicShellEnv for the full rationale.
+	if opts.ScopeAnthropicKeyToShell {
+		if err := os.WriteFile(filepath.Join(tmpDir, AnthropicShellEnvFileName), []byte(RenderAnthropicShellEnv()), 0o644); err != nil {
+			return nil, fmt.Errorf("writing anthropic shell env file: %w", err)
+		}
+	}
+
 	// Write runtime context file if provided
 	if opts.RuntimeContext != "" {
 		if err := os.WriteFile(filepath.Join(tmpDir, "CLAUDE.md"), []byte(opts.RuntimeContext), 0o644); err != nil {
@@ -121,6 +130,9 @@ func (p *OAuthProvider) PrepareContainer(ctx context.Context, opts provider.Prep
 	// PrepareContainer can be called with either OAuth or API key credentials.
 	env := containerEnvForCredential(opts.Credential)
 	env = append(env, "MOAT_CLAUDE_INIT="+ClaudeInitMountPath)
+	if opts.ScopeAnthropicKeyToShell {
+		env = append(env, AnthropicShellEnvVars()...)
+	}
 
 	success = true
 	return &provider.ContainerConfig{

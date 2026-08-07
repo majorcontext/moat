@@ -210,7 +210,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// Proxy environment and mount configuration
 	var proxyEnv []string
 	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
-	var hostAddr string      // Host address for proxy (may be rewritten for custom networks)
+
+	// When a run holds both the "claude" (OAuth) and "anthropic" (API key)
+	// grants, a container-wide ANTHROPIC_API_KEY takes precedence over Claude
+	// Code's OAuth login and silently moves the session onto API billing. In
+	// that case the key is staged into a BASH_ENV file by the Claude provider
+	// so only shell commands see it. anthropicShellEnv holds the anthropic
+	// provider's env vars until we know that staging actually ran; if it did
+	// not, they are appended to providerEnv as before so the key is not lost.
+	scopeAnthropicKeyToShell := hasGrant(opts.Grants, "claude") && hasGrant(opts.Grants, "anthropic")
+	var anthropicShellEnv []string
+	var hostAddr string // Host address for proxy (may be rewritten for custom networks)
 	var mounts []container.MountConfig
 	var tmpfsMounts []container.TmpfsMount
 
@@ -479,7 +489,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 				envVars := prov.ContainerEnv(provCred)
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
-				providerEnv = append(providerEnv, envVars...)
+				if scopeAnthropicKeyToShell && credName == credential.ProviderAnthropic {
+					anthropicShellEnv = append(anthropicShellEnv, envVars...)
+				} else {
+					providerEnv = append(providerEnv, envVars...)
+				}
 
 				// Capture Anthropic/Claude credential for base URL proxy setup
 				if credName == credential.ProviderClaude || credName == credential.ProviderAnthropic {
@@ -1398,12 +1412,29 @@ region = %s
 		proxyEnv = append(proxyEnv, "MOAT_INIT_FILES="+buf.String())
 	}
 
+	// Whether the Claude staging directory will be written. Computed here, ahead
+	// of both the runtime context and the staging block, so the CLAUDE.md we
+	// render and the files we actually stage agree — the context is rendered
+	// first and is passed into staging.
+	hasClaudePlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
+	isClaudeCodeRun := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
+	hasClaudeLocalMCP := opts.Config != nil && len(opts.Config.Claude.MCP) > 0
+	willStageClaude := !isPiRun && (needsClaudeInit || opts.Config != nil) &&
+		(needsClaudeInit || hasClaudePlugins || isClaudeCodeRun || hasClaudeLocalMCP)
+
+	// The Anthropic key is only shell-scoped when staging actually runs — that
+	// is what writes the BASH_ENV file.
+	scopeAnthropicKeyToShell = scopeAnthropicKeyToShell && willStageClaude
+
 	// Build and render runtime context for agent instruction files.
 	var renderedContext string
 	if opts.Config != nil {
 		buildOpts := runctx.BuildOptions{WorkspaceMode: opts.WorkspaceMode}
 		if dockerConfig != nil {
 			buildOpts.DockerMode = dockerConfig.Mode
+		}
+		if scopeAnthropicKeyToShell {
+			buildOpts.AnthropicKeyEnv = "ANTHROPIC_API_KEY"
 		}
 		rc := runctx.BuildFromConfig(opts.Config, r.ID, buildOpts)
 		renderedContext = runctx.Render(rc)
@@ -1412,34 +1443,37 @@ region = %s
 	// Set up Claude staging directory for init script using the provider interface.
 	// This includes OAuth credentials, host files, and MCP server configuration.
 	var claudeConfig *provider.ContainerConfig
-	if !isPiRun && (needsClaudeInit || (opts.Config != nil)) {
-		// claudeSettings was loaded earlier for plugin detection
-		hasPlugins := claudeSettings != nil && claudeSettings.HasPluginsOrMarketplaces()
-		isClaudeCode := opts.Config != nil && opts.Config.ShouldSyncClaudeLogs()
-
-		hasClaudeLocalMCP := opts.Config != nil && len(opts.Config.Claude.MCP) > 0
-		// We need PrepareContainer if:
-		// - needsClaudeInit (OAuth credentials to set up)
-		// - hasPlugins (plugin settings to configure)
-		// - isClaudeCode (need to copy onboarding state from host)
-		// - hasClaudeLocalMCP (local MCP servers to configure)
-		if needsClaudeInit || hasPlugins || isClaudeCode || hasClaudeLocalMCP {
-			claudeProvider := provider.GetAgent("claude")
-			if claudeProvider == nil {
-				cleanupDaemonRun()
-				return nil, fmt.Errorf("claude provider not registered")
-			}
-
-			cfg, stageErr := m.setupClaudeStaging(ctx, claudeProvider, opts, r, needsClaudeInit, hasPlugins, hasClaudeCode, claudeSettings, containerHome, renderedContext, openCredStore)
-			if stageErr != nil {
-				cleanupDaemonRun()
-				cleanupSSH(sshServer)
-				return nil, stageErr
-			}
-			claudeConfig = cfg
-			mounts = append(mounts, claudeConfig.Mounts...)
-			proxyEnv = append(proxyEnv, claudeConfig.Env...)
+	// PrepareContainer is needed when there are OAuth credentials to set up
+	// (needsClaudeInit), plugin settings to configure, onboarding state to copy
+	// from the host, or local MCP servers to configure. See willStageClaude.
+	if willStageClaude {
+		claudeProvider := provider.GetAgent("claude")
+		if claudeProvider == nil {
+			cleanupDaemonRun()
+			return nil, fmt.Errorf("claude provider not registered")
 		}
+
+		cfg, stageErr := m.setupClaudeStaging(ctx, claudeProvider, opts, r, needsClaudeInit, hasClaudePlugins, hasClaudeCode, scopeAnthropicKeyToShell, claudeSettings, containerHome, renderedContext, openCredStore)
+		if stageErr != nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			return nil, stageErr
+		}
+		claudeConfig = cfg
+		mounts = append(mounts, claudeConfig.Mounts...)
+		proxyEnv = append(proxyEnv, claudeConfig.Env...)
+		// Staging ran, so the API key is available via BASH_ENV and the
+		// held-back container-wide vars stay held back.
+		anthropicShellEnv = nil
+	}
+
+	// Claude staging did not run (e.g. a pi run), so no BASH_ENV file was
+	// staged. Fall back to exporting the anthropic key container-wide rather
+	// than dropping it — without Claude Code in play there is nothing to
+	// override.
+	if len(anthropicShellEnv) > 0 {
+		log.Debug("claude staging skipped; exporting anthropic key container-wide", "vars", anthropicShellEnv)
+		proxyEnv = append(proxyEnv, anthropicShellEnv...)
 	}
 
 	// Set up Codex staging directory for init script using the provider interface.
