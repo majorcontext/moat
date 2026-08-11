@@ -106,6 +106,12 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	if !initSet["gemini"] && hasDep(depList, "gemini-cli") {
 		initSet["gemini"] = true
 	}
+	// Codex staging writes a placeholder API key and the proxy injects the real
+	// credential at request time (see providers/codex.PopulateStagingDir), so
+	// staging does not need a credential — same as the other agents.
+	if !initSet[providerCodex] && hasDep(depList, "codex-cli") {
+		initSet[providerCodex] = true
+	}
 	// Pi has no credential of its own, so it is never triggered by a grant.
 	// Its staging (runtime context) runs whenever the pi-cli dependency is present.
 	if !initSet["pi"] && hasDep(depList, "pi-cli") {
