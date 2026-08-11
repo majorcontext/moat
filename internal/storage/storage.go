@@ -17,19 +17,27 @@ import (
 
 // Metadata holds information about an agent run.
 type Metadata struct {
-	Name        string         `json:"name"`
-	Workspace   string         `json:"workspace"`
-	Grants      []string       `json:"grants,omitempty"`
-	Agent       string         `json:"agent,omitempty"` // Agent type from config (e.g., "claude-code")
-	Image       string         `json:"image,omitempty"` // Container image used
-	Ports       map[string]int `json:"ports,omitempty"`
-	ContainerID string         `json:"container_id,omitempty"`
-	State       string         `json:"state,omitempty"`
-	Interactive bool           `json:"interactive,omitempty"`
-	CreatedAt   time.Time      `json:"created_at,omitempty"`
-	StartedAt   time.Time      `json:"started_at,omitempty"`
-	StoppedAt   time.Time      `json:"stopped_at,omitempty"`
-	Error       string         `json:"error,omitempty"`
+	Name      string   `json:"name"`
+	Workspace string   `json:"workspace"`
+	Grants    []string `json:"grants,omitempty"`
+	Agent     string   `json:"agent,omitempty"` // Agent type from config (e.g., "claude-code")
+
+	// JoinableAgents lists the agents moat provisioned into the container —
+	// staged config plus an installed CLI. `moat join` tests membership here.
+	//
+	// Deliberately NOT omitempty: an empty slice (no joinable agents) must stay
+	// distinguishable from an absent field (a run created before this existed,
+	// which falls back to the legacy agent-string check).
+	JoinableAgents []string       `json:"joinable_agents"`
+	Image          string         `json:"image,omitempty"` // Container image used
+	Ports          map[string]int `json:"ports,omitempty"`
+	ContainerID    string         `json:"container_id,omitempty"`
+	State          string         `json:"state,omitempty"`
+	Interactive    bool           `json:"interactive,omitempty"`
+	CreatedAt      time.Time      `json:"created_at,omitempty"`
+	StartedAt      time.Time      `json:"started_at,omitempty"`
+	StoppedAt      time.Time      `json:"stopped_at,omitempty"`
+	Error          string         `json:"error,omitempty"`
 
 	// ProviderMeta holds provider-specific metadata captured during the run lifecycle.
 	// For example, the Claude provider stores {"claude_session_id": "<uuid>"}.

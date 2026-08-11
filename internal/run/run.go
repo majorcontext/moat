@@ -52,6 +52,7 @@ type Run struct {
 	WorktreeRepoID    string
 	Grants            []string
 	Agent             string            // Agent type from config (e.g., "claude-code", "codex")
+	JoinableAgents    []string          // Agents provisioned into the container; nil = pre-upgrade run
 	Image             string            // Container image used for this run
 	Runtime           string            // Container runtime type ("docker" or "apple")
 	ProviderMeta      map[string]string // Provider-specific metadata (e.g., claude_session_id)
@@ -196,6 +197,7 @@ func (r *Run) SaveMetadata() error {
 		Workspace:           r.Workspace,
 		Grants:              r.Grants,
 		Agent:               r.Agent,
+		JoinableAgents:      r.JoinableAgents,
 		Image:               r.Image,
 		Ports:               r.Ports,
 		ContainerID:         r.ContainerID,
