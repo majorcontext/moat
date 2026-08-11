@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // TestAgentVerbForInit is a regression test for the moat-init special case in
@@ -34,6 +36,85 @@ func TestAgentVerbForInit(t *testing.T) {
 			cfg := &config.Config{Agent: tt.agent}
 			if got := agentVerbFor(tt.rcName, cfg); got != tt.want {
 				t.Errorf("agentVerbFor(%q, cfg.Agent=%q) = %q, want %q", tt.rcName, tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveProviderAgentFieldWarnsAcrossConfigureAgentHooks is a regression
+// test for the copilot/pi warning gap: their ConfigureAgent hooks
+// unconditionally overwrite cfg.Agent with their own name (exactly like
+// init's does), which erases the moat.yaml value before ResolveAgentField's
+// conflict check ever sees it — so a conflicting `agent:` silently produced
+// no warning for those two commands, unlike claude/codex/gemini whose
+// ConfigureAgent hooks don't touch cfg.Agent at all. resolveProviderAgentField
+// restores the pre-ConfigureAgent snapshot before resolving, so the conflict
+// check is uniform across all six provider commands.
+func TestResolveProviderAgentFieldWarnsAcrossConfigureAgentHooks(t *testing.T) {
+	tests := []struct {
+		name               string
+		rcName             string
+		preConfigureAgent  string // cfg.Agent before the simulated ConfigureAgent stomp (i.e. what moat.yaml said)
+		postConfigureAgent string // cfg.Agent after the simulated ConfigureAgent stomp (its own provider name)
+		wantAgent          string
+		wantWarn           bool
+	}{
+		{
+			name:               "copilot with a conflicting agent: warns",
+			rcName:             "copilot",
+			preConfigureAgent:  "claude",
+			postConfigureAgent: "copilot",
+			wantAgent:          "copilot",
+			wantWarn:           true,
+		},
+		// Companion: no conflicting field, stays silent.
+		{
+			name:               "copilot with no conflicting agent: stays silent",
+			rcName:             "copilot",
+			preConfigureAgent:  "",
+			postConfigureAgent: "copilot",
+			wantAgent:          "copilot",
+			wantWarn:           false,
+		},
+		{
+			name:               "pi with a conflicting agent: warns",
+			rcName:             "pi",
+			preConfigureAgent:  "codex",
+			postConfigureAgent: "pi",
+			wantAgent:          "pi",
+			wantWarn:           true,
+		},
+		// Companion: no conflicting field, stays silent.
+		{
+			name:               "pi with no conflicting agent: stays silent",
+			rcName:             "pi",
+			preConfigureAgent:  "pi",
+			postConfigureAgent: "pi",
+			wantAgent:          "pi",
+			wantWarn:           false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			orig := ui.Writer()
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(orig) })
+
+			// Simulate what RunProvider does: snapshot cfg.Agent, then run a
+			// ConfigureAgent hook that unconditionally stomps it (as copilot,
+			// pi, and init all do).
+			cfg := &config.Config{Agent: tt.preConfigureAgent}
+			preConfigureAgent := cfg.Agent
+			cfg.Agent = tt.postConfigureAgent
+
+			resolveProviderAgentField(tt.rcName, cfg, preConfigureAgent)
+
+			if cfg.Agent != tt.wantAgent {
+				t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, tt.wantAgent)
+			}
+			if gotWarn := buf.Len() > 0; gotWarn != tt.wantWarn {
+				t.Errorf("warned = %v, want %v (output: %q)", gotWarn, tt.wantWarn, buf.String())
 			}
 		})
 	}

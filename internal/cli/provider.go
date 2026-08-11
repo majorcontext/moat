@@ -182,6 +182,12 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
 	}
 
+	// Snapshot cfg.Agent before provider-specific hooks run. Some ConfigureAgent
+	// hooks (copilot, pi, init) unconditionally overwrite cfg.Agent with their
+	// own name below, which would otherwise erase the moat.yaml value before
+	// the conflict check further down ever sees it.
+	agentBeforeConfigure := cfg.Agent
+
 	// Provider-specific config tweaks (e.g., enabling log sync)
 	if rc.ConfigureAgent != nil {
 		rc.ConfigureAgent(cfg)
@@ -215,7 +221,7 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	// The verb the user typed always names the agent. ValidateAgent runs inside
 	// so an unknown moat.yaml value warns once and is discarded.
-	ResolveAgentField(cfg, agentVerbFor(rc.Name, cfg))
+	resolveProviderAgentField(rc.Name, cfg, agentBeforeConfigure)
 
 	opts := ExecOptions{
 		Flags:       *rc.Flags,
@@ -246,6 +252,24 @@ func agentVerbFor(rcName string, cfg *config.Config) string {
 		return cfg.Agent
 	}
 	return rcName
+}
+
+// resolveProviderAgentField determines and applies the final cfg.Agent for a
+// provider run. preConfigureAgent is the cfg.Agent snapshot taken before
+// rc.ConfigureAgent ran: several hooks (copilot, pi, init) unconditionally
+// overwrite cfg.Agent with their own provider name, which — if left in
+// place — would make ResolveAgentField's conflict check compare the provider
+// name against itself and silently swallow the warning. Restoring the
+// snapshot first means the check always compares against what moat.yaml
+// actually said, uniformly across every provider command.
+//
+// agentVerbFor still needs the post-ConfigureAgent value for "init" (it reads
+// cfg.Agent to find the auto-detected agent), so the verb is computed before
+// the snapshot is restored.
+func resolveProviderAgentField(rcName string, cfg *config.Config, preConfigureAgent string) {
+	verb := agentVerbFor(rcName, cfg)
+	cfg.Agent = preConfigureAgent
+	ResolveAgentField(cfg, verb)
 }
 
 // containsGrant reports whether grants contains the named grant.
