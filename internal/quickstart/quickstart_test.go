@@ -1,6 +1,7 @@
 package quickstart
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -102,6 +103,45 @@ func TestBuildPrompt(t *testing.T) {
 	// Size should be reasonable (under 20KB).
 	if len(prompt) > 20*1024 {
 		t.Errorf("prompt is too large: %d bytes (max 20KB)", len(prompt))
+	}
+}
+
+func TestWalkStructDocTag(t *testing.T) {
+	type sample struct {
+		Tagged   string `yaml:"tagged" doc:"one of: a, b, c."`
+		Untagged string `yaml:"untagged"`
+	}
+
+	var b strings.Builder
+	walkStruct(reflect.TypeOf(sample{}), "", &b)
+	got := b.String()
+
+	// A doc-tagged field renders its guidance inline.
+	if !strings.Contains(got, "- `tagged` (string) — one of: a, b, c.") {
+		t.Errorf("tagged field missing doc text; got:\n%s", got)
+	}
+	// Companion: an untagged field still renders the bare declaration.
+	if !strings.Contains(got, "- `untagged` (string)\n") {
+		t.Errorf("untagged field should render bare; got:\n%s", got)
+	}
+	if strings.Contains(got, "- `untagged` (string) —") {
+		t.Errorf("untagged field must not gain a dash suffix; got:\n%s", got)
+	}
+}
+
+func TestSchemaReferenceDocumentsAgentFields(t *testing.T) {
+	ref := GenerateSchemaReference()
+	for _, want := range []string{"claude-code", "codex", "gemini"} {
+		if !strings.Contains(ref, want) {
+			t.Errorf("schema reference should list allowed agent value %q", want)
+		}
+	}
+}
+
+func TestPromptForbidsInventingAgentValues(t *testing.T) {
+	p := BuildPrompt(t.TempDir())
+	if !strings.Contains(p, "Do not invent") {
+		t.Error("prompt should instruct the model not to invent agent values")
 	}
 }
 

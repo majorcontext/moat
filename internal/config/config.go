@@ -32,7 +32,7 @@ var imageRefRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*(@sha256:[a-f
 // Config represents a moat.yaml manifest.
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
-	Agent        string            `yaml:"agent"`
+	Agent        string            `yaml:"agent" doc:"one of: claude, claude-code, codex, copilot, gemini, pi. Omit unless the project pins a specific agent."`
 	Version      string            `yaml:"version,omitempty"`
 	Dependencies []string          `yaml:"dependencies,omitempty"`
 	Grants       []string          `yaml:"grants,omitempty"`

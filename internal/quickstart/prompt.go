@@ -71,7 +71,8 @@ func BuildPrompt(workspace string) string {
 	b.WriteString("9. Keep the config minimal — only include what the project actually needs, but don't miss dependencies used by tests or build scripts.\n")
 	b.WriteString("10. Use pre_run hooks for dependency installation (npm install, pip install, etc.).\n")
 	b.WriteString("11. Use post_build_root hooks only for system packages not available as dependencies.\n")
-	b.WriteString("12. Output only valid YAML, nothing else. No markdown fences, no explanation.\n")
+	b.WriteString("12. Do not invent a value for `agent`. Omit it unless the project genuinely pins one agent; it accepts only the listed agent names, not a project name.\n")
+	b.WriteString("13. Output only valid YAML, nothing else. No markdown fences, no explanation.\n")
 
 	return b.String()
 }
