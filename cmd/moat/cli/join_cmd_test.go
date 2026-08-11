@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -9,24 +10,69 @@ import (
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/run"
 )
 
-// fakeJoinable implements provider.JoinableAgent for validation tests.
-type fakeJoinable struct{ identifies bool }
+// fakeJoinable implements provider.JoinableAgent for validation tests. It is
+// also reused by joinpick_test.go.
+type fakeJoinable struct{ names []string }
 
-func (f fakeJoinable) JoinCommand(provider.JoinOpts) ([]string, error) { return []string{"x"}, nil }
-func (f fakeJoinable) IdentifiesAs(string) bool                        { return f.identifies }
-
-func TestValidateJoinAgent_OK(t *testing.T) {
-	if err := validateJoinAgent(fakeJoinable{identifies: true}, "claude", "claude-code"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+func (f fakeJoinable) JoinCommand(provider.JoinOpts) ([]string, error) { return nil, nil }
+func (f fakeJoinable) IdentifiesAs(agent string) bool {
+	return slices.Contains(f.names, agent)
 }
 
-func TestValidateJoinAgent_WrongProvider(t *testing.T) {
-	err := validateJoinAgent(fakeJoinable{identifies: false}, "codex", "claude-code")
-	if err == nil || !strings.Contains(err.Error(), "no codex configuration") {
-		t.Fatalf("got %v, want a clear 'no codex configuration' error", err)
+func TestValidateJoinAgent(t *testing.T) {
+	claude := fakeJoinable{names: []string{"claude", "claude-code"}}
+
+	tests := []struct {
+		name    string
+		run     *run.Run
+		agent   string
+		wantErr bool
+		errHas  string
+	}{
+		{
+			name:  "member of the capability set is accepted",
+			run:   &run.Run{ID: "run_1", JoinableAgents: []string{"claude"}},
+			agent: "claude",
+		},
+		{
+			name:    "non-member is rejected even when the agent string matches",
+			run:     &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{"codex"}},
+			agent:   "claude",
+			wantErr: true,
+			errHas:  "codex",
+		},
+		{
+			name:    "empty set refuses",
+			run:     &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{}},
+			agent:   "claude",
+			wantErr: true,
+		},
+		{
+			name:  "nil set falls back and accepts a matching agent string",
+			run:   &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: nil},
+			agent: "claude",
+		},
+		{
+			name:    "nil set falls back and refuses a stale agent string",
+			run:     &run.Run{ID: "run_1", Agent: "vibrant-code", JoinableAgents: nil},
+			agent:   "claude",
+			wantErr: true,
+			errHas:  "Recreate the run",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateJoinAgent(claude, tt.agent, tt.run)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateJoinAgent() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.errHas != "" && !strings.Contains(err.Error(), tt.errHas) {
+				t.Errorf("error %q should mention %q", err, tt.errHas)
+			}
+		})
 	}
 }
 

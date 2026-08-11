@@ -49,17 +49,36 @@ func init() {
 	rootCmd.AddCommand(joinCmd)
 }
 
-// validateJoinAgent checks that the run (whose recorded agent field is runAgent)
-// was created by the requested provider. agentArg is the user-typed agent name,
-// used only for the error message.
-func validateJoinAgent(j provider.JoinableAgent, agentArg, runAgent string) error {
-	if !j.IdentifiesAs(runAgent) {
-		return fmt.Errorf("run has no %s configuration.\n"+
-			"v1 join only attaches an agent the run was started with (run agent: %q).\n"+
-			"To run %s here, start the run with %s configured.",
-			agentArg, runAgent, agentArg, agentArg)
+// validateJoinAgent reports whether agentArg may be launched into r.
+//
+// The authority is r.JoinableAgents — what moat actually provisioned. A nil set
+// means the run was created before capability tracking, so we fall back to the
+// legacy agent-string check; an EMPTY set is a real answer ("nothing joinable
+// here") and must not fall back. That distinction is why the metadata field is
+// persisted without omitempty.
+func validateJoinAgent(j provider.JoinableAgent, agentArg string, r *run.Run) error {
+	if r.JoinableAgents != nil {
+		for _, a := range r.JoinableAgents {
+			if a == agentArg || j.IdentifiesAs(a) {
+				return nil
+			}
+		}
+		hosted := "none"
+		if len(r.JoinableAgents) > 0 {
+			hosted = strings.Join(r.JoinableAgents, ", ")
+		}
+		return fmt.Errorf("run %s cannot host %s (provisioned agents: %s).\n"+
+			"Add %s to this project's moat.yaml `agents:` list and recreate the run.",
+			r.ID, agentArg, hosted, agentArg)
 	}
-	return nil
+
+	// Pre-upgrade run: no capability set was ever recorded.
+	if j.IdentifiesAs(r.Agent) {
+		return nil
+	}
+	return fmt.Errorf("run %s was created before capability tracking and records agent %q.\n"+
+		"Recreate the run to join it (moat stop %s && moat %s).",
+		r.ID, r.Agent, r.ID, agentArg)
 }
 
 // joinableAgentNames returns the sorted names of registered agents that support
@@ -110,7 +129,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent %q does not support join yet", agentArg)
 	}
-	if valErr := validateJoinAgent(joinable, agentArg, r.Agent); valErr != nil {
+	if valErr := validateJoinAgent(joinable, agentArg, r); valErr != nil {
 		return valErr
 	}
 
