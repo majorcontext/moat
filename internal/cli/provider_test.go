@@ -12,6 +12,33 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 )
 
+// TestAgentVerbForInit is a regression test for the moat-init special case in
+// ResolveAgentField's wiring: RunProvider's ConfigureAgent hook (called before
+// the agent-name block) sets cfg.Agent for "init" runs, so "init" itself is
+// not a usable verb — it must be swapped for the already-resolved cfg.Agent
+// rather than clobbering it.
+func TestAgentVerbForInit(t *testing.T) {
+	tests := []struct {
+		name   string
+		rcName string
+		agent  string
+		want   string
+	}{
+		{"init reuses the auto-detected agent instead of the literal name", "init", "claude", "claude"},
+		// Companion: every other provider's own name is a real agent verb and
+		// must pass through unchanged.
+		{"non-init providers use their own name as the verb", "claude", "codex", "claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Agent: tt.agent}
+			if got := agentVerbFor(tt.rcName, cfg); got != tt.want {
+				t.Errorf("agentVerbFor(%q, cfg.Agent=%q) = %q, want %q", tt.rcName, tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildGrants(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -98,3 +98,61 @@ func TestValidateAgent(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveAgentField(t *testing.T) {
+	tests := []struct {
+		name      string
+		agent     string
+		verb      string
+		wantAgent string
+		wantWarn  bool
+	}{
+		{"verb backfills an empty field", "", "claude", "claude", false},
+		{"verb overrides a conflicting value", "codex", "claude", "claude", true},
+		{"verb agrees with the field", "claude", "claude", "claude", false},
+		{"verb agrees via variant", "claude-code", "claude", "claude", false},
+		{"moat run keeps a valid field", "codex", "", "codex", false},
+		{"moat run clears an invalid field", "vibrant-code", "", "", true},
+	}
+	// The point of this fix is that the five HasPrefix call sites downstream
+	// (isAIAgent, agentImpliedDependencies, language_servers, copilot init, pi
+	// staging) receive a usable value. TestAgentFieldReachesDegradationSites
+	// below asserts that directly.
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			orig := ui.Writer()
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(orig) })
+
+			cfg := &config.Config{Agent: tt.agent}
+			cli.ResolveAgentField(cfg, tt.verb)
+
+			if cfg.Agent != tt.wantAgent {
+				t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, tt.wantAgent)
+			}
+			if gotWarn := buf.Len() > 0; gotWarn != tt.wantWarn {
+				t.Errorf("warned = %v, want %v (output: %q)", gotWarn, tt.wantWarn, buf.String())
+			}
+		})
+	}
+}
+
+func TestAgentFieldReachesDegradationSites(t *testing.T) {
+	// isAIAgent is the cheapest observable proxy for the five HasPrefix call
+	// sites in manager_create.go that a bogus agent: silently disabled.
+	cfg := &config.Config{Agent: "vibrant-code"}
+	cli.ResolveAgentField(cfg, "claude")
+	if !strings.HasPrefix(cfg.Agent, "claude") {
+		t.Errorf("agent %q must satisfy the HasPrefix checks that gate memory "+
+			"limits, implied deps, and language servers", cfg.Agent)
+	}
+
+	// Companion: moat run with no verb and no valid field leaves it empty, and
+	// those sites correctly stay off rather than matching something wrong.
+	bare := &config.Config{Agent: "vibrant-code"}
+	cli.ResolveAgentField(bare, "")
+	if bare.Agent != "" {
+		t.Errorf("cfg.Agent = %q, want empty so the HasPrefix sites stay off", bare.Agent)
+	}
+}

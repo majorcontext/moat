@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/ui"
@@ -166,6 +167,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
+
+	// moat run has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared.
+	intcli.ResolveAgentField(cfg, "")
 
 	opts := ExecOptions{
 		Flags:       runFlags,

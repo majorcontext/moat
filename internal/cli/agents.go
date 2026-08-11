@@ -75,3 +75,25 @@ func ValidateAgent(cfg *config.Config) {
 		cfg.Agent, strings.Join(KnownAgentNames(), ", "))
 	cfg.Agent = ""
 }
+
+// ResolveAgentField normalizes cfg.Agent. verb is the provider name the user
+// typed (e.g. "claude"), or "" for `moat run`, which has no verb.
+//
+// The verb always wins when there is one: if the user typed `moat claude`, the
+// run is claude regardless of what moat.yaml says. Before this, a moat.yaml
+// value silently overrode the command line, so `moat claude` could record a run
+// as codex.
+func ResolveAgentField(cfg *config.Config, verb string) {
+	if cfg == nil {
+		return
+	}
+	ValidateAgent(cfg)
+	if verb == "" {
+		return
+	}
+	if cfg.Agent != "" && CanonicalAgent(cfg.Agent) != CanonicalAgent(verb) {
+		ui.Warnf("moat.yaml `agent: %s` conflicts with `moat %s` — using %s.",
+			cfg.Agent, verb, verb)
+	}
+	cfg.Agent = verb
+}

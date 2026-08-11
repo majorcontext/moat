@@ -213,12 +213,9 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	ctx := context.Background()
 
-	// Ensure the agent name is set so the manager can apply agent-specific
-	// defaults (e.g., memory limits). When there's no moat.yaml, cfg.Agent
-	// is empty — fill it from the provider name (e.g., "claude", "codex").
-	if cfg.Agent == "" {
-		cfg.Agent = rc.Name
-	}
+	// The verb the user typed always names the agent. ValidateAgent runs inside
+	// so an unknown moat.yaml value warns once and is discarded.
+	ResolveAgentField(cfg, agentVerbFor(rc.Name, cfg))
 
 	opts := ExecOptions{
 		Flags:       *rc.Flags,
@@ -237,6 +234,18 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	_, err = ExecuteRun(ctx, opts)
 	return err
+}
+
+// agentVerbFor selects the verb passed to ResolveAgentField for a given
+// provider run. "init" is not an agent name — moat init's own ConfigureAgent
+// hook (which runs earlier, at line ~186) already sets cfg.Agent to the
+// auto-detected agent, so that value is reused as the verb instead of
+// overwriting it with the literal string "init".
+func agentVerbFor(rcName string, cfg *config.Config) string {
+	if rcName == "init" {
+		return cfg.Agent
+	}
+	return rcName
 }
 
 // containsGrant reports whether grants contains the named grant.
