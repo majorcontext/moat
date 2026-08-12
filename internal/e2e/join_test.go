@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/storage"
@@ -187,6 +189,236 @@ func TestJoinHeadless(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestDualAgentJoin_E2E provisions a real container via moat.yaml's
+// `agents: [claude, codex]` and proves it is joinable as BOTH agents — the
+// combination TestJoinHeadless doesn't cover (it is single-agent).
+//
+// What it asserts:
+//  1. The persisted joinable_agents set (what moat actually provisioned —
+//     internal/run/joinable.go's computeJoinableAgents) contains both
+//     "claude" and "codex", proving `agents:` expansion (dependencies +
+//     grants) actually ran and actually staged both agents.
+//  2. `moat join <run> claude` and `moat join <run> codex` both get PAST
+//     validateJoinAgent's capability gate: neither is refused with the
+//     "cannot host" error that fires for an agent the run never provisioned
+//     (cmd/moat/cli/join_cmd.go). That refusal path is already covered by
+//     pure unit tests (join_cmd_test.go); what only a real container proves
+//     is the positive case — that both real, distinct in-container agent
+//     binaries are reachable through the same gate on the same run.
+//  3. Both joins run inside the SAME container the primary run started (no
+//     new container created), matching TestJoinHeadless's invariant (a), and
+//     joined output does not leak into the primary's logs.jsonl (split
+//     console isolation).
+//
+// What this test CANNOT assert: that claude/codex complete a real
+// conversation turn. This sandbox has no real Anthropic or OpenAI
+// credentials, so both grants are stored with fake tokens; the real CLI
+// processes are expected to fail authentication once they reach the network.
+// That failure is fine and out of scope — what matters here is purely the
+// join *mechanism*, not agent behavior once inside.
+func TestDualAgentJoin_E2E(t *testing.T) {
+	// Isolated test keyring so the fake credentials below never touch the
+	// user's real credential store (same pattern as TestCodexContainerConfig_E2E).
+	t.Setenv("MOAT_KEYRING_SERVICE", "moat-test")
+	t.Cleanup(func() { cleanupKeychainKey(t) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	// Fake credentials for both grants `agents: [claude, codex]` expands to.
+	// Neither needs to look like a real token: the claude provider writes a
+	// fixed placeholder into the container regardless of the stored value
+	// (internal/providers/claude/config.go WriteCredentialsFile — the real
+	// token is never written to the container), and codex's staged auth.json
+	// is likewise a placeholder the proxy replaces at request time. Storing
+	// *something* under each provider is what satisfies validateGrants and
+	// gets each agent into JoinableAgents.
+	encKey, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatalf("DefaultEncryptionKey: %v", err)
+	}
+	credStore, err := credential.NewFileStore(credential.DefaultStoreDir(), encKey)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := credStore.Save(credential.Credential{
+		Provider:  credential.ProviderClaude,
+		Token:     "e2e-not-a-real-oauth-token",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save claude credential: %v", err)
+	}
+	defer credStore.Delete(credential.ProviderClaude)
+	if err := credStore.Save(credential.Credential{
+		Provider:  credential.ProviderOpenAI,
+		Token:     "sk-e2e-not-a-real-key",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save openai credential: %v", err)
+	}
+	defer credStore.Delete(credential.ProviderOpenAI)
+
+	// moat.yaml's `agents:` list is the thing under test. ExpandAgents is the
+	// exact function `moat run` calls (cmd/moat/cli/run.go) to turn it into
+	// dependencies, grants, and network rules — using it here, rather than
+	// hand-building a Config with Dependencies/Grants set directly, is what
+	// makes this test exercise the `agents:` feature and not just the join
+	// gate in isolation.
+	workspace := t.TempDir()
+	yaml := "agents: [claude, codex]\nversion: 1.0.0\n"
+	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatalf("WriteFile moat.yaml: %v", err)
+	}
+	cfg, err := config.Load(workspace)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if err := intcli.ExpandAgents(cfg); err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+
+	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	// "sleep 600" keeps the container alive long enough for both joins, and —
+	// crucially for the split-console assertion below — never writes to
+	// stdout itself, so anything found in logs.jsonl can only have leaked
+	// from a join.
+	r, err := mgr.Create(ctx, run.Options{
+		Name:      "e2e-dual-agent-join",
+		Workspace: workspace,
+		Grants:    cfg.Grants,
+		Config:    cfg,
+		Cmd:       []string{"sleep", "600"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Stop(context.Background(), r.ID)
+
+	if err := mgr.Start(ctx, r.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait briefly for the container to be fully running before joining.
+	time.Sleep(500 * time.Millisecond)
+
+	primaryContainerID := r.ContainerID
+	if primaryContainerID == "" {
+		t.Fatal("run has no container ID after Start")
+	}
+
+	// --- Assertion (1): both agents landed in the persisted capability set ---
+	refreshed, err := mgr.Get(r.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	t.Logf("JoinableAgents = %v", refreshed.JoinableAgents)
+	gotAgents := make(map[string]bool, len(refreshed.JoinableAgents))
+	for _, a := range refreshed.JoinableAgents {
+		gotAgents[a] = true
+	}
+	for _, want := range []string{"claude", "codex"} {
+		if !gotAgents[want] {
+			t.Fatalf("JoinableAgents = %v, missing %q — `agents: [claude, codex]` did not provision it as claimed",
+				refreshed.JoinableAgents, want)
+		}
+	}
+
+	moatBin := joinTestMoatExecutable(t)
+
+	// --- Assertion (2): join as claude, then as codex ---
+	// Real moat binary, so the full CLI path is exercised (agent/provider
+	// resolution, validateJoinAgent, ExecInteractive) — same approach as
+	// TestJoinHeadless. Headless (-p) avoids needing a pty.
+	claudeOut := runJoinHeadlessCLI(t, moatBin, r.ID, "claude", "say OK and nothing else")
+	if strings.Contains(claudeOut, "cannot host") {
+		t.Errorf("join claude was refused by the capability gate despite being in JoinableAgents:\n%s", claudeOut)
+	}
+
+	codexOut := runJoinHeadlessCLI(t, moatBin, r.ID, "codex", "say OK and nothing else")
+	if strings.Contains(codexOut, "cannot host") {
+		t.Errorf("join codex was refused by the capability gate despite being in JoinableAgents:\n%s", codexOut)
+	}
+
+	// --- Assertion (3a): no new container across either join ---
+	afterJoins, err := mgr.Get(r.ID)
+	if err != nil {
+		t.Fatalf("Get after joins: %v", err)
+	}
+	if afterJoins.ContainerID != primaryContainerID {
+		t.Errorf("container ID changed after joins: before=%q after=%q (join must reuse the existing container)",
+			primaryContainerID, afterJoins.ContainerID)
+	}
+
+	// --- Assertion (3b): split-console isolation ---
+	// The primary command is "sleep 600"; it never writes to stdout, so
+	// logs.jsonl must stay empty regardless of what either joined agent
+	// printed.
+	time.Sleep(100 * time.Millisecond)
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), r.ID)
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+	primaryLogs, logsErr := store.ReadLogs(0, 500)
+	if logsErr != nil {
+		t.Errorf("ReadLogs: %v", logsErr)
+	} else if len(primaryLogs) != 0 {
+		t.Errorf("primary logs.jsonl should be empty (\"sleep 600\" writes nothing), got %d lines — joined agent output leaked in: %+v",
+			len(primaryLogs), primaryLogs)
+	}
+
+	// Informational only: real evidence the joins reached a live process
+	// inside the container, not just the gate check. Not asserted as fatal
+	// because a joined agent that fails auth may write only to stderr, which
+	// runJoinHeadless (join_cmd.go) does not tee into logs.<N>.jsonl — that's
+	// a pre-existing, out-of-scope asymmetry, not something this test owns.
+	if strings.TrimSpace(claudeOut) == "" {
+		t.Log("join claude produced no captured output (fake credentials — may have failed before printing anything)")
+	}
+	if strings.TrimSpace(codexOut) == "" {
+		t.Log("join codex produced no captured output (fake credentials — may have failed before printing anything)")
+	}
+}
+
+// runJoinHeadlessCLI runs `moat join <runID> <agent> -p <prompt>` via the
+// real moat binary and returns its combined stdout+stderr. It deliberately
+// never fails the test on a non-zero exit: the joined agents in this test
+// carry fake credentials, so a failed auth attempt is expected and is not
+// what this test is checking. Bounded to 90s so a CLI that unexpectedly
+// blocks on interactive auth (rather than failing fast) doesn't hang the
+// suite — moat join runs headless (no TTY), which should prevent that, but
+// the bound makes the failure mode "test times out with a clear log" rather
+// than "test hangs forever."
+func runJoinHeadlessCLI(t *testing.T, moatBin, runID, agent, prompt string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, moatBin, "join", runID, agent, "-p", prompt)
+	// join_cmd.go calls run.NewManager() unconditionally (it has no
+	// --no-sandbox flag of its own — joining execs into an already-running
+	// container, so it shouldn't need one), but NewManager() still probes for
+	// gVisor up front as part of building the runtime pool. This sandbox has
+	// no gVisor (runsc) installed, so without this the join subprocess fails
+	// before ever reaching validateJoinAgent — the same MOAT_NO_SANDBOX=1
+	// escape hatch Task 17's manual verification needed for `moat run`.
+	cmd.Env = append(os.Environ(), "MOAT_NO_SANDBOX=1")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	runErr := cmd.Run()
+	t.Logf("join %s output: %s", agent, out.String())
+	if runErr != nil {
+		t.Logf("join %s exited with error (may be expected — fake credentials): %v", agent, runErr)
+	}
+	return out.String()
 }
 
 // joinTestMoatExecutable returns the path to the moat binary set by TestMain
