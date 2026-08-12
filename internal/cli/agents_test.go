@@ -12,6 +12,7 @@ package cli_test
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,6 +137,89 @@ func TestResolveAgentField(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExpandAgents(t *testing.T) {
+	cfg := &config.Config{Agents: []string{"claude", "codex"}}
+	if err := cli.ExpandAgents(cfg); err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+
+	for _, dep := range []string{"claude-code", "codex-cli"} {
+		if !cli.HasDependency(cfg.Dependencies, dep) {
+			t.Errorf("expected dependency %q; got %v", dep, cfg.Dependencies)
+		}
+	}
+	// codex's grant is openai, not codex.
+	if !slices.Contains(cfg.Grants, "openai") {
+		t.Errorf("expected grant openai; got %v", cfg.Grants)
+	}
+	if slices.Contains(cfg.Grants, "codex") {
+		t.Errorf("codex must expand to the openai grant, not codex; got %v", cfg.Grants)
+	}
+
+	hosts := make([]string, 0, len(cfg.Network.Rules))
+	for _, r := range cfg.Network.Rules {
+		hosts = append(hosts, r.Host)
+	}
+	for _, want := range []string{"claude.ai", "api.openai.com"} {
+		if !slices.Contains(hosts, want) {
+			t.Errorf("expected host %q; got %v", want, hosts)
+		}
+	}
+}
+
+func TestExpandAgentsDoesNotDuplicate(t *testing.T) {
+	// Companion to the expansion test: already-declared values are not repeated.
+	cfg := &config.Config{
+		Agents:       []string{"claude"},
+		Dependencies: []string{"claude-code"},
+		Grants:       []string{"claude"},
+	}
+	if err := cli.ExpandAgents(cfg); err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+	if got := countOccurrences(cfg.Dependencies, "claude-code"); got != 1 {
+		t.Errorf("claude-code appears %d times, want 1: %v", got, cfg.Dependencies)
+	}
+	if got := countOccurrences(cfg.Grants, "claude"); got != 1 {
+		t.Errorf("claude grant appears %d times, want 1: %v", got, cfg.Grants)
+	}
+}
+
+func TestExpandAgentsRejectsBadEntries(t *testing.T) {
+	tests := []struct {
+		name   string
+		agents []string
+		errHas string
+	}{
+		{"unknown name", []string{"vibrant-code"}, "vibrant-code"},
+		{"non-agent provider", []string{"github"}, "github"},
+		{"agent without AgentRuntime", []string{"pi"}, "pi"},
+		{"empty string entry", []string{""}, "empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Agents: tt.agents}
+			err := cli.ExpandAgents(cfg)
+			if err == nil {
+				t.Fatal("expected a hard error — a dropped entry silently costs a credential and firewall rules")
+			}
+			if !strings.Contains(err.Error(), tt.errHas) {
+				t.Errorf("error %q should name %q", err, tt.errHas)
+			}
+		})
+	}
+}
+
+func countOccurrences(list []string, want string) int {
+	n := 0
+	for _, s := range list {
+		if s == want || strings.HasPrefix(s, want+"@") {
+			n++
+		}
+	}
+	return n
 }
 
 func TestAgentFieldReachesDegradationSites(t *testing.T) {

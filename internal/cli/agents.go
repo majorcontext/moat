@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/netrules"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/ui"
 )
@@ -96,4 +99,74 @@ func ResolveAgentField(cfg *config.Config, verb string) {
 			cfg.Agent, verb, verb)
 	}
 	cfg.Agent = verb
+}
+
+// ExpandAgents expands moat.yaml's `agents:` list into the dependencies,
+// grants, and network rules each named agent needs, deduping against what the
+// config already declares.
+//
+// It must run BEFORE grant resolution and the network-rule loop in
+// RunProvider — an expansion that lands after either contributes nothing. The
+// failure is fail-closed (the agent is absent from the capability set and join
+// refuses) but opaque, so ordering is a requirement, not an accident.
+//
+// Unknown entries are a hard error, unlike `agent:`, which warns. There is no
+// legacy corpus of hallucinated `agents:` values to stay compatible with, and a
+// silently dropped entry leaves the container short a credential AND its
+// firewall rules — surfacing much later as an opaque join refusal or a blocked
+// request under a strict network policy.
+func ExpandAgents(cfg *config.Config) error {
+	if cfg == nil || len(cfg.Agents) == 0 {
+		return nil
+	}
+	for _, entry := range cfg.Agents {
+		if entry == "" {
+			return fmt.Errorf("moat.yaml `agents:` contains an empty entry; remove it or name an agent (valid: %s)",
+				strings.Join(KnownAgentNames(), ", "))
+		}
+		canonical := CanonicalAgent(entry)
+		if canonical == "" {
+			return fmt.Errorf("moat.yaml `agents: [%s]` is not a known agent (valid: %s)",
+				entry, strings.Join(KnownAgentNames(), ", "))
+		}
+		agent := provider.GetAgent(canonical)
+		rt, ok := agent.(provider.AgentRuntime)
+		if !ok {
+			return fmt.Errorf("moat.yaml `agents: [%s]` cannot be provisioned declaratively; "+
+				"run it with `moat %s` instead", entry, canonical)
+		}
+
+		for _, dep := range rt.DefaultDependencies() {
+			name := dep
+			if i := strings.IndexByte(dep, '@'); i >= 0 {
+				name = dep[:i]
+			}
+			if !HasDependency(cfg.Dependencies, name) {
+				cfg.Dependencies = append(cfg.Dependencies, dep)
+			}
+		}
+
+		if grant := rt.CredentialGrant(); grant != "" && !slices.Contains(cfg.Grants, grant) {
+			cfg.Grants = append(cfg.Grants, grant)
+		}
+
+		for _, host := range rt.NetworkHosts() {
+			if hasNetworkHost(cfg.Network.Rules, host) {
+				continue
+			}
+			cfg.Network.Rules = append(cfg.Network.Rules,
+				netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
+		}
+	}
+	return nil
+}
+
+// hasNetworkHost reports whether rules already contains an entry for host.
+func hasNetworkHost(rules []netrules.NetworkRuleEntry, host string) bool {
+	for _, r := range rules {
+		if r.Host == host {
+			return true
+		}
+	}
+	return false
 }

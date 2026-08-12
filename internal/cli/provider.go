@@ -130,6 +130,17 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		}
 	}
 
+	// Expand `agents:` into dependencies/grants/network hosts before grant
+	// resolution and the network-rule loop below — an expansion that lands
+	// after either contributes nothing: the grants never reach buildGrants
+	// (which reads cfg.Grants immediately below) and the hosts never reach
+	// the proxy registration (see ExpandAgents doc comment). cfg may still be
+	// nil here (no moat.yaml); ExpandAgents is a no-op in that case since a
+	// nil config can't carry an agents: list either.
+	if err = ExpandAgents(cfg); err != nil {
+		return err
+	}
+
 	// Build grants list with deduplication: credential grant first,
 	// then config grants, then flag grants. Auto-detected grants are
 	// suppressed when they conflict with an explicit grant.

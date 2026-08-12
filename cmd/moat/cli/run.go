@@ -111,6 +111,14 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
+	// Expand agents: into dependencies/grants/network hosts before the
+	// "Apply config defaults" block below reads cfg.Grants into runFlags.Grants
+	// — an expansion that lands after would never reach the grants flag (see
+	// intcli.ExpandAgents doc comment for why ordering matters here).
+	if err = intcli.ExpandAgents(cfg); err != nil {
+		return err
+	}
+
 	// Determine agent name: --name flag > config.Name > random
 	if runFlags.Name == "" && cfg != nil && cfg.Name != "" {
 		runFlags.Name = cfg.Name

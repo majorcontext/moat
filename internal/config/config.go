@@ -33,6 +33,7 @@ var imageRefRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*(@sha256:[a-f
 type Config struct {
 	Name         string            `yaml:"name,omitempty"`
 	Agent        string            `yaml:"agent" doc:"one of: claude, claude-code, codex, copilot, gemini, pi. Omit unless the project pins a specific agent."`
+	Agents       []string          `yaml:"agents,omitempty" doc:"agents to provision into the container, e.g. [claude, codex]. Same allowed values as agent. For moat run, the first entry is the foreground agent."`
 	Version      string            `yaml:"version,omitempty"`
 	Dependencies []string          `yaml:"dependencies,omitempty"`
 	Grants       []string          `yaml:"grants,omitempty"`
