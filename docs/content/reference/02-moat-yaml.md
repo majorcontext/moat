@@ -16,7 +16,7 @@ The `moat.yaml` file configures how Moat runs your agent. Place it in your works
 ```yaml
 # Metadata
 name: my-agent
-agent: my-agent
+agent: claude
 version: 1.0.0
 
 # Runtime
@@ -201,14 +201,42 @@ When using `moat wt` or `--worktree`, the `name` field is used to generate the r
 
 ### agent
 
-Agent identifier. Used internally for tracking.
+Names the agent this project runs. Moat uses it to apply agent-specific defaults
+(container memory, implied dependencies, language-server support).
 
 ```yaml
-agent: my-agent
+agent: claude
 ```
 
 - Type: `string`
-- Default: Same as `name`
+- Allowed values: `claude`, `claude-code`, `codex`, `copilot`, `gemini`, `pi`
+- Default: the provider name of the command you ran (`moat claude` → `claude`).
+  For `moat run`, `agent:` is used as set; if it is unset and `agents:` is
+  present, it falls back to the first entry in `agents:`; otherwise it stays
+  unset.
+- The command wins: `moat claude` runs claude even if this field says otherwise.
+
+This is not a free-form label. An unrecognized value is ignored with a warning.
+
+### agents
+
+Provisions several agents into one container so `moat join` can launch any of
+them. Each entry contributes its CLI dependency, its credential grant, and its
+network rules.
+
+```yaml
+agents: [claude, codex]
+```
+
+- Type: `array[string]`
+- Allowed values: same as `agent`, except `pi`
+- Order matters: for `moat run` with no `agent:` set, the first entry is the
+  foreground agent. Every other entry is reachable only via `moat join`.
+- An unrecognized entry is an error, not a warning — a dropped entry would leave
+  the container without that agent's credential and firewall rules.
+
+See [Multi-agent sessions](../guides/14-multi-agent.md) for how `moat join`
+uses this list.
 
 ### version
 
