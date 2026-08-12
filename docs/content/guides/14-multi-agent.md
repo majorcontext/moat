@@ -42,17 +42,19 @@ By default, a run only provisions the agent you started it with — `moat claude
 agents: [claude, codex]
 ```
 
-This provisions both agents' dependencies, credential grants, and network rules into the container. With no `agent:` field set, `moat run` launches the first entry (`claude`) in the foreground; `codex` is reachable only via `moat join`:
+This provisions both agents' dependencies, credential grants, and network rules into the container. With no `agent:` field set, `agents[0]` (`claude`) becomes the run's recorded **primary agent** — used for agent-specific defaults like container memory, implied dependencies, and language-server support. It does not change what the run executes: `moat run` with no `-- command` and no `command:` in `moat.yaml` still starts a shell, never an agent. To run an agent in the foreground, use its own verb:
 
 ```bash
-moat run
-# or: moat claude, since agent: is unset and agents[0] is claude
+moat claude
+# agents[0] (claude) would be recorded as the primary agent even if you ran
+# `moat run` instead — but moat run itself still starts your configured
+# command, or a shell, not an agent. moat claude runs it directly.
 
 # from a second terminal
 moat join run_a1b2c3d4e5f6 codex
 ```
 
-Order in `agents:` matters only for picking the foreground agent — every entry after the first is equally joinable.
+Order in `agents:` matters only for picking the primary agent — every entry after the first is equally joinable.
 
 ## Joining without a run ID
 

@@ -230,10 +230,22 @@ agents: [claude, codex]
 
 - Type: `array[string]`
 - Allowed values: same as `agent`, except `pi`
-- Order matters: for `moat run` with no `agent:` set, the first entry is the
-  foreground agent. Every other entry is reachable only via `moat join`.
+- Order matters: with no `agent:` set, the first entry backfills `agent:` as
+  the run's primary agent — used for agent-specific defaults (container
+  memory, implied dependencies, language-server support), not for what the
+  run executes. `moat run` still starts `command:` / `-- command`, or a
+  shell, regardless of `agents:`; to run an agent in the foreground, use its
+  verb (`moat claude`). Every entry after the first is reachable only via
+  `moat join`.
 - An unrecognized entry is an error, not a warning — a dropped entry would leave
   the container without that agent's credential and firewall rules.
+- `--grant` on `moat run` / `moat wt` **replaces** the grants this field
+  derives, rather than adding to them. `moat run --grant github` with
+  `agents: [claude, codex]` runs with only the `github` grant; neither agent's
+  credential is injected. The agents still get their dependencies and network
+  rules, so `moat join` still succeeds — the agent then fails to authenticate
+  once joined. Pass every grant you need explicitly with `--grant` when using
+  it alongside `agents:`.
 
 See [Multi-agent sessions](../guides/14-multi-agent.md) for how `moat join`
 uses this list.
