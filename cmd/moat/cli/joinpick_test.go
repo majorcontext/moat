@@ -236,3 +236,33 @@ func TestPickJoinRun(t *testing.T) {
 		}
 	})
 }
+
+// TestTwoArgMultiMatchUsesPicker locks in the shape runJoin's two-arg path
+// relies on: when resolveRunningRunArg finds several running runs sharing a
+// name (common, since nothing enforces run-name uniqueness and moat.yaml's
+// `name:` field puts every run in a project under one name), pickJoinRun
+// must pick interactively rather than error — matching the shorthand form.
+func TestTwoArgMultiMatchUsesPicker(t *testing.T) {
+	a := &run.Run{ID: "run_a", Name: "moat-dev", State: run.StateRunning, JoinableAgents: []string{"claude"}}
+	b := &run.Run{ID: "run_b", Name: "moat-dev", State: run.StateRunning, JoinableAgents: []string{"claude"}}
+
+	// TTY: selecting 2 picks the second candidate.
+	got, err := pickJoinRun(strings.NewReader("2\n"), io.Discard, []*run.Run{a, b}, "claude", false, true, true)
+	if err != nil {
+		t.Fatalf("pickJoinRun: %v", err)
+	}
+	if got.ID != "run_b" {
+		t.Errorf("selected %s, want run_b", got.ID)
+	}
+
+	// Companion: no TTY still errors with both IDs listed.
+	_, err = pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{a, b}, "claude", false, false, true)
+	if err == nil {
+		t.Fatal("non-TTY should error rather than prompt")
+	}
+	for _, id := range []string{"run_a", "run_b"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("error should list %s; got %q", id, err)
+		}
+	}
+}

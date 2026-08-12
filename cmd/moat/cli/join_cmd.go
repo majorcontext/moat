@@ -172,10 +172,20 @@ func runJoin(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if r == nil {
-			// Several running runs share this name. Task 17 routes these to the
-			// picker; until then, list them and ask for an ID.
-			printMatchingRuns(candidates, runArg)
-			return fmt.Errorf("name %q matches %d running runs; specify a run ID", runArg, len(candidates))
+			// Several running runs share this name — nothing enforces run-name
+			// uniqueness, and moat.yaml's `name:` field means every run in a
+			// project commonly shares one. Route through the same picker the
+			// shorthand form uses (Task 16) rather than erroring, so the
+			// explicit and shorthand forms behave the same way. widened=false:
+			// the user named a run explicitly, so there was no workspace-widening
+			// search to disclose. anyRunning=true: resolveRunningRunArg only
+			// returns a candidate list when more than one running run matched.
+			picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, false,
+				term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), true)
+			if pickErr != nil {
+				return pickErr
+			}
+			r = picked
 		}
 	}
 
