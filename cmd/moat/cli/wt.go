@@ -131,6 +131,17 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		cfg = wtCfg
 	}
 
+	// Expand agents: into dependencies/grants/network hosts before the "Apply
+	// config defaults" block below reads cfg.Grants into wtFlags.Grants — same
+	// pattern as moat run (cmd/moat/cli/run.go). derivedGrants is returned
+	// rather than merged into cfg.Grants by ExpandAgents itself (see its doc
+	// comment), so it's combined into the default grants list explicitly
+	// below.
+	derivedGrants, err := intcli.ExpandAgents(cfg)
+	if err != nil {
+		return err
+	}
+
 	// Check for active run in this worktree
 	manager, err := run.NewManager()
 	if err != nil {
@@ -151,8 +162,12 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 
 	// Apply config defaults (same pattern as moat run)
 	if cfg != nil {
-		if len(wtFlags.Grants) == 0 && len(cfg.Grants) > 0 {
-			wtFlags.Grants = cfg.Grants
+		if len(wtFlags.Grants) == 0 {
+			grants := append([]string{}, cfg.Grants...)
+			grants = append(grants, derivedGrants...)
+			if len(grants) > 0 {
+				wtFlags.Grants = grants
+			}
 		}
 		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
 			containerCmd = cfg.Command
@@ -182,6 +197,10 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+
+	// moat wt has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared (same pattern as moat run).
+	intcli.ResolveAgentField(cfg, "")
 
 	opts := intcli.ExecOptions{
 		Flags:       wtFlags,
