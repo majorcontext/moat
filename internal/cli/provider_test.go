@@ -122,11 +122,12 @@ func TestResolveProviderAgentFieldWarnsAcrossConfigureAgentHooks(t *testing.T) {
 
 func TestBuildGrants(t *testing.T) {
 	tests := []struct {
-		name         string
-		autoDetected string
-		configGrants []string
-		flagGrants   []string
-		want         []string
+		name          string
+		autoDetected  string
+		configGrants  []string
+		flagGrants    []string
+		derivedGrants []string
+		want          []string
 	}{
 		{
 			name:         "auto-detected claude with no explicit grants",
@@ -176,11 +177,55 @@ func TestBuildGrants(t *testing.T) {
 			flagGrants:   []string{"claude", "anthropic"},
 			want:         []string{"claude", "anthropic"},
 		},
+		// C1 regression: a derived grant (from moat.yaml `agents:` expansion,
+		// e.g. `agents: [claude, ...]`) must never outrank an auto-detected
+		// credential, even when they're the claude/anthropic equivalence
+		// pair. Previously ExpandAgents appended "claude" straight into
+		// cfg.Grants, which buildGrants treated as an explicit grant and used
+		// to suppress the auto-detected "anthropic" API-key credential —
+		// discarding a credential that actually works in favor of one the
+		// user never configured.
+		{
+			name:          "derived claude does not suppress auto-detected anthropic",
+			autoDetected:  "anthropic",
+			derivedGrants: []string{"claude"},
+			want:          []string{"anthropic"},
+		},
+		// Companion: the equivalence check is symmetric.
+		{
+			name:          "derived anthropic does not suppress auto-detected claude",
+			autoDetected:  "claude",
+			derivedGrants: []string{"anthropic"},
+			want:          []string{"claude"},
+		},
+		// Companion: with no conflict, a derived grant still populates —
+		// agents: expansion is a real fallback source, not a no-op.
+		{
+			name:          "derived grant populates when nothing else claims the credential",
+			derivedGrants: []string{"openai"},
+			want:          []string{"openai"},
+		},
+		// Companion: a derived grant that duplicates an explicit one is
+		// deduped, not appended twice.
+		{
+			name:          "derived grant already explicit is not duplicated",
+			configGrants:  []string{"openai"},
+			derivedGrants: []string{"openai"},
+			want:          []string{"openai"},
+		},
+		// Companion: derived grants are lower precedence than explicit ones
+		// too, but still contribute when they don't conflict.
+		{
+			name:          "derived grant added after explicit, non-conflicting grants",
+			configGrants:  []string{"github"},
+			derivedGrants: []string{"claude"},
+			want:          []string{"github", "claude"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildGrants(tt.autoDetected, tt.configGrants, tt.flagGrants)
+			got := buildGrants(tt.autoDetected, tt.configGrants, tt.flagGrants, tt.derivedGrants)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("buildGrants(%q, %v, %v) = %v, want %v",
 					tt.autoDetected, tt.configGrants, tt.flagGrants, got, tt.want)

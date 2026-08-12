@@ -126,9 +126,16 @@ func agentsListContains(agents []string, agent string) bool {
 	return false
 }
 
-// ExpandAgents expands moat.yaml's `agents:` list into the dependencies,
-// grants, and network rules each named agent needs, deduping against what the
-// config already declares.
+// ExpandAgents expands moat.yaml's `agents:` list into the dependencies and
+// network rules each named agent needs, deduping against what the config
+// already declares. It mutates cfg.Dependencies and cfg.Network.Rules
+// directly, but returns credential grants rather than appending them to
+// cfg.Grants — callers must merge the return value into their own grants
+// list. This keeps agent-derived grants out of cfg.Grants, which callers
+// like buildGrants treat as "explicit" (user-written) and use to suppress an
+// auto-detected credential; a derived grant is a fallback, not a user
+// declaration, and must never win that suppression. See buildGrants in
+// internal/cli/provider.go.
 //
 // It must run BEFORE grant resolution and the network-rule loop in
 // RunProvider — an expansion that lands after either contributes nothing. The
@@ -140,24 +147,25 @@ func agentsListContains(agents []string, agent string) bool {
 // silently dropped entry leaves the container short a credential AND its
 // firewall rules — surfacing much later as an opaque join refusal or a blocked
 // request under a strict network policy.
-func ExpandAgents(cfg *config.Config) error {
+func ExpandAgents(cfg *config.Config) ([]string, error) {
 	if cfg == nil || len(cfg.Agents) == 0 {
-		return nil
+		return nil, nil
 	}
+	var derivedGrants []string
 	for _, entry := range cfg.Agents {
 		if entry == "" {
-			return fmt.Errorf("moat.yaml `agents:` contains an empty entry; remove it or name an agent (valid: %s)",
+			return nil, fmt.Errorf("moat.yaml `agents:` contains an empty entry; remove it or name an agent (valid: %s)",
 				strings.Join(KnownAgentNames(), ", "))
 		}
 		canonical := CanonicalAgent(entry)
 		if canonical == "" {
-			return fmt.Errorf("moat.yaml `agents: [%s]` is not a known agent (valid: %s)",
+			return nil, fmt.Errorf("moat.yaml `agents: [%s]` is not a known agent (valid: %s)",
 				entry, strings.Join(KnownAgentNames(), ", "))
 		}
 		agent := provider.GetAgent(canonical)
 		rt, ok := agent.(provider.AgentRuntime)
 		if !ok {
-			return fmt.Errorf("moat.yaml `agents: [%s]` cannot be provisioned declaratively; "+
+			return nil, fmt.Errorf("moat.yaml `agents: [%s]` cannot be provisioned declaratively; "+
 				"run it with `moat %s` instead", entry, canonical)
 		}
 
@@ -171,8 +179,8 @@ func ExpandAgents(cfg *config.Config) error {
 			}
 		}
 
-		if grant := rt.CredentialGrant(); grant != "" && !slices.Contains(cfg.Grants, grant) {
-			cfg.Grants = append(cfg.Grants, grant)
+		if grant := rt.CredentialGrant(); grant != "" && !slices.Contains(cfg.Grants, grant) && !slices.Contains(derivedGrants, grant) {
+			derivedGrants = append(derivedGrants, grant)
 		}
 
 		for _, host := range rt.NetworkHosts() {
@@ -183,7 +191,7 @@ func ExpandAgents(cfg *config.Config) error {
 				netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
 		}
 	}
-	return nil
+	return derivedGrants, nil
 }
 
 // hasNetworkHost reports whether rules already contains an entry for host.

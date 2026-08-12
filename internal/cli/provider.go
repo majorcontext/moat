@@ -137,13 +137,16 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	// the proxy registration (see ExpandAgents doc comment). cfg may still be
 	// nil here (no moat.yaml); ExpandAgents is a no-op in that case since a
 	// nil config can't carry an agents: list either.
-	if err = ExpandAgents(cfg); err != nil {
+	var derivedGrants []string
+	derivedGrants, err = ExpandAgents(cfg)
+	if err != nil {
 		return err
 	}
 
 	// Build grants list with deduplication: credential grant first,
-	// then config grants, then flag grants. Auto-detected grants are
-	// suppressed when they conflict with an explicit grant.
+	// then config grants, then flag grants, then agents:-derived grants.
+	// Auto-detected grants are suppressed when they conflict with an
+	// explicit grant.
 	var autoDetected string
 	if rc.GetCredentialGrant != nil {
 		autoDetected = rc.GetCredentialGrant()
@@ -152,7 +155,7 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	if cfg != nil {
 		configGrants = cfg.Grants
 	}
-	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants)
+	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants, derivedGrants)
 	rc.Flags.Grants = grants
 
 	interactive := rc.PromptFlag == ""
@@ -293,11 +296,30 @@ func containsGrant(grants []string, name string) bool {
 	return false
 }
 
+// grantsEquivalent reports whether a and b name the same underlying
+// credential under different grant keys — today, only the claude
+// (OAuth-token) / anthropic (API-key) pair, which both authenticate Claude
+// Code against the same host.
+func grantsEquivalent(a, b string) bool {
+	return (a == "claude" && b == "anthropic") || (a == "anthropic" && b == "claude")
+}
+
 // buildGrants assembles the final grants list from an auto-detected
-// credential grant, config grants, and flag grants. Auto-detected grants
-// are suppressed when they conflict with an explicit grant (e.g.,
-// "claude" conflicts with "anthropic" since both target the same host).
-func buildGrants(autoDetected string, configGrants, flagGrants []string) []string {
+// credential grant, config grants, flag grants, and agents:-derived grants,
+// in descending precedence.
+//
+// Auto-detected grants are suppressed when they conflict with an EXPLICIT
+// (config or flag) grant — e.g. "claude" conflicts with "anthropic" since
+// both target the same host. derivedGrants (from moat.yaml's `agents:`
+// expansion, see ExpandAgents) never participates in that suppression: it is
+// a machine-filled fallback, not a user declaration, so it must not outrank
+// whatever credential the user actually has. A derived grant is instead
+// dropped when an equivalent credential is already present in the result —
+// otherwise a user who stores their Anthropic credential as an API key
+// (autoDetected == "anthropic") would have it discarded in favor of a
+// "claude" grant injected by `agents: [claude, ...]`, forcing an OAuth login
+// they never asked for even though their existing credential already works.
+func buildGrants(autoDetected string, configGrants, flagGrants, derivedGrants []string) []string {
 	grantSet := make(map[string]bool)
 	var grants []string
 	addGrant := func(g string) {
@@ -305,6 +327,14 @@ func buildGrants(autoDetected string, configGrants, flagGrants []string) []strin
 			grantSet[g] = true
 			grants = append(grants, g)
 		}
+	}
+	equivalentPresent := func(g string) bool {
+		for _, existing := range grants {
+			if grantsEquivalent(existing, g) {
+				return true
+			}
+		}
+		return false
 	}
 
 	explicitGrants := make([]string, 0, len(configGrants)+len(flagGrants))
@@ -319,6 +349,12 @@ func buildGrants(autoDetected string, configGrants, flagGrants []string) []strin
 		}
 	}
 	for _, g := range explicitGrants {
+		addGrant(g)
+	}
+	for _, g := range derivedGrants {
+		if equivalentPresent(g) {
+			continue
+		}
 		addGrant(g)
 	}
 	return grants

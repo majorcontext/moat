@@ -115,7 +115,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	// "Apply config defaults" block below reads cfg.Grants into runFlags.Grants
 	// — an expansion that lands after would never reach the grants flag (see
 	// intcli.ExpandAgents doc comment for why ordering matters here).
-	if err = intcli.ExpandAgents(cfg); err != nil {
+	//
+	// derivedGrants is returned rather than merged into cfg.Grants by
+	// ExpandAgents itself — see its doc comment — so it's combined into the
+	// default grants list explicitly below.
+	derivedGrants, err := intcli.ExpandAgents(cfg)
+	if err != nil {
 		return err
 	}
 
@@ -127,8 +132,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	// Apply config defaults
 	if cfg != nil {
-		if len(runFlags.Grants) == 0 && len(cfg.Grants) > 0 {
-			runFlags.Grants = cfg.Grants
+		if len(runFlags.Grants) == 0 {
+			grants := append([]string{}, cfg.Grants...)
+			grants = append(grants, derivedGrants...)
+			if len(grants) > 0 {
+				runFlags.Grants = grants
+			}
 		}
 		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
 			containerCmd = cfg.Command

@@ -176,7 +176,8 @@ func TestResolveAgentFieldWithAgentsList(t *testing.T) {
 
 func TestExpandAgents(t *testing.T) {
 	cfg := &config.Config{Agents: []string{"claude", "codex"}}
-	if err := cli.ExpandAgents(cfg); err != nil {
+	grants, err := cli.ExpandAgents(cfg)
+	if err != nil {
 		t.Fatalf("ExpandAgents: %v", err)
 	}
 
@@ -186,11 +187,17 @@ func TestExpandAgents(t *testing.T) {
 		}
 	}
 	// codex's grant is openai, not codex.
-	if !slices.Contains(cfg.Grants, "openai") {
-		t.Errorf("expected grant openai; got %v", cfg.Grants)
+	if !slices.Contains(grants, "openai") {
+		t.Errorf("expected grant openai; got %v", grants)
 	}
-	if slices.Contains(cfg.Grants, "codex") {
-		t.Errorf("codex must expand to the openai grant, not codex; got %v", cfg.Grants)
+	if slices.Contains(grants, "codex") {
+		t.Errorf("codex must expand to the openai grant, not codex; got %v", grants)
+	}
+	// ExpandAgents must not mutate cfg.Grants directly — see its doc comment:
+	// derived grants are returned so callers can give them lower precedence
+	// than an auto-detected credential.
+	if len(cfg.Grants) != 0 {
+		t.Errorf("cfg.Grants should be untouched by ExpandAgents; got %v", cfg.Grants)
 	}
 
 	hosts := make([]string, 0, len(cfg.Network.Rules))
@@ -211,14 +218,17 @@ func TestExpandAgentsDoesNotDuplicate(t *testing.T) {
 		Dependencies: []string{"claude-code"},
 		Grants:       []string{"claude"},
 	}
-	if err := cli.ExpandAgents(cfg); err != nil {
+	grants, err := cli.ExpandAgents(cfg)
+	if err != nil {
 		t.Fatalf("ExpandAgents: %v", err)
 	}
 	if got := countOccurrences(cfg.Dependencies, "claude-code"); got != 1 {
 		t.Errorf("claude-code appears %d times, want 1: %v", got, cfg.Dependencies)
 	}
-	if got := countOccurrences(cfg.Grants, "claude"); got != 1 {
-		t.Errorf("claude grant appears %d times, want 1: %v", got, cfg.Grants)
+	// claude is already in cfg.Grants, so it must not also come back as a
+	// derived grant — the caller would otherwise re-add it.
+	if len(grants) != 0 {
+		t.Errorf("expected no derived grants (claude already in cfg.Grants); got %v", grants)
 	}
 }
 
@@ -236,7 +246,7 @@ func TestExpandAgentsRejectsBadEntries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{Agents: tt.agents}
-			err := cli.ExpandAgents(cfg)
+			_, err := cli.ExpandAgents(cfg)
 			if err == nil {
 				t.Fatal("expected a hard error — a dropped entry silently costs a credential and firewall rules")
 			}

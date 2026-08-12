@@ -275,9 +275,14 @@ func TestDualAgentJoin_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if err := intcli.ExpandAgents(cfg); err != nil {
+	// ExpandAgents returns derived grants rather than merging them into
+	// cfg.Grants (see its doc comment) — merge them the same way
+	// cmd/moat/cli/run.go does before passing grants to the run manager.
+	derivedGrants, err := intcli.ExpandAgents(cfg)
+	if err != nil {
 		t.Fatalf("ExpandAgents: %v", err)
 	}
+	grants := append(append([]string{}, cfg.Grants...), derivedGrants...)
 
 	mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &[]bool{true}[0]})
 	if err != nil {
@@ -292,7 +297,7 @@ func TestDualAgentJoin_E2E(t *testing.T) {
 	r, err := mgr.Create(ctx, run.Options{
 		Name:      "e2e-dual-agent-join",
 		Workspace: workspace,
-		Grants:    cfg.Grants,
+		Grants:    grants,
 		Config:    cfg,
 		Cmd:       []string{"sleep", "600"},
 	})
