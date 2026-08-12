@@ -10,6 +10,8 @@ Realigns the Codex integration with the current Codex CLI (0.146). Codex's own a
 
 A second pass fixes the terminal handling that made Codex hard to use inside Moat: `ctrl+/` did not register at all, and Codex's inline rendering was corrupted because Moat overrode terminal state the agent legitimately drives.
 
+A third pass adds multi-agent containers: `moat.yaml`'s new `agents:` list provisions several agents into one run, and `moat join` gates on what moat actually provisioned instead of an unvalidated `agent:` string, fixing joins that previously failed for any project using a project-shaped `agent:` value.
+
 ### Added
 
 - **`MOAT_TTY_TRACE`** — an environment-variable equivalent of `--tty-trace`, recording a session's terminal I/O to a file for debugging TUI and input problems. The sessions worth tracing are the broken ones, where the in-session `ctrl+/ d` dump may itself be unreachable, and exporting a variable captures every subsequent run without editing each command line. See [Environment variables](https://majorcontext.com/moat/reference/environment). ([#450](https://github.com/majorcontext/moat/pull/450))
