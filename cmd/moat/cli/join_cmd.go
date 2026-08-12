@@ -17,6 +17,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 var (
@@ -26,7 +27,7 @@ var (
 )
 
 var joinCmd = &cobra.Command{
-	Use:   "join <run> <agent> [flags]",
+	Use:   "join [run] <agent> [flags]",
 	Short: "Launch another agent inside a running container",
 	Long: `Launch a second agent inside an already-running container, reusing its
 workspace, grants, and credentials — without creating a new container.
@@ -37,8 +38,10 @@ joins, e.g. joining claude into a run started by 'moat claude').
 Examples:
   moat join run_a1b2c3d4e5f6 claude
   moat join my-feature claude --continue
-  moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"`,
-	Args: cobra.MinimumNArgs(2),
+  moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"
+  moat join claude                        # infer the run from this workspace
+  moat join run_a1b2c3d4e5f6 codex`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runJoin,
 }
 
@@ -94,19 +97,47 @@ func joinableAgentNames() []string {
 	return names
 }
 
+// parseJoinArgs interprets join's positional arguments.
+//
+// Two args are `<run> <agent>`, unchanged. A single arg is the AGENT — it is
+// the required half, while the run is what gets inferred. When that arg is also
+// a run name, the agent wins and collided is set so the caller can say so; the
+// two-arg form is the escape hatch.
+func parseJoinArgs(args []string, isRunName func(string) bool) (runArg, agentArg string, collided bool, err error) {
+	if len(args) >= 2 {
+		return args[0], args[1], false, nil
+	}
+	arg := args[0]
+	if provider.GetAgent(arg) == nil {
+		return "", "", false, fmt.Errorf("unknown agent %q; joinable agents: %s",
+			arg, strings.Join(joinableAgentNames(), ", "))
+	}
+	return "", arg, isRunName(arg), nil
+}
+
 func runJoin(cmd *cobra.Command, args []string) error {
 	if joinContinue && joinResume != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
 	}
-
-	runArg := args[0]
-	agentArg := args[1]
 
 	manager, err := run.NewManager()
 	if err != nil {
 		return fmt.Errorf("creating run manager: %w", err)
 	}
 	defer manager.Close()
+
+	isRunName := func(s string) bool {
+		matches, rErr := manager.Resolve(s)
+		return rErr == nil && len(matches) > 0
+	}
+	runArg, agentArg, collided, err := parseJoinArgs(args, isRunName)
+	if err != nil {
+		return err
+	}
+	if collided {
+		ui.Warnf("%q matches both an agent and a run name; interpreting as agent.\n"+
+			"Use `moat join %s <agent>` to target the run.", agentArg, agentArg)
+	}
 
 	r, candidates, err := resolveRunningRunArg(manager, runArg)
 	if err != nil {

@@ -76,6 +76,47 @@ func TestValidateJoinAgent(t *testing.T) {
 	}
 }
 
+func TestParseJoinArgs(t *testing.T) {
+	noRuns := func(string) bool { return false }
+	claudeIsARun := func(s string) bool { return s == "claude" }
+
+	tests := []struct {
+		name       string
+		args       []string
+		isRunName  func(string) bool
+		wantRun    string
+		wantAgent  string
+		wantCollid bool
+		wantErr    bool
+	}{
+		{"two args unchanged", []string{"run_abc", "claude"}, noRuns, "run_abc", "claude", false, false},
+		{"one arg is the agent", []string{"claude"}, noRuns, "", "claude", false, false},
+		{"one arg that is not an agent errors", []string{"sometypo"}, noRuns, "", "", false, true},
+		{"collision resolves to the agent", []string{"claude"}, claudeIsARun, "", "claude", true, false},
+		{"two-arg form escapes the collision", []string{"claude", "codex"}, claudeIsARun, "claude", "codex", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRun, gotAgent, gotCollid, err := parseJoinArgs(tt.args, tt.isRunName)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				if !strings.Contains(err.Error(), "sometypo") {
+					t.Errorf("error should name the bad agent; got %q", err)
+				}
+				return
+			}
+			if gotRun != tt.wantRun || gotAgent != tt.wantAgent {
+				t.Errorf("= (%q, %q), want (%q, %q)", gotRun, gotAgent, tt.wantRun, tt.wantAgent)
+			}
+			if gotCollid != tt.wantCollid {
+				t.Errorf("collided = %v, want %v", gotCollid, tt.wantCollid)
+			}
+		})
+	}
+}
+
 // TestResizePump_NoSendOnClosed verifies that resizePump never sends on a
 // closed channel. It is intentionally run under -race to catch any concurrent
 // close vs send on the out channel.
