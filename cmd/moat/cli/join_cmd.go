@@ -32,8 +32,13 @@ var joinCmd = &cobra.Command{
 	Long: `Launch a second agent inside an already-running container, reusing its
 workspace, grants, and credentials — without creating a new container.
 
-The agent must match the one the run was started with (v1 supports same-agent
-joins, e.g. joining claude into a run started by 'moat claude').
+The agent must be one the run was provisioned with — not necessarily the one
+it was started with. A run created from moat.yaml's 'agents:' list can be
+joined as any agent in that list.
+
+The run argument is optional: with just an agent, moat infers the run from
+the running runs in the current workspace, and prompts when more than one
+qualifies.
 
 Examples:
   moat join run_a1b2c3d4e5f6 claude
