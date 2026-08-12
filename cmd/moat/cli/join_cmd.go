@@ -139,17 +139,8 @@ func runJoin(cmd *cobra.Command, args []string) error {
 			"Use `moat join %s <agent>` to target the run.", agentArg, agentArg)
 	}
 
-	r, candidates, err := resolveRunningRunArg(manager, runArg)
-	if err != nil {
-		return err
-	}
-	if r == nil {
-		// Several running runs share this name. Task 17 routes these to the
-		// picker; until then, list them and ask for an ID.
-		printMatchingRuns(candidates, runArg)
-		return fmt.Errorf("name %q matches %d running runs; specify a run ID", runArg, len(candidates))
-	}
-
+	// The agent/provider lookup happens before run resolution: the shorthand
+	// path needs `joinable` to filter candidates by hosting capability.
 	agent := provider.GetAgent(agentArg)
 	if agent == nil {
 		return fmt.Errorf("unknown agent %q; joinable agents: %s", agentArg, strings.Join(joinableAgentNames(), ", "))
@@ -158,6 +149,34 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent %q does not support join yet", agentArg)
 	}
+
+	var r *run.Run
+	if runArg == "" {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return fmt.Errorf("resolving working directory: %w", cwdErr)
+		}
+		candidates, widened := inferJoinCandidates(manager.List(), cwd, agentArg, joinable)
+		picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, widened,
+			term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr))
+		if pickErr != nil {
+			return pickErr
+		}
+		r = picked
+	} else {
+		var candidates []*run.Run
+		r, candidates, err = resolveRunningRunArg(manager, runArg)
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			// Several running runs share this name. Task 17 routes these to the
+			// picker; until then, list them and ask for an ID.
+			printMatchingRuns(candidates, runArg)
+			return fmt.Errorf("name %q matches %d running runs; specify a run ID", runArg, len(candidates))
+		}
+	}
+
 	if valErr := validateJoinAgent(joinable, agentArg, r); valErr != nil {
 		return valErr
 	}

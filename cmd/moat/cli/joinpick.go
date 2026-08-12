@@ -1,6 +1,13 @@
 package cli
 
 import (
+	"bufio"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/run"
 )
@@ -26,8 +33,6 @@ func runHostsAgent(r *run.Run, agentArg string, j provider.JoinableAgent) bool {
 
 // hostedAgents returns the agent names to show in the picker's AGENTS column,
 // deriving them from the recorded agent string for pre-upgrade runs.
-//
-//nolint:unused // wired into the picker's AGENTS column by Task 16
 func hostedAgents(r *run.Run) []string {
 	if r.JoinableAgents != nil {
 		return r.JoinableAgents
@@ -42,8 +47,6 @@ func hostedAgents(r *run.Run) []string {
 // the current workspace. widened reports that no run in cwd qualified and the
 // search covered every running run — the caller must disclose that, because
 // attaching to another workspace's run means using that run's grants.
-//
-//nolint:unparam // cwd is a literal only in today's tests; Task 16 wires runJoin's os.Getwd() through here
 func inferJoinCandidates(runs []*run.Run, cwd, agentArg string, j provider.JoinableAgent) (candidates []*run.Run, widened bool) {
 	var all []*run.Run
 	for _, r := range runs {
@@ -66,4 +69,94 @@ func inferJoinCandidates(runs []*run.Run, cwd, agentArg string, j provider.Joina
 		return local, false
 	}
 	return all, len(all) > 0
+}
+
+// renderPicker writes the numbered candidate table.
+//
+// Writes to the caller-supplied writer, which is os.Stderr in production —
+// matching printMatchingRuns and disambiguateRuns. CLAUDE.md's "write command
+// output to stdout" rule covers results, not interactive prompts: a picker on
+// stdout hangs invisibly under `moat join claude | tee log` when stdin is still
+// a TTY. No ui style functions inside the tabwriter — ANSI codes break column
+// alignment.
+func renderPicker(w io.Writer, candidates []*run.Run, agentArg string, widened bool) {
+	if widened {
+		fmt.Fprintf(w, "No running runs in this workspace can host %s — showing all running runs:\n\n", agentArg)
+	} else {
+		fmt.Fprintf(w, "Multiple running runs can host %s:\n\n", agentArg)
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if widened {
+		fmt.Fprintln(tw, "    NAME\tRUN ID\tAGENTS\tAGE\tWORKSPACE")
+	} else {
+		fmt.Fprintln(tw, "    NAME\tRUN ID\tAGENTS\tAGE")
+	}
+	for i, r := range candidates {
+		agents := strings.Join(hostedAgents(r), ", ")
+		if agents == "" {
+			agents = "-"
+		}
+		if widened {
+			fmt.Fprintf(tw, "  %d %s\t%s\t%s\t%s\t%s\n",
+				i+1, r.Name, r.ID, agents, formatTimeAgo(r.CreatedAt), r.Workspace)
+			continue
+		}
+		fmt.Fprintf(tw, "  %d %s\t%s\t%s\t%s\n",
+			i+1, r.Name, r.ID, agents, formatTimeAgo(r.CreatedAt))
+	}
+	tw.Flush()
+	fmt.Fprintln(w)
+}
+
+// readSelection reads a 1-based choice in [1, n].
+//
+// Invalid input aborts rather than re-prompting, matching disambiguateRuns's
+// abort-on-invalid-input convention. Re-prompting in a loop is a trap for
+// scripted callers whose stdin never produces a valid answer.
+func readSelection(r io.Reader, n int) (int, error) {
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && line == "" {
+		return 0, fmt.Errorf("no selection made; run `moat join <run> <agent>` to specify directly")
+	}
+	choice, convErr := strconv.Atoi(strings.TrimSpace(line))
+	if convErr != nil || choice < 1 || choice > n {
+		return 0, fmt.Errorf("invalid selection %q; run `moat join <run> <agent>` to specify directly",
+			strings.TrimSpace(line))
+	}
+	return choice, nil
+}
+
+// pickJoinRun resolves a candidate list to one run.
+//
+// A single candidate auto-selects UNLESS the search was widened past the
+// current workspace: attaching to another workspace's run silently borrows that
+// run's grants and network policy, so it is confirmed rather than assumed.
+func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg string, widened, isTTY bool) (*run.Run, error) {
+	switch len(candidates) {
+	case 0:
+		return nil, fmt.Errorf("no running run can host %s in this workspace.\n"+
+			"Start one with `moat %s`, or run `moat list` to see what is running.", agentArg, agentArg)
+	case 1:
+		if !widened {
+			return candidates[0], nil
+		}
+	}
+
+	if !isTTY {
+		ids := make([]string, len(candidates))
+		for i, r := range candidates {
+			ids[i] = r.ID
+		}
+		return nil, fmt.Errorf("%d running runs can host %s; specify one: %s",
+			len(candidates), agentArg, strings.Join(ids, ", "))
+	}
+
+	renderPicker(out, candidates, agentArg, widened)
+	fmt.Fprintf(out, "Select [1-%d]: ", len(candidates))
+	choice, err := readSelection(in, len(candidates))
+	if err != nil {
+		return nil, err
+	}
+	return candidates[choice-1], nil
 }
