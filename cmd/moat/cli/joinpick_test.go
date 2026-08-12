@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/moat/internal/run"
 )
@@ -70,6 +71,37 @@ func TestInferJoinCandidates(t *testing.T) {
 		got, _ := inferJoinCandidates([]*run.Run{codexOnly, here}, "/work", "claude", claude)
 		if len(got) != 1 || got[0].ID != "run_here" {
 			t.Errorf("expected only the claude-capable run; got %v", got)
+		}
+	})
+
+	// manager.List() (the real caller) iterates a map and is unordered per
+	// call. renderPicker numbers candidates by slice index, so without a
+	// deterministic sort the same run gets a different number across
+	// invocations — a remembered "2" could attach to a different run.
+	older := &run.Run{ID: "run_old", Workspace: "/work", State: run.StateRunning, JoinableAgents: []string{"claude"}, CreatedAt: time.Unix(100, 0)}
+	newer := &run.Run{ID: "run_new", Workspace: "/work", State: run.StateRunning, JoinableAgents: []string{"claude"}, CreatedAt: time.Unix(200, 0)}
+	elsewhereOlder := &run.Run{ID: "run_old_far", Workspace: "/other", State: run.StateRunning, JoinableAgents: []string{"claude"}, CreatedAt: time.Unix(100, 0)}
+	elsewhereNewer := &run.Run{ID: "run_new_far", Workspace: "/another", State: run.StateRunning, JoinableAgents: []string{"claude"}, CreatedAt: time.Unix(200, 0)}
+
+	t.Run("sorts local candidates newest-first regardless of input order", func(t *testing.T) {
+		got, widened := inferJoinCandidates([]*run.Run{older, newer}, "/work", "claude", claude)
+		if widened {
+			t.Fatal("expected a local match, not widened")
+		}
+		if len(got) != 2 || got[0].ID != "run_new" || got[1].ID != "run_old" {
+			t.Errorf("expected newest-first order; got %v", got)
+		}
+	})
+
+	// Companion: the widened path returns a different slice (`all` instead of
+	// `local`), so the sort must cover it too, not just the local branch.
+	t.Run("sorts widened candidates newest-first regardless of input order", func(t *testing.T) {
+		got, widened := inferJoinCandidates([]*run.Run{elsewhereOlder, elsewhereNewer}, "/work", "claude", claude)
+		if !widened {
+			t.Fatal("expected widening since neither run is in /work")
+		}
+		if len(got) != 2 || got[0].ID != "run_new_far" || got[1].ID != "run_old_far" {
+			t.Errorf("expected newest-first order; got %v", got)
 		}
 	})
 }
@@ -140,7 +172,7 @@ func TestPickJoinRun(t *testing.T) {
 	two := &run.Run{ID: "run_two", Name: "other", JoinableAgents: []string{"claude"}}
 
 	t.Run("single candidate auto-selects", func(t *testing.T) {
-		got, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one}, "claude", false, true)
+		got, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one}, "claude", false, true, true)
 		if err != nil || got != one {
 			t.Errorf("expected auto-select; got %v, %v", got, err)
 		}
@@ -149,14 +181,24 @@ func TestPickJoinRun(t *testing.T) {
 	t.Run("single WIDENED candidate still prompts", func(t *testing.T) {
 		// Companion to the auto-select case. Attaching to another workspace's
 		// run means using that run's credentials, so it must be confirmed.
-		got, err := pickJoinRun(strings.NewReader("1\n"), io.Discard, []*run.Run{one}, "claude", true, true)
+		// Assert the picker actually ran (via its output), not just the return
+		// value — the return value alone is satisfied even if the widened
+		// guard is deleted and case 1 falls straight through to auto-select.
+		var out bytes.Buffer
+		got, err := pickJoinRun(strings.NewReader("1\n"), &out, []*run.Run{one}, "claude", true, true, true)
 		if err != nil || got != one {
 			t.Errorf("expected prompted selection; got %v, %v", got, err)
+		}
+		if !strings.Contains(out.String(), "No running runs in this workspace") {
+			t.Errorf("expected the widened picker to actually render; got %q", out.String())
+		}
+		if !strings.Contains(out.String(), "Select [1-1]:") {
+			t.Errorf("expected a selection prompt to actually be shown; got %q", out.String())
 		}
 	})
 
 	t.Run("non-TTY errors with the IDs", func(t *testing.T) {
-		_, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one, two}, "claude", false, false)
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one, two}, "claude", false, false, true)
 		if err == nil {
 			t.Fatal("expected an error without a TTY")
 		}
@@ -167,9 +209,30 @@ func TestPickJoinRun(t *testing.T) {
 		}
 	})
 
-	t.Run("zero candidates errors", func(t *testing.T) {
-		if _, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", false, true); err == nil {
-			t.Error("expected an error with no candidates")
+	t.Run("zero candidates, nothing running at all", func(t *testing.T) {
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", false, true, false)
+		if err == nil {
+			t.Fatal("expected an error with no candidates")
+		}
+		if !strings.Contains(err.Error(), "start one") {
+			t.Errorf("error should tell the user to start a run; got %q", err)
+		}
+	})
+
+	// Companion: candidates are empty either because nothing is running at
+	// all, or because something is running but can't host this agent. Those
+	// imply different next steps (start a run vs. recreate one with this
+	// agent), so the messages must differ.
+	t.Run("zero candidates, runs are running but none can host the agent", func(t *testing.T) {
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", false, true, true)
+		if err == nil {
+			t.Fatal("expected an error with no candidates")
+		}
+		if !strings.Contains(err.Error(), "agents:") {
+			t.Errorf("error should point at moat.yaml's agents: list; got %q", err)
+		}
+		if strings.Contains(err.Error(), "start one") {
+			t.Errorf("this case must not suggest starting a run; got %q", err)
 		}
 	})
 }

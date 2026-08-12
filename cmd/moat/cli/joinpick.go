@@ -47,6 +47,14 @@ func hostedAgents(r *run.Run) []string {
 // the current workspace. widened reports that no run in cwd qualified and the
 // search covered every running run — the caller must disclose that, because
 // attaching to another workspace's run means using that run's grants.
+//
+// Results are sorted newest-first, matching every other multi-match surface
+// in this CLI (resolve.go's SortRunsByCreatedAt). runs typically comes from
+// manager.List(), which iterates a map and is unordered per call — without
+// this sort, renderPicker's slice-index numbering would shuffle between
+// invocations, so a number the user remembers from one run of the picker
+// could attach to a different run (and, when widened, a different
+// workspace's grants) the next time.
 func inferJoinCandidates(runs []*run.Run, cwd, agentArg string, j provider.JoinableAgent) (candidates []*run.Run, widened bool) {
 	var all []*run.Run
 	for _, r := range runs {
@@ -58,6 +66,7 @@ func inferJoinCandidates(runs []*run.Run, cwd, agentArg string, j provider.Joina
 		}
 		all = append(all, r)
 	}
+	run.SortRunsByCreatedAt(all)
 
 	var local []*run.Run
 	for _, r := range all {
@@ -132,11 +141,23 @@ func readSelection(r io.Reader, n int) (int, error) {
 // A single candidate auto-selects UNLESS the search was widened past the
 // current workspace: attaching to another workspace's run silently borrows that
 // run's grants and network policy, so it is confirmed rather than assumed.
-func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg string, widened, isTTY bool) (*run.Run, error) {
+//
+// anyRunning distinguishes the two zero-candidate causes, which imply
+// different next steps: no running runs anywhere (start one) vs. running runs
+// exist but none can host agentArg (add it to moat.yaml's agents: list and
+// recreate). candidates alone can't tell these apart — by the time it is
+// empty, inferJoinCandidates has already filtered by capability across every
+// running run, local or not — so the caller must supply the distinction from
+// the unfiltered population.
+func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg string, widened, isTTY, anyRunning bool) (*run.Run, error) {
 	switch len(candidates) {
 	case 0:
-		return nil, fmt.Errorf("no running run can host %s in this workspace.\n"+
-			"Start one with `moat %s`, or run `moat list` to see what is running.", agentArg, agentArg)
+		if !anyRunning {
+			return nil, fmt.Errorf("no runs are running; start one with `moat %s`.", agentArg)
+		}
+		return nil, fmt.Errorf("no running run can host %s.\n"+
+			"Add %s to this project's moat.yaml `agents:` list and recreate the run, or run `moat list` to see what is running.",
+			agentArg, agentArg)
 	case 1:
 		if !widened {
 			return candidates[0], nil

@@ -156,9 +156,11 @@ func runJoin(cmd *cobra.Command, args []string) error {
 		if cwdErr != nil {
 			return fmt.Errorf("resolving working directory: %w", cwdErr)
 		}
-		candidates, widened := inferJoinCandidates(manager.List(), cwd, agentArg, joinable)
+		allRuns := manager.List()
+		candidates, widened := inferJoinCandidates(allRuns, cwd, agentArg, joinable)
+		anyRunning := len(filterRunning(allRuns)) > 0
 		picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, widened,
-			term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr))
+			term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), anyRunning)
 		if pickErr != nil {
 			return pickErr
 		}
