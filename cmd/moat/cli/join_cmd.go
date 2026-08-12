@@ -108,17 +108,15 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	}
 	defer manager.Close()
 
-	runID, err := resolveRunArgSingle(manager, runArg)
+	r, candidates, err := resolveRunningRunArg(manager, runArg)
 	if err != nil {
 		return err
 	}
-
-	r, gErr := manager.Get(runID)
-	if gErr != nil {
-		return gErr
-	}
-	if r.GetState() != run.StateRunning {
-		return fmt.Errorf("run %s is not running (state: %s)", runID, r.GetState())
+	if r == nil {
+		// Several running runs share this name. Task 17 routes these to the
+		// picker; until then, list them and ask for an ID.
+		printMatchingRuns(candidates, runArg)
+		return fmt.Errorf("name %q matches %d running runs; specify a run ID", runArg, len(candidates))
 	}
 
 	agent := provider.GetAgent(agentArg)
@@ -148,7 +146,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	// and headless paths need an index so console output lands in logs.<N>.jsonl.
 	// Do NOT defer release here — we call it explicitly before exitWithExecError
 	// so registry cleanup runs even when the agent exits with a non-zero code.
-	index, release, regErr := manager.RegisterJoinedAgent(runID)
+	index, release, regErr := manager.RegisterJoinedAgent(r.ID)
 
 	var execErr error
 	// Headless (--prompt with no TTY) vs interactive.
