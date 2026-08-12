@@ -41,7 +41,7 @@ func (m *Manager) Resolve(arg string) ([]*Run, error) {
 			}
 		}
 		if len(matches) > 0 {
-			sortRunsByCreatedAt(matches)
+			SortRunsByCreatedAt(matches)
 			return matches, nil
 		}
 		// Fall through to name match
@@ -59,12 +59,12 @@ func (m *Manager) Resolve(arg string) ([]*Run, error) {
 		return nil, fmt.Errorf("no run found matching %q\n\nRun 'moat list' to see available runs.", arg)
 	}
 
-	sortRunsByCreatedAt(matches)
+	SortRunsByCreatedAt(matches)
 	return matches, nil
 }
 
-// sortRunsByCreatedAt sorts runs newest first.
-func sortRunsByCreatedAt(runs []*Run) {
+// SortRunsByCreatedAt sorts runs newest first.
+func SortRunsByCreatedAt(runs []*Run) {
 	sort.Slice(runs, func(i, j int) bool {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})

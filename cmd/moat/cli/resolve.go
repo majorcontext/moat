@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -103,14 +102,14 @@ func resolveRunningFrom(matches []*run.Run, arg string) (*run.Run, []*run.Run, e
 	}
 	running := filterRunning(matches)
 	if len(running) == 0 {
-		sortRunsByCreatedAt(matches)
+		run.SortRunsByCreatedAt(matches)
 		r := matches[0]
 		return nil, nil, fmt.Errorf("run %s is not running (state: %s)", r.ID, r.GetState())
 	}
 	if len(running) == 1 {
 		return running[0], nil, nil
 	}
-	sortRunsByCreatedAt(running)
+	run.SortRunsByCreatedAt(running)
 	return nil, running, nil
 }
 
@@ -121,18 +120,6 @@ func resolveRunningRunArg(manager *run.Manager, arg string) (*run.Run, []*run.Ru
 		return nil, nil, err
 	}
 	return resolveRunningFrom(matches, arg)
-}
-
-// sortRunsByCreatedAt sorts runs newest first. manager.Resolve already
-// returns matches in this order, but resolveRunningFrom is also exercised
-// directly with hand-built slices (see resolve_test.go), and filtering
-// itself doesn't change ordering — so this keeps both entry points
-// consistent. (internal/run has an equivalent helper, but it is unexported
-// and not reachable from this package.)
-func sortRunsByCreatedAt(matches []*run.Run) {
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].CreatedAt.After(matches[j].CreatedAt)
-	})
 }
 
 // printMatchingRuns prints a table of matching runs to stderr.
