@@ -21,8 +21,11 @@ func (p *OAuthProvider) JoinCommand(opts provider.JoinOpts) ([]string, error) {
 }
 
 // IdentifiesAs reports whether a run with the given recorded Agent field was
-// created by the claude provider. cfg.Agent defaults to the provider name
-// ("claude") but is "claude-code" when set explicitly in moat.yaml.
+// created by the claude provider. This serves only the pre-upgrade fallback path
+// in `moat join` — runs created before joinable_agents existed. Runs created
+// since are matched against their persisted capability set instead.
+// cfg.Agent defaults to the provider name ("claude") but is "claude-code" when
+// set explicitly in moat.yaml.
 func (p *OAuthProvider) IdentifiesAs(agent string) bool {
 	return agent == "claude" || agent == "claude-code"
 }
