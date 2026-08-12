@@ -127,6 +127,36 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	}
 }
 
+// agents: [claude, codex] expands to grants: [claude, openai] (Task 10). With
+// no openai credential stored, the user must be told at create time — the
+// capability set no longer silently excludes codex. DetectMissingGrants
+// validates every grant generically via credentialStoreKey + store.Get, so
+// this should already be covered with no production change.
+func TestDetectMissingGrantsCoversExpandedOpenAIGrant(t *testing.T) {
+	store := newGrantsTestStore(t)
+
+	missing := DetectMissingGrants([]string{"claude", "openai"}, nil, store)
+	found := false
+	for _, m := range missing {
+		if m.Grant == "openai" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("openai should be reported missing; got %+v", missing)
+	}
+
+	// Companion: with the credential present under the openai store key,
+	// nothing is reported.
+	withCred := newGrantsTestStore(t)
+	if err := withCred.Save(credential.Credential{Provider: credential.ProviderOpenAI, Token: "tok"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := DetectMissingGrants([]string{"openai"}, nil, withCred); len(got) != 0 {
+		t.Errorf("openai should not be reported when stored; got %+v", got)
+	}
+}
+
 func TestClassifyMissingReason(t *testing.T) {
 	cases := []struct {
 		name string
