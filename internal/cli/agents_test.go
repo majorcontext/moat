@@ -139,6 +139,41 @@ func TestResolveAgentField(t *testing.T) {
 	}
 }
 
+func TestResolveAgentFieldWithAgentsList(t *testing.T) {
+	tests := []struct {
+		name      string
+		agent     string
+		agents    []string
+		verb      string
+		wantAgent string
+		wantWarn  bool
+	}{
+		{"moat run falls back to agents[0]", "", []string{"claude", "codex"}, "", "claude", false},
+		{"list order decides the fallback", "", []string{"codex", "claude"}, "", "codex", false},
+		{"agent: still wins over agents[0]", "codex", []string{"claude", "codex"}, "", "codex", false},
+		{"verb still wins over both", "codex", []string{"claude", "codex"}, "claude", "claude", true},
+		{"agent: outside agents: warns", "gemini", []string{"claude", "codex"}, "", "gemini", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			orig := ui.Writer()
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(orig) })
+
+			cfg := &config.Config{Agent: tt.agent, Agents: tt.agents}
+			cli.ResolveAgentField(cfg, tt.verb)
+
+			if cfg.Agent != tt.wantAgent {
+				t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, tt.wantAgent)
+			}
+			if gotWarn := buf.Len() > 0; gotWarn != tt.wantWarn {
+				t.Errorf("warned = %v, want %v (output: %q)", gotWarn, tt.wantWarn, buf.String())
+			}
+		})
+	}
+}
+
 func TestExpandAgents(t *testing.T) {
 	cfg := &config.Config{Agents: []string{"claude", "codex"}}
 	if err := cli.ExpandAgents(cfg); err != nil {

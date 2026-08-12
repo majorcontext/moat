@@ -79,26 +79,51 @@ func ValidateAgent(cfg *config.Config) {
 	cfg.Agent = ""
 }
 
-// ResolveAgentField normalizes cfg.Agent. verb is the provider name the user
-// typed (e.g. "claude"), or "" for `moat run`, which has no verb.
+// ResolveAgentField normalizes cfg.Agent to name the run's PRIMARY agent — the
+// one launched in the foreground that owns the container lifecycle. Every other
+// entry in cfg.Agents is provisioned but reachable only via `moat join`.
 //
-// The verb always wins when there is one: if the user typed `moat claude`, the
-// run is claude regardless of what moat.yaml says. Before this, a moat.yaml
-// value silently overrode the command line, so `moat claude` could record a run
-// as codex.
+// One rule: the CLI verb always names the primary when there is one; otherwise
+// `agent:` names it; if neither is set, `moat run` falls back to Agents[0].
+// verb is "" for `moat run`.
 func ResolveAgentField(cfg *config.Config, verb string) {
 	if cfg == nil {
 		return
 	}
 	ValidateAgent(cfg)
-	if verb == "" {
+
+	if cfg.Agent != "" && len(cfg.Agents) > 0 && !agentsListContains(cfg.Agents, cfg.Agent) {
+		ui.Warnf("moat.yaml `agent: %s` is not in `agents: %v`; it will run as the primary but "+
+			"add it to `agents:` so its dependencies and grants are provisioned.",
+			cfg.Agent, cfg.Agents)
+	}
+
+	if verb != "" {
+		if cfg.Agent != "" && CanonicalAgent(cfg.Agent) != CanonicalAgent(verb) {
+			ui.Warnf("moat.yaml `agent: %s` conflicts with `moat %s` — using %s.",
+				cfg.Agent, verb, verb)
+		}
+		cfg.Agent = verb
 		return
 	}
-	if cfg.Agent != "" && CanonicalAgent(cfg.Agent) != CanonicalAgent(verb) {
-		ui.Warnf("moat.yaml `agent: %s` conflicts with `moat %s` — using %s.",
-			cfg.Agent, verb, verb)
+
+	// No verb: `moat run`. Fall back to the first entry in agents:.
+	if cfg.Agent == "" && len(cfg.Agents) > 0 {
+		cfg.Agent = cfg.Agents[0]
 	}
-	cfg.Agent = verb
+}
+
+// agentsListContains reports whether agents contains agent, comparing by
+// canonical name so documented variants (claude-code) and registry aliases
+// (openai) match their canonical entry.
+func agentsListContains(agents []string, agent string) bool {
+	want := CanonicalAgent(agent)
+	for _, a := range agents {
+		if CanonicalAgent(a) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ExpandAgents expands moat.yaml's `agents:` list into the dependencies,
