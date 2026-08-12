@@ -337,14 +337,34 @@ func TestDualAgentJoin_E2E(t *testing.T) {
 	// Real moat binary, so the full CLI path is exercised (agent/provider
 	// resolution, validateJoinAgent, ExecInteractive) — same approach as
 	// TestJoinHeadless. Headless (-p) avoids needing a pty.
+	//
+	// Two checks per join, and both are load-bearing:
+	//   - Negative: the output must not contain "cannot host" — the literal
+	//     string validateJoinAgent (join_cmd.go) emits when the gate refuses
+	//     an agent that isn't in JoinableAgents.
+	//   - Positive: the output must be non-empty. Without this, the negative
+	//     check alone passes vacuously if the subprocess never launches, or
+	//     the joined process crashes before printing anything — out stays
+	//     "", and "" plainly does not contain "cannot host" either. Fatal,
+	//     not merely logged: in 3/3 real runs this captured genuine evidence
+	//     the join reached a live process (claude's real 401 from Anthropic;
+	//     codex's own trust-directory check), so it carries no flake risk
+	//     here — see runJoinHeadlessCLI's doc comment for what "output"
+	//     means and why it's safe to require.
 	claudeOut := runJoinHeadlessCLI(t, moatBin, r.ID, "claude", "say OK and nothing else")
 	if strings.Contains(claudeOut, "cannot host") {
 		t.Errorf("join claude was refused by the capability gate despite being in JoinableAgents:\n%s", claudeOut)
+	}
+	if strings.TrimSpace(claudeOut) == "" {
+		t.Fatalf("join claude produced no output at all — cannot tell whether the gate passed or the subprocess never ran")
 	}
 
 	codexOut := runJoinHeadlessCLI(t, moatBin, r.ID, "codex", "say OK and nothing else")
 	if strings.Contains(codexOut, "cannot host") {
 		t.Errorf("join codex was refused by the capability gate despite being in JoinableAgents:\n%s", codexOut)
+	}
+	if strings.TrimSpace(codexOut) == "" {
+		t.Fatalf("join codex produced no output at all — cannot tell whether the gate passed or the subprocess never ran")
 	}
 
 	// --- Assertion (3a): no new container across either join ---
@@ -374,28 +394,39 @@ func TestDualAgentJoin_E2E(t *testing.T) {
 			len(primaryLogs), primaryLogs)
 	}
 
-	// Informational only: real evidence the joins reached a live process
-	// inside the container, not just the gate check. Not asserted as fatal
-	// because a joined agent that fails auth may write only to stderr, which
-	// runJoinHeadless (join_cmd.go) does not tee into logs.<N>.jsonl — that's
-	// a pre-existing, out-of-scope asymmetry, not something this test owns.
-	if strings.TrimSpace(claudeOut) == "" {
-		t.Log("join claude produced no captured output (fake credentials — may have failed before printing anything)")
-	}
-	if strings.TrimSpace(codexOut) == "" {
-		t.Log("join codex produced no captured output (fake credentials — may have failed before printing anything)")
-	}
+	// Deliberately NOT asserted: the on-disk logs.<N>.jsonl file. That would
+	// be a stronger check in principle (proof the output was actually teed
+	// to storage, not just visible to this test's own subprocess capture),
+	// but runJoinHeadless (join_cmd.go) only tees the joined process's stdout
+	// into logs.<N>.jsonl, not its stderr — and claude/codex may write an
+	// auth failure to either stream. Asserting on logs.<N>.jsonl here would
+	// couple this test to that pre-existing, out-of-scope asymmetry. The
+	// fatal non-empty checks above already use the reliable signal: the
+	// `moat join` subprocess's own combined stdout+stderr, captured directly
+	// by runJoinHeadlessCLI regardless of which stream the joined agent used.
 }
 
 // runJoinHeadlessCLI runs `moat join <runID> <agent> -p <prompt>` via the
-// real moat binary and returns its combined stdout+stderr. It deliberately
-// never fails the test on a non-zero exit: the joined agents in this test
-// carry fake credentials, so a failed auth attempt is expected and is not
-// what this test is checking. Bounded to 90s so a CLI that unexpectedly
-// blocks on interactive auth (rather than failing fast) doesn't hang the
-// suite — moat join runs headless (no TTY), which should prevent that, but
-// the bound makes the failure mode "test times out with a clear log" rather
-// than "test hangs forever."
+// real moat binary and returns its combined stdout+stderr — the `moat join`
+// process's own streams, which is why it reliably captures the joined
+// agent's output regardless of whether that agent wrote to its own stdout or
+// stderr (see the comment above the call sites for why that distinction
+// matters). The caller, not this helper, decides what the returned string
+// must contain; this helper only runs the process and reports what happened.
+//
+// It deliberately does NOT fail the test on a non-zero exit: the joined
+// agents in this test carry fake credentials, so a failed auth attempt is
+// expected and is not what this test is checking — a real exit code from a
+// real process that got past the gate is success, not failure, for this
+// test's purposes. (What the caller DOES require is that some output was
+// produced at all — see the fatal checks at the call sites — which is a
+// different, and necessary, signal from the exit code.)
+//
+// Bounded to 90s so a CLI that unexpectedly blocks on interactive auth
+// (rather than failing fast) doesn't hang the suite — moat join runs
+// headless (no TTY), which should prevent that, but the bound makes the
+// failure mode "test times out with a clear log" rather than "test hangs
+// forever."
 func runJoinHeadlessCLI(t *testing.T, moatBin, runID, agent, prompt string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
