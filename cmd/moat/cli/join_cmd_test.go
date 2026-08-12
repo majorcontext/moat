@@ -24,48 +24,71 @@ func (f fakeJoinable) IdentifiesAs(agent string) bool {
 
 func TestValidateJoinAgent(t *testing.T) {
 	claude := fakeJoinable{names: []string{"claude", "claude-code"}}
+	codex := fakeJoinable{names: []string{"codex"}}
 
 	tests := []struct {
-		name    string
-		run     *run.Run
-		agent   string
-		wantErr bool
-		errHas  string
+		name      string
+		run       *run.Run
+		agent     string
+		canonical string
+		joinable  fakeJoinable
+		wantErr   bool
+		errHas    string
 	}{
 		{
-			name:  "member of the capability set is accepted",
-			run:   &run.Run{ID: "run_1", JoinableAgents: []string{"claude"}},
-			agent: "claude",
+			name:     "member of the capability set is accepted",
+			run:      &run.Run{ID: "run_1", JoinableAgents: []string{"claude"}},
+			agent:    "claude",
+			joinable: claude,
 		},
 		{
-			name:    "non-member is rejected even when the agent string matches",
-			run:     &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{"codex"}},
-			agent:   "claude",
-			wantErr: true,
-			errHas:  "codex",
+			name:     "non-member is rejected even when the agent string matches",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{"codex"}},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
+			errHas:   "codex",
 		},
 		{
-			name:    "empty set refuses",
-			run:     &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{}},
-			agent:   "claude",
-			wantErr: true,
+			name:     "empty set refuses",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{}},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
 		},
 		{
-			name:  "nil set falls back and accepts a matching agent string",
-			run:   &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: nil},
-			agent: "claude",
+			name:     "nil set falls back and accepts a matching agent string",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: nil},
+			agent:    "claude",
+			joinable: claude,
 		},
 		{
-			name:    "nil set falls back and refuses a stale agent string",
-			run:     &run.Run{ID: "run_1", Agent: "vibrant-code", JoinableAgents: nil},
-			agent:   "claude",
-			wantErr: true,
-			errHas:  "Recreate the run",
+			name:     "nil set falls back and refuses a stale agent string",
+			run:      &run.Run{ID: "run_1", Agent: "vibrant-code", JoinableAgents: nil},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
+			errHas:   "Recreate the run",
+		},
+		// Regression: `moat join <run> openai` must keep working. agentArg
+		// stays the alias "openai" (parseJoinArgs/runJoin never rewrite it —
+		// only the remedy text uses the canonical name), while JoinableAgents
+		// holds the canonical "codex" recorded at provisioning time. The
+		// direct `a == agentArg` comparison can never match here ("codex" !=
+		// "openai"); acceptance depends entirely on the `j.IdentifiesAs(a)`
+		// branch. A prior review believed that branch was unreachable and
+		// proposed deleting it — this case is what proves it's load-bearing.
+		{
+			name:      "alias arg (openai) matches a canonical member via IdentifiesAs",
+			run:       &run.Run{ID: "run_1", JoinableAgents: []string{"codex"}},
+			agent:     "openai",
+			canonical: "codex",
+			joinable:  codex,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateJoinAgent(claude, tt.agent, tt.run)
+			err := validateJoinAgent(tt.joinable, tt.agent, tt.canonical, tt.run)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateJoinAgent() error = %v, wantErr %v", err, tt.wantErr)
 			}

@@ -149,15 +149,20 @@ func readSelection(r io.Reader, n int) (int, error) {
 // empty, inferJoinCandidates has already filtered by capability across every
 // running run, local or not — so the caller must supply the distinction from
 // the unfiltered population.
-func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg string, widened, isTTY, anyRunning bool) (*run.Run, error) {
+//
+// canonical is agentArg resolved through registry aliases (openai -> codex);
+// the diagnosis halves of the errors below keep agentArg (what the user
+// typed), the remedy halves use canonical, so a suggested `moat <name>` or
+// `agents: [<name>]` names a real command/value.
+func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg, canonical string, widened, isTTY, anyRunning bool) (*run.Run, error) {
 	switch len(candidates) {
 	case 0:
 		if !anyRunning {
-			return nil, fmt.Errorf("no runs are running; start one with `moat %s`.", agentArg)
+			return nil, fmt.Errorf("no runs are running; start one with `moat %s`.", canonical)
 		}
 		return nil, fmt.Errorf("no running run can host %s.\n"+
 			"Add %s to this project's moat.yaml `agents:` list and recreate the run, or run `moat list` to see what is running.",
-			agentArg, agentArg)
+			agentArg, canonical)
 	case 1:
 		if !widened {
 			return candidates[0], nil

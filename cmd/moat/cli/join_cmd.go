@@ -64,7 +64,13 @@ func init() {
 // legacy agent-string check; an EMPTY set is a real answer ("nothing joinable
 // here") and must not fall back. That distinction is why the metadata field is
 // persisted without omitempty.
-func validateJoinAgent(j provider.JoinableAgent, agentArg string, r *run.Run) error {
+//
+// canonical is agentArg resolved through registry aliases (openai -> codex).
+// The diagnosis half of each error keeps agentArg, the string the user typed,
+// so they recognize what they asked for; the remedy half uses canonical, so a
+// suggested `moat <name>` or `agents: [<name>]` names a real command/value —
+// `moat openai` is not a command.
+func validateJoinAgent(j provider.JoinableAgent, agentArg, canonical string, r *run.Run) error {
 	if r.JoinableAgents != nil {
 		for _, a := range r.JoinableAgents {
 			if a == agentArg || j.IdentifiesAs(a) {
@@ -77,7 +83,7 @@ func validateJoinAgent(j provider.JoinableAgent, agentArg string, r *run.Run) er
 		}
 		return fmt.Errorf("run %s cannot host %s (provisioned agents: %s).\n"+
 			"Add %s to this project's moat.yaml `agents:` list and recreate the run.",
-			r.ID, agentArg, hosted, agentArg)
+			r.ID, agentArg, hosted, canonical)
 	}
 
 	// Pre-upgrade run: no capability set was ever recorded.
@@ -86,7 +92,7 @@ func validateJoinAgent(j provider.JoinableAgent, agentArg string, r *run.Run) er
 	}
 	return fmt.Errorf("run %s was created before capability tracking and records agent %q.\n"+
 		"Recreate the run to join it (moat stop %s && moat %s).",
-		r.ID, r.Agent, r.ID, agentArg)
+		r.ID, r.Agent, r.ID, canonical)
 }
 
 // joinableAgentNames returns the sorted names of registered agents that support
@@ -154,6 +160,12 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent %q does not support join yet", agentArg)
 	}
+	// canonical is what the user typed, resolved through registry aliases
+	// (openai -> codex) — agentArg itself must stay as typed for the
+	// membership checks below (JoinableAgents / IdentifiesAs match against
+	// the canonical name while agentArg may be the alias), but any remedy
+	// text suggesting a command must say `moat codex`, not `moat openai`.
+	canonical := agent.Name()
 
 	var r *run.Run
 	if runArg == "" {
@@ -164,7 +176,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 		allRuns := manager.List()
 		candidates, widened := inferJoinCandidates(allRuns, cwd, agentArg, joinable)
 		anyRunning := len(filterRunning(allRuns)) > 0
-		picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, widened,
+		picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, canonical, widened,
 			term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), anyRunning)
 		if pickErr != nil {
 			return pickErr
@@ -185,7 +197,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 			// the user named a run explicitly, so there was no workspace-widening
 			// search to disclose. anyRunning=true: resolveRunningRunArg only
 			// returns a candidate list when more than one running run matched.
-			picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, false,
+			picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, canonical, false,
 				term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), true)
 			if pickErr != nil {
 				return pickErr
@@ -194,7 +206,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if valErr := validateJoinAgent(joinable, agentArg, r); valErr != nil {
+	if valErr := validateJoinAgent(joinable, agentArg, canonical, r); valErr != nil {
 		return valErr
 	}
 

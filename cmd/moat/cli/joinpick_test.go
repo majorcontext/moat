@@ -172,7 +172,7 @@ func TestPickJoinRun(t *testing.T) {
 	two := &run.Run{ID: "run_two", Name: "other", JoinableAgents: []string{"claude"}}
 
 	t.Run("single candidate auto-selects", func(t *testing.T) {
-		got, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one}, "claude", false, true, true)
+		got, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one}, "claude", "claude", false, true, true)
 		if err != nil || got != one {
 			t.Errorf("expected auto-select; got %v, %v", got, err)
 		}
@@ -185,7 +185,7 @@ func TestPickJoinRun(t *testing.T) {
 		// value — the return value alone is satisfied even if the widened
 		// guard is deleted and case 1 falls straight through to auto-select.
 		var out bytes.Buffer
-		got, err := pickJoinRun(strings.NewReader("1\n"), &out, []*run.Run{one}, "claude", true, true, true)
+		got, err := pickJoinRun(strings.NewReader("1\n"), &out, []*run.Run{one}, "claude", "claude", true, true, true)
 		if err != nil || got != one {
 			t.Errorf("expected prompted selection; got %v, %v", got, err)
 		}
@@ -198,7 +198,7 @@ func TestPickJoinRun(t *testing.T) {
 	})
 
 	t.Run("non-TTY errors with the IDs", func(t *testing.T) {
-		_, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one, two}, "claude", false, false, true)
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one, two}, "claude", "claude", false, false, true)
 		if err == nil {
 			t.Fatal("expected an error without a TTY")
 		}
@@ -210,7 +210,7 @@ func TestPickJoinRun(t *testing.T) {
 	})
 
 	t.Run("zero candidates, nothing running at all", func(t *testing.T) {
-		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", false, true, false)
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", "claude", false, true, false)
 		if err == nil {
 			t.Fatal("expected an error with no candidates")
 		}
@@ -224,7 +224,7 @@ func TestPickJoinRun(t *testing.T) {
 	// imply different next steps (start a run vs. recreate one with this
 	// agent), so the messages must differ.
 	t.Run("zero candidates, runs are running but none can host the agent", func(t *testing.T) {
-		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", false, true, true)
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", "claude", false, true, true)
 		if err == nil {
 			t.Fatal("expected an error with no candidates")
 		}
@@ -233,6 +233,38 @@ func TestPickJoinRun(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "start one") {
 			t.Errorf("this case must not suggest starting a run; got %q", err)
+		}
+	})
+
+	// I3 regression: `moat join openai` must not suggest running `moat
+	// openai` — that's not a command. The diagnosis half of each message
+	// keeps agentArg (what the user typed); the remedy half (the `moat
+	// <name>` / `agents: [<name>]` suggestion) must use the canonical name.
+	t.Run("zero candidates, remedy names the canonical agent, not the alias", func(t *testing.T) {
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "openai", "codex", false, true, false)
+		if err == nil {
+			t.Fatal("expected an error with no candidates")
+		}
+		if !strings.Contains(err.Error(), "moat codex") {
+			t.Errorf("error should suggest `moat codex`; got %q", err)
+		}
+		if strings.Contains(err.Error(), "moat openai") {
+			t.Errorf("error must not suggest the non-existent `moat openai`; got %q", err)
+		}
+	})
+
+	// Companion: the "runs exist but none can host it" remedy must also use
+	// the canonical name, while the diagnosis half keeps the typed alias.
+	t.Run("zero candidates but running, remedy names the canonical agent, diagnosis names the alias", func(t *testing.T) {
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "openai", "codex", false, true, true)
+		if err == nil {
+			t.Fatal("expected an error with no candidates")
+		}
+		if !strings.Contains(err.Error(), "host openai") {
+			t.Errorf("diagnosis should name what the user typed (openai); got %q", err)
+		}
+		if !strings.Contains(err.Error(), "Add codex to") {
+			t.Errorf("remedy should name the canonical agent (codex); got %q", err)
 		}
 	})
 }
@@ -247,7 +279,7 @@ func TestTwoArgMultiMatchUsesPicker(t *testing.T) {
 	b := &run.Run{ID: "run_b", Name: "moat-dev", State: run.StateRunning, JoinableAgents: []string{"claude"}}
 
 	// TTY: selecting 2 picks the second candidate.
-	got, err := pickJoinRun(strings.NewReader("2\n"), io.Discard, []*run.Run{a, b}, "claude", false, true, true)
+	got, err := pickJoinRun(strings.NewReader("2\n"), io.Discard, []*run.Run{a, b}, "claude", "claude", false, true, true)
 	if err != nil {
 		t.Fatalf("pickJoinRun: %v", err)
 	}
@@ -256,7 +288,7 @@ func TestTwoArgMultiMatchUsesPicker(t *testing.T) {
 	}
 
 	// Companion: no TTY still errors with both IDs listed.
-	_, err = pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{a, b}, "claude", false, false, true)
+	_, err = pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{a, b}, "claude", "claude", false, false, true)
 	if err == nil {
 		t.Fatal("non-TTY should error rather than prompt")
 	}
