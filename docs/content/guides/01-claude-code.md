@@ -92,6 +92,38 @@ API key is valid.
 
 You can also set `ANTHROPIC_API_KEY` in your environment before running the command.
 
+### Using both grants
+
+Grant `claude` and `anthropic` together when Claude Code should run on your
+subscription while scripts, SDK calls, and agent-authored subagents use a
+metered API key.
+
+The two credentials are kept apart by scope. `ANTHROPIC_API_KEY` is not placed
+in the container environment — Claude Code prefers it over the OAuth login and
+would move the whole session onto API billing. Instead Moat stages a file and
+sets `BASH_ENV` to point at it, so every shell command receives the key while
+Claude Code, a native binary that ignores `BASH_ENV`, does not. A `claude()`
+guard function keeps nested `claude` invocations on OAuth.
+
+Inside the container, send the key explicitly so the proxy injects the API key
+rather than the OAuth token:
+
+```bash
+curl https://api.anthropic.com/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-sonnet-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+The Anthropic SDKs read `ANTHROPIC_API_KEY` themselves and need no changes. Two
+limits are worth knowing: `sh`/dash ignores `BASH_ENV`, so a command launched
+with `sh -c` will not see the key; and the guard function is a convenience, not
+a boundary — invoking `claude` by absolute path bypasses it.
+
+Granting `anthropic` on its own is unaffected: the key is exported normally and
+Claude Code uses it.
+
 ### How credentials are injected
 
 The actual credential is never in the container environment. Moat's proxy intercepts requests to Anthropic's API and injects the real token at the network layer. See [Credential management](../concepts/02-credentials.md) for details.

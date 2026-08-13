@@ -30,11 +30,22 @@ type BuildOptions struct {
 	// DockerMode is the resolved Docker mode ("host"/"dind"). Empty means Docker
 	// is not enabled for this run.
 	DockerMode deps.DockerMode
+	// AnthropicKeyEnv is the environment variable holding the shell-scoped
+	// Anthropic API key. Set only when the key is exported via BASH_ENV rather
+	// than container-wide (both "claude" and "anthropic" grants active). Empty
+	// means there is nothing special to explain.
+	AnthropicKeyEnv string
 }
 
 // BuildFromConfig constructs a RuntimeContext from a moat config, run ID, and
 // resolved run options.
+// A nil cfg means the workspace has no moat.yaml. That is a valid run — grants
+// can come entirely from --grant flags — and resolved facts in opts may still
+// be worth rendering, so it is treated as an empty config rather than refused.
 func BuildFromConfig(cfg *config.Config, runID string, opts BuildOptions) *RuntimeContext {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
 	workspaceMode := opts.WorkspaceMode
 	if workspaceMode == "" {
 		workspaceMode = config.WorkspaceModeBind
@@ -49,6 +60,10 @@ func BuildFromConfig(cfg *config.Config, runID string, opts BuildOptions) *Runti
 
 	if opts.DockerMode != "" {
 		rc.Docker = &Docker{Mode: string(opts.DockerMode)}
+	}
+
+	if opts.AnthropicKeyEnv != "" {
+		rc.AnthropicAPI = &AnthropicAPI{KeyEnv: opts.AnthropicKeyEnv}
 	}
 
 	// Grants.

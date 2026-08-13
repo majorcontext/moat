@@ -22,6 +22,18 @@ type RuntimeContext struct {
 	NetworkPolicy   *NetworkPolicy
 	MCPServers      []MCPServer
 	HasDependencies bool // true when the config declares any dependencies
+
+	// AnthropicAPI is non-nil when an Anthropic API key is available to shell
+	// commands but deliberately absent from the container environment.
+	AnthropicAPI *AnthropicAPI
+}
+
+// AnthropicAPI describes shell-scoped Anthropic API access. It is only set
+// when a run holds both the "claude" and "anthropic" grants, where the key is
+// exported via BASH_ENV so Claude Code's own OAuth login is not overridden.
+type AnthropicAPI struct {
+	// KeyEnv is the environment variable holding the (placeholder) API key.
+	KeyEnv string
 }
 
 // Docker describes Docker access available inside the container.
@@ -110,6 +122,22 @@ func Render(rc *RuntimeContext) string {
 		}
 	}
 
+	// Anthropic API access (shell-scoped key).
+	if rc.AnthropicAPI != nil {
+		b.WriteString("\n## Calling the Anthropic API\n\n")
+		b.WriteString("An Anthropic API key is available for programmatic calls (scripts, SDKs,\n")
+		b.WriteString("subagents you write). It is exported to shell commands via BASH_ENV, not to\n")
+		b.WriteString("the global environment.\n\n")
+		fmt.Fprintf(&b, "- `%s` holds a placeholder. The real key is injected by the proxy at\n", rc.AnthropicAPI.KeyEnv)
+		b.WriteString("  the network layer — this is normal, don't try to \"fix\" it.\n")
+		fmt.Fprintf(&b, "- Send it explicitly: `-H \"x-api-key: $%s\"`, or use the Anthropic SDK,\n", rc.AnthropicAPI.KeyEnv)
+		b.WriteString("  which reads the variable itself.\n")
+		b.WriteString("- Do not export it globally or write it into a shell profile. Claude Code\n")
+		b.WriteString("  authenticates separately and must not see this variable.\n\n")
+		b.WriteString("A 429 from api.anthropic.com means the request used the wrong credential —\n")
+		b.WriteString("send the `x-api-key` header as above.\n")
+	}
+
 	// Services.
 	if len(rc.Services) > 0 {
 		b.WriteString("\n## Services\n\n")
@@ -191,7 +219,9 @@ func Render(rc *RuntimeContext) string {
 	// Run Metadata.
 	b.WriteString("\n## Run Metadata\n\n")
 	fmt.Fprintf(&b, "- Run ID: %s\n", rc.RunID)
-	fmt.Fprintf(&b, "- Agent: %s\n", rc.Agent)
+	if rc.Agent != "" {
+		fmt.Fprintf(&b, "- Agent: %s\n", rc.Agent)
+	}
 
 	// Documentation — always-present index plus context-specific references.
 	b.WriteString("\n## Documentation\n\n")

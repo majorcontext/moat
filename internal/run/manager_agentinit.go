@@ -228,7 +228,7 @@ func buildMCPRelayServers(mcps []config.MCPServerConfig, proxyPort int, authToke
 // bypass runs, persisting bypass-permissions mode). claude.mcp does not support
 // grants, so its local-MCP build is a plain conversion. openCredStore must be
 // non-nil when needsClaudeInit is true; claudeSettings may be nil.
-func (m *Manager) setupClaudeStaging(ctx context.Context, claudeProvider provider.AgentProvider, opts Options, r *Run, needsClaudeInit, hasPlugins, hasClaudeCode bool, claudeSettings *claude.Settings, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
+func (m *Manager) setupClaudeStaging(ctx context.Context, claudeProvider provider.AgentProvider, opts Options, r *Run, needsClaudeInit, hasPlugins, hasClaudeCode, scopeAnthropicKeyToShell bool, claudeSettings *claude.Settings, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
 	// Build the proxy-relay MCP server config for .claude.json.
 	var claudeMCPs []config.MCPServerConfig
 	if opts.Config != nil {
@@ -281,6 +281,8 @@ func (m *Manager) setupClaudeStaging(ctx context.Context, claudeProvider provide
 		LocalMCPServers:  claudeLocalMCP,
 		SubscriptionType: claudeSubType,
 		RateLimitTier:    claudeRateTier,
+
+		ScopeAnthropicKeyToShell: scopeAnthropicKeyToShell,
 		// HostConfig is read automatically by the provider if nil
 	})
 	if prepErr != nil {
