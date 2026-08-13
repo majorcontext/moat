@@ -131,17 +131,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		cfg = wtCfg
 	}
 
-	// Expand agents: into dependencies/grants/network hosts before the "Apply
-	// config defaults" block below reads cfg.Grants into wtFlags.Grants — same
-	// pattern as moat run (cmd/moat/cli/run.go). derivedGrants is returned
-	// rather than merged into cfg.Grants by ExpandAgents itself (see its doc
-	// comment), so it's combined into the default grants list explicitly
-	// below.
-	derivedGrants, err := intcli.ExpandAgents(cfg)
-	if err != nil {
-		return err
-	}
-
 	// Check for active run in this worktree
 	manager, err := run.NewManager()
 	if err != nil {
@@ -160,28 +149,15 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		wtFlags.Name = result.RunName
 	}
 
-	// Apply config defaults (same pattern as moat run)
-	if cfg != nil {
-		if len(wtFlags.Grants) == 0 {
-			grants := append([]string{}, cfg.Grants...)
-			grants = append(grants, derivedGrants...)
-			if len(grants) > 0 {
-				wtFlags.Grants = grants
-			}
-		}
-		// Write derived grants back into cfg.Grants now that the defaulting
-		// block above has already read cfg.Grants into wtFlags.Grants — see
-		// intcli.AppendDerivedGrants' doc comment for why this must run after,
-		// not before. cfg.Grants has its own direct readers downstream
-		// (ShouldSyncCodexLogs, ShouldSyncGeminiLogs, buildLocalMCPConfig's
-		// grant validation) that never see wtFlags.Grants.
-		intcli.AppendDerivedGrants(cfg, derivedGrants)
-		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
-			containerCmd = cfg.Command
-		}
-		if cfg.Sandbox == "none" && !wtFlags.NoSandbox {
-			wtFlags.NoSandbox = true
-		}
+	// Apply config defaults: agents: expansion, grants, and command (same
+	// pattern as moat run). See intcli.ApplyAgentDefaults for the
+	// ExpandAgents → grants-merge → AppendDerivedGrants ordering invariant
+	// this preserves.
+	if err = intcli.ApplyAgentDefaults(cfg, &wtFlags.Grants, &containerCmd); err != nil {
+		return err
+	}
+	if cfg != nil && cfg.Sandbox == "none" && !wtFlags.NoSandbox {
+		wtFlags.NoSandbox = true
 	}
 
 	// Determine interactive mode from config

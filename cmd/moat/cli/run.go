@@ -111,44 +111,19 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Expand agents: into dependencies/grants/network hosts before the
-	// "Apply config defaults" block below reads cfg.Grants into runFlags.Grants
-	// — an expansion that lands after would never reach the grants flag (see
-	// intcli.ExpandAgents doc comment for why ordering matters here).
-	//
-	// derivedGrants is returned rather than merged into cfg.Grants by
-	// ExpandAgents itself — see its doc comment — so it's combined into the
-	// default grants list explicitly below.
-	derivedGrants, err := intcli.ExpandAgents(cfg)
-	if err != nil {
-		return err
-	}
-
 	// Determine agent name: --name flag > config.Name > random
 	if runFlags.Name == "" && cfg != nil && cfg.Name != "" {
 		runFlags.Name = cfg.Name
 	}
 	// Random name generation happens in manager.Create if still empty
 
-	// Apply config defaults
+	// Apply config defaults: agents: expansion, grants, and command. See
+	// intcli.ApplyAgentDefaults for the ExpandAgents → grants-merge →
+	// AppendDerivedGrants ordering invariant this preserves.
+	if err = intcli.ApplyAgentDefaults(cfg, &runFlags.Grants, &containerCmd); err != nil {
+		return err
+	}
 	if cfg != nil {
-		if len(runFlags.Grants) == 0 {
-			grants := append([]string{}, cfg.Grants...)
-			grants = append(grants, derivedGrants...)
-			if len(grants) > 0 {
-				runFlags.Grants = grants
-			}
-		}
-		// Write derived grants back into cfg.Grants now that the defaulting
-		// block above has already read cfg.Grants into runFlags.Grants — see
-		// intcli.AppendDerivedGrants' doc comment for why this must run after,
-		// not before. cfg.Grants has its own direct readers downstream
-		// (ShouldSyncCodexLogs, ShouldSyncGeminiLogs, buildLocalMCPConfig's
-		// grant validation) that never see runFlags.Grants.
-		intcli.AppendDerivedGrants(cfg, derivedGrants)
-		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
-			containerCmd = cfg.Command
-		}
 		// Check sandbox setting from config
 		if cfg.Sandbox == "none" && !runFlags.NoSandbox {
 			runFlags.NoSandbox = true

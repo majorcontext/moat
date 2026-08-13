@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/storage"
 )
 
@@ -64,6 +65,46 @@ func TestComputeJoinableAgents(t *testing.T) {
 				t.Errorf("computeJoinableAgents() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestAgentCLIDepMatchesAgentRuntimeProviders guards agentCLIDep against
+// drift: it's a hand-maintained map that duplicates information each
+// AgentRuntime provider already exposes, so a new provider whose author
+// forgets an entry here would silently never be joinable (see the doc
+// comment on agentCLIDep). This enumerates the actual registry — via
+// provider.Agents(), populated by production init() side effects, not a
+// restated hardcoded list — so it can't drift in lockstep with the map it's
+// checking.
+func TestAgentCLIDepMatchesAgentRuntimeProviders(t *testing.T) {
+	// pi implements provider.AgentProvider but not provider.AgentRuntime (see
+	// internal/providers/pi/provider.go): it can't appear in moat.yaml
+	// `agents:`, but it does track a CLI dependency for join purposes. That's
+	// an intentional, documented exception, not drift.
+	exceptions := map[string]bool{"pi": true}
+
+	runtimeAgents := map[string]bool{}
+	for _, ap := range provider.Agents() {
+		if _, ok := ap.(provider.AgentRuntime); ok {
+			runtimeAgents[ap.Name()] = true
+		}
+	}
+	if len(runtimeAgents) == 0 {
+		t.Fatal("no AgentRuntime providers found in the registry — provider init() side effects didn't run; " +
+			"is internal/providers still blank-imported from internal/run?")
+	}
+
+	for name := range runtimeAgents {
+		if _, ok := agentCLIDep[name]; !ok {
+			t.Errorf("provider %q implements provider.AgentRuntime but has no agentCLIDep entry — "+
+				"moat join will wrongly report it as never provisioned", name)
+		}
+	}
+	for name := range agentCLIDep {
+		if !runtimeAgents[name] && !exceptions[name] {
+			t.Errorf("agentCLIDep[%q] has no registered provider.AgentRuntime provider — "+
+				"stale entry from a removed/renamed provider?", name)
+		}
 	}
 }
 

@@ -228,6 +228,26 @@ func TestAll(t *testing.T) {
 	}
 }
 
+func TestAgentAliases(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
+	Clear()
+	defer Clear()
+
+	Register(&mockAgentProvider{mockProvider{name: "codex"}})
+	Register(&mockProvider{name: "gitlab"})
+
+	RegisterAlias("openai", "codex") // alias to an agent provider
+	RegisterAlias("gl", "gitlab")    // alias to a non-agent provider
+	RegisterAlias("ghost", "nobody") // alias to a provider that doesn't exist
+
+	got := AgentAliases()
+	if len(got) != 1 || got[0] != "openai" {
+		t.Errorf("AgentAliases() = %v, want [openai]", got)
+	}
+}
+
 func TestAgents(t *testing.T) {
 	snapP, snapA := snapshotRegistry()
 	defer restoreRegistry(snapP, snapA)

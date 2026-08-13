@@ -209,6 +209,28 @@ func TestPickJoinRun(t *testing.T) {
 		}
 	})
 
+	// Companion: single widened candidate also errors in non-TTY (must confirm
+	// cross-workspace attachment), and the error message must use singular
+	// "run", not plural "runs".
+	t.Run("single WIDENED candidate non-TTY errors with correct pluralization", func(t *testing.T) {
+		_, err := pickJoinRun(strings.NewReader(""), io.Discard, []*run.Run{one}, "claude", "claude", true, false, true)
+		if err == nil {
+			t.Fatal("expected an error for single widened candidate without a TTY")
+		}
+		if !strings.Contains(err.Error(), "run_only") {
+			t.Errorf("error should list the candidate ID; got %q", err)
+		}
+		if !strings.Contains(err.Error(), "1 running run can host") {
+			t.Errorf("error should use singular 'run' not 'runs'; got %q", err)
+		}
+		if strings.Contains(err.Error(), "1 running runs") {
+			t.Errorf("error has incorrect plural form; got %q", err)
+		}
+		if !strings.Contains(err.Error(), "specify it:") {
+			t.Errorf("error should say 'specify it:' for a single candidate; got %q", err)
+		}
+	})
+
 	t.Run("zero candidates, nothing running at all", func(t *testing.T) {
 		_, err := pickJoinRun(strings.NewReader(""), io.Discard, nil, "claude", "claude", false, true, false)
 		if err == nil {

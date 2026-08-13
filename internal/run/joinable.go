@@ -8,6 +8,14 @@ import (
 
 // agentCLIDep maps an agent provider name to the dependency that installs its
 // CLI binary into the container.
+//
+// This hand-duplicates information each AgentRuntime provider already exposes
+// via DefaultDependencies() — there's no marker in that slice identifying
+// which entry is the agent's own CLI, so it can't be derived automatically.
+// TestAgentCLIDepMatchesAgentRuntimeProviders in joinable_test.go guards
+// against drift: it fails if a provider implementing provider.AgentRuntime
+// has no entry here (or vice versa). Adding a new AgentRuntime provider?
+// Add its CLI dependency name here too, or that test will catch it.
 var agentCLIDep = map[string]string{
 	"claude":  "claude-code",
 	"codex":   "codex-cli",

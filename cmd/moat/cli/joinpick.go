@@ -174,8 +174,15 @@ func pickJoinRun(in io.Reader, out io.Writer, candidates []*run.Run, agentArg, c
 		for i, r := range candidates {
 			ids[i] = r.ID
 		}
-		return nil, fmt.Errorf("%d running runs can host %s; specify one: %s",
-			len(candidates), agentArg, strings.Join(ids, ", "))
+		plural := len(candidates) != 1
+		runWord := "run"
+		specifyWord := "it"
+		if plural {
+			runWord = "runs"
+			specifyWord = "one"
+		}
+		return nil, fmt.Errorf("%d running %s can host %s; specify %s: %s",
+			len(candidates), runWord, agentArg, specifyWord, strings.Join(ids, ", "))
 	}
 
 	renderPicker(out, candidates, agentArg, widened)

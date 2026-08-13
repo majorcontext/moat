@@ -52,7 +52,11 @@ func TestCanonicalAgent(t *testing.T) {
 func TestKnownAgentNamesIncludesVariants(t *testing.T) {
 	names := cli.KnownAgentNames()
 	joined := strings.Join(names, ",")
-	for _, want := range []string{"claude", "claude-code", "codex"} {
+	// "openai" is a registry alias (RegisterAlias("openai", "codex") in
+	// internal/providers/codex/provider.go), not a documented variant like
+	// claude-code — it must still appear here so a typo'd `agent:` warning
+	// tells the user it's an accepted value.
+	for _, want := range []string{"claude", "claude-code", "codex", "openai"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("KnownAgentNames() = %v, missing %q", names, want)
 		}
@@ -153,6 +157,10 @@ func TestResolveAgentFieldWithAgentsList(t *testing.T) {
 		{"agent: still wins over agents[0]", "codex", []string{"claude", "codex"}, "", "codex", false},
 		{"verb still wins over both", "codex", []string{"claude", "codex"}, "claude", "claude", true},
 		{"agent: outside agents: warns", "gemini", []string{"claude", "codex"}, "", "gemini", true},
+		// Companion: with a verb present, the "not in agents:" warning must not
+		// fire — see TestResolveAgentFieldOutsideAgentsListVerbWarnsOnce for the
+		// assertion that only the conflict warning appears (not both).
+		{"agent: outside agents: with a verb only warns about the conflict", "gemini", []string{"claude", "codex"}, "claude", "claude", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -171,6 +179,38 @@ func TestResolveAgentFieldWithAgentsList(t *testing.T) {
 				t.Errorf("warned = %v, want %v (output: %q)", gotWarn, tt.wantWarn, buf.String())
 			}
 		})
+	}
+}
+
+// TestResolveAgentFieldOutsideAgentsListVerbWarnsOnce is a regression test:
+// the "not in agents:" warning claims the field "will run as the primary",
+// which is only true on the no-verb (`moat run`) path. When a verb is
+// present, ResolveAgentField immediately overwrites cfg.Agent with verb a
+// few lines later, and RunProvider provisions the verb's own dependencies,
+// grants, and network hosts independently of `agents:` — so the field is
+// genuinely provisioned without being in the list, and the "not in agents:"
+// warning must stay silent. Only the verb-conflict warning should fire.
+func TestResolveAgentFieldOutsideAgentsListVerbWarnsOnce(t *testing.T) {
+	var buf bytes.Buffer
+	orig := ui.Writer()
+	ui.SetWriter(&buf)
+	t.Cleanup(func() { ui.SetWriter(orig) })
+
+	cfg := &config.Config{Agent: "gemini", Agents: []string{"claude", "codex"}}
+	cli.ResolveAgentField(cfg, "claude")
+
+	if cfg.Agent != "claude" {
+		t.Fatalf("cfg.Agent = %q, want %q", cfg.Agent, "claude")
+	}
+	out := buf.String()
+	if got := strings.Count(out, "Warning:"); got != 1 {
+		t.Errorf("expected exactly 1 warning, got %d: %q", got, out)
+	}
+	if strings.Contains(out, "is not in `agents:") {
+		t.Errorf("the not-in-agents warning must not fire when a verb is present: %q", out)
+	}
+	if !strings.Contains(out, "conflicts with") {
+		t.Errorf("expected the verb-conflict warning: %q", out)
 	}
 }
 

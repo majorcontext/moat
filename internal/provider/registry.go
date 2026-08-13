@@ -99,6 +99,26 @@ func Agents() []AgentProvider {
 	return result
 }
 
+// AgentAliases returns the registered alias names (e.g. "openai" for
+// "codex") whose canonical provider is an AgentProvider, sorted. Aliases
+// that resolve to a non-agent provider (or to nothing) are excluded — an
+// alias only belongs in an "accepted agent name" listing if it actually
+// names an agent.
+func AgentAliases() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	var result []string
+	for alias, canonical := range aliases {
+		if p, ok := providers[canonical]; ok {
+			if _, ok := p.(AgentProvider); ok {
+				result = append(result, alias)
+			}
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
 // Names returns the names of all registered providers, sorted.
 func Names() []string {
 	mu.RLock()

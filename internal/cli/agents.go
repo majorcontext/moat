@@ -52,6 +52,9 @@ func KnownAgentNames() []string {
 	for variant := range agentVariants {
 		seen[variant] = true
 	}
+	for _, alias := range provider.AgentAliases() {
+		seen[alias] = true
+	}
 	names := make([]string, 0, len(seen))
 	for n := range seen {
 		names = append(names, n)
@@ -92,7 +95,12 @@ func ResolveAgentField(cfg *config.Config, verb string) {
 	}
 	ValidateAgent(cfg)
 
-	if cfg.Agent != "" && len(cfg.Agents) > 0 && !agentsListContains(cfg.Agents, cfg.Agent) {
+	// This warning only holds on the no-verb (`moat run`) path: when a verb is
+	// present, the block below immediately overwrites cfg.Agent with verb, and
+	// RunProvider provisions the verb's own dependencies/grants/network hosts
+	// independently of `agents:` — so the named agent genuinely is provisioned,
+	// and warning here would just contradict the conflict warning that follows.
+	if verb == "" && cfg.Agent != "" && len(cfg.Agents) > 0 && !agentsListContains(cfg.Agents, cfg.Agent) {
 		ui.Warnf("moat.yaml `agent: %s` is not in `agents: %v`; it will run as the primary but "+
 			"add it to `agents:` so its dependencies and grants are provisioned.",
 			cfg.Agent, cfg.Agents)
