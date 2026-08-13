@@ -139,6 +139,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 				runFlags.Grants = grants
 			}
 		}
+		// Write derived grants back into cfg.Grants now that the defaulting
+		// block above has already read cfg.Grants into runFlags.Grants — see
+		// intcli.AppendDerivedGrants' doc comment for why this must run after,
+		// not before. cfg.Grants has its own direct readers downstream
+		// (ShouldSyncCodexLogs, ShouldSyncGeminiLogs, buildLocalMCPConfig's
+		// grant validation) that never see runFlags.Grants.
+		intcli.AppendDerivedGrants(cfg, derivedGrants)
 		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
 			containerCmd = cfg.Command
 		}

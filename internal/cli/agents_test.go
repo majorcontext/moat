@@ -232,6 +232,65 @@ func TestExpandAgentsDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+// TestAppendDerivedGrants is a regression test: ExpandAgents deliberately
+// returns derived grants instead of writing them into cfg.Grants (see its
+// doc comment), but two downstream readers — Config.ShouldSyncCodexLogs /
+// ShouldSyncGeminiLogs and buildLocalMCPConfig's grant validation in
+// internal/run — read cfg.Grants directly and never see the returned slice.
+// Callers must write the derived grants back with AppendDerivedGrants after
+// grant precedence resolution runs.
+func TestAppendDerivedGrants(t *testing.T) {
+	cfg := &config.Config{Grants: []string{"github"}}
+	cli.AppendDerivedGrants(cfg, []string{"openai", "github"})
+	if !slices.Contains(cfg.Grants, "openai") {
+		t.Errorf("expected openai appended; got %v", cfg.Grants)
+	}
+	if countOccurrences(cfg.Grants, "github") != 1 {
+		t.Errorf("github was already present; must not be duplicated: got %v", cfg.Grants)
+	}
+	// A nil cfg must not panic — provider.go can still hold a nil *Config at
+	// the point buildGrants runs, before it's defaulted to &config.Config{}.
+	cli.AppendDerivedGrants(nil, []string{"openai"})
+}
+
+// TestExpandAgentsWriteBackEnablesCodexLogSync reproduces the regression this
+// fix addresses: `agents: [codex]` with no explicit top-level grants used to
+// leave cfg.Grants empty after ExpandAgents, so ShouldSyncCodexLogs (which
+// reads cfg.Grants directly, not ExpandAgents' return value) silently stayed
+// false and the codex session-transcript mount was never added. Writing the
+// derived grants back with AppendDerivedGrants — the fix — makes cfg.Grants
+// carry "openai" so ShouldSyncCodexLogs sees it.
+func TestExpandAgentsWriteBackEnablesCodexLogSync(t *testing.T) {
+	cfg := &config.Config{Agents: []string{"codex"}}
+	derived, err := cli.ExpandAgents(cfg)
+	if err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+	cli.AppendDerivedGrants(cfg, derived)
+	if !slices.Contains(cfg.Grants, "openai") {
+		t.Fatalf("expected openai written back into cfg.Grants; got %v", cfg.Grants)
+	}
+	if !cfg.ShouldSyncCodexLogs() {
+		t.Errorf("ShouldSyncCodexLogs() = false, want true once the derived openai grant is on cfg.Grants")
+	}
+}
+
+// TestExpandAgentsWriteBackCompanionNoAgentsNoGrant is the companion to
+// TestExpandAgentsWriteBackEnablesCodexLogSync: a config with neither
+// `agents:` nor an explicit openai grant must still report false — the fix
+// must not make ShouldSyncCodexLogs default to true.
+func TestExpandAgentsWriteBackCompanionNoAgentsNoGrant(t *testing.T) {
+	cfg := &config.Config{}
+	derived, err := cli.ExpandAgents(cfg)
+	if err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+	cli.AppendDerivedGrants(cfg, derived)
+	if cfg.ShouldSyncCodexLogs() {
+		t.Errorf("ShouldSyncCodexLogs() = true, want false with no agents: and no openai grant; cfg.Grants = %v", cfg.Grants)
+	}
+}
+
 func TestExpandAgentsRejectsBadEntries(t *testing.T) {
 	tests := []struct {
 		name   string

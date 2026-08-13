@@ -194,6 +194,35 @@ func ExpandAgents(cfg *config.Config) ([]string, error) {
 	return derivedGrants, nil
 }
 
+// AppendDerivedGrants appends the derived grants returned by ExpandAgents
+// onto cfg.Grants, skipping any already present. Callers must invoke this
+// AFTER grant precedence resolution has read cfg.Grants as the "explicit"
+// bucket (buildGrants in internal/cli/provider.go, or the equivalent
+// grants-defaulting block in `moat run`/`moat wt`) — never before. Writing
+// derived grants into cfg.Grants earlier would let them re-enter that
+// resolution as if the user had declared them, resurrecting the bug
+// ExpandAgents' doc comment describes (a derived "claude" grant wrongly
+// suppressing an auto-detected "anthropic" API-key credential).
+//
+// This exists because cfg.Grants has two downstream readers besides grant
+// resolution — Config.ShouldSyncCodexLogs/ShouldSyncGeminiLogs and
+// buildLocalMCPConfig's grant validation (internal/run/manager_agentinit.go)
+// — that read cfg.Grants directly rather than the resolved grants list.
+// Without this write-back, an agents:-derived grant (e.g. "openai" from
+// `agents: [codex]`) is invisible to them: log sync silently stays off, and a
+// local MCP server's `grant: openai` is rejected as "not declared in
+// top-level grants list" even though the credential is provisioned.
+func AppendDerivedGrants(cfg *config.Config, derivedGrants []string) {
+	if cfg == nil {
+		return
+	}
+	for _, g := range derivedGrants {
+		if !slices.Contains(cfg.Grants, g) {
+			cfg.Grants = append(cfg.Grants, g)
+		}
+	}
+}
+
 // hasNetworkHost reports whether rules already contains an entry for host.
 func hasNetworkHost(rules []netrules.NetworkRuleEntry, host string) bool {
 	for _, r := range rules {

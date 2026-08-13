@@ -6,9 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
+
+	// Registers the codex provider so intcli.ExpandAgents can resolve
+	// "codex" to its AgentRuntime (dependencies, grant, network hosts).
+	_ "github.com/majorcontext/moat/internal/providers"
 )
 
 func TestSetupCodexStaging_UnknownGrant(t *testing.T) {
@@ -31,6 +36,35 @@ func TestSetupCodexStaging_GrantNotDeclared(t *testing.T) {
 	_, err := m.setupCodexStaging(context.Background(), nil, Options{Config: cfg}, &Run{}, false, "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("expected grant-not-declared error, got %v", err)
+	}
+}
+
+// TestSetupCodexStaging_AgentsDerivedGrantSatisfiesLocalMCP reproduces the
+// full CLI pipeline for the regression fixed alongside this test: `agents:
+// [codex]` derives the "openai" grant, but ExpandAgents deliberately returns
+// it instead of writing it into cfg.Grants (see its doc comment). Without the
+// intcli.AppendDerivedGrants write-back that `moat run`/`moat wt`/RunProvider
+// now perform after grant resolution, cfg.Grants stays empty and a local
+// codex.mcp entry declaring `grant: openai` is rejected here as "not
+// declared in top-level grants list" even though no top-level `grants:` was
+// ever needed — the agents: entry alone should suffice.
+func TestSetupCodexStaging_AgentsDerivedGrantSatisfiesLocalMCP(t *testing.T) {
+	m := &Manager{}
+	cfg := &config.Config{Agents: []string{"codex"}}
+	cfg.Codex.MCP = map[string]config.MCPServerSpec{"srv": {Grant: "openai", Command: "run"}}
+
+	derived, err := intcli.ExpandAgents(cfg)
+	if err != nil {
+		t.Fatalf("ExpandAgents: %v", err)
+	}
+	intcli.AppendDerivedGrants(cfg, derived)
+	if !strings.Contains(strings.Join(cfg.Grants, ","), "openai") {
+		t.Fatalf("expected openai written back into cfg.Grants by AppendDerivedGrants; got %v", cfg.Grants)
+	}
+
+	fake := &captureAgentProvider{}
+	if _, err := m.setupCodexStaging(context.Background(), fake, Options{Config: cfg}, &Run{}, false, "", "", nil); err != nil {
+		t.Fatalf("expected agents:-derived openai grant to satisfy the local MCP grant check, got error: %v", err)
 	}
 }
 

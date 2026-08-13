@@ -158,6 +158,14 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants, derivedGrants)
 	rc.Flags.Grants = grants
 
+	// Write derived grants back into cfg.Grants now that buildGrants has
+	// already read configGrants as the "explicit" bucket above — see
+	// AppendDerivedGrants' doc comment for why this must run after, not
+	// before. Downstream readers of cfg.Grants directly (ShouldSyncCodexLogs,
+	// ShouldSyncGeminiLogs, buildLocalMCPConfig's grant validation) need
+	// agents:-derived grants to be visible on cfg, not just on rc.Flags.Grants.
+	AppendDerivedGrants(cfg, derivedGrants)
+
 	interactive := rc.PromptFlag == ""
 
 	// Build container command (provider-specific logic)
