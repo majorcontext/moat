@@ -17,6 +17,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 var (
@@ -26,19 +27,26 @@ var (
 )
 
 var joinCmd = &cobra.Command{
-	Use:   "join <run> <agent> [flags]",
+	Use:   "join [run] <agent> [flags]",
 	Short: "Launch another agent inside a running container",
 	Long: `Launch a second agent inside an already-running container, reusing its
 workspace, grants, and credentials — without creating a new container.
 
-The agent must match the one the run was started with (v1 supports same-agent
-joins, e.g. joining claude into a run started by 'moat claude').
+The agent must be one the run was provisioned with — not necessarily the one
+it was started with. A run created from moat.yaml's 'agents:' list can be
+joined as any agent in that list.
+
+The run argument is optional: with just an agent, moat infers the run from
+the running runs in the current workspace, and prompts when more than one
+qualifies.
 
 Examples:
   moat join run_a1b2c3d4e5f6 claude
   moat join my-feature claude --continue
-  moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"`,
-	Args: cobra.MinimumNArgs(2),
+  moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"
+  moat join claude                        # infer the run from this workspace
+  moat join run_a1b2c3d4e5f6 codex`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: runJoin,
 }
 
@@ -49,17 +57,42 @@ func init() {
 	rootCmd.AddCommand(joinCmd)
 }
 
-// validateJoinAgent checks that the run (whose recorded agent field is runAgent)
-// was created by the requested provider. agentArg is the user-typed agent name,
-// used only for the error message.
-func validateJoinAgent(j provider.JoinableAgent, agentArg, runAgent string) error {
-	if !j.IdentifiesAs(runAgent) {
-		return fmt.Errorf("run has no %s configuration.\n"+
-			"v1 join only attaches an agent the run was started with (run agent: %q).\n"+
-			"To run %s here, start the run with %s configured.",
-			agentArg, runAgent, agentArg, agentArg)
+// validateJoinAgent reports whether agentArg may be launched into r.
+//
+// The authority is r.JoinableAgents — what moat actually provisioned. A nil set
+// means the run was created before capability tracking, so we fall back to the
+// legacy agent-string check; an EMPTY set is a real answer ("nothing joinable
+// here") and must not fall back. That distinction is why the metadata field is
+// persisted without omitempty.
+//
+// canonical is agentArg resolved through registry aliases (openai -> codex).
+// The diagnosis half of each error keeps agentArg, the string the user typed,
+// so they recognize what they asked for; the remedy half uses canonical, so a
+// suggested `moat <name>` or `agents: [<name>]` names a real command/value —
+// `moat openai` is not a command.
+func validateJoinAgent(j provider.JoinableAgent, agentArg, canonical string, r *run.Run) error {
+	if r.JoinableAgents != nil {
+		for _, a := range r.JoinableAgents {
+			if a == agentArg || j.IdentifiesAs(a) {
+				return nil
+			}
+		}
+		hosted := "none"
+		if len(r.JoinableAgents) > 0 {
+			hosted = strings.Join(r.JoinableAgents, ", ")
+		}
+		return fmt.Errorf("run %s cannot host %s (provisioned agents: %s).\n"+
+			"Add %s to this project's moat.yaml `agents:` list and recreate the run.",
+			r.ID, agentArg, hosted, canonical)
 	}
-	return nil
+
+	// Pre-upgrade run: no capability set was ever recorded.
+	if j.IdentifiesAs(r.Agent) {
+		return nil
+	}
+	return fmt.Errorf("run %s was created before capability tracking and records agent %q.\n"+
+		"Recreate the run to join it (moat stop %s && moat %s).",
+		r.ID, r.Agent, r.ID, canonical)
 }
 
 // joinableAgentNames returns the sorted names of registered agents that support
@@ -75,13 +108,28 @@ func joinableAgentNames() []string {
 	return names
 }
 
+// parseJoinArgs interprets join's positional arguments.
+//
+// Two args are `<run> <agent>`, unchanged. A single arg is the AGENT — it is
+// the required half, while the run is what gets inferred. When that arg is also
+// a run name, the agent wins and collided is set so the caller can say so; the
+// two-arg form is the escape hatch.
+func parseJoinArgs(args []string, isRunName func(string) bool) (runArg, agentArg string, collided bool, err error) {
+	if len(args) >= 2 {
+		return args[0], args[1], false, nil
+	}
+	arg := args[0]
+	if provider.GetAgent(arg) == nil {
+		return "", "", false, fmt.Errorf("unknown agent %q; joinable agents: %s",
+			arg, strings.Join(joinableAgentNames(), ", "))
+	}
+	return "", arg, isRunName(arg), nil
+}
+
 func runJoin(cmd *cobra.Command, args []string) error {
 	if joinContinue && joinResume != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
 	}
-
-	runArg := args[0]
-	agentArg := args[1]
 
 	manager, err := run.NewManager()
 	if err != nil {
@@ -89,19 +137,21 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	}
 	defer manager.Close()
 
-	runID, err := resolveRunArgSingle(manager, runArg)
+	isRunName := func(s string) bool {
+		matches, rErr := manager.Resolve(s)
+		return rErr == nil && len(matches) > 0
+	}
+	runArg, agentArg, collided, err := parseJoinArgs(args, isRunName)
 	if err != nil {
 		return err
 	}
-
-	r, gErr := manager.Get(runID)
-	if gErr != nil {
-		return gErr
-	}
-	if r.GetState() != run.StateRunning {
-		return fmt.Errorf("run %s is not running (state: %s)", runID, r.GetState())
+	if collided {
+		ui.Warnf("%q matches both an agent and a run name; interpreting as agent.\n"+
+			"Use `moat join %s <agent>` to target the run.", agentArg, agentArg)
 	}
 
+	// The agent/provider lookup happens before run resolution: the shorthand
+	// path needs `joinable` to filter candidates by hosting capability.
 	agent := provider.GetAgent(agentArg)
 	if agent == nil {
 		return fmt.Errorf("unknown agent %q; joinable agents: %s", agentArg, strings.Join(joinableAgentNames(), ", "))
@@ -110,7 +160,53 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("agent %q does not support join yet", agentArg)
 	}
-	if valErr := validateJoinAgent(joinable, agentArg, r.Agent); valErr != nil {
+	// canonical is what the user typed, resolved through registry aliases
+	// (openai -> codex) — agentArg itself must stay as typed for the
+	// membership checks below (JoinableAgents / IdentifiesAs match against
+	// the canonical name while agentArg may be the alias), but any remedy
+	// text suggesting a command must say `moat codex`, not `moat openai`.
+	canonical := agent.Name()
+
+	var r *run.Run
+	if runArg == "" {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return fmt.Errorf("resolving working directory: %w", cwdErr)
+		}
+		allRuns := manager.List()
+		candidates, widened := inferJoinCandidates(allRuns, cwd, agentArg, joinable)
+		anyRunning := len(filterRunning(allRuns)) > 0
+		picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, canonical, widened,
+			term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), anyRunning)
+		if pickErr != nil {
+			return pickErr
+		}
+		r = picked
+	} else {
+		var candidates []*run.Run
+		r, candidates, err = resolveRunningRunArg(manager, runArg)
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			// Several running runs share this name — nothing enforces run-name
+			// uniqueness, and moat.yaml's `name:` field means every run in a
+			// project commonly shares one. Route through the same picker the
+			// shorthand form uses (Task 16) rather than erroring, so the
+			// explicit and shorthand forms behave the same way. widened=false:
+			// the user named a run explicitly, so there was no workspace-widening
+			// search to disclose. anyRunning=true: resolveRunningRunArg only
+			// returns a candidate list when more than one running run matched.
+			picked, pickErr := pickJoinRun(os.Stdin, os.Stderr, candidates, agentArg, canonical, false,
+				term.IsTerminal(os.Stdin) && term.IsTerminal(os.Stderr), true)
+			if pickErr != nil {
+				return pickErr
+			}
+			r = picked
+		}
+	}
+
+	if valErr := validateJoinAgent(joinable, agentArg, canonical, r); valErr != nil {
 		return valErr
 	}
 
@@ -129,7 +225,7 @@ func runJoin(cmd *cobra.Command, args []string) error {
 	// and headless paths need an index so console output lands in logs.<N>.jsonl.
 	// Do NOT defer release here — we call it explicitly before exitWithExecError
 	// so registry cleanup runs even when the agent exits with a non-zero code.
-	index, release, regErr := manager.RegisterJoinedAgent(runID)
+	index, release, regErr := manager.RegisterJoinedAgent(r.ID)
 
 	var execErr error
 	// Headless (--prompt with no TTY) vs interactive.

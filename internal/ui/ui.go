@@ -16,6 +16,14 @@ func SetWriter(w io.Writer) {
 	writer = w
 }
 
+// Writer returns the current output writer (for testing, to save/restore
+// around SetWriter). There is no "reset to default" sentinel: passing nil to
+// SetWriter would leave writer nil and panic on the next Warn/Error/Info
+// call, so callers must capture the prior value here and restore it.
+func Writer() io.Writer {
+	return writer
+}
+
 // --- Color detection ---
 
 var (

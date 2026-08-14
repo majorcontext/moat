@@ -40,7 +40,36 @@ type mockEndpointProvider struct {
 
 func (m *mockEndpointProvider) RegisterEndpoints(mux *http.ServeMux, cred *Credential) {}
 
+// snapshotRegistry captures the current registry state so tests that call
+// Clear() can restore it afterward. Real agents are registered once via
+// init() (triggered by the blank import of internal/providers in
+// interfaces_test.go) — Clear() without a restore would wipe them for the
+// rest of the test binary, since init() never runs again.
+func snapshotRegistry() (map[string]CredentialProvider, map[string]string) {
+	mu.RLock()
+	defer mu.RUnlock()
+	p := make(map[string]CredentialProvider, len(providers))
+	for k, v := range providers {
+		p[k] = v
+	}
+	a := make(map[string]string, len(aliases))
+	for k, v := range aliases {
+		a[k] = v
+	}
+	return p, a
+}
+
+func restoreRegistry(p map[string]CredentialProvider, a map[string]string) {
+	mu.Lock()
+	defer mu.Unlock()
+	providers = p
+	aliases = a
+}
+
 func TestRegistry(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear() // Start fresh
 	defer Clear()
 
@@ -81,6 +110,9 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestRegisterAlias(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear()
 	defer Clear()
 
@@ -107,6 +139,9 @@ func TestRegisterAlias(t *testing.T) {
 }
 
 func TestGetAgent(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear()
 	defer Clear()
 
@@ -137,6 +172,9 @@ func TestGetAgent(t *testing.T) {
 }
 
 func TestGetEndpoint(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear()
 	defer Clear()
 
@@ -167,6 +205,9 @@ func TestGetEndpoint(t *testing.T) {
 }
 
 func TestAll(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear()
 	defer Clear()
 
@@ -187,7 +228,30 @@ func TestAll(t *testing.T) {
 	}
 }
 
+func TestAgentAliases(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
+	Clear()
+	defer Clear()
+
+	Register(&mockAgentProvider{mockProvider{name: "codex"}})
+	Register(&mockProvider{name: "gitlab"})
+
+	RegisterAlias("openai", "codex") // alias to an agent provider
+	RegisterAlias("gl", "gitlab")    // alias to a non-agent provider
+	RegisterAlias("ghost", "nobody") // alias to a provider that doesn't exist
+
+	got := AgentAliases()
+	if len(got) != 1 || got[0] != "openai" {
+		t.Errorf("AgentAliases() = %v, want [openai]", got)
+	}
+}
+
 func TestAgents(t *testing.T) {
+	snapP, snapA := snapshotRegistry()
+	defer restoreRegistry(snapP, snapA)
+
 	Clear()
 	defer Clear()
 

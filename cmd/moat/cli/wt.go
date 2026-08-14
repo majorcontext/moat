@@ -149,21 +149,25 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		wtFlags.Name = result.RunName
 	}
 
-	// Apply config defaults (same pattern as moat run)
-	if cfg != nil {
-		if len(wtFlags.Grants) == 0 && len(cfg.Grants) > 0 {
-			wtFlags.Grants = cfg.Grants
-		}
-		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
-			containerCmd = cfg.Command
-		}
-		if cfg.Sandbox == "none" && !wtFlags.NoSandbox {
-			wtFlags.NoSandbox = true
-		}
+	// Apply config defaults: agents: expansion, grants, and command (same
+	// pattern as moat run). See intcli.ApplyAgentDefaults for the
+	// ExpandAgents → grants-merge → AppendDerivedGrants ordering invariant
+	// this preserves.
+	if err = intcli.ApplyAgentDefaults(cfg, &wtFlags.Grants, &containerCmd); err != nil {
+		return err
+	}
+	if cfg != nil && cfg.Sandbox == "none" && !wtFlags.NoSandbox {
+		wtFlags.NoSandbox = true
 	}
 
 	// Determine interactive mode from config
 	interactive := cfg != nil && cfg.Interactive
+
+	// moat wt has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared (same pattern as moat run). This runs BEFORE the
+	// dry-run return below so --dry-run surfaces the same agent: warnings a
+	// real run would.
+	intcli.ResolveAgentField(cfg, "")
 
 	log.Debug("starting worktree run",
 		"branch", branch,

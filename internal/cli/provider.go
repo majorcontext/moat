@@ -130,9 +130,23 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		}
 	}
 
+	// Expand `agents:` into dependencies/grants/network hosts before grant
+	// resolution and the network-rule loop below — an expansion that lands
+	// after either contributes nothing: the grants never reach buildGrants
+	// (which reads cfg.Grants immediately below) and the hosts never reach
+	// the proxy registration (see ExpandAgents doc comment). cfg may still be
+	// nil here (no moat.yaml); ExpandAgents is a no-op in that case since a
+	// nil config can't carry an agents: list either.
+	var derivedGrants []string
+	derivedGrants, err = ExpandAgents(cfg)
+	if err != nil {
+		return err
+	}
+
 	// Build grants list with deduplication: credential grant first,
-	// then config grants, then flag grants. Auto-detected grants are
-	// suppressed when they conflict with an explicit grant.
+	// then config grants, then flag grants, then agents:-derived grants.
+	// Auto-detected grants are suppressed when they conflict with an
+	// explicit grant.
 	var autoDetected string
 	if rc.GetCredentialGrant != nil {
 		autoDetected = rc.GetCredentialGrant()
@@ -141,8 +155,16 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	if cfg != nil {
 		configGrants = cfg.Grants
 	}
-	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants)
+	grants := buildGrants(autoDetected, configGrants, rc.Flags.Grants, derivedGrants)
 	rc.Flags.Grants = grants
+
+	// Write derived grants back into cfg.Grants now that buildGrants has
+	// already read configGrants as the "explicit" bucket above — see
+	// AppendDerivedGrants' doc comment for why this must run after, not
+	// before. Downstream readers of cfg.Grants directly (ShouldSyncCodexLogs,
+	// ShouldSyncGeminiLogs, buildLocalMCPConfig's grant validation) need
+	// agents:-derived grants to be visible on cfg, not just on rc.Flags.Grants.
+	AppendDerivedGrants(cfg, derivedGrants)
 
 	interactive := rc.PromptFlag == ""
 
@@ -182,6 +204,12 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
 	}
 
+	// Snapshot cfg.Agent before provider-specific hooks run. Some ConfigureAgent
+	// hooks (copilot, pi, init) unconditionally overwrite cfg.Agent with their
+	// own name below, which would otherwise erase the moat.yaml value before
+	// the conflict check further down ever sees it.
+	agentBeforeConfigure := cfg.Agent
+
 	// Provider-specific config tweaks (e.g., enabling log sync)
 	if rc.ConfigureAgent != nil {
 		rc.ConfigureAgent(cfg)
@@ -190,6 +218,13 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	if envErr := ParseEnvFlags(rc.Flags.Env, cfg); envErr != nil {
 		return envErr
 	}
+
+	// The verb the user typed always names the agent. ValidateAgent runs inside
+	// so an unknown moat.yaml value warns once and is discarded. This runs
+	// BEFORE the dry-run return below: --dry-run is what someone reaches for to
+	// check a moat.yaml, so it must surface the same agent: warnings a real run
+	// would.
+	resolveProviderAgentField(rc.Name, cfg, agentBeforeConfigure)
 
 	log.Debug(fmt.Sprintf("starting %s", rc.Name),
 		"workspace", absPath,
@@ -213,13 +248,6 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 
 	ctx := context.Background()
 
-	// Ensure the agent name is set so the manager can apply agent-specific
-	// defaults (e.g., memory limits). When there's no moat.yaml, cfg.Agent
-	// is empty — fill it from the provider name (e.g., "claude", "codex").
-	if cfg.Agent == "" {
-		cfg.Agent = rc.Name
-	}
-
 	opts := ExecOptions{
 		Flags:       *rc.Flags,
 		Workspace:   absPath,
@@ -239,6 +267,36 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	return err
 }
 
+// agentVerbFor selects the verb passed to ResolveAgentField for a given
+// provider run. "init" is not an agent name — moat init's own ConfigureAgent
+// hook (which runs earlier, at line ~186) already sets cfg.Agent to the
+// auto-detected agent, so that value is reused as the verb instead of
+// overwriting it with the literal string "init".
+func agentVerbFor(rcName string, cfg *config.Config) string {
+	if rcName == "init" {
+		return cfg.Agent
+	}
+	return rcName
+}
+
+// resolveProviderAgentField determines and applies the final cfg.Agent for a
+// provider run. preConfigureAgent is the cfg.Agent snapshot taken before
+// rc.ConfigureAgent ran: several hooks (copilot, pi, init) unconditionally
+// overwrite cfg.Agent with their own provider name, which — if left in
+// place — would make ResolveAgentField's conflict check compare the provider
+// name against itself and silently swallow the warning. Restoring the
+// snapshot first means the check always compares against what moat.yaml
+// actually said, uniformly across every provider command.
+//
+// agentVerbFor still needs the post-ConfigureAgent value for "init" (it reads
+// cfg.Agent to find the auto-detected agent), so the verb is computed before
+// the snapshot is restored.
+func resolveProviderAgentField(rcName string, cfg *config.Config, preConfigureAgent string) {
+	verb := agentVerbFor(rcName, cfg)
+	cfg.Agent = preConfigureAgent
+	ResolveAgentField(cfg, verb)
+}
+
 // containsGrant reports whether grants contains the named grant.
 func containsGrant(grants []string, name string) bool {
 	for _, g := range grants {
@@ -249,11 +307,30 @@ func containsGrant(grants []string, name string) bool {
 	return false
 }
 
+// grantsEquivalent reports whether a and b name the same underlying
+// credential under different grant keys — today, only the claude
+// (OAuth-token) / anthropic (API-key) pair, which both authenticate Claude
+// Code against the same host.
+func grantsEquivalent(a, b string) bool {
+	return (a == "claude" && b == "anthropic") || (a == "anthropic" && b == "claude")
+}
+
 // buildGrants assembles the final grants list from an auto-detected
-// credential grant, config grants, and flag grants. Auto-detected grants
-// are suppressed when they conflict with an explicit grant (e.g.,
-// "claude" conflicts with "anthropic" since both target the same host).
-func buildGrants(autoDetected string, configGrants, flagGrants []string) []string {
+// credential grant, config grants, flag grants, and agents:-derived grants,
+// in descending precedence.
+//
+// Auto-detected grants are suppressed when they conflict with an EXPLICIT
+// (config or flag) grant — e.g. "claude" conflicts with "anthropic" since
+// both target the same host. derivedGrants (from moat.yaml's `agents:`
+// expansion, see ExpandAgents) never participates in that suppression: it is
+// a machine-filled fallback, not a user declaration, so it must not outrank
+// whatever credential the user actually has. A derived grant is instead
+// dropped when an equivalent credential is already present in the result —
+// otherwise a user who stores their Anthropic credential as an API key
+// (autoDetected == "anthropic") would have it discarded in favor of a
+// "claude" grant injected by `agents: [claude, ...]`, forcing an OAuth login
+// they never asked for even though their existing credential already works.
+func buildGrants(autoDetected string, configGrants, flagGrants, derivedGrants []string) []string {
 	grantSet := make(map[string]bool)
 	var grants []string
 	addGrant := func(g string) {
@@ -261,6 +338,14 @@ func buildGrants(autoDetected string, configGrants, flagGrants []string) []strin
 			grantSet[g] = true
 			grants = append(grants, g)
 		}
+	}
+	equivalentPresent := func(g string) bool {
+		for _, existing := range grants {
+			if grantsEquivalent(existing, g) {
+				return true
+			}
+		}
+		return false
 	}
 
 	explicitGrants := make([]string, 0, len(configGrants)+len(flagGrants))
@@ -275,6 +360,12 @@ func buildGrants(autoDetected string, configGrants, flagGrants []string) []strin
 		}
 	}
 	for _, g := range explicitGrants {
+		addGrant(g)
+	}
+	for _, g := range derivedGrants {
+		if equivalentPresent(g) {
+			continue
+		}
 		addGrant(g)
 	}
 	return grants

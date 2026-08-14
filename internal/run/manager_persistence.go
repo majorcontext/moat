@@ -193,6 +193,7 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		Workspace:         meta.Workspace,
 		Grants:            meta.Grants,
 		Agent:             meta.Agent,
+		JoinableAgents:    meta.JoinableAgents,
 		Image:             meta.Image,
 		Runtime:           meta.Runtime,
 		Ports:             meta.Ports,

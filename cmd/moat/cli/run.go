@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/ui"
@@ -116,14 +117,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 	// Random name generation happens in manager.Create if still empty
 
-	// Apply config defaults
+	// Apply config defaults: agents: expansion, grants, and command. See
+	// intcli.ApplyAgentDefaults for the ExpandAgents → grants-merge →
+	// AppendDerivedGrants ordering invariant this preserves.
+	if err = intcli.ApplyAgentDefaults(cfg, &runFlags.Grants, &containerCmd); err != nil {
+		return err
+	}
 	if cfg != nil {
-		if len(runFlags.Grants) == 0 && len(cfg.Grants) > 0 {
-			runFlags.Grants = cfg.Grants
-		}
-		if len(containerCmd) == 0 && len(cfg.Command) > 0 {
-			containerCmd = cfg.Command
-		}
 		// Check sandbox setting from config
 		if cfg.Sandbox == "none" && !runFlags.NoSandbox {
 			runFlags.NoSandbox = true
@@ -148,6 +148,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// moat run has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared. This runs BEFORE the dry-run return below: --dry-run
+	// is what someone reaches for to check a moat.yaml, so it must surface the
+	// same agent: warnings a real run would.
+	intcli.ResolveAgentField(cfg, "")
 
 	log.Debug("preparing run",
 		"name", runFlags.Name,

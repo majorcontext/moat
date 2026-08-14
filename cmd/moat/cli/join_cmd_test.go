@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -9,24 +10,133 @@ import (
 
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/run"
 )
 
-// fakeJoinable implements provider.JoinableAgent for validation tests.
-type fakeJoinable struct{ identifies bool }
+// fakeJoinable implements provider.JoinableAgent for validation tests. It is
+// also reused by joinpick_test.go.
+type fakeJoinable struct{ names []string }
 
-func (f fakeJoinable) JoinCommand(provider.JoinOpts) ([]string, error) { return []string{"x"}, nil }
-func (f fakeJoinable) IdentifiesAs(string) bool                        { return f.identifies }
+func (f fakeJoinable) JoinCommand(provider.JoinOpts) ([]string, error) { return nil, nil }
+func (f fakeJoinable) IdentifiesAs(agent string) bool {
+	return slices.Contains(f.names, agent)
+}
 
-func TestValidateJoinAgent_OK(t *testing.T) {
-	if err := validateJoinAgent(fakeJoinable{identifies: true}, "claude", "claude-code"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestValidateJoinAgent(t *testing.T) {
+	claude := fakeJoinable{names: []string{"claude", "claude-code"}}
+	codex := fakeJoinable{names: []string{"codex"}}
+
+	tests := []struct {
+		name      string
+		run       *run.Run
+		agent     string
+		canonical string
+		joinable  fakeJoinable
+		wantErr   bool
+		errHas    string
+	}{
+		{
+			name:     "member of the capability set is accepted",
+			run:      &run.Run{ID: "run_1", JoinableAgents: []string{"claude"}},
+			agent:    "claude",
+			joinable: claude,
+		},
+		{
+			name:     "non-member is rejected even when the agent string matches",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{"codex"}},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
+			errHas:   "codex",
+		},
+		{
+			name:     "empty set refuses",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: []string{}},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
+		},
+		{
+			name:     "nil set falls back and accepts a matching agent string",
+			run:      &run.Run{ID: "run_1", Agent: "claude", JoinableAgents: nil},
+			agent:    "claude",
+			joinable: claude,
+		},
+		{
+			name:     "nil set falls back and refuses a stale agent string",
+			run:      &run.Run{ID: "run_1", Agent: "vibrant-code", JoinableAgents: nil},
+			agent:    "claude",
+			joinable: claude,
+			wantErr:  true,
+			errHas:   "Recreate the run",
+		},
+		// Regression: `moat join <run> openai` must keep working. agentArg
+		// stays the alias "openai" (parseJoinArgs/runJoin never rewrite it —
+		// only the remedy text uses the canonical name), while JoinableAgents
+		// holds the canonical "codex" recorded at provisioning time. The
+		// direct `a == agentArg` comparison can never match here ("codex" !=
+		// "openai"); acceptance depends entirely on the `j.IdentifiesAs(a)`
+		// branch. A prior review believed that branch was unreachable and
+		// proposed deleting it — this case is what proves it's load-bearing.
+		{
+			name:      "alias arg (openai) matches a canonical member via IdentifiesAs",
+			run:       &run.Run{ID: "run_1", JoinableAgents: []string{"codex"}},
+			agent:     "openai",
+			canonical: "codex",
+			joinable:  codex,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateJoinAgent(tt.joinable, tt.agent, tt.canonical, tt.run)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateJoinAgent() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.errHas != "" && !strings.Contains(err.Error(), tt.errHas) {
+				t.Errorf("error %q should mention %q", err, tt.errHas)
+			}
+		})
 	}
 }
 
-func TestValidateJoinAgent_WrongProvider(t *testing.T) {
-	err := validateJoinAgent(fakeJoinable{identifies: false}, "codex", "claude-code")
-	if err == nil || !strings.Contains(err.Error(), "no codex configuration") {
-		t.Fatalf("got %v, want a clear 'no codex configuration' error", err)
+func TestParseJoinArgs(t *testing.T) {
+	noRuns := func(string) bool { return false }
+	claudeIsARun := func(s string) bool { return s == "claude" }
+
+	tests := []struct {
+		name       string
+		args       []string
+		isRunName  func(string) bool
+		wantRun    string
+		wantAgent  string
+		wantCollid bool
+		wantErr    bool
+	}{
+		{"two args unchanged", []string{"run_abc", "claude"}, noRuns, "run_abc", "claude", false, false},
+		{"one arg is the agent", []string{"claude"}, noRuns, "", "claude", false, false},
+		{"one arg that is not an agent errors", []string{"sometypo"}, noRuns, "", "", false, true},
+		{"collision resolves to the agent", []string{"claude"}, claudeIsARun, "", "claude", true, false},
+		{"two-arg form escapes the collision", []string{"claude", "codex"}, claudeIsARun, "claude", "codex", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRun, gotAgent, gotCollid, err := parseJoinArgs(tt.args, tt.isRunName)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				if !strings.Contains(err.Error(), "sometypo") {
+					t.Errorf("error should name the bad agent; got %q", err)
+				}
+				return
+			}
+			if gotRun != tt.wantRun || gotAgent != tt.wantAgent {
+				t.Errorf("= (%q, %q), want (%q, %q)", gotRun, gotAgent, tt.wantRun, tt.wantAgent)
+			}
+			if gotCollid != tt.wantCollid {
+				t.Errorf("collided = %v, want %v", gotCollid, tt.wantCollid)
+			}
+		})
 	}
 }
 

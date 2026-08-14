@@ -135,6 +135,8 @@ moat run [flags] [path] [-- command]
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
+`--grant` **replaces** `moat.yaml`'s configured grants rather than adding to them — this includes grants derived from [`agents:`](./02-moat-yaml.md#agents). `moat run --grant github` with `agents: [claude, codex]` runs with only the `github` grant; neither agent's credential is injected, so an agent that needs one fails to authenticate inside the container. Pass every grant you need explicitly (`--grant github --grant claude --grant openai`), or omit `--grant` to use `moat.yaml`'s grants (including `agents:`-derived ones) unmodified.
+
 ### Execution modes
 
 **Non-interactive (default):** Output streams to the terminal. Press `Ctrl+C` to stop.
@@ -543,6 +545,8 @@ Configuration is read from `moat.yaml` in the repository root. If a run is alrea
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail instead. Also set via `MOAT_NO_PROMPT=1`. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging |
+
+`--grant` **replaces** `moat.yaml`'s configured grants rather than adding to them — this includes grants derived from [`agents:`](./02-moat-yaml.md#agents), the same as `moat run` (see above).
 
 ### Run naming
 
@@ -1253,19 +1257,30 @@ moat exec run_a1b2c3d4e5f6 -- sh -c "ps aux"
 Launch a second agent inside a running container, reusing its workspace, grants, and credentials.
 
 ```
-moat join <run> <agent> [flags]
+moat join [run] <agent> [flags]
 ```
 
 `moat join` is the run-first counterpart to `moat exec`: where `exec` runs an arbitrary command, `join` resolves an agent provider by name, constructs its standard in-container invocation, and execs it into the existing container. The original run owns the container lifecycle — stopping the run tears down the container and any joined agents.
 
-v1 supports same-agent joins only (e.g. joining `claude` into a run started by `moat claude`). The agent argument must match the agent the run was created with.
+The agent must be one moat actually provisioned into the target container — either the agent the run was started with, or one listed in that project's `agents:` (see [`agents:`](./02-moat-yaml.md#agents)). `moat join run_a1b2c3d4e5f6 codex` works against a container started by `moat claude` only when that project's `moat.yaml` also lists `codex` in `agents:`.
 
 ### Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `run` | Run ID or name of the target (must be in the running state) |
-| `agent` | Agent to launch (`claude`) |
+| `run` | Run ID or name of the target (must be in the running state). May be omitted — see below. |
+| `agent` | Agent to launch (`claude`, `codex`, …) |
+
+#### Inferring the run
+
+When `run` is omitted, `moat join <agent>` picks it for you:
+
+1. Only runs in the `running` state are candidates.
+2. Candidates are narrowed to runs that can host `<agent>` — the run's provisioned-agent set includes it.
+3. If any candidate's workspace matches the current directory, only those are offered. Otherwise every running, capable run is offered, and moat says so — attaching outside the current workspace uses that run's grants and network policy.
+4. One remaining candidate in the current workspace attaches directly. Otherwise moat prints a numbered table (newest run first) and prompts for a choice; the table and prompt are written to stderr, so `moat join claude | tee log` still shows the picker even though stdin is a TTY. Piped or non-interactive input with more than one candidate is an error listing the run IDs, rather than a prompt.
+
+If the single positional argument names both a known agent and a run, it resolves as the agent — moat warns and shows the two-argument form to target the run instead.
 
 ### Flags
 
@@ -1293,6 +1308,12 @@ moat join run_a1b2c3d4e5f6 claude -p "summarize the diff"
 
 # Identify the run by name
 moat join my-feature claude
+
+# Infer the run from the current workspace
+moat join claude
+
+# Join codex into a container provisioned with agents: [claude, codex]
+moat join run_a1b2c3d4e5f6 codex
 ```
 
 ---

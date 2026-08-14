@@ -111,6 +111,24 @@ type JoinableAgent interface {
 	IdentifiesAs(agent string) bool
 }
 
+// AgentRuntime is implemented by agent providers that can be provisioned into a
+// container declaratively via moat.yaml `agents:`. It is optional: a provider
+// that does not implement it cannot appear in an `agents:` list.
+type AgentRuntime interface {
+	// DefaultDependencies returns the dependencies that install this agent's CLI.
+	DefaultDependencies() []string
+
+	// NetworkHosts returns the hosts this agent needs to reach.
+	NetworkHosts() []string
+
+	// CredentialGrant returns the STATIC grant name this agent needs — not a
+	// credential-store lookup. "" means the agent has no static grant and none
+	// should be unioned in. Store lookups stay in the verb-path
+	// GetCredentialName funcs; conflating the two puts empty or wrong grant
+	// names into the grants list.
+	CredentialGrant() string
+}
+
 // AgentProvider extends CredentialProvider for AI agent runtimes.
 // Implemented by claude, copilot, codex, gemini, and pi providers.
 type AgentProvider interface {

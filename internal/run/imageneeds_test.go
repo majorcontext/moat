@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -301,4 +302,37 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func TestResolveImageNeedsCodexDependencyFallback(t *testing.T) {
+	depList := []deps.Dependency{{Name: "codex-cli"}}
+
+	// No credential store at all — the dependency alone must stage codex.
+	needs := resolveImageNeedsWithStore(nil, depList, nil)
+	if !slices.Contains(needs.initProviders, "codex") {
+		t.Errorf("codex-cli dependency should stage codex; got %v", needs.initProviders)
+	}
+
+	// Companion: no dependency and no grant means codex is not staged.
+	bare := resolveImageNeedsWithStore(nil, []deps.Dependency{{Name: "git"}}, nil)
+	if slices.Contains(bare.initProviders, "codex") {
+		t.Errorf("codex should not be staged without dep or grant; got %v", bare.initProviders)
+	}
+}
+
+func TestResolveImageNeedsCLIDepFallbackIsUniform(t *testing.T) {
+	for dep, agent := range map[string]string{
+		"claude-code": "claude",
+		"codex-cli":   "codex",
+		"copilot-cli": "copilot",
+		"gemini-cli":  "gemini",
+		"pi-cli":      "pi",
+	} {
+		t.Run(dep, func(t *testing.T) {
+			needs := resolveImageNeedsWithStore(nil, []deps.Dependency{{Name: dep}}, nil)
+			if !slices.Contains(needs.initProviders, agent) {
+				t.Errorf("%s should stage %s; got %v", dep, agent, needs.initProviders)
+			}
+		})
+	}
 }

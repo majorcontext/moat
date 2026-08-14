@@ -54,6 +54,10 @@ func walkStruct(t reflect.Type, prefix string, b *strings.Builder) {
 			continue
 		}
 
+		if doc := f.Tag.Get("doc"); doc != "" {
+			fmt.Fprintf(b, "- `%s` (%s) — %s\n", fullName, friendlyType(ft), doc)
+			continue
+		}
 		fmt.Fprintf(b, "- `%s` (%s)\n", fullName, friendlyType(ft))
 	}
 }

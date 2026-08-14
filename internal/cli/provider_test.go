@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,15 +11,123 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/ui"
 )
+
+// TestAgentVerbForInit is a regression test for the moat-init special case in
+// ResolveAgentField's wiring: RunProvider's ConfigureAgent hook (called before
+// the agent-name block) sets cfg.Agent for "init" runs, so "init" itself is
+// not a usable verb — it must be swapped for the already-resolved cfg.Agent
+// rather than clobbering it.
+func TestAgentVerbForInit(t *testing.T) {
+	tests := []struct {
+		name   string
+		rcName string
+		agent  string
+		want   string
+	}{
+		{"init reuses the auto-detected agent instead of the literal name", "init", "claude", "claude"},
+		// Companion: every other provider's own name is a real agent verb and
+		// must pass through unchanged.
+		{"non-init providers use their own name as the verb", "claude", "codex", "claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Agent: tt.agent}
+			if got := agentVerbFor(tt.rcName, cfg); got != tt.want {
+				t.Errorf("agentVerbFor(%q, cfg.Agent=%q) = %q, want %q", tt.rcName, tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveProviderAgentFieldWarnsAcrossConfigureAgentHooks is a regression
+// test for the copilot/pi warning gap: their ConfigureAgent hooks
+// unconditionally overwrite cfg.Agent with their own name (exactly like
+// init's does), which erases the moat.yaml value before ResolveAgentField's
+// conflict check ever sees it — so a conflicting `agent:` silently produced
+// no warning for those two commands, unlike claude/codex/gemini whose
+// ConfigureAgent hooks don't touch cfg.Agent at all. resolveProviderAgentField
+// restores the pre-ConfigureAgent snapshot before resolving, so the conflict
+// check is uniform across all six provider commands.
+func TestResolveProviderAgentFieldWarnsAcrossConfigureAgentHooks(t *testing.T) {
+	tests := []struct {
+		name               string
+		rcName             string
+		preConfigureAgent  string // cfg.Agent before the simulated ConfigureAgent stomp (i.e. what moat.yaml said)
+		postConfigureAgent string // cfg.Agent after the simulated ConfigureAgent stomp (its own provider name)
+		wantAgent          string
+		wantWarn           bool
+	}{
+		{
+			name:               "copilot with a conflicting agent: warns",
+			rcName:             "copilot",
+			preConfigureAgent:  "claude",
+			postConfigureAgent: "copilot",
+			wantAgent:          "copilot",
+			wantWarn:           true,
+		},
+		// Companion: no conflicting field, stays silent.
+		{
+			name:               "copilot with no conflicting agent: stays silent",
+			rcName:             "copilot",
+			preConfigureAgent:  "",
+			postConfigureAgent: "copilot",
+			wantAgent:          "copilot",
+			wantWarn:           false,
+		},
+		{
+			name:               "pi with a conflicting agent: warns",
+			rcName:             "pi",
+			preConfigureAgent:  "codex",
+			postConfigureAgent: "pi",
+			wantAgent:          "pi",
+			wantWarn:           true,
+		},
+		// Companion: no conflicting field, stays silent.
+		{
+			name:               "pi with no conflicting agent: stays silent",
+			rcName:             "pi",
+			preConfigureAgent:  "pi",
+			postConfigureAgent: "pi",
+			wantAgent:          "pi",
+			wantWarn:           false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			orig := ui.Writer()
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(orig) })
+
+			// Simulate what RunProvider does: snapshot cfg.Agent, then run a
+			// ConfigureAgent hook that unconditionally stomps it (as copilot,
+			// pi, and init all do).
+			cfg := &config.Config{Agent: tt.preConfigureAgent}
+			preConfigureAgent := cfg.Agent
+			cfg.Agent = tt.postConfigureAgent
+
+			resolveProviderAgentField(tt.rcName, cfg, preConfigureAgent)
+
+			if cfg.Agent != tt.wantAgent {
+				t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, tt.wantAgent)
+			}
+			if gotWarn := buf.Len() > 0; gotWarn != tt.wantWarn {
+				t.Errorf("warned = %v, want %v (output: %q)", gotWarn, tt.wantWarn, buf.String())
+			}
+		})
+	}
+}
 
 func TestBuildGrants(t *testing.T) {
 	tests := []struct {
-		name         string
-		autoDetected string
-		configGrants []string
-		flagGrants   []string
-		want         []string
+		name          string
+		autoDetected  string
+		configGrants  []string
+		flagGrants    []string
+		derivedGrants []string
+		want          []string
 	}{
 		{
 			name:         "auto-detected claude with no explicit grants",
@@ -68,11 +177,55 @@ func TestBuildGrants(t *testing.T) {
 			flagGrants:   []string{"claude", "anthropic"},
 			want:         []string{"claude", "anthropic"},
 		},
+		// C1 regression: a derived grant (from moat.yaml `agents:` expansion,
+		// e.g. `agents: [claude, ...]`) must never outrank an auto-detected
+		// credential, even when they're the claude/anthropic equivalence
+		// pair. Previously ExpandAgents appended "claude" straight into
+		// cfg.Grants, which buildGrants treated as an explicit grant and used
+		// to suppress the auto-detected "anthropic" API-key credential —
+		// discarding a credential that actually works in favor of one the
+		// user never configured.
+		{
+			name:          "derived claude does not suppress auto-detected anthropic",
+			autoDetected:  "anthropic",
+			derivedGrants: []string{"claude"},
+			want:          []string{"anthropic"},
+		},
+		// Companion: the equivalence check is symmetric.
+		{
+			name:          "derived anthropic does not suppress auto-detected claude",
+			autoDetected:  "claude",
+			derivedGrants: []string{"anthropic"},
+			want:          []string{"claude"},
+		},
+		// Companion: with no conflict, a derived grant still populates —
+		// agents: expansion is a real fallback source, not a no-op.
+		{
+			name:          "derived grant populates when nothing else claims the credential",
+			derivedGrants: []string{"openai"},
+			want:          []string{"openai"},
+		},
+		// Companion: a derived grant that duplicates an explicit one is
+		// deduped, not appended twice.
+		{
+			name:          "derived grant already explicit is not duplicated",
+			configGrants:  []string{"openai"},
+			derivedGrants: []string{"openai"},
+			want:          []string{"openai"},
+		},
+		// Companion: derived grants are lower precedence than explicit ones
+		// too, but still contribute when they don't conflict.
+		{
+			name:          "derived grant added after explicit, non-conflicting grants",
+			configGrants:  []string{"github"},
+			derivedGrants: []string{"claude"},
+			want:          []string{"github", "claude"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildGrants(tt.autoDetected, tt.configGrants, tt.flagGrants)
+			got := buildGrants(tt.autoDetected, tt.configGrants, tt.flagGrants, tt.derivedGrants)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("buildGrants(%q, %v, %v) = %v, want %v",
 					tt.autoDetected, tt.configGrants, tt.flagGrants, got, tt.want)

@@ -79,6 +79,49 @@ func disambiguateRuns(matches []*run.Run, arg string, action string) ([]string, 
 	return ids, nil
 }
 
+// filterRunning returns only the runs currently in the running state.
+func filterRunning(matches []*run.Run) []*run.Run {
+	out := make([]*run.Run, 0, len(matches))
+	for _, r := range matches {
+		if r.GetState() == run.StateRunning {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// resolveRunningFrom narrows a name/ID match set to running runs.
+//
+// Returns exactly one of: a single run, a candidate list for the caller to
+// disambiguate, or an error. When filtering empties a non-empty match set the
+// error names the state ("not running (state: stopped)") rather than degrading
+// to "no run found" — the specific cause is what tells the user what to do.
+func resolveRunningFrom(matches []*run.Run, arg string) (*run.Run, []*run.Run, error) {
+	if len(matches) == 0 {
+		return nil, nil, fmt.Errorf("no run found matching %q\n\nRun 'moat list' to see available runs.", arg)
+	}
+	running := filterRunning(matches)
+	if len(running) == 0 {
+		run.SortRunsByCreatedAt(matches)
+		r := matches[0]
+		return nil, nil, fmt.Errorf("run %s is not running (state: %s)", r.ID, r.GetState())
+	}
+	if len(running) == 1 {
+		return running[0], nil, nil
+	}
+	run.SortRunsByCreatedAt(running)
+	return nil, running, nil
+}
+
+// resolveRunningRunArg resolves a user-supplied run argument to a running run.
+func resolveRunningRunArg(manager *run.Manager, arg string) (*run.Run, []*run.Run, error) {
+	matches, err := manager.Resolve(arg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolveRunningFrom(matches, arg)
+}
+
 // printMatchingRuns prints a table of matching runs to stderr.
 func printMatchingRuns(matches []*run.Run, arg string) {
 	fmt.Fprintf(os.Stderr, "Multiple runs match %q:\n", arg)

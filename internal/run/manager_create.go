@@ -1227,6 +1227,11 @@ region = %s
 		NeedsWorkspaceVolume: volumeMode,
 	}
 
+	// Record which agents this container can host, for `moat join`.
+	// installableDeps is a separately scoped local (deps.FilterInstallable,
+	// ~line 1000) — not a field on imgNeeds — so both operands are read here.
+	r.JoinableAgents = computeJoinableAgents(imgNeeds.initProviders, installableDeps)
+
 	// Resolve container image based on dependencies and image spec
 	hasDeps := len(installableDeps) > 0
 	containerImage := image.Resolve(installableDeps, imageSpec)
