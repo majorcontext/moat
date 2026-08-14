@@ -1,4 +1,5 @@
 name: moat-dev
+agents: [claude, codex]
 interactive: true
 
 env:
