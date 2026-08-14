@@ -89,10 +89,15 @@ func ValidateAgent(cfg *config.Config) {
 // One rule: the CLI verb always names the primary when there is one; otherwise
 // `agent:` names it; if neither is set, `moat run` falls back to Agents[0].
 // verb is "" for `moat run`.
+//
+// Whichever path wins, the result is canonicalized on the way out — see
+// canonicalizeAgentField.
 func ResolveAgentField(cfg *config.Config, verb string) {
 	if cfg == nil {
 		return
 	}
+	defer canonicalizeAgentField(cfg)
+
 	ValidateAgent(cfg)
 
 	// This warning only holds on the no-verb (`moat run`) path: when a verb is
@@ -118,6 +123,29 @@ func ResolveAgentField(cfg *config.Config, verb string) {
 	// No verb: `moat run`. Fall back to the first entry in agents:.
 	if cfg.Agent == "" && len(cfg.Agents) > 0 {
 		cfg.Agent = cfg.Agents[0]
+	}
+}
+
+// canonicalizeAgentField rewrites cfg.Agent to its registered provider name, so
+// registry aliases (openai -> codex, google -> gemini) and documented variants
+// (claude-code -> claude) all collapse to one spelling.
+//
+// Every downstream consumer of cfg.Agent matches it with
+// strings.HasPrefix(cfg.Agent, "<canonical>"): isAIAgent's container-memory
+// default, agentImpliedDependencies, the language_servers gate, copilot init,
+// and pi staging — all in internal/run/manager_create.go. "claude-code"
+// satisfies those by prefix; "openai" and "google" do not. Without this,
+// an alias that ValidateAgent accepts (and that KnownAgentNames advertises as
+// valid) would sail through validation and then silently switch those defaults
+// off — the exact degradation this file exists to prevent. `agents: [openai]`
+// reaches the same place via the Agents[0] backfill above.
+//
+// A value that does not resolve is left alone: ValidateAgent has already
+// cleared unknown moat.yaml values, and the verb path assigns a name the
+// provider registry owns.
+func canonicalizeAgentField(cfg *config.Config) {
+	if canonical := CanonicalAgent(cfg.Agent); canonical != "" {
+		cfg.Agent = canonical
 	}
 }
 

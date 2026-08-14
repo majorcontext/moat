@@ -12,9 +12,14 @@ package cli_test
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
@@ -382,5 +387,172 @@ func TestAgentFieldReachesDegradationSites(t *testing.T) {
 	cli.ResolveAgentField(bare, "")
 	if bare.Agent != "" {
 		t.Errorf("cfg.Agent = %q, want empty so the HasPrefix sites stay off", bare.Agent)
+	}
+}
+
+// TestResolveAgentFieldCanonicalizes covers the alias half of the degradation
+// this file exists to prevent. KnownAgentNames advertises the registry aliases
+// (openai, google) as valid `agent:` values and ValidateAgent accepts them, so
+// they must also reach cfg.Agent in the spelling the downstream
+// strings.HasPrefix consumers in manager_create.go match against. "openai"
+// prefix-matches none of claude/codex/copilot/gemini/pi; "codex" does.
+func TestResolveAgentFieldCanonicalizes(t *testing.T) {
+	tests := []struct {
+		name   string
+		agent  string
+		agents []string
+		verb   string
+		want   string
+	}{
+		{"alias in agent: resolves to the provider name", "openai", nil, "", "codex"},
+		{"google resolves to gemini", "google", nil, "", "gemini"},
+		{"alias via the agents[0] backfill", "", []string{"openai"}, "", "codex"},
+		{"documented variant collapses too", "claude-code", nil, "", "claude"},
+		{"variant in agents[0] collapses", "", []string{"claude-code"}, "", "claude"},
+		// Companion: the verb path already assigns a canonical provider name,
+		// so canonicalization must leave it exactly as it was.
+		{"verb value is already canonical", "openai", nil, "claude", "claude"},
+		// Companion: an unknown value is still cleared, not "canonicalized"
+		// into some nearby agent.
+		{"unknown stays cleared", "vibrant-code", nil, "", ""},
+		// Companion: no agent info at all stays empty.
+		{"empty stays empty", "", nil, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			orig := ui.Writer()
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(orig) })
+
+			cfg := &config.Config{Agent: tt.agent, Agents: tt.agents}
+			cli.ResolveAgentField(cfg, tt.verb)
+
+			if cfg.Agent != tt.want {
+				t.Errorf("cfg.Agent = %q, want %q", cfg.Agent, tt.want)
+			}
+		})
+	}
+}
+
+// TestAliasAgentReachesDegradationSites is the companion to
+// TestAgentFieldReachesDegradationSites: that one proves a hallucinated value
+// is repaired by the verb, this one proves an alias moat itself advertises as
+// valid ends up satisfying the same HasPrefix gates. Before canonicalization
+// both `agent: openai` and `agents: [openai]` passed validation and then
+// silently switched off the memory limit, implied deps, and language-server
+// support.
+func TestAliasAgentReachesDegradationSites(t *testing.T) {
+	canonicalPrefixes := []string{"claude", "codex", "copilot", "gemini", "pi"}
+	satisfiesPrefixGate := func(agent string) bool {
+		for _, p := range canonicalPrefixes {
+			if strings.HasPrefix(agent, p) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, alias := range []string{"openai", "google"} {
+		t.Run("agent field "+alias, func(t *testing.T) {
+			cfg := &config.Config{Agent: alias}
+			cli.ResolveAgentField(cfg, "")
+			if !satisfiesPrefixGate(cfg.Agent) {
+				t.Errorf("agent: %s resolved to %q, which matches none of the "+
+					"HasPrefix gates in manager_create.go", alias, cfg.Agent)
+			}
+		})
+		t.Run("agents list "+alias, func(t *testing.T) {
+			cfg := &config.Config{Agents: []string{alias}}
+			if _, err := cli.ExpandAgents(cfg); err != nil {
+				t.Fatalf("ExpandAgents: %v", err)
+			}
+			cli.ResolveAgentField(cfg, "")
+			if !satisfiesPrefixGate(cfg.Agent) {
+				t.Errorf("agents: [%s] backfilled %q, which matches none of the "+
+					"HasPrefix gates in manager_create.go", alias, cfg.Agent)
+			}
+		})
+	}
+}
+
+// TestAgentDocTagListsEveryKnownAgentName guards the two "valid values" lists
+// against drift. The `doc:` tag on config.Config.Agent is rendered into moat
+// init's LLM prompt (quickstart.GenerateSchemaReference), while
+// KnownAgentNames() produces the list in the runtime warning — a value named by
+// one and not the other is either an unadvertised accepted value or, worse, a
+// prompt telling the model to write something moat rejects.
+func TestAgentDocTagListsEveryKnownAgentName(t *testing.T) {
+	field, ok := reflect.TypeOf(config.Config{}).FieldByName("Agent")
+	if !ok {
+		t.Fatal("config.Config has no Agent field")
+	}
+	doc := field.Tag.Get("doc")
+	if doc == "" {
+		t.Fatal("config.Config.Agent has no doc tag; moat init's prompt would document it as a bare string")
+	}
+	for _, name := range cli.KnownAgentNames() {
+		if !strings.Contains(doc, name) {
+			t.Errorf("KnownAgentNames() accepts %q but the Agent doc tag never mentions it: %q", name, doc)
+		}
+	}
+}
+
+// runProviderDryRun drives RunProvider against a workspace containing the given
+// moat.yaml with DryRun set, and returns everything written to the ui writer.
+// The verb is "codex" so ResolveAgentField takes the real provider path.
+func runProviderDryRun(t *testing.T, moatYAML string) string {
+	t.Helper()
+
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "moat.yaml"), []byte(moatYAML), 0o600); err != nil {
+		t.Fatalf("writing moat.yaml: %v", err)
+	}
+
+	oldDryRun := cli.DryRun
+	cli.DryRun = true
+	t.Cleanup(func() { cli.DryRun = oldDryRun })
+
+	var buf bytes.Buffer
+	orig := ui.Writer()
+	ui.SetWriter(&buf)
+	t.Cleanup(func() { ui.SetWriter(orig) })
+
+	cmd := &cobra.Command{
+		Use:           "codex",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(c *cobra.Command, a []string) error {
+			return cli.RunProvider(c, a, cli.ProviderRunConfig{
+				Name:         "codex",
+				Flags:        &cli.ExecFlags{},
+				BuildCommand: func(_, _ string) ([]string, error) { return []string{"noop"}, nil },
+			})
+		},
+	}
+	cmd.SetArgs([]string{ws})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	return buf.String()
+}
+
+// TestDryRunStillValidatesAgentField is a regression test for the ordering of
+// resolveProviderAgentField relative to the DryRun return. --dry-run is what
+// someone reaches for to check a moat.yaml before committing to a run, so it
+// is the worst place to skip the very warning that tells them `agent:` is
+// wrong. The call used to sit after the dry-run return and never fired.
+func TestDryRunStillValidatesAgentField(t *testing.T) {
+	out := runProviderDryRun(t, "agent: vibrant-code\n")
+	if !strings.Contains(out, "not a known agent") {
+		t.Errorf("dry run should warn about an unknown agent: value; got %q", out)
+	}
+
+	// Companion: a valid agent: under the same dry-run path stays silent, so
+	// the test above is detecting the bad value rather than a warning that
+	// fires unconditionally.
+	if out := runProviderDryRun(t, "agent: codex\n"); out != "" {
+		t.Errorf("dry run with a valid agent: should warn about nothing; got %q", out)
 	}
 }

@@ -45,6 +45,8 @@ Separately, port-exposing agents no longer disappear from the routing proxy's di
 - Fix `moat join <name>` failing when several runs share a name — previously, any project setting `name:` in `moat.yaml` gave every run the same name, and a second concurrent run made join error instead of offering a choice. ([#454](https://github.com/majorcontext/moat/pull/454))
 - Fix `moat join`'s extra positional arguments being silently ignored — `moat join <run> <agent> <extra>` used to accept and discard `<extra>`; it is now a usage error. `moat join` now takes one or two positional arguments (`[run] agent`), not a minimum of two. ([#454](https://github.com/majorcontext/moat/pull/454))
 - Fix the `agent:` reference documentation, which described the field as a free-form identifier defaulting to `name`. It is a fixed set of agent names and defaults to the command you ran. ([#454](https://github.com/majorcontext/moat/pull/454))
+- Fix `agent: openai` and `agent: google` being accepted and then ignored — the provider aliases passed validation but were never normalized to `codex` / `gemini`, so the agent-specific defaults (container memory, implied dependencies, language-server support) all silently switched off. `agent:` is now normalized to the provider name, including when it is backfilled from the first entry of `agents:`. ([#454](https://github.com/majorcontext/moat/pull/454))
+- Fix `--dry-run` skipping `agent:` validation — a `moat.yaml` with an unrecognized `agent:` previewed cleanly and only warned once you started a real run, which is backwards for the flag people use to check their config. ([#454](https://github.com/majorcontext/moat/pull/454))
 
 ### Breaking
 

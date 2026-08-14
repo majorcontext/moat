@@ -149,6 +149,12 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// moat run has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared. This runs BEFORE the dry-run return below: --dry-run
+	// is what someone reaches for to check a moat.yaml, so it must surface the
+	// same agent: warnings a real run would.
+	intcli.ResolveAgentField(cfg, "")
+
 	log.Debug("preparing run",
 		"name", runFlags.Name,
 		"workspace", absPath,
@@ -166,10 +172,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-
-	// moat run has no verb, so a valid agent: is preserved and an invalid one
-	// warns and is cleared.
-	intcli.ResolveAgentField(cfg, "")
 
 	opts := ExecOptions{
 		Flags:       runFlags,

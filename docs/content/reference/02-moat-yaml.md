@@ -209,7 +209,10 @@ agent: claude
 ```
 
 - Type: `string`
-- Allowed values: `claude`, `claude-code`, `codex`, `copilot`, `gemini`, `pi`
+- Allowed values: `claude`, `claude-code`, `codex`, `copilot`, `gemini`, `pi`.
+  The provider aliases `openai` (codex) and `google` (gemini) are accepted too.
+  Whatever you write is normalized to the provider name, so `agent: openai` is
+  recorded as `codex`.
 - Default: the provider name of the command you ran (`moat claude` → `claude`).
   For `moat run`, `agent:` is used as set; if it is unset and `agents:` is
   present, it falls back to the first entry in `agents:`; otherwise it stays

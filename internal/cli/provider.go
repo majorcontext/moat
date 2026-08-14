@@ -219,6 +219,13 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 		return envErr
 	}
 
+	// The verb the user typed always names the agent. ValidateAgent runs inside
+	// so an unknown moat.yaml value warns once and is discarded. This runs
+	// BEFORE the dry-run return below: --dry-run is what someone reaches for to
+	// check a moat.yaml, so it must surface the same agent: warnings a real run
+	// would.
+	resolveProviderAgentField(rc.Name, cfg, agentBeforeConfigure)
+
 	log.Debug(fmt.Sprintf("starting %s", rc.Name),
 		"workspace", absPath,
 		"grants", grants,
@@ -240,10 +247,6 @@ func RunProvider(cmd *cobra.Command, args []string, rc ProviderRunConfig) error 
 	}
 
 	ctx := context.Background()
-
-	// The verb the user typed always names the agent. ValidateAgent runs inside
-	// so an unknown moat.yaml value warns once and is discarded.
-	resolveProviderAgentField(rc.Name, cfg, agentBeforeConfigure)
 
 	opts := ExecOptions{
 		Flags:       *rc.Flags,

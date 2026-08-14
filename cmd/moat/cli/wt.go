@@ -163,6 +163,12 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	// Determine interactive mode from config
 	interactive := cfg != nil && cfg.Interactive
 
+	// moat wt has no verb, so a valid agent: is preserved and an invalid one
+	// warns and is cleared (same pattern as moat run). This runs BEFORE the
+	// dry-run return below so --dry-run surfaces the same agent: warnings a
+	// real run would.
+	intcli.ResolveAgentField(cfg, "")
+
 	log.Debug("starting worktree run",
 		"branch", branch,
 		"workspace", result.WorkspacePath,
@@ -180,10 +186,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-
-	// moat wt has no verb, so a valid agent: is preserved and an invalid one
-	// warns and is cleared (same pattern as moat run).
-	intcli.ResolveAgentField(cfg, "")
 
 	opts := intcli.ExecOptions{
 		Flags:       wtFlags,
