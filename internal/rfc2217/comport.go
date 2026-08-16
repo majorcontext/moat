@@ -75,3 +75,10 @@ func DecodeBaud(p []byte) uint32 {
 	}
 	return binary.BigEndian.Uint32(p[:4])
 }
+
+// SET-CONTROL also carries outbound flow control, alongside the modem lines.
+const (
+	ControlFlowNone    byte = 1
+	ControlFlowXONXOFF byte = 2
+	ControlFlowRTSCTS  byte = 3
+)

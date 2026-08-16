@@ -186,3 +186,57 @@ func TestWriteCommandThenReaderRoundTrip(t *testing.T) {
 		t.Fatalf("got cmd %d baud %d, want CmdSetBaudRate 921600", gotCmd, gotBaud)
 	}
 }
+
+func TestReaderReportsNegotiationVerbs(t *testing.T) {
+	// A peer that offers options and hears nothing back will stall, so the
+	// reader has to surface every verb, not just the ones we act on.
+	wire := []byte{
+		iac, Do, OptionComPort,
+		iac, Will, OptionBinary,
+		iac, Wont, OptionEcho,
+		iac, Dont, OptionSGA,
+	}
+	type call struct{ verb, option byte }
+	var got []call
+	r := NewReader(bytes.NewReader(wire))
+	r.OnNegotiate = func(verb, option byte) { got = append(got, call{verb, option}) }
+	if _, err := io.ReadAll(r); err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	want := []call{
+		{Do, OptionComPort},
+		{Will, OptionBinary},
+		{Wont, OptionEcho},
+		{Dont, OptionSGA},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d negotiations, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("negotiation %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNegotiationDoesNotLeakIntoData(t *testing.T) {
+	r := NewReader(bytes.NewReader([]byte{'a', iac, Do, OptionComPort, 'b'}))
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != "ab" {
+		t.Fatalf("data = %q, want %q", got, "ab")
+	}
+}
+
+func TestWriteNegotiate(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteNegotiate(&buf, Will, OptionComPort); err != nil {
+		t.Fatalf("WriteNegotiate: %v", err)
+	}
+	want := []byte{iac, Will, OptionComPort}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("got % x, want % x", buf.Bytes(), want)
+	}
+}

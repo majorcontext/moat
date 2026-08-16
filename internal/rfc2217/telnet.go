@@ -7,17 +7,31 @@ import (
 
 // Telnet control bytes.
 const (
-	iac  = 0xFF // interpret as command
-	se   = 0xF0 // subnegotiation end
-	sb   = 0xFA // subnegotiation begin
-	will = 0xFB
-	wont = 0xFC
-	do   = 0xFD
-	dont = 0xFE
+	iac = 0xFF // interpret as command
+	se  = 0xF0 // subnegotiation end
+	sb  = 0xFA // subnegotiation begin
 
-	// OptionComPort is the client-to-server com-port-control option.
-	OptionComPort = 44
+	// Negotiation verbs, exported so peers can answer an offer.
+	Will byte = 0xFB
+	Wont byte = 0xFC
+	Do   byte = 0xFD
+	Dont byte = 0xFE
 )
+
+// Telnet options moat cares about. A serial stream must be in binary mode, or
+// the peer is entitled to mangle high-bit bytes.
+const (
+	OptionBinary  byte = 0
+	OptionEcho    byte = 1
+	OptionSGA     byte = 3  // suppress go-ahead
+	OptionComPort byte = 44 // com-port-control (RFC 2217)
+)
+
+// WriteNegotiate writes a telnet negotiation command, e.g. IAC WILL BINARY.
+func WriteNegotiate(w io.Writer, verb, option byte) error {
+	_, err := w.Write([]byte{iac, verb, option})
+	return err
+}
 
 // EscapeIAC appends src to dst with every 0xFF doubled, as telnet requires.
 //
@@ -68,7 +82,12 @@ type Reader struct {
 	// call. Nil means commands are parsed and discarded.
 	OnCommand func(cmd byte, payload []byte)
 
+	// OnNegotiate is called for each IAC WILL/WONT/DO/DONT. A peer that offers
+	// options and gets no answer will stall, so servers must respond to these.
+	OnNegotiate func(verb, option byte)
+
 	state   int
+	verb    byte
 	option  byte
 	payload []byte
 	out     bytes.Buffer
@@ -119,7 +138,8 @@ func (r *Reader) process(chunk []byte) {
 				r.state = stData
 			case sb:
 				r.state = stSubOption
-			case do, dont, will, wont:
+			case Do, Dont, Will, Wont:
+				r.verb = b
 				r.state = stSkipOption
 			default:
 				// Two-byte command with no argument (NOP, DM, ...).
@@ -127,6 +147,9 @@ func (r *Reader) process(chunk []byte) {
 			}
 
 		case stSkipOption:
+			if r.OnNegotiate != nil {
+				r.OnNegotiate(r.verb, b)
+			}
 			r.state = stData
 
 		case stSubOption:
