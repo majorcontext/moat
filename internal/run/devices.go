@@ -281,8 +281,8 @@ func SerialEnvVarName(device string) string {
 // SerialEnv builds the environment a container needs to reach its devices.
 //
 // Each device is addressed by an rfc2217:// URL because control lines (DTR/RTS)
-// have no pty representation; the pty at /dev/moat/serial/<name> is for console
-// use only.
+// have no pty representation, so a device path could enumerate the hardware and
+// still never flash it.
 func SerialEnv(hostAddr string, addrs map[string]string) []string {
 	if len(addrs) == 0 {
 		return nil

@@ -15,9 +15,10 @@ const (
 	RecordFull = "full"
 )
 
-// deviceNameRe constrains device names. The name becomes a path under
-// /dev/moat/serial/ inside the container, so anything that could escape that
-// directory or confuse a shell is rejected.
+// deviceNameRe constrains device names. The name is interpolated into an
+// environment variable name and, once the console bridge lands, into a path
+// under /dev/moat/serial/, so anything that could escape that directory or
+// confuse a shell is rejected.
 var deviceNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // usbIDRe matches a 4-digit hex USB vendor or product ID, in either case.
@@ -31,8 +32,8 @@ type DeviceMatch struct {
 
 // DeviceEntry requests access to one serial device.
 type DeviceEntry struct {
-	// Serial is the device name. It determines the container paths:
-	// /dev/moat/serial/<name> and the MOAT_SERIAL_<NAME>_URL variable.
+	// Serial is the device name. It determines how the container addresses the
+	// device: MOAT_SERIAL_<NAME>_URL carries its rfc2217:// endpoint.
 	Serial string `yaml:"serial"`
 
 	// Match selects which attached device this entry refers to. The specific
@@ -63,7 +64,7 @@ func validateDevices(devs []DeviceEntry) error {
 		}
 		if !deviceNameRe.MatchString(d.Serial) {
 			return fmt.Errorf("devices[%d]: invalid device name %q — use lowercase letters, digits, '-' and '_', "+
-				"starting with a letter or digit (the name becomes /dev/moat/serial/<name>)", i, d.Serial)
+				"starting with a letter or digit (the name becomes MOAT_SERIAL_<NAME>_URL)", i, d.Serial)
 		}
 		if seen[d.Serial] {
 			return fmt.Errorf("devices[%d]: duplicate device name %q", i, d.Serial)
