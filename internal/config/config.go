@@ -40,6 +40,7 @@ type Config struct {
 	Env          map[string]string `yaml:"env,omitempty"`
 	Secrets      map[string]string `yaml:"secrets,omitempty"`
 	Mounts       []MountEntry      `yaml:"mounts,omitempty"`
+	Devices      []DeviceEntry     `yaml:"devices,omitempty" doc:"host serial devices to expose, e.g. an ESP32 dev board. Each entry is matched by USB vendor/product ID and pinned to a specific device on first use."`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
@@ -687,6 +688,11 @@ func Load(dir string) (*Config, error) {
 			return nil, fmt.Errorf("network.host: duplicate port %d", port)
 		}
 		seen[port] = true
+	}
+
+	// Validate devices
+	if err := validateDevices(cfg.Devices); err != nil {
+		return nil, err
 	}
 
 	// Validate sandbox setting
