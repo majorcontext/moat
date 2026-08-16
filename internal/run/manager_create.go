@@ -44,6 +44,7 @@ import (
 	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
+	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/majorcontext/moat/internal/storage"
@@ -698,10 +699,30 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			return nil, fmt.Errorf("claude.base_url: %w", baseURLErr)
 		}
 
+		// Resolve serial devices before registering. Resolution enforces the
+		// device pins, so a swapped device fails here — before the container is
+		// created — rather than part-way through a flash.
+		var serialSpecs []daemon.SerialDeviceSpec
+		if opts.Config != nil && len(opts.Config.Devices) > 0 {
+			if !slices.Contains(daemonCapabilities, daemon.CapSerialDevices) {
+				return nil, fmt.Errorf("proxy daemon is too old for serial devices (missing %q capability); run 'moat proxy restart' to upgrade", daemon.CapSerialDevices)
+			}
+			pins, pinErr := serialdev.OpenPinStore(serialdev.DefaultPinPath())
+			if pinErr != nil {
+				return nil, fmt.Errorf("opening device pins: %w", pinErr)
+			}
+			specs, devErr := ResolveDevices(ctx, opts.Config.Devices, serialdev.NewEnumerator(), pins)
+			if devErr != nil {
+				return nil, devErr
+			}
+			serialSpecs = specs
+		}
+
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
 		regReq.PolicyYAML = policyYAML
 		regReq.PolicyRuleSets = policyRuleSets
+		regReq.SerialDevices = serialSpecs
 
 		// Save registration request for re-registration after proxy restart
 		r.ProxyRegReq = &regReq
@@ -731,6 +752,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// must NOT be in NO_PROXY (otherwise it bypasses network.host enforcement).
 		isHostNet := m.defaultRuntime().SupportsHostNetwork() && (opts.Config == nil || len(opts.Config.Ports) == 0)
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
+
+		// Advertise each serial device as an rfc2217:// URL. Control lines have
+		// no pty representation, so the URL — not a device path — is what tools
+		// that need DTR/RTS must use.
+		proxyEnv = append(proxyEnv, SerialEnv(syntheticHostGateway, regResp.SerialAddrs)...)
 		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
 		// Docker-on-Linux resolves the synthetic hostnames via --add-host (set
