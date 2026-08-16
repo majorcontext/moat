@@ -714,6 +714,52 @@ Endpoints are accessible at `https://<endpoint>.<name>.localhost:<proxy-port>` w
 
 ---
 
+## Devices
+
+### devices
+
+Host serial devices the run may use. Nothing is exposed unless listed here.
+
+```yaml
+devices:
+  - serial: esp32
+    match: {vid: "303a", pid: "1001"}
+    baud: 115200
+    record: full
+```
+
+- Type: `list`
+- Default: `[]`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `serial` | string | yes | Device name. Lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
+| `match.vid` | string | yes | USB vendor ID, exactly 4 hex digits. |
+| `match.pid` | string | yes | USB product ID, exactly 4 hex digits. |
+| `baud` | int | no | Initial line rate. Tools normally set their own. |
+| `record` | string | no | `events` (default) or `full`. |
+
+Run `moat device list` to see the USB IDs of attached devices.
+
+Each device is exposed to the container as an RFC2217 URL, because control lines
+(DTR/RTS) cannot be carried by a pseudo-terminal:
+
+```bash
+esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id
+```
+
+`MOAT_SERIAL_DEVICES` lists the names of all devices available to the run.
+
+`match` identifies a device *model*. The first run to use a name pins that specific unit by
+serial number, and later runs must present the same device or fail. Use
+`moat device forget <name>` after deliberately swapping hardware. See
+[Serial devices](../guides/18-serial-devices.md).
+
+Only tty character devices can be exposed; storage, HID, and smartcard devices cannot.
+General USB passthrough is not supported.
+
+---
+
 ## Network
 
 ### network.policy

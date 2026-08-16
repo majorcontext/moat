@@ -1,0 +1,15 @@
+name: esp32-dev
+agent: claude
+
+dependencies:
+  - python
+
+# Run `moat device list` to find your board's USB ID and replace these.
+#
+# Common LilyGO / ESP32 bridges:
+#   10c4:ea60  CP2102 / CP2104   (T-Display, T-Beam)
+#   1a86:55d4  CH9102F           (newer LilyGO revisions)
+#   303a:1001  native USB        (ESP32-S3, ESP32-C3)
+devices:
+  - serial: esp32
+    match: {vid: "10c4", pid: "ea60"}

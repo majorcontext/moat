@@ -1,0 +1,157 @@
+---
+title: "Serial devices"
+navTitle: "Serial devices"
+description: "Give an agent access to an approved USB serial device, such as an ESP32 dev board."
+keywords: ["moat", "serial", "usb", "esp32", "esptool", "rfc2217", "hardware", "uart"]
+---
+
+# Serial devices
+
+Give an agent access to a USB serial device attached to your machine — an ESP32 or
+Arduino dev board, a UART adapter, a modem — without giving it the rest of your hardware.
+
+## 1. Find the device
+
+```bash
+$ moat device list
+DEVICE                   USB ID     SERIAL  PIN  DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  0001    -    CP2102 USB to UART Bridge
+
+Add a device to moat.yaml with its USB ID:
+
+  devices:
+    - serial: cp2102-usb-to-uart-bridge
+      match: {vid: "10c4", pid: "ea60"}
+```
+
+## 2. Declare it in moat.yaml
+
+```yaml
+name: esp32-dev
+
+dependencies:
+  - python
+
+devices:
+  - serial: esp32
+    match: {vid: "10c4", pid: "ea60"}
+```
+
+## 3. Use it
+
+Each device is exposed as an RFC2217 URL in `MOAT_SERIAL_<NAME>_URL`:
+
+```bash
+$ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+```
+
+`MOAT_SERIAL_DEVICES` lists the names of all devices available to the run.
+
+## Why a URL and not /dev/ttyUSB0
+
+Flashing a board is not a byte stream. `esptool` drives the DTR and RTS control lines to
+put an ESP32 into its bootloader, and changes the baud rate mid-session.
+
+A pseudo-terminal cannot carry either signal — `TIOCMGET` on a pty returns `ENOTTY`,
+because a pty has no modem control lines at all. A device path inside the container would
+enumerate correctly and then fail to flash, which looks like broken hardware rather than a
+missing feature.
+
+RFC2217 is the standard solution: it carries baud rate, DTR, RTS, and break over TCP.
+Espressif [documents it](https://docs.espressif.com/projects/esptool/en/latest/esp32/esptool/remote-serial-ports.html)
+as supporting DTR/RTS auto-reset "the same as for a local serial port," and recommends it
+for remote serial. Any pyserial-based tool accepts an `rfc2217://` URL in place of a port.
+
+## Approval and pinning
+
+Nothing is exposed unless `moat.yaml` asks for it.
+
+The `match` block selects a device by USB vendor and product ID, which identifies the
+*model*, not the unit. The first run to use a device name records that specific device's
+serial number. Every later run must present the same device:
+
+```
+$ moat run -- esptool chip_id
+Error: cannot use the serial devices this run requires:
+  esp32: serial device does not match its pin: "esp32" was pinned to serial 0001
+  but the attached device reports 0002
+    If you intended to swap devices, run: moat device forget esp32
+```
+
+This is a hard failure, not a warning. Two boards of the same model are indistinguishable
+by USB ID, so without pinning an agent could flash the wrong one.
+
+After deliberately swapping hardware:
+
+```bash
+$ moat device forget esp32
+```
+
+### Devices without a serial number
+
+Cheap CH340 and CP2102 clones often ship without a serial number. Those are pinned to the
+physical USB port instead, and `moat device list` says so:
+
+```
+DEVICE        USB ID     SERIAL                PIN  DESCRIPTION
+/dev/ttyUSB0  1a86:7523  - (pins by port 1-3)  -    USB Serial
+```
+
+A port pin approves *whatever is plugged into that port*, so moving the device to another
+port fails until you either move it back or run `moat device forget`.
+
+## What an agent can do with a serial device
+
+An agent with a serial line can reflash the device, and can therefore brick or reprogram
+it. That is inherent to the request — flashing is the point.
+
+The mitigation is consent at the device level: you choose which device, and moat enforces
+that it stays the same device. Sandboxing does not help here, and moat does not pretend
+otherwise.
+
+Two further boundaries are worth stating plainly:
+
+- **Only ttys are exposed.** The broker refuses to open anything that is not a tty
+  character device, so storage, HID, and smartcard devices cannot be reached through this
+  mechanism at all.
+- **The RFC2217 port is reachable from the host.** The protocol has no authentication, so
+  access is scoped by reachability: each device gets its own port, and only the owning
+  run's container is permitted to reach it through moat's network policy. Other processes
+  running on your machine can still connect to it.
+
+## One run at a time
+
+A device is claimed exclusively while a run holds it. A second run that wants the same
+device fails rather than interleaving bytes on the same line:
+
+```
+Error: serial device "esp32" is already in use by run 01HQ...
+```
+
+The claim is released when the run stops.
+
+## Observability
+
+Attach, detach, line-setting changes, DTR/RTS transitions, and byte counters are recorded
+for every session. Set `record: full` to capture the payload bytes too:
+
+```yaml
+devices:
+  - serial: esp32
+    match: {vid: "10c4", pid: "ea60"}
+    record: full
+```
+
+Full capture is opt-in because serial traffic carries firmware images and device
+credentials.
+
+## Platform support
+
+Serial devices work on Linux and macOS, with Docker and with Apple containers. Nothing
+here requires privileged mode, and it does not disable the gVisor sandbox, because no
+device is passed into the container — the broker holds the device on the host and speaks
+TCP to the container.
+
+General USB passthrough is not supported and is not planned: gVisor does not forward host
+devices, Apple's container runtime has no USB passthrough, and the Linux devices cgroup
+cannot filter on USB identity, so an allowlist could not be enforced.

@@ -181,6 +181,11 @@ func (s *Store) AppendContainer(data ContainerData) (*Entry, error) {
 	return s.Append(EntryContainer, &data)
 }
 
+// AppendDevice appends a serial device entry.
+func (s *Store) AppendDevice(data DeviceData) (*Entry, error) {
+	return s.Append(EntryDevice, data)
+}
+
 // AppendExec adds an exec command entry.
 func (s *Store) AppendExec(data ExecData) (*Entry, error) {
 	return s.Append(EntryExec, &data)

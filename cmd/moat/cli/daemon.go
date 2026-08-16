@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -66,17 +67,6 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 
 	// Create API server.
 	apiServer := daemon.NewServer(sockPath, daemonProxyPort)
-
-	// Serial device broker. Listeners are opened per run when a run registers
-	// devices, and closed when it unregisters.
-	serialBroker := serialbroker.New(serialbroker.Options{
-		Log: func(e serialbroker.Event) {
-			log.Debug("serial device event", "run", e.RunID, "device", e.Device,
-				"kind", e.Kind, "detail", e.Detail, "tx", e.TxBytes, "rx", e.RxBytes)
-		},
-	})
-	defer serialBroker.Close()
-	apiServer.SetSerialBroker(serialBroker)
 
 	// Create credential proxy.
 	p := proxy.NewProxy()
@@ -169,6 +159,95 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 
 		_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 	})
+
+	// Serial device broker. Listeners are opened per run when a run registers
+	// devices, and closed when it unregisters.
+	//
+	// Every event goes to the run's devices.jsonl. Session boundaries also go to
+	// the audit chain: attaching to hardware an agent can reflash is worth a
+	// tamper-evident record, while per-signal chatter is not.
+	serialBroker := serialbroker.New(serialbroker.Options{
+		// Payload capture (record: full) writes to the run's directory beside
+		// its other artifacts. 0600 because the capture may contain firmware
+		// images and device credentials.
+		OpenRecorder: func(runID, device string) (io.WriteCloser, error) {
+			runDir := filepath.Join(baseDir, runID)
+			if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
+				return nil, mkErr
+			}
+			return os.OpenFile(
+				filepath.Join(runDir, "serial-"+device+".capture"),
+				os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600,
+			)
+		},
+		Log: func(e serialbroker.Event) {
+			log.Debug("serial device event", "run", e.RunID, "device", e.Device,
+				"kind", e.Kind, "detail", e.Detail, "tx", e.TxBytes, "rx", e.RxBytes)
+			if e.RunID == "" {
+				return
+			}
+
+			storeMu.Lock()
+			store, ok := stores[e.RunID]
+			if !ok {
+				var storeErr error
+				store, storeErr = storage.NewRunStore(baseDir, e.RunID)
+				if storeErr != nil {
+					storeMu.Unlock()
+					log.Warn("failed to open run store for device log",
+						"run_id", e.RunID, "error", storeErr)
+					return
+				}
+				stores[e.RunID] = store
+			}
+			storeMu.Unlock()
+
+			_ = store.WriteDeviceEvent(storage.DeviceEvent{
+				Timestamp: time.Now().UTC(),
+				Device:    e.Device,
+				Kind:      e.Kind,
+				Detail:    e.Detail,
+				TxBytes:   e.TxBytes,
+				RxBytes:   e.RxBytes,
+			})
+
+			switch e.Kind {
+			case "attach", "detach", "error", "conflict":
+			default:
+				return
+			}
+
+			auditMu.Lock()
+			as, ok := auditStores[e.RunID]
+			if !ok {
+				var openErr error
+				as, openErr = audit.OpenStore(filepath.Join(baseDir, e.RunID, "audit.db"))
+				if openErr != nil {
+					auditMu.Unlock()
+					log.Warn("failed to open audit store for device log",
+						"run_id", e.RunID, "error", openErr)
+					return
+				}
+				auditStores[e.RunID] = as
+			}
+			auditMu.Unlock()
+
+			_, _ = as.AppendDevice(audit.DeviceData{
+				Name:       e.Device,
+				Path:       e.DevicePath,
+				VID:        e.VID,
+				PID:        e.PID,
+				Serial:     e.DeviceSerial,
+				Action:     e.Kind,
+				Detail:     e.Detail,
+				TxBytes:    e.TxBytes,
+				RxBytes:    e.RxBytes,
+				RecordMode: e.Record,
+			})
+		},
+	})
+	defer serialBroker.Close()
+	apiServer.SetSerialBroker(serialBroker)
 
 	// Start credential proxy.
 	proxyServer := proxy.NewServer(p)

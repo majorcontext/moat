@@ -2,10 +2,12 @@ package serialbroker
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/rfc2217"
@@ -49,10 +51,7 @@ func (l *listener) handle(conn net.Conn) {
 		l.mu.Unlock()
 		log.Debug("serial connection refused; device busy",
 			"device", l.approved.Name, "run", l.runID)
-		l.broker.emit(Event{
-			RunID: l.runID, Device: l.approved.Name, Kind: "conflict",
-			Detail: "a connection already holds this device",
-		})
+		l.emit("conflict", "a connection already holds this device", 0, 0)
 		conn.Close()
 		return
 	}
@@ -71,25 +70,47 @@ func (l *listener) handle(conn net.Conn) {
 	port, err := l.broker.openPort(l.approved.Device.Path)
 	if err != nil {
 		log.Debug("opening serial device failed", "device", l.approved.Name, "err", err)
-		l.broker.emit(Event{
-			RunID: l.runID, Device: l.approved.Name, Kind: "error",
-			Detail: err.Error(),
-		})
+		l.emit("error", err.Error(), 0, 0)
 		return
 	}
 	s.setPort(port)
 	defer port.Close()
 
-	l.broker.emit(Event{
-		RunID: l.runID, Device: l.approved.Name, Kind: "attach",
-		Detail: l.approved.Device.Path,
-	})
+	// Payload capture is opt-in: serial carries firmware images and device
+	// credentials. A recorder that cannot be opened degrades to events only
+	// rather than failing the session and stranding the hardware.
+	if l.approved.Record == RecordFull && l.broker.openRecorder != nil {
+		rec, rerr := l.broker.openRecorder(l.runID, l.approved.Name)
+		if rerr != nil {
+			log.Warn("serial payload capture unavailable", "device", l.approved.Name, "err", rerr)
+			l.emit("error", "payload capture unavailable: "+rerr.Error(), 0, 0)
+		} else {
+			s.recorder = rec
+			defer rec.Close()
+		}
+	}
+
+	l.emit("attach", l.approved.Device.Path, 0, 0)
 
 	s.run()
 
+	l.emit("detach", "", s.tx.Load(), s.rx.Load())
+}
+
+// emit reports an event carrying this device's identity.
+func (l *listener) emit(kind, detail string, tx, rx int64) {
 	l.broker.emit(Event{
-		RunID: l.runID, Device: l.approved.Name, Kind: "detach",
-		TxBytes: s.tx.Load(), RxBytes: s.rx.Load(),
+		RunID:        l.runID,
+		Device:       l.approved.Name,
+		Kind:         kind,
+		Detail:       detail,
+		DevicePath:   l.approved.Device.Path,
+		VID:          l.approved.Device.VID,
+		PID:          l.approved.Device.PID,
+		DeviceSerial: l.approved.Device.Serial,
+		Record:       l.approved.Record,
+		TxBytes:      tx,
+		RxBytes:      rx,
 	})
 }
 
@@ -118,6 +139,20 @@ type session struct {
 	mu       sync.Mutex
 	settings serialport.Settings
 	modem    serialport.Modem
+	recorder io.WriteCloser
+}
+
+// record writes captured payload bytes, if capture is enabled.
+func (s *session) record(dir string, b []byte) {
+	s.mu.Lock()
+	w := s.recorder
+	s.mu.Unlock()
+	if w == nil || len(b) == 0 {
+		return
+	}
+	if _, err := fmt.Fprintf(w, "%s %s %x\n", time.Now().UTC().Format(time.RFC3339Nano), dir, b); err != nil {
+		log.Debug("serial payload capture write failed", "device", s.listener.approved.Name, "err", err)
+	}
 }
 
 // setPort publishes the open device to the session.
@@ -156,7 +191,7 @@ func (s *session) run() {
 		r := rfc2217.NewReader(s.conn)
 		r.OnCommand = s.handleCommand
 		r.OnNegotiate = s.handleNegotiate
-		n, err := io.Copy(port, r)
+		n, err := io.Copy(&recordingWriter{w: port, dir: "tx", s: s}, r)
 		s.rx.Add(n)
 		s.logPumpExit("container->device", err)
 	}()
@@ -170,6 +205,7 @@ func (s *session) run() {
 		for {
 			n, err := port.Read(buf)
 			if n > 0 {
+				s.record("rx", buf[:n])
 				escaped = rfc2217.EscapeIAC(escaped[:0], buf[:n])
 				if _, werr := s.conn.Write(escaped); werr != nil {
 					s.logPumpExit("device->container", werr)
@@ -185,6 +221,18 @@ func (s *session) run() {
 	}()
 
 	wg.Wait()
+}
+
+// recordingWriter tees bytes headed for the device into the capture file.
+type recordingWriter struct {
+	w   io.Writer
+	dir string
+	s   *session
+}
+
+func (rw *recordingWriter) Write(p []byte) (int, error) {
+	rw.s.record(rw.dir, p)
+	return rw.w.Write(p)
 }
 
 // logPumpExit records why a pump stopped. A closed connection or port is the
@@ -343,10 +391,7 @@ func (s *session) reply(cmd byte, payload []byte) {
 }
 
 func (s *session) emit(kind, detail string) {
-	s.listener.broker.emit(Event{
-		RunID: s.listener.runID, Device: s.listener.approved.Name,
-		Kind: kind, Detail: detail,
-	})
+	s.listener.emit(kind, detail, 0, 0)
 }
 
 func (s *session) emitError(detail string) {

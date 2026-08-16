@@ -10,6 +10,7 @@ package serialbroker
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 
@@ -26,14 +27,27 @@ type Approved struct {
 }
 
 // Event describes something worth recording about a device session.
+//
+// The device's USB identity travels with every event so an audit trail records
+// which physical device was reached, not just the name the config gave it.
 type Event struct {
-	RunID   string
-	Device  string
-	Kind    string // attach, detach, error, settings, modem, break
-	Detail  string
+	RunID  string
+	Device string // config name, e.g. "esp32"
+	Kind   string // attach, detach, error, conflict, settings, modem, break
+	Detail string
+
+	DevicePath   string // host device node
+	VID          string
+	PID          string
+	DeviceSerial string // the device's USB serial number, if it has one
+	Record       string // record mode in force for this session
+
 	TxBytes int64 // bytes sent to the container
 	RxBytes int64 // bytes received from the container
 }
+
+// RecordFull is the Approved.Record value that enables payload capture.
+const RecordFull = "full"
 
 // Options configures a Broker.
 type Options struct {
@@ -44,6 +58,11 @@ type Options struct {
 	// Log receives session events. Optional.
 	Log func(Event)
 
+	// OpenRecorder returns a sink for captured payload bytes, used only when a
+	// device is configured with record: full. Optional; without it, full
+	// capture degrades to events only rather than failing the session.
+	OpenRecorder func(runID, device string) (io.WriteCloser, error)
+
 	// BindAddr is the address listeners bind to. Defaults to all interfaces so
 	// the container can reach it through the host gateway.
 	BindAddr string
@@ -51,9 +70,10 @@ type Options struct {
 
 // Broker owns the listeners and device claims for every registered run.
 type Broker struct {
-	openPort func(string) (serialport.Port, error)
-	logEvent func(Event)
-	bindAddr string
+	openPort     func(string) (serialport.Port, error)
+	logEvent     func(Event)
+	openRecorder func(runID, device string) (io.WriteCloser, error)
+	bindAddr     string
 
 	mu       sync.Mutex
 	closed   bool
@@ -64,11 +84,12 @@ type Broker struct {
 // New creates a Broker.
 func New(opts Options) *Broker {
 	b := &Broker{
-		openPort: opts.OpenPort,
-		logEvent: opts.Log,
-		bindAddr: opts.BindAddr,
-		byDevice: map[string]*listener{},
-		byRun:    map[string][]string{},
+		openPort:     opts.OpenPort,
+		logEvent:     opts.Log,
+		openRecorder: opts.OpenRecorder,
+		bindAddr:     opts.BindAddr,
+		byDevice:     map[string]*listener{},
+		byRun:        map[string][]string{},
 	}
 	if b.openPort == nil {
 		b.openPort = serialport.Open

@@ -1634,6 +1634,42 @@ moat proxy restart
 
 ---
 
+## moat device
+
+Inspect serial devices attached to this machine and manage which ones runs may use. See
+[Serial devices](../guides/18-serial-devices.md).
+
+### moat device list
+
+List attached serial devices with their USB IDs and pin state.
+
+```bash
+moat device list
+```
+
+```
+DEVICE                   USB ID     SERIAL  PIN    DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  0001    esp32  CP2102 USB to UART Bridge
+```
+
+The `PIN` column shows the device name a device is approved under, `-` if it is not
+pinned, or `MISMATCH (<name>)` when a device of the same model as a pin is attached but is
+not the pinned unit — the case a run rejects.
+
+Pins whose device is not attached are listed separately.
+
+### moat device forget
+
+Forget a device pin so the next run approves whatever is attached.
+
+```bash
+moat device forget <name>
+```
+
+Use after deliberately swapping hardware.
+
+---
+
 ## moat deps
 
 Manage dependencies. See [Dependencies](./06-dependencies.md) for details on the dependency system.

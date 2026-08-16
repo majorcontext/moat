@@ -2,8 +2,11 @@ package serialbroker_test
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
+	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -537,5 +540,184 @@ func TestSetBaudRateIsConfirmedToTheClient(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("got % x, want the server confirmation % x", got, want)
+	}
+}
+
+// capture is an in-memory recorder standing in for the run's capture file.
+type capture struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	closed bool
+}
+
+func (c *capture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
+}
+
+func (c *capture) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	return nil
+}
+
+func (c *capture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+func newRecordingBroker(t *testing.T, record string) (*serialtest.FakePort, *capture, string) {
+	t.Helper()
+	fp := serialtest.NewFakePort(t)
+	cap := &capture{}
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		OpenRecorder: func(string, string) (io.WriteCloser, error) {
+			return cap, nil
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	addr, err := b.Listen("run-a", serialbroker.Approved{
+		Name: "esp32", Device: testDevice(), Record: record,
+	})
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	return fp, cap, addr
+}
+
+func TestFullRecordModeCapturesBothDirections(t *testing.T) {
+	fp, cap, addr := newRecordingBroker(t, serialbroker.RecordFull)
+	c := dial(t, addr)
+
+	if _, err := c.Write([]byte("to-device")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 32)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+	if _, err := fp.Peer().Write([]byte("from-device")); err != nil {
+		t.Fatal(err)
+	}
+	readN(t, c, len("from-device"))
+
+	waitFor(t, "both directions captured", func() bool {
+		got := cap.String()
+		return strings.Contains(got, hex.EncodeToString([]byte("to-device"))) &&
+			strings.Contains(got, hex.EncodeToString([]byte("from-device")))
+	})
+	if got := cap.String(); !strings.Contains(got, " tx ") || !strings.Contains(got, " rx ") {
+		t.Fatalf("capture %q should label each direction", got)
+	}
+}
+
+func TestEventsModeCapturesNoPayload(t *testing.T) {
+	// Companion of the capture test, and the more important half: the default
+	// must not write firmware images or device credentials to disk.
+	fp, cap, addr := newRecordingBroker(t, "events")
+	c := dial(t, addr)
+
+	if _, err := c.Write([]byte("secret-payload")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 32)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+	if got := cap.String(); got != "" {
+		t.Fatalf("capture should be empty in events mode, got %q", got)
+	}
+}
+
+func TestEmptyRecordModeCapturesNoPayload(t *testing.T) {
+	// An omitted record field must behave like "events", not like "full".
+	fp, cap, addr := newRecordingBroker(t, "")
+	c := dial(t, addr)
+
+	if _, err := c.Write([]byte("secret-payload")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 32)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+	if got := cap.String(); got != "" {
+		t.Fatalf("capture should be empty when record is unset, got %q", got)
+	}
+}
+
+func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
+	// A recorder that cannot be opened must not strand the hardware.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		OpenRecorder: func(string, string) (io.WriteCloser, error) {
+			return nil, errors.New("disk full")
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	addr, err := b.Listen("run-a", serialbroker.Approved{
+		Name: "esp32", Device: testDevice(), Record: serialbroker.RecordFull,
+	})
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	c := dial(t, addr)
+	if _, err := c.Write([]byte("still-works")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 32)
+	n, err := fp.Peer().Read(buf)
+	if err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+	if string(buf[:n]) != "still-works" {
+		t.Fatalf("device got %q, want still-works", buf[:n])
+	}
+}
+
+func TestEventsCarryDeviceIdentity(t *testing.T) {
+	// Audit entries must name the physical device, not just the config name.
+	fp := serialtest.NewFakePort(t)
+	var (
+		mu     sync.Mutex
+		events []serialbroker.Event
+	)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log: func(e serialbroker.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, e)
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	c := dial(t, addr)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "attach event", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(events) > 0
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	e := events[0]
+	if e.VID != "303a" || e.PID != "1001" || e.DeviceSerial != "AAA" {
+		t.Fatalf("event %+v should carry the device's USB identity", e)
+	}
+	if e.DevicePath != "/dev/ttyUSB0" {
+		t.Fatalf("DevicePath = %q, want the host device node", e.DevicePath)
 	}
 }
