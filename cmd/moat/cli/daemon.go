@@ -16,6 +16,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/serialbroker"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -65,6 +66,17 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 
 	// Create API server.
 	apiServer := daemon.NewServer(sockPath, daemonProxyPort)
+
+	// Serial device broker. Listeners are opened per run when a run registers
+	// devices, and closed when it unregisters.
+	serialBroker := serialbroker.New(serialbroker.Options{
+		Log: func(e serialbroker.Event) {
+			log.Debug("serial device event", "run", e.RunID, "device", e.Device,
+				"kind", e.Kind, "detail", e.Detail, "tx", e.TxBytes, "rx", e.RxBytes)
+		},
+	})
+	defer serialBroker.Close()
+	apiServer.SetSerialBroker(serialBroker)
 
 	// Create credential proxy.
 	p := proxy.NewProxy()

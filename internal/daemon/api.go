@@ -87,6 +87,23 @@ type RegisterRequest struct {
 	HostGateway      string              `json:"host_gateway,omitempty"`
 	HostGatewayIP    string              `json:"host_gateway_ip,omitempty"`
 	AllowedHostPorts []int               `json:"allowed_host_ports,omitempty"`
+
+	// SerialDevices are host serial devices this run may use. The daemon opens
+	// one RFC2217 listener per device and returns their addresses.
+	SerialDevices []SerialDeviceSpec `json:"serial_devices,omitempty"`
+}
+
+// SerialDeviceSpec is one approved serial device, already resolved and pinned
+// by the CLI. The daemon does not re-resolve it: enumeration and pin checking
+// happen in pre-flight so a mismatch fails before the container is created.
+type SerialDeviceSpec struct {
+	Name     string `json:"name"`                // config name, e.g. "esp32"
+	Path     string `json:"path"`                // host device node
+	VID      string `json:"vid,omitempty"`       // for audit entries
+	PID      string `json:"pid,omitempty"`       // for audit entries
+	Serial   string `json:"serial,omitempty"`    // for audit entries
+	PortPath string `json:"port_path,omitempty"` // for audit entries
+	Record   string `json:"record,omitempty"`    // "events" (default) or "full"
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.
@@ -103,6 +120,10 @@ type RegisterResponse struct {
 	AuthToken string `json:"auth_token"`
 	ProxyPort int    `json:"proxy_port"`
 	Error     string `json:"error,omitempty"`
+
+	// SerialAddrs maps each approved device name to the host:port of its
+	// RFC2217 listener. Empty when the run requested no devices.
+	SerialAddrs map[string]string `json:"serial_addrs,omitempty"`
 }
 
 // UpdateRunRequest is sent to PATCH /v1/runs/{token}.
@@ -120,6 +141,7 @@ const (
 	CapKeepPolicy     = "keep-policy"
 	CapKeepBodyPolicy = "keep-body-policy"
 	CapHostGatewayV2  = "host-gateway-v2"
+	CapSerialDevices  = "serial-devices"
 )
 
 // HealthResponse is returned from GET /v1/health.
