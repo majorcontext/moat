@@ -20,6 +20,15 @@
 #   moat run --profile lunaroute examples/lunaroute
 #   moat run --profile lunaroute examples/lunaroute -- claude -p "explain this directory"
 #
+#   3. Optional: put the model names with the profile instead of here, so every
+#      project using the gateway inherits them. In ~/.moat/config.yaml:
+#        profiles:
+#          lunaroute:
+#            env:
+#              ANTHROPIC_MODEL: glm-5.3
+#              ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
+#              CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+#
 # The endpoint is on the credential, so `claude.base_url` is not needed here —
 # any run using this profile is routed to the gateway. Set claude.base_url only
 # to override it for one project.

@@ -283,3 +283,161 @@ func TestLoadGlobalMalformedReturnsDefaults(t *testing.T) {
 		t.Errorf("Debug.RetentionDays = %d, want default %d", cfg.Debug.RetentionDays, def.Debug.RetentionDays)
 	}
 }
+
+// writeGlobalConfigFile points MOAT_HOME at dir and writes config.yaml there,
+// so LoadGlobal reads exactly this content.
+func writeGlobalConfigFile(t *testing.T, dir, content string) {
+	t.Helper()
+	t.Setenv("MOAT_HOME", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("writing config.yaml: %v", err)
+	}
+}
+
+func TestLoadGlobalProfiles(t *testing.T) {
+	t.Run("parses profile env", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGlobalConfigFile(t, dir, `
+profiles:
+  lunaroute:
+    env:
+      ANTHROPIC_MODEL: glm-5.3
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+`)
+		cfg, err := LoadGlobal()
+		if err != nil {
+			t.Fatalf("LoadGlobal: %v", err)
+		}
+		env := cfg.ProfileEnv("lunaroute")
+		if env["ANTHROPIC_MODEL"] != "glm-5.3" {
+			t.Errorf("ANTHROPIC_MODEL = %q, want glm-5.3", env["ANTHROPIC_MODEL"])
+		}
+		// A YAML value that looks numeric must survive as the string the
+		// container needs.
+		if env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] != "1" {
+			t.Errorf("gateway discovery flag = %q, want \"1\"", env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"])
+		}
+	})
+
+	t.Run("rejects an invalid profile name", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGlobalConfigFile(t, dir, "profiles:\n  \"../escape\":\n    env:\n      A: b\n")
+		if _, err := LoadGlobal(); err == nil {
+			t.Error("expected an error for a profile name with path separators, got nil")
+		}
+	})
+
+	t.Run("rejects an invalid env name", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGlobalConfigFile(t, dir, "profiles:\n  work:\n    env:\n      \"A=B\": c\n")
+		if _, err := LoadGlobal(); err == nil {
+			t.Error("expected an error for an env name containing '=', got nil")
+		}
+	})
+
+	// Companion case: a config with no profiles section is valid and yields no
+	// profile env, rather than erroring or panicking.
+	t.Run("no profiles section", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGlobalConfigFile(t, dir, "proxy:\n  port: 9090\n")
+		cfg, err := LoadGlobal()
+		if err != nil {
+			t.Fatalf("LoadGlobal: %v", err)
+		}
+		if got := cfg.ProfileEnv("anything"); got != nil {
+			t.Errorf("ProfileEnv = %v, want nil", got)
+		}
+		if cfg.Proxy.Port != 9090 {
+			t.Errorf("Proxy.Port = %d, want 9090 — unrelated settings must still load", cfg.Proxy.Port)
+		}
+	})
+
+	t.Run("empty profile name is never matched", func(t *testing.T) {
+		dir := t.TempDir()
+		writeGlobalConfigFile(t, dir, "profiles:\n  work:\n    env:\n      A: b\n")
+		cfg, err := LoadGlobal()
+		if err != nil {
+			t.Fatalf("LoadGlobal: %v", err)
+		}
+		if got := cfg.ProfileEnv(""); got != nil {
+			t.Errorf("ProfileEnv(\"\") = %v, want nil", got)
+		}
+	})
+
+	t.Run("nil receiver", func(t *testing.T) {
+		var cfg *GlobalConfig
+		if got := cfg.ProfileEnv("work"); got != nil {
+			t.Errorf("ProfileEnv on nil = %v, want nil", got)
+		}
+	})
+}
+
+func TestValidateProfileName(t *testing.T) {
+	valid := []string{"work", "lunaroute", "a", "A1", "my-profile", "my_profile", "0"}
+	for _, n := range valid {
+		if err := ValidateProfileName(n); err != nil {
+			t.Errorf("ValidateProfileName(%q) = %v, want nil", n, err)
+		}
+	}
+	// Companion case: names that would escape the profiles directory or are
+	// otherwise unusable as a directory name.
+	invalid := []string{"", "../escape", "a/b", "-leading", "_leading", "has space", "has.dot", "a:b"}
+	for _, n := range invalid {
+		if err := ValidateProfileName(n); err == nil {
+			t.Errorf("ValidateProfileName(%q) = nil, want an error", n)
+		}
+	}
+}
+
+// TestLoadGlobalNeverReturnsNilConfig guards the contract that keeps a personal
+// config typo from crashing unrelated commands. Several callers ignore the
+// error and read a field straight away (the root command's debug settings, the
+// routing proxy port), so a nil config on a validation error is a panic waiting
+// for someone to mistype a profile name.
+func TestLoadGlobalNeverReturnsNilConfig(t *testing.T) {
+	bad := []struct {
+		name    string
+		content string
+	}{
+		{name: "invalid profile name", content: "profiles:\n  \"../escape\":\n    env:\n      A: b\n"},
+		{name: "invalid env name", content: "profiles:\n  work:\n    env:\n      \"A=B\": c\n"},
+		{name: "relative global mount", content: "mounts:\n  - source: relative/path\n    target: /x\n"},
+		{name: "global mount with exclude", content: "mounts:\n  - source: /abs\n    target: /x\n    exclude: [node_modules]\n"},
+		{name: "malformed yaml", content: "proxy: {{{\n"},
+	}
+
+	for _, tt := range bad {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeGlobalConfigFile(t, dir, tt.content)
+
+			cfg, err := LoadGlobal()
+			if cfg == nil {
+				t.Fatalf("LoadGlobal returned a nil config (err=%v); callers dereference it", err)
+			}
+			// Usable defaults, so a caller that ignores the error still works.
+			if cfg.Proxy.Port != DefaultGlobalConfig().Proxy.Port {
+				t.Errorf("Proxy.Port = %d, want the default %d", cfg.Proxy.Port, DefaultGlobalConfig().Proxy.Port)
+			}
+			if got := cfg.ProfileEnv("work"); got != nil {
+				t.Errorf("ProfileEnv = %v, want nil from a rejected config", got)
+			}
+		})
+	}
+}
+
+// TestLoadGlobalReportsValidationErrors is the companion: returning a usable
+// config must not mean swallowing the problem — the user still has to be told,
+// or a typo becomes invisible.
+func TestLoadGlobalReportsValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeGlobalConfigFile(t, dir, "profiles:\n  \"../escape\":\n    env:\n      A: b\n")
+
+	_, err := LoadGlobal()
+	if err == nil {
+		t.Fatal("LoadGlobal returned nil error for an invalid profile name")
+	}
+	if !strings.Contains(err.Error(), "../escape") {
+		t.Errorf("error %q does not name the offending profile", err.Error())
+	}
+}

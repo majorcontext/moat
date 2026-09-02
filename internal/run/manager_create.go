@@ -691,7 +691,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// LunaRoute, or a host-side proxy such as Headroom). Must run before
 		// buildRegisterRequest — see configureClaudeBaseURL.
 		var baseURLErr error
-		claudeBaseURLEnv, baseURLErr = configureClaudeBaseURL(runCtx, opts.Config, anthropicCred, opts.Env)
+		claudeBaseURLEnv, baseURLErr = configureClaudeBaseURL(runCtx, opts.Config, anthropicCred, globalCfg.ProfileEnv(credential.ActiveProfile), opts.Env)
 		if baseURLErr != nil {
 			// Should not happen: config.Load() validates the URL. Nothing to
 			// unwind — the run is not registered with the daemon yet.
@@ -860,6 +860,11 @@ region = %s
 	needsProxy := r.ProxyAuthToken != ""
 	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, hostAddr)
 
+	// Add the active credential profile's env vars. First of the three env
+	// layers, so moat.yaml and -e both override them: a profile carries the
+	// settings that go with an identity, not with a project.
+	proxyEnv = append(proxyEnv, profileEnv(globalCfg, credential.ActiveProfile, needsProxy)...)
+
 	// Add config env vars, filtering out proxy-related variables that would
 	// override moat's proxy settings and re-open the host traffic bypass.
 	if opts.Config != nil {
@@ -929,7 +934,7 @@ region = %s
 
 	// Build MOAT_* environment variables for host injection
 	if len(ports) > 0 {
-		globalCfg, _ := config.LoadGlobal()
+		// Reuse the config loaded above rather than re-reading the file.
 		proxyPort := globalCfg.Proxy.Port
 
 		baseHost := fmt.Sprintf("%s.localhost:%d", agentName, proxyPort)

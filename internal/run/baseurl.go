@@ -47,9 +47,9 @@ type claudeBaseURL struct {
 // supplying the key themselves via env or secrets. If nothing supplies it, the
 // run would fail with an opaque 401 from the endpoint, so that case warns.
 //
-// userEnv is the run's -e entries ("KEY=value"), needed only to tell those two
-// cases apart.
-func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential, userEnv []string) (string, error) {
+// profileEnvVars (the active credential profile's env) and userEnv (the run's
+// -e entries, "KEY=value") are needed only to tell those two cases apart.
+func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential, profileEnvVars map[string]string, userEnv []string) (string, error) {
 	raw := claudeBaseURLSource(cfg, cred)
 	if raw == "" {
 		return "", nil
@@ -70,7 +70,7 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
 	case cred != nil:
 		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
-	case hasUserSuppliedAnthropicKey(cfg, userEnv):
+	case hasUserSuppliedAnthropicKey(cfg, profileEnvVars, userEnv):
 		// The user is providing the endpoint's key themselves. Nothing to
 		// inject, and nothing to warn about.
 		log.Debug("claude.base_url set with a user-supplied key; no credential will be injected",
@@ -191,11 +191,21 @@ func isLoopbackHost(host string) bool {
 }
 
 // hasUserSuppliedAnthropicKey reports whether the run provides an Anthropic
-// credential of its own, through moat.yaml env, moat.yaml secrets, or a -e
-// flag. Used only to decide whether a base_url with no grant is a mistake or a
-// deliberate bring-your-own-key run.
-func hasUserSuppliedAnthropicKey(cfg *config.Config, userEnv []string) bool {
+// credential of its own, through any of the places a user can set one: the
+// active profile's env, moat.yaml env, moat.yaml secrets, or a -e flag. Used
+// only to decide whether a base_url with no grant is a mistake or a deliberate
+// bring-your-own-key run.
+//
+// Every env layer has to be checked here. Missing one produces a warning that
+// contradicts a working setup, which is worse than no warning at all.
+func hasUserSuppliedAnthropicKey(cfg *config.Config, profileEnvVars map[string]string, userEnv []string) bool {
 	names := []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+
+	for _, n := range names {
+		if _, ok := profileEnvVars[n]; ok {
+			return true
+		}
+	}
 
 	if cfg != nil {
 		for _, n := range names {
