@@ -134,6 +134,10 @@ func showProviderMetadata(cred *credential.Credential) {
 		if v := cred.Metadata["profile"]; v != "" {
 			fmt.Fprintf(os.Stdout, "%s   %s\n", ui.Bold("Profile:"), v)
 		}
+	case credential.ProviderAnthropic:
+		if v := cred.Metadata[credential.MetaKeyBaseURL]; v != "" {
+			fmt.Fprintf(os.Stdout, "%s  %s\n", ui.Bold("Endpoint:"), v)
+		}
 	case credential.ProviderNpm:
 		showNpmRegistries(cred.Token)
 	default:

@@ -17,7 +17,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 |-------|---------------|-----------------|-------------------|
 | `github` | `api.github.com`, `github.com` | `Authorization: Bearer ...` (`api.github.com`); `Authorization: Basic ...` (`github.com`, for git smart-HTTP) | gh CLI, `GITHUB_TOKEN`/`GH_TOKEN`, or PAT prompt |
 | `claude` | `api.anthropic.com` | `Authorization: Bearer ...` | `claude setup-token` or imported OAuth |
-| `anthropic` | `api.anthropic.com` | `x-api-key: ...` | API key from `console.anthropic.com` |
+| `anthropic` | `api.anthropic.com`, or a gateway host with `--base-url` | `x-api-key: ...` | API key from `console.anthropic.com`, or an Anthropic-compatible gateway |
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
 | `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token ...` | `GRAPHITE_TOKEN`, `GT_TOKEN`, or prompt |
@@ -138,7 +138,7 @@ moat grant anthropic    # API key (for any agent or tool)
 
 `moat pi` runs on the `anthropic` grant when that is its resolved backend. Pi has no credential of its own — see [Running Pi](../guides/16-pi.md) for how the backend is chosen.
 
-No flags.
+`moat grant anthropic` takes `--base-url` for a key issued by an Anthropic-compatible gateway. `moat grant claude` takes no flags.
 
 ### `moat grant claude`
 
@@ -155,6 +155,8 @@ Stored as `claude.enc`.
 Prompts for an API key directly, or uses `ANTHROPIC_API_KEY` from the environment.
 
 Stored as `anthropic.enc`.
+
+With `--base-url <url>`, the key belongs to an Anthropic-compatible gateway instead of to Anthropic. The `sk-ant-` prefix check is skipped, the key is validated against `<url>/v1/messages`, and the endpoint is recorded on the credential — so runs using it are pointed at the gateway and the key is injected for that host rather than for `api.anthropic.com`. See [moat grant anthropic](./01-cli.md#moat-grant-anthropic).
 
 ### What it injects
 

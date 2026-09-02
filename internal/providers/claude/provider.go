@@ -3,8 +3,14 @@ package claude
 import (
 	"net"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
+
+// APIHost is Anthropic's own API host. Claude Code contacts it regardless of
+// ANTHROPIC_BASE_URL (telemetry, the bootstrap check, the MCP registry), which
+// is why a third-party gateway key must never be registered for it.
+const APIHost = "api.anthropic.com"
 
 // OAuthProvider implements provider.CredentialProvider and provider.AgentProvider
 // for Claude Code OAuth tokens (from Claude Pro/Max subscriptions).
@@ -88,7 +94,17 @@ func (p *AnthropicProvider) Name() string {
 }
 
 // ConfigureProxy sets up proxy headers for API keys on the Anthropic API.
+//
+// A gateway key (one granted with --base-url) is deliberately NOT registered
+// for api.anthropic.com. Claude Code talks to api.anthropic.com regardless of
+// ANTHROPIC_BASE_URL — telemetry, the bootstrap check, the MCP registry — and
+// injecting a third-party gateway's key into those requests would hand it to
+// Anthropic. The key is registered for the gateway's own host instead, by
+// run.configureClaudeBaseURL.
 func (p *AnthropicProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
+	if cred.Metadata[credential.MetaKeyBaseURL] != "" {
+		return
+	}
 	proxy.SetCredentialWithGrant("api.anthropic.com", "x-api-key", cred.Token, "anthropic")
 }
 
@@ -138,6 +154,16 @@ func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential
 	host := baseURLHost
 	if h, _, err := net.SplitHostPort(baseURLHost); err == nil {
 		host = h
+	}
+
+	// A gateway key must never reach Anthropic's own API, however the endpoint
+	// was chosen. AnthropicProvider.ConfigureProxy already refuses that host
+	// for a gateway credential, but moat.yaml's claude.base_url can also name
+	// it — and it wins over the endpoint recorded on the credential — which
+	// would route the key straight back to Anthropic. Callers warn; this is the
+	// enforcement point.
+	if host == APIHost && cred.Metadata[credential.MetaKeyBaseURL] != "" {
+		return
 	}
 
 	switch cred.Provider {

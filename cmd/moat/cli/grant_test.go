@@ -71,3 +71,45 @@ func TestGrantCopilotUsesGitHub(t *testing.T) {
 		t.Fatalf("runGrant(copilot) error = %v, want moat grant github guidance", err)
 	}
 }
+
+// TestGrantBaseURLWrongProvider covers the CLI wiring for --base-url: the flag
+// only means something to the anthropic grant, and anywhere else it would be
+// silently ignored, so it must be rejected with guidance.
+func TestGrantBaseURLWrongProvider(t *testing.T) {
+	oldBaseURL := grantBaseURL
+	defer func() { grantBaseURL = oldBaseURL }()
+	grantBaseURL = "https://gw.lunaroute.com"
+
+	for _, prov := range []string{"github", "claude", "openai", "npm"} {
+		t.Run(prov, func(t *testing.T) {
+			err := runGrant(grantCmd, []string{prov})
+			if err == nil {
+				t.Fatalf("runGrant(%s --base-url) = nil, want error", prov)
+			}
+			if !strings.Contains(err.Error(), "moat grant anthropic --base-url") {
+				t.Errorf("error = %v, want guidance naming the anthropic grant", err)
+			}
+		})
+	}
+}
+
+// TestGrantBaseURLInvalidURL is the companion case: --base-url on the right
+// provider still has to name a usable endpoint, and the error says which flag
+// was wrong.
+func TestGrantBaseURLInvalidURL(t *testing.T) {
+	oldBaseURL := grantBaseURL
+	defer func() { grantBaseURL = oldBaseURL }()
+
+	for _, raw := range []string{"ftp://gw.example.com", "gw.example.com", "http://", "http://:8080"} {
+		t.Run(raw, func(t *testing.T) {
+			grantBaseURL = raw
+			err := runGrant(grantCmd, []string{"anthropic"})
+			if err == nil {
+				t.Fatalf("runGrant(anthropic --base-url %q) = nil, want error", raw)
+			}
+			if !strings.Contains(err.Error(), "--base-url") {
+				t.Errorf("error = %v, want it to name the --base-url flag", err)
+			}
+		})
+	}
+}

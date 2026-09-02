@@ -738,20 +738,14 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
-	// Validate claude.base_url
+	// Validate and normalize claude.base_url, so a trailing slash here behaves
+	// exactly like one passed to `moat grant anthropic --base-url`.
 	if cfg.Claude.BaseURL != "" {
-		u, err := url.Parse(cfg.Claude.BaseURL)
+		_, normalized, err := ValidateHTTPURL(cfg.Claude.BaseURL)
 		if err != nil {
-			return nil, fmt.Errorf("claude.base_url: invalid URL %q: %w", cfg.Claude.BaseURL, err)
+			return nil, fmt.Errorf("claude.base_url: %w", err)
 		}
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return nil, fmt.Errorf("claude.base_url: scheme must be http or https, got %q", u.Scheme)
-		}
-		// Hostname() as well as Host: "http://:8080" has a non-empty Host but
-		// no hostname, which yields an endpoint the container cannot reach.
-		if u.Host == "" || u.Hostname() == "" {
-			return nil, fmt.Errorf("claude.base_url: missing host in %q", cfg.Claude.BaseURL)
-		}
+		cfg.Claude.BaseURL = normalized
 	}
 
 	if cfg.Claude.BaseURL != "" && cfg.Claude.LLMGateway != nil {
@@ -1038,4 +1032,36 @@ func DefaultConfig() *Config {
 			},
 		},
 	}
+}
+
+// ValidateHTTPURL parses raw and checks it names something a container can
+// actually connect to: an http or https scheme and a non-empty hostname. It
+// returns the parsed URL and its normalized string form.
+//
+// It is shared by every place a user can name an LLM endpoint — moat.yaml's
+// claude.base_url, `moat grant anthropic --base-url`, and the endpoint recorded
+// on a credential — so the three cannot drift into disagreeing about what a
+// usable endpoint is, nor produce different ANTHROPIC_BASE_URL values for the
+// same endpoint.
+//
+// Normalization strips trailing slashes, because callers join a path onto the
+// result: "https://gw.example.com/" would otherwise yield
+// "https://gw.example.com//v1/messages".
+//
+// Hostname() is checked as well as Host because "http://:8080" has a non-empty
+// Host but no hostname at all.
+func ValidateHTTPURL(raw string) (*url.URL, string, error) {
+	normalized := strings.TrimRight(raw, "/")
+
+	u, err := url.Parse(normalized)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" || u.Hostname() == "" {
+		return nil, "", fmt.Errorf("missing host in %q", raw)
+	}
+	return u, normalized, nil
 }

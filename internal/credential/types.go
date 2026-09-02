@@ -11,6 +11,12 @@ import (
 // Provider packages define the values (e.g., "cli", "env", "pat").
 const MetaKeyTokenSource = "token_source"
 
+// MetaKeyBaseURL is the metadata key for the API endpoint a credential
+// authenticates against, when that is not the provider's own API. An
+// `anthropic` credential carrying this key is a gateway key: runs using it get
+// ANTHROPIC_BASE_URL pointed here and the key injected for this host.
+const MetaKeyBaseURL = "base_url"
+
 // Provider identifies a credential provider (github, aws, etc.)
 type Provider string
 

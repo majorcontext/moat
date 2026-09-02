@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/credential/keyring"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
@@ -370,8 +371,14 @@ func promptAndValidateOAuthToken(ctx context.Context, reader *bufio.Reader) (*pr
 }
 
 // grantViaAPIKey prompts for an API key.
+//
+// With a base URL in the context (moat grant anthropic --base-url), the key
+// belongs to an Anthropic-compatible gateway rather than to Anthropic: it is
+// validated against that endpoint and the endpoint is recorded on the
+// credential, so runs using it are routed there automatically.
 func grantViaAPIKey(ctx context.Context) (*provider.Credential, error) {
 	auth := &anthropicAuth{}
+	baseURL := BaseURLFromContext(ctx)
 
 	// Get API key from environment variable or interactive prompt
 	var apiKey string
@@ -380,17 +387,32 @@ func grantViaAPIKey(ctx context.Context) (*provider.Credential, error) {
 		fmt.Println("Using API key from ANTHROPIC_API_KEY environment variable")
 	} else {
 		var err error
-		apiKey, err = auth.PromptForAPIKey()
+		apiKey, err = auth.PromptForAPIKey(baseURL)
 		if err != nil {
 			return nil, fmt.Errorf("reading API key: %w", err)
 		}
 	}
 
-	// Validate the key
-	fmt.Println("\nValidating API key...")
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	if baseURL != "" {
+		fmt.Printf("\nValidating key against %s...\n", baseURL)
+		if err := auth.ValidateGatewayKey(ctx, apiKey, baseURL); err != nil {
+			return nil, fmt.Errorf("validating API key: %w", err)
+		}
+		fmt.Println("API key is valid.")
+
+		return &provider.Credential{
+			Provider:  "anthropic",
+			Token:     apiKey,
+			CreatedAt: time.Now(),
+			Metadata:  map[string]string{credential.MetaKeyBaseURL: baseURL},
+		}, nil
+	}
+
+	// Validate the key
+	fmt.Println("\nValidating API key...")
 	if err := auth.ValidateKey(ctx, apiKey); err != nil {
 		return nil, fmt.Errorf("validating API key: %w", err)
 	}
