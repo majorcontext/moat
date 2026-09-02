@@ -2,7 +2,6 @@ package claude
 
 import (
 	"context"
-	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 )
@@ -35,8 +34,9 @@ func BaseURLFromContext(ctx context.Context) string {
 // The returned URL has any trailing slash removed, since the path is joined
 // onto it later.
 func ValidateBaseURL(raw string) (string, error) {
-	if _, err := config.ValidateHTTPURL(raw); err != nil {
+	_, normalized, err := config.ValidateHTTPURL(raw)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSuffix(raw, "/"), nil
+	return normalized, nil
 }

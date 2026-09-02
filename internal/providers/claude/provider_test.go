@@ -1253,3 +1253,63 @@ func TestAnthropicConfigureProxy_PlainKeyStillInjected(t *testing.T) {
 		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], want)
 	}
 }
+
+// TestConfigureBaseURLProxy_GatewayKeyRefusesAnthropicHost is the enforcement
+// half of the leak guard. moat.yaml's claude.base_url overrides the endpoint
+// recorded on a credential, so it can name Anthropic's own API while a gateway
+// key is active — the key must still not be registered for that host.
+func TestConfigureBaseURLProxy_GatewayKeyRefusesAnthropicHost(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_gateway_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+
+	ConfigureBaseURLProxy(mockProxy, cred, APIHost)
+
+	if got, ok := mockProxy.credentials[APIHost]; ok {
+		t.Errorf("gateway key registered for %s (%q)", APIHost, got)
+	}
+}
+
+// TestConfigureBaseURLProxy_GatewayKeyReachesItsOwnHost is the companion: the
+// guard must be specific to Anthropic's host, not a blanket refusal that breaks
+// the feature.
+func TestConfigureBaseURLProxy_GatewayKeyReachesItsOwnHost(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_gateway_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+
+	ConfigureBaseURLProxy(mockProxy, cred, "gw.lunaroute.com")
+
+	if want := "x-api-key: lr_gateway_key"; mockProxy.credentials["gw.lunaroute.com"] != want {
+		t.Errorf("gw.lunaroute.com credential = %q, want %q", mockProxy.credentials["gw.lunaroute.com"], want)
+	}
+}
+
+// TestConfigureBaseURLProxy_PlainKeyReachesAnthropicHost is the other
+// companion: a real Anthropic key aimed at api.anthropic.com is legitimate and
+// must still be injected.
+func TestConfigureBaseURLProxy_PlainKeyReachesAnthropicHost(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-real"}
+
+	ConfigureBaseURLProxy(mockProxy, cred, APIHost)
+
+	if want := "x-api-key: sk-ant-api03-real"; mockProxy.credentials[APIHost] != want {
+		t.Errorf("%s credential = %q, want %q", APIHost, mockProxy.credentials[APIHost], want)
+	}
+}

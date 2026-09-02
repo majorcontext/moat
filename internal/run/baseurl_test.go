@@ -10,6 +10,7 @@ import (
 	"github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/netrules"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/providers/claude"
 )
 
 func TestResolveClaudeBaseURL(t *testing.T) {
@@ -624,5 +625,68 @@ func TestConfigureClaudeBaseURLUserSuppliedKey(t *testing.T) {
 	}
 	if len(rc.Credentials) != 0 {
 		t.Errorf("registered credentials for %v, want none", credHosts(rc))
+	}
+}
+
+// TestConfigureClaudeBaseURLGatewayKeyNeverReachesAnthropic covers the hole
+// review found in the security property: moat.yaml's claude.base_url wins over
+// the credential's own endpoint, so it can name api.anthropic.com while a
+// gateway key is active. The key must still not be registered for that host.
+func TestConfigureClaudeBaseURLGatewayKeyNeverReachesAnthropic(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+	cfg := &config.Config{}
+	cfg.Claude.BaseURL = "https://api.anthropic.com"
+	gatewayCred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_gateway_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+
+	if _, err := configureClaudeBaseURL(rc, cfg, gatewayCred, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds := rc.Credentials[claude.APIHost]; len(creds) != 0 {
+		t.Errorf("gateway key registered for %s: %+v", claude.APIHost, creds)
+	}
+}
+
+// TestConfigureClaudeBaseURLPlainKeyReachesAnthropic is the companion: a real
+// Anthropic key pointed at api.anthropic.com is a legitimate configuration and
+// must still be injected.
+func TestConfigureClaudeBaseURLPlainKeyReachesAnthropic(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+	cfg := &config.Config{}
+	cfg.Claude.BaseURL = "https://api.anthropic.com"
+	plainCred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-real"}
+
+	if _, err := configureClaudeBaseURL(rc, cfg, plainCred, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rc.Credentials[claude.APIHost]) == 0 {
+		t.Errorf("plain Anthropic key not registered for %s; hosts = %v", claude.APIHost, credHosts(rc))
+	}
+}
+
+// TestResolveClaudeBaseURLTrimsTrailingSlash covers the normalization review
+// flagged: the container must get the same ANTHROPIC_BASE_URL whether the
+// endpoint came from moat.yaml or from `moat grant anthropic --base-url`.
+func TestResolveClaudeBaseURLTrimsTrailingSlash(t *testing.T) {
+	tests := []struct {
+		raw           string
+		wantContainer string
+	}{
+		{raw: "https://gw.lunaroute.com/", wantContainer: "https://gw.lunaroute.com"},
+		{raw: "https://gw.example.com/anthropic/", wantContainer: "https://gw.example.com/anthropic"},
+		{raw: "http://localhost:8787/", wantContainer: "http://" + syntheticHostGateway + ":8787"},
+	}
+	for _, tt := range tests {
+		got, err := resolveClaudeBaseURL(tt.raw)
+		if err != nil {
+			t.Errorf("resolveClaudeBaseURL(%q): %v", tt.raw, err)
+			continue
+		}
+		if got.ContainerURL != tt.wantContainer {
+			t.Errorf("resolveClaudeBaseURL(%q) ContainerURL = %q, want %q", tt.raw, got.ContainerURL, tt.wantContainer)
+		}
 	}
 }

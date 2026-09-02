@@ -1241,7 +1241,9 @@ claude:
 
 Traffic goes through the Moat proxy, which injects the `anthropic` or `claude` grant's credential for the endpoint's host. The key stays on the host; the container only ever holds a placeholder.
 
-An ordinary Anthropic key is injected for `api.anthropic.com` as well. A gateway key — one granted with [`moat grant anthropic --base-url`](./01-cli.md#moat-grant-anthropic) — is deliberately not: Claude Code contacts `api.anthropic.com` regardless of `ANTHROPIC_BASE_URL`, and a third-party key has no business being sent there.
+An ordinary Anthropic key is injected for `api.anthropic.com` as well. A gateway key — one granted with [`moat grant anthropic --base-url`](./01-cli.md#moat-grant-anthropic) — is never sent there, including when `base_url` itself names `api.anthropic.com`: Claude Code contacts that host regardless of `ANTHROPIC_BASE_URL`, and a third-party key has no business being sent to Anthropic.
+
+Trailing slashes are stripped, so `https://gw.example.com/` and `https://gw.example.com` behave identically.
 
 A `localhost` (or `127.0.0.1`) URL names a service on your machine, which the container cannot reach at its own loopback address. Moat rewrites it to the container's host-gateway address and allows that port for the run, so you do not need a matching `network.host` entry.
 

@@ -61,6 +61,13 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 	}
 
 	switch {
+	case cred != nil && isGatewayCredential(cred) && resolved.CredentialHost == claude.APIHost:
+		// A gateway key against Anthropic's own API: ConfigureBaseURLProxy
+		// refuses to inject it, so say why rather than leaving an opaque 401.
+		ui.Warnf("claude.base_url points at %s, but the active anthropic grant is a gateway key for %s — it will not be sent to Anthropic.\n"+
+			"  Remove claude.base_url to use the gateway, or run without this profile to use an Anthropic key",
+			claude.APIHost, cred.Metadata[credential.MetaKeyBaseURL])
+		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
 	case cred != nil:
 		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
 	case hasUserSuppliedAnthropicKey(cfg, userEnv):
@@ -132,14 +139,17 @@ func claudeBaseURLSource(cfg *config.Config, cred *provider.Credential) string {
 // recorded endpoint is read back from the store, so this is the one place both
 // sources pass through.
 func resolveClaudeBaseURL(raw string) (claudeBaseURL, error) {
-	u, err := config.ValidateHTTPURL(raw)
+	u, normalized, err := config.ValidateHTTPURL(raw)
 	if err != nil {
 		return claudeBaseURL{}, err
 	}
 
 	host := u.Hostname()
 	if !isLoopbackHost(host) {
-		return claudeBaseURL{ContainerURL: raw, CredentialHost: host}, nil
+		// The normalized form, not raw: an endpoint from a credential or a
+		// moat.yaml with a trailing slash must reach the container in the same
+		// shape either way.
+		return claudeBaseURL{ContainerURL: normalized, CredentialHost: host}, nil
 	}
 
 	port := u.Port()
@@ -208,4 +218,11 @@ func hasUserSuppliedAnthropicKey(cfg *config.Config, userEnv []string) bool {
 		}
 	}
 	return false
+}
+
+// isGatewayCredential reports whether cred authenticates against a third-party
+// endpoint rather than Anthropic — i.e. it came from
+// `moat grant anthropic --base-url`.
+func isGatewayCredential(cred *provider.Credential) bool {
+	return cred != nil && cred.Metadata[credential.MetaKeyBaseURL] != ""
 }
