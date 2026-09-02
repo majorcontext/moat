@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
@@ -50,11 +51,12 @@ type claudeBaseURL struct {
 // userEnv is the run's -e entries ("KEY=value"), needed only to tell those two
 // cases apart.
 func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential, userEnv []string) (string, error) {
-	if cfg == nil || cfg.Claude.BaseURL == "" {
+	raw := claudeBaseURLSource(cfg, cred)
+	if raw == "" {
 		return "", nil
 	}
 
-	resolved, err := resolveClaudeBaseURL(cfg.Claude.BaseURL)
+	resolved, err := resolveClaudeBaseURL(raw)
 	if err != nil {
 		return "", err
 	}
@@ -66,7 +68,7 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 		// The user is providing the endpoint's key themselves. Nothing to
 		// inject, and nothing to warn about.
 		log.Debug("claude.base_url set with a user-supplied key; no credential will be injected",
-			"baseURL", cfg.Claude.BaseURL)
+			"baseURL", raw)
 	default:
 		// Neither a grant nor a key of their own: the endpoint will reject
 		// every request. Say so now rather than letting Claude Code retry
@@ -74,7 +76,7 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 		ui.Warnf("claude.base_url is set but nothing provides its key — requests to %s will be unauthenticated.\n"+
 			"  Grant one:  moat grant anthropic --base-url %s\n"+
 			"  Or set ANTHROPIC_AUTH_TOKEN via env or secrets in moat.yaml",
-			resolved.CredentialHost, cfg.Claude.BaseURL)
+			resolved.CredentialHost, raw)
 	}
 
 	// A host-local endpoint is only reachable if its port is allowed. base_url
@@ -86,12 +88,30 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 	}
 
 	log.Debug("configured base URL for Claude Code",
-		"baseURL", cfg.Claude.BaseURL,
+		"baseURL", raw,
 		"containerURL", resolved.ContainerURL,
 		"credentialHost", resolved.CredentialHost,
 		"allowedHostPort", resolved.HostPort)
 
 	return "ANTHROPIC_BASE_URL=" + resolved.ContainerURL, nil
+}
+
+// claudeBaseURLSource picks the endpoint for a run.
+//
+// moat.yaml wins over the credential: a project that names an endpoint means
+// it, and a gateway credential is a default for "wherever I run this key", not
+// an override of an explicit setting.
+//
+// The credential's endpoint comes from `moat grant anthropic --base-url`, which
+// is how a gateway key stays out of moat.yaml and out of the container.
+func claudeBaseURLSource(cfg *config.Config, cred *provider.Credential) string {
+	if cfg != nil && cfg.Claude.BaseURL != "" {
+		return cfg.Claude.BaseURL
+	}
+	if cred != nil {
+		return cred.Metadata[credential.MetaKeyBaseURL]
+	}
+	return ""
 }
 
 // resolveClaudeBaseURL rewrites a claude.base_url into the form the container
@@ -108,12 +128,17 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 // Any other host is returned unchanged. The proxy sees an ordinary request and
 // injects on the way through, so no rewrite is needed.
 //
-// config.Load already rejects a malformed URL, a non-HTTP(S) scheme, and a
-// missing host, so an error here means a caller passed an unvalidated string.
+// The URL is re-checked here rather than trusted. config.Load validates a
+// moat.yaml value and grant validates a --base-url one, but a credential's
+// recorded endpoint is read back from the store, so this is the one place both
+// sources pass through.
 func resolveClaudeBaseURL(raw string) (claudeBaseURL, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return claudeBaseURL{}, fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return claudeBaseURL{}, fmt.Errorf("scheme must be http or https, got %q in %q", u.Scheme, raw)
 	}
 	// Hostname() as well as Host: "http://:8080" has a non-empty Host but no
 	// hostname at all, and would otherwise sail through as a non-loopback

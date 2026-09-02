@@ -1213,3 +1213,43 @@ func TestPrepareContainer_LocalMCPMinimalFields(t *testing.T) {
 		}
 	}
 }
+
+// TestAnthropicConfigureProxy_GatewayKeyNotSentToAnthropic guards a credential
+// leak: Claude Code contacts api.anthropic.com regardless of
+// ANTHROPIC_BASE_URL (telemetry, bootstrap, MCP registry), so registering a
+// third-party gateway's key for that host would hand the key to Anthropic.
+func TestAnthropicConfigureProxy_GatewayKeyNotSentToAnthropic(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_gateway_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+
+	p := &AnthropicProvider{}
+	p.ConfigureProxy(mockProxy, cred)
+
+	if got, ok := mockProxy.credentials["api.anthropic.com"]; ok {
+		t.Errorf("gateway key registered for api.anthropic.com (%q); it must only go to the gateway host", got)
+	}
+}
+
+// TestAnthropicConfigureProxy_PlainKeyStillInjected is the companion case: a
+// normal Anthropic key must still be injected for api.anthropic.com.
+func TestAnthropicConfigureProxy_PlainKeyStillInjected(t *testing.T) {
+	mockProxy := &mockProxyConfigurer{
+		credentials:  make(map[string]string),
+		extraHeaders: make(map[string]map[string]string),
+	}
+	cred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-abc123"}
+
+	p := &AnthropicProvider{}
+	p.ConfigureProxy(mockProxy, cred)
+
+	if want := "x-api-key: sk-ant-api03-abc123"; mockProxy.credentials["api.anthropic.com"] != want {
+		t.Errorf("api.anthropic.com credential = %q, want %q", mockProxy.credentials["api.anthropic.com"], want)
+	}
+}

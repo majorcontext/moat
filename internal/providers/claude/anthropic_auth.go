@@ -48,9 +48,16 @@ func (a *anthropicAuth) apiURL() string {
 }
 
 // PromptForAPIKey prompts the user to enter their Anthropic API key.
-func (a *anthropicAuth) PromptForAPIKey() (string, error) {
-	fmt.Println("Enter your Anthropic API key.")
-	fmt.Println("You can find or create one at: https://console.anthropic.com/settings/keys")
+//
+// A gateway key (baseURL set) skips the sk-ant- prefix check: a third-party
+// Anthropic-compatible gateway issues keys in its own format.
+func (a *anthropicAuth) PromptForAPIKey(baseURL string) (string, error) {
+	if baseURL != "" {
+		fmt.Printf("Enter the API key for %s.\n", baseURL)
+	} else {
+		fmt.Println("Enter your Anthropic API key.")
+		fmt.Println("You can find or create one at: https://console.anthropic.com/settings/keys")
+	}
 	fmt.Print("\nAPI Key: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -64,9 +71,10 @@ func (a *anthropicAuth) PromptForAPIKey() (string, error) {
 		return "", fmt.Errorf("API key cannot be empty")
 	}
 
-	// Basic format validation to catch obvious errors early
-	if !strings.HasPrefix(key, anthropicKeyPrefix) {
-		return "", fmt.Errorf("invalid API key format: Anthropic keys start with %q", anthropicKeyPrefix)
+	// Basic format validation to catch obvious errors early. Only Anthropic's
+	// own keys have a known prefix.
+	if baseURL == "" && !strings.HasPrefix(key, anthropicKeyPrefix) {
+		return "", fmt.Errorf("invalid API key format: Anthropic keys start with %q\n\nFor a key issued by an Anthropic-compatible gateway, pass its endpoint:\n  moat grant anthropic --base-url https://gateway.example.com", anthropicKeyPrefix)
 	}
 
 	return key, nil
@@ -127,6 +135,53 @@ func (a *anthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 	default:
 		return fmt.Errorf("API error (status %d)", resp.StatusCode)
 	}
+}
+
+// ValidateGatewayKey validates a key against an Anthropic-compatible gateway
+// rather than api.anthropic.com.
+//
+// Only 401 and 403 count as failures. A gateway serves its own model catalog,
+// so the fixed validation model is usually unknown to it and the request comes
+// back 400 or 404 — which still proves the key authenticated. Being stricter
+// would reject working keys on every gateway that does not happen to serve
+// Anthropic's model ids.
+//
+// The key is sent as x-api-key, the same header moat injects at runtime for an
+// anthropic credential, so a gateway that only accepts Bearer tokens fails here
+// rather than at the first real request.
+func (a *anthropicAuth) ValidateGatewayKey(ctx context.Context, apiKey, baseURL string) error {
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/v1/messages"
+	reqBody := fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, validationModel)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := a.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("connecting to %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	log.Debug("gateway key validation response",
+		"subsystem", "grant",
+		"action", "validate_gateway",
+		"endpoint", endpoint,
+		"status", resp.StatusCode,
+	)
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("%s rejected the key (401) — check that it is correct and not revoked", baseURL)
+	case http.StatusForbidden:
+		return fmt.Errorf("%s rejected the key (403) — the key lacks permission for this endpoint", baseURL)
+	}
+	return nil
 }
 
 // ValidateOAuthToken validates an OAuth token by making a minimal API request.

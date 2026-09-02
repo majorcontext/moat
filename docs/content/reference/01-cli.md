@@ -660,6 +660,21 @@ API keys are stored as `anthropic.enc`. Both credentials can coexist with `claud
 moat grant anthropic
 ```
 
+| Flag | Description |
+|------|-------------|
+| `--base-url <url>` | The key belongs to an Anthropic-compatible gateway at this endpoint, not to Anthropic |
+
+`--base-url` changes three things: the `sk-ant-` prefix check is skipped (gateways issue keys in their own format), the key is validated against `<url>/v1/messages` instead of `api.anthropic.com` (only 401 and 403 count as failures, since a gateway serves its own model catalog), and the endpoint is recorded on the credential.
+
+Any run using that credential is then pointed at the endpoint — `ANTHROPIC_BASE_URL` is set from it and the key is injected for its host, so the key never enters the container. A `claude.base_url` in `moat.yaml` overrides it. The key is deliberately not injected for `api.anthropic.com`, which Claude Code contacts regardless.
+
+Pair it with `--profile` to keep a gateway key separate from a real Anthropic key:
+
+```bash
+moat grant anthropic --base-url https://gw.lunaroute.com --profile lunaroute
+moat run --profile lunaroute -- claude
+```
+
 ### moat grant openai
 
 Stores an OpenAI API key. Reads from the `OPENAI_API_KEY` environment variable, or prompts interactively.

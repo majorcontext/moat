@@ -134,6 +134,11 @@ func credType(c credential.Credential) string {
 	case credential.ProviderClaude:
 		return "oauth"
 	case credential.ProviderAnthropic:
+		// A gateway key is not interchangeable with an Anthropic key, so say so
+		// — otherwise two rows that behave very differently look identical.
+		if c.Metadata != nil && c.Metadata[credential.MetaKeyBaseURL] != "" {
+			return "api-key (gateway)"
+		}
 		return "api-key"
 	case credential.ProviderOpenAI:
 		if c.Metadata != nil && c.Metadata["auth_type"] == "oauth" {

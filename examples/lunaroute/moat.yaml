@@ -1,0 +1,51 @@
+# Example: Claude Code against the LunaRoute gateway
+#
+# LunaRoute serves the Anthropic Messages API in front of many models, so
+# Claude Code can talk to it by pointing ANTHROPIC_BASE_URL at the gateway.
+# Moat keeps the gateway key on the host and injects it at the proxy, so the
+# agent never sees it and it is redacted in the run's network log.
+#
+# Traffic flow:
+#   Claude Code -> Moat proxy (injects the key) -> gw.lunaroute.com
+#
+# Prerequisites:
+#   1. A LunaRoute API key (starts with lr_), from https://lunaroute.com
+#
+#   2. Store it as a gateway credential. --base-url records the endpoint on the
+#      credential and validates the key against it; --profile keeps it separate
+#      from any real Anthropic key you already granted:
+#        moat grant anthropic --base-url https://gw.lunaroute.com --profile lunaroute
+#
+# Run with:
+#   moat run --profile lunaroute examples/lunaroute
+#   moat run --profile lunaroute examples/lunaroute -- claude -p "explain this directory"
+#
+# The endpoint is on the credential, so `claude.base_url` is not needed here —
+# any run using this profile is routed to the gateway. Set claude.base_url only
+# to override it for one project.
+
+agent: claude
+
+dependencies:
+  - node@22
+  - git
+  - claude-code
+
+grants:
+  - anthropic
+
+# The models LunaRoute serves. ANTHROPIC_DEFAULT_HAIKU_MODEL matters: Claude
+# Code uses it for background work (titles, summaries, compaction) and would
+# otherwise fall back to a hardcoded Anthropic model id the gateway does not
+# serve. CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY lets /model list what the
+# gateway actually offers.
+#
+# Claude Code assumes a 200k context window for a model it does not know; set
+# CLAUDE_CODE_MAX_CONTEXT_TOKENS if the model accepts more.
+env:
+  ANTHROPIC_MODEL: "glm-5.3"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash"
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+
+command: ["claude"]
+interactive: true

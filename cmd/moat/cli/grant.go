@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/aws"
+	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -23,6 +24,7 @@ var (
 	awsSessionDuration string
 	awsExternalID      string
 	awsProfile         string
+	grantBaseURL       string
 )
 
 var grantCmd = &cobra.Command{
@@ -46,6 +48,7 @@ Subcommands:
 Examples:
   moat grant claude                              # Grant Claude OAuth token (for moat claude)
   moat grant anthropic                           # Grant Anthropic API key (for any agent)
+  moat grant anthropic --base-url https://gw...  # Grant a key for an Anthropic-compatible gateway
   moat grant github                              # Grant GitHub access
   moat grant aws --role=arn:aws:...              # Grant AWS access via IAM role
   moat grant github --profile myproject          # Grant GitHub access in a profile
@@ -63,6 +66,7 @@ func init() {
 	grantCmd.Flags().StringVar(&awsSessionDuration, "session-duration", "", "Session duration (default: 15m, max: 12h)")
 	grantCmd.Flags().StringVar(&awsExternalID, "external-id", "", "External ID for role assumption")
 	grantCmd.Flags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile for role assumption (falls back to AWS_PROFILE env var if not set)")
+	grantCmd.Flags().StringVar(&grantBaseURL, "base-url", "", "endpoint the key authenticates against, for an Anthropic-compatible gateway (anthropic only)")
 }
 
 // saveCredential stores a credential and returns the file path.
@@ -128,6 +132,20 @@ Options:
 	// For AWS, pass the CLI flags via context
 	if providerName == "aws" {
 		ctx = aws.WithGrantOptions(ctx, awsRole, awsRegion, awsSessionDuration, awsExternalID, awsProfile)
+	}
+
+	// --base-url marks the key as belonging to an Anthropic-compatible gateway
+	// rather than to Anthropic. Only the anthropic provider knows what to do
+	// with it; anywhere else it would be silently ignored.
+	if grantBaseURL != "" {
+		if providerName != "anthropic" {
+			return fmt.Errorf("--base-url applies to the anthropic grant, not %s\n\nFor a key issued by an Anthropic-compatible gateway:\n  moat grant anthropic --base-url %s", args[0], grantBaseURL)
+		}
+		validated, err := claudeprov.ValidateBaseURL(grantBaseURL)
+		if err != nil {
+			return fmt.Errorf("--base-url: %w", err)
+		}
+		ctx = claudeprov.WithBaseURL(ctx, validated)
 	}
 
 	provCred, err := prov.Grant(ctx)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/netrules"
@@ -149,6 +150,7 @@ func TestResolveClaudeBaseURLErrors(t *testing.T) {
 		// Non-empty Host (":8787") but no hostname: would otherwise resolve to
 		// a non-loopback endpoint with an empty credential host.
 		{name: "port with no host", raw: "http://:8787"},
+		{name: "wrong scheme", raw: "ftp://gw.example.com"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -473,6 +475,85 @@ func TestConfigureClaudeBaseURLInvalidURL(t *testing.T) {
 	}
 	if len(rc.Credentials) != 0 {
 		t.Errorf("registered credentials for %v, want none on error", credHosts(rc))
+	}
+}
+
+func TestClaudeBaseURLSource(t *testing.T) {
+	gatewayCred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+	plainCred := &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-key"}
+
+	cfgWithURL := &config.Config{}
+	cfgWithURL.Claude.BaseURL = "https://project.example.com"
+
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		cred *provider.Credential
+		want string
+	}{
+		{name: "nothing set", cfg: &config.Config{}, cred: plainCred, want: ""},
+		{name: "nil config and nil cred", cfg: nil, cred: nil, want: ""},
+		{name: "moat.yaml only", cfg: cfgWithURL, cred: plainCred, want: "https://project.example.com"},
+		{name: "credential only", cfg: &config.Config{}, cred: gatewayCred, want: "https://gw.lunaroute.com"},
+		{name: "credential with no config", cfg: nil, cred: gatewayCred, want: "https://gw.lunaroute.com"},
+		// moat.yaml wins: a project that names an endpoint means it.
+		{name: "moat.yaml wins over credential", cfg: cfgWithURL, cred: gatewayCred, want: "https://project.example.com"},
+		{name: "plain credential contributes nothing", cfg: &config.Config{}, cred: plainCred, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := claudeBaseURLSource(tt.cfg, tt.cred); got != tt.want {
+				t.Errorf("claudeBaseURLSource = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfigureClaudeBaseURLFromCredential covers the gateway-grant path: the
+// endpoint comes from the credential, so it works in any project with no
+// moat.yaml at all, and the key is injected for the gateway host.
+func TestConfigureClaudeBaseURLFromCredential(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+	cred := &provider.Credential{
+		Provider: "anthropic",
+		Token:    "lr_key",
+		Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"},
+	}
+
+	env, err := configureClaudeBaseURL(rc, nil, cred, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "ANTHROPIC_BASE_URL=https://gw.lunaroute.com"; env != want {
+		t.Errorf("env = %q, want %q", env, want)
+	}
+	if len(rc.Credentials["gw.lunaroute.com"]) == 0 {
+		t.Errorf("no credential registered for gw.lunaroute.com; hosts = %v", credHosts(rc))
+	}
+	// The gateway key must not be registered for Anthropic's own API.
+	if len(rc.Credentials["api.anthropic.com"]) != 0 {
+		t.Error("gateway key registered for api.anthropic.com")
+	}
+}
+
+// TestConfigureClaudeBaseURLRejectsBadCredentialURL covers the one input that
+// is not validated before it gets here: an endpoint read back from the
+// credential store.
+func TestConfigureClaudeBaseURLRejectsBadCredentialURL(t *testing.T) {
+	for _, bad := range []string{"ftp://gw.example.com", "gw.example.com", "http://"} {
+		rc := daemon.NewRunContext("run_test")
+		cred := &provider.Credential{
+			Provider: "anthropic",
+			Token:    "lr_key",
+			Metadata: map[string]string{credential.MetaKeyBaseURL: bad},
+		}
+		if _, err := configureClaudeBaseURL(rc, nil, cred, nil); err == nil {
+			t.Errorf("configureClaudeBaseURL with stored base_url %q: expected an error, got nil", bad)
+		}
 	}
 }
 

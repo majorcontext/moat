@@ -338,33 +338,38 @@ moat claude ./my-project
 
 ### An Anthropic-compatible gateway
 
-A gateway that speaks the Anthropic Messages API works the same way — point `base_url` at it and set the models it serves:
+A gateway that serves the Anthropic Messages API — [LunaRoute](https://lunaroute.com), an internal router, anything that speaks the same protocol — works the same way, but its key is its own credential rather than an Anthropic one. Grant it with `--base-url`:
+
+```bash
+moat grant anthropic --base-url https://gw.lunaroute.com --profile lunaroute
+```
+
+That validates the key against the gateway (rather than against `api.anthropic.com`, which would reject it) and records the endpoint on the credential. `--profile` keeps it separate from a real Anthropic key you may already have granted.
+
+Every run using that profile is then routed to the gateway, in any project:
+
+```bash
+moat run --profile lunaroute -- claude
+```
+
+The key stays on the host: the container gets a placeholder `ANTHROPIC_API_KEY`, the proxy swaps in the real key for the gateway's host, and the run's `network.jsonl` shows the header as `[REDACTED]`. The key is never sent to `api.anthropic.com` — Claude Code contacts it regardless of `ANTHROPIC_BASE_URL` for telemetry and bootstrap checks, and those requests keep the placeholder.
+
+You still have to name the models the gateway serves:
 
 ```yaml
-dependencies:
-  - claude-code
-
-claude:
-  base_url: https://gateway.example.com
-
 env:
-  ANTHROPIC_MODEL: "some-model"
-  ANTHROPIC_DEFAULT_HAIKU_MODEL: "some-small-model"
+  ANTHROPIC_MODEL: "glm-5.3"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash"
   CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
 ```
 
-`ANTHROPIC_DEFAULT_HAIKU_MODEL` matters: Claude Code uses it for background work (titles, summaries, compaction) and otherwise falls back to a hardcoded Anthropic model id the gateway will not serve.
+`ANTHROPIC_DEFAULT_HAIKU_MODEL` matters: Claude Code uses it for background work (titles, summaries, compaction) and otherwise falls back to a hardcoded Anthropic model id the gateway will not serve. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` lets `/model` list what the gateway actually offers.
 
-Gateway keys are their own credential, not an Anthropic key, so supply one yourself for now:
+Claude Code assumes a 200k context window for a model it does not recognize. Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the real window if the gateway's model accepts more.
 
-```yaml
-secrets:
-  ANTHROPIC_AUTH_TOKEN: env://GATEWAY_API_KEY
-```
+A working example is in [`examples/lunaroute`](https://github.com/majorcontext/moat/tree/main/examples/lunaroute).
 
-That puts the key in the container's environment, where the agent can read it and the proxy logs it to `network.jsonl`. Use a key scoped to what the run needs.
-
-Claude Code warns that a model it does not know assumes a 200k context window. Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the real window if the gateway's model accepts more.
+To override the endpoint for one project, set `claude.base_url` — it wins over the credential's recorded endpoint.
 
 ## LLM response policy
 

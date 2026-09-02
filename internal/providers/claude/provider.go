@@ -3,6 +3,7 @@ package claude
 import (
 	"net"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -88,7 +89,17 @@ func (p *AnthropicProvider) Name() string {
 }
 
 // ConfigureProxy sets up proxy headers for API keys on the Anthropic API.
+//
+// A gateway key (one granted with --base-url) is deliberately NOT registered
+// for api.anthropic.com. Claude Code talks to api.anthropic.com regardless of
+// ANTHROPIC_BASE_URL — telemetry, the bootstrap check, the MCP registry — and
+// injecting a third-party gateway's key into those requests would hand it to
+// Anthropic. The key is registered for the gateway's own host instead, by
+// run.configureClaudeBaseURL.
 func (p *AnthropicProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
+	if cred.Metadata[credential.MetaKeyBaseURL] != "" {
+		return
+	}
 	proxy.SetCredentialWithGrant("api.anthropic.com", "x-api-key", cred.Token, "anthropic")
 }
 
