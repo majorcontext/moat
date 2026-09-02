@@ -388,3 +388,56 @@ func TestValidateProfileName(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadGlobalNeverReturnsNilConfig guards the contract that keeps a personal
+// config typo from crashing unrelated commands. Several callers ignore the
+// error and read a field straight away (the root command's debug settings, the
+// routing proxy port), so a nil config on a validation error is a panic waiting
+// for someone to mistype a profile name.
+func TestLoadGlobalNeverReturnsNilConfig(t *testing.T) {
+	bad := []struct {
+		name    string
+		content string
+	}{
+		{name: "invalid profile name", content: "profiles:\n  \"../escape\":\n    env:\n      A: b\n"},
+		{name: "invalid env name", content: "profiles:\n  work:\n    env:\n      \"A=B\": c\n"},
+		{name: "relative global mount", content: "mounts:\n  - source: relative/path\n    target: /x\n"},
+		{name: "global mount with exclude", content: "mounts:\n  - source: /abs\n    target: /x\n    exclude: [node_modules]\n"},
+		{name: "malformed yaml", content: "proxy: {{{\n"},
+	}
+
+	for _, tt := range bad {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeGlobalConfigFile(t, dir, tt.content)
+
+			cfg, err := LoadGlobal()
+			if cfg == nil {
+				t.Fatalf("LoadGlobal returned a nil config (err=%v); callers dereference it", err)
+			}
+			// Usable defaults, so a caller that ignores the error still works.
+			if cfg.Proxy.Port != DefaultGlobalConfig().Proxy.Port {
+				t.Errorf("Proxy.Port = %d, want the default %d", cfg.Proxy.Port, DefaultGlobalConfig().Proxy.Port)
+			}
+			if got := cfg.ProfileEnv("work"); got != nil {
+				t.Errorf("ProfileEnv = %v, want nil from a rejected config", got)
+			}
+		})
+	}
+}
+
+// TestLoadGlobalReportsValidationErrors is the companion: returning a usable
+// config must not mean swallowing the problem — the user still has to be told,
+// or a typo becomes invisible.
+func TestLoadGlobalReportsValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeGlobalConfigFile(t, dir, "profiles:\n  \"../escape\":\n    env:\n      A: b\n")
+
+	_, err := LoadGlobal()
+	if err == nil {
+		t.Fatal("LoadGlobal returned nil error for an invalid profile name")
+	}
+	if !strings.Contains(err.Error(), "../escape") {
+		t.Errorf("error %q does not name the offending profile", err.Error())
+	}
+}

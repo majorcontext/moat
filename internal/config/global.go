@@ -69,6 +69,14 @@ func DefaultGlobalConfig() *GlobalConfig {
 // LoadGlobal reads the moat global config file and applies environment overrides.
 // The config path is <GlobalConfigDir>/config.yaml — by default ~/.moat/config.yaml,
 // or $MOAT_HOME/config.yaml when MOAT_HOME is set.
+//
+// The returned config is ALWAYS usable, never nil, even when the error is
+// non-nil: a validation failure yields defaults plus the error. A personal
+// config file is not worth crashing an unrelated command over, and several
+// callers legitimately ignore the error and read a field (the root command's
+// debug settings, the routing proxy port). Callers that want to tell the user
+// should report the error; callers that just need a value can use the config
+// as-is. Malformed YAML already behaved this way.
 func LoadGlobal() (*GlobalConfig, error) {
 	cfg := DefaultGlobalConfig()
 
@@ -100,7 +108,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 		}
 
 		if !filepath.IsAbs(m.Source) {
-			return nil, fmt.Errorf("global mount %d: source %q must be an absolute path (no workspace to resolve relative paths against)", i+1, m.Source)
+			return DefaultGlobalConfig(), fmt.Errorf("global mount %d: source %q must be an absolute path (no workspace to resolve relative paths against)", i+1, m.Source)
 		}
 
 		// Enforce read-only
@@ -109,7 +117,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 
 		// Excludes not supported on global mounts
 		if len(m.Exclude) > 0 {
-			return nil, fmt.Errorf("global mount %d: excludes are not supported on global mounts", i+1)
+			return DefaultGlobalConfig(), fmt.Errorf("global mount %d: excludes are not supported on global mounts", i+1)
 		}
 
 		validMounts = append(validMounts, m)
@@ -120,11 +128,11 @@ func LoadGlobal() (*GlobalConfig, error) {
 	// as a silently missing variable inside the container.
 	for name, prof := range cfg.Profiles {
 		if err := ValidateProfileName(name); err != nil {
-			return nil, fmt.Errorf("profiles.%s: %w", name, err)
+			return DefaultGlobalConfig(), fmt.Errorf("profiles.%s: %w", name, err)
 		}
 		for key := range prof.Env {
 			if err := validateEnvName(key); err != nil {
-				return nil, fmt.Errorf("profiles.%s.env: %w", name, err)
+				return DefaultGlobalConfig(), fmt.Errorf("profiles.%s.env: %w", name, err)
 			}
 		}
 	}

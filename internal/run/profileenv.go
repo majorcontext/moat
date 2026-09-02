@@ -4,7 +4,6 @@ import (
 	"sort"
 
 	"github.com/majorcontext/moat/internal/config"
-	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/ui"
 )
 
@@ -20,18 +19,14 @@ import (
 // configuration and must not be a way around network policy.
 //
 // The result is sorted so a run's environment does not depend on map order.
-// Returns nil for an empty profile name, an unreadable global config, or a
-// profile with no env.
-func profileEnv(profile string, needsProxy bool) []string {
+// Returns nil for an empty profile name, a nil config, or a profile with no
+// env.
+//
+// globalCfg is passed in rather than loaded here: Create already has it, and
+// re-reading would both parse the file a second time and risk disagreeing with
+// the copy the rest of the run was configured from.
+func profileEnv(globalCfg *config.GlobalConfig, profile string, needsProxy bool) []string {
 	if profile == "" {
-		return nil
-	}
-
-	globalCfg, err := config.LoadGlobal()
-	if err != nil {
-		// LoadGlobal already warns the user about a malformed config; a run
-		// should not fail because of an unrelated global setting.
-		log.Debug("could not load global config for profile env", "profile", profile, "error", err)
 		return nil
 	}
 
