@@ -1403,7 +1403,7 @@ func TestReplaceHostInEnv(t *testing.T) {
 		"HTTP_PROXY=http://moat:token@192.168.64.1:19080",
 		"HTTPS_PROXY=http://moat:token@192.168.64.1:19080",
 		"NO_PROXY=192.168.64.1,buildkit,localhost,127.0.0.1",
-		"ANTHROPIC_BASE_URL=http://192.168.64.1:19080/relay/anthropic",
+		"ANTHROPIC_BASE_URL=https://gw.lunaroute.com",
 		"MOAT_SSH_TCP_ADDR=192.168.64.1:62098",
 		"SOME_UNRELATED_VAR=hello",
 	}
@@ -1414,7 +1414,7 @@ func TestReplaceHostInEnv(t *testing.T) {
 		"HTTP_PROXY=http://moat:token@192.168.72.1:19080",
 		"HTTPS_PROXY=http://moat:token@192.168.72.1:19080",
 		"NO_PROXY=192.168.72.1,buildkit,localhost,127.0.0.1",
-		"ANTHROPIC_BASE_URL=http://192.168.72.1:19080/relay/anthropic",
+		"ANTHROPIC_BASE_URL=https://gw.lunaroute.com", // a remote endpoint holds no host address, so it is untouched
 		"MOAT_SSH_TCP_ADDR=192.168.72.1:62098",
 		"SOME_UNRELATED_VAR=hello",
 	}

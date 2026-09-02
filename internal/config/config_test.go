@@ -1879,6 +1879,18 @@ func TestLoadConfigWithClaudeBaseURL(t *testing.T) {
 			baseURL: "://localhost:8080",
 			wantErr: "invalid URL",
 		},
+		{
+			// Non-empty Host (":8080") but no hostname — would otherwise pass
+			// validation and yield an endpoint nothing can connect to.
+			name:    "port with no host",
+			baseURL: "http://:8080",
+			wantErr: "missing host",
+		},
+		{
+			name:    "scheme only",
+			baseURL: "http://",
+			wantErr: "missing host",
+		},
 	}
 
 	for _, tt := range tests {

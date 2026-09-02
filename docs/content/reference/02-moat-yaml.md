@@ -1228,7 +1228,7 @@ Moat injects `MOAT_*` environment variables into the main container for each ser
 
 ### claude.base_url
 
-Redirect Claude Code API traffic through a host-side LLM proxy. Sets `ANTHROPIC_BASE_URL` inside the container and registers credential injection for the proxy host.
+Send Claude Code's API traffic to a custom endpoint: a host-side LLM proxy, or an Anthropic-compatible gateway. Sets `ANTHROPIC_BASE_URL` inside the container and registers credential injection for the endpoint's host.
 
 ```yaml
 claude:
@@ -1239,7 +1239,11 @@ claude:
 - Default: none (Claude Code connects to `api.anthropic.com` directly)
 - Scheme must be `http` or `https`
 
-Moat routes traffic through a relay endpoint on the Moat proxy, which forwards requests to the configured URL with credentials injected. This works transparently with `localhost` URLs because the relay runs on the host where `localhost` resolves correctly. Credentials from the `anthropic` or `claude` grant are injected for the base URL host in addition to the standard `api.anthropic.com` injection.
+Traffic goes through the Moat proxy, which injects the `anthropic` or `claude` grant's credential for the endpoint's host in addition to the standard `api.anthropic.com` injection. The key stays on the host; the container only ever holds a placeholder.
+
+A `localhost` (or `127.0.0.1`) URL names a service on your machine, which the container cannot reach at its own loopback address. Moat rewrites it to the container's host-gateway address and allows that port for the run, so you do not need a matching `network.host` entry.
+
+Setting `base_url` starts the proxy on its own — a run needs no grants and no strict policy for it to take effect. Without a grant nothing is injected, so the endpoint's key has to come from `env` or `secrets` instead.
 
 ### claude.llm-gateway
 

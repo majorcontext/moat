@@ -211,6 +211,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	var proxyEnv []string
 	var providerEnv []string // Provider-specific env vars (e.g., dummy ANTHROPIC_API_KEY)
 
+	// ANTHROPIC_BASE_URL for a claude.base_url run. Resolved before the run is
+	// registered with the daemon (the credential has to be in the registration
+	// request) but appended to the container env further down, once the proxy
+	// details that env depends on are known.
+	var claudeBaseURLEnv string
+
 	// When a run holds both the "claude" (OAuth) and "anthropic" (API key)
 	// grants, a container-wide ANTHROPIC_API_KEY takes precedence over Claude
 	// Code's OAuth login and silently moves the session onto API billing. In
@@ -353,16 +359,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 	// Start proxy for any feature that the proxy is responsible for enforcing
 	// or relaying, even when there are no grants and the policy is permissive.
-	// Without this, setting `network.host`, `network.rules`, MCP servers, or
-	// Keep policies on a grant-less run would silently do nothing.
-	needsProxyForConfig := false
-	if opts.Config != nil {
-		needsProxyForConfig = len(opts.Config.Network.Host) > 0 ||
-			len(opts.Config.Network.Rules) > 0 ||
-			len(opts.Config.MCP) > 0 ||
-			opts.Config.Network.KeepPolicy != nil ||
-			(opts.Config.Claude.LLMGateway != nil && opts.Config.Claude.LLMGateway.Policy != nil)
-	}
+	// Without this, setting `network.host`, `network.rules`, MCP servers,
+	// Keep policies, or claude.base_url on a grant-less run would silently do
+	// nothing — base_url is set on the container by the proxy block, and a
+	// host-local endpoint is only reachable through the proxy at all.
+	needsProxyForConfig := proxyRequiredForConfig(opts.Config)
 
 	// Clipboard bridging is resolved by the caller (ExecuteRun).
 	needsClipboard := opts.Clipboard
@@ -686,6 +687,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// the host.
 		runCtx.HostGatewayIP = "127.0.0.1"
 
+		// Redirect Claude Code at a custom LLM endpoint (a gateway such as
+		// LunaRoute, or a host-side proxy such as Headroom). Must run before
+		// buildRegisterRequest — see configureClaudeBaseURL.
+		var baseURLErr error
+		claudeBaseURLEnv, baseURLErr = configureClaudeBaseURL(runCtx, opts.Config, anthropicCred, opts.Env)
+		if baseURLErr != nil {
+			// Should not happen: config.Load() validates the URL. Nothing to
+			// unwind — the run is not registered with the daemon yet.
+			return nil, fmt.Errorf("claude.base_url: %w", baseURLErr)
+		}
+
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
 		regReq.PolicyYAML = policyYAML
@@ -762,36 +774,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// Add provider-specific env vars (collected during credential loading)
 		proxyEnv = append(proxyEnv, providerEnv...)
 
-		// Configure custom base URL for Claude Code LLM proxy (e.g., Headroom).
-		// Uses a relay pattern: ANTHROPIC_BASE_URL points to a relay endpoint on
-		// the Moat proxy, which forwards to the actual host-side LLM proxy with
-		// credentials injected. This avoids the NO_PROXY issue where the rewritten
-		// base URL host would bypass the proxy (it's the same hostAddr).
-		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred == nil {
-			ui.Warn("claude.base_url is set but no anthropic or claude grant is active — ANTHROPIC_BASE_URL will not be set")
-		}
-		if opts.Config != nil && opts.Config.Claude.BaseURL != "" && anthropicCred != nil {
-			baseURL, parseErr := url.Parse(opts.Config.Claude.BaseURL)
-			if parseErr != nil {
-				// Should not happen: config.Load() validates the URL.
-				log.Warn("invalid claude.base_url, skipping relay setup",
-					"url", opts.Config.Claude.BaseURL, "error", parseErr)
-			} else {
-				// Register credential injection for the base URL host on the RunContext
-				claude.ConfigureBaseURLProxy(runCtx, anthropicCred, baseURL.Host)
-
-				// The relay endpoint runs on the daemon's proxy.
-				// Set ANTHROPIC_BASE_URL to the relay endpoint.
-				// Since proxyHost is in NO_PROXY, Claude Code connects directly
-				// to the proxy's HTTP handler (not through the CONNECT tunnel),
-				// which routes /relay/anthropic/ to the relay handler.
-				relayURL := fmt.Sprintf("http://%s/relay/anthropic", proxyHost)
-				proxyEnv = append(proxyEnv, "ANTHROPIC_BASE_URL="+relayURL)
-
-				log.Debug("configured base URL relay for Claude Code",
-					"baseURL", opts.Config.Claude.BaseURL,
-					"relayURL", relayURL)
-			}
+		// Point Claude Code at the custom LLM endpoint resolved before
+		// registration. Appended after providerEnv so it wins over any
+		// provider-supplied value.
+		if claudeBaseURLEnv != "" {
+			proxyEnv = append(proxyEnv, claudeBaseURLEnv)
 		}
 
 		// Set up AWS credential_process if AWS grant is active
@@ -2961,4 +2948,24 @@ func checkKeepPolicyCapabilities(daemonCapabilities []string, requiresBody bool)
 		return fmt.Errorf("proxy daemon does not support request-body Keep policies (missing 'keep-body-policy' capability); run 'moat proxy restart' to upgrade")
 	}
 	return nil
+}
+
+// proxyRequiredForConfig reports whether moat.yaml asks for something the proxy
+// is responsible for enforcing or relaying. These features must start the proxy
+// even when a run has no grants and a permissive policy, or they would silently
+// do nothing.
+//
+// claude.base_url is in this set because the proxy block is what puts
+// ANTHROPIC_BASE_URL on the container, and a host-local endpoint is only
+// reachable through the proxy at all.
+func proxyRequiredForConfig(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return len(cfg.Network.Host) > 0 ||
+		len(cfg.Network.Rules) > 0 ||
+		len(cfg.MCP) > 0 ||
+		cfg.Network.KeepPolicy != nil ||
+		cfg.Claude.BaseURL != "" ||
+		(cfg.Claude.LLMGateway != nil && cfg.Claude.LLMGateway.Policy != nil)
 }

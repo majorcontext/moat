@@ -114,8 +114,14 @@ func (p *AnthropicProvider) ImpliedDependencies() []string {
 
 // ConfigureBaseURLProxy registers credential injection for a custom base URL
 // host, mirroring the standard api.anthropic.com injection. This is called by
-// the run manager when claude.base_url is configured, so that a host-side LLM
-// proxy receives requests with credentials already injected.
+// the run manager when claude.base_url is configured, so that a custom LLM
+// endpoint receives requests with credentials already injected and the key
+// never enters the container.
+//
+// baseURLHost must be the host the CONTAINER connects to, which is what the
+// proxy matches on — for a host-local endpoint that is the synthetic
+// host-gateway name, not the localhost address the user wrote. See
+// run.resolveClaudeBaseURL.
 //
 // The function checks cred.Provider to determine the correct header format:
 // - "claude" (OAuth): Bearer Authorization header + beta flag + response transformer
@@ -126,8 +132,9 @@ func ConfigureBaseURLProxy(p provider.ProxyConfigurer, cred *provider.Credential
 	}
 
 	// Strip port if present — proxy credential methods (SetCredentialWithGrant,
-	// AddExtraHeader, etc.) validate via isValidHost which rejects colons.
-	// The relay handler uses getCredential() which handles host:port fallback.
+	// AddExtraHeader, etc.) validate via isValidHost which rejects colons. The
+	// proxy's own lookup falls back from host:port to host, so a bare host
+	// still matches a request to a non-default port.
 	host := baseURLHost
 	if h, _, err := net.SplitHostPort(baseURLHost); err == nil {
 		host = h
