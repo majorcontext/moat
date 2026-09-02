@@ -6,12 +6,14 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/claude"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // claudeBaseURL is a resolved claude.base_url, split into the three forms the
@@ -41,9 +43,13 @@ type claudeBaseURL struct {
 // RunContext into the registration request, so a credential registered
 // afterwards never reaches the daemon and nothing gets injected.
 //
-// cred may be nil: the endpoint still applies, the user is just supplying the
-// key themselves (via env or secrets) and there is nothing to inject.
-func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential) (string, error) {
+// cred may be nil: the endpoint still applies, because the user may be
+// supplying the key themselves via env or secrets. If nothing supplies it, the
+// run would fail with an opaque 401 from the endpoint, so that case warns.
+//
+// userEnv is the run's -e entries ("KEY=value"), needed only to tell those two
+// cases apart.
+func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential, userEnv []string) (string, error) {
 	if cfg == nil || cfg.Claude.BaseURL == "" {
 		return "", nil
 	}
@@ -53,11 +59,22 @@ func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred 
 		return "", err
 	}
 
-	if cred != nil {
+	switch {
+	case cred != nil:
 		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
-	} else {
-		log.Debug("claude.base_url set with no anthropic or claude grant; no credential will be injected",
+	case hasUserSuppliedAnthropicKey(cfg, userEnv):
+		// The user is providing the endpoint's key themselves. Nothing to
+		// inject, and nothing to warn about.
+		log.Debug("claude.base_url set with a user-supplied key; no credential will be injected",
 			"baseURL", cfg.Claude.BaseURL)
+	default:
+		// Neither a grant nor a key of their own: the endpoint will reject
+		// every request. Say so now rather than letting Claude Code retry
+		// auth errors silently.
+		ui.Warnf("claude.base_url is set but nothing provides its key — requests to %s will be unauthenticated.\n"+
+			"  Grant one:  moat grant anthropic --base-url %s\n"+
+			"  Or set ANTHROPIC_AUTH_TOKEN via env or secrets in moat.yaml",
+			resolved.CredentialHost, cfg.Claude.BaseURL)
 	}
 
 	// A host-local endpoint is only reachable if its port is allowed. base_url
@@ -98,7 +115,11 @@ func resolveClaudeBaseURL(raw string) (claudeBaseURL, error) {
 	if err != nil {
 		return claudeBaseURL{}, fmt.Errorf("invalid URL %q: %w", raw, err)
 	}
-	if u.Host == "" {
+	// Hostname() as well as Host: "http://:8080" has a non-empty Host but no
+	// hostname at all, and would otherwise sail through as a non-loopback
+	// endpoint with an empty credential host — an address the container cannot
+	// connect to, with nothing injected and no error.
+	if u.Host == "" || u.Hostname() == "" {
 		return claudeBaseURL{}, fmt.Errorf("missing host in %q", raw)
 	}
 
@@ -141,6 +162,36 @@ func isLoopbackHost(host string) bool {
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
+	}
+	return false
+}
+
+// hasUserSuppliedAnthropicKey reports whether the run provides an Anthropic
+// credential of its own, through moat.yaml env, moat.yaml secrets, or a -e
+// flag. Used only to decide whether a base_url with no grant is a mistake or a
+// deliberate bring-your-own-key run.
+func hasUserSuppliedAnthropicKey(cfg *config.Config, userEnv []string) bool {
+	names := []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+
+	if cfg != nil {
+		for _, n := range names {
+			if _, ok := cfg.Env[n]; ok {
+				return true
+			}
+			if _, ok := cfg.Secrets[n]; ok {
+				return true
+			}
+		}
+	}
+
+	for _, e := range userEnv {
+		name, _, found := strings.Cut(e, "=")
+		if !found {
+			continue
+		}
+		if slices.Contains(names, name) {
+			return true
+		}
 	}
 	return false
 }

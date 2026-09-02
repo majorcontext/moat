@@ -146,6 +146,9 @@ func TestResolveClaudeBaseURLErrors(t *testing.T) {
 		{name: "no host", raw: "http://"},
 		{name: "empty", raw: ""},
 		{name: "control character", raw: "http://local\x7fhost:8787"},
+		// Non-empty Host (":8787") but no hostname: would otherwise resolve to
+		// a non-loopback endpoint with an empty credential host.
+		{name: "port with no host", raw: "http://:8787"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -178,7 +181,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 
 	t.Run("no config", func(t *testing.T) {
 		rc := daemon.NewRunContext("run_test")
-		env, err := configureClaudeBaseURL(rc, nil, apiKeyCred)
+		env, err := configureClaudeBaseURL(rc, nil, apiKeyCred, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -192,7 +195,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 
 	t.Run("no base_url", func(t *testing.T) {
 		rc := daemon.NewRunContext("run_test")
-		env, err := configureClaudeBaseURL(rc, &config.Config{}, apiKeyCred)
+		env, err := configureClaudeBaseURL(rc, &config.Config{}, apiKeyCred, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -209,7 +212,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Claude.BaseURL = "https://gw.lunaroute.com"
 
-		env, err := configureClaudeBaseURL(rc, cfg, apiKeyCred)
+		env, err := configureClaudeBaseURL(rc, cfg, apiKeyCred, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -229,7 +232,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Claude.BaseURL = "http://localhost:8787"
 
-		env, err := configureClaudeBaseURL(rc, cfg, apiKeyCred)
+		env, err := configureClaudeBaseURL(rc, cfg, apiKeyCred, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -256,7 +259,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg.Network.Host = []int{5432}
 		rc.AllowedHostPorts = cfg.Network.Host
 
-		if _, err := configureClaudeBaseURL(rc, cfg, apiKeyCred); err != nil {
+		if _, err := configureClaudeBaseURL(rc, cfg, apiKeyCred, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(rc.AllowedHostPorts) != 2 || rc.AllowedHostPorts[0] != 5432 || rc.AllowedHostPorts[1] != 8787 {
@@ -275,7 +278,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg.Claude.BaseURL = "http://localhost:8787"
 		rc.AllowedHostPorts = []int{8787}
 
-		if _, err := configureClaudeBaseURL(rc, cfg, apiKeyCred); err != nil {
+		if _, err := configureClaudeBaseURL(rc, cfg, apiKeyCred, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(rc.AllowedHostPorts) != 1 {
@@ -290,7 +293,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.Claude.BaseURL = "https://gw.lunaroute.com"
 
-		env, err := configureClaudeBaseURL(rc, cfg, nil)
+		env, err := configureClaudeBaseURL(rc, cfg, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -308,7 +311,7 @@ func TestConfigureClaudeBaseURL(t *testing.T) {
 		cfg.Claude.BaseURL = "https://gw.example.com"
 
 		oauthCred := &provider.Credential{Provider: "claude", Token: "sk-ant-oat01-secret"}
-		if _, err := configureClaudeBaseURL(rc, cfg, oauthCred); err != nil {
+		if _, err := configureClaudeBaseURL(rc, cfg, oauthCred, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		creds := rc.Credentials["gw.example.com"]
@@ -327,7 +330,7 @@ func TestConfigureClaudeBaseURLReachesRegisterRequest(t *testing.T) {
 	cfg.Claude.BaseURL = "https://gw.lunaroute.com"
 	cfg.Network.Host = []int{}
 
-	if _, err := configureClaudeBaseURL(rc, cfg, &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-secret"}); err != nil {
+	if _, err := configureClaudeBaseURL(rc, cfg, &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-secret"}, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -355,7 +358,7 @@ func TestConfigureClaudeBaseURLLoopbackPortReachesRegisterRequest(t *testing.T) 
 	cfg := &config.Config{}
 	cfg.Claude.BaseURL = "http://localhost:8787"
 
-	if _, err := configureClaudeBaseURL(rc, cfg, nil); err != nil {
+	if _, err := configureClaudeBaseURL(rc, cfg, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -461,7 +464,7 @@ func TestConfigureClaudeBaseURLInvalidURL(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Claude.BaseURL = "http://"
 
-	env, err := configureClaudeBaseURL(rc, cfg, &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-secret"})
+	env, err := configureClaudeBaseURL(rc, cfg, &provider.Credential{Provider: "anthropic", Token: "sk-ant-api03-secret"}, nil)
 	if err == nil {
 		t.Fatal("expected an error for a base_url with no host, got nil")
 	}
@@ -470,5 +473,75 @@ func TestConfigureClaudeBaseURLInvalidURL(t *testing.T) {
 	}
 	if len(rc.Credentials) != 0 {
 		t.Errorf("registered credentials for %v, want none on error", credHosts(rc))
+	}
+}
+
+// TestHasUserSuppliedAnthropicKey covers the check that decides whether a
+// base_url with no grant is a mistake (warn) or a deliberate
+// bring-your-own-key run (stay quiet).
+func TestHasUserSuppliedAnthropicKey(t *testing.T) {
+	envCfg := &config.Config{Env: map[string]string{"ANTHROPIC_AUTH_TOKEN": "lr_key"}}
+	apiKeyCfg := &config.Config{Env: map[string]string{"ANTHROPIC_API_KEY": "lr_key"}}
+	secretCfg := &config.Config{Secrets: map[string]string{"ANTHROPIC_AUTH_TOKEN": "env://LUNAROUTE_API_KEY"}}
+
+	supplied := []struct {
+		name    string
+		cfg     *config.Config
+		userEnv []string
+	}{
+		{name: "moat.yaml env auth token", cfg: envCfg},
+		{name: "moat.yaml env api key", cfg: apiKeyCfg},
+		{name: "moat.yaml secrets", cfg: secretCfg},
+		{name: "-e flag", cfg: &config.Config{}, userEnv: []string{"ANTHROPIC_AUTH_TOKEN=lr_key"}},
+		{name: "-e flag among others", cfg: &config.Config{}, userEnv: []string{"FOO=bar", "ANTHROPIC_API_KEY=lr_key"}},
+	}
+	for _, tt := range supplied {
+		t.Run(tt.name, func(t *testing.T) {
+			if !hasUserSuppliedAnthropicKey(tt.cfg, tt.userEnv) {
+				t.Error("got false, want true")
+			}
+		})
+	}
+
+	// Companion cases: nothing supplies a key, so the run must warn.
+	notSupplied := []struct {
+		name    string
+		cfg     *config.Config
+		userEnv []string
+	}{
+		{name: "nil config and no env", cfg: nil},
+		{name: "empty config", cfg: &config.Config{}},
+		{name: "unrelated env", cfg: &config.Config{Env: map[string]string{"ANTHROPIC_MODEL": "glm-5.3"}}},
+		{name: "unrelated secret", cfg: &config.Config{Secrets: map[string]string{"GITHUB_TOKEN": "env://GH"}}},
+		{name: "unrelated -e flag", cfg: &config.Config{}, userEnv: []string{"ANTHROPIC_MODEL=glm-5.3"}},
+		// A malformed -e entry has no "=", so it names nothing.
+		{name: "-e flag with no value", cfg: &config.Config{}, userEnv: []string{"ANTHROPIC_AUTH_TOKEN"}},
+	}
+	for _, tt := range notSupplied {
+		t.Run(tt.name, func(t *testing.T) {
+			if hasUserSuppliedAnthropicKey(tt.cfg, tt.userEnv) {
+				t.Error("got true, want false")
+			}
+		})
+	}
+}
+
+// TestConfigureClaudeBaseURLUserSuppliedKey is the companion to the
+// no-credential case: a bring-your-own-key run still gets the endpoint, and
+// still registers nothing.
+func TestConfigureClaudeBaseURLUserSuppliedKey(t *testing.T) {
+	rc := daemon.NewRunContext("run_test")
+	cfg := &config.Config{Env: map[string]string{"ANTHROPIC_AUTH_TOKEN": "lr_key"}}
+	cfg.Claude.BaseURL = "https://gw.lunaroute.com"
+
+	env, err := configureClaudeBaseURL(rc, cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "ANTHROPIC_BASE_URL=https://gw.lunaroute.com"; env != want {
+		t.Errorf("env = %q, want %q", env, want)
+	}
+	if len(rc.Credentials) != 0 {
+		t.Errorf("registered credentials for %v, want none", credHosts(rc))
 	}
 }

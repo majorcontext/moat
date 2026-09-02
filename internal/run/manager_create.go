@@ -691,7 +691,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// LunaRoute, or a host-side proxy such as Headroom). Must run before
 		// buildRegisterRequest — see configureClaudeBaseURL.
 		var baseURLErr error
-		claudeBaseURLEnv, baseURLErr = configureClaudeBaseURL(runCtx, opts.Config, anthropicCred)
+		claudeBaseURLEnv, baseURLErr = configureClaudeBaseURL(runCtx, opts.Config, anthropicCred, opts.Env)
 		if baseURLErr != nil {
 			// Should not happen: config.Load() validates the URL. Nothing to
 			// unwind — the run is not registered with the daemon yet.

@@ -747,7 +747,9 @@ func Load(dir string) (*Config, error) {
 		if u.Scheme != "http" && u.Scheme != "https" {
 			return nil, fmt.Errorf("claude.base_url: scheme must be http or https, got %q", u.Scheme)
 		}
-		if u.Host == "" {
+		// Hostname() as well as Host: "http://:8080" has a non-empty Host but
+		// no hostname, which yields an endpoint the container cannot reach.
+		if u.Host == "" || u.Hostname() == "" {
 			return nil, fmt.Errorf("claude.base_url: missing host in %q", cfg.Claude.BaseURL)
 		}
 	}
