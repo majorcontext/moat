@@ -281,10 +281,14 @@ type LLMGatewayConfig struct {
 // ClaudeConfig configures Claude Code integration options.
 type ClaudeConfig struct {
 	// BaseURL sets ANTHROPIC_BASE_URL inside the container, redirecting Claude
-	// Code API traffic through a host-side LLM proxy (e.g., Headroom).
-	// Traffic is routed through a relay endpoint on the Moat proxy, which
-	// forwards to the configured URL with credentials injected. Localhost
-	// URLs work because the relay runs on the host.
+	// Code API traffic to a custom endpoint: an Anthropic-compatible gateway
+	// (e.g. LunaRoute) or a host-side LLM proxy (e.g. Headroom).
+	//
+	// Traffic goes through the Moat proxy, which injects the anthropic or claude
+	// grant's credential for the endpoint's host, so the key never enters the
+	// container. A localhost URL is rewritten to the synthetic host-gateway
+	// name and its port allowed, since the container cannot reach a host
+	// service at its own loopback address.
 	BaseURL string `yaml:"base_url,omitempty"`
 
 	// SyncLogs enables mounting Claude's session logs directory so logs from

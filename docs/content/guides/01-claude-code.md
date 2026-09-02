@@ -299,9 +299,13 @@ Then:
 moat claude ./my-project
 ```
 
-## Using an LLM proxy
+## Using a custom LLM endpoint
 
-Route Claude Code API traffic through a host-side proxy for caching, logging, or policy enforcement. Tools like [Headroom](https://github.com/chopratejas/headroom) sit between Claude Code and the Anthropic API.
+`claude.base_url` sets `ANTHROPIC_BASE_URL` inside the container, sending Claude Code's API traffic somewhere other than `api.anthropic.com`. Two things use it: a host-side proxy for caching, logging, or policy enforcement, and an Anthropic-compatible gateway.
+
+### A host-side proxy
+
+Tools like [Headroom](https://github.com/chopratejas/headroom) sit between Claude Code and the Anthropic API.
 
 Install and start Headroom:
 
@@ -323,14 +327,44 @@ claude:
 Moat handles the details:
 
 - Sets `ANTHROPIC_BASE_URL` inside the container
-- Routes traffic through a relay on the Moat proxy (`localhost` works because the relay runs on the host)
-- Injects credentials for both `api.anthropic.com` and the proxy host
+- Rewrites `localhost` to the container's host-gateway address and allows that port, since the container cannot reach a host service at its own loopback address
+- Injects the `claude` (or `anthropic`) credential for the endpoint, so the key never enters the container
 
 Start the proxy on your host, then run as usual:
 
 ```bash
 moat claude ./my-project
 ```
+
+### An Anthropic-compatible gateway
+
+A gateway that speaks the Anthropic Messages API works the same way — point `base_url` at it and set the models it serves:
+
+```yaml
+dependencies:
+  - claude-code
+
+claude:
+  base_url: https://gateway.example.com
+
+env:
+  ANTHROPIC_MODEL: "some-model"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "some-small-model"
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+```
+
+`ANTHROPIC_DEFAULT_HAIKU_MODEL` matters: Claude Code uses it for background work (titles, summaries, compaction) and otherwise falls back to a hardcoded Anthropic model id the gateway will not serve.
+
+Gateway keys are their own credential, not an Anthropic key, so supply one yourself for now:
+
+```yaml
+secrets:
+  ANTHROPIC_AUTH_TOKEN: env://GATEWAY_API_KEY
+```
+
+That puts the key in the container's environment, where the agent can read it and the proxy logs it to `network.jsonl`. Use a key scoped to what the run needs.
+
+Claude Code warns that a model it does not know assumes a 200k context window. Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the real window if the gateway's model accepts more.
 
 ## LLM response policy
 

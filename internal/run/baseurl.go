@@ -1,0 +1,146 @@
+package run
+
+import (
+	"fmt"
+	"net"
+	"net/url"
+	"slices"
+	"strconv"
+
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/daemon"
+	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/providers/claude"
+)
+
+// claudeBaseURL is a resolved claude.base_url, split into the three forms the
+// run needs: what the container gets, what the proxy matches credentials on,
+// and which host port (if any) the run must be allowed to reach.
+type claudeBaseURL struct {
+	// ContainerURL is the value for ANTHROPIC_BASE_URL inside the container.
+	ContainerURL string
+
+	// CredentialHost is the hostname credential injection is registered under.
+	// It is the host the container actually connects to, which is what the
+	// proxy matches on — not necessarily the host the user wrote.
+	CredentialHost string
+
+	// HostPort is a port on the host loopback the run must be allowed to
+	// reach, or 0 when the target is not host-local.
+	HostPort int
+}
+
+// configureClaudeBaseURL points Claude Code at a custom LLM endpoint (a gateway
+// such as LunaRoute, or a host-side proxy such as Headroom). It registers
+// credential injection for the endpoint on runCtx, allows the endpoint's port
+// when it is host-local, and returns the ANTHROPIC_BASE_URL env entry for the
+// container. It returns "" when the run has no base_url configured.
+//
+// Callers must invoke this BEFORE buildRegisterRequest. That call snapshots the
+// RunContext into the registration request, so a credential registered
+// afterwards never reaches the daemon and nothing gets injected.
+//
+// cred may be nil: the endpoint still applies, the user is just supplying the
+// key themselves (via env or secrets) and there is nothing to inject.
+func configureClaudeBaseURL(runCtx *daemon.RunContext, cfg *config.Config, cred *provider.Credential) (string, error) {
+	if cfg == nil || cfg.Claude.BaseURL == "" {
+		return "", nil
+	}
+
+	resolved, err := resolveClaudeBaseURL(cfg.Claude.BaseURL)
+	if err != nil {
+		return "", err
+	}
+
+	if cred != nil {
+		claude.ConfigureBaseURLProxy(runCtx, cred, resolved.CredentialHost)
+	} else {
+		log.Debug("claude.base_url set with no anthropic or claude grant; no credential will be injected",
+			"baseURL", cfg.Claude.BaseURL)
+	}
+
+	// A host-local endpoint is only reachable if its port is allowed. base_url
+	// is explicit intent, so allow it rather than making the user repeat the
+	// port under network.host. Copy rather than append in place — the slice
+	// aliases cfg.Network.Host.
+	if resolved.HostPort != 0 && !slices.Contains(runCtx.AllowedHostPorts, resolved.HostPort) {
+		runCtx.AllowedHostPorts = append(append([]int{}, runCtx.AllowedHostPorts...), resolved.HostPort)
+	}
+
+	log.Debug("configured base URL for Claude Code",
+		"baseURL", cfg.Claude.BaseURL,
+		"containerURL", resolved.ContainerURL,
+		"credentialHost", resolved.CredentialHost,
+		"allowedHostPort", resolved.HostPort)
+
+	return "ANTHROPIC_BASE_URL=" + resolved.ContainerURL, nil
+}
+
+// resolveClaudeBaseURL rewrites a claude.base_url into the form the container
+// and the proxy each need.
+//
+// A loopback URL names a service on the host (a local LLM proxy such as
+// Headroom), which the container cannot reach at its own 127.0.0.1. Those are
+// rewritten to the synthetic host-gateway hostname, and the port is returned so
+// the caller can add it to the run's allowed host ports. The host gateway is
+// deliberately absent from NO_PROXY, so the rewritten request still goes
+// through the proxy: it gets its credential injected and stays subject to
+// network policy.
+//
+// Any other host is returned unchanged. The proxy sees an ordinary request and
+// injects on the way through, so no rewrite is needed.
+//
+// config.Load already rejects a malformed URL, a non-HTTP(S) scheme, and a
+// missing host, so an error here means a caller passed an unvalidated string.
+func resolveClaudeBaseURL(raw string) (claudeBaseURL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return claudeBaseURL{}, fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if u.Host == "" {
+		return claudeBaseURL{}, fmt.Errorf("missing host in %q", raw)
+	}
+
+	host := u.Hostname()
+	if !isLoopbackHost(host) {
+		return claudeBaseURL{ContainerURL: raw, CredentialHost: host}, nil
+	}
+
+	port := u.Port()
+	if port == "" {
+		// A loopback URL with no explicit port still needs one: the rewritten
+		// URL must name the port the host service listens on, and the run must
+		// allow that exact port.
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return claudeBaseURL{}, fmt.Errorf("invalid port %q in %q: %w", port, raw, err)
+	}
+
+	rewritten := *u
+	rewritten.Host = net.JoinHostPort(syntheticHostGateway, port)
+	return claudeBaseURL{
+		ContainerURL:   rewritten.String(),
+		CredentialHost: syntheticHostGateway,
+		HostPort:       portNum,
+	}, nil
+}
+
+// isLoopbackHost reports whether host names the machine the CLI runs on.
+// "localhost" is matched by name because it is what users write; everything
+// else is decided by the parsed IP so that 127.0.0.2 and ::1 are covered too.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}

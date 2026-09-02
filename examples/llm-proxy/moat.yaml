@@ -9,8 +9,10 @@
 #
 # Moat handles:
 #   - Setting ANTHROPIC_BASE_URL inside the container
-#   - Routing traffic through a relay on the Moat proxy
-#   - Injecting credentials for both api.anthropic.com and the proxy host
+#   - Rewriting localhost to the container's host-gateway address and allowing
+#     that port (the container cannot reach a host service at its own loopback)
+#   - Injecting credentials for both api.anthropic.com and the proxy host, so
+#     the key never enters the container
 #
 # Prerequisites:
 #   1. Claude credentials (Claude Pro/Max subscription):
