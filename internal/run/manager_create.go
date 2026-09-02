@@ -860,6 +860,11 @@ region = %s
 	needsProxy := r.ProxyAuthToken != ""
 	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, hostAddr)
 
+	// Add the active credential profile's env vars. First of the three env
+	// layers, so moat.yaml and -e both override them: a profile carries the
+	// settings that go with an identity, not with a project.
+	proxyEnv = append(proxyEnv, profileEnv(credential.ActiveProfile, needsProxy)...)
+
 	// Add config env vars, filtering out proxy-related variables that would
 	// override moat's proxy settings and re-open the host traffic bypass.
 	if opts.Config != nil {

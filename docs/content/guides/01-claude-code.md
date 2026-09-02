@@ -354,14 +354,18 @@ moat run --profile lunaroute -- claude
 
 The key stays on the host: the container gets a placeholder `ANTHROPIC_API_KEY`, the proxy swaps in the real key for the gateway's host, and the run's `network.jsonl` shows the header as `[REDACTED]`. The key is never sent to `api.anthropic.com` — Claude Code contacts it regardless of `ANTHROPIC_BASE_URL` for telemetry and bootstrap checks, and those requests keep the placeholder.
 
-You still have to name the models the gateway serves:
+You still have to name the models the gateway serves. Put them with the profile in `~/.moat/config.yaml` so every project using the gateway inherits them:
 
 ```yaml
-env:
-  ANTHROPIC_MODEL: "glm-5.3"
-  ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash"
-  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+profiles:
+  lunaroute:
+    env:
+      ANTHROPIC_MODEL: "glm-5.3"
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash"
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
 ```
+
+Or in a single project's `moat.yaml` under `env:`, which overrides the profile. See [Profile environment variables](../reference/03-environment.md#profile-environment-variables).
 
 `ANTHROPIC_DEFAULT_HAIKU_MODEL` matters: Claude Code uses it for background work (titles, summaries, compaction) and otherwise falls back to a hardcoded Anthropic model id the gateway will not serve. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` lets `/model` list what the gateway actually offers.
 

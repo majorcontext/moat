@@ -18,7 +18,7 @@ These flags apply to all commands:
 | `-v`, `--verbose` | Enable verbose output (debug logs) |
 | `--dry-run` | Show what would happen without executing |
 | `--json` | Output in JSON format |
-| `--profile NAME` | Credential profile to use (env: `MOAT_PROFILE`) |
+| `--profile NAME` | Credential profile to use (env: `MOAT_PROFILE`). A profile can also carry [environment variables](./03-environment.md#profile-environment-variables) applied to every run using it |
 | `-h`, `--help` | Show help for command |
 
 ## Run identification
@@ -674,6 +674,8 @@ Pair it with `--profile` to keep a gateway key separate from a real Anthropic ke
 moat grant anthropic --base-url https://gw.lunaroute.com --profile lunaroute
 moat run --profile lunaroute -- claude
 ```
+
+The models the gateway serves can live with the profile too, so they do not have to be repeated per project — see [Profile environment variables](./03-environment.md#profile-environment-variables).
 
 ### moat grant openai
 

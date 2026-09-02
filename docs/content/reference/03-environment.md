@@ -282,6 +282,30 @@ echo $OPENAI_API_KEY
 
 ---
 
+## Profile environment variables
+
+A credential profile can carry environment variables that apply to every run using it. Configure them under `profiles` in `~/.moat/config.yaml`:
+
+```yaml
+profiles:
+  lunaroute:
+    env:
+      ANTHROPIC_MODEL: glm-5.3
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+```
+
+```bash
+moat run --profile lunaroute -- claude    # in any project
+```
+
+A profile is an identity — a set of credentials plus the configuration that goes with them. Settings that belong to the identity rather than to a project live here, so they do not have to be repeated in every `moat.yaml`. The models an LLM gateway serves are the motivating case: they go with the gateway's key, not with the checkout.
+
+- Profile names follow the same rules as `--profile`: start with a letter or digit, then letters, digits, hyphens, and underscores.
+- `moat.yaml` `env` and the `-e` flag both override profile env.
+- Proxy variables Moat owns (`HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY`, …) are ignored with a warning when the run has a proxy, exactly as they are in `moat.yaml` `env`.
+- Runs with no `--profile` (the default credential store) get no profile env — the default store is not a named profile.
+
 ## Variable precedence
 
 When the same variable is defined in multiple places:
@@ -289,8 +313,9 @@ When the same variable is defined in multiple places:
 1. CLI `-e` flag (highest priority)
 2. `secrets` in moat.yaml
 3. `env` in moat.yaml
-4. Moat-injected variables (HTTP_PROXY, etc.)
-5. Base image defaults (lowest priority)
+4. `env` for the active `--profile` in `~/.moat/config.yaml`
+5. Moat-injected variables (HTTP_PROXY, etc.)
+6. Base image defaults (lowest priority)
 
 ---
 

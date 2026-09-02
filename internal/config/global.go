@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,11 +17,31 @@ import (
 // process — LoadGlobal is called several times per command.
 var malformedConfigWarnOnce sync.Once
 
+// profileNameRe matches valid credential profile names. Kept in sync with
+// credential.ValidateProfile — a profile name becomes a directory name under
+// ~/.moat/credentials/profiles/, so it must stay free of path separators.
+var profileNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
 // GlobalConfig holds global Moat settings from ~/.moat/config.yaml.
 type GlobalConfig struct {
 	Proxy  ProxyConfig  `yaml:"proxy"`
 	Debug  DebugConfig  `yaml:"debug"`
 	Mounts []MountEntry `yaml:"mounts,omitempty"`
+
+	// Profiles holds per-credential-profile settings, keyed by profile name.
+	// They apply to any run using that profile (--profile / MOAT_PROFILE).
+	Profiles map[string]ProfileConfig `yaml:"profiles,omitempty"`
+}
+
+// ProfileConfig holds settings that apply to every run using a credential
+// profile. A profile is an identity — a set of credentials plus whatever
+// configuration goes with them — so settings that belong to the identity rather
+// than to a project live here instead of in each moat.yaml.
+type ProfileConfig struct {
+	// Env are environment variables set in the container for any run using
+	// this profile. moat.yaml env and -e flags override them; proxy variables
+	// moat owns are filtered out, exactly as for the other two layers.
+	Env map[string]string `yaml:"env,omitempty"`
 }
 
 // DebugConfig holds debug logging settings.
@@ -95,6 +116,19 @@ func LoadGlobal() (*GlobalConfig, error) {
 	}
 	cfg.Mounts = validMounts
 
+	// Validate profile names and env keys. A typo here would otherwise surface
+	// as a silently missing variable inside the container.
+	for name, prof := range cfg.Profiles {
+		if err := ValidateProfileName(name); err != nil {
+			return nil, fmt.Errorf("profiles.%s: %w", name, err)
+		}
+		for key := range prof.Env {
+			if err := validateEnvName(key); err != nil {
+				return nil, fmt.Errorf("profiles.%s.env: %w", name, err)
+			}
+		}
+	}
+
 	// Apply environment overrides
 	if portStr := os.Getenv("MOAT_PROXY_PORT"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil {
@@ -121,4 +155,45 @@ func GlobalConfigDir() string {
 		return filepath.Join(".", ".moat")
 	}
 	return filepath.Join(homeDir, ".moat")
+}
+
+// ProfileEnv returns the environment variables configured for a credential
+// profile, or nil when the profile has none. An empty name (no --profile) never
+// matches: the default store is not a named profile, so there is nowhere to
+// hang settings and a `profiles:` entry cannot accidentally apply to every run.
+func (c *GlobalConfig) ProfileEnv(name string) map[string]string {
+	if c == nil || name == "" {
+		return nil
+	}
+	prof, ok := c.Profiles[name]
+	if !ok {
+		return nil
+	}
+	return prof.Env
+}
+
+// ValidateProfileName checks a profile name from the global config. It mirrors
+// credential.ValidateProfile, which guards the --profile flag, so a name that
+// is grantable is also configurable and vice versa. Duplicated rather than
+// imported to keep config free of a dependency on credential.
+func ValidateProfileName(name string) error {
+	if name == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+	if !profileNameRe.MatchString(name) {
+		return fmt.Errorf("invalid profile name %q: must start with a letter or digit and contain only letters, digits, hyphens, and underscores", name)
+	}
+	return nil
+}
+
+// validateEnvName rejects environment variable names the container could not
+// receive: an empty name, or one containing "=" or a NUL byte.
+func validateEnvName(name string) error {
+	if name == "" {
+		return fmt.Errorf("environment variable name cannot be empty")
+	}
+	if strings.ContainsAny(name, "=\x00") {
+		return fmt.Errorf("invalid environment variable name %q: must not contain %q or a NUL byte", name, "=")
+	}
+	return nil
 }
