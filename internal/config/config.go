@@ -740,17 +740,8 @@ func Load(dir string) (*Config, error) {
 
 	// Validate claude.base_url
 	if cfg.Claude.BaseURL != "" {
-		u, err := url.Parse(cfg.Claude.BaseURL)
-		if err != nil {
-			return nil, fmt.Errorf("claude.base_url: invalid URL %q: %w", cfg.Claude.BaseURL, err)
-		}
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return nil, fmt.Errorf("claude.base_url: scheme must be http or https, got %q", u.Scheme)
-		}
-		// Hostname() as well as Host: "http://:8080" has a non-empty Host but
-		// no hostname, which yields an endpoint the container cannot reach.
-		if u.Host == "" || u.Hostname() == "" {
-			return nil, fmt.Errorf("claude.base_url: missing host in %q", cfg.Claude.BaseURL)
+		if _, err := ValidateHTTPURL(cfg.Claude.BaseURL); err != nil {
+			return nil, fmt.Errorf("claude.base_url: %w", err)
 		}
 	}
 
@@ -1038,4 +1029,28 @@ func DefaultConfig() *Config {
 			},
 		},
 	}
+}
+
+// ValidateHTTPURL parses raw and checks it names something a container can
+// actually connect to: an http or https scheme and a non-empty hostname.
+//
+// It is shared by every place a user can name an LLM endpoint — moat.yaml's
+// claude.base_url, `moat grant anthropic --base-url`, and the endpoint recorded
+// on a credential — so the three cannot drift into disagreeing about what a
+// usable endpoint is.
+//
+// Hostname() is checked as well as Host because "http://:8080" has a non-empty
+// Host but no hostname at all.
+func ValidateHTTPURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" || u.Hostname() == "" {
+		return nil, fmt.Errorf("missing host in %q", raw)
+	}
+	return u, nil
 }

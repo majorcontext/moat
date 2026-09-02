@@ -3,7 +3,6 @@ package run
 import (
 	"fmt"
 	"net"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -133,19 +132,9 @@ func claudeBaseURLSource(cfg *config.Config, cred *provider.Credential) string {
 // recorded endpoint is read back from the store, so this is the one place both
 // sources pass through.
 func resolveClaudeBaseURL(raw string) (claudeBaseURL, error) {
-	u, err := url.Parse(raw)
+	u, err := config.ValidateHTTPURL(raw)
 	if err != nil {
-		return claudeBaseURL{}, fmt.Errorf("invalid URL %q: %w", raw, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return claudeBaseURL{}, fmt.Errorf("scheme must be http or https, got %q in %q", u.Scheme, raw)
-	}
-	// Hostname() as well as Host: "http://:8080" has a non-empty Host but no
-	// hostname at all, and would otherwise sail through as a non-loopback
-	// endpoint with an empty credential host — an address the container cannot
-	// connect to, with nothing injected and no error.
-	if u.Host == "" || u.Hostname() == "" {
-		return claudeBaseURL{}, fmt.Errorf("missing host in %q", raw)
+		return claudeBaseURL{}, err
 	}
 
 	host := u.Hostname()

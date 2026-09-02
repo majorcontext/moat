@@ -80,21 +80,33 @@ func (a *anthropicAuth) PromptForAPIKey(baseURL string) (string, error) {
 	return key, nil
 }
 
-// ValidateKey validates an Anthropic API key by making a minimal API request.
-// Returns nil if the key is valid, or an error describing the problem.
-func (a *anthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
-	// Make a minimal request to validate the key.
-	// We use a simple message request with max_tokens=1 to minimize cost.
+// newAPIKeyProbe builds the minimal Messages API request both key validators
+// send: max_tokens=1 to keep it cheap, and the key as x-api-key — the header
+// moat injects at runtime, so validation exercises the same auth path a real
+// request will take.
+//
+// Shared so the payload and headers cannot drift between Anthropic-key and
+// gateway-key validation.
+func (a *anthropicAuth) newAPIKeyProbe(ctx context.Context, endpoint, apiKey string) (*http.Request, error) {
 	reqBody := fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, validationModel)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", a.apiURL(), strings.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	return req, nil
+}
+
+// ValidateKey validates an Anthropic API key by making a minimal API request.
+// Returns nil if the key is valid, or an error describing the problem.
+func (a *anthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
+	req, err := a.newAPIKeyProbe(ctx, a.apiURL(), apiKey)
+	if err != nil {
+		return err
+	}
 
 	resp, err := a.httpClient().Do(req)
 	if err != nil {
@@ -151,15 +163,11 @@ func (a *anthropicAuth) ValidateKey(ctx context.Context, apiKey string) error {
 // rather than at the first real request.
 func (a *anthropicAuth) ValidateGatewayKey(ctx context.Context, apiKey, baseURL string) error {
 	endpoint := strings.TrimSuffix(baseURL, "/") + "/v1/messages"
-	reqBody := fmt.Sprintf(`{"model":%q,"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, validationModel)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(reqBody))
+	req, err := a.newAPIKeyProbe(ctx, endpoint, apiKey)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := a.httpClient().Do(req)
 	if err != nil {

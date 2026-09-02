@@ -2,9 +2,9 @@ package claude
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 	"strings"
+
+	"github.com/majorcontext/moat/internal/config"
 )
 
 // ctxKeyBaseURL carries the --base-url flag from the CLI into Grant.
@@ -28,21 +28,15 @@ func BaseURLFromContext(ctx context.Context) string {
 }
 
 // ValidateBaseURL checks a --base-url value before it is used to validate a key
-// or written to a credential. It mirrors the moat.yaml claude.base_url rules so
-// the two sources cannot disagree about what a usable endpoint is.
+// or written to a credential. The endpoint rules live in config.ValidateHTTPURL,
+// shared with moat.yaml's claude.base_url, so the two sources cannot disagree
+// about what a usable endpoint is.
 //
 // The returned URL has any trailing slash removed, since the path is joined
 // onto it later.
 func ValidateBaseURL(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL %q: %w", raw, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("missing host in %q", raw)
+	if _, err := config.ValidateHTTPURL(raw); err != nil {
+		return "", err
 	}
 	return strings.TrimSuffix(raw, "/"), nil
 }
