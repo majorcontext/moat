@@ -87,7 +87,11 @@ func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin)
 
 	// No ui styling inside the tabwriter: ANSI codes break column alignment.
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "DEVICE\tUSB ID\tSERIAL\tPIN\tDESCRIPTION")
+	// "SERIAL NUMBER", not "SERIAL": the word serial appears twice in this
+	// output with different meanings — the hardware serial number in this
+	// column, and the name you pick for the `serial:` key in the snippet
+	// below. Spelling the column out keeps them apart.
+	fmt.Fprintln(tw, "DEVICE\tUSB ID\tSERIAL NUMBER\tPIN\tDESCRIPTION")
 	for _, d := range devices {
 		fmt.Fprintf(tw, "%s\t%s:%s\t%s\t%s\t%s\n",
 			d.Path, d.VID, d.PID, serialOrDash(d), pinState(d, pins), descriptionOrDash(d))
@@ -97,10 +101,14 @@ func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin)
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Add a device to moat.yaml with its USB ID:")
+	fmt.Fprintln(w, "Pick a name for the device and add it to moat.yaml. The name is")
+	fmt.Fprintln(w, "yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  devices:\n    - serial: %s\n      match: {vid: %q, pid: %q}\n",
 		suggestedName(devices[0]), devices[0].VID, devices[0].PID)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "The first run that uses the device pins it to this hardware; the PIN column")
+	fmt.Fprintln(w, "shows the name it is pinned under.")
 
 	return printOrphanPins(w, pins, devices)
 }
@@ -179,7 +187,7 @@ func suggestedName(d serialdev.Device) string {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
-		case r == ' ' || r == '-' || r == '_':
+		case r == ' ' || r == '-' || r == '_' || r == '/':
 			b.WriteRune('-')
 		}
 	}

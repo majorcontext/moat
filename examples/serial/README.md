@@ -20,8 +20,8 @@ moat device list
 Expected for a T-Display S3:
 
 ```
-DEVICE        USB ID     SERIAL  PIN  DESCRIPTION
-/dev/ttyACM0  303a:1001  ...     -    USB JTAG/serial
+DEVICE                  USB ID     SERIAL NUMBER      PIN  DESCRIPTION
+/dev/cu.usbmodem83201   303a:1001  E0:72:A1:A2:32:48  -    USB JTAG/serial debug unit
 ```
 
 The values in `moat.yaml` are for the S3's native USB (`303a:1001`). If your

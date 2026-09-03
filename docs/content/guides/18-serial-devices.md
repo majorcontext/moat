@@ -24,14 +24,18 @@ created — if the daemon is too old to serve them.
 
 ```bash
 $ moat device list
-DEVICE                   USB ID     SERIAL  PIN  DESCRIPTION
-/dev/cu.usbserial-14220  10c4:ea60  0001    -    CP2102 USB to UART Bridge
+DEVICE                   USB ID     SERIAL NUMBER      PIN  DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  0001              -    CP2102 USB to UART Bridge
 
-Add a device to moat.yaml with its USB ID:
+Pick a name for the device and add it to moat.yaml. The name is
+yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:
 
   devices:
     - serial: cp2102-usb-to-uart-bridge
       match: {vid: "10c4", pid: "ea60"}
+
+The first run that uses the device pins it to this hardware; the PIN column
+shows the name it is pinned under.
 ```
 
 ## 2. Declare it in moat.yaml
@@ -103,7 +107,7 @@ Cheap CH340 and CP2102 clones often ship without a serial number. Those are pinn
 physical USB port instead, and `moat device list` says so:
 
 ```
-DEVICE        USB ID     SERIAL                PIN  DESCRIPTION
+DEVICE        USB ID     SERIAL NUMBER         PIN  DESCRIPTION
 /dev/ttyUSB0  1a86:7523  - (pins by port 1-3)  -    USB Serial
 ```
 

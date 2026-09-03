@@ -111,7 +111,7 @@ func TestDeviceListDoesNotReportAttachedPinsAsOrphans(t *testing.T) {
 
 func TestSuggestedNameFromDescription(t *testing.T) {
 	cases := map[string]string{
-		"USB JTAG/serial debug unit": "usb-jtagserial-debug-unit",
+		"USB JTAG/serial debug unit": "usb-jtag-serial-debug-unit",
 		"CP2102 USB to UART Bridge":  "cp2102-usb-to-uart-bridge",
 		"":                           "mydevice",
 		"!!!":                        "mydevice",

@@ -1648,8 +1648,8 @@ moat device list
 ```
 
 ```
-DEVICE                   USB ID     SERIAL  PIN    DESCRIPTION
-/dev/cu.usbserial-14220  10c4:ea60  0001    esp32  CP2102 USB to UART Bridge
+DEVICE                   USB ID     SERIAL NUMBER      PIN    DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  0001              esp32  CP2102 USB to UART Bridge
 ```
 
 The `PIN` column shows the device name a device is approved under, `-` if it is not
