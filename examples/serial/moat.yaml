@@ -1,15 +1,20 @@
 name: esp32-dev
-agent: claude
 
 dependencies:
   - python
 
-# Run `moat device list` to find your board's USB ID and replace these.
+# Hardware test example for a LilyGO T-Display S3 (ESP32-S3).
 #
-# Common LilyGO / ESP32 bridges:
-#   10c4:ea60  CP2102 / CP2104   (T-Display, T-Beam)
-#   1a86:55d4  CH9102F           (newer LilyGO revisions)
-#   303a:1001  native USB        (ESP32-S3, ESP32-C3)
+# The T-Display S3 has no USB-UART bridge chip: the ESP32-S3's own USB
+# peripheral enumerates as a CDC serial port (Espressif VID 303a, PID 1001).
+#
+# Run `moat device list` on the host and copy the vid/pid it prints if yours
+# differs. Other IDs this board can show up as:
+#   303a:1001  ESP32-S3 USB-Serial-JTAG / CDC  (T-Display S3, most common)
+#   303a:1002  ESP32-S3 ROM download mode
+#   10c4:ea60  CP2102 bridge                  (T-Display, T-Beam)
+#   1a86:55d4  CH9102F bridge                 (newer LilyGO revisions)
+#   1a86:7523  CH340 bridge                   (cheap clones)
 devices:
   - serial: esp32
-    match: {vid: "10c4", pid: "ea60"}
+    match: {vid: "303a", pid: "1001"}

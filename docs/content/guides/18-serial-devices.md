@@ -10,6 +10,16 @@ keywords: ["moat", "serial", "usb", "esp32", "esptool", "rfc2217", "hardware", "
 Give an agent access to a USB serial device attached to your machine — an ESP32 or
 Arduino dev board, a UART adapter, a modem — without giving it the rest of your hardware.
 
+The device broker runs inside the proxy daemon, which outlives the CLI. If you just
+installed or upgraded moat, restart it once so the running daemon is the new binary:
+
+```bash
+$ moat proxy restart
+```
+
+A run whose moat.yaml has `devices:` fails immediately — before the container is
+created — if the daemon is too old to serve them.
+
 ## 1. Find the device
 
 ```bash

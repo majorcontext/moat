@@ -1,0 +1,21 @@
+# Hardware test example for a USB SDR dongle (RTL2832U) via a host-side
+# rtl_tcp server.
+#
+# The dongle itself is NOT a serial device — no tty, no CDC class, just
+# vendor-specific USB bulk transfers — so it cannot go through moat's
+# `devices:` serial broker at all. See README.md in this directory.
+#
+# What this config does is the part moat CAN sandbox: let the container reach
+# a sample server running on the host.
+name: sdr-dev
+
+dependencies:
+  - python
+
+network:
+  host:
+    - 1234   # rtl_tcp on the host
+
+# Do NOT add the dongle's USB ID here (0bda:2838 etc.). The serial broker only
+# serves tty devices; the RTL2832U is not one. See README.md.
+devices: []
