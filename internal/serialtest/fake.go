@@ -32,6 +32,7 @@ type FakePort struct {
 	settings    serialport.Settings
 	modem       serialport.Modem
 	breaks      int
+	purges      int
 	settingsLog []serialport.Settings
 	modemLog    []serialport.Modem
 	closed      bool
@@ -120,6 +121,16 @@ func (p *FakePort) SendBreak() error {
 	return nil
 }
 
+// FlushBuffers records a purge. A pty has no kernel receive queue to flush
+// that would matter to assertions, so recording is enough to prove the broker
+// forwards PURGE_DATA to the port.
+func (p *FakePort) FlushBuffers() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.purges++
+	return nil
+}
+
 // LastSettings returns the most recently applied line settings.
 func (p *FakePort) LastSettings() serialport.Settings {
 	p.mu.Lock()
@@ -157,6 +168,13 @@ func (p *FakePort) BreakCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.breaks
+}
+
+// PurgeCount returns how many buffer flushes were requested.
+func (p *FakePort) PurgeCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.purges
 }
 
 // NewFakeEnumerator returns an Enumerator yielding a fixed device list.

@@ -543,6 +543,216 @@ func TestSetBaudRateIsConfirmedToTheClient(t *testing.T) {
 	}
 }
 
+func TestPurgeIsConfirmedToTheClient(t *testing.T) {
+	// pyserial's Serial.open() sends PURGE_DATA as part of connecting —
+	// reset_input_buffer() and reset_output_buffer() run before open returns —
+	// and blocks until the server replies. A broker without this reply fails
+	// every pyserial connect (esptool: "timeout while waiting for option
+	// 'purge'"), even though the data path itself is fine. The reply must echo
+	// the request's value byte exactly: pyserial's check_answer rejects a
+	// mismatch.
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{rfc2217.PurgeBothBuffers}); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	// IAC SB COM-PORT (cmd+100) <value> IAC SE
+	got := readN(t, c, 7)
+	want := []byte{
+		0xFF, 0xFA, rfc2217.OptionComPort, rfc2217.CmdPurgeData + 100,
+		rfc2217.PurgeBothBuffers, 0xFF, 0xF0,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got % x, want the server confirmation % x", got, want)
+	}
+}
+
+func TestPurgeFlushesThePort(t *testing.T) {
+	// The reply alone is not the feature: pyserial purges because it wants
+	// stale bytes gone before it starts reading. The broker must forward the
+	// flush to the device, not just acknowledge it.
+	_, fp, addr := newBroker(t)
+	c := dial(t, addr)
+
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{rfc2217.PurgeReceiveBuffer}); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	waitFor(t, "buffers flushed", func() bool { return fp.PurgeCount() == 1 })
+}
+
+// TestPySerialOpenSequence models pyserial's Serial.open() against the broker:
+// the exact command sequence serial/rfc2217.py sends when connecting, with
+// every step blocking on its server reply the way the real client does.
+//
+// This is the test that would have caught the missing PURGE case: esptool
+// failed with "timeout while waiting for option 'purge'" on real hardware
+// while every existing broker test passed, because none of them spoke the
+// client's full connect dance. Each step uses a short deadline so a missing
+// reply fails the test in seconds instead of hanging it.
+func TestPySerialOpenSequence(t *testing.T) {
+	_, fp, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := c.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Telnet negotiation: the client offers WILL for BINARY, SGA, and
+	// COM-PORT-OPTION, and DO for ECHO, SGA, BINARY, and COM-PORT-OPTION.
+	// The mandatory ones are "we-BINARY" (client WILL BINARY) and
+	// "we-RFC2217" (client WILL COM-PORT) — open() blocks until both are
+	// answered affirmatively.
+	for _, offer := range [][2]byte{
+		{rfc2217.Do, rfc2217.OptionEcho},
+		{rfc2217.Will, rfc2217.OptionSGA},
+		{rfc2217.Do, rfc2217.OptionSGA},
+		{rfc2217.Do, rfc2217.OptionBinary},
+		{rfc2217.Do, rfc2217.OptionComPort},
+		{rfc2217.Will, rfc2217.OptionBinary},
+		{rfc2217.Will, rfc2217.OptionComPort},
+	} {
+		if err := rfc2217.WriteNegotiate(c, offer[0], offer[1]); err != nil {
+			t.Fatalf("offering %v: %v", offer, err)
+		}
+	}
+	// The server answers each offer with 3 bytes; 7 offers → 21 bytes. The
+	// client checks only that the mandatory ones came back positive, but we
+	// assert the count so a regression that stalls negotiation fails here
+	// rather than later in a settings step.
+	if got := readN(t, c, 21); len(got) != 21 {
+		t.Fatalf("negotiation replies: got %d bytes, want 21", len(got))
+	}
+
+	// 2. Line settings: baud, data size, parity, stop size, each sent then
+	// waited on (open() raises "Remote does not accept parameter change"
+	// after 3s otherwise). Replies are read with a length that matches the
+	// payload: 10 for baud (4-byte value), 7 for the single-byte settings.
+	settings := []struct {
+		cmd     byte
+		payload []byte
+	}{
+		{rfc2217.CmdSetBaudRate, rfc2217.EncodeBaud(921600)},
+		{rfc2217.CmdSetDataSize, []byte{8}},
+		{rfc2217.CmdSetParity, []byte{1}},
+		{rfc2217.CmdSetStopSize, []byte{1}},
+	}
+	for _, st := range settings {
+		if err := rfc2217.WriteCommand(c, st.cmd, st.payload); err != nil {
+			t.Fatalf("sending setting %d: %v", st.cmd, err)
+		}
+		n := 7
+		if st.cmd == rfc2217.CmdSetBaudRate {
+			n = 10
+		}
+		got := readN(t, c, n)
+		if got[3] != st.cmd+100 {
+			t.Fatalf("setting %d: reply cmd = %d, want %d", st.cmd, got[3], st.cmd+100)
+		}
+	}
+
+	// 3. Flow control: SET_CONTROL with USE_NO_FLOW_CONTROL.
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdSetControl, []byte{rfc2217.ControlFlowNone}); err != nil {
+		t.Fatalf("sending flow control: %v", err)
+	}
+	readN(t, c, 7)
+
+	// 4. DTR and RTS: the client asserts both by default (their _dtr_state
+	// and _rts_state default to True).
+	for _, ctrl := range []byte{rfc2217.ControlDTROn, rfc2217.ControlRTSOn} {
+		if err := rfc2217.WriteCommand(c, rfc2217.CmdSetControl, []byte{ctrl}); err != nil {
+			t.Fatalf("sending %s: %v", rfc2217.ControlName(ctrl), err)
+		}
+		readN(t, c, 7)
+	}
+
+	// 5. The purges: reset_input_buffer() then reset_output_buffer(), both
+	// called from open(). This is where esptool hung on real hardware.
+	for _, v := range []byte{rfc2217.PurgeReceiveBuffer, rfc2217.PurgeTransmitBuffer} {
+		if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{v}); err != nil {
+			t.Fatalf("sending purge %d: %v", v, err)
+		}
+		readN(t, c, 7)
+	}
+
+	// The device saw the whole sequence.
+	waitFor(t, "baud to reach the device", func() bool { return fp.LastSettings().Baud == 921600 })
+	waitFor(t, "both purges to reach the device", func() bool { return fp.PurgeCount() == 2 })
+	if !fp.LastModem().DTR || !fp.LastModem().RTS {
+		t.Fatalf("final modem state = %+v, want DTR and RTS asserted", fp.LastModem())
+	}
+}
+
+func TestPurgeOfEveryDefinedValueIsAnswered(t *testing.T) {
+	// pyserial sends PURGE_RECEIVE_BUFFER from reset_input_buffer and
+	// PURGE_TRANSMIT_BUFFER from reset_output_buffer, both inside open().
+	// Answering only one of them leaves the other failing on the same
+	// connect-time timeout.
+	//
+	// The device serves one connection at a time, so each iteration waits for
+	// the previous session to release it — the same pattern the
+	// reusability test uses.
+	var (
+		mu       sync.Mutex
+		opens    int
+		detached int
+		lastOpen int
+	)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			opens++
+			return serialtest.NewFakePort(t), nil
+		},
+		Log: func(e serialbroker.Event) {
+			if e.Kind != "detach" {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			detached++
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	for _, v := range []byte{
+		rfc2217.PurgeReceiveBuffer,
+		rfc2217.PurgeTransmitBuffer,
+		rfc2217.PurgeBothBuffers,
+	} {
+		mu.Lock()
+		lastOpen = opens
+		mu.Unlock()
+
+		c := dial(t, addr)
+		if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{v}); err != nil {
+			t.Fatalf("WriteCommand(%d): %v", v, err)
+		}
+		got := readN(t, c, 7)
+		want := []byte{
+			0xFF, 0xFA, rfc2217.OptionComPort, rfc2217.CmdPurgeData + 100,
+			v, 0xFF, 0xF0,
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("value %d: got % x, want the server confirmation % x", v, got, want)
+		}
+		c.Close()
+		// Wait until the session has released the device before dialing again.
+		waitFor(t, "session to detach", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return detached >= 1 && opens > lastOpen
+		})
+		mu.Lock()
+		detached = 0
+		mu.Unlock()
+	}
+}
+
 // capture is an in-memory recorder standing in for the run's capture file.
 type capture struct {
 	mu     sync.Mutex

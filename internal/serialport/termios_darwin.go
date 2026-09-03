@@ -93,3 +93,10 @@ func sendBreak(fd int) error {
 func currentBaud(tio *unix.Termios) uint32 {
 	return uint32(tio.Ospeed)
 }
+
+// flushBuffers implements Port.FlushBuffers. Darwin's TIOCFLUSH takes the queue
+// selector as its argument; TCIOFLUSH discards both pending input and
+// undelivered output.
+func flushBuffers(fd int) error {
+	return unix.IoctlSetInt(fd, unix.TIOCFLUSH, unix.TCIOFLUSH)
+}

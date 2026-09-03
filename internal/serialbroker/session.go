@@ -324,6 +324,28 @@ func (s *session) handleCommand(cmd byte, payload []byte) {
 			s.applyControl(payload[0])
 		}
 		s.reply(cmd, payload)
+
+	case rfc2217.CmdPurgeData:
+		// pyserial issues PURGE from inside Serial.open() (reset_input_buffer
+		// / reset_output_buffer are part of its connect sequence) and blocks
+		// until the reply arrives, so this must be answered even though the
+		// broker has nothing buffered. The reply echoes the request's value
+		// byte: pyserial's check_answer rejects a mismatch.
+		if len(payload) == 1 {
+			switch payload[0] {
+			case rfc2217.PurgeReceiveBuffer, rfc2217.PurgeTransmitBuffer, rfc2217.PurgeBothBuffers:
+				if err := s.port.FlushBuffers(); err != nil {
+					s.emitError("flushing device: " + err.Error())
+					return
+				}
+				s.emit("purge", "buffers flushed")
+			default:
+				// Undefined purge value: acknowledge with the echo the client
+				// expects rather than failing the session over it.
+				s.emit("purge", fmt.Sprintf("unknown value %d", payload[0]))
+			}
+		}
+		s.reply(cmd, payload)
 	}
 }
 

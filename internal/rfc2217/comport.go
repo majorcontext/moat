@@ -11,7 +11,7 @@ package rfc2217
 import "encoding/binary"
 
 // Client-to-server com-port commands. Server-to-client replies use the same
-// value plus 100, which is why NotifyModemState below is 107 rather than 7.
+// value plus 100, which is why CmdNotifyModemState below is 107 rather than 7.
 const (
 	CmdSignature          byte = 0
 	CmdSetBaudRate        byte = 1
@@ -19,8 +19,12 @@ const (
 	CmdSetParity          byte = 3
 	CmdSetStopSize        byte = 4
 	CmdSetControl         byte = 5
+	CmdNotifyLineState    byte = 6
 	CmdFlowControlSuspend byte = 8
 	CmdFlowControlResume  byte = 9
+	CmdSetLineStateMask   byte = 10
+	CmdSetModemStateMask  byte = 11
+	CmdPurgeData          byte = 12
 
 	// CmdNotifyModemState is server-to-client (7 + 100).
 	CmdNotifyModemState byte = 107
@@ -81,4 +85,15 @@ const (
 	ControlFlowNone    byte = 1
 	ControlFlowXONXOFF byte = 2
 	ControlFlowRTSCTS  byte = 3
+)
+
+// PURGE_DATA values. pyserial's client sends one of these from inside
+// Serial.open() — reset_input_buffer()/reset_output_buffer() are part of its
+// connect sequence — and blocks until the server replies, so a server without
+// a PURGE case fails every pyserial connect with "timeout while waiting for
+// option 'purge'".
+const (
+	PurgeReceiveBuffer  byte = 1
+	PurgeTransmitBuffer byte = 2
+	PurgeBothBuffers    byte = 3
 )

@@ -135,6 +135,18 @@ func (t *tty) SendBreak() error {
 	return nil
 }
 
+// FlushBuffers implements Port. On both Linux and macOS the TIOCFLUSH ioctl
+// takes the queue selector as its argument; TCIOFLUSH discards both pending
+// input and undelivered output.
+func (t *tty) FlushBuffers() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err := flushBuffers(int(t.f.Fd())); err != nil {
+		return fmt.Errorf("flushing %s: %w", t.path, err)
+	}
+	return nil
+}
+
 // currentSettings reads the line settings back from the device. It exists for
 // tests: the port holds an exclusive claim (TIOCEXCL), so nothing else can open
 // the device to inspect it.

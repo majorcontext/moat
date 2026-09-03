@@ -56,6 +56,12 @@ type Port interface {
 	// SendBreak transmits a break condition.
 	SendBreak() error
 
+	// FlushBuffers discards pending input and output on the device. It backs
+	// RFC2217 PURGE_DATA, which pyserial's client issues from inside
+	// Serial.open() and blocks on — a server that ignores it fails every
+	// pyserial connect, not just explicit flush calls.
+	FlushBuffers() error
+
 	// Name is the host device path, for logs and errors.
 	Name() string
 }

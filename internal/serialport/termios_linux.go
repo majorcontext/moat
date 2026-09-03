@@ -112,6 +112,13 @@ func sendBreak(fd int) error {
 	return unix.IoctlSetInt(fd, unix.TCSBRK, 0)
 }
 
+// flushBuffers implements Port.FlushBuffers. Linux's TIOCFLUSH ioctl is
+// exposed as TCFLSH (same request number, 0x540B) with the queue selector as
+// its argument; TCIOFLUSH discards both pending input and undelivered output.
+func flushBuffers(fd int) error {
+	return unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIOFLUSH)
+}
+
 // currentBaud reports the rate encoded in a termios, or 0 if it is not one of
 // the standard rates.
 func currentBaud(tio *unix.Termios) uint32 {
