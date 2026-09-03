@@ -1229,6 +1229,7 @@ region = %s
 		SSHHosts:           sshGrants,
 		InitProviders:      imgNeeds.initProviders,
 		NeedsFirewall:      needsProxyForFirewall,
+		HasSerialDevices:   opts.Config != nil && len(opts.Config.Devices) > 0,
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
 		NeedsClipboard:     needsClipboard,

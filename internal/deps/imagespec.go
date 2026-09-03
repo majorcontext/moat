@@ -32,6 +32,15 @@ type ImageSpec struct {
 	// policy enforcement.
 	NeedsFirewall bool
 
+	// HasSerialDevices indicates the run attaches USB serial devices via the
+	// proxy daemon's RFC2217 broker. The broker URL handed to the container
+	// uses the synthetic hostname moat-host, which only resolves on runtimes
+	// where moat-init.sh writes it to /etc/hosts from MOAT_EXTRA_HOSTS (Apple
+	// containers, Docker Desktop). On Docker Linux the entries come from
+	// --add-host instead, but the entrypoint is forced unconditionally so the
+	// image does not silently vary by host platform.
+	HasSerialDevices bool
+
 	// NeedsGitIdentity indicates the host's git identity should be injected
 	// into the container. Used only by Dockerfile generation.
 	NeedsGitIdentity bool
@@ -90,6 +99,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
+		s.HasSerialDevices ||
 		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume || s.PiBakeSettings
 }
 
@@ -113,7 +123,7 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
-		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume
+		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume || s.HasSerialDevices
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.

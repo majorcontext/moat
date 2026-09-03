@@ -47,6 +47,9 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 	if opts.NeedsFirewall {
 		hashInput += ",firewall:iptables"
 	}
+	if opts.HasSerialDevices {
+		hashInput += ",serial:devices"
+	}
 	if opts.NeedsInitFiles {
 		hashInput += ",init-files"
 	}

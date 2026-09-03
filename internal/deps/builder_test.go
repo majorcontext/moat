@@ -49,6 +49,23 @@ func TestImageTagWithSSH(t *testing.T) {
 	}
 }
 
+// A serial run must get a different tag from a plain run: the serial image
+// bakes the moat-init entrypoint (for MOAT_EXTRA_HOSTS), so reusing a cached
+// entrypoint-less image would leave moat-host unresolvable on Apple/Docker
+// Desktop runtimes.
+func TestImageTagWithSerialDevices(t *testing.T) {
+	deps := []Dependency{{Name: "python"}}
+	tagPlain := ImageTag(deps, nil)
+	tagSerial := ImageTag(deps, &ImageSpec{HasSerialDevices: true})
+	if tagPlain == tagSerial {
+		t.Error("HasSerialDevices should affect tag")
+	}
+	// Determinism: same spec, same tag.
+	if tagSerial != ImageTag(deps, &ImageSpec{HasSerialDevices: true}) {
+		t.Error("HasSerialDevices tag should be deterministic")
+	}
+}
+
 func TestImageTagWithHooks(t *testing.T) {
 	noHooks := ImageTag(nil, nil)
 	withHooks := ImageTag(nil, &ImageSpec{
