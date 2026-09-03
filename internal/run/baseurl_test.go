@@ -415,6 +415,13 @@ func TestProxyRequiredForConfig(t *testing.T) {
 			cfg:  &config.Config{Network: config.NetworkConfig{KeepPolicy: &keep.PolicyConfig{}}},
 		},
 		{
+			name: "devices",
+			cfg: &config.Config{Devices: []config.DeviceEntry{{
+				Serial: "esp32",
+				Match:  config.DeviceMatch{VID: "303a", PID: "1001"},
+			}}},
+		},
+		{
 			name: "claude.llm_gateway policy",
 			cfg: func() *config.Config {
 				c := &config.Config{}

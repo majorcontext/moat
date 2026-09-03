@@ -2988,13 +2988,16 @@ func checkKeepPolicyCapabilities(daemonCapabilities []string, requiresBody bool)
 //
 // claude.base_url is in this set because the proxy block is what puts
 // ANTHROPIC_BASE_URL on the container, and a host-local endpoint is only
-// reachable through the proxy at all.
+// reachable through the proxy at all. devices is in this set because the serial
+// broker runs inside the proxy daemon: without it, a devices-only run would
+// resolve its pins, then get no listeners at all.
 func proxyRequiredForConfig(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
 	return len(cfg.Network.Host) > 0 ||
 		len(cfg.Network.Rules) > 0 ||
+		len(cfg.Devices) > 0 ||
 		len(cfg.MCP) > 0 ||
 		cfg.Network.KeepPolicy != nil ||
 		cfg.Claude.BaseURL != "" ||
