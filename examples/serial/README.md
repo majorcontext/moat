@@ -46,6 +46,21 @@ address. If the app firmware is running, esptool drives DTR/RTS over the
 broker to reset the chip into its bootloader — that is the part worth
 watching, because a pty cannot carry those lines.
 
+esptool also prints, repeatedly:
+
+```
+Failed to get VID/PID of a device on rfc2217://...: Cannot resolve VID/PID
+for 'rfc2217://...': only COM* and absolute device paths are supported
+(pyserial URL handlers have no USB identity). Using standard reset sequence.
+```
+
+That is expected, not an error. esptool asks the port for its USB VID/PID to
+pick a reset strategy; an `rfc2217://` URL has no USB identity by
+construction — the device lives on the host and is deliberately not visible
+in the container. esptool falls back to the standard (classic UART) reset
+sequence, which is the one that works over RFC2217. It repeats on every
+lookup because esptool only caches the answer on success.
+
 If the board is already in ROM download mode (hold BOOT, tap RST), the same
 command works without any DTR/RTS toggling.
 

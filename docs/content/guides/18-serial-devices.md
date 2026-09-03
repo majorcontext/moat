@@ -85,6 +85,13 @@ Espressif [documents it](https://docs.espressif.com/projects/esptool/en/latest/e
 as supporting DTR/RTS auto-reset "the same as for a local serial port," and recommends it
 for remote serial. Any pyserial-based tool accepts an `rfc2217://` URL in place of a port.
 
+One message to expect rather than fix: esptool prints `Failed to get VID/PID of a
+device on rfc2217://...` on each connect. It asks the port for its USB IDs to pick a
+reset strategy; an `rfc2217://` URL has no USB identity by construction — the device
+lives on the host, not in the container — so esptool falls back to the standard UART
+reset sequence, which is the one that works over RFC2217. The message repeats because
+esptool caches the answer only on success.
+
 ## Approval and pinning
 
 Nothing is exposed unless `moat.yaml` asks for it.
