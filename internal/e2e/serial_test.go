@@ -83,7 +83,7 @@ func createSerialTestWorkspace(t *testing.T, vid, pid string) string {
 	t.Helper()
 	dir := t.TempDir()
 	yaml := "name: serial-e2e\nagent: e2e-test\ndependencies: [python, pip:pyserial]\n" +
-		"devices:\n  - serial: dut\n    match: {vid: \"" + vid + "\", pid: \"" + pid + "\"}\n"
+		"devices:\n  - name: dut\n    match: {usb: \"" + vid + ":" + pid + "\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "moat.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("WriteFile moat.yaml: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSerialDeviceEndToEnd(t *testing.T) {
 			Config: &config.Config{
 				Name:         "serial-e2e",
 				Dependencies: []string{"python", "pip:pyserial"},
-				Devices:      []config.DeviceEntry{{Serial: "dut", Match: config.DeviceMatch{VID: dev.VID, PID: dev.PID}}},
+				Devices:      []config.DeviceEntry{{Name: "dut", Match: config.DeviceMatch{USB: dev.VID + ":" + dev.PID}}},
 				Network:      config.NetworkConfig{Policy: "permissive"},
 			},
 			Cmd: []string{"sh", "-c", serialTestScript},

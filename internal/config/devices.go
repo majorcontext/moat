@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Record modes for a device session.
@@ -21,20 +22,23 @@ const (
 // confuse a shell is rejected.
 var deviceNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// usbIDRe matches a 4-digit hex USB vendor or product ID, in either case.
-var usbIDRe = regexp.MustCompile(`^[0-9a-fA-F]{4}$`)
+// usbIDRe matches a "vid:pid" USB ID pair as `moat device list` prints it —
+// 4 hex digits, colon, 4 hex digits, in either case.
+var usbIDRe = regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$`)
 
-// DeviceMatch selects a host device by USB vendor and product ID.
+// DeviceMatch selects a host device by its USB ID. The value is the exact
+// `vid:pid` pair the device list prints, so a row can be copied into
+// moat.yaml without splitting it.
 type DeviceMatch struct {
-	VID string `yaml:"vid"`
-	PID string `yaml:"pid"`
+	USB string `yaml:"usb"`
 }
 
 // DeviceEntry requests access to one serial device.
 type DeviceEntry struct {
-	// Serial is the device name. It determines how the container addresses the
-	// device: MOAT_SERIAL_<NAME>_URL carries its rfc2217:// endpoint.
-	Serial string `yaml:"serial"`
+	// Name is the device's name in moat.yaml. It determines how the container
+	// addresses the device: MOAT_SERIAL_<NAME>_URL carries its rfc2217://
+	// endpoint.
+	Name string `yaml:"name"`
 
 	// Match selects which attached device this entry refers to. The specific
 	// device is pinned on first use; see internal/serialdev.
@@ -55,40 +59,43 @@ func (d DeviceEntry) RecordMode() string {
 	return d.Record
 }
 
+// VIDPID returns the match's vendor and product IDs, lowercased, for device
+// resolution. Callers have validated the format already.
+func (d DeviceEntry) VIDPID() (string, string) {
+	vid, pid, _ := strings.Cut(d.Match.USB, ":")
+	return strings.ToLower(vid), strings.ToLower(pid)
+}
+
 // validateDevices checks the devices block.
 func validateDevices(devs []DeviceEntry) error {
 	seen := make(map[string]bool, len(devs))
 	for i, d := range devs {
-		if d.Serial == "" {
-			return fmt.Errorf("devices[%d]: serial is required — it names the device, e.g. `serial: esp32`", i)
+		if d.Name == "" {
+			return fmt.Errorf("devices[%d]: name is required — it names the device, e.g. `name: esp32`", i)
 		}
-		if !deviceNameRe.MatchString(d.Serial) {
+		if !deviceNameRe.MatchString(d.Name) {
 			return fmt.Errorf("devices[%d]: invalid device name %q — use lowercase letters, digits, '-' and '_', "+
-				"starting with a letter or digit (the name becomes MOAT_SERIAL_<NAME>_URL)", i, d.Serial)
+				"starting with a letter or digit (the name becomes MOAT_SERIAL_<NAME>_URL)", i, d.Name)
 		}
-		if seen[d.Serial] {
-			return fmt.Errorf("devices[%d]: duplicate device name %q", i, d.Serial)
+		if seen[d.Name] {
+			return fmt.Errorf("devices[%d]: duplicate device name %q", i, d.Name)
 		}
-		seen[d.Serial] = true
+		seen[d.Name] = true
 
-		if !usbIDRe.MatchString(d.Match.VID) {
-			return fmt.Errorf("devices[%s]: match.vid must be 4 hex digits, e.g. \"303a\" — got %q\n"+
-				"  Run `moat device list` to see the IDs of attached devices", d.Serial, d.Match.VID)
-		}
-		if !usbIDRe.MatchString(d.Match.PID) {
-			return fmt.Errorf("devices[%s]: match.pid must be 4 hex digits, e.g. \"1001\" — got %q\n"+
-				"  Run `moat device list` to see the IDs of attached devices", d.Serial, d.Match.PID)
+		if !usbIDRe.MatchString(d.Match.USB) {
+			return fmt.Errorf("devices[%s]: match.usb must be a vid:pid pair, e.g. \"303a:1001\" — got %q\n"+
+				"  Run `moat device list` to see the USB IDs of attached devices", d.Name, d.Match.USB)
 		}
 
 		if d.Baud < 0 {
-			return fmt.Errorf("devices[%s]: baud must be positive, got %d", d.Serial, d.Baud)
+			return fmt.Errorf("devices[%s]: baud must be positive, got %d", d.Name, d.Baud)
 		}
 
 		switch d.Record {
 		case "", RecordEvents, RecordFull:
 		default:
 			return fmt.Errorf("devices[%s]: invalid record mode %q: must be %q (default) or %q",
-				d.Serial, d.Record, RecordEvents, RecordFull)
+				d.Name, d.Record, RecordEvents, RecordFull)
 		}
 	}
 	return nil

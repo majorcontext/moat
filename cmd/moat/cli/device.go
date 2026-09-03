@@ -22,8 +22,8 @@ moat runs are approved to use.
 A run gets access to a device by declaring it in moat.yaml:
 
   devices:
-    - serial: esp32
-      match: {vid: "303a", pid: "1001"}
+    - name: esp32
+      match: {usb: "303a:1001"}
 
 The first run to use a device records its identity. Later runs must present the
 same device, so swapping in different hardware fails rather than silently
@@ -89,7 +89,7 @@ func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	// "SERIAL NUMBER", not "SERIAL": the word serial appears twice in this
 	// output with different meanings — the hardware serial number in this
-	// column, and the name you pick for the `serial:` key in the snippet
+	// column, and the name you pick for the `name:` key in the snippet
 	// below. Spelling the column out keeps them apart.
 	fmt.Fprintln(tw, "DEVICE\tUSB ID\tSERIAL NUMBER\tPIN\tDESCRIPTION")
 	for _, d := range devices {
@@ -104,8 +104,8 @@ func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin)
 	fmt.Fprintln(w, "Pick a name for the device and add it to moat.yaml. The name is")
 	fmt.Fprintln(w, "yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  devices:\n    - serial: %s\n      match: {vid: %q, pid: %q}\n",
-		suggestedName(devices[0]), devices[0].VID, devices[0].PID)
+	fmt.Fprintf(w, "  devices:\n    - name: %s\n      match: {usb: %q}\n",
+		suggestedName(devices[0]), devices[0].VID+":"+devices[0].PID)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The first run that uses the device pins it to this hardware; the PIN column")
 	fmt.Fprintln(w, "shows the name it is pinned under.")

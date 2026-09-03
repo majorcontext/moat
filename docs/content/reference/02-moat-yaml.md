@@ -722,8 +722,8 @@ Host serial devices the run may use. Nothing is exposed unless listed here.
 
 ```yaml
 devices:
-  - serial: esp32
-    match: {vid: "303a", pid: "1001"}
+  - name: esp32
+    match: {usb: "303a:1001"}
     baud: 115200
     record: full
 ```
@@ -733,9 +733,8 @@ devices:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `serial` | string | yes | Device name. Lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
-| `match.vid` | string | yes | USB vendor ID, exactly 4 hex digits. |
-| `match.pid` | string | yes | USB product ID, exactly 4 hex digits. |
+| `name` | string | yes | Device name. Lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
+| `match.usb` | string | yes | USB ID as `vid:pid`, e.g. `"303a:1001"` — the USB ID column `moat device list` prints. |
 | `baud` | int | no | Initial line rate. Tools normally set their own. |
 | `record` | string | no | `events` (default) or `full`. |
 

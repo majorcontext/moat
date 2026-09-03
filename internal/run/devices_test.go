@@ -14,8 +14,8 @@ import (
 
 func esp32Entry() config.DeviceEntry {
 	return config.DeviceEntry{
-		Serial: "esp32",
-		Match:  config.DeviceMatch{VID: "303a", PID: "1001"},
+		Name:  "esp32",
+		Match: config.DeviceMatch{USB: "303a:1001"},
 	}
 }
 
@@ -232,7 +232,7 @@ func TestResolveDevicesDoesNotPinWhenAnotherDeviceFails(t *testing.T) {
 	pins := newPins(t)
 	entries := []config.DeviceEntry{
 		esp32Entry(),
-		{Serial: "probe", Match: config.DeviceMatch{VID: "1a86", PID: "7523"}},
+		{Name: "probe", Match: config.DeviceMatch{USB: "1a86:7523"}},
 	}
 	if _, err := ResolveDevices(context.Background(), entries,
 		serialtest.NewFakeEnumerator(esp32Device("AAA")), pins); err == nil {
@@ -286,13 +286,13 @@ func TestDetectMissingDevicesMatchesResolve(t *testing.T) {
 		},
 		{
 			"serial-less same port",
-			[]config.DeviceEntry{{Serial: "ch340", Match: config.DeviceMatch{VID: "1a86", PID: "7523"}}},
+			[]config.DeviceEntry{{Name: "ch340", Match: config.DeviceMatch{USB: "1a86:7523"}}},
 			[]serialdev.Device{noSerial},
 			ptr(serialdev.PinFor("ch340", noSerial)),
 		},
 		{
 			"serial-less moved port",
-			[]config.DeviceEntry{{Serial: "ch340", Match: config.DeviceMatch{VID: "1a86", PID: "7523"}}},
+			[]config.DeviceEntry{{Name: "ch340", Match: config.DeviceMatch{USB: "1a86:7523"}}},
 			[]serialdev.Device{noSerialMoved},
 			ptr(serialdev.PinFor("ch340", noSerial)),
 		},

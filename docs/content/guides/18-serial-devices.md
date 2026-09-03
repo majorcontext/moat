@@ -31,8 +31,8 @@ Pick a name for the device and add it to moat.yaml. The name is
 yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:
 
   devices:
-    - serial: cp2102-usb-to-uart-bridge
-      match: {vid: "10c4", pid: "ea60"}
+    - name: cp2102-usb-to-uart-bridge
+      match: {usb: "10c4:ea60"}
 
 The first run that uses the device pins it to this hardware; the PIN column
 shows the name it is pinned under.
@@ -47,8 +47,8 @@ dependencies:
   - python
 
 devices:
-  - serial: esp32
-    match: {vid: "10c4", pid: "ea60"}
+  - name: esp32
+    match: {usb: "10c4:ea60"}
 ```
 
 ## 3. Use it
@@ -151,8 +151,8 @@ for every session. Set `record: full` to capture the payload bytes too:
 
 ```yaml
 devices:
-  - serial: esp32
-    match: {vid: "10c4", pid: "ea60"}
+  - name: esp32
+    match: {usb: "10c4:ea60"}
     record: full
 ```
 

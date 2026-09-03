@@ -417,8 +417,8 @@ func TestProxyRequiredForConfig(t *testing.T) {
 		{
 			name: "devices",
 			cfg: &config.Config{Devices: []config.DeviceEntry{{
-				Serial: "esp32",
-				Match:  config.DeviceMatch{VID: "303a", PID: "1001"},
+				Name:  "esp32",
+				Match: config.DeviceMatch{USB: "303a:1001"},
 			}}},
 		},
 		{

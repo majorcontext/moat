@@ -33,7 +33,7 @@ func TestDeviceListShowsIdentityAndSuggestsConfig(t *testing.T) {
 		}
 	}
 	// The IDs are only useful if the user knows where to put them.
-	if !strings.Contains(out, "devices:") || !strings.Contains(out, `vid: "303a"`) {
+	if !strings.Contains(out, "devices:") || !strings.Contains(out, `usb: "303a:1001"`) {
 		t.Fatalf("output should suggest a moat.yaml snippet:\n%s", out)
 	}
 }

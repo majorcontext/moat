@@ -70,7 +70,7 @@ func resolveDevices(
 		missing := make([]MissingDevice, 0, len(devs))
 		for _, d := range devs {
 			missing = append(missing, MissingDevice{
-				Name:   d.Serial,
+				Name:   d.Name,
 				Reason: ReasonDeviceEnumerationFailed,
 				Detail: fmt.Sprintf("could not list host serial devices: %v", err),
 			})
@@ -83,15 +83,16 @@ func resolveDevices(
 		missing  []MissingDevice
 	)
 	for _, entry := range devs {
+		vid, pid := entry.VIDPID()
 		candidates, matchErr := serialdev.Match(attached, serialdev.Matcher{
-			VID: entry.Match.VID,
-			PID: entry.Match.PID,
+			VID: vid,
+			PID: pid,
 		})
 
-		pin, pinned, perr := pins.Get(entry.Serial)
+		pin, pinned, perr := pins.Get(entry.Name)
 		if perr != nil {
 			missing = append(missing, MissingDevice{
-				Name:   entry.Serial,
+				Name:   entry.Name,
 				Reason: ReasonDeviceEnumerationFailed,
 				Detail: fmt.Sprintf("could not read device pins: %v", perr),
 			})
@@ -101,11 +102,11 @@ func resolveDevices(
 		switch {
 		case errors.Is(matchErr, serialdev.ErrNoMatch):
 			missing = append(missing, MissingDevice{
-				Name:   entry.Serial,
+				Name:   entry.Name,
 				Reason: ReasonDeviceNotFound,
 				Detail: fmt.Sprintf("no attached device matches USB ID %s:%s\n"+
 					"  Plug it in, or run `moat device list` to see what is attached",
-					strings.ToLower(entry.Match.VID), strings.ToLower(entry.Match.PID)),
+					vid, pid),
 			})
 			continue
 
@@ -117,26 +118,25 @@ func resolveDevices(
 					continue
 				}
 				missing = append(missing, MissingDevice{
-					Name:       entry.Serial,
+					Name:       entry.Name,
 					Reason:     ReasonDevicePinMismatch,
-					Detail:     pinMismatchDetail(entry.Serial, pin, candidates),
-					FixCommand: "moat device forget " + entry.Serial,
+					Detail:     pinMismatchDetail(entry.Name, pin, candidates),
+					FixCommand: "moat device forget " + entry.Name,
 				})
 				continue
 			}
 			missing = append(missing, MissingDevice{
-				Name:   entry.Serial,
+				Name:   entry.Name,
 				Reason: ReasonDeviceAmbiguous,
 				Detail: fmt.Sprintf("%d attached devices match USB ID %s:%s — %s\n"+
 					"  Unplug all but one so moat can pin the right device",
-					len(candidates), strings.ToLower(entry.Match.VID),
-					strings.ToLower(entry.Match.PID), describeDevices(candidates)),
+					len(candidates), vid, pid, describeDevices(candidates)),
 			})
 			continue
 
 		case matchErr != nil:
 			missing = append(missing, MissingDevice{
-				Name:   entry.Serial,
+				Name:   entry.Name,
 				Reason: ReasonDeviceNotFound,
 				Detail: matchErr.Error(),
 			})
@@ -149,17 +149,17 @@ func resolveDevices(
 			resolved = append(resolved, resolvedDevice{
 				entry:  entry,
 				device: dev,
-				pin:    serialdev.PinFor(entry.Serial, dev),
+				pin:    serialdev.PinFor(entry.Name, dev),
 				newPin: true,
 			})
 			continue
 		}
 		if err := pin.Verify(dev); err != nil {
 			missing = append(missing, MissingDevice{
-				Name:       entry.Serial,
+				Name:       entry.Name,
 				Reason:     ReasonDevicePinMismatch,
 				Detail:     err.Error(),
-				FixCommand: "moat device forget " + entry.Serial,
+				FixCommand: "moat device forget " + entry.Name,
 			})
 			continue
 		}
@@ -239,11 +239,11 @@ func ResolveDevices(
 	for _, r := range resolved {
 		if r.newPin {
 			if err := pins.Put(r.pin); err != nil {
-				return nil, fmt.Errorf("recording device pin for %q: %w", r.entry.Serial, err)
+				return nil, fmt.Errorf("recording device pin for %q: %w", r.entry.Name, err)
 			}
 		}
 		specs = append(specs, daemon.SerialDeviceSpec{
-			Name:     r.entry.Serial,
+			Name:     r.entry.Name,
 			Path:     r.device.Path,
 			VID:      r.device.VID,
 			PID:      r.device.PID,
