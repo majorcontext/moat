@@ -151,6 +151,34 @@ func TestWriteAndReadPassThrough(t *testing.T) {
 	}
 }
 
+func TestFlushBuffersDiscardsPendingInput(t *testing.T) {
+	// RFC2217 PURGE_DATA maps to this flush, and pyserial blocks its entire
+	// connect sequence on it — a flush that errors (rather than clearing) fails
+	// every pyserial connect. This test exercises the real ioctl against a real
+	// tty, which is where a wrong argument-passing convention shows up: Darwin's
+	// TIOCFLUSH expects the queue selector by pointer (_IOW), so passing it by
+	// value gives EFAULT there even though the Linux form passes both ways here.
+	//
+	// The stale-bytes assertion lives in the broker tests (pty queue topology
+	// differs by platform, so which side's queue holds the bytes is not portable
+	// to assert here); what this pins down is that the ioctl itself succeeds
+	// with the correct argument convention on each platform.
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer p.Close()
+
+	if err := p.FlushBuffers(); err != nil {
+		t.Fatalf("FlushBuffers: %v", err)
+	}
+	// Idempotent: a second flush of an already-empty queue is fine.
+	if err := p.FlushBuffers(); err != nil {
+		t.Fatalf("second FlushBuffers: %v", err)
+	}
+}
+
 func TestCloseUnblocksPendingRead(t *testing.T) {
 	// The broker tears sessions down by closing the port while a read is in
 	// flight; if that blocked forever, Revoke would hang.

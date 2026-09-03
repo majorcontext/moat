@@ -94,9 +94,13 @@ func currentBaud(tio *unix.Termios) uint32 {
 	return uint32(tio.Ospeed)
 }
 
-// flushBuffers implements Port.FlushBuffers. Darwin's TIOCFLUSH takes the queue
-// selector as its argument; TCIOFLUSH discards both pending input and
-// undelivered output.
+// flushBuffers implements Port.FlushBuffers.
+//
+// TIOCFLUSH on Darwin is _IOW('t', 16, int): the kernel copies a 4-byte queue
+// selector from the address passed as the ioctl argument — the selector must
+// be passed by pointer, not by value. (Contrast Linux, whose TCFLSH takes the
+// selector by value.) TCIOFLUSH discards both pending input and undelivered
+// output.
 func flushBuffers(fd int) error {
-	return unix.IoctlSetInt(fd, unix.TIOCFLUSH, unix.TCIOFLUSH)
+	return unix.IoctlSetPointerInt(fd, unix.TIOCFLUSH, unix.TCIOFLUSH)
 }

@@ -581,6 +581,28 @@ func TestPurgeFlushesThePort(t *testing.T) {
 	waitFor(t, "buffers flushed", func() bool { return fp.PurgeCount() == 1 })
 }
 
+func TestPurgeIsAcknowledgedEvenWhenTheFlushFails(t *testing.T) {
+	// A flush failure must not swallow the reply. The first version of PURGE
+	// support returned early on a flush error, so a device whose flush failed
+	// (Darwin EFAULT, a vanished USB device) left pyserial blocked on the ack
+	// — presenting as a dead device when the data path was still fine.
+	_, fp, addr := newBroker(t)
+	fp.SetFlushError(errors.New("device detached"))
+	c := dial(t, addr)
+
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{rfc2217.PurgeReceiveBuffer}); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	got := readN(t, c, 7)
+	want := []byte{
+		0xFF, 0xFA, rfc2217.OptionComPort, rfc2217.CmdPurgeData + 100,
+		rfc2217.PurgeReceiveBuffer, 0xFF, 0xF0,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got % x, want the ack even after a flush failure % x", got, want)
+	}
+}
+
 // TestPySerialOpenSequence models pyserial's Serial.open() against the broker:
 // the exact command sequence serial/rfc2217.py sends when connecting, with
 // every step blocking on its server reply the way the real client does.

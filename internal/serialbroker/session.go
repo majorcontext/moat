@@ -331,14 +331,20 @@ func (s *session) handleCommand(cmd byte, payload []byte) {
 		// until the reply arrives, so this must be answered even though the
 		// broker has nothing buffered. The reply echoes the request's value
 		// byte: pyserial's check_answer rejects a mismatch.
+		//
+		// A flush failure is reported but still acknowledged: the alternative
+		// is a client that hangs on the ack and presents as an unreachable
+		// device, when the truth is only that the buffers could not be
+		// cleared. The data path still works; the client merely risks reading
+		// a stale byte.
 		if len(payload) == 1 {
 			switch payload[0] {
 			case rfc2217.PurgeReceiveBuffer, rfc2217.PurgeTransmitBuffer, rfc2217.PurgeBothBuffers:
 				if err := s.port.FlushBuffers(); err != nil {
 					s.emitError("flushing device: " + err.Error())
-					return
+				} else {
+					s.emit("purge", "buffers flushed")
 				}
-				s.emit("purge", "buffers flushed")
 			default:
 				// Undefined purge value: acknowledge with the echo the client
 				// expects rather than failing the session over it.
