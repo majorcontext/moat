@@ -53,10 +53,19 @@ devices:
 
 ## 3. Use it
 
-Each device is exposed as an RFC2217 URL in `MOAT_SERIAL_<NAME>_URL`:
+Each device is exposed as an RFC2217 URL in `MOAT_SERIAL_<NAME>_URL`. Pass the URL to
+whatever tool would have taken the device path:
 
 ```bash
 $ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+```
+
+The command can also live in moat.yaml. `command:` is an argv list, not a shell string —
+`$MOAT_SERIAL_ESP32_URL` does not expand in it — so reference the env var from a script
+the command runs:
+
+```yaml
+command: ["sh", "/workspace/verify.sh"]
 ```
 
 `MOAT_SERIAL_DEVICES` lists the names of all devices available to the run.

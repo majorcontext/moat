@@ -33,8 +33,13 @@ board shows a different ID (`10c4:ea60`, `1a86:55d4`, ...), copy what
 From this directory:
 
 ```bash
-moat run -- sh -c 'pip install --quiet esptool && esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+moat run
 ```
+
+That's the whole command — `moat.yaml`'s `command:` runs `verify.sh`, which
+calls `esptool chip_id` against `$MOAT_SERIAL_ESP32_URL`. esptool installs
+at image build time via the `pip:esptool` dependency; nothing is installed
+at run time.
 
 Expected: esptool connects over RFC2217 and prints the chip type and MAC
 address. If the app firmware is running, esptool drives DTR/RTS over the
@@ -43,6 +48,15 @@ watching, because a pty cannot carry those lines.
 
 If the board is already in ROM download mode (hold BOOT, tap RST), the same
 command works without any DTR/RTS toggling.
+
+For anything not baked into the image, pass the command inline instead —
+`command:` in moat.yaml is an argv list, not a shell string, so
+`$MOAT_SERIAL_ESP32_URL` does not expand there and the shell wrapper does
+the expanding:
+
+```bash
+moat run -- sh -c 'pip install --quiet esptool && esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+```
 
 **No hardware? Test the plumbing anyway:**
 
@@ -57,7 +71,7 @@ moat to be right — without depending on the board's state.
 ## 2. Flash or read the board
 
 ```bash
-moat run -- sh -c 'pip install --quiet esptool && esptool --port "$MOAT_SERIAL_ESP32_URL" flash_id'
+moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" flash_id'
 ```
 
 See the [esptool remote serial ports doc](https://docs.espressif.com/projects/esptool/en/latest/esp32/remote-serial-ports.html)
@@ -75,7 +89,8 @@ Anything that takes a pyserial URL works on the line as well:
 moat run -- sh -c 'pip install --quiet pyserial && python3 -m serial.tools.miniterm --eol CRLF "$MOAT_SERIAL_ESP32_URL" 115200'
 ```
 
-Exit with `ctrl+]`. Watch the boot log after tapping RST.
+Exit with `ctrl+]`. Watch the boot log after tapping RST. (Adding
+`pip:pyserial` to `dependencies:` drops the install from this command too.)
 
 ## 4. What the run recorded
 
