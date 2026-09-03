@@ -22,5 +22,6 @@ devices:
 
 # The command runs inside the container with the device already attached.
 # It is an argv list, not a shell string — $MOAT_SERIAL_ESP32_URL does not
-# expand here, so the script does the expanding.
-command: ["sh", "/workspace/verify.sh"]
+# expand here, so the script does the expanding. verify.sh uses bash for
+# `set -o pipefail` (sh on Debian is dash, which has no equivalent).
+command: ["bash", "/workspace/verify.sh"]

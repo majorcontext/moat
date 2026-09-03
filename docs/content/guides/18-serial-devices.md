@@ -57,7 +57,7 @@ Each device is exposed as an RFC2217 URL in `MOAT_SERIAL_<NAME>_URL`. Pass the U
 whatever tool would have taken the device path:
 
 ```bash
-$ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+$ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip-id'
 ```
 
 The command can also live in moat.yaml. `command:` is an argv list, not a shell string —
@@ -90,7 +90,12 @@ device on rfc2217://...` on each connect. It asks the port for its USB IDs to pi
 reset strategy; an `rfc2217://` URL has no USB identity by construction — the device
 lives on the host, not in the container — so esptool falls back to the standard UART
 reset sequence, which is the one that works over RFC2217. The message repeats because
-esptool caches the answer only on success.
+esptool caches the answer only on success. It is informational, so the
+[serial example](https://github.com/majorcontext/moat/tree/main/examples/serial)
+filters it from its demo output; no esptool flag suppresses it (checked against 5.4.0:
+`--before` does not skip the lookup, and the `custom_reset_sequence` config option
+covers only the two lookups in reset-strategy selection, not the four during chip
+detection and chip-info printing).
 
 ## Approval and pinning
 
@@ -101,7 +106,7 @@ The `match` block selects a device by USB vendor and product ID, which identifie
 serial number. Every later run must present the same device:
 
 ```
-$ moat run -- esptool chip_id
+$ moat run -- esptool chip-id
 Error: cannot use the serial devices this run requires:
   esp32: serial device does not match its pin: "esp32" was pinned to serial 0001
   but the attached device reports 0002

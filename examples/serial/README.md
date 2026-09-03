@@ -37,7 +37,7 @@ moat run
 ```
 
 That's the whole command — `moat.yaml`'s `command:` runs `verify.sh`, which
-calls `esptool chip_id` against `$MOAT_SERIAL_ESP32_URL`. esptool installs
+calls `esptool chip-id` against `$MOAT_SERIAL_ESP32_URL`. esptool installs
 at image build time via the `pip:esptool` dependency; nothing is installed
 at run time.
 
@@ -46,20 +46,18 @@ address. If the app firmware is running, esptool drives DTR/RTS over the
 broker to reset the chip into its bootloader — that is the part worth
 watching, because a pty cannot carry those lines.
 
-esptool also prints, repeatedly:
+verify.sh filters one message esptool prints: `Failed to get VID/PID of a
+device on rfc2217://...`. It is informational, not an error — esptool asks
+the port for its USB VID/PID to pick a reset strategy, and an `rfc2217://`
+URL has no USB identity by construction (the device lives on the host and
+is deliberately not visible in the container). esptool falls back to the
+standard (classic UART) reset sequence, which is the one that works over
+RFC2217, and prints the message again on every lookup because it caches the
+answer only on success. Run esptool without the filter to see them:
 
+```bash
+moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip-id'
 ```
-Failed to get VID/PID of a device on rfc2217://...: Cannot resolve VID/PID
-for 'rfc2217://...': only COM* and absolute device paths are supported
-(pyserial URL handlers have no USB identity). Using standard reset sequence.
-```
-
-That is expected, not an error. esptool asks the port for its USB VID/PID to
-pick a reset strategy; an `rfc2217://` URL has no USB identity by
-construction — the device lives on the host and is deliberately not visible
-in the container. esptool falls back to the standard (classic UART) reset
-sequence, which is the one that works over RFC2217. It repeats on every
-lookup because esptool only caches the answer on success.
 
 If the board is already in ROM download mode (hold BOOT, tap RST), the same
 command works without any DTR/RTS toggling.
@@ -70,7 +68,7 @@ For anything not baked into the image, pass the command inline instead —
 the expanding:
 
 ```bash
-moat run -- sh -c 'pip install --quiet esptool && esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id'
+moat run -- sh -c 'pip install --quiet esptool && esptool --port "$MOAT_SERIAL_ESP32_URL" chip-id'
 ```
 
 **No hardware? Test the plumbing anyway:**
@@ -86,14 +84,14 @@ moat to be right — without depending on the board's state.
 ## 2. Flash or read the board
 
 ```bash
-moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" flash_id'
+moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" flash-id'
 ```
 
 See the [esptool remote serial ports doc](https://docs.espressif.com/projects/esptool/en/latest/esp32/remote-serial-ports.html)
 for what works over RFC2217. One caveat that page carries: esptool cannot
 apply its *native-USB* behaviors to a remote port because the URL does not
 expose USB IDs. On the S3's USB-Serial-JTAG interface the classic UART reset
-sequence is what matters, so `chip_id`/`flash_id` and flashing over UART work;
+sequence is what matters, so `chip-id`/`flash-id` and flashing over UART work;
 stub flashing over native-USB paths does not apply here.
 
 ## 3. Console on the serial line
@@ -122,7 +120,7 @@ moat audit <run-id>         # attach/detach are in the tamper-evident chain
 The security property worth verifying by hand, because it only shows up with
 two boards of the same model:
 
-1. Run the `chip_id` command above. The first run pins that board's USB serial
+1. Run the `chip-id` command above. The first run pins that board's USB serial
    number (for the S3, the value printed in `moat device list`'s SERIAL
    column).
 2. Unplug it, plug in a second T-Display S3, and run the command again.
