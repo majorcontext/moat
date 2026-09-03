@@ -1,27 +1,32 @@
-name: esp32-dev
+name: board-dev
 
 dependencies:
   - python
   - pip:esptool
 
-# Hardware test example for a LilyGO T-Display S3 (ESP32-S3).
+# Hardware example: give an agent access to one approved USB serial board
+# through the host-side RFC2217 broker — no device node enters the container.
 #
-# The T-Display S3 has no USB-UART bridge chip: the ESP32-S3's own USB
-# peripheral enumerates as a CDC serial port (Espressif VID 303a, PID 1001).
+# Works for any board esptool supports — the whole ESP32 family and the
+# ESP8266 — because esptool autodetects the chip over the line. Both ways a
+# board reaches USB work the same here: through an external bridge chip
+# (CP2102, CH340, CH9102F) or through the chip's own USB-Serial-JTAG
+# peripheral (ESP32-S3/C3/C6 dev boards, including the LilyGO T-Display S3
+# this example was verified on).
 #
-# Run `moat device list` on the host and copy the USB ID it prints if yours
-# differs. Other IDs this board can show up as:
-#   303a:1001  ESP32-S3 USB-Serial-JTAG / CDC  (T-Display S3, most common)
+# The one board-specific value is match.usb — run `moat device list` on the
+# host and copy the USB ID it prints for your board. Common IDs:
+#   303a:1001  ESP32-S3/C3/C6 native USB-Serial-JTAG  (T-Display S3)
 #   303a:1002  ESP32-S3 ROM download mode
-#   10c4:ea60  CP2102 bridge                  (T-Display, T-Beam)
-#   1a86:55d4  CH9102F bridge                 (newer LilyGO revisions)
-#   1a86:7523  CH340 bridge                   (cheap clones)
+#   10c4:ea60  CP2102 bridge                          (plain ESP32 dev kits)
+#   1a86:55d4  CH9102F bridge                         (newer LilyGO revisions)
+#   1a86:7523  CH340 bridge                           (cheap clones, ESP8266)
 devices:
-  - name: esp32
+  - name: board
     match: {usb: "303a:1001"}
 
 # The command runs inside the container with the device already attached.
-# It is an argv list, not a shell string — $MOAT_SERIAL_ESP32_URL does not
+# It is an argv list, not a shell string — $MOAT_SERIAL_BOARD_URL does not
 # expand here, so the script does the expanding. verify.sh uses bash for
 # `set -o pipefail` (sh on Debian is dash, which has no equivalent).
 command: ["bash", "/workspace/verify.sh"]

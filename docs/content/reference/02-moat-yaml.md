@@ -744,7 +744,7 @@ Each device is exposed to the container as an RFC2217 URL, because control lines
 (DTR/RTS) cannot be carried by a pseudo-terminal:
 
 ```bash
-esptool --port "$MOAT_SERIAL_ESP32_URL" chip_id
+esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id
 ```
 
 `MOAT_SERIAL_DEVICES` lists the names of all devices available to the run.

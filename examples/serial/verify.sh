@@ -1,5 +1,6 @@
 #!/bin/bash
-# Serial device smoke test for the LilyGO T-Display S3.
+# Serial device smoke test for an ESP32-family board (any board esptool
+# supports — chip-id autodetects which one).
 #
 # Runs inside the moat container (see moat.yaml — its `command:` points
 # here). Verifies the board is reachable through the RFC2217 broker and
@@ -11,7 +12,7 @@ set -e
 set -o pipefail
 
 echo "=== Device URL ==="
-echo "MOAT_SERIAL_ESP32_URL=$MOAT_SERIAL_ESP32_URL"
+echo "MOAT_SERIAL_BOARD_URL=$MOAT_SERIAL_BOARD_URL"
 
 echo ""
 echo "=== esptool chip-id ==="
@@ -22,7 +23,7 @@ echo "=== esptool chip-id ==="
 # standard UART reset sequence, is the one that works over RFC2217, so the
 # message is informational. This demo filters it out; run esptool directly
 # to see it.
-esptool --port "$MOAT_SERIAL_ESP32_URL" chip-id 2>&1 | awk '
+esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id 2>&1 | awk '
     /Failed to get VID\/PID/ { skip = 1; next }
     skip && $0 == ""          { skip = 0; next }  # also drop the blank line after it
     { skip = 0; print }

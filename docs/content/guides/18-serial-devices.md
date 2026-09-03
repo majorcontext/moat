@@ -41,13 +41,13 @@ shows the name it is pinned under.
 ## 2. Declare it in moat.yaml
 
 ```yaml
-name: esp32-dev
+name: board-dev
 
 dependencies:
   - python
 
 devices:
-  - name: esp32
+  - name: board
     match: {usb: "10c4:ea60"}
 ```
 
@@ -57,11 +57,11 @@ Each device is exposed as an RFC2217 URL in `MOAT_SERIAL_<NAME>_URL`. Pass the U
 whatever tool would have taken the device path:
 
 ```bash
-$ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_ESP32_URL" chip-id'
+$ moat run -- sh -c 'esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id'
 ```
 
 The command can also live in moat.yaml. `command:` is an argv list, not a shell string —
-`$MOAT_SERIAL_ESP32_URL` does not expand in it — so reference the env var from a script
+`$MOAT_SERIAL_BOARD_URL` does not expand in it — so reference the env var from a script
 the command runs:
 
 ```yaml
@@ -108,9 +108,9 @@ serial number. Every later run must present the same device:
 ```
 $ moat run -- esptool chip-id
 Error: cannot use the serial devices this run requires:
-  esp32: serial device does not match its pin: "esp32" was pinned to serial 0001
+  board: serial device does not match its pin: "board" was pinned to serial 0001
   but the attached device reports 0002
-    If you intended to swap devices, run: moat device forget esp32
+    If you intended to swap devices, run: moat device forget board
 ```
 
 This is a hard failure, not a warning. Two boards of the same model are indistinguishable
@@ -119,7 +119,7 @@ by USB ID, so without pinning an agent could flash the wrong one.
 After deliberately swapping hardware:
 
 ```bash
-$ moat device forget esp32
+$ moat device forget board
 ```
 
 ### Devices without a serial number
@@ -160,7 +160,7 @@ A device is claimed exclusively while a run holds it. A second run that wants th
 device fails rather than interleaving bytes on the same line:
 
 ```
-Error: serial device "esp32" is already in use by run 01HQ...
+Error: serial device "board" is already in use by run 01HQ...
 ```
 
 The claim is released when the run stops.
@@ -172,7 +172,7 @@ for every session. Set `record: full` to capture the payload bytes too:
 
 ```yaml
 devices:
-  - name: esp32
+  - name: board
     match: {usb: "10c4:ea60"}
     record: full
 ```
