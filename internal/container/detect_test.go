@@ -1,14 +1,23 @@
 package container
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 func TestGVisorAvailable(t *testing.T) {
@@ -117,14 +126,438 @@ func TestAlternativeDockerSocketPaths(t *testing.T) {
 	}
 }
 
-func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
-	// On non-darwin, alternativeDockerSockets returns nil immediately.
-	// On darwin, point HOME at an empty dir so no candidate paths exist.
+func TestPodmanSocketCandidatesDarwin(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	// Point TMPDIR at a scratch dir containing a fake podman machine socket,
+	// so the glob in podmanSocketCandidates has something deterministic to find.
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir+"/")
+
+	podmanDir := filepath.Join(dir, "podman")
+	if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sockPath := filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	if err := os.WriteFile(sockPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := podmanSocketCandidates()
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d: %+v", len(candidates), candidates)
+	}
+	if candidates[0].path != sockPath {
+		t.Errorf("path = %q, want %q", candidates[0].path, sockPath)
+	}
+	if want := "Podman machine podman-machine-default"; candidates[0].name != want {
+		t.Errorf("name = %q, want %q", candidates[0].name, want)
+	}
+}
+
+// TestPodmanSocketCandidatesDarwinPrefersDefaultMachine covers the multi-machine
+// case the single-machine test above cannot: with two machines running, the
+// candidate order must follow podman's own default connection rather than the
+// glob's alphabetical order.
+func TestPodmanSocketCandidatesDarwinPrefersDefaultMachine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir+"/")
+	t.Setenv("CONTAINER_CONNECTION", "")
+
+	podmanDir := filepath.Join(dir, "podman")
+	if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// "dev" sorts first and would win on glob order alone.
+	for _, name := range []string{"dev", "podman-machine-default"} {
+		if err := os.WriteFile(filepath.Join(podmanDir, name+"-api.sock"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePodmanConnections(t, "podman-machine-default")
+
+	candidates := podmanSocketCandidates()
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d: %+v", len(candidates), candidates)
+	}
+	if got := podmanMachineName(candidates[0].path); got != "podman-machine-default" {
+		t.Errorf("first candidate = %q, want the default machine", got)
+	}
+	if got := podmanMachineName(candidates[1].path); got != "dev" {
+		t.Errorf("second candidate = %q, want the non-default machine preserved", got)
+	}
+}
+
+func TestPodmanSocketCandidatesDarwinNoMachine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only podman socket layout")
+	}
+
+	t.Setenv("TMPDIR", t.TempDir()+"/")
+
+	if candidates := podmanSocketCandidates(); len(candidates) != 0 {
+		t.Errorf("expected no candidates when no podman machine socket exists, got %+v", candidates)
+	}
+}
+
+func TestPodmanSocketCandidatesLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only podman socket layout")
+	}
+
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	candidates := podmanSocketCandidates()
+
+	wantRootless := "/run/user/1000/podman/podman.sock"
+	wantRootful := "/run/podman/podman.sock"
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d: %+v", len(candidates), candidates)
+	}
+	if candidates[0].path != wantRootless {
+		t.Errorf("rootless path = %q, want %q", candidates[0].path, wantRootless)
+	}
+	if candidates[1].path != wantRootful {
+		t.Errorf("rootful path = %q, want %q", candidates[1].path, wantRootful)
+	}
+}
+
+func TestPodmanSocketCandidatesLinuxNoXDGRuntimeDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only podman socket layout")
+	}
+
+	// Redirect the uid-fallback seam so this test doesn't depend on the
+	// actual invoking uid (sudo/cron/CI contexts lack XDG_RUNTIME_DIR but
+	// still have podman's socket under /run/user/<uid>).
+	restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.xdgRuntimeDir = func() string { return "/run/user/9999" }
+		return e
+	})
+	t.Cleanup(restore)
+
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	candidates := podmanSocketCandidates()
+
+	wantRootless := "/run/user/9999/podman/podman.sock"
+	wantRootful := "/run/podman/podman.sock"
+	if len(candidates) != 2 {
+		t.Fatalf("expected the uid-fallback rootless candidate plus rootful when XDG_RUNTIME_DIR is unset, got %+v", candidates)
+	}
+	if candidates[0].path != wantRootless {
+		t.Errorf("rootless path = %q, want %q", candidates[0].path, wantRootless)
+	}
+	if candidates[1].path != wantRootful {
+		t.Errorf("rootful path = %q, want %q", candidates[1].path, wantRootful)
+	}
+}
+
+func TestXDGRuntimeDirFallbackUsesUID(t *testing.T) {
+	// The real (non-overridden) fallback must derive the path from the
+	// current process's uid — the systemd/podman convention — not a fixed or
+	// empty value. Checked against defaultDetectEnviron() directly (rather
+	// than the possibly-swapped package var detectEnv) so this test's result
+	// doesn't depend on whether it happens to run while some other test has
+	// detectEnv redirected.
+	want := fmt.Sprintf("/run/user/%d", os.Getuid())
+	if got := defaultDetectEnviron().xdgRuntimeDir(); got != want {
+		t.Errorf("defaultDetectEnviron().xdgRuntimeDir() = %q, want %q", got, want)
+	}
+}
+
+func TestAlternativeDockerSocketsIncludesPodman(t *testing.T) {
+	// alternativeDockerSockets should append podman candidates after any
+	// platform-specific third-party sockets (Rancher Desktop on macOS keeps
+	// precedence). This just checks podman candidates aren't dropped.
+	got := alternativeDockerSockets()
+	want := podmanSocketCandidates()
+	if len(got) < len(want) {
+		t.Fatalf("alternativeDockerSockets() returned fewer entries (%d) than podmanSocketCandidates() (%d)", len(got), len(want))
+	}
+	gotTail := got[len(got)-len(want):]
+	for i := range want {
+		if gotTail[i] != want[i] {
+			t.Errorf("alternativeDockerSockets() tail[%d] = %+v, want %+v", i, gotTail[i], want[i])
+		}
+	}
+}
+
+func TestVersionIsPodman(t *testing.T) {
+	tests := []struct {
+		name       string
+		components []string
+		want       bool
+	}{
+		{"podman engine", []string{"Podman Engine"}, true},
+		{"docker engine", []string{"Engine"}, false},
+		{"docker desktop style", []string{"Engine", "containerd", "runc", "docker-init"}, false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := types.Version{}
+			for _, name := range tt.components {
+				v.Components = append(v.Components, types.ComponentVersion{Name: name})
+			}
+			if got := versionIsPodman(v); got != tt.want {
+				t.Errorf("versionIsPodman(%v) = %v, want %v", tt.components, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideNoPodman(t *testing.T) {
+	// Without a live podman socket (and no DOCKER_HOST), MOAT_RUNTIME=podman
+	// should fail with an actionable hint rather than silently falling back
+	// to another runtime.
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("HOME", t.TempDir())
+	if runtime.GOOS == "darwin" {
+		t.Setenv("TMPDIR", t.TempDir()+"/")
+	}
+	if runtime.GOOS == "linux" {
+		t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	}
+
+	_, err := NewRuntimeWithOptions(RuntimeOptions{})
+	if err == nil {
+		t.Skip("a podman socket appears to be reachable on this machine; skipping negative-path assertion")
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should mention podman, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "podman machine start") && !strings.Contains(err.Error(), "podman.socket") {
+		t.Errorf("error should include a start hint, got: %v", err)
+	}
+}
+
+func TestTryAlternativeDockerSocketsNoSockets(t *testing.T) {
+	// Point HOME (Rancher Desktop), TMPDIR (podman machine on macOS), and
+	// XDG_RUNTIME_DIR (podman rootless on Linux) at empty scratch dirs so no
+	// candidate paths exist, isolating this from any real Docker/podman
+	// tooling running on the test host.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir()+"/")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
+	// The Linux rootful podman candidate (/run/podman/podman.sock) is a fixed
+	// path that can't be neutralized via env vars — redirect it to a scratch
+	// path so this test stays hermetic even on a Linux host with rootful
+	// podman running.
+	restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.rootfulSocket = filepath.Join(t.TempDir(), "podman.sock")
+		return e
+	})
+	t.Cleanup(restoreRootful)
 
 	rt := tryAlternativeDockerSockets(false)
 	if rt != nil {
 		t.Error("expected nil when no alternative sockets exist")
+	}
+}
+
+// newFakeDockerAPIServer starts an httptest server that serves just enough of
+// the Docker Engine API for client.Client's version negotiation, Ping, and
+// ServerVersion calls: HEAD/GET /_ping and GET .../version. If podman is
+// true, the version response includes podman's compat-API marker component
+// ("Podman Engine"), as podman's real compat API does.
+func newFakeDockerAPIServer(t *testing.T, podman bool) *httptest.Server {
+	t.Helper()
+
+	version := types.Version{APIVersion: "1.44", Version: "24.0.0"}
+	if podman {
+		version.Components = []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}}
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("API-Version", "1.44")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideDockerHostNonPodman(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, false)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	_, err = NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("expected error when DOCKER_HOST points at a non-podman engine")
+	}
+	if !strings.Contains(err.Error(), "non-podman engine") {
+		t.Errorf("error should identify a non-podman engine, got: %v", err)
+	}
+}
+
+func TestNewRuntimeWithOptionsPodmanOverrideDockerHostPodman(t *testing.T) {
+	srv := newFakeDockerAPIServer(t, true)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err != nil {
+		t.Fatalf("expected success when DOCKER_HOST points at podman's compat API, got: %v", err)
+	}
+	if rt.Type() != RuntimeDocker {
+		t.Errorf("Type() = %v, want %v (podman is served via the Docker runtime)", rt.Type(), RuntimeDocker)
+	}
+}
+
+// TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman is the
+// auto-probe companion to the DockerHost case: with DOCKER_HOST unset, the
+// candidate probe must reject a Docker engine on a podman candidate socket
+// rather than trusting the path alone.
+func TestNewRuntimeWithOptionsPodmanOverrideCandidateRejectsNonPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based candidate probing is unix/darwin-only")
+	}
+
+	t.Setenv("MOAT_RUNTIME", "podman")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("HOME", t.TempDir())
+
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := shortTempDir(t)
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := shortTempDir(t)
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
+	}
+
+	// podman=false: the fake engine answers /version without podman's
+	// "Podman Engine" component marker, as a plain Docker-compatible engine
+	// (that happened to be listening on a podman-shaped path) would.
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, false)
+
+	_, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("MOAT_RUNTIME=podman should not accept a non-podman engine found via candidate probing")
+	}
+	if !strings.Contains(err.Error(), "podman") {
+		t.Errorf("error should mention podman, got: %v", err)
+	}
+}
+
+func TestIsPodmanEngineDoesNotCacheError(t *testing.T) {
+	// Server that fails ServerVersion (/version) until toldRecovered flips,
+	// but always answers /_ping so NewDockerRuntime/Ping succeed regardless.
+	// This lets us call IsPodmanEngine twice against the *same* runtime: once
+	// while the version endpoint is broken (must return an error and must not
+	// cache "false"), and once after it recovers (must then report true).
+	var recovered bool
+	version := types.Version{
+		APIVersion: "1.44",
+		Version:    "24.0.0",
+		Components: []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}},
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("API-Version", "1.44")
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			if !recovered {
+				http.Error(w, "temporarily unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+	t.Setenv("DOCKER_HOST", "tcp://"+u.Host)
+
+	rt, err := NewDockerRuntime(false)
+	if err != nil {
+		t.Fatalf("NewDockerRuntime: %v", err)
+	}
+	defer rt.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := rt.IsPodmanEngine(ctx); err == nil {
+		t.Fatal("expected an error while the version endpoint is broken")
+	}
+
+	recovered = true
+	isPodman, err := rt.IsPodmanEngine(ctx)
+	if err != nil {
+		t.Fatalf("expected the earlier error not to be cached, got: %v", err)
+	}
+	if !isPodman {
+		t.Error("expected IsPodmanEngine to report true once the version endpoint recovers")
 	}
 }
 
@@ -168,5 +601,318 @@ func TestSocketStatFollowsSymlink(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		t.Error("os.Stat should report ModeSocket when following a symlink to a socket")
+	}
+}
+
+// serveFakeDockerAPIUnixSocket starts an HTTP server on a unix socket at
+// path, serving the same minimal Docker Engine API surface as
+// newFakeDockerAPIServer (HEAD/GET /_ping, GET .../version), so it can stand
+// in for a live podman/docker socket at a specific filesystem path (rather
+// than httptest's TCP listener). path's parent directory must already
+// exist. The server is stopped via t.Cleanup.
+func serveFakeDockerAPIUnixSocket(t *testing.T, path string, podman bool) {
+	t.Helper()
+
+	version := types.Version{APIVersion: "1.44", Version: "24.0.0"}
+	if podman {
+		version.Components = []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}}
+	}
+	body, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listening on unix socket %s: %v", path, err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+}
+
+// forceDefaultDockerUnreachable redirects the newDockerRuntime seam to a
+// scratch path with nothing listening, so the initial ping fails even on a
+// host with a live dockerd (as ubuntu-latest has). Restored via t.Cleanup.
+func forceDefaultDockerUnreachable(t *testing.T) {
+	t.Helper()
+	dead := filepath.Join(shortTempDir(t), "dead-default.sock")
+	restore := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+		e.newDockerRuntime = func(sandbox bool) (*DockerRuntime, error) {
+			return NewDockerRuntimeWithHost("unix://"+dead, sandbox)
+		}
+		return e
+	})
+	t.Cleanup(restore)
+}
+
+// shortTempDir creates a scratch directory directly under /tmp (bypassing
+// t.TempDir(), which nests under a per-test path derived from the test name
+// — e.g. /var/folders/.../TestMOATRuntimeAutoDetectFallsBackToPodman.../003)
+// and, combined with a unix-socket filename, can exceed macOS's ~104-byte
+// sun_path limit. Registers cleanup via t.Cleanup.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "moat")
+	if err != nil {
+		t.Fatalf("creating short scratch dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+// TestMOATRuntimeDockerDoesNotFallBackToPodman pins the genuineDockerSockets
+// /alternativeDockerSockets split: with the default socket unreachable and a
+// live podman-shaped socket in the candidate seam, MOAT_RUNTIME=docker must
+// not land on it. Reverting the split passes the rest of the suite, not this.
+func TestMOATRuntimeDockerDoesNotFallBackToPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fallback probing is unix/darwin-only")
+	}
+
+	t.Setenv("DOCKER_HOST", "")
+	forceDefaultDockerUnreachable(t)
+
+	// Isolate genuineDockerSockets() (HOME, for the Rancher Desktop
+	// candidate) from any real third-party tooling on this machine.
+	t.Setenv("HOME", t.TempDir())
+
+	// Plant a live fake podman-shaped socket in the platform-specific podman
+	// candidate seam, redirecting the seams so only our fake socket is found.
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := shortTempDir(t)
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := shortTempDir(t)
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
+	}
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
+
+	t.Setenv("MOAT_RUNTIME", "docker")
+	_, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err == nil {
+		t.Fatal("MOAT_RUNTIME=docker should not silently fall back to a podman socket")
+	}
+	if !strings.Contains(err.Error(), "Docker runtime requested") {
+		t.Errorf("error should mention Docker was requested, got: %v", err)
+	}
+}
+
+// TestMOATRuntimeDockerWithPodmanDockerHostSucceedsSilently pins the F5
+// behavior: MOAT_RUNTIME=docker against a podman-backed DOCKER_HOST succeeds
+// (unlike the podman override, which fails hard on a genuine mismatch)
+// without eagerly probing for or warning about the mismatch at construction
+// time. An eager probe here would tax every startup with DOCKER_HOST set —
+// including the common remote-Docker and Rancher Desktop paths — with a
+// blocking ServerVersion call for a warning most of them would never see.
+// Engine identity is available lazily instead, via EngineName, exercised
+// below for both the podman and genuine-docker cases.
+func TestMOATRuntimeDockerWithPodmanDockerHostSucceedsSilently(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fake engines are unix/darwin-only")
+	}
+
+	tests := []struct {
+		name       string
+		podman     bool
+		wantEngine string
+	}{
+		{"podman engine behind DOCKER_HOST", true, "podman"},
+		{"genuine docker engine behind DOCKER_HOST", false, "docker"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sockPath := filepath.Join(shortTempDir(t), "engine.sock")
+			serveFakeDockerAPIUnixSocket(t, sockPath, tt.podman)
+
+			t.Setenv("MOAT_RUNTIME", "docker")
+			t.Setenv("DOCKER_HOST", "unix://"+sockPath)
+
+			var buf bytes.Buffer
+			ui.SetWriter(&buf)
+			t.Cleanup(func() { ui.SetWriter(os.Stderr) })
+
+			rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+			if err != nil {
+				t.Fatalf("MOAT_RUNTIME=docker with a reachable DOCKER_HOST engine (podman=%v) must succeed, got: %v", tt.podman, err)
+			}
+			if rt == nil {
+				t.Fatal("expected a non-nil runtime")
+			}
+
+			// No eager probe means no engine-identity output at construction
+			// time, regardless of whether the engine turns out to be podman
+			// or genuine docker. (The unrelated "without gVisor sandbox"
+			// warning is expected here since Sandbox is false — only the
+			// podman-mismatch warning is what F5 removed.)
+			if got := buf.String(); strings.Contains(got, "podman") {
+				t.Errorf("MOAT_RUNTIME=docker should not eagerly warn about engine identity, got: %q", got)
+			}
+
+			dockerRT, ok := rt.(*DockerRuntime)
+			if !ok {
+				t.Fatalf("expected *DockerRuntime, got %T", rt)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			name, err := dockerRT.EngineName(ctx)
+			if err != nil {
+				t.Fatalf("EngineName: %v", err)
+			}
+			if name != tt.wantEngine {
+				t.Errorf("EngineName() = %q, want %q", name, tt.wantEngine)
+			}
+		})
+	}
+}
+
+// TestMOATRuntimeAutoDetectFallsBackToPodman is the companion to
+// TestMOATRuntimeDockerDoesNotFallBackToPodman: with the same dead-default,
+// live-podman-socket setup, auto-detection (MOAT_RUNTIME unset) DOES land on
+// the podman socket, since podman-or-docker auto-detect is allowed to use
+// alternativeDockerSockets (which includes podman candidates).
+func TestMOATRuntimeAutoDetectFallsBackToPodman(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fallback probing is unix/darwin-only")
+	}
+
+	t.Setenv("DOCKER_HOST", "")
+	forceDefaultDockerUnreachable(t)
+
+	// Auto-detect tries Apple containers first on darwin/arm64 — take that
+	// branch out of the running so this test exercises the Docker fallback
+	// path regardless of whether Apple's container CLI is installed here.
+	t.Setenv("PATH", "/nonexistent")
+
+	t.Setenv("HOME", t.TempDir())
+
+	var podmanSockPath string
+	switch runtime.GOOS {
+	case "darwin":
+		dir := shortTempDir(t)
+		t.Setenv("TMPDIR", dir+"/")
+		podmanDir := filepath.Join(dir, "podman")
+		if err := os.MkdirAll(podmanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		podmanSockPath = filepath.Join(podmanDir, "podman-machine-default-api.sock")
+	case "linux":
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		dir := shortTempDir(t)
+		rootful := filepath.Join(dir, "podman.sock")
+		restoreRootful := SwapDetectEnv(func(e detectEnviron) detectEnviron {
+			e.rootfulSocket = rootful
+			return e
+		})
+		t.Cleanup(restoreRootful)
+		podmanSockPath = rootful
+	}
+	serveFakeDockerAPIUnixSocket(t, podmanSockPath, true)
+
+	rt, err := NewRuntimeWithOptions(RuntimeOptions{Sandbox: false})
+	if err != nil {
+		t.Fatalf("auto-detect should land on the fake podman socket: %v", err)
+	}
+	if rt.Type() != RuntimeDocker {
+		t.Errorf("Type() = %v, want %v (podman is served via the Docker runtime)", rt.Type(), RuntimeDocker)
+	}
+}
+
+// TestTryDockerSocketCandidatesVerifiedGivesVerifyFreshTimeout pins F7: verify
+// must get its own timeout rather than inheriting whatever's left of the
+// ping's context. It proves this by inspecting the deadline verify actually
+// receives after a slow-but-successful ping, rather than depending on a
+// ~5s-long timeout race (which the old shared-context code would only fail
+// once the ping had eaten nearly all 5s).
+func TestTryDockerSocketCandidatesVerifiedGivesVerifyFreshTimeout(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unix-socket-based fake engines are unix/darwin-only")
+	}
+
+	// A successful candidate leaves DOCKER_HOST set (see
+	// tryDockerSocketCandidate) — t.Setenv here, rather than leaving it to
+	// production code's os.Setenv, ensures it's restored to its prior value
+	// once this test ends instead of leaking into later tests.
+	t.Setenv("DOCKER_HOST", "")
+
+	const pingDelay = 2 * time.Second
+	sockPath := filepath.Join(shortTempDir(t), "slow-ping.sock")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			time.Sleep(pingDelay)
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	var verifyDeadline time.Time
+	verify := func(rt *DockerRuntime, ctx context.Context) (bool, error) {
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected verify's context to carry a deadline")
+		}
+		verifyDeadline = dl
+		return true, nil
+	}
+
+	candidates := []dockerSocketCandidate{{path: sockPath, name: "test"}}
+	beforeVerify := time.Now()
+	rt, err := tryDockerSocketCandidatesVerified(candidates, false, verify)
+	if err != nil {
+		t.Fatalf("tryDockerSocketCandidatesVerified: %v", err)
+	}
+	if rt == nil {
+		t.Fatal("expected a non-nil runtime")
+	}
+
+	// A fresh 5s timeout starting when verify runs (after the pingDelay-long
+	// ping already completed) deadlines close to 5s from beforeVerify. A
+	// timeout inherited from the ping's own context (created before the
+	// ping, also with a 5s budget) would instead deadline close to
+	// 5s-pingDelay from beforeVerify — pingDelay earlier.
+	remaining := verifyDeadline.Sub(beforeVerify)
+	if remaining < 4*time.Second {
+		t.Errorf("verify's context deadline was %s after the call started; expected close to a fresh 5s timeout, not one inherited from the %s ping (which would leave ~%s)",
+			remaining, pingDelay, 5*time.Second-pingDelay)
 	}
 }

@@ -107,7 +107,7 @@ func TestMCPCredentialInjection_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	// Verify daemon proxy is configured (required for credential injection)
 	if r.ProxyPort == 0 {
@@ -296,7 +296,7 @@ mcp:
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	// Build relay URLs using daemon proxy
 	if r.ProxyPort == 0 {

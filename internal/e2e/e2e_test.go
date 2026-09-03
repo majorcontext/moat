@@ -260,7 +260,7 @@ func TestProxyBindsToLocalhostOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Start the run
 		if err := mgr.Start(ctx, r.ID); err != nil {
@@ -328,7 +328,7 @@ func TestProxyNotAccessibleFromNetwork(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -417,7 +417,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -511,7 +511,7 @@ func TestContainerCanReachProxyViaHostDockerInternal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -554,7 +554,7 @@ func TestRunWithoutGrantsNoProxy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// With no grants, the proxy port should still be set (daemon manages the proxy),
 		// but the run should have no proxy auth token since no credentials are needed.
@@ -590,7 +590,7 @@ func TestLogsAreCaptured(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -660,7 +660,7 @@ func TestWorkspaceIsMounted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -728,7 +728,7 @@ func TestConfigEnvironmentVariables(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -902,7 +902,7 @@ func TestAppleContainerBasicRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	if err := mgr.Start(ctx, r.ID); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -982,7 +982,7 @@ func TestAppleContainerWithProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	// Verify daemon proxy is configured
 	if r.ProxyPort == 0 {
@@ -1210,7 +1210,7 @@ func TestSSHAuthSockEnvSetInContainer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Verify SSH server was started
 		if r.SSHAgentServer == nil {
@@ -1345,7 +1345,7 @@ func TestDependencyNodeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1407,7 +1407,7 @@ func TestDependencyPythonRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1469,7 +1469,7 @@ func TestDependencyGoRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1533,7 +1533,7 @@ func TestDependencyMultipleRuntimes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1602,7 +1602,7 @@ func TestDependencyNpmPackage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1664,7 +1664,7 @@ func TestDependencyGitHubBinary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1728,7 +1728,7 @@ func TestDependencyMetaBundle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -1805,7 +1805,7 @@ func TestInteractiveContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r.ID)
+	defer mgr.Destroy(context.Background(), r.ID, true)
 
 	// Verify Interactive flag was set
 	if !r.Interactive {
@@ -1984,7 +1984,7 @@ func TestClaudeLogSyncMountTarget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)

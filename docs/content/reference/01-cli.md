@@ -47,7 +47,7 @@ The agent commands (`moat claude`, `moat copilot`, `moat codex`, `moat gemini`, 
 | `-n`, `--name NAME` | Run name (default: from `moat.yaml` or random) |
 | `--rebuild` | Force rebuild of container image |
 | `--allow-host HOST` | Additional hosts to allow network access to (repeatable) |
-| `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`) |
+| `--runtime RUNTIME` | Container runtime to use (`apple`, `docker`, `podman`) |
 | `--keep` | Keep container after run completes |
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) or `volume` (isolated Docker named volume). Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
@@ -127,7 +127,7 @@ moat run [flags] [path] [-- command]
 | `-m`, `--mount SOURCE:TARGET[:MODE]` | Additional mount (repeatable). See [Mounts reference](./05-mounts.md). |
 | `-i`, `--interactive` | Enable interactive mode (stdin + TTY) |
 | `--rebuild` | Force rebuild of container image |
-| `--runtime RUNTIME` | Container runtime to use (apple, docker) |
+| `--runtime RUNTIME` | Container runtime to use (apple, docker, podman) |
 | `--keep` | Keep container after run completes |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--workspace-mode bind\|volume` | Workspace mode: `bind` (default) mounts the host directory at `/workspace`; `volume` copies it into an isolated Docker named volume. Overrides `workspace.mode` in `moat.yaml`. Docker-only for `volume`. |
@@ -540,7 +540,7 @@ Configuration is read from `moat.yaml` in the repository root. If a run is alrea
 | `-e KEY=VALUE` | Set environment variable (repeatable) |
 | `--rebuild` | Force image rebuild |
 | `--keep` | Keep container after completion |
-| `--runtime` | Container runtime to use (`apple`, `docker`) |
+| `--runtime` | Container runtime to use (`apple`, `docker`, `podman`) |
 | `--no-clipboard` | Disable host clipboard bridging for this run |
 | `--no-sandbox` | Disable gVisor sandbox (Docker only) |
 | `--no-prompt` | Never prompt to grant missing credentials; fail instead. Also set via `MOAT_NO_PROMPT=1`. |
@@ -1092,7 +1092,7 @@ moat list
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique identifier |
-| RUNTIME | Container runtime (docker, apple) |
+| RUNTIME | Container runtime (`docker`, `apple`, or `docker (podman)` for a run recorded against a Podman engine) |
 | STATE | running, stopped, failed |
 | AGE | Time since run was created |
 | WORKTREE | Branch name (appears when any run has a worktree) |
@@ -1168,7 +1168,7 @@ moat status
 |--------|-------------|
 | NAME | Run name |
 | RUN ID | Unique run identifier |
-| RUNTIME | Container runtime (docker or apple) |
+| RUNTIME | Container runtime (`docker`, `apple`, or `docker (podman)` for a run recorded against a Podman engine) |
 | AGE | Time since run was created |
 | DISK | Disk usage in MB |
 | ENDPOINTS | Exposed services (from ports) |
@@ -1354,10 +1354,13 @@ moat destroy [run] [flags]
 | Flag | Description |
 |------|-------------|
 | `-f`, `--force` | Destroy even if a volume-mode run has no extraction snapshot |
+| `--force-running` | Destroy a run that is still running, without stopping it first |
 
 If a name matches multiple runs, you'll be prompted to confirm destroying all of them.
 
 For volume-mode runs, the workspace lives only in the Docker named volume. Destroying such a run without first capturing a snapshot permanently deletes the agent's work. The command refuses unless an extraction snapshot exists; pass `-f`/`--force` to override.
+
+A run whose container lives on an engine this process can't reach can't be stopped cleanly. `--force-running` skips the running-state guard so such a run can still be torn down. The two flags are independent: `--force` never waives the running-run guard, and `--force-running` never waives the snapshot guard.
 
 ### Examples
 
@@ -1370,6 +1373,9 @@ moat destroy run_a1b2c3d4e5f6
 
 # Destroy a volume-mode run even without an extraction snapshot
 moat destroy --force run_a1b2c3d4e5f6
+
+# Tear down a run whose engine is unreachable, without stopping it first
+moat destroy --force-running run_a1b2c3d4e5f6
 ```
 
 ---

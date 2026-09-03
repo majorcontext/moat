@@ -82,10 +82,7 @@ func listRuns(cmd *cobra.Command, args []string) error {
 			sort.Strings(names)
 			endpoints = strings.Join(names, ", ")
 		}
-		rtLabel := r.Runtime
-		if rtLabel == "" {
-			rtLabel = "-"
-		}
+		rtLabel := runtimeDisplayLabel(r.Runtime, r.Engine)
 		if hasWorktree {
 			wt := ""
 			if r.WorktreeBranch != "" {

@@ -10,7 +10,7 @@ This tutorial walks through running an agent with credential injection. By the e
 
 **Prerequisites:**
 - Moat installed ([Installation](./02-installation.md))
-- Docker running, or [Apple containers](./02-installation.md#apple-containers-macos-26-with-apple-silicon) installed (macOS 26+)
+- Docker or [Podman](./02-installation.md#podman-macos-linux) running, or [Apple containers](./02-installation.md#apple-containers-macos-26-with-apple-silicon) installed (macOS 26+)
 - GitHub authentication (one of: `gh` CLI, `GITHUB_TOKEN` env var, or Personal Access Token)
 
 ## Step 1: Grant GitHub credentials
