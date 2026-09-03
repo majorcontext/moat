@@ -83,10 +83,15 @@ func parseIoreg(r io.Reader) ([]Device, error) {
 			if n, err := strconv.ParseUint(val, 10, 64); err == nil {
 				cur.PortPath = fmt.Sprintf("0x%08x", n)
 			}
-		case "USB Product Name", "kUSBProductString":
+		case "USB Product Name":
+			// macOS sanitizes this one (the S3's "USB JTAG/serial debug unit"
+			// renders as "USB JTAG_serial debug unit"), so it only fills in
+			// when the real string is absent.
 			if cur.Description == "" {
 				cur.Description = strings.Trim(val, `"`)
 			}
+		case "kUSBProductString":
+			cur.Description = strings.Trim(val, `"`)
 		case "IOCalloutDevice":
 			// Attach to the nearest enclosing USB device, not the innermost
 			// stack frame, since IOSerialBSDClient is not itself a USB device.

@@ -17,10 +17,20 @@ func NewEnumerator() Enumerator { return &ioregEnumerator{} }
 // List implements Enumerator by shelling out to ioreg.
 //
 // macOS has no sysfs equivalent, and reading the identity attributes through
-// IOKit directly would require cgo. ioreg is present on every macOS install and
-// its tree output carries everything needed: see parseIoreg.
+// IOKit directly would require cgo. ioreg is present on every macOS install.
+//
+// The plane choice is the whole game: the USB identity attributes
+// (idVendor, idProduct, USB Serial Number, locationID) live on the
+// IOUSBHostDevice, but the /dev node is created by the CDC driver stack
+// (AppleUSBACMData → IOSerialBSDClient) which attaches only in the IOService
+// plane. `ioreg -p IOUSB` shows the bus topology — every leaf an
+// IOUSBHostDevice and nothing beneath it — so a device's serial client never
+// appears there and every device would be dropped. `-r -p IOService
+// -c IOUSBHostDevice` roots a separate subtree at each USB device and
+// includes everything macOS attached below it; `-l` adds the properties.
+// See parseIoreg for the parse.
 func (e *ioregEnumerator) List(ctx context.Context) ([]Device, error) {
-	cmd := exec.CommandContext(ctx, "ioreg", "-p", "IOUSB", "-l", "-w0")
+	cmd := exec.CommandContext(ctx, "ioreg", "-r", "-p", "IOService", "-l", "-w0", "-c", "IOUSBHostDevice")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
