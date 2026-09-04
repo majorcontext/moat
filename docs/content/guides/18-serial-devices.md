@@ -171,6 +171,17 @@ The claim is released when the run stops — including when the run dies without
 unregistering (a killed CLI, a crashed machine): the daemon's liveness checker reaps the
 dead container and releases its devices.
 
+## Daemon restarts
+
+The `MOAT_SERIAL_*_URL` a container gets is fixed when the container is created, so a
+proxy daemon restart while a run is active re-opens each device's listener on the same
+port. The run's device keeps working across `moat proxy restart` and across daemon
+crashes — the run manager re-registers the run and its pinned ports.
+
+If a restart lands and one of those ports is now occupied by something else, the daemon
+refuses the re-registration and the run is skipped on restore rather than given a device
+that silently does not work. Stop whatever holds the port, or `moat stop` and re-run.
+
 ## Interaction with `network.policy: strict`
 
 A device connection is raw TCP to the RFC2217 listener, not HTTP through the proxy, so

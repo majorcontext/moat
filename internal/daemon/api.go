@@ -100,6 +100,14 @@ type RegisterRequest struct {
 	// machine, not from the network at large. Additive/optional: an older CLI
 	// omits it and the daemon falls back to the broker's configured BindAddr.
 	SerialBindAddr string `json:"serial_bind_addr,omitempty"`
+
+	// SerialPins names the exact port each device must come back on, keyed by
+	// device name. Sent on re-registration and restore: the container's
+	// MOAT_SERIAL_*_URL froze these ports at create, so the listeners must
+	// re-bind the same numbers — a fresh ephemeral port would be unreachable
+	// and the run's devices would silently die. A pinned port that is taken
+	// fails the registration rather than moving the device. Additive/optional.
+	SerialPins map[string]int `json:"serial_pins,omitempty"`
 }
 
 // SerialDeviceSpec is one approved serial device, already resolved and pinned

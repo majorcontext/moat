@@ -35,6 +35,19 @@ type PersistedRun struct {
 	TransformerSpecs  []TransformerSpec        `json:"transformer_specs,omitempty"`
 	CopilotGitHubAuth bool                     `json:"copilot_github_auth,omitempty"`
 	CredProfile       string                   `json:"cred_profile,omitempty"`
+
+	// Serial state. The container's MOAT_SERIAL_*_URL froze the device's
+	// host:port at container create, so a daemon restart must re-open the
+	// listeners on the same port numbers — a fresh ephemeral port would be
+	// unreachable from inside the container for the rest of the run.
+	SerialDevices  []SerialDeviceSpec `json:"serial_devices,omitempty"`
+	SerialBindAddr string             `json:"serial_bind_addr,omitempty"`
+	SerialAddrs    map[string]string  `json:"serial_addrs,omitempty"`
+
+	// AllowedHostPorts are the host ports (serial listeners, network.host
+	// entries) the run's firewall must let through. Restore re-populates them
+	// so a restarted daemon still enforces the run's network policy.
+	AllowedHostPorts []int `json:"allowed_host_ports,omitempty"`
 }
 
 // persistedFile is the versioned on-disk format.
@@ -82,6 +95,13 @@ func (p *RunPersister) Save() error {
 			TransformerSpecs:  rc.TransformerSpecs,
 			CopilotGitHubAuth: rc.CopilotGitHubAuth,
 			CredProfile:       rc.CredProfile,
+
+			// Serial state: the container's MOAT_SERIAL_*_URL froze these
+			// addresses at create, so restore must bring them back unchanged.
+			SerialDevices:    rc.SerialDevices,
+			SerialBindAddr:   rc.SerialBindAddr,
+			SerialAddrs:      rc.SerialAddrs,
+			AllowedHostPorts: rc.AllowedHostPorts,
 		}
 		rc.mu.RUnlock()
 		runs = append(runs, pr)
@@ -186,6 +206,21 @@ func (p *RunPersister) Load() ([]PersistedRun, error) {
 // RestoreRuns re-registers persisted runs by re-resolving credentials from
 // the encrypted credential store. Returns the number of successfully restored runs.
 func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) int {
+	return RestoreRunsWithSerial(ctx, registry, runs, nil)
+}
+
+// serialRestoreListener re-opens a restored run's serial listeners on the same
+// ports the container's frozen MOAT_SERIAL_*_URLs point at. It is the server's
+// listenSerialAt in pin mode; nil (a daemon with no broker) skips runs with
+// devices rather than restoring them device-less.
+type serialRestoreListener func(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, addrs map[string]string) error
+
+// RestoreRunsWithSerial is RestoreRuns with serial-device support: a restored
+// run's listeners are re-opened on the ports its container already holds, via
+// the supplied listener. A run whose port is now occupied fails loudly and is
+// skipped — not silently rebound elsewhere, where the container could not
+// reach it.
+func RestoreRunsWithSerial(ctx context.Context, registry *Registry, runs []PersistedRun, listen serialRestoreListener) int {
 	if len(runs) == 0 {
 		return 0
 	}
@@ -216,6 +251,7 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		rc.TransformerSpecs = pr.TransformerSpecs
 		rc.CopilotGitHubAuth = pr.CopilotGitHubAuth
 		rc.CredProfile = pr.CredProfile
+		rc.AllowedHostPorts = pr.AllowedHostPorts
 
 		// Open the store scoped to this run's profile — the daemon serves runs
 		// from many profiles, so a single default-profile store would re-resolve
@@ -231,6 +267,27 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 			log.Warn("restore: failed to resolve credentials, skipping run",
 				"run_id", pr.RunID, "error", err)
 			continue
+		}
+
+		// Re-open the run's serial listeners before the registry can observe
+		// it, on the same ports the container's MOAT_SERIAL_*_URL froze at
+		// create. A run with devices but no listener (no broker, or a port
+		// now occupied) is skipped: restoring it without working devices
+		// would look like dead hardware to the agent.
+		if len(pr.SerialDevices) > 0 {
+			if listen == nil {
+				log.Warn("restore: daemon has no serial broker, skipping run with devices",
+					"run_id", pr.RunID, "devices", len(pr.SerialDevices))
+				continue
+			}
+			if err := listen(rc, pr.SerialDevices, pr.SerialBindAddr, pr.SerialAddrs); err != nil {
+				log.Warn("restore: cannot re-open serial listeners, skipping run",
+					"run_id", pr.RunID, "error", err)
+				continue
+			}
+			rc.SerialDevices = pr.SerialDevices
+			rc.SerialBindAddr = pr.SerialBindAddr
+			rc.SerialAddrs = pr.SerialAddrs
 		}
 
 		// Create a per-run context and set cancel BEFORE registering so that
@@ -273,7 +330,8 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		log.Info("restored run from disk",
 			"run_id", pr.RunID,
 			"container_id", pr.ContainerID,
-			"grants", len(pr.Grants))
+			"grants", len(pr.Grants),
+			"serial_devices", len(pr.SerialDevices))
 		restored++
 	}
 	return restored

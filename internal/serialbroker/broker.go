@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -122,7 +123,7 @@ func New(opts Options) *Broker {
 }
 
 // Listen opens a listener for one approved device and returns a handle for
-// scoped rollback plus its host:port address.
+// scoped rollback plus its host:port address. The port is OS-assigned.
 //
 // A device already claimed by another run is refused: two runs sharing a serial
 // line would interleave bytes and corrupt both sessions.
@@ -136,6 +137,21 @@ func New(opts Options) *Broker {
 // run manager passes the container-facing address of the run's network, and an
 // empty value means the broker's configured default.
 func (b *Broker) Listen(runID string, a Approved, bindAddr string) (*ListenerRef, string, error) {
+	return b.listen(runID, a, bindAddr, 0)
+}
+
+// ListenAt is Listen bound to one exact port. The container's
+// MOAT_SERIAL_*_URL froze the port at container create, so restoring a run
+// after a daemon restart must re-bind the same number — rebinding elsewhere
+// would leave the run's device silently dead while the daemon looks healthy.
+// A taken port fails with a named error rather than falling back to an
+// OS-assigned one.
+func (b *Broker) ListenAt(runID string, a Approved, bindAddr string, port int) (*ListenerRef, string, error) {
+	return b.listen(runID, a, bindAddr, port)
+}
+
+// listen is the shared core of Listen and ListenAt.
+func (b *Broker) listen(runID string, a Approved, bindAddr string, port int) (*ListenerRef, string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -154,7 +170,7 @@ func (b *Broker) Listen(runID string, a Approved, bindAddr string) (*ListenerRef
 			a.Name, a.Device.Path, existing.runID)
 	}
 
-	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, "0"))
+	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(port)))
 	if err != nil {
 		return nil, "", fmt.Errorf("opening serial listener for %q: %w", a.Name, err)
 	}

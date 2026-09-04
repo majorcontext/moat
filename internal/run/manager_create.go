@@ -752,6 +752,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		r.ProxyPort = regResp.ProxyPort
 		r.ProxyHost = hostAddr
 
+		// Pin the serial ports into the re-registration request. The
+		// container's MOAT_SERIAL_*_URL froze these numbers at create; if the
+		// daemon restarts, re-registration must re-bind them exactly — a
+		// fresh ephemeral port would be unreachable from the container.
+		if len(regResp.SerialAddrs) > 0 && regReq.SerialDevices != nil {
+			r.ProxyRegReq.SerialPins = serialPinsFromAddrs(regResp.SerialAddrs)
+		}
+
 		// Serial listener ports become part of the firewall allowlist: the
 		// strict-policy firewall must not silently drop the device's RFC2217
 		// port. Also covers network.host entries and claude.base_url host

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -496,5 +497,140 @@ func TestResolveCredentials_EmptyGrants(t *testing.T) {
 	}
 	if err := resolveCredentials(rc, []string{}, nil, store); err != nil {
 		t.Fatalf("resolveCredentials([]) = %v, want nil", err)
+	}
+}
+
+func TestRunPersister_SavesSerialState(t *testing.T) {
+	// The container's MOAT_SERIAL_*_URL froze the device addresses at create;
+	// a daemon restart that loses them restores the run with dead devices.
+	// SerialDevices/SerialBindAddr/SerialAddrs/AllowedHostPorts must all
+	// survive Save -> JSON -> Load, or the restore path cannot bring the
+	// listeners back on the ports the containers already hold.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runs.json")
+
+	reg := NewRegistry()
+	rc := NewRunContext("run-serial")
+	rc.AuthToken = "tok"
+	rc.SerialDevices = []SerialDeviceSpec{serialSpec("esp32")}
+	rc.SerialBindAddr = "172.17.0.1"
+	rc.SerialAddrs = map[string]string{"esp32": "172.17.0.1:41234"}
+	rc.AllowedHostPorts = []int{41234, 8080}
+	reg.RegisterWithToken(rc, "tok")
+
+	p := NewRunPersister(path, reg)
+	if err := p.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := p.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("Load returned %d runs, want 1", len(loaded))
+	}
+	got := loaded[0]
+	if len(got.SerialDevices) != 1 || got.SerialDevices[0] != serialSpec("esp32") {
+		t.Errorf("SerialDevices = %+v, want the esp32 spec", got.SerialDevices)
+	}
+	if got.SerialBindAddr != "172.17.0.1" {
+		t.Errorf("SerialBindAddr = %q, want 172.17.0.1", got.SerialBindAddr)
+	}
+	if got.SerialAddrs["esp32"] != "172.17.0.1:41234" {
+		t.Errorf("SerialAddrs = %v, want esp32=172.17.0.1:41234", got.SerialAddrs)
+	}
+	if len(got.AllowedHostPorts) != 2 || got.AllowedHostPorts[0] != 41234 {
+		t.Errorf("AllowedHostPorts = %v, want [41234 8080]", got.AllowedHostPorts)
+	}
+}
+
+func TestRestoreRunsWithSerial_RebindsTheSamePort(t *testing.T) {
+	// The restore contract: a run's devices come back on the ports its
+	// containers' MOAT_SERIAL_*_URLs froze at create. The listener hook is
+	// exercised end-to-end — the restored run must be dialable at the
+	// persisted address.
+	s := newServerWithBroker(t)
+	first := NewRunContext("run-a")
+	orig, err := s.listenSerial(first, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+
+	listen := func(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, addrs map[string]string) error {
+		_, err := s.ListenSerialPinned(rc, specs, bindAddr, addrs)
+		return err
+	}
+	reg := NewRegistry()
+	restored := RestoreRunsWithSerial(context.Background(), reg, []PersistedRun{{
+		RunID:          "run-a",
+		AuthToken:      "tok",
+		SerialDevices:  []SerialDeviceSpec{serialSpec("esp32")},
+		SerialBindAddr: "127.0.0.1",
+		SerialAddrs:    orig,
+	}}, listen)
+	if restored != 1 {
+		t.Fatalf("restored = %d, want 1", restored)
+	}
+
+	rc, ok := reg.Lookup("tok")
+	if !ok {
+		t.Fatal("restored run not in registry")
+	}
+	if rc.SerialAddrs["esp32"] != orig["esp32"] {
+		t.Fatalf("SerialAddrs = %v, want the persisted %v", rc.SerialAddrs, orig)
+	}
+	c, derr := net.Dial("tcp", orig["esp32"])
+	if derr != nil {
+		t.Fatalf("restored device unreachable at the frozen address %s: %v", orig["esp32"], derr)
+	}
+	c.Close()
+}
+
+func TestRestoreRunsWithSerial_OccupiedPortFailsLoudly(t *testing.T) {
+	// Companion of the happy path: a persisted port now held by another
+	// listener must skip the run with a named error, not restore it with a
+	// device silently rebound out of the container's reach.
+	s := newServerWithBroker(t)
+	holder := NewRunContext("run-holder")
+	held, err := s.listenSerial(holder, []SerialDeviceSpec{serialSpec2("probe")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+
+	listen := func(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, addrs map[string]string) error {
+		_, err := s.ListenSerialPinned(rc, specs, bindAddr, addrs)
+		return err
+	}
+	reg := NewRegistry()
+	restored := RestoreRunsWithSerial(context.Background(), reg, []PersistedRun{{
+		RunID:          "run-a",
+		AuthToken:      "tok",
+		SerialDevices:  []SerialDeviceSpec{serialSpec2("probe")},
+		SerialBindAddr: "127.0.0.1",
+		SerialAddrs:    held, // the same port the holder occupies
+	}}, listen)
+	if restored != 0 {
+		t.Fatalf("restored = %d, want 0 — the run must be skipped when its port is taken", restored)
+	}
+	if _, ok := reg.Lookup("tok"); ok {
+		t.Fatal("a skipped run must not be registered")
+	}
+}
+
+func TestRestoreRunsWithSerial_NoBrokerSkipsRunsWithDevices(t *testing.T) {
+	// A daemon with no broker cannot serve a run with devices; restoring it
+	// anyway would hand the agent dead hardware. Skip it, as restore does for
+	// unresolvable credentials. Companion: a run WITHOUT devices is unaffected.
+	t.Setenv("MOAT_HOME", t.TempDir())
+	reg := NewRegistry()
+	restored := RestoreRunsWithSerial(context.Background(), reg, []PersistedRun{
+		{RunID: "with-devices", AuthToken: "tok1", SerialDevices: []SerialDeviceSpec{serialSpec("esp32")}},
+	}, nil)
+	if restored != 0 {
+		t.Fatalf("restored = %d, want 0 (no broker)", restored)
+	}
+	if _, ok := reg.Lookup("tok1"); ok {
+		t.Fatal("a device run must not be restored without a broker")
 	}
 }

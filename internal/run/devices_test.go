@@ -366,3 +366,27 @@ func TestSerialEnvWithNoDevicesIsEmpty(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestSerialPinsFromAddrs(t *testing.T) {
+	// The container's MOAT_SERIAL_*_URL froze these ports at create; a daemon
+	// restart must re-register the run pinned to them, or its devices go dead.
+	pins := serialPinsFromAddrs(map[string]string{
+		"esp32": "172.17.0.1:41234",
+		"probe": "172.17.0.1:41235",
+	})
+	if len(pins) != 2 || pins["esp32"] != 41234 || pins["probe"] != 41235 {
+		t.Fatalf("got %v, want esp32=41234 probe=41235", pins)
+	}
+}
+
+func TestSerialPinsFromAddrsSkipsUnusableEntries(t *testing.T) {
+	// Companion: an address without a parsable port is skipped, not fatal —
+	// the other devices still come back. An empty map is nil, so a
+	// re-registration without devices stays unpinned.
+	if got := serialPinsFromAddrs(nil); got != nil {
+		t.Fatalf("got %v, want nil", got)
+	}
+	if got := serialPinsFromAddrs(map[string]string{"bad": "no-port"}); len(got) != 0 {
+		t.Fatalf("got %v, want no pins from an unusable address", got)
+	}
+}

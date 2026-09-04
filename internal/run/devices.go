@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -303,4 +304,28 @@ func SerialEnv(hostAddr string, addrs map[string]string) []string {
 	}
 	env = append(env, "MOAT_SERIAL_DEVICES="+strings.Join(names, ","))
 	return env
+}
+
+// serialPinsFromAddrs extracts device-name -> port from the daemon's serial
+// addresses. The result goes into RegisterRequest.SerialPins so a
+// re-registration after a daemon restart re-binds the exact ports the
+// container's frozen MOAT_SERIAL_*_URLs point at — a fresh ephemeral port
+// would be unreachable from inside the container.
+func serialPinsFromAddrs(addrs map[string]string) map[string]int {
+	if len(addrs) == 0 {
+		return nil
+	}
+	pins := make(map[string]int, len(addrs))
+	for name, addr := range addrs {
+		_, portStr, err := splitPort(addr)
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			continue
+		}
+		pins[name] = port
+	}
+	return pins
 }

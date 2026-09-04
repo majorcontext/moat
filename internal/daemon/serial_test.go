@@ -243,3 +243,75 @@ func TestRegisterRequestSerialBindAddrSurvivesJSON(t *testing.T) {
 		t.Fatalf("round trip gave SerialBindAddr %q, want 172.17.0.1", got.SerialBindAddr)
 	}
 }
+
+func TestListenSerialPinnedRebindsTheContainerAddress(t *testing.T) {
+	// A daemon restart must not move a device: the container's
+	// MOAT_SERIAL_*_URL froze the port at create, so restore re-opens the
+	// listener on that exact number. This is the daemon-restart half of the
+	// "advertised URLs must stay stable" constraint.
+	s := newServerWithBroker(t)
+	rc := NewRunContext("run-a")
+	orig, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+
+	// A restart drops the old broker's listeners; simulate it by rebuilding
+	// the server with a fresh broker (same fake device), after releasing the
+	// old one's listener.
+	s.serial.Close() //nolint:errcheck — Close on an open broker does not fail
+	s2 := newServerWithBroker(t)
+	rc2 := NewRunContext("run-a")
+	got, err := s2.ListenSerialPinned(rc2, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1", orig)
+	if err != nil {
+		t.Fatalf("ListenSerialPinned: %v", err)
+	}
+	if got["esp32"] != orig["esp32"] {
+		t.Fatalf("restored device at %q, want the container's frozen address %q", got["esp32"], orig["esp32"])
+	}
+	// The device is reachable at that address — the whole point of the pin.
+	c, derr := net.Dial("tcp", got["esp32"])
+	if derr != nil {
+		t.Fatalf("device unreachable at the pinned address: %v", derr)
+	}
+	c.Close()
+}
+
+func TestListenSerialPinnedRefusesAnOccupiedPort(t *testing.T) {
+	// Companion of the happy path: a pinned port now held by something else
+	// must fail with a named error, not silently rebind elsewhere — the
+	// container could never reach the new port, and the failure would be
+	// invisible.
+	s := newServerWithBroker(t)
+	holder := NewRunContext("run-holder")
+	if _, err := s.listenSerial(holder, []SerialDeviceSpec{serialSpec2("probe")}, "127.0.0.1"); err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+	_, probeAddr, _ := func() (map[string]string, string, error) {
+		addrs, err := s.listenSerial(holder, []SerialDeviceSpec{serialSpec2("probe")}, "127.0.0.1")
+		return addrs, addrs["probe"], err
+	}()
+	if probeAddr == "" {
+		t.Fatal("probe listener did not open")
+	}
+
+	restored := NewRunContext("run-a")
+	_, err := s.ListenSerialPinned(restored, []SerialDeviceSpec{serialSpec2("probe")}, "127.0.0.1",
+		map[string]string{"probe": probeAddr})
+	if err == nil {
+		t.Fatal("pinning a port another listener holds must fail")
+	}
+	if !contains(err.Error(), "listen") && !contains(err.Error(), "use") {
+		t.Fatalf("error %q should name the bind failure", err)
+	}
+}
+
+func TestRegisterRequestSerialPinsSurviveJSON(t *testing.T) {
+	// The daemon API must stay wire-compatible; pins lost in transit would
+	// silently downgrade a re-registration to ephemeral ports.
+	req := RegisterRequest{RunID: "run-a", SerialPins: map[string]int{"esp32": 41234}}
+	got := roundTripRegisterRequest(t, req)
+	if got.SerialPins["esp32"] != 41234 {
+		t.Fatalf("round trip gave SerialPins %v, want esp32=41234", got.SerialPins)
+	}
+}

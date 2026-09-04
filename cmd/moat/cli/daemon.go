@@ -372,7 +372,14 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	if persisted, loadErr := persister.Load(); loadErr != nil {
 		log.Warn("failed to load persisted runs", "error", loadErr)
 	} else if len(persisted) > 0 {
-		restored := daemon.RestoreRuns(livenessCtx, apiServer.Registry(), persisted)
+		// Serial listeners are re-opened on the ports the containers' frozen
+		// MOAT_SERIAL_*_URLs point at. listenSerialAt fails a run whose port is
+		// taken; such a run is skipped rather than rebound out of reach.
+		restoreListen := func(rc *daemon.RunContext, specs []daemon.SerialDeviceSpec, bindAddr string, addrs map[string]string) error {
+			_, err := apiServer.ListenSerialPinned(rc, specs, bindAddr, addrs)
+			return err
+		}
+		restored := daemon.RestoreRunsWithSerial(livenessCtx, apiServer.Registry(), persisted, restoreListen)
 		log.Info("restored runs from disk", "loaded", len(persisted), "restored", restored)
 		// Save immediately to reconcile (remove runs that failed to restore).
 		if err := persister.Save(); err != nil {

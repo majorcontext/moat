@@ -71,6 +71,14 @@ type RunContext struct {
 	HostGatewayIP     string            `json:"host_gateway_ip,omitempty"` // actual IP for forwarding allowed host traffic
 	AllowedHostPorts  []int             `json:"allowed_host_ports,omitempty"`
 
+	// Serial state, for persistence across daemon restarts. SerialDevices and
+	// SerialBindAddr are the registration request's; SerialAddrs is what the
+	// container's frozen MOAT_SERIAL_*_URL points at, so a restore must
+	// re-open each listener on the same port.
+	SerialDevices  []SerialDeviceSpec `json:"serial_devices,omitempty"`
+	SerialBindAddr string             `json:"serial_bind_addr,omitempty"`
+	SerialAddrs    map[string]string  `json:"serial_addrs,omitempty"`
+
 	// CredProfile is the credential profile this run was created under (from
 	// the CLI's --profile/MOAT_PROFILE). The daemon is shared across profiles,
 	// so token refresh must scope to this value rather than the daemon

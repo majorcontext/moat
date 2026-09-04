@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1192,5 +1193,85 @@ func TestListenWithAnUnbindableAddressRefusesTheDevice(t *testing.T) {
 	// The failed claim must leave the device free for the next run.
 	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1"); err != nil {
 		t.Fatalf("device must be free after a failed bind: %v", err)
+	}
+}
+
+func TestListenAtRebindsTheSamePort(t *testing.T) {
+	// The container's MOAT_SERIAL_*_URL froze the port at create. A restore
+	// that rebinds a different number leaves the run's device dead while the
+	// daemon looks healthy — so ListenAt must return the exact port asked for.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the daemon restart: old broker closed, new broker, same
+	// pinned port.
+	if err := b.Close(); err != nil {
+		t.Fatalf("closing the old broker: %v", err)
+	}
+	b2 := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b2.Close() })
+	_, addr2, err := b2.ListenAt("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1", port)
+	if err != nil {
+		t.Fatalf("ListenAt on the freed port: %v", err)
+	}
+	if addr2 != addr {
+		t.Fatalf("rebound %q, want the exact original address %q", addr2, addr)
+	}
+}
+
+func TestListenAtRefusesATakenPort(t *testing.T) {
+	// Companion of the happy path: a pinned port that is taken must fail with
+	// a named error, never fall back to an OS-assigned port — the container
+	// could not reach the fallback, and the failure would be invisible.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A different run holds the device on this port in a second broker.
+	b2 := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b2.Close() })
+	_, _, err = b2.ListenAt("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1", port)
+	if err == nil {
+		t.Fatal("binding a taken port must fail, not fall back to an ephemeral port")
+	}
+	// The failed claim must leave the device free.
+	if _, _, err := b2.ListenAt("run-c", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1", 0); err != nil {
+		// run-c requested port 0 = OS-assigned; must succeed.
+		t.Fatalf("device must be free after a failed pin: %v", err)
 	}
 }

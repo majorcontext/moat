@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -283,7 +284,13 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// Open a listener per approved serial device. This happens before registry
 	// insertion so a device that cannot be claimed fails the registration
 	// outright rather than leaving a half-configured run.
-	serialAddrs, err := s.listenSerial(rc, req.SerialDevices, req.SerialBindAddr)
+	//
+	// A request carrying SerialPins is a re-registration or restore: the
+	// container's MOAT_SERIAL_*_URL froze those ports at create, so the
+	// listeners must come back on the same numbers. listenSerialAt fails
+	// loudly if one is taken rather than re-binding elsewhere and leaving the
+	// run's devices dead.
+	serialAddrs, err := s.listenSerialAt(rc, req.SerialDevices, req.SerialBindAddr, req.SerialPins)
 	if err != nil {
 		rc.CancelRefresh()
 		writeJSON(w, http.StatusConflict, RegisterResponse{Error: err.Error()})
@@ -292,6 +299,9 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 
 	// Register the fully-initialized RunContext so the proxy never sees
 	// an incomplete run.
+	rc.SerialDevices = req.SerialDevices
+	rc.SerialBindAddr = req.SerialBindAddr
+	rc.SerialAddrs = serialAddrs
 	s.registry.RegisterWithToken(rc, token)
 
 	if s.persister != nil {
@@ -310,8 +320,34 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// listenSerial opens one RFC2217 listener per approved device and allows the
-// container to reach each port.
+// listenSerial opens one RFC2217 listener per approved device on an
+// OS-assigned port and allows the container to reach each one.
+func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr string) (map[string]string, error) {
+	return s.listenSerialAt(rc, specs, bindAddr, nil)
+}
+
+// ListenSerialPinned re-opens a restored run's serial listeners on the exact
+// ports the container's frozen MOAT_SERIAL_*_URLs point at. It is the restore
+// half of P0-9: a daemon restart must not move a device, because the
+// container cannot learn the new address. A port that cannot be re-bound
+// fails with a named error naming the device, rather than silently leaving
+// the device dead or rebinding it elsewhere.
+func (s *Server) ListenSerialPinned(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pinned map[string]string) (map[string]string, error) {
+	pins := make(map[string]int, len(pinned))
+	for name, addr := range pinned {
+		port, err := portOf(addr)
+		if err != nil {
+			return nil, fmt.Errorf("restored address for device %q is unusable: %q: %w", name, addr, err)
+		}
+		pins[name] = port
+	}
+	return s.listenSerialAt(rc, specs, bindAddr, pins)
+}
+
+// listenSerialAt opens one RFC2217 listener per approved device and allows the
+// container to reach each port. pins, when non-nil, names the exact port each
+// device must bind; a pinned port that cannot be bound fails the registration
+// with a named error instead of moving the device.
 //
 // bindAddr scopes where those listeners are reachable from. RFC2217 has no
 // authentication, so the bind address is the reachability control: the caller
@@ -322,7 +358,7 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 // failure never leaves a device claimed by a run that did not start — and a
 // re-registration of an already-running run never tears down the devices its
 // container is using.
-func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr string) (map[string]string, error) {
+func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pins map[string]int) (map[string]string, error) {
 	if len(specs) == 0 {
 		return nil, nil
 	}
@@ -338,17 +374,34 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr
 	// would go dead for the rest of the run.
 	var opened []*serialbroker.ListenerRef
 	for _, spec := range specs {
-		ref, addr, err := s.serial.Listen(rc.RunID, serialbroker.Approved{
-			Name: spec.Name,
-			Device: serialdev.Device{
-				Path:     spec.Path,
-				VID:      spec.VID,
-				PID:      spec.PID,
-				Serial:   spec.Serial,
-				PortPath: spec.PortPath,
-			},
-			Record: spec.Record,
-		}, bindAddr)
+		var ref *serialbroker.ListenerRef
+		var addr string
+		var err error
+		if port, ok := pins[spec.Name]; ok && port > 0 {
+			ref, addr, err = s.serial.ListenAt(rc.RunID, serialbroker.Approved{
+				Name: spec.Name,
+				Device: serialdev.Device{
+					Path:     spec.Path,
+					VID:      spec.VID,
+					PID:      spec.PID,
+					Serial:   spec.Serial,
+					PortPath: spec.PortPath,
+				},
+				Record: spec.Record,
+			}, bindAddr, port)
+		} else {
+			ref, addr, err = s.serial.Listen(rc.RunID, serialbroker.Approved{
+				Name: spec.Name,
+				Device: serialdev.Device{
+					Path:     spec.Path,
+					VID:      spec.VID,
+					PID:      spec.PID,
+					Serial:   spec.Serial,
+					PortPath: spec.PortPath,
+				},
+				Record: spec.Record,
+			}, bindAddr)
+		}
 		if err != nil {
 			s.serial.CloseListeners(opened)
 			return nil, err
@@ -361,7 +414,11 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr
 			s.serial.CloseListeners(opened)
 			return nil, fmt.Errorf("serial listener for %q returned an unusable address %q: %w", spec.Name, addr, perr)
 		}
-		rc.AllowedHostPorts = append(rc.AllowedHostPorts, port)
+		// A restored run arrives with its persisted AllowedHostPorts already
+		// set; dedup so re-registration does not grow the list every cycle.
+		if !slices.Contains(rc.AllowedHostPorts, port) {
+			rc.AllowedHostPorts = append(rc.AllowedHostPorts, port)
+		}
 	}
 	return addrs, nil
 }
