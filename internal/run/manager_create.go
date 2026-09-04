@@ -712,6 +712,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if pinErr != nil {
 				return nil, fmt.Errorf("opening device pins: %w", pinErr)
 			}
+			defer pins.Close() //nolint:errcheck // runs for the length of Create; close errors carry no signal
 			specs, devErr := ResolveDevices(ctx, opts.Config.Devices, serialdev.NewEnumerator(), pins)
 			if devErr != nil {
 				return nil, devErr

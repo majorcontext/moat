@@ -61,6 +61,7 @@ func listDevices(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	defer pins.Close() //nolint:errcheck // read-only; an error on close has no consequence
 	enum := serialdev.NewEnumerator()
 	devices, err := enum.List(cmd.Context())
 	if err != nil {
@@ -283,6 +284,7 @@ func forgetDevice(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer pins.Close() //nolint:errcheck // the process exits with the command
 	if _, ok, err := pins.Get(name); err != nil {
 		return err
 	} else if !ok {

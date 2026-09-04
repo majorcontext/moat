@@ -76,6 +76,11 @@ func (d DeviceEntry) VIDPID() (string, string) {
 // validateDevices checks the devices block.
 func validateDevices(devs []DeviceEntry) error {
 	seen := make(map[string]bool, len(devs))
+	// Names distinct as written can collide once mapped to an environment
+	// variable: the transform uppercases and folds "-" into "_", so "esp-32"
+	// and "esp_32" both become MOAT_SERIAL_ESP_32_URL. Both would be emitted
+	// and last-wins hands the run the other board.
+	envNames := make(map[string]string, len(devs))
 	for i, d := range devs {
 		if d.Name == "" {
 			return fmt.Errorf("devices[%d]: name is required — it names the device, e.g. `name: esp32`", i)
@@ -88,6 +93,15 @@ func validateDevices(devs []DeviceEntry) error {
 			return fmt.Errorf("devices[%d]: duplicate device name %q", i, d.Name)
 		}
 		seen[d.Name] = true
+
+		// The env-var transform is case-insensitive and folds "-" into
+		// "_", so distinct written names can land on one variable.
+		envName := strings.ToUpper(strings.ReplaceAll(d.Name, "-", "_"))
+		if other, clash := envNames[envName]; clash {
+			return fmt.Errorf("devices[%s]: name %q and name %q both become the environment variable MOAT_SERIAL_%s_URL\n"+
+				"  Rename one of them — the later entry would silently win", d.Name, other, d.Name, envName)
+		}
+		envNames[envName] = d.Name
 
 		if !usbIDRe.MatchString(d.Match.USB) {
 			return fmt.Errorf("devices[%s]: match.usb must be a vid:pid pair, e.g. \"303a:1001\" — got %q\n"+

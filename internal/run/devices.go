@@ -291,6 +291,7 @@ func ResolveDevices(
 			PortPath:  r.device.PortPath,
 			Interface: r.device.Interface,
 			Record:    r.entry.RecordMode(),
+			Baud:      r.entry.Baud,
 		})
 	}
 	return specs, nil

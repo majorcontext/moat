@@ -237,3 +237,38 @@ func TestDevicesRejectBadInterfaceSelectors(t *testing.T) {
 		}
 	}
 }
+
+func TestDevicesRejectEnvVarNameCollisions(t *testing.T) {
+	// "esp-32" and "esp_32" are distinct names but one environment variable:
+	// MOAT_SERIAL_ESP_32_URL. Both would be emitted and last-wins hands the
+	// run the other board.
+	const yaml = `name: x
+devices:
+  - name: esp-32
+    match: {usb: "303a:1001"}
+  - name: esp_32
+    match: {usb: "303a:1001"}
+`
+	_, err := loadDevicesYAML(t, yaml)
+	if err == nil {
+		t.Fatal("names that collide on one env var should be rejected")
+	}
+	if !strings.Contains(err.Error(), "esp-32") || !strings.Contains(err.Error(), "esp_32") {
+		t.Fatalf("error should name both entries: %v", err)
+	}
+}
+
+func TestDevicesAcceptDistinctNamesThatStayDistinct(t *testing.T) {
+	// Companion: hyphens and underscores must keep working when they do not
+	// collide — the characters are part of the documented name syntax.
+	const yaml = `name: x
+devices:
+  - name: esp32
+    match: {usb: "303a:1001"}
+  - name: esp32-jtag
+    match: {usb: "0403:6010"}
+`
+	if _, err := loadDevicesYAML(t, yaml); err != nil {
+		t.Fatalf("distinct names should be accepted: %v", err)
+	}
+}
