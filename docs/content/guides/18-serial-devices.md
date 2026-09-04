@@ -116,6 +116,24 @@ Error: cannot use the serial devices this run requires:
 This is a hard failure, not a warning. Two boards of the same model are indistinguishable
 by USB ID, so without pinning an agent could flash the wrong one.
 
+Before anything is created, the first run also shows what it is about to approve:
+
+```
+⚠ Approving serial device for the first run:
+  board 303a:1001 (serial 0001)
+  This is trust-on-first-use: the run gets full control of the hardware —
+  it can read, reflash, or brick the device. Later runs must present the same
+  device or fail until you run `moat device forget`.
+```
+
+A device with no serial number says so plainly, because the pin that gets recorded approves
+whatever is plugged into that port, not that unit:
+
+```
+⚠ Approving serial device for the first run:
+  board 1a86:7523 (no serial number — pins whatever is plugged into port 1-3, not this unit)
+```
+
 After deliberately swapping hardware:
 
 ```bash
@@ -170,8 +188,9 @@ An agent with a serial line can reflash the device, and can therefore brick or r
 it. That is inherent to the request — flashing is the point.
 
 The mitigation is consent at the device level: you choose which device, and moat enforces
-that it stays the same device. Sandboxing does not help here, and moat does not pretend
-otherwise.
+that it stays the same device — the first run states what it is approving and what the
+approval grants (see [Approval and pinning](#approval-and-pinning)). Sandboxing does not
+help here, and moat does not pretend otherwise.
 
 Two further boundaries are worth stating plainly:
 

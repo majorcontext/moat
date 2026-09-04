@@ -38,6 +38,24 @@ type MissingDevice struct {
 	FixCommand string // e.g. "moat device forget esp32"
 }
 
+// NewPin describes a device this run would approve for the first time, so the
+// CLI can surface the trust-on-first-use decision before the run starts.
+type NewPin struct {
+	Name string // config name, e.g. "esp32"
+	// VID:PID of the device being approved.
+	VID, PID string
+	// Identity is how the device will be pinned: its serial number, or the
+	// physical port when the device has none.
+	Serial   string
+	PortPath string
+	// ByPortPath reports whether the pin identifies the device only by the
+	// port it is plugged into — true when the device ships no serial number
+	// (common on cheap CH340 and CP2102 clones). Such a pin approves
+	// whatever is plugged into that port, which the consent notice must say
+	// plainly.
+	ByPortPath bool
+}
+
 // resolvedDevice pairs a config entry with the host device it resolved to.
 type resolvedDevice struct {
 	entry  config.DeviceEntry
@@ -255,6 +273,38 @@ func DetectMissingDevices(
 ) []MissingDevice {
 	_, missing := resolveDevices(ctx, devs, enum, pins)
 	return missing
+}
+
+// DetectNewPins reports the devices this run would approve on first use, so
+// the CLI can surface the trust-on-first-use decision — approving a device
+// gives the run full control of that hardware, and a serial-less clone pins
+// whatever is plugged into the port.
+//
+// It shares resolveDevices with the Create gate, so what it reports is
+// exactly what ResolveDevices would pin. It writes nothing: the pin is
+// recorded only if the run proceeds.
+func DetectNewPins(
+	ctx context.Context,
+	devs []config.DeviceEntry,
+	enum serialdev.Enumerator,
+	pins *serialdev.PinStore,
+) []NewPin {
+	resolved, _ := resolveDevices(ctx, devs, enum, pins)
+	var newPins []NewPin
+	for _, r := range resolved {
+		if !r.newPin {
+			continue
+		}
+		newPins = append(newPins, NewPin{
+			Name:       r.entry.Name,
+			VID:        r.device.VID,
+			PID:        r.device.PID,
+			Serial:     r.device.Serial,
+			PortPath:   r.device.PortPath,
+			ByPortPath: r.pin.PinnedByPortPath(),
+		})
+	}
+	return newPins
 }
 
 // ResolveDevices resolves every configured device and returns the specs to send

@@ -118,8 +118,12 @@ type PinStore struct {
 	lf   *os.File // held for the store's lifetime; flock'd per mutation
 }
 
-// DefaultPinPath is where pins live under the moat home directory.
+// DefaultPinPath is where pins live under the moat home directory. MOAT_HOME
+// overrides the location the same way it does for every other moat state.
 func DefaultPinPath() string {
+	if override := os.Getenv("MOAT_HOME"); override != "" {
+		return filepath.Join(override, "devices.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "devices.json"
