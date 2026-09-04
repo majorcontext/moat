@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/majorcontext/moat/internal/log"
 )
 
 // ErrPinMismatch means the attached device is not the one previously approved
@@ -103,11 +105,17 @@ func (p Pin) Verify(d Device) error {
 	return nil
 }
 
-// PinStore persists pins as JSON. It is safe for concurrent use.
+// PinStore persists pins as JSON. It is safe for concurrent use within a
+// process, and across processes via an advisory lock on a sidecar lock file:
+// two moat processes approving devices concurrently would otherwise race —
+// each reads the file at open, each writes its own map back, and the second
+// write drops the first's pins, silently re-arming trust-on-first-use for
+// every device the loser had pinned.
 type PinStore struct {
 	path string
 	mu   sync.Mutex
 	pins map[string]Pin
+	lf   *os.File // held for the store's lifetime; flock'd per mutation
 }
 
 // DefaultPinPath is where pins live under the moat home directory.
@@ -119,52 +127,143 @@ func DefaultPinPath() string {
 	return filepath.Join(home, ".moat", "devices.json")
 }
 
-// OpenPinStore loads the store at path, creating an empty one if absent.
-//
-// A malformed file is an error rather than an empty store: silently discarding
-// pins would silently disable the approval check.
-func OpenPinStore(path string) (*PinStore, error) {
-	s := &PinStore{path: path, pins: map[string]Pin{}}
+// lock takes the store's mutex and the cross-process flock, reloading pins
+// from disk so the caller mutates the latest state rather than a snapshot
+// taken at OpenPinStore time. The returned func releases both.
+func (s *PinStore) lock() (func(), error) {
+	s.mu.Lock()
+	var unlock func()
+	if s.lf != nil {
+		u, err := lockFile(s.lf)
+		if err != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("locking device pins at %s: %w", s.path+".lock", err)
+		}
+		unlock = u
+	}
+	if err := s.reloadLocked(); err != nil {
+		if unlock != nil {
+			unlock()
+		}
+		s.mu.Unlock()
+		return nil, err
+	}
+	return func() {
+		if unlock != nil {
+			unlock()
+		}
+		s.mu.Unlock()
+	}, nil
+}
+
+// reloadLocked re-reads the pin file into the map. Callers hold the lock.
+func (s *PinStore) reloadLocked() error {
+	pins, err := readPins(s.path)
+	if err != nil {
+		return err
+	}
+	s.pins = pins
+	return nil
+}
+
+// readPins parses the pin file at path, tolerating absence and emptiness.
+func readPins(path string) (map[string]Pin, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return s, nil
+		return map[string]Pin{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading device pins from %s: %w", path, err)
 	}
 	if len(data) == 0 {
-		return s, nil
+		return map[string]Pin{}, nil
 	}
 	var pins []Pin
 	if err := json.Unmarshal(data, &pins); err != nil {
 		return nil, fmt.Errorf("parsing device pins in %s: %w\n"+
 			"  Fix the file by hand, or delete it to re-approve devices from scratch", path, err)
 	}
+	m := make(map[string]Pin, len(pins))
 	for _, p := range pins {
-		s.pins[p.Name] = p
+		m[p.Name] = p
 	}
+	return m, nil
+}
+
+// OpenPinStore loads the store at path, creating an empty one if absent.
+//
+// A malformed file is an error rather than an empty store: silently discarding
+// pins would silently disable the approval check.
+//
+// The store keeps the file's lock sidecar open so mutations can flock it; a
+// store whose lock file cannot be opened still works single-process (lf is
+// nil, lockFile is skipped) rather than failing every run.
+func OpenPinStore(path string) (*PinStore, error) {
+	s := &PinStore{path: path}
+	pins, err := readPins(path)
+	if err != nil {
+		return nil, err
+	}
+	s.pins = pins
+
+	// The lock file is separate from the data so a crash mid-write of either
+	// never corrupts the other, and so its permissions say "lock" not "pins".
+	dir := filepath.Dir(path)
+	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+		return nil, fmt.Errorf("creating %s: %w", dir, mkErr)
+	}
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		// Not fatal: single-process use (the overwhelmingly common case —
+		// one CLI, one daemon) still works, and erroring here would block
+		// every run on a directory the user can fix.
+		log.Debug("opening device pin lock file failed; continuing without cross-process lock", "path", path+".lock", "err", err)
+		return s, nil
+	}
+	s.lf = lf
 	return s, nil
+}
+
+// Close releases the lock file. The store is unusable after Close.
+func (s *PinStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lf != nil {
+		err := s.lf.Close()
+		s.lf = nil
+		return err
+	}
+	return nil
 }
 
 // Get returns the pin recorded for name, if any.
 func (s *PinStore) Get(name string) (Pin, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return Pin{}, false, err
+	}
+	defer unlock()
 	p, ok := s.pins[name]
 	return p, ok, nil
 }
 
 // List returns all pins, for `moat device list`.
 func (s *PinStore) List() ([]Pin, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	return s.snapshotLocked(), nil
 }
 
 // Put records a pin and flushes the store.
 func (s *PinStore) Put(p Pin) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	s.pins[p.Name] = p
 	return s.flushLocked()
 }
@@ -172,8 +271,11 @@ func (s *PinStore) Put(p Pin) error {
 // Forget removes a pin so the next run re-approves the device. Forgetting an
 // unknown name is not an error.
 func (s *PinStore) Forget(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	delete(s.pins, name)
 	return s.flushLocked()
 }
@@ -192,16 +294,30 @@ func (s *PinStore) flushLocked() error {
 		return fmt.Errorf("encoding device pins: %w", err)
 	}
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
+	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+		return fmt.Errorf("creating %s: %w", dir, mkErr)
 	}
 	// Write-then-rename so a crash cannot leave a half-written pin file, which
 	// would fail to parse on the next run and block every device.
+	// O_EXCL plus noFollow (unix): a pre-symlinked .tmp must not be followed
+	// to its victim (os.WriteFile would), and a stale .tmp from a crashed run
+	// must not be silently reused.
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|noFollow, 0o600)
+	if err != nil {
+		return fmt.Errorf("writing device pins: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp) //nolint:errcheck
+		return fmt.Errorf("writing device pins: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp) //nolint:errcheck
 		return fmt.Errorf("writing device pins: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
+		os.Remove(tmp) //nolint:errcheck
 		return fmt.Errorf("replacing device pins at %s: %w", s.path, err)
 	}
 	return nil

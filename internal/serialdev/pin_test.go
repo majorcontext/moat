@@ -258,3 +258,126 @@ func TestSerialLessPinWithPortStillVerifies(t *testing.T) {
 		t.Fatalf("different port must fail: %v", err)
 	}
 }
+
+func TestPinStoreConcurrentProcessesBothSurvive(t *testing.T) {
+	// Two stores on one path model two moat processes (a CLI run and a
+	// re-registration, say). Without the cross-process lock each Put writes
+	// its own map back and the second drops the first's pin — silently
+	// re-arming trust-on-first-use for the lost device.
+	path := filepath.Join(t.TempDir(), "devices.json")
+	a, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close() //nolint:errcheck
+	b, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close() //nolint:errcheck
+
+	if err := a.Put(PinFor("board-a", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Put(PinFor("board-b", Device{VID: "1a86", PID: "7523", Serial: "BBB", PortPath: "1-3"})); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh store reads what both writers left — the loser's pin must not
+	// have been dropped.
+	c, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close() //nolint:errcheck
+	for _, name := range []string{"board-a", "board-b"} {
+		if _, ok, _ := c.Get(name); !ok {
+			t.Fatalf("pin %s was lost — the other process's write dropped it", name)
+		}
+	}
+}
+
+func TestPinStorePutSeesAnotherProcesssWrite(t *testing.T) {
+	// Companion: a store held open across another process's Put must not
+	// write a stale snapshot back over it — reload-under-lock is the other
+	// half of the flock fix.
+	path := filepath.Join(t.TempDir(), "devices.json")
+	a, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close() //nolint:errcheck
+	b, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close() //nolint:errcheck
+
+	if err := b.Put(PinFor("board-b", Device{VID: "1a86", PID: "7523", Serial: "BBB", PortPath: "1-3"})); err != nil {
+		t.Fatal(err)
+	}
+	// a was opened before b wrote; a's next write must carry b's pin forward.
+	if err := a.Put(PinFor("board-a", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"})); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close() //nolint:errcheck
+	if _, ok, _ := c.Get("board-b"); !ok {
+		t.Fatalf("a's stale snapshot overwrote b's pin")
+	}
+	if _, ok, _ := c.Get("board-a"); !ok {
+		t.Fatalf("a's own pin missing after its Put")
+	}
+}
+
+func TestPinStoreTempFileIsNotASymlinkAndKeepsItsMode(t *testing.T) {
+	// A pre-symlinked devices.json.tmp must not be followed to its victim,
+	// and the resulting devices.json must be 0600 — the pin file names
+	// hardware approval; group/world read has no audience.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "devices.json")
+
+	victim := filepath.Join(dir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("do not touch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path+".tmp"); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	s, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close() //nolint:errcheck
+	err = s.Put(PinFor("board", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"}))
+	if err == nil {
+		t.Log("put succeeded — symlink may have been replaced")
+	}
+
+	// Whatever happened to the Put, the victim must be untouched.
+	got, rerr := os.ReadFile(victim)
+	if rerr != nil || string(got) != "do not touch" {
+		t.Fatalf("victim file was overwritten through the symlink: %q", got)
+	}
+
+	// If the Put succeeded, the pin file exists with mode 0600.
+	if err == nil {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat pins: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("pin file mode = %o, want 600", perm)
+		}
+	} else {
+		// The symlinked .tmp blocking the write is also an acceptable
+		// outcome (O_EXCL fails on the existing link) — as long as it did
+		// not write through it.
+		t.Logf("Put refused the symlinked temp file: %v", err)
+	}
+}
