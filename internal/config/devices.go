@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -31,6 +32,12 @@ var usbIDRe = regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$`)
 // moat.yaml without splitting it.
 type DeviceMatch struct {
 	USB string `yaml:"usb"`
+
+	// Interface picks one UART of a multi-interface bridge (FT2232H, CP2105,
+	// ESP-Prog): one USB device, several ttys, identical USB IDs. It is the
+	// interface number moat device list shows for each port. Empty matches
+	// single-UART devices unchanged.
+	Interface string `yaml:"interface,omitempty"`
 }
 
 // DeviceEntry requests access to one serial device.
@@ -85,6 +92,14 @@ func validateDevices(devs []DeviceEntry) error {
 		if !usbIDRe.MatchString(d.Match.USB) {
 			return fmt.Errorf("devices[%s]: match.usb must be a vid:pid pair, e.g. \"303a:1001\" — got %q\n"+
 				"  Run `moat device list` to see the USB IDs of attached devices", d.Name, d.Match.USB)
+		}
+
+		// The interface selector picks a UART of a multi-interface bridge; it
+		// is a plain number ("0", "1"). The empty string means "no selector",
+		// which keeps single-UART configs as they were.
+		if n, err := strconv.Atoi(strings.TrimSpace(d.Match.Interface)); d.Match.Interface != "" && (err != nil || n < 0 || d.Match.Interface != strings.TrimSpace(d.Match.Interface)) {
+			return fmt.Errorf("devices[%s]: match.interface must be a number (the UART index moat device list shows, "+
+				"e.g. \"1\" for the second port of a dual-UART bridge) — got %q", d.Name, d.Match.Interface)
 		}
 
 		if d.Baud < 0 {

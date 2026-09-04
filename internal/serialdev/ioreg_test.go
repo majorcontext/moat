@@ -400,3 +400,103 @@ func TestParseIoregUSBSkipsControllerHubsWithNoDeviceClass(t *testing.T) {
 		t.Fatalf("class-9 device must be skipped regardless of name, got %+v", got)
 	}
 }
+
+// ioregDualUART is the ioreg shape of a dual-UART bridge (FT2232H): one
+// IOUSBHostDevice, two IOUSBHostInterfaces, one serial client each. Written
+// from the structure of the existing captured samples (decimal IDs, tree
+// prefixes, IOSerialBSDClient property blocks).
+const ioregDualUART = `
++-o USB Dual UART@14100000  <class IOUSBHostDevice, id 0x100000f01, registered, matched, active, busy 0 (362 ms), retain 49>
+  | {
+  |   "idProduct" = 24577
+  |   "idVendor" = 1027
+  |   "USB Serial Number" = "FT7ABCDE"
+  |   "locationID" = 33667584
+  |   "kUSBProductString" = "USB Dual UART"
+  | }
+  |
+  +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100000f02, registered, matched, active, busy 0, retain 8>
+  | | {
+  | |   "idProduct" = 24577
+  | |   "idVendor" = 1027
+  | | }
+  | |
+  | +-o AppleUSBACMData  <class AppleUSBACMData, id 0x100000f03, registered, matched, active, busy 0, retain 7>
+  |   | {
+  |   |   "IOTTYBaseName" = "usbserial"
+  |   |   "IOTTYSuffix" = "FT7ABCD0"
+  |   | }
+  |   |
+  |   +-o IOSerialBSDClient  <class IOSerialBSDClient, id 0x100000f04, registered, matched, active, busy 0, retain 5>
+  |       {
+  |         "IOCalloutDevice" = "/dev/cu.usbserial-FT7ABCD0"
+  |       }
+  |
+  +-o IOUSBHostInterface@1  <class IOUSBHostInterface, id 0x100000f05, registered, matched, active, busy 0, retain 8>
+  | | {
+  | |   "idProduct" = 24577
+  | |   "idVendor" = 1027
+  | | }
+  | |
+  | +-o AppleUSBACMData  <class AppleUSBACMData, id 0x100000f06, registered, matched, active, busy 0, retain 7>
+  |   | {
+  |   |   "IOTTYBaseName" = "usbserial"
+  |   |   "IOTTYSuffix" = "FT7ABCD1"
+  |   | }
+  |   |
+  |   +-o IOSerialBSDClient  <class IOSerialBSDClient, id 0x100000f07, registered, matched, active, busy 0, retain 5>
+  |       {
+  |         "IOCalloutDevice" = "/dev/cu.usbserial-FT7ABCD1"
+  |       }
+  |
+`
+
+func TestParseIoregSeparatesDualUARTPorts(t *testing.T) {
+	// One plug, two ttys (FT2232H). Without one Device per serial client the
+	// clients overwrite each other: the sample parsed to a single device and
+	// port A was unreachable.
+	got, err := parseIoreg(strings.NewReader(ioregDualUART))
+	if err != nil {
+		t.Fatalf("parseIoreg: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d devices, want one per UART: %+v", len(got), got)
+	}
+	a, ok := findByPath(got, "/dev/cu.usbserial-FT7ABCD0")
+	if !ok {
+		t.Fatalf("port A not found in %+v", got)
+	}
+	b, ok := findByPath(got, "/dev/cu.usbserial-FT7ABCD1")
+	if !ok {
+		t.Fatalf("port B not found in %+v", got)
+	}
+	if a.Interface != "0" || b.Interface != "1" {
+		t.Fatalf("interfaces = %q/%q, want 0/1 — the only discriminator between the UARTs", a.Interface, b.Interface)
+	}
+	if a.Identity() == b.Identity() {
+		t.Fatalf("both UARTs share identity %+v; they cannot pin separately", a.Identity())
+	}
+	// The shared identity fields stay shared: both are the same bridge.
+	if a.VID != b.VID || a.PID != b.PID || a.Serial != b.Serial || a.PortPath != b.PortPath {
+		t.Fatalf("ports diverged beyond the interface: %+v vs %+v", a, b)
+	}
+}
+
+func TestParseIoregSingleUARTDeviceDoesNotSplit(t *testing.T) {
+	// Companion: the dual-UART split must not multiply single-UART hardware.
+	// The sample's modem has three interfaces but one serial client, so it
+	// must parse to exactly one Device.
+	got := parseSample(t)
+	byPath := map[string]int{}
+	for _, d := range got {
+		byPath[d.Path]++
+	}
+	for path, n := range byPath {
+		if n != 1 {
+			t.Fatalf("device %s appeared %d times; one serial client must yield one Device", path, n)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d devices, want the sample's 2: %+v", len(got), got)
+	}
+}

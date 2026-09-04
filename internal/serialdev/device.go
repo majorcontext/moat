@@ -31,6 +31,12 @@ type Device struct {
 	PortPath    string // physical topology: sysfs port path (Linux) or IOKit locationID (macOS)
 	Description string // human label for `moat device list`
 
+	// Interface distinguishes the UARTs of a multi-interface bridge (FT2232H,
+	// CP2105, ESP-Prog): one USB device, several ttys, everything else about
+	// them identical. It is the interface's number within the device — "0",
+	// "1" — and empty when the platform cannot see it.
+	Interface string
+
 	// isHub marks a USB hub (class 9). Set by the macOS parser from
 	// bDeviceClass; on Linux the hub roothubs are skipped by name instead
 	// (they start with "usb"). Only USBEnumerator reads it — a hub is host
@@ -40,10 +46,11 @@ type Device struct {
 
 // Identity is the subset of a Device used for approval decisions.
 type Identity struct {
-	VID      string
-	PID      string
-	Serial   string
-	PortPath string
+	VID       string
+	PID       string
+	Serial    string
+	PortPath  string
+	Interface string
 }
 
 // hubByName reports whether a product string names a hub. Over-filtering is
@@ -62,13 +69,34 @@ func hubByName(description string) bool {
 
 // Identity returns the device's approval identity.
 func (d Device) Identity() Identity {
-	return Identity{VID: d.VID, PID: d.PID, Serial: d.Serial, PortPath: d.PortPath}
+	return Identity{VID: d.VID, PID: d.PID, Serial: d.Serial, PortPath: d.PortPath, Interface: d.Interface}
+}
+
+// sameInterface reports whether a recorded interface and an attached one name
+// the same UART, normalizing the empty form onto "0". Only called for pins
+// that carry an interface value at all — a recorded empty value means "predates
+// the discriminator", not "interface 0", because CDC modems legitimately put
+// their single tty on interface 1.
+func sameInterface(recorded, attached string) bool {
+	return normalizeInterface(recorded) == normalizeInterface(attached)
+}
+
+// normalizeInterface maps the empty form onto the first interface.
+func normalizeInterface(s string) string {
+	if s == "" {
+		return "0"
+	}
+	return s
 }
 
 // Matcher selects devices by USB vendor and product ID.
 type Matcher struct {
 	VID string
 	PID string
+	// Interface narrows a match to one UART of a multi-interface bridge, where
+	// several ttys share a USB ID. Empty matches any interface, which keeps
+	// single-UART devices as they were.
+	Interface string
 }
 
 // Match returns devices matching m. Hex IDs compare case-insensitively so a
@@ -80,12 +108,19 @@ func Match(devs []Device, m Matcher) ([]Device, error) {
 	vid, pid := strings.ToLower(m.VID), strings.ToLower(m.PID)
 	var out []Device
 	for _, d := range devs {
-		if strings.ToLower(d.VID) == vid && strings.ToLower(d.PID) == pid {
-			out = append(out, d)
+		if strings.ToLower(d.VID) != vid || strings.ToLower(d.PID) != pid {
+			continue
 		}
+		if m.Interface != "" && normalizeInterface(d.Interface) != normalizeInterface(m.Interface) {
+			continue
+		}
+		out = append(out, d)
 	}
 	switch len(out) {
 	case 0:
+		if m.Interface != "" {
+			return nil, fmt.Errorf("%w for %s:%s interface %s", ErrNoMatch, vid, pid, m.Interface)
+		}
 		return nil, fmt.Errorf("%w for %s:%s", ErrNoMatch, vid, pid)
 	case 1:
 		return out, nil

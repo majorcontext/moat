@@ -60,6 +60,47 @@ func TestEnumerateSysfsReadsUSBIdentity(t *testing.T) {
 	if d.Description != "USB JTAG/serial debug unit" {
 		t.Fatalf("Description = %q, want the product string", d.Description)
 	}
+	if d.Interface != "0" {
+		t.Fatalf("Interface = %q, want 0 — the fixture's tty lives on interface 1-2:1.0", d.Interface)
+	}
+}
+
+func TestEnumerateSysfsSeparatesDualInterfaceBridges(t *testing.T) {
+	// One USB device, two ttys, one per interface (FT2232H shape: "1-2:1.0"
+	// and "1-2:1.1"). Without the interface discriminator the two Devices are
+	// byte-identical, Match reports them ambiguous, and the user is told to
+	// "unplug all but one" — of a single plug.
+	root := fakeSysfs(t, "FT7ABCDE")
+	usbDev := filepath.Join(root, "devices", "pci0000:00", "usb1", "1-2")
+	iface1 := filepath.Join(usbDev, "1-2:1.1")
+	if err := os.MkdirAll(iface1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "class", "tty", "ttyUSB1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(iface1, filepath.Join(root, "class", "tty", "ttyUSB1", "device")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := enumerateSysfs(root)
+	if err != nil {
+		t.Fatalf("enumerateSysfs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d devices, want one per tty: %+v", len(got), got)
+	}
+	ids := map[string]string{}
+	for _, d := range got {
+		ids[d.Interface] = d.Path
+	}
+	if ids["0"] != "/dev/ttyUSB0" || ids["1"] != "/dev/ttyUSB1" {
+		t.Fatalf("interface->path = %v, want 0->/dev/ttyUSB0 1->/dev/ttyUSB1", ids)
+	}
+	// The two identities must differ — that is what lets them pin separately.
+	if got[0].Identity() == got[1].Identity() {
+		t.Fatalf("both ttys share identity %+v; the interface discriminator is missing", got[0].Identity())
+	}
 }
 
 func TestEnumerateSysfsSerialLessDeviceStillEnumerates(t *testing.T) {

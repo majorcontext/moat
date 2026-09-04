@@ -190,3 +190,50 @@ func TestDevicesBaudIsOptional(t *testing.T) {
 		t.Fatalf("Baud = %d, want 0 meaning the tool decides", cfg.Devices[0].Baud)
 	}
 }
+
+func TestDevicesAcceptInterfaceSelector(t *testing.T) {
+	// The selector for the second UART of a dual-UART bridge. The match is
+	// written in block form because the selector nests under it.
+	const yaml = `name: x
+devices:
+  - name: esp32
+    match:
+      usb: "303a:1001"
+      interface: "1"
+`
+	cfg, err := loadDevicesYAML(t, yaml)
+	if err != nil {
+		t.Fatalf("interface selector should be accepted: %v", err)
+	}
+	if got := cfg.Devices[0].Match.Interface; got != "1" {
+		t.Fatalf("Match.Interface = %q, want \"1\"", got)
+	}
+}
+
+func TestDevicesInterfaceSelectorDefaultsToEmpty(t *testing.T) {
+	// Companion: without the selector nothing changes for single-UART
+	// configs — empty means "no selector", not interface 0.
+	cfg, err := loadDevicesYAML(t, validDevice)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Devices[0].Match.Interface; got != "" {
+		t.Fatalf("Match.Interface = %q, want empty", got)
+	}
+}
+
+func TestDevicesRejectBadInterfaceSelectors(t *testing.T) {
+	cases := map[string]string{
+		"non-numeric":    "uart1",
+		"negative":       "-1",
+		"hex":            "0x1",
+		"padded":         " 1",
+		"trailing space": "1 ",
+	}
+	for what, iface := range cases {
+		_, err := loadDevicesYAML(t, "name: x\ndevices:\n  - name: esp32\n    match: {usb: \"303a:1001\", interface: \""+iface+"\"}\n")
+		if err == nil {
+			t.Fatalf("%s interface selector should be rejected", what)
+		}
+	}
+}

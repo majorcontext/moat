@@ -381,11 +381,12 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 			ref, addr, err = s.serial.ListenAt(rc.RunID, serialbroker.Approved{
 				Name: spec.Name,
 				Device: serialdev.Device{
-					Path:     spec.Path,
-					VID:      spec.VID,
-					PID:      spec.PID,
-					Serial:   spec.Serial,
-					PortPath: spec.PortPath,
+					Path:      spec.Path,
+					VID:       spec.VID,
+					PID:       spec.PID,
+					Serial:    spec.Serial,
+					PortPath:  spec.PortPath,
+					Interface: spec.Interface,
 				},
 				Record: spec.Record,
 			}, bindAddr, port)
@@ -393,11 +394,12 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 			ref, addr, err = s.serial.Listen(rc.RunID, serialbroker.Approved{
 				Name: spec.Name,
 				Device: serialdev.Device{
-					Path:     spec.Path,
-					VID:      spec.VID,
-					PID:      spec.PID,
-					Serial:   spec.Serial,
-					PortPath: spec.PortPath,
+					Path:      spec.Path,
+					VID:       spec.VID,
+					PID:       spec.PID,
+					Serial:    spec.Serial,
+					PortPath:  spec.PortPath,
+					Interface: spec.Interface,
 				},
 				Record: spec.Record,
 			}, bindAddr)

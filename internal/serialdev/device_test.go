@@ -52,6 +52,54 @@ func TestMatchEmptyDeviceListIsNoMatch(t *testing.T) {
 	}
 }
 
+func TestMatchInterfaceSelectsOneUARTOfABridge(t *testing.T) {
+	// An FT2232H-style bridge: one USB device, two ttys, same IDs and serial.
+	bridge := []Device{
+		{Path: "/dev/ttyUSB0", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0"},
+		{Path: "/dev/ttyUSB1", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "1"},
+	}
+	got, err := Match(bridge, Matcher{VID: "0403", PID: "6010", Interface: "1"})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "/dev/ttyUSB1" {
+		t.Fatalf("got %+v, want only the interface-1 port", got)
+	}
+}
+
+func TestMatchWithoutInterfaceStaysAmbiguousOnABridge(t *testing.T) {
+	bridge := []Device{
+		{Path: "/dev/ttyUSB0", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0"},
+		{Path: "/dev/ttyUSB1", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "1"},
+	}
+	got, err := Match(bridge, Matcher{VID: "0403", PID: "6010"})
+	if !errors.Is(err, ErrAmbiguous) || len(got) != 2 {
+		t.Fatalf("no selector should not silently pick a port: got %+v err %v", got, err)
+	}
+}
+
+func TestMatchInterfaceWithoutThatInterfaceIsNoMatch(t *testing.T) {
+	// Companion to the selector test: asking for an interface the device does
+	// not expose must fail as a no-match, not fall back to matching any.
+	bridge := []Device{
+		{Path: "/dev/ttyUSB0", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0"},
+	}
+	if _, err := Match(bridge, Matcher{VID: "0403", PID: "6010", Interface: "1"}); !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("err = %v, want ErrNoMatch when the bridge has no such interface", err)
+	}
+}
+
+func TestMatchInterfaceSelectsNothingOnDevicesWithoutOne(t *testing.T) {
+	// Single-UART devices enumerated before the interface field, or on a
+	// platform that cannot see it: a stray selector must not match them.
+	legacy := []Device{
+		{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"},
+	}
+	if _, err := Match(legacy, Matcher{VID: "303a", PID: "1001", Interface: "1"}); !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("err = %v, want ErrNoMatch against a device with no interface number", err)
+	}
+}
+
 func TestIdentityCarriesApprovalFields(t *testing.T) {
 	d := Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"}
 	got := d.Identity()

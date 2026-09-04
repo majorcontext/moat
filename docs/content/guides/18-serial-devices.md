@@ -24,8 +24,8 @@ created — if the daemon is too old to serve them.
 
 ```bash
 $ moat device list
-DEVICE                   USB ID     SERIAL NUMBER      PIN  DESCRIPTION
-/dev/cu.usbserial-14220  10c4:ea60  0001              -    CP2102 USB to UART Bridge
+DEVICE                   USB ID     IFACE  SERIAL NUMBER      PIN  DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  -      0001              -    CP2102 USB to UART Bridge
 
 Pick a name for the device and add it to moat.yaml. The name is
 yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:
@@ -134,6 +134,35 @@ DEVICE        USB ID     SERIAL NUMBER         PIN  DESCRIPTION
 
 A port pin approves *whatever is plugged into that port*, so moving the device to another
 port fails until you either move it back or run `moat device forget`.
+
+### Multi-UART bridges
+
+Some debug bridges expose two or more UARTs over one USB device — an FT2232H (common on
+ESP-Prog boards), a CP2105, or an FT4232H. Their ports share everything: USB ID, serial
+number, physical port. `moat device list` shows one row per port, distinguished by the
+IFACE column:
+
+```
+DEVICE        USB ID     IFACE  SERIAL NUMBER      PIN      DESCRIPTION
+/dev/ttyUSB0  0403:6010  0      FT7ABCDE          jtag     Dual RS232-HS
+/dev/ttyUSB1  0403:6010  1      FT7ABCDE          uart     Dual RS232-HS
+```
+
+Declare each port as its own device, selecting it by interface number:
+
+```yaml
+devices:
+  - name: jtag
+    match: {usb: "0403:6010", interface: "0"}
+  - name: uart
+    match: {usb: "0403:6010", interface: "1"}
+```
+
+Each name is pinned independently — port 0 on `jtag`, port 1 on `uart` — so the two ports
+can be given to different runs. Without a selector, a bridge's ports are ambiguous and the
+run fails with a message showing this config.
+
+Devices that expose a single UART show `-` in the IFACE column and need no selector.
 
 ## What an agent can do with a serial device
 

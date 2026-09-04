@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -54,6 +55,10 @@ func enumerateSysfs(root string) ([]Device, error) {
 			Serial:      readAttr(usbDir, "serial"),
 			PortPath:    portPath,
 			Description: readAttr(usbDir, "product"),
+			// The tty's interface directory is "1-2:1.0" — port:config.iface.
+			// The trailing number distinguishes the UARTs of a multi-interface
+			// bridge (FT2232H, CP2105), which share every other attribute.
+			Interface: interfaceNumber(target),
 		})
 	}
 	return out, nil
@@ -72,6 +77,21 @@ func usbParent(dir string) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+// interfaceNumber extracts the USB interface number from a tty's sysfs
+// directory, whose name is "<port>:<config>.<interface>" — "1-2:1.0" is port
+// 1-2, configuration 1, interface 0. Dual-UART bridges (FT2232H, CP2105)
+// expose "1-2:1.0" and "1-2:1.1" for their two ttys; the trailing number is
+// the only attribute that tells them apart.
+func interfaceNumber(ifaceDir string) string {
+	name := filepath.Base(ifaceDir)
+	if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
+		if n, err := strconv.Atoi(name[i+1:]); err == nil {
+			return strconv.Itoa(n)
+		}
+	}
+	return ""
 }
 
 func readAttr(dir, name string) string {

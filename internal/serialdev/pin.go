@@ -18,11 +18,16 @@ var ErrPinMismatch = errors.New("serial device does not match its pin")
 
 // Pin records the identity a device name was first approved with.
 type Pin struct {
-	Name      string    `json:"name"`
-	VID       string    `json:"vid"`
-	PID       string    `json:"pid"`
-	Serial    string    `json:"serial,omitempty"`
-	PortPath  string    `json:"port_path,omitempty"`
+	Name     string `json:"name"`
+	VID      string `json:"vid"`
+	PID      string `json:"pid"`
+	Serial   string `json:"serial,omitempty"`
+	PortPath string `json:"port_path,omitempty"`
+	// Interface is the UART index of a multi-interface bridge (FT2232H,
+	// CP2105). Empty on pins written before the field existed, which skips
+	// the interface check rather than demanding "0": CDC modems expose their
+	// single tty on interface 1.
+	Interface string    `json:"interface,omitempty"`
 	FirstSeen time.Time `json:"first_seen"`
 }
 
@@ -34,6 +39,7 @@ func PinFor(name string, d Device) Pin {
 		PID:       strings.ToLower(d.PID),
 		Serial:    d.Serial,
 		PortPath:  d.PortPath,
+		Interface: d.Interface,
 		FirstSeen: time.Now().UTC(),
 	}
 }
@@ -53,6 +59,18 @@ func (p Pin) Verify(d Device) error {
 			"  If you intended to swap devices, run: moat device forget %s",
 			ErrPinMismatch, p.Name, p.VID, p.PID,
 			strings.ToLower(d.VID), strings.ToLower(d.PID), p.Name)
+	}
+	// The interface distinguishes the UARTs of a multi-interface bridge — one
+	// plug, two ports, everything else identical. Only pins recorded with a
+	// discriminator enforce it: a pin with no interface value predates the
+	// field, and CDC modems legitimately expose their tty on interface 1, so
+	// treating an empty value as "0" would fail hardware the pin was created
+	// against.
+	if p.Interface != "" && !sameInterface(p.Interface, d.Interface) {
+		return fmt.Errorf("%w: %q was pinned to interface %s but the attached device is interface %s\n"+
+			"  Two ports on one bridge must be declared as separate devices, each pinning its own interface\n"+
+			"  If you intended to move it, run: moat device forget %s",
+			ErrPinMismatch, p.Name, normalizeInterface(p.Interface), normalizeInterface(d.Interface), p.Name)
 	}
 	if p.Serial != "" {
 		if p.Serial != d.Serial {

@@ -70,10 +70,21 @@ func parseIoregUSB(r io.Reader) ([]Device, error) {
 
 // parseIoregAll walks ioreg's tree and returns every USB device with a USB ID,
 // serial or not. It is the shared core of parseIoreg and parseIoregUSB.
+//
+// A USB device with several serial clients (a dual-UART bridge such as an
+// FT2232H) yields one Device per client: the first takes the frame's Device,
+// and each later one clones it with its own path and interface number. Without
+// that, the clients overwrite each other and all but the last port are
+// unreachable.
 func parseIoregAll(r io.Reader) ([]Device, error) {
 	type frame struct {
 		depth int
 		dev   *Device
+		// extra holds the Devices created for serial clients after the
+		// first: a multi-interface bridge has one tty per interface.
+		extra     []Device
+		ifaceNum  string // interface number of the nearest IOUSBHostInterface@N below this device
+		ifaceSeen bool
 	}
 	var (
 		stack []frame
@@ -87,6 +98,7 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 			f := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			out = append(out, *f.dev)
+			out = append(out, f.extra...)
 		}
 	}
 
@@ -95,6 +107,15 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 	for sc.Scan() {
 		line := sc.Text()
 		if idx := strings.Index(line, "+-o "); idx >= 0 {
+			// A nested IOUSBHostInterface@N under the open USB device names the
+			// interface the serial clients below it belong to. It is the only
+			// discriminator between the UARTs of a dual-interface bridge.
+			if len(stack) > 0 && strings.Contains(line, "<class IOUSBHostInterface") {
+				if n := interfaceAt(line); n != "" {
+					stack[len(stack)-1].ifaceNum = n
+					stack[len(stack)-1].ifaceSeen = true
+				}
+			}
 			flushTo(idx)
 			if strings.Contains(line, "<class IOUSBHostDevice") {
 				stack = append(stack, frame{depth: idx, dev: &Device{}})
@@ -108,7 +129,8 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		if !ok {
 			continue
 		}
-		cur := stack[len(stack)-1].dev
+		f := &stack[len(stack)-1]
+		cur := f.dev
 		switch key {
 		case "idVendor":
 			cur.VID = decimalToHexID(val)
@@ -138,7 +160,23 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		case "IOCalloutDevice":
 			// Attach to the nearest enclosing USB device, not the innermost
 			// stack frame, since IOSerialBSDClient is not itself a USB device.
-			stack[len(stack)-1].dev.Path = strings.Trim(val, `"`)
+			path := strings.Trim(val, `"`)
+			if cur.Path == "" {
+				cur.Path = path
+				if f.ifaceSeen {
+					cur.Interface = f.ifaceNum
+				}
+				break
+			}
+			// A second serial client on the same USB device: another UART of
+			// the same bridge. Clone the device so both ports are enumerable
+			// and pinnable; the interface number tells them apart.
+			clone := *cur
+			clone.Path = path
+			if f.ifaceSeen {
+				clone.Interface = f.ifaceNum
+			}
+			f.extra = append(f.extra, clone)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -154,6 +192,24 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		}
 	}
 	return kept, nil
+}
+
+// interfaceAt pulls the trailing @N off an ioreg tree line naming
+// IOUSBHostInterface@N — the USB interface number of the clients below it.
+func interfaceAt(line string) string {
+	at := strings.LastIndex(line, "@")
+	if at < 0 {
+		return ""
+	}
+	rest := line[at+1:]
+	end := strings.IndexAny(rest, " ,")
+	if end >= 0 {
+		rest = rest[:end]
+	}
+	if n, err := strconv.Atoi(rest); err == nil {
+		return strconv.Itoa(n)
+	}
+	return ""
 }
 
 // parseIoregProperty pulls `"key" = value` out of a property line, which is

@@ -113,10 +113,10 @@ func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialde
 	// output with different meanings — the hardware serial number in this
 	// column, and the name you pick for the `name:` key in the snippet
 	// below. Spelling the column out keeps them apart.
-	fmt.Fprintln(tw, "DEVICE\tUSB ID\tSERIAL NUMBER\tPIN\tDESCRIPTION")
+	fmt.Fprintln(tw, "DEVICE\tUSB ID\tIFACE\tSERIAL NUMBER\tPIN\tDESCRIPTION")
 	for _, d := range devices {
-		fmt.Fprintf(tw, "%s\t%s:%s\t%s\t%s\t%s\n",
-			d.Path, d.VID, d.PID, serialOrDash(d), pinState(d, pins), descriptionOrDash(d))
+		fmt.Fprintf(tw, "%s\t%s:%s\t%s\t%s\t%s\t%s\n",
+			d.Path, d.VID, d.PID, interfaceOrDash(d), serialOrDash(d), pinState(d, pins), descriptionOrDash(d))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -208,6 +208,10 @@ func printOrphanPins(w io.Writer, pins []serialdev.Pin, attached []serialdev.Dev
 
 // pinState describes a device's approval status.
 func pinState(d serialdev.Device, pins []serialdev.Pin) string {
+	// A pin that matches on USB ID but fails Verify is only conclusive if no
+	// other pin verifies: the ports of one bridge share a USB ID, so pin "b"
+	// failing against port A just means port A is pin "a".
+	mismatch := ""
 	for _, p := range pins {
 		if !strings.EqualFold(p.VID, d.VID) || !strings.EqualFold(p.PID, d.PID) {
 			continue
@@ -215,10 +219,14 @@ func pinState(d serialdev.Device, pins []serialdev.Pin) string {
 		if p.Verify(d) == nil {
 			return p.Name
 		}
-		// Same model, different device: this is the case a run would reject.
-		return "MISMATCH (" + p.Name + ")"
+		if mismatch == "" {
+			mismatch = p.Name
+		}
 	}
-	return "-"
+	if mismatch == "" {
+		return "-"
+	}
+	return "MISMATCH (" + mismatch + ")"
 }
 
 func serialOrDash(d serialdev.Device) string {
@@ -228,6 +236,16 @@ func serialOrDash(d serialdev.Device) string {
 		return "- (pins by port " + d.PortPath + ")"
 	}
 	return d.Serial
+}
+
+// interfaceOrDash renders the USB interface number. A bridge exposing several
+// UARTs over one USB device lists one row per port with the same IDs, and the
+// interface number is what tells them apart in moat.yaml's interface selector.
+func interfaceOrDash(d serialdev.Device) string {
+	if d.Interface == "" {
+		return "-"
+	}
+	return d.Interface
 }
 
 func descriptionOrDash(d serialdev.Device) string {

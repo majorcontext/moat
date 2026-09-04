@@ -120,7 +120,10 @@ type SerialDeviceSpec struct {
 	PID      string `json:"pid,omitempty"`       // for audit entries
 	Serial   string `json:"serial,omitempty"`    // for audit entries
 	PortPath string `json:"port_path,omitempty"` // for audit entries
-	Record   string `json:"record,omitempty"`    // "events" (default) or "full"
+	// Interface is the UART index on multi-interface bridges (FT2232H,
+	// CP2105) — the only attribute distinguishing their two ports.
+	Interface string `json:"interface,omitempty"` // for audit entries
+	Record    string `json:"record,omitempty"`    // "events" (default) or "full"
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.

@@ -142,6 +142,75 @@ func TestAmbiguousMatchResolvesWhenPinned(t *testing.T) {
 	}
 }
 
+func TestInterfaceSelectorPicksOneUARTOfABridge(t *testing.T) {
+	// First use of a dual-UART bridge: without a pin to disambiguate, only the
+	// interface selector can pick a port. The chosen port must be the one the
+	// selector names, not whichever enumerated first.
+	bridge := []config.DeviceEntry{{
+		Name:  "port-a",
+		Match: config.DeviceMatch{USB: "0403:6010", Interface: "1"},
+	}}
+	enum := serialtest.NewFakeEnumerator(
+		serialdev.Device{Path: "/dev/ttyUSB0", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0"},
+		serialdev.Device{Path: "/dev/ttyUSB1", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "1"},
+	)
+	specs, err := ResolveDevices(context.Background(), bridge, enum, newPins(t))
+	if err != nil {
+		t.Fatalf("ResolveDevices: %v", err)
+	}
+	if len(specs) != 1 || specs[0].Path != "/dev/ttyUSB1" {
+		t.Fatalf("got %+v, want the interface-1 port", specs)
+	}
+	if specs[0].Interface != "1" {
+		t.Fatalf("spec.Interface = %q, want \"1\" so the broker binds this port again", specs[0].Interface)
+	}
+}
+
+func TestAmbiguousBridgeSuggestsTheInterfaceSelector(t *testing.T) {
+	// Two ports of one bridge with no selector: the fix is a config change,
+	// not unplugging — the error must say so.
+	bridge := []config.DeviceEntry{{
+		Name:  "port-a",
+		Match: config.DeviceMatch{USB: "0403:6010"},
+	}}
+	enum := serialtest.NewFakeEnumerator(
+		serialdev.Device{Path: "/dev/ttyUSB0", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0"},
+		serialdev.Device{Path: "/dev/ttyUSB1", VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "1"},
+	)
+	missing := DetectMissingDevices(context.Background(), bridge, enum, newPins(t))
+	if len(missing) != 1 || missing[0].Reason != ReasonDeviceAmbiguous {
+		t.Fatalf("got %+v, want one ambiguous finding", missing)
+	}
+	if !strings.Contains(missing[0].Detail, "interface:") {
+		t.Fatalf("detail %q should suggest the interface selector", missing[0].Detail)
+	}
+	// The snippet must name the user's own device entry.
+	if !strings.Contains(missing[0].Detail, "port-a") {
+		t.Fatalf("detail %q should show the configured device name", missing[0].Detail)
+	}
+}
+
+func TestAmbiguousDevicesStillSuggestUnplugging(t *testing.T) {
+	// Companion: two separate boards with the same USB ID are not a bridge —
+	// the interface selector would be wrong advice there.
+	other := esp32Device("BBB")
+	other.Path = "/dev/ttyUSB1"
+	other.PortPath = "1-3"
+
+	missing := DetectMissingDevices(context.Background(),
+		[]config.DeviceEntry{esp32Entry()},
+		serialtest.NewFakeEnumerator(esp32Device("AAA"), other), newPins(t))
+	if len(missing) != 1 || missing[0].Reason != ReasonDeviceAmbiguous {
+		t.Fatalf("got %+v, want one ambiguous finding", missing)
+	}
+	if !strings.Contains(missing[0].Detail, "Unplug") {
+		t.Fatalf("detail %q should still suggest unplugging", missing[0].Detail)
+	}
+	if strings.Contains(missing[0].Detail, "interface:") {
+		t.Fatalf("detail %q should not suggest the interface selector for separate boards", missing[0].Detail)
+	}
+}
+
 func TestDetectMissingDevicesReportsEnumerationFailure(t *testing.T) {
 	missing := DetectMissingDevices(context.Background(),
 		[]config.DeviceEntry{esp32Entry()},

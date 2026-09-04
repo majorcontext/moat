@@ -57,6 +57,61 @@ func TestDeviceListShowsThePinnedName(t *testing.T) {
 	}
 }
 
+func TestDeviceListShowsTheInterfaceNumber(t *testing.T) {
+	// A dual-UART bridge lists one row per port with identical USB IDs; the
+	// interface number is the column that tells them apart in moat.yaml.
+	portA := esp32()
+	portA.Interface = "0"
+	portB := esp32()
+	portB.Path = "/dev/ttyUSB1"
+	portB.Interface = "1"
+	out := render(t, []serialdev.Device{portA, portB}, nil)
+	if !strings.Contains(out, "IFACE") {
+		t.Fatalf("output should carry an IFACE column:\n%s", out)
+	}
+	// Both rows must show their interface: the selector is only usable if the
+	// number is visible on each row.
+	for _, row := range []string{
+		"/dev/ttyUSB0  303a:1001  0",
+		"/dev/ttyUSB1  303a:1001  1",
+	} {
+		if !strings.Contains(out, row) {
+			t.Fatalf("output missing %q:\n%s", row, out)
+		}
+	}
+}
+
+func TestDeviceListShowsDashWithoutInterface(t *testing.T) {
+	// Companion: single-UART devices (or platforms that cannot see the
+	// interface) must render a dash, not a confusing 0.
+	out := render(t, []serialdev.Device{esp32()}, nil)
+	if !strings.Contains(out, "/dev/ttyUSB0  303a:1001  -") {
+		t.Fatalf("a device with no interface number should show a dash in the IFACE column:\n%s", out)
+	}
+}
+
+func TestDeviceListSeparatesBridgePortsWithTheirOwnPins(t *testing.T) {
+	// Both ports of one bridge are pinned under different names: neither row
+	// may report a MISMATCH just because the sibling pin fails to verify
+	// against it.
+	portA := esp32()
+	portA.Interface = "0"
+	portB := esp32()
+	portB.Path = "/dev/ttyUSB1"
+	portB.Interface = "1"
+	pins := []serialdev.Pin{
+		serialdev.PinFor("port-a", portA),
+		serialdev.PinFor("port-b", portB),
+	}
+	out := render(t, []serialdev.Device{portA, portB}, pins)
+	if strings.Contains(out, "MISMATCH") {
+		t.Fatalf("sibling pins on one bridge must not flag a mismatch:\n%s", out)
+	}
+	if !strings.Contains(out, "port-a") || !strings.Contains(out, "port-b") {
+		t.Fatalf("both rows should show their pin names:\n%s", out)
+	}
+}
+
 func TestDeviceListFlagsAMismatchedDevice(t *testing.T) {
 	// Same model, different unit: this is exactly what a run would reject, so
 	// it must be visible before the run fails.

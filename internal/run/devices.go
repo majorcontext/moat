@@ -86,8 +86,9 @@ func resolveDevices(
 	for _, entry := range devs {
 		vid, pid := entry.VIDPID()
 		candidates, matchErr := serialdev.Match(attached, serialdev.Matcher{
-			VID: vid,
-			PID: pid,
+			VID:       vid,
+			PID:       pid,
+			Interface: entry.Match.Interface,
 		})
 
 		pin, pinned, perr := pins.Get(entry.Name)
@@ -129,9 +130,9 @@ func resolveDevices(
 			missing = append(missing, MissingDevice{
 				Name:   entry.Name,
 				Reason: ReasonDeviceAmbiguous,
-				Detail: fmt.Sprintf("%d attached devices match USB ID %s:%s — %s\n"+
-					"  Unplug all but one so moat can pin the right device",
-					len(candidates), vid, pid, describeDevices(candidates)),
+				Detail: fmt.Sprintf("%d attached devices match USB ID %s:%s — %s\n%s",
+					len(candidates), vid, pid, describeDevices(candidates),
+					ambiguousFix(entry, candidates)),
 			})
 			continue
 
@@ -197,10 +198,48 @@ func describeDevices(devs []serialdev.Device) string {
 		if id == "" {
 			id = "no serial, port " + d.PortPath
 		}
+		if d.Interface != "" {
+			id += ", interface " + d.Interface
+		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", d.Path, id))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ", ")
+}
+
+// ambiguousFix suggests how to disambiguate multiple matching devices. Two
+// ports on one USB bridge (same IDs, same serial, different interfaces) can be
+// told apart with the interface selector; anything else needs physical
+// unplugging.
+func ambiguousFix(entry config.DeviceEntry, candidates []serialdev.Device) string {
+	if len(candidates) < 2 || !sameBridge(candidates) {
+		return "  Unplug all but one so moat can pin the right device"
+	}
+	vid, pid := entry.VIDPID()
+	return fmt.Sprintf("  These look like ports of one multi-interface bridge. "+
+		"Declare each as its own device with an interface selector:\n"+
+		"    devices:\n"+
+		"      %s:\n"+
+		"        match:\n"+
+		"          usb: \"%s:%s\"\n"+
+		"          interface: \"0\"   # or \"1\", per `moat device list`",
+		entry.Name, vid, pid)
+}
+
+// sameBridge reports whether every candidate is a UART of one USB device: same
+// IDs, same serial, same port path, and each carries an interface number.
+func sameBridge(candidates []serialdev.Device) bool {
+	first := candidates[0]
+	if first.Interface == "" {
+		return false
+	}
+	for _, d := range candidates[1:] {
+		if d.Interface == "" || d.VID != first.VID || d.PID != first.PID ||
+			d.Serial != first.Serial || d.PortPath != first.PortPath {
+			return false
+		}
+	}
+	return true
 }
 
 // DetectMissingDevices reports configured devices the run cannot use, without
@@ -244,13 +283,14 @@ func ResolveDevices(
 			}
 		}
 		specs = append(specs, daemon.SerialDeviceSpec{
-			Name:     r.entry.Name,
-			Path:     r.device.Path,
-			VID:      r.device.VID,
-			PID:      r.device.PID,
-			Serial:   r.device.Serial,
-			PortPath: r.device.PortPath,
-			Record:   r.entry.RecordMode(),
+			Name:      r.entry.Name,
+			Path:      r.device.Path,
+			VID:       r.device.VID,
+			PID:       r.device.PID,
+			Serial:    r.device.Serial,
+			PortPath:  r.device.PortPath,
+			Interface: r.device.Interface,
+			Record:    r.entry.RecordMode(),
 		})
 	}
 	return specs, nil

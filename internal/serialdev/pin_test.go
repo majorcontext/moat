@@ -186,3 +186,45 @@ func TestOpenPinStoreOnEmptyFileIsEmptyNotAnError(t *testing.T) {
 		t.Fatalf("List returned %d pins, want 0", len(got))
 	}
 }
+
+func TestPinInterfaceDistinguishesDualUARTPorts(t *testing.T) {
+	// One bridge, two UARTs: the same VID/PID/serial/port, different ttys.
+	// Each port pins independently under its own config name.
+	portA := Device{VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "0", Path: "/dev/ttyUSB0"}
+	portB := Device{VID: "0403", PID: "6010", Serial: "FT7ABCDE", PortPath: "1-2", Interface: "1", Path: "/dev/ttyUSB1"}
+
+	pinA := PinFor("jtag", portA)
+	pinB := PinFor("uart", portB)
+	if err := pinA.Verify(portA); err != nil {
+		t.Fatalf("port A must verify against its own pin: %v", err)
+	}
+	if err := pinB.Verify(portB); err != nil {
+		t.Fatalf("port B must verify against its own pin: %v", err)
+	}
+	// The cross checks fail: a config pinned to one UART must not silently
+	// land on the other after a device forget.
+	if err := pinA.Verify(portB); !errors.Is(err, ErrPinMismatch) {
+		t.Fatalf("pin A vs port B: err = %v, want ErrPinMismatch", err)
+	}
+	if err := pinB.Verify(portA); !errors.Is(err, ErrPinMismatch) {
+		t.Fatalf("pin B vs port A: err = %v, want ErrPinMismatch", err)
+	}
+}
+
+func TestPinWithoutInterfaceStillVerifiesAnyInterface(t *testing.T) {
+	// Companion: pins written before the interface field existed have no
+	// value. They must keep verifying the hardware they were created against
+	// — a CDC modem's single tty lives on interface 1, so demanding "0"
+	// would break existing pins for hardware the user already approved.
+	old := PinFor("board", Device{VID: "12346", PID: "4097", Serial: "AAA", PortPath: "0x08320000"})
+	old.Interface = "" // as written by an older binary
+
+	modemOnIface1 := Device{VID: "12346", PID: "4097", Serial: "AAA", PortPath: "0x08320000", Interface: "1"}
+	if err := old.Verify(modemOnIface1); err != nil {
+		t.Fatalf("pre-discriminator pin must keep verifying: %v", err)
+	}
+	singleOnIface0 := Device{VID: "12346", PID: "4097", Serial: "AAA", PortPath: "0x08320000", Interface: "0"}
+	if err := old.Verify(singleOnIface0); err != nil {
+		t.Fatalf("pre-discriminator pin must keep verifying: %v", err)
+	}
+}
