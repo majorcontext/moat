@@ -48,9 +48,12 @@ func parseIoreg(r io.Reader) (serial []Device, err error) {
 }
 
 // parseIoregUSB extracts non-serial USB devices from the same output: every
-// USB device with an identity but no serial child, except hubs (USB class 9) —
-// showing the host's own hubs would be noise, not an answer to "what is
-// plugged in".
+// USB device with an identity but no serial child, except hubs — showing the
+// host's own hubs would be noise, not an answer to "what is plugged in".
+// Hubs are dropped by USB class (9) and, as a backstop, by product name:
+// real Macs carry internal hub controllers ("USB2 Controller Hub", e.g.
+// 0424:7240) whose ioreg blocks report no class-9 bDeviceClass, so the class
+// check alone lets them through.
 func parseIoregUSB(r io.Reader) ([]Device, error) {
 	all, err := parseIoregAll(r)
 	if err != nil {
@@ -58,11 +61,19 @@ func parseIoregUSB(r io.Reader) ([]Device, error) {
 	}
 	var out []Device
 	for _, d := range all {
-		if d.Path == "" && !d.isHub {
+		if d.Path == "" && !d.isHub && !hubByName(d.Description) {
 			out = append(out, d)
 		}
 	}
 	return out, nil
+}
+
+// hubByName reports whether a product string names a hub. Over-filtering is
+// acceptable here — hardware whose own name says "hub" is not something
+// anyone is matching in devices: — while under-filtering put two of the
+// host's controller hubs into the user-facing list.
+func hubByName(description string) bool {
+	return strings.Contains(strings.ToLower(description), "hub")
 }
 
 // parseIoregAll walks ioreg's tree and returns every USB device with a USB ID,

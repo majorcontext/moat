@@ -352,3 +352,51 @@ func TestParseIoregAndUSBPartitionTheSample(t *testing.T) {
 		t.Fatalf("serial = %d, usb = %d, want 2 and 1 (the SDR only in USB)", len(serial), len(usb))
 	}
 }
+
+// Real-hardware regression: Macs carry internal hub controllers (e.g.
+// Microchip 0424:7240 "USB2 Controller Hub") whose ioreg blocks report no
+// class-9 bDeviceClass. The class filter alone let them into the USB section
+// of `moat device list` on a real machine. The product name is the backstop.
+func TestParseIoregUSBSkipsControllerHubsWithNoDeviceClass(t *testing.T) {
+	const sample = `+-o USB2 Controller Hub@02300000  <class IOUSBHostDevice, id 0x100022bc0, registered, matched, active, busy 0 (210 ms), retain 16>
+  | {
+  |   "idProduct" = 29248
+  |   "idVendor" = 1060
+  |   "locationID" = 36765696
+  |   "USB Product Name" = "USB2 Controller Hub"
+  | }
+  |
+  +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100022bc1, registered, matched, active, busy 0 (3 ms), retain 5>
+  | {
+  |   "IOUserClientCreator" = "pid 154, WindowServer"
+  | }
+  |
+`
+	got, err := parseIoregUSB(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("internal controller hub must be skipped, got %+v", got)
+	}
+
+	// Companion: a class-9 device whose product string does NOT say "hub"
+	// (a downstream hub on a real bus) is still dropped by the class filter.
+	const classOnly = `+-o Bus-Powered Device@02310000  <class IOUSBHostDevice, id 0x100022bc2, registered, matched, active, busy 0 (5 ms), retain 9>
+  | {
+  |   "idProduct" = 1
+  |   "idVendor" = 2
+  |   "bDeviceClass" = 9
+  |   "locationID" = 36765696
+  |   "USB Product Name" = "Bus-Powered Device"
+  | }
+  |
+`
+	got, err = parseIoregUSB(strings.NewReader(classOnly))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("class-9 device must be skipped regardless of name, got %+v", got)
+	}
+}
