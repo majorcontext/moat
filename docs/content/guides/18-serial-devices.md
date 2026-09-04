@@ -82,7 +82,7 @@ missing feature.
 
 RFC2217 is the standard solution: it carries baud rate, DTR, RTS, and break over TCP, and
 reports the modem status lines (CTS, DSR, RI, CD) to a client that asks.
-Espressif [documents it](https://docs.espressif.com/projects/esptool/en/latest/esp32/esptool/remote-serial-ports.html)
+Espressif [documents it](https://docs.espressif.com/projects/esptool/en/latest/esp32/remote-serial-ports.html)
 as supporting DTR/RTS auto-reset "the same as for a local serial port," and recommends it
 for remote serial. Any pyserial-based tool accepts an `rfc2217://` URL in place of a port.
 
@@ -111,7 +111,7 @@ $ moat run -- esptool chip-id
 Error: cannot use the serial devices this run requires:
   board: serial device does not match its pin: "board" was pinned to serial 0001
   but the attached device reports 0002
-    If you intended to swap devices, run: moat device forget board
+  If you intended to swap devices, run: moat device forget board
 ```
 
 This is a hard failure, not a warning. Two boards of the same model are indistinguishable
@@ -189,9 +189,17 @@ An agent with a serial line can reflash the device, and can therefore brick or r
 it. That is inherent to the request — flashing is the point.
 
 The mitigation is consent at the device level: you choose which device, and moat enforces
-that it stays the same device — the first run states what it is approving and what the
+that it stays the same device — checked when the run starts, before the container is
+created — and the first run states what it is approving and what the
 approval grants (see [Approval and pinning](#approval-and-pinning)). Sandboxing does not
 help here, and moat does not pretend otherwise.
+
+Identity is not re-checked mid-run: the check happens once at start, against the
+devices attached at that moment. Unplugging the pinned board mid-run ends the session
+(the failed read tears it down and releases the claim), and replugging *the same* board
+lets a new session open it. But if a different board takes over the same device node
+while the run is active (Linux reuses `/dev/ttyUSB0` freely), the next connection opens
+it — the pin holds between runs, not within one.
 
 Two further boundaries are worth stating plainly:
 
@@ -243,7 +251,9 @@ way they always did.
 ## Observability
 
 Attach, detach, line-setting changes, DTR/RTS transitions, and byte counters are recorded
-for every session. Set `record: full` to capture the payload bytes too:
+for every session in the run's `devices.jsonl`, with attach/detach/error also in the
+tamper-evident audit chain (`moat audit <run-id>`). Set `record: full` to capture the
+payload bytes too, in `serial-<name>.capture` beside the other run artifacts:
 
 ```yaml
 devices:
@@ -253,7 +263,9 @@ devices:
 ```
 
 Full capture is opt-in because serial traffic carries firmware images and device
-credentials.
+credentials. A run configured for full capture whose capture file cannot be opened —
+disk full, permissions — degrades to events and records an error saying so; the session
+itself keeps running.
 
 ## Devices that are not serial at all
 

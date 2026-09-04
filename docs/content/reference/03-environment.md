@@ -155,6 +155,17 @@ The trace records terminal output, terminal input, and resize events with timest
 
 Each run overwrites the file, so give concurrent runs distinct paths. Traces are JSON regardless of the name; the `.tty` suffix used here is what moat's `.gitignore` excludes, so captures taken inside a repo are not committed by accident.
 
+### MOAT_SERIAL_TEST_DEVICE
+
+Test-only: names the host serial device the hardware E2E tests use. Without it those tests skip — CI has no serial hardware.
+
+```bash
+export MOAT_SERIAL_TEST_DEVICE=/dev/cu.usbmodem-14201
+go test -tags=e2e ./internal/e2e/ -run TestSerialDeviceEndToEnd
+```
+
+Set `MOAT_SERIAL_TEST_ECHO=1` too when the board runs firmware that echoes what it receives; the tests then also assert the data path. Both variables are read by the tests, never by `moat` itself.
+
 ### AWS credentials
 
 For AWS SSM secrets, standard AWS environment variables are used:
@@ -233,6 +244,36 @@ Unique identifier for the current run.
 echo $MOAT_RUN_ID
 # run_a1b2c3d4e5f6
 ```
+
+### MOAT_SERIAL_DEVICES
+
+Names of the serial devices available to the run, comma-separated. One variable
+per `devices` entry in moat.yaml.
+
+```bash
+# Inside container:
+echo $MOAT_SERIAL_DEVICES
+# board,probe
+```
+
+### MOAT_SERIAL_<NAME>_URL
+
+RFC2217 URL for one serial device, one variable per name in
+`MOAT_SERIAL_DEVICES`. Pass it to any pyserial-based tool in place of a device
+path — it carries baud rate, DTR/RTS, and break over TCP, which a device path
+cannot.
+
+```bash
+# Inside container:
+echo $MOAT_SERIAL_BOARD_URL
+# rfc2217://192.168.65.2:45231
+
+esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id
+```
+
+The name is uppercased with non-alphanumerics folded to underscores:
+`esp32-s3` becomes `MOAT_SERIAL_ESP32_S3_URL`. The URL is fixed when the
+container is created and stays valid across proxy daemon restarts.
 
 ### MOAT_RUN_NAME
 

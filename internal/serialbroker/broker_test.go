@@ -1044,12 +1044,22 @@ func TestEmptyRecordModeCapturesNoPayload(t *testing.T) {
 }
 
 func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
-	// A recorder that cannot be opened must not strand the hardware.
+	// A recorder that cannot be opened must not strand the hardware, and must
+	// not leave the audit trail claiming capture that did not happen.
 	fp := serialtest.NewFakePort(t)
+	var (
+		mu     sync.Mutex
+		events []serialbroker.Event
+	)
 	b := serialbroker.New(serialbroker.Options{
 		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
 		OpenRecorder: func(string, string) (io.WriteCloser, error) {
 			return nil, errors.New("disk full")
+		},
+		Log: func(e serialbroker.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, e)
 		},
 	})
 	t.Cleanup(func() { b.Close() })
@@ -1061,6 +1071,7 @@ func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
 	}
 
 	c := dial(t, addr)
+	defer c.Close()
 	if _, err := c.Write([]byte("still-works")); err != nil {
 		t.Fatal(err)
 	}
@@ -1071,6 +1082,25 @@ func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
 	}
 	if string(buf[:n]) != "still-works" {
 		t.Fatalf("device got %q, want still-works", buf[:n])
+	}
+
+	waitFor(t, "attach and error events", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(events) >= 2
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range events {
+		// record: full was configured, but no recorder could be opened, so no
+		// event may claim it: the audit entry stamped from this field would
+		// otherwise attest a capture file that does not exist.
+		if e.Record == serialbroker.RecordFull {
+			t.Fatalf("event %q claims record=full; capture degraded and must report events only: %+v", e.Kind, e)
+		}
+		if e.Kind == "error" && e.Detail == "" {
+			t.Fatalf("degraded capture must leave an error event explaining why: %+v", e)
+		}
 	}
 }
 

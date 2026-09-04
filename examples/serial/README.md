@@ -9,11 +9,10 @@ for how approval and pinning work.
 
 ## Setup
 
-Build and install the CLI from this branch, then plug the board in and find
-its USB ID:
+Build and install the CLI, then plug the board in and find its USB ID:
 
 ```bash
-go build -o /usr/local/bin/moat ./cmd/moat   # or: make build-cli
+make build-cli && install -m 0755 moat /usr/local/bin/moat
 moat proxy restart                            # the broker runs inside the proxy daemon
 moat device list
 ```
@@ -128,8 +127,16 @@ Attach, detach, baud changes, and DTR/RTS transitions are recorded per
 session:
 
 ```bash
-moat logs <run-id>          # device events appear in the session log
 moat audit <run-id>         # attach/detach are in the tamper-evident chain
+```
+
+Every event — including the per-signal chatter — also lands in the run's
+`devices.jsonl` (`~/.moat/runs/<run-id>/devices.jsonl`), and `record: full`
+payload bytes in `serial-<name>.capture` beside it. Both are JSONL; `jq` reads
+them directly:
+
+```bash
+jq -r '.kind + " " + .detail' ~/.moat/runs/<run-id>/devices.jsonl
 ```
 
 ## Check that pinning works
@@ -138,7 +145,7 @@ The security property worth verifying by hand, because it only shows up with
 two boards of the same model:
 
 1. Run the `chip-id` command above. The first run pins that board's USB
-   serial number (the value printed in `moat device list`'s SERIAL
+   serial number (the value printed in `moat device list`'s SERIAL NUMBER
    column).
 2. Unplug it, plug in a second board of the same model, and run the command
    again.

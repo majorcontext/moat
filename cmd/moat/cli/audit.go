@@ -230,6 +230,40 @@ func formatEntryData(e *audit.Entry) string {
 		}
 		return line
 
+	case audit.EntryDevice:
+		name, _ := data["name"].(string)
+		action, _ := data["action"].(string)
+		vid, _ := data["vid"].(string)
+		pid, _ := data["pid"].(string)
+		serial, _ := data["serial"].(string)
+		record, _ := data["record_mode"].(string)
+		tx, _ := data["tx_bytes"].(float64)
+		rx, _ := data["rx_bytes"].(float64)
+		// Identity and capture mode lead: they are the proof the entry
+		// exists for, so they must survive even when the detail runs long.
+		s := fmt.Sprintf("%s %s", action, name)
+		if vid != "" || pid != "" {
+			s += fmt.Sprintf(" %s:%s", vid, pid)
+		}
+		if serial != "" {
+			s += fmt.Sprintf(" serial=%s", serial)
+		}
+		// "events" is the documented default; stating it adds nothing, the
+		// way an empty field would.
+		if record != "" && record != "events" {
+			s += fmt.Sprintf(" record=%s", record)
+		}
+		if tx > 0 || rx > 0 {
+			s += fmt.Sprintf(" tx=%d rx=%d", int64(tx), int64(rx))
+		}
+		if detail, _ := data["detail"].(string); detail != "" {
+			if len(detail) > 80 {
+				detail = detail[:80] + "…"
+			}
+			s += fmt.Sprintf(" — %s", detail)
+		}
+		return s
+
 	default:
 		b, _ := json.Marshal(data)
 		s := string(b)

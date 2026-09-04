@@ -37,7 +37,7 @@ type Approved struct {
 type Event struct {
 	RunID  string
 	Device string // config name, e.g. "esp32"
-	Kind   string // attach, detach, error, conflict, settings, modem, break
+	Kind   string // attach, detach, error, conflict, settings, modem, break, purge
 	Detail string
 
 	DevicePath   string // host device node

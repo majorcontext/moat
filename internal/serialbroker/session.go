@@ -87,7 +87,9 @@ func (l *listener) handle(conn net.Conn) {
 	port, err := l.broker.openPort(l.approved.Device.Path)
 	if err != nil {
 		log.Debug("opening serial device failed", "device", l.approved.Name, "err", err)
-		l.emit("error", err.Error(), 0, 0)
+		// Session-scoped: this session never opened a recorder, so the event
+		// must not claim the configured capture mode.
+		s.emitError(err.Error())
 		return
 	}
 	s.setPort(port)
@@ -104,31 +106,43 @@ func (l *listener) handle(conn net.Conn) {
 	// Payload capture is opt-in: serial carries firmware images and device
 	// credentials. A recorder that cannot be opened degrades to events only
 	// rather than failing the session and stranding the hardware.
+	//
+	// recordMode is set only on success, so every event this session emits —
+	// including the degradation error below — reports the capture mode
+	// actually in force, never the configured one.
 	if l.approved.Record == RecordFull && l.broker.openRecorder != nil {
 		rec, rerr := l.broker.openRecorder(l.runID, l.approved.Name)
 		if rerr != nil {
 			log.Warn("serial payload capture unavailable", "device", l.approved.Name, "err", rerr)
-			l.emit("error", "payload capture unavailable: "+rerr.Error(), 0, 0)
+			s.emitError("payload capture unavailable: " + rerr.Error())
 		} else {
 			s.recorder = rec
+			s.recordMode = RecordFull
 			defer rec.Close()
 		}
 	}
 
-	l.emit("attach", l.approved.Device.Path, 0, 0)
+	s.emit("attach", l.approved.Device.Path)
 
 	s.run()
 
-	l.emit("detach", "", s.tx.Load(), s.rx.Load())
+	s.emitCounters("detach", "", s.tx.Load(), s.rx.Load())
 }
 
-// emit reports an event carrying this device's identity.
+// emit reports an event carrying this device's identity and configured capture
+// mode. It serves events with no session to describe — a refused connection, a
+// port that failed to open. Events scoped to a live session go through the
+// session's own emit, which stamps the mode actually in force.
 func (l *listener) emit(kind, detail string, tx, rx int64) {
-	record := l.approved.Record
+	l.emitEvent(kind, detail, tx, rx, l.approved.Record)
+}
+
+// emitEvent reports an event carrying this device's identity and capture mode.
+// An empty record is Approved's documented default, stamped here rather than
+// trusting every caller to normalize: an empty Record reads downstream as
+// "unknown" where the audit trail wants "events".
+func (l *listener) emitEvent(kind, detail string, tx, rx int64, record string) {
 	if record == "" {
-		// Approved's documented default. Stamped here rather than trusting
-		// every caller to normalize: an empty Record reads downstream as
-		// "unknown" where the audit trail wants "events".
 		record = "events"
 	}
 	l.broker.emit(Event{
@@ -175,6 +189,17 @@ type session struct {
 	// handleCommand writes them after releasing the lock.
 	pendingReplies [][]byte
 	recorder       io.WriteCloser
+	// recordMode is the capture mode actually in force: RecordFull once a
+	// recorder has been attached to this session, empty otherwise — including
+	// when record: full was configured but the recorder could not be opened.
+	// It is written in handle before the pumps start and never after, so the
+	// goroutine-start edge orders it against every read without the mutex —
+	// which matters because the session's emit runs inside
+	// handleCommandLocked, where taking s.mu would deadlock.
+	//
+	// The audit trail stamps this onto session-boundary events as
+	// record_mode, so it must never claim capture that did not happen.
+	recordMode string
 }
 
 // record writes captured payload bytes, if capture is enabled.
@@ -599,8 +624,17 @@ func (s *session) writeReply(cmd byte, payload []byte) {
 	}
 }
 
+// emit reports a session-scoped event: the capture mode stamped on it is the
+// one actually in force, not the configured one — a degraded recorder must not
+// leave an audit trail claiming capture that did not happen.
 func (s *session) emit(kind, detail string) {
-	s.listener.emit(kind, detail, 0, 0)
+	s.listener.emitEvent(kind, detail, 0, 0, s.recordMode)
+}
+
+// emitCounters is emit for the detach event, which carries the session's byte
+// counters.
+func (s *session) emitCounters(kind, detail string, tx, rx int64) {
+	s.listener.emitEvent(kind, detail, tx, rx, s.recordMode)
 }
 
 func (s *session) emitError(detail string) {
