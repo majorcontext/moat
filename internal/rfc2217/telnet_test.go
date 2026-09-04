@@ -354,3 +354,43 @@ func TestWriteNegotiate(t *testing.T) {
 		t.Fatalf("got % x, want % x", buf.Bytes(), want)
 	}
 }
+
+func TestReaderIgnoresIACNoArgumentCommands(t *testing.T) {
+	// IAC <NOP/DM/...> is two bytes with no option argument; the reader must
+	// return to data state and keep the surrounding bytes, rather than
+	// consuming the next byte as a phantom option.
+	for _, cmd := range []byte{0xF1 /* NOP */, 0xF2 /* DM */, 0xF6 /* AYT */, 0x06 /* TIMING-MARK */} {
+		wire := []byte{'a', iac, cmd, 'b'}
+		r := NewReader(bytes.NewReader(wire))
+		data, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("cmd %#x: ReadAll: %v", cmd, err)
+		}
+		if string(data) != "ab" {
+			t.Fatalf("cmd %#x: data = %q, want %q", cmd, data, "ab")
+		}
+	}
+}
+
+func TestReaderDropsASubnegotiationWithAMidPayloadIACCommand(t *testing.T) {
+	// IAC <other> inside a subnegotiation is malformed: the peer should have
+	// doubled the IAC or sent IAC SE. The partial command is dropped and the
+	// reader resynchronizes on data, rather than guessing at a meaning.
+	wire := []byte{
+		'a', iac, sb, OptionComPort, CmdSetControl, 0x08,
+		iac, 0xEE /* neither IAC nor SE */, 'b',
+	}
+	r := NewReader(bytes.NewReader(wire))
+	var cmds int
+	r.OnCommand = func(byte, []byte) { cmds++ }
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if cmds != 0 {
+		t.Fatalf("%d commands dispatched, want the malformed one dropped", cmds)
+	}
+	if string(data) != "ab" {
+		t.Fatalf("data = %q, want %q — the reader must resynchronize on data", data, "ab")
+	}
+}

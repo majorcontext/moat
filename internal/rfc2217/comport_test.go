@@ -42,11 +42,47 @@ func TestControlValuesAreDistinct(t *testing.T) {
 	}
 }
 
-func TestControlNameCoversEverySignal(t *testing.T) {
-	for _, v := range []byte{ControlBreakOn, ControlBreakOff, ControlDTROn, ControlDTROff, ControlRTSOn, ControlRTSOff} {
-		if ControlName(v) == "" {
-			t.Fatalf("ControlName(%d) is empty; logs and audit entries need a label", v)
+func TestControlNameLabelsEveryDefinedValue(t *testing.T) {
+	// ControlName is the `detail` field of every modem/break audit entry and
+	// devices.jsonl row, so the label must be the right one — returning
+	// "dtr-on" for RTS-off passes an emptiness check and corrupts the trail.
+	//
+	// Every value the protocol defines gets its expected label, and the
+	// companion (unknown value) lives below.
+	labels := map[byte]string{
+		ControlQueryFlow:     "flow-query",
+		ControlFlowNone:      "flow-none",
+		ControlFlowXONXOFF:   "flow-xonxoff",
+		ControlFlowRTSCTS:    "flow-rtscts",
+		ControlQueryBreak:    "break-query",
+		ControlBreakOn:       "break-on",
+		ControlBreakOff:      "break-off",
+		ControlQueryDTR:      "dtr-query",
+		ControlDTROn:         "dtr-on",
+		ControlDTROff:        "dtr-off",
+		ControlQueryRTS:      "rts-query",
+		ControlRTSOn:         "rts-on",
+		ControlRTSOff:        "rts-off",
+		ControlQueryFlowIn:   "flow-in-query",
+		ControlFlowNoneIn:    "flow-in-none",
+		ControlFlowXONXOFFIn: "flow-in-xonxoff",
+		ControlFlowRTSCTSIn:  "flow-in-rtscts",
+		ControlFlowDCD:       "flow-dcd",
+		ControlFlowDTRIn:     "flow-in-dtr",
+		ControlFlowDSR:       "flow-dsr",
+	}
+	for v, want := range labels {
+		if got := ControlName(v); got != want {
+			t.Errorf("ControlName(%d) = %q, want %q", v, got, want)
 		}
+	}
+	// A duplicate label would blur two different signals in the audit trail.
+	seen := map[string]byte{}
+	for v, want := range labels {
+		if prev, dup := seen[want]; dup {
+			t.Errorf("ControlName(%d) and ControlName(%d) share the label %q", prev, v, want)
+		}
+		seen[want] = v
 	}
 }
 

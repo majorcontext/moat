@@ -2,8 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/serialdev"
 )
@@ -43,9 +47,26 @@ func TestDeviceListShowsIdentityAndSuggestsConfig(t *testing.T) {
 }
 
 func TestDeviceListShowsUnpinnedDevicesAsDash(t *testing.T) {
+	// The PIN column (5th) must render "-" for an unpinned device: that dash
+	// is what tells the user the next run will prompt for approval. The
+	// tabwriter pads columns, so the assertion matches on the padded row.
 	out := render(t, []serialdev.Device{esp32()}, nil)
-	if !strings.Contains(out, "\t") && !strings.Contains(out, "-") {
-		t.Fatalf("an unpinned device should render a dash in the PIN column:\n%s", out)
+	lines := strings.Split(out, "\n")
+	var row string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "/dev/ttyUSB0") {
+			row = l
+		}
+	}
+	if row == "" {
+		t.Fatalf("no row for the device in:\n%s", out)
+	}
+	fields := strings.Fields(row)
+	// DEVICE USB-ID IFACE SERIAL-NUMBER PIN DESCRIPTION; the description is
+	// free text and may itself contain spaces, so index from the left for the
+	// leading columns and check the PIN field directly.
+	if len(fields) < 5 || fields[4] != "-" {
+		t.Fatalf("PIN column = %v, want -:\n%s", fields, row)
 	}
 }
 
@@ -265,5 +286,70 @@ func TestDeviceListNoUSBDevicesPrintsNoUSBSection(t *testing.T) {
 	out = renderUSB(t, nil, nil, nil)
 	if strings.Contains(out, "Other USB devices") {
 		t.Fatalf("USB section should not appear with no USB devices:\n%s", out)
+	}
+}
+
+// runForget executes `moat device forget` with MOAT_HOME pointing at a temp
+// home, returning stdout. The command reads its pin store through
+// DefaultPinPath(), which MOAT_HOME relocates — that indirection is what makes
+// the command testable without touching a real device pin.
+func runForget(t *testing.T, pins []serialdev.Pin, name string) (string, error) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("MOAT_HOME", home)
+	if len(pins) > 0 {
+		store, err := serialdev.OpenPinStore(filepath.Join(home, "devices.json"))
+		if err != nil {
+			t.Fatalf("OpenPinStore: %v", err)
+		}
+		for _, p := range pins {
+			if err := store.Put(p); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+		}
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.SetOut(&out)
+	err := forgetDevice(cmd, []string{name})
+	return out.String(), err
+}
+
+func TestDeviceForgetRemovesThePin(t *testing.T) {
+	out, err := runForget(t, []serialdev.Pin{serialdev.PinFor("esp32", esp32())}, "esp32")
+	if err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	if !strings.Contains(out, "Forgot device esp32") {
+		t.Fatalf("output should confirm the forget:\n%s", out)
+	}
+	// The companion assertion: the pin is really gone, not merely reported so.
+	home := os.Getenv("MOAT_HOME")
+	store, err := serialdev.OpenPinStore(filepath.Join(home, "devices.json"))
+	if err != nil {
+		t.Fatalf("reopening the pin store: %v", err)
+	}
+	defer store.Close() //nolint:errcheck // test cleanup
+	if _, ok, err := store.Get("esp32"); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if ok {
+		t.Fatal("the pin must be gone after forgetting it")
+	}
+}
+
+func TestDeviceForgetOfAnUnknownNameIsAnActionableError(t *testing.T) {
+	_, err := runForget(t, nil, "esp32")
+	if err == nil {
+		t.Fatal("forgetting an unpinned name must fail")
+	}
+	if !strings.Contains(err.Error(), `no device named "esp32" is pinned`) {
+		t.Fatalf("error %q should name the missing pin and point at device list", err)
+	}
+	if !strings.Contains(err.Error(), "moat device list") {
+		t.Fatalf("error %q should point at `moat device list`", err)
 	}
 }

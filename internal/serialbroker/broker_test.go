@@ -1113,6 +1113,12 @@ func TestEventsCarryDeviceIdentity(t *testing.T) {
 	if e.DevicePath != "/dev/ttyUSB0" {
 		t.Fatalf("DevicePath = %q, want the host device node", e.DevicePath)
 	}
+	// The record mode is the audit trail's proof that payload capture was
+	// enabled for the session; an empty value here reads downstream as
+	// "events only" even when record: full was configured.
+	if e.Record != "events" {
+		t.Fatalf("Record = %q, want the events default", e.Record)
+	}
 }
 
 func TestOversizedSubnegotiationDropsTheSession(t *testing.T) {
@@ -1480,5 +1486,568 @@ func TestModemStateMaskIsAcknowledged(t *testing.T) {
 	}
 	if len(payload) != 1 || payload[0] != 0x1F {
 		t.Fatalf("mask echo = % x, want [1f]", payload)
+	}
+}
+
+// TestParityReachesThePort pins the seam the parity unit tests cannot see:
+// parityFromWire's result must land in the Port's ApplySettings, not merely in
+// the broker's reply. The fake records every settings change it was given, so
+// an odd↔even swap anywhere in that plumbing shows up here.
+// TestPySerialOpenSequence sends parity none only.
+func TestParityReachesThePort(t *testing.T) {
+	cases := []struct {
+		wire byte
+		want uint8
+	}{
+		{2, serialport.ParityOdd},
+		{3, serialport.ParityEven},
+		{1, serialport.ParityNone},
+	}
+	for _, c := range cases {
+		_, fp, addr := newBroker(t)
+		conn := dial(t, addr)
+		if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if err := rfc2217.WriteCommand(conn, rfc2217.CmdSetParity, []byte{c.wire}); err != nil {
+			t.Fatalf("sending parity %d: %v", c.wire, err)
+		}
+		readCommand(t, conn) // confirmation reply
+		settings := fp.SettingsSequence()
+		if len(settings) == 0 || settings[len(settings)-1].Parity != c.want {
+			t.Errorf("parity %d: port settings = %+v, want last entry parity %d", c.wire, settings, c.want)
+		}
+		conn.Close()
+	}
+}
+
+// TestConflictEventNamesTheDevice covers the `conflict` audit event, which the
+// refused-connection test cannot see: it asserts only that the socket closes.
+// The event is how a claim conflict surfaces in devices.jsonl and the audit
+// chain — the run's owner learns the device was busy, not merely unreachable.
+func TestConflictEventNamesTheDevice(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log:      func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	first := dial(t, addr)
+	if _, err := first.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 8)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+
+	second := dial(t, addr)
+	defer second.Close()
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "conflict" {
+				if e.Device != "esp32" {
+					t.Errorf("conflict event device = %q, want esp32", e.Device)
+				}
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no conflict event fired for the refused connection")
+		}
+	}
+}
+
+// TestSetModemFailureEmitsAnErrorEventAndKeepsTheSessionAlive exercises the
+// broker's error-event path: a device that cannot drive its control lines
+// (unplug mid-command, EIO) must surface as an `error` event rather than die
+// silently, and the session must keep answering — the client is told what
+// failed through the event stream while the data path continues.
+func TestSetModemFailureEmitsAnErrorEventAndKeepsTheSessionAlive(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log:      func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	conn := dial(t, addr)
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	fp.SetModemError(errors.New("input/output error"))
+	if err := rfc2217.WriteCommand(conn, rfc2217.CmdSetControl, []byte{rfc2217.ControlDTROn}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The command is still answered (echo of the request byte): SET-CONTROL
+	// replies are mandatory, and swallowing one hangs pyserial's open().
+	cmd, payload := readCommand(t, conn)
+	if cmd != rfc2217.CmdSetControl+100 {
+		t.Fatalf("reply cmd = %d, want %d", cmd, rfc2217.CmdSetControl+100)
+	}
+	if len(payload) != 1 || payload[0] != rfc2217.ControlDTROn {
+		t.Fatalf("reply payload = %v, want the echoed DTR-on", payload)
+	}
+
+	// And the failure surfaced as an error event.
+	sawError := false
+	for !sawError {
+		select {
+		case e := <-events:
+			if e.Kind == "error" && strings.Contains(e.Detail, "setting modem lines") {
+				sawError = true
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no error event for the failed SetModem")
+		}
+	}
+
+	// The session survives: a subsequent command is answered normally.
+	fp.SetModemError(nil)
+	if err := rfc2217.WriteCommand(conn, rfc2217.CmdSetControl, []byte{rfc2217.ControlRTSOn}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, payload = readCommand(t, conn)
+	if cmd != rfc2217.CmdSetControl+100 || len(payload) != 1 || payload[0] != rfc2217.ControlRTSOn {
+		t.Fatalf("reply after recovery = (%d, %v)", cmd, payload)
+	}
+}
+
+// TestApplySettingsFailureEmitsAnErrorEvent covers the other command-path
+// error branch: a baud change the device rejects (device unplugged mid-open,
+// or a rate it cannot clock) must reach the event stream, not vanish.
+func TestApplySettingsFailureEmitsAnErrorEvent(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log:      func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	conn := dial(t, addr)
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	fp.SetApplySettingsError(errors.New("input/output error"))
+	if err := rfc2217.WriteCommand(conn, rfc2217.CmdSetBaudRate, rfc2217.EncodeBaud(115200)); err != nil {
+		t.Fatal(err)
+	}
+	readCommand(t, conn) // the reply still arrives (echo of the current baud)
+
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "error" && strings.Contains(e.Detail, "applying line settings") {
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no error event for the failed ApplySettings")
+		}
+	}
+}
+
+// TestDeviceReadFailureEndsTheSessionAndDetaches covers the unplug lifecycle
+// step: a device read error (EIO on unplug) must tear the session down and
+// emit the detach event that releases the claim — a session that stayed
+// wedged would hold the device forever.
+func TestDeviceReadFailureEndsTheSessionAndDetaches(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log:      func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	conn := dial(t, addr)
+	if _, err := conn.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 8)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+
+	fp.SetReadError(errors.New("input/output error"))
+	// The device pump sits blocked in the read that the error must fail; a
+	// real unplug fails the in-flight read itself, and the fake returns the
+	// scripted error only on the next call. Unblock the in-flight read with a
+	// byte from the device side so the pump loops into it.
+	if _, err := fp.Peer().Write([]byte("y")); err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "detach" {
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("session did not detach after the device read failed")
+		}
+	}
+}
+
+// TestOpenFailureEmitsAnErrorEvent covers the session-open error branch: a
+// device that disappears between approval and connection must surface as an
+// error event, not a silently refused connection.
+func TestOpenFailureEmitsAnErrorEvent(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) {
+			return nil, errors.New("no such device")
+		},
+		Log: func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	conn := dial(t, addr)
+	defer conn.Close()
+
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "error" && strings.Contains(e.Detail, "no such device") {
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no error event for the failed open")
+		}
+	}
+}
+
+// TestCloseIsIdempotentAndListenAfterCloseFails pins two lifecycle edges:
+// Close twice must not panic (the daemon calls it from several teardown
+// paths), and a Listen after Close must fail with a named error rather than
+// binding a listener nobody will tear down.
+func TestCloseIsIdempotentAndListenAfterCloseFails(t *testing.T) {
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return serialtest.NewFakePort(t), nil },
+	})
+	if _, _, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, ""); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("second Close must be a no-op, got %v", err)
+	}
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, ""); err == nil {
+		t.Fatal("Listen after Close must fail")
+	} else if !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("Listen after Close error %q should name the closed broker", err)
+	}
+}
+
+// TestRevokeClosesTheRunsSessions covers Revoke against an active session:
+// the container's connection must be closed and the device released for
+// another run.
+func TestRevokeClosesTheRunsSessions(t *testing.T) {
+	var mu sync.Mutex
+	ports := []*serialtest.FakePort{}
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			p := serialtest.NewFakePort(t)
+			ports = append(ports, p)
+			return p, nil
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	conn := dial(t, addr)
+	if _, err := conn.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session to open the device", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(ports) == 1
+	})
+
+	b.Revoke("run-a")
+
+	// The connection the run held is closed...
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("the revoked run's connection must be closed")
+	}
+	// ...and the device is free for another run.
+	if _, addr2, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, ""); err != nil {
+		t.Fatalf("Listen by another run after Revoke: %v", err)
+	} else {
+		_ = addr2
+	}
+}
+
+// TestZeroBaudQueryAnswersTheCurrentRate covers the SET-BAUDRATE query form:
+// a zero value asks for the current rate rather than setting one, and the
+// reply must carry the current baud — pyserial sends the query in some
+// connect paths and a reply of 0 reads as an unusable port.
+func TestZeroBaudQueryAnswersTheCurrentRate(t *testing.T) {
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := c.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set a known rate first, so the query has something to report.
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdSetBaudRate, rfc2217.EncodeBaud(115200)); err != nil {
+		t.Fatal(err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.CmdSetBaudRate+100 {
+		t.Fatalf("set reply cmd = %d, want %d", cmd, rfc2217.CmdSetBaudRate+100)
+	}
+	if got := rfc2217.DecodeBaud(payload); got != 115200 {
+		t.Fatalf("set reply baud = %d, want 115200", got)
+	}
+
+	// Now the query: value 0 must answer with the current rate, not 0.
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdSetBaudRate, rfc2217.EncodeBaud(0)); err != nil {
+		t.Fatal(err)
+	}
+	cmd, payload = readCommand(t, c)
+	if cmd != rfc2217.CmdSetBaudRate+100 {
+		t.Fatalf("query reply cmd = %d, want %d", cmd, rfc2217.CmdSetBaudRate+100)
+	}
+	if got := rfc2217.DecodeBaud(payload); got != 115200 {
+		t.Fatalf("query reply baud = %d, want the current 115200", got)
+	}
+}
+
+// TestUndefinedPurgeValueIsAcknowledgedNotDropped covers the hostile-input
+// branch: an undefined PURGE value still gets the echo reply, because a client
+// that blocks on the ack would otherwise hang on a value it sent by mistake.
+func TestUndefinedPurgeValueIsAcknowledgedNotDropped(t *testing.T) {
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := c.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdPurgeData, []byte{0x7B}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.CmdPurgeData+100 {
+		t.Fatalf("reply cmd = %d, want %d", cmd, rfc2217.CmdPurgeData+100)
+	}
+	if len(payload) != 1 || payload[0] != 0x7B {
+		t.Fatalf("reply payload = % x, want the echoed 7b", payload)
+	}
+}
+
+// TestUnsupportedWillOfferIsAnsweredDont covers the negotiation branch: a
+// client offering WILL <unsupported> must get DONT — silence stalls a client
+// that waits for an answer, and WILL-ing it would promise behavior the broker
+// does not implement.
+func TestUnsupportedWillOfferIsAnsweredDont(t *testing.T) {
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := c.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rfc2217.WriteNegotiate(c, rfc2217.Will, 0x62 /* not an option we support */); err != nil {
+		t.Fatal(err)
+	}
+	// IAC DONT <option>: 3 bytes.
+	got := readN(t, c, 3)
+	if got[0] != 0xFF || got[1] != rfc2217.Dont || got[2] != 0x62 {
+		t.Fatalf("reply = % x, want IAC DONT 62", got)
+	}
+}
+
+// TestWontDontAreNotAnswered covers the loop hazard the source comment calls
+// out: answering a WONT or DONT would make the peer answer back, and the pair
+// would ping-pong forever. The broker must stay silent.
+func TestWontDontAreNotAnswered(t *testing.T) {
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := c.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, verb := range []byte{rfc2217.Wont, rfc2217.Dont} {
+		if err := rfc2217.WriteNegotiate(c, verb, rfc2217.OptionBinary); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The deadline turns into a read timeout, not a hang: any bytes here
+	// would mean the broker answered a WONT/DONT.
+	buf := make([]byte, 8)
+	n, err := c.Read(buf)
+	if n > 0 {
+		t.Fatalf("broker answered a WONT/DONT with % x — that is the negotiation loop", buf[:n])
+	}
+	if err == nil {
+		t.Fatal("read returned without bytes and without error")
+	}
+}
+
+// TestConnectionAfterListenerCloseIsDropped covers the race at the end of a
+// run: a client that connects between close() and the listener's socket being
+// torn down must simply have its connection closed, never served a device.
+func TestConnectionAfterListenerCloseIsDropped(t *testing.T) {
+	var mu sync.Mutex
+	opens := 0
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			opens++
+			return serialtest.NewFakePort(t), nil
+		},
+	})
+	ref, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	// Close through the refs API the run manager uses to release a run's
+	// listeners, then dial the address the container was given.
+	b.CloseListeners([]*serialbroker.ListenerRef{ref})
+	late, derr := net.DialTimeout("tcp", addr, 2*time.Second)
+	if derr == nil {
+		defer late.Close()
+		// The socket may still be in the kernel's teardown backlog; a
+		// connection that lands must be closed, never served.
+		if err := late.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := late.Read(make([]byte, 1)); err == nil {
+			t.Fatal("the late connection must be closed, not served")
+		}
+	}
+	// Either way — refused, or accepted then closed — no session may open
+	// the device. Give a would-be session time to (wrongly) open the port.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if opens != 0 {
+		t.Fatalf("%d sessions opened after the listener closed; the device must never be served", opens)
+	}
+}
+
+// TestClientWriteFailureEndsTheSession covers the device->container pump's
+// write branch: a client that stops reading (or vanishes) mid-stream must end
+// the session, not wedge the device forever — the detach event releases the
+// claim for the next client.
+func TestClientWriteFailureEndsTheSession(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log:      func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	conn := dial(t, addr)
+	// Establish the session, then break the client side mid-stream: a read
+	// with a short deadline proves bytes flow first.
+	if _, err := conn.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 8)
+	if _, err := fp.Peer().Read(buf); err != nil {
+		t.Fatalf("device read: %v", err)
+	}
+
+	// Fill the client's socket until writes block: close the peer so the
+	// session's conn.Write fails on the next device byte.
+	conn.Close()
+
+	// Device bytes still arrive; the pump's write fails and must end the
+	// session — detach fires, which is what releases the claim.
+	if _, err := fp.Peer().Write([]byte("device-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "detach" {
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("session did not detach after the client write failed")
+		}
+	}
+}
+
+// TestFullRecordModeAnnouncesItselfOnAttach is the broker half of the audit
+// seam: the attach event must carry Record=full, which the daemon's fan-out
+// stamps into the audit entry as record_mode. An empty Record reads
+// downstream as "events only" even when payload capture was configured.
+func TestFullRecordModeAnnouncesItselfOnAttach(t *testing.T) {
+	events := make(chan serialbroker.Event, 8)
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		OpenRecorder: func(string, string) (io.WriteCloser, error) {
+			return &capture{}, nil
+		},
+		Log: func(e serialbroker.Event) { events <- e },
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{
+		Name: "esp32", Device: testDevice(), Record: serialbroker.RecordFull,
+	}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	c := dial(t, addr)
+	defer c.Close()
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "attach" {
+				if e.Record != serialbroker.RecordFull {
+					t.Fatalf("attach Record = %q, want %q", e.Record, serialbroker.RecordFull)
+				}
+				return
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no attach event")
+		}
 	}
 }

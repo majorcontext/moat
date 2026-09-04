@@ -200,6 +200,94 @@ func TestCloseUnblocksPendingRead(t *testing.T) {
 	<-done
 }
 
+func TestSetModemClearsBeforeItSets(t *testing.T) {
+	// A pty has no modem lines, so SetModem's TIOCMBIC/TIOCMBIS fail (ENOTTY
+	// on Linux and macOS). The ioctl argument convention itself cannot be
+	// exercised against a pty — that is the hardware e2e's job
+	// (MOAT_SERIAL_TEST_DEVICE: esptool's reset sequence asserts and releases
+	// DTR/RTS through this method, and a wrong argument form fails there the
+	// way the darwin TIOCFLUSH bug did). What the pty pins here is the branch
+	// structure: clears run before sets, so a transition never momentarily
+	// asserts both lines — the ESP32 reset sequence depends on the exact
+	// transitions — and a failure names the ioctl that failed and the port.
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer p.Close()
+
+	// Set-only frame: no clear to run, so the SET ioctl's error surfaces.
+	err = p.SetModem(Modem{DTR: true, RTS: true})
+	if err == nil {
+		// This platform's pty accepts modem-line ioctls; the order the test
+		// asserts is only observable when the ioctls can fail.
+		t.Skipf("pty on this platform accepts modem-line ioctls; branch order not observable")
+	}
+	if !strings.Contains(err.Error(), "setting modem lines on "+path) {
+		t.Fatalf("SetModem(DTR,RTS on): error %q should name the set ioctl and the port", err)
+	}
+
+	// Clear-only frame: only the CLEAR ioctl runs.
+	err = p.SetModem(Modem{DTR: false, RTS: false})
+	if err == nil || !strings.Contains(err.Error(), "clearing modem lines on "+path) {
+		t.Fatalf("SetModem(DTR,RTS off): error %v should name the clear ioctl and the port", err)
+	}
+
+	// Mixed frame: the clear fires first — the error is the CLEAR ioctl's,
+	// not the set's.
+	err = p.SetModem(Modem{DTR: true, RTS: false})
+	if err == nil || !strings.Contains(err.Error(), "clearing modem lines on "+path) {
+		t.Fatalf("SetModem(DTR on, RTS off): error %v should surface the clear (which runs first), not the set", err)
+	}
+}
+
+func TestModemStatusReportsAFailureToReadTheLines(t *testing.T) {
+	// A pty has no modem lines, so TIOCMGET fails; the broker answers an
+	// RFC2217 modem-state poll with zero in that case (covered in the broker
+	// tests). This pins that the port reports the failure as an error naming
+	// the port, rather than as a nil error with an all-low status that would
+	// read as "carrier and CTS both dropped" to a client.
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer p.Close()
+
+	_, err = p.ModemStatus()
+	if err == nil {
+		t.Skipf("pty on this platform answers modem-line reads; failure path not observable")
+	}
+	if !strings.Contains(err.Error(), "reading modem lines on "+path) {
+		t.Fatalf("ModemStatus(): error %q should name the port", err)
+	}
+}
+
+func TestSendBreakOnATTY(t *testing.T) {
+	// The real ioctl, against a real tty — the same shape as the flush test
+	// below. Linux's TCSBRK drains then breaks; on a pty it returns
+	// immediately. Darwin has no single-ioctl break, so sendBreak asserts
+	// TIOCSBRK, holds, and clears with TIOCCBRK. What must hold on both: the
+	// call completes (no hang — a pty has nothing to drain), and the ioctl
+	// form is accepted, which is where a wrong argument convention would
+	// surface as EFAULT.
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer p.Close()
+
+	if err := p.SendBreak(); err != nil {
+		t.Fatalf("SendBreak on %s: %v", path, err)
+	}
+	// Idempotent: a second break is fine.
+	if err := p.SendBreak(); err != nil {
+		t.Fatalf("second SendBreak: %v", err)
+	}
+}
+
 // readBaud reports the baud rate currently set on the port's line.
 func readBaud(t *testing.T, p Port) uint32 {
 	t.Helper()

@@ -36,6 +36,9 @@ type FakePort struct {
 	breaks      int
 	purges      int
 	flushErr    error
+	settingsErr error
+	modemErr    error
+	readErr     error
 	settingsLog []serialport.Settings
 	modemLog    []serialport.Modem
 	closed      bool
@@ -65,7 +68,15 @@ func NewFakePort(t *testing.T) *FakePort {
 // Peer is the far end of the wire — what a device would read and write.
 func (p *FakePort) Peer() io.ReadWriter { return p.slave }
 
-func (p *FakePort) Read(b []byte) (int, error)  { return p.master.Read(b) }
+func (p *FakePort) Read(b []byte) (int, error) {
+	p.mu.Lock()
+	err := p.readErr
+	p.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	return p.master.Read(b)
+}
 func (p *FakePort) Write(b []byte) (int, error) { return p.master.Write(b) }
 func (p *FakePort) Name() string                { return p.name }
 
@@ -87,10 +98,15 @@ func (p *FakePort) Close() error {
 	return err
 }
 
-// ApplySettings records the requested line settings.
+// ApplySettings records the requested line settings. SetApplySettingsError,
+// when set, is returned instead — for testing how callers handle a device
+// that rejects a line change.
 func (p *FakePort) ApplySettings(s serialport.Settings) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.settingsErr != nil {
+		return p.settingsErr
+	}
 	// Merge, matching the real port's contract that zero fields are unchanged.
 	if s.Baud != 0 {
 		p.settings.Baud = s.Baud
@@ -107,10 +123,15 @@ func (p *FakePort) ApplySettings(s serialport.Settings) error {
 	return nil
 }
 
-// SetModem records the requested control lines.
+// SetModem records the requested control lines. SetModemError, when set, is
+// returned instead — for testing how callers handle a device that cannot
+// drive its control lines.
 func (p *FakePort) SetModem(m serialport.Modem) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.modemErr != nil {
+		return p.modemErr
+	}
 	p.modem = m
 	p.modemLog = append(p.modemLog, m)
 	return nil
@@ -143,6 +164,30 @@ func (p *FakePort) SetFlushError(err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.flushErr = err
+}
+
+// SetApplySettingsError makes subsequent ApplySettings calls fail, or clears
+// it with nil.
+func (p *FakePort) SetApplySettingsError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.settingsErr = err
+}
+
+// SetModemError makes subsequent SetModem calls fail, or clears it with nil.
+func (p *FakePort) SetModemError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.modemErr = err
+}
+
+// SetReadError makes subsequent Read calls fail, or clears it with nil — for
+// testing how callers handle a device that vanishes mid-session (EIO on
+// unplug, ENXIO on disconnect).
+func (p *FakePort) SetReadError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.readErr = err
 }
 
 // ModemStatus reports the scripted input lines (Status field). A pty cannot
