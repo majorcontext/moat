@@ -61,25 +61,47 @@ func listDevices(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	devices, err := serialdev.NewEnumerator().List(cmd.Context())
+	enum := serialdev.NewEnumerator()
+	devices, err := enum.List(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("listing serial devices: %w", err)
+	}
+	// Non-serial USB devices are a diagnostic surface, not a feature this
+	// command acts on: a failure to list them must not hide the serial list,
+	// or the pinned-device information under it.
+	var usbDevices []serialdev.Device
+	if u, ok := enum.(serialdev.USBEnumerator); ok {
+		if usbDevices, err = u.ListUSB(cmd.Context()); err != nil {
+			ui.Warnf("listing USB devices: %v", err)
+			usbDevices = nil
+		}
 	}
 	allPins, err := pins.List()
 	if err != nil {
 		return err
 	}
-	return printDevices(cmd.OutOrStdout(), devices, allPins)
+	return printDevices(cmd.OutOrStdout(), devices, usbDevices, allPins)
 }
 
 // printDevices renders the device table. Splitting it out keeps the formatting
 // testable without hardware.
-func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin) error {
+func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialdev.Device, pins []serialdev.Pin) error {
 	if len(devices) == 0 {
 		fmt.Fprintln(w, "No serial devices attached.")
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Plug in a device and run this again. USB-serial adapters and dev boards")
-		fmt.Fprintln(w, "(ESP32, Arduino, RP2040) appear here once connected.")
+		if len(usbDevices) == 0 {
+			fmt.Fprintln(w, "Plug in a device and run this again. USB-serial adapters and dev boards")
+			fmt.Fprintln(w, "(ESP32, Arduino, RP2040) appear here once connected.")
+		} else {
+			// Something IS plugged in — say that, or the list above reads as
+			// the device not being detected.
+			fmt.Fprintln(w, "USB devices are attached, but none has a serial interface — they are")
+			fmt.Fprintln(w, "listed below. USB-serial adapters and dev boards (ESP32, Arduino,")
+			fmt.Fprintln(w, "RP2040) appear here once connected.")
+		}
+		if err := printUSBDevices(w, usbDevices); err != nil {
+			return err
+		}
 		return printOrphanPins(w, pins, devices)
 	}
 
@@ -110,7 +132,42 @@ func printDevices(w io.Writer, devices []serialdev.Device, pins []serialdev.Pin)
 	fmt.Fprintln(w, "The first run that uses the device pins it to this hardware; the PIN column")
 	fmt.Fprintln(w, "shows the name it is pinned under.")
 
+	if err := printUSBDevices(w, usbDevices); err != nil {
+		return err
+	}
 	return printOrphanPins(w, pins, devices)
+}
+
+// printUSBDevices renders the non-serial USB section. These devices cannot go
+// through `devices:` — the serial broker only serves tty-backed hardware — so
+// the section exists to tell a user whose SDR dongle "vanished" that moat sees
+// it, and where its path actually is. Empty input prints nothing.
+func printUSBDevices(w io.Writer, usbDevices []serialdev.Device) error {
+	if len(usbDevices) == 0 {
+		return nil
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Other USB devices attached (no serial interface — cannot use devices:):")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "USB ID\tSERIAL NUMBER\tDESCRIPTION")
+	for _, d := range usbDevices {
+		fmt.Fprintf(tw, "%s:%s\t%s\t%s\n", d.VID, d.PID, serialNumberOrDash(d), descriptionOrDash(d))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Serial-only tools cannot reach these. A dongle that streams over USB bulk")
+	fmt.Fprintln(w, "transfers (SDRs like the RTL2832U) belongs on the host, with the container")
+	fmt.Fprintln(w, "connecting over the network — see examples/serial-sdr in the moat repo.")
+	return nil
+}
+
+func serialNumberOrDash(d serialdev.Device) string {
+	if d.Serial == "" {
+		return "-"
+	}
+	return d.Serial
 }
 
 // printOrphanPins reports pins whose device is not attached, so a stale pin is

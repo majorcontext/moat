@@ -31,7 +31,43 @@ import (
 //
 // So the parser keeps a stack of open USB devices keyed by tree depth and
 // attaches a callout device to the nearest enclosing one.
-func parseIoreg(r io.Reader) ([]Device, error) {
+//
+// Devices are dropped when they cannot be matched or pinned: no USB ID, or —
+// for the serial list — no serial child.
+func parseIoreg(r io.Reader) (serial []Device, err error) {
+	all, err := parseIoregAll(r)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range all {
+		if d.Path != "" {
+			serial = append(serial, d)
+		}
+	}
+	return serial, nil
+}
+
+// parseIoregUSB extracts non-serial USB devices from the same output: every
+// USB device with an identity but no serial child, except hubs (USB class 9) —
+// showing the host's own hubs would be noise, not an answer to "what is
+// plugged in".
+func parseIoregUSB(r io.Reader) ([]Device, error) {
+	all, err := parseIoregAll(r)
+	if err != nil {
+		return nil, err
+	}
+	var out []Device
+	for _, d := range all {
+		if d.Path == "" && !d.isHub {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// parseIoregAll walks ioreg's tree and returns every USB device with a USB ID,
+// serial or not. It is the shared core of parseIoreg and parseIoregUSB.
+func parseIoregAll(r io.Reader) ([]Device, error) {
 	type frame struct {
 		depth int
 		dev   *Device
@@ -41,15 +77,13 @@ func parseIoreg(r io.Reader) ([]Device, error) {
 		out   []Device
 	)
 
-	// flush emits every stacked device that has acquired a device node. A USB
-	// device with no serial child (a hub, a keyboard) is dropped.
+	// flush emits every stacked device, serial or not; the split into serial
+	// and non-serial lists is the callers' job.
 	flushTo := func(depth int) {
 		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 			f := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			if f.dev.Path != "" {
-				out = append(out, *f.dev)
-			}
+			out = append(out, *f.dev)
 		}
 	}
 
@@ -82,6 +116,12 @@ func parseIoreg(r io.Reader) ([]Device, error) {
 		case "locationID":
 			if n, err := strconv.ParseUint(val, 10, 64); err == nil {
 				cur.PortPath = fmt.Sprintf("0x%08x", n)
+			}
+		case "bDeviceClass":
+			// 9 = hub (USB class code). parseIoregUSB drops them; a hub is host
+			// infrastructure, not a plugged-in device anyone is looking for.
+			if strings.TrimSpace(val) == "9" {
+				cur.isHub = true
 			}
 		case "USB Product Name":
 			// macOS sanitizes this one (the S3's "USB JTAG/serial debug unit"

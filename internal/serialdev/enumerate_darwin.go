@@ -30,6 +30,24 @@ func NewEnumerator() Enumerator { return &ioregEnumerator{} }
 // includes everything macOS attached below it; `-l` adds the properties.
 // See parseIoreg for the parse.
 func (e *ioregEnumerator) List(ctx context.Context) ([]Device, error) {
+	out, err := e.ioreg(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return parseIoreg(out)
+}
+
+// ListUSB implements USBEnumerator with the same ioreg invocation, keeping
+// the USB devices parseIoreg drops: ones with an identity but no serial child.
+func (e *ioregEnumerator) ListUSB(ctx context.Context) ([]Device, error) {
+	out, err := e.ioreg(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return parseIoregUSB(out)
+}
+
+func (e *ioregEnumerator) ioreg(ctx context.Context) (*bytes.Buffer, error) {
 	cmd := exec.CommandContext(ctx, "ioreg", "-r", "-p", "IOService", "-l", "-w0", "-c", "IOUSBHostDevice")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -37,5 +55,5 @@ func (e *ioregEnumerator) List(ctx context.Context) ([]Device, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("listing serial devices with ioreg: %w: %s", err, stderr.String())
 	}
-	return parseIoreg(&stdout)
+	return &stdout, nil
 }

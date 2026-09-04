@@ -30,6 +30,12 @@ type Device struct {
 	Serial      string // USB iSerial, empty on devices that ship without one
 	PortPath    string // physical topology: sysfs port path (Linux) or IOKit locationID (macOS)
 	Description string // human label for `moat device list`
+
+	// isHub marks a USB hub (class 9). Set by the macOS parser from
+	// bDeviceClass; on Linux the hub roothubs are skipped by name instead
+	// (they start with "usb"). Only USBEnumerator reads it — a hub is host
+	// infrastructure, never a device anyone is trying to match.
+	isHub bool
 }
 
 // Identity is the subset of a Device used for approval decisions.

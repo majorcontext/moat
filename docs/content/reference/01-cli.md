@@ -1658,6 +1658,12 @@ not the pinned unit — the case a run rejects.
 
 Pins whose device is not attached are listed separately.
 
+USB devices with no serial interface (SDR dongles like the RTL2832U, keyboards, storage)
+are listed in a separate section — they cannot go through `devices:`, which only brokers
+serial hardware. The section points at
+[examples/serial-sdr](https://github.com/majorcontext/moat/tree/main/examples/serial-sdr)
+for the network-based path such devices need.
+
 ### moat device forget
 
 Forget a device pin so the next run approves whatever is attached.

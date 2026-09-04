@@ -128,6 +128,7 @@ const ioregSample = `+-o USB JTAG/serial debug unit@08320000  <class IOUSBHostDe
   | {
   |   "idProduct" = 10531
   |   "idVendor" = 1155
+  |   "bDeviceClass" = 9
   |   "locationID" = 17825792
   | }
   |
@@ -251,5 +252,103 @@ func TestParseIoregPropertyHandlesTreePrefixes(t *testing.T) {
 func TestParseIoregPropertyIgnoresNonPropertyLines(t *testing.T) {
 	if _, _, ok := parseIoregProperty(`      | {`); ok {
 		t.Fatal("brace line should not parse as a property")
+	}
+}
+
+// The hub in the fixture above is the negative case for the serial walk; here
+// a device with a real identity and no serial child pins the USB walk: an
+// SDR dongle, which is the device that made the gap visible.
+const ioregSDRSample = `+-o RTL2832U@02100000  <class IOUSBHostDevice, id 0x100022aaf, registered, matched, active, busy 0 (123 ms), retain 9>
+  | {
+  |   "idProduct" = 10296
+  |   "idVendor" = 3034
+  |   "USB Serial Number" = "00000001"
+  |   "locationID" = 34603008
+  |   "USB Product Name" = "RTL2832U"
+  | }
+  |
+  +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100022ab0, registered, matched, active, busy 0 (5 ms), retain 5>
+  | | {
+  | |   "bInterfaceClass" = 255
+  | |   "idProduct" = 10296
+  | |   "idVendor" = 3034
+  | | }
+  | |
+  | +-o IOUSBHostDeviceUserClient  <class IOUSBHostDeviceUserClient, id 0x100022ab1, !registered, !matched, active, busy 0, retain 5>
+  |       {
+  |         "IOUserClientCreator" = "pid 301, sdrpp"
+  |       }
+  |
+`
+
+func TestParseIoregUSBFindsNonSerialDevices(t *testing.T) {
+	got, err := parseIoregUSB(strings.NewReader(ioregSDRSample))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d devices, want 1: %+v", len(got), got)
+	}
+	d := got[0]
+	if d.Path != "" {
+		t.Fatalf("Path = %q, want empty — this device has no tty", d.Path)
+	}
+	// ioreg reports IDs in decimal: 3034 = 0x0bda, 10296 = 0x2838.
+	if d.VID != "0bda" || d.PID != "2838" {
+		t.Fatalf("got %s:%s, want 0bda:2838 (RTL2832U)", d.VID, d.PID)
+	}
+	if d.Serial != "00000001" {
+		t.Fatalf("Serial = %q, want 00000001", d.Serial)
+	}
+	if d.PortPath != "0x02100000" {
+		t.Fatalf("PortPath = %q, want 0x02100000", d.PortPath)
+	}
+	if d.Description != "RTL2832U" {
+		t.Fatalf("Description = %q, want RTL2832U", d.Description)
+	}
+}
+
+func TestParseIoregUSBSkipsSerialDevices(t *testing.T) {
+	// Companion: the main fixture's two serial devices must not appear in the
+	// USB list — they are the serial walk's output, and showing them here
+	// would double-report every board.
+	got, err := parseIoregUSB(strings.NewReader(ioregSample))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want none — both fixture devices are serial", got)
+	}
+}
+
+func TestParseIoregAndUSBPartitionTheSample(t *testing.T) {
+	// The two walks together must cover every identifiable device exactly
+	// once: serial devices in List, everything else in ListUSB.
+	serial, err := parseIoreg(strings.NewReader(ioregSample))
+	if err != nil {
+		t.Fatalf("parseIoreg: %v", err)
+	}
+	usb, err := parseIoregUSB(strings.NewReader(ioregSample))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	// ioregSample has 2 serial devices (ESP32, CH340); the hub has no
+	// idVendor/idProduct pair and is dropped by both walks.
+	if len(serial) != 2 || len(usb) != 0 {
+		t.Fatalf("serial = %d, usb = %d, want 2 and 0", len(serial), len(usb))
+	}
+
+	// Mixed: the SDR fixture added on top, both walks stay disjoint.
+	combined := ioregSample + ioregSDRSample
+	serial, err = parseIoreg(strings.NewReader(combined))
+	if err != nil {
+		t.Fatalf("parseIoreg: %v", err)
+	}
+	usb, err = parseIoregUSB(strings.NewReader(combined))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(serial) != 2 || len(usb) != 1 {
+		t.Fatalf("serial = %d, usb = %d, want 2 and 1 (the SDR only in USB)", len(serial), len(usb))
 	}
 }

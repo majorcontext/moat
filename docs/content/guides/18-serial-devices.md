@@ -180,6 +180,17 @@ devices:
 Full capture is opt-in because serial traffic carries firmware images and device
 credentials.
 
+## Devices that are not serial at all
+
+USB hardware with no serial interface never appears in the `devices:` list. This is not
+moat failing to detect it — an SDR dongle (RTL2832U), a keyboard, or a USB drive has no
+tty and no CDC class, so there is nothing for a serial broker to serve. `moat device
+list` shows such devices in a separate "Other USB devices" section so a plugged-in
+device is visible, with a pointer to
+[examples/serial-sdr](https://github.com/majorcontext/moat/tree/main/examples/serial-sdr)
+— the pattern that works for streaming hardware: run the driver on the host (for an
+SDR, `rtl_tcp`), and let the container reach it through `network: host:`.
+
 ## Platform support
 
 Serial devices work on Linux and macOS, with Docker and with Apple containers. Nothing

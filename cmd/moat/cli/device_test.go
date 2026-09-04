@@ -16,9 +16,13 @@ func esp32() serialdev.Device {
 }
 
 func render(t *testing.T, devices []serialdev.Device, pins []serialdev.Pin) string {
+	return renderUSB(t, devices, nil, pins)
+}
+
+func renderUSB(t *testing.T, devices, usbDevices []serialdev.Device, pins []serialdev.Pin) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := printDevices(&buf, devices, pins); err != nil {
+	if err := printDevices(&buf, devices, usbDevices, pins); err != nil {
 		t.Fatalf("printDevices: %v", err)
 	}
 	return buf.String()
@@ -139,5 +143,70 @@ func TestSuggestedNameIsAValidDeviceName(t *testing.T) {
 	}
 	if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
 		t.Fatalf("suggestedName produced %q, which cannot start or end with a dash", got)
+	}
+}
+
+func nooelec() serialdev.Device {
+	// Path empty: the whole point of a USB device with no serial interface.
+	return serialdev.Device{
+		VID: "0bda", PID: "2838", Serial: "00000001",
+		PortPath: "1-3", Description: "RTL2832U",
+	}
+}
+
+func TestDeviceListShowsNonSerialUSBDevices(t *testing.T) {
+	out := renderUSB(t, []serialdev.Device{esp32()}, []serialdev.Device{nooelec()}, nil)
+	for _, want := range []string{"0bda:2838", "RTL2832U", "00000001"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "no serial interface") {
+		t.Fatalf("the section must say these cannot go through devices::\n%s", out)
+	}
+	if !strings.Contains(out, "examples/serial-sdr") {
+		t.Fatalf("the section must point at the SDR example:\n%s", out)
+	}
+	// The USB device must not be presented as usable by the serial broker.
+	if !strings.Contains(out, "cannot use devices:") {
+		t.Fatalf("the section must say devices: does not apply:\n%s", out)
+	}
+}
+
+func TestDeviceListUSBOnlyDoesNotClaimNothingIsAttached(t *testing.T) {
+	// The case that motivated the section: an SDR plugged in, `moat device
+	// list` showing "No serial devices attached" and "plug in a device" —
+	// implying moat cannot see hardware the user is looking at.
+	out := renderUSB(t, nil, []serialdev.Device{nooelec()}, nil)
+	if !strings.Contains(out, "No serial devices attached") {
+		t.Fatalf("serial section must still say there are none:\n%s", out)
+	}
+	if !strings.Contains(out, "none has a serial interface") {
+		t.Fatalf("empty state must acknowledge the attached USB device:\n%s", out)
+	}
+	if !strings.Contains(out, "0bda:2838") {
+		t.Fatalf("the attached SDR must still be listed:\n%s", out)
+	}
+	if !strings.Contains(out, "examples/serial-sdr") {
+		t.Fatalf("the section must point at the SDR example:\n%s", out)
+	}
+	// "Plug in a device and run this again" would be wrong here — the user
+	// already plugged something in.
+	if strings.Contains(out, "Plug in a device") {
+		t.Fatalf("empty state must not tell a user with a USB device attached to plug one in:\n%s", out)
+	}
+}
+
+func TestDeviceListNoUSBDevicesPrintsNoUSBSection(t *testing.T) {
+	// Companion: with nothing non-serial attached, the section must not appear
+	// (and especially not with the old "plug in" advice when a serial device
+	// IS attached).
+	out := renderUSB(t, []serialdev.Device{esp32()}, nil, nil)
+	if strings.Contains(out, "Other USB devices") {
+		t.Fatalf("USB section should not appear with no USB devices:\n%s", out)
+	}
+	out = renderUSB(t, nil, nil, nil)
+	if strings.Contains(out, "Other USB devices") {
+		t.Fatalf("USB section should not appear with no USB devices:\n%s", out)
 	}
 }
