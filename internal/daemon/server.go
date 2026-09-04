@@ -313,10 +313,10 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 // listenSerial opens one RFC2217 listener per approved device and allows the
 // container to reach each port.
 //
-// That allowance is the access control: RFC2217 has no authentication, so only
-// the owning run's container may reach the port. Any failure rolls back the
-// listeners already opened, so a partial failure never leaves a device claimed
-// by a run that did not start.
+// Any failure rolls back only the listeners this call opened, so a partial
+// failure never leaves a device claimed by a run that did not start — and a
+// re-registration of an already-running run never tears down the devices its
+// container is using.
 func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec) (map[string]string, error) {
 	if len(specs) == 0 {
 		return nil, nil
@@ -326,8 +326,14 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec) (map[str
 	}
 
 	addrs := make(map[string]string, len(specs))
+	// Only the listeners this call opens are rolled back on failure. The run
+	// manager re-registers an existing run after a transient daemon failure,
+	// so a registration that arrives while the run's earlier listeners are
+	// live must not tear those down — the container's frozen MOAT_SERIAL_*_URL
+	// would go dead for the rest of the run.
+	var opened []*serialbroker.ListenerRef
 	for _, spec := range specs {
-		addr, err := s.serial.Listen(rc.RunID, serialbroker.Approved{
+		ref, addr, err := s.serial.Listen(rc.RunID, serialbroker.Approved{
 			Name: spec.Name,
 			Device: serialdev.Device{
 				Path:     spec.Path,
@@ -339,14 +345,15 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec) (map[str
 			Record: spec.Record,
 		})
 		if err != nil {
-			s.serial.Revoke(rc.RunID)
+			s.serial.CloseListeners(opened)
 			return nil, err
 		}
+		opened = append(opened, ref)
 		addrs[spec.Name] = addr
 
 		port, perr := portOf(addr)
 		if perr != nil {
-			s.serial.Revoke(rc.RunID)
+			s.serial.CloseListeners(opened)
 			return nil, fmt.Errorf("serial listener for %q returned an unusable address %q: %w", spec.Name, addr, perr)
 		}
 		rc.AllowedHostPorts = append(rc.AllowedHostPorts, port)

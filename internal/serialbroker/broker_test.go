@@ -32,7 +32,7 @@ func newBroker(t *testing.T) (*serialbroker.Broker, *serialtest.FakePort, string
 	})
 	t.Cleanup(func() { b.Close() })
 
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestDeviceIsReusableAfterTheFirstClientDisconnects(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -378,9 +378,169 @@ func TestRevokeOfAnUnknownRunIsHarmless(t *testing.T) {
 
 func TestListenTwiceForTheSameDeviceFails(t *testing.T) {
 	b, _, _ := newBroker(t)
-	_, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err == nil {
 		t.Fatal("a device already claimed by another run must not be listenable")
+	}
+}
+
+func TestReclaimingARevokedDeviceSucceeds(t *testing.T) {
+	// The mirror of TestListenTwiceForTheSameDeviceFails: a claim that dies
+	// with its run must not hold the device hostage — the next run gets it.
+	b, _, addr := newBroker(t)
+	b.Revoke("run-a")
+	_, addr2, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	if err != nil {
+		t.Fatalf("after the owning run is revoked the device must be claimable: %v", err)
+	}
+	if addr2 != addr {
+		// Not a hard requirement on the port number, but the idempotent
+		// re-Listen below must return whatever the live listener answers on.
+		t.Logf("reclaimed device moved from %s to %s", addr, addr2)
+	}
+	// And the old address must now serve the new run, not the dead one.
+	c := dial(t, addr2)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSameRunRelistenIsIdempotent(t *testing.T) {
+	// monitorProxyHealth re-registers an existing run with the daemon after a
+	// transient failure; that must return the live listener, not a self-conflict.
+	b, _, addr := newBroker(t)
+	_, addr2, err := b.Listen("run-a", serialbroker.Approved{
+		Name:   "esp32-renamed", // a different config name for the same device
+		Device: testDevice(),
+	})
+	if err != nil {
+		t.Fatalf("re-listening a device this run already holds must succeed: %v", err)
+	}
+	if addr2 != addr {
+		t.Fatalf("re-listen must return the existing address %s, got %s", addr, addr2)
+	}
+	// No second claim was registered, so revoking the run once must close
+	// the device exactly once and leave it free for the next run.
+	b.Revoke("run-a")
+	if c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("listener must be closed after the run's one and only claim is revoked")
+	}
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}); err != nil {
+		t.Fatalf("device must be free after one revoke: %v", err)
+	}
+}
+
+func TestTwoNamesForOneDeviceConflict(t *testing.T) {
+	// The claim is keyed on the physical device, not the config name: two
+	// entries resolving to the same node must not both get listeners, or
+	// their sessions interleave bytes on the same line. The TIOCEXCL backstop
+	// would only surface at connect time as a confusing open failure.
+	b, _, _ := newBroker(t) // run-a holds /dev/ttyUSB0 as "esp32"
+	_, _, err := b.Listen("run-a", serialbroker.Approved{
+		Name:   "monitor", // same run, different name, same device
+		Device: testDevice(),
+	})
+	if err != nil {
+		t.Fatalf("same run re-listening its own device under a new name must be idempotent: %v", err)
+	}
+	_, _, err = b.Listen("run-b", serialbroker.Approved{
+		Name:   "flash", // different run, same device
+		Device: testDevice(),
+	})
+	if err == nil {
+		t.Fatal("a second run claiming the same physical device under a different name must fail")
+	}
+	if !strings.Contains(err.Error(), "run-a") || !strings.Contains(err.Error(), "/dev/ttyUSB0") {
+		t.Fatalf("conflict must name the device and the owning run, got: %v", err)
+	}
+}
+
+func TestSameNameDifferentDevicesDoesNotConflict(t *testing.T) {
+	// The mirror of TestTwoNamesForOneDeviceConflict: an identical config
+	// name on a different physical device is a different claim. Generic
+	// names collide across unrelated projects; only the device identity
+	// should decide.
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return serialtest.NewFakePort(t), nil },
+	})
+	t.Cleanup(func() { b.Close() })
+	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
+	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "303a", PID: "1001", Serial: "BBB"}
+	if _, _, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: devA}); err != nil {
+		t.Fatalf("first listen: %v", err)
+	}
+	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: devB})
+	if err != nil {
+		t.Fatalf("same name on a different physical device must not conflict: %v", err)
+	}
+}
+
+func TestCloseListenersReleasesOnlyTheGivenClaims(t *testing.T) {
+	// A partially-failed registration rolls back only what it opened. The
+	// run's earlier listeners — a live container's devices — must survive.
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return serialtest.NewFakePort(t), nil },
+	})
+	t.Cleanup(func() { b.Close() })
+	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
+	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "1a86", PID: "7523", Serial: "BBB"}
+
+	refA, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA})
+	if err != nil {
+		t.Fatalf("listen a: %v", err)
+	}
+	_, addrB, err := b.Listen("run-a", serialbroker.Approved{Name: "b", Device: devB})
+	if err != nil {
+		t.Fatalf("listen b: %v", err)
+	}
+
+	// Roll back only B's claim — the shape of a second registration that
+	// failed on a third device.
+	b.CloseListeners([]*serialbroker.ListenerRef{refA})
+
+	if c, err := net.DialTimeout("tcp", addrA, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("rolled-back listener must be closed")
+	}
+	// A must be released for other runs to claim.
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "a", Device: devA}); err != nil {
+		t.Fatalf("rolled-back claim must be free: %v", err)
+	}
+	// B's listener must still be alive and serving the same run.
+	c := dial(t, addrB)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatalf("live sibling listener must survive the rollback: %v", err)
+	}
+}
+
+func TestRevokeReleasesEveryClaimOfTheRun(t *testing.T) {
+	// Revoke remains the full-run teardown (used by unregister and the
+	// liveness reaper); every claim of the run goes, others' stay.
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return serialtest.NewFakePort(t), nil },
+	})
+	t.Cleanup(func() { b.Close() })
+	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
+	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "1a86", PID: "7523", Serial: "BBB"}
+	_, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA})
+	if err != nil {
+		t.Fatalf("listen a: %v", err)
+	}
+	_, addrB, err := b.Listen("run-b", serialbroker.Approved{Name: "b", Device: devB})
+	if err != nil {
+		t.Fatalf("listen b: %v", err)
+	}
+
+	b.Revoke("run-a")
+
+	if c, err := net.DialTimeout("tcp", addrA, 500*time.Millisecond); err == nil {
+		c.Close()
+		t.Fatal("revoked run's listener must be closed")
+	}
+	c := dial(t, addrB)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatalf("another run's listener must survive the revoke: %v", err)
 	}
 }
 
@@ -393,7 +553,7 @@ func TestListenReportsPortOpenFailureAtConnectTime(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -425,7 +585,7 @@ func TestEventsRecordAttachAndDetach(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -736,7 +896,7 @@ func TestPurgeOfEveryDefinedValueIsAnswered(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -812,7 +972,7 @@ func newRecordingBroker(t *testing.T, record string) (*serialtest.FakePort, *cap
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{
 		Name: "esp32", Device: testDevice(), Record: record,
 	})
 	if err != nil {
@@ -892,7 +1052,7 @@ func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{
 		Name: "esp32", Device: testDevice(), Record: serialbroker.RecordFull,
 	})
 	if err != nil {
@@ -929,7 +1089,7 @@ func TestEventsCarryDeviceIdentity(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

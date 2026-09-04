@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClient_Health(t *testing.T) {
@@ -178,9 +179,12 @@ func TestClient_RegisterNon2xxEmptyBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-	}))
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusConflict) }),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	defer srv.Close()
+	go srv.Serve(ln)
 
 	client := NewClient(ln.Addr().String())
 	_, err = client.RegisterRun(context.Background(), RegisterRequest{RunID: "run_x"})

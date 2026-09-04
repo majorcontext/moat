@@ -160,10 +160,12 @@ A device is claimed exclusively while a run holds it. A second run that wants th
 device fails rather than interleaving bytes on the same line:
 
 ```
-Error: serial device "board" is already in use by run 01HQ...
+Error: registering run with proxy daemon: daemon returned 409: serial device "board" (/dev/ttyUSB0) is already in use by run run_015e8e26...
 ```
 
-The claim is released when the run stops.
+The claim is released when the run stops — including when the run dies without
+unregistering (a killed CLI, a crashed machine): the daemon's liveness checker reaps the
+dead container and releases its devices.
 
 ## Observability
 

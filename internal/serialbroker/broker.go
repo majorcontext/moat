@@ -77,8 +77,26 @@ type Broker struct {
 
 	mu       sync.Mutex
 	closed   bool
-	byDevice map[string]*listener // device name -> listener
-	byRun    map[string][]string  // run ID -> device names
+	byDevice map[string]*listener // claim key -> listener
+	byRun    map[string][]string  // run ID -> claim keys
+}
+
+// claimKey identifies the physical device a claim holds, independent of the
+// config name it was approved under. Two config names resolving to the same
+// device node must share a claim — otherwise both open the port and interleave
+// bytes on the same line, which is exactly what the claim exists to prevent.
+// The device path is used directly because it is what the session re-opens;
+// VID/PID/serial would be equivalent at run start (resolution happened against
+// them) but the path is the stronger key once a device is unplugged and its
+// node reused.
+func claimKey(a Approved) string {
+	if a.Device.Path != "" {
+		return "path:" + a.Device.Path
+	}
+	// A device with no path (never seen in practice — resolution requires a
+	// node) still claims on its identity so it cannot be double-listened.
+	id := a.Device.Identity()
+	return "id:" + id.VID + ":" + id.PID + ":" + id.Serial + ":" + id.PortPath
 }
 
 // New creates a Broker.
@@ -100,24 +118,34 @@ func New(opts Options) *Broker {
 	return b
 }
 
-// Listen opens a listener for one approved device and returns its host:port.
+// Listen opens a listener for one approved device and returns a handle for
+// scoped rollback plus its host:port address.
 //
 // A device already claimed by another run is refused: two runs sharing a serial
 // line would interleave bytes and corrupt both sessions.
-func (b *Broker) Listen(runID string, a Approved) (string, error) {
+//
+// Re-listening a device this run already holds is idempotent and returns the
+// existing address: the run manager re-registers with the daemon after a
+// transient daemon failure, and a run must not conflict with its own claim.
+func (b *Broker) Listen(runID string, a Approved) (*ListenerRef, string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.closed {
-		return "", fmt.Errorf("serial broker is closed")
+		return nil, "", fmt.Errorf("serial broker is closed")
 	}
-	if existing, ok := b.byDevice[a.Name]; ok {
-		return "", fmt.Errorf("serial device %q is already in use by run %s", a.Name, existing.runID)
+	key := claimKey(a)
+	if existing, ok := b.byDevice[key]; ok {
+		if existing.runID == runID {
+			return &ListenerRef{broker: b, l: existing}, existing.ln.Addr().String(), nil
+		}
+		return nil, "", fmt.Errorf("serial device %q (%s) is already in use by run %s",
+			a.Name, a.Device.Path, existing.runID)
 	}
 
 	ln, err := net.Listen("tcp", net.JoinHostPort(b.bindAddr, "0"))
 	if err != nil {
-		return "", fmt.Errorf("opening serial listener for %q: %w", a.Name, err)
+		return nil, "", fmt.Errorf("opening serial listener for %q: %w", a.Name, err)
 	}
 
 	l := &listener{
@@ -126,26 +154,70 @@ func (b *Broker) Listen(runID string, a Approved) (string, error) {
 		approved: a,
 		ln:       ln,
 	}
-	b.byDevice[a.Name] = l
-	b.byRun[runID] = append(b.byRun[runID], a.Name)
+	b.byDevice[key] = l
+	b.byRun[runID] = append(b.byRun[runID], key)
 
 	go l.serve()
 
 	log.Debug("serial listener started", "run", runID, "device", a.Name,
 		"path", a.Device.Path, "addr", ln.Addr().String())
-	return ln.Addr().String(), nil
+	return &ListenerRef{broker: b, l: l}, ln.Addr().String(), nil
+}
+
+// ListenerRef names one listener a specific Listen call opened, so a caller
+// can roll back exactly that set without disturbing the run's other devices.
+type ListenerRef struct {
+	broker *Broker
+	l      *listener
+}
+
+// CloseListeners releases exactly the listeners the given refs point at.
+// listenSerial uses it to roll back a partially-failed registration without
+// touching the live listeners of the same run: re-registration after a
+// transient daemon failure must not tear down devices a running container is
+// using. A ref whose listener was already released (or re-created by a later
+// registration) is a no-op for it — the registry entry is only removed when it
+// still points at that listener.
+func (b *Broker) CloseListeners(refs []*ListenerRef) {
+	if len(refs) == 0 {
+		return
+	}
+	ls := make([]*listener, 0, len(refs))
+	seen := map[*listener]bool{}
+	for _, r := range refs {
+		if r != nil && r.broker == b && !seen[r.l] {
+			seen[r.l] = true
+			ls = append(ls, r.l)
+		}
+	}
+	if len(ls) == 0 {
+		return
+	}
+	b.mu.Lock()
+	for _, l := range ls {
+		key := claimKey(l.approved)
+		if cur, ok := b.byDevice[key]; ok && cur == l {
+			delete(b.byDevice, key)
+		}
+		b.byRun[l.runID] = removeString(b.byRun[l.runID], key)
+	}
+	b.mu.Unlock()
+
+	for _, l := range ls {
+		l.close()
+	}
 }
 
 // Revoke closes every listener and session belonging to a run. It is safe to
 // call for a run that has no devices.
 func (b *Broker) Revoke(runID string) {
 	b.mu.Lock()
-	names := b.byRun[runID]
+	keys := b.byRun[runID]
 	delete(b.byRun, runID)
-	toClose := make([]*listener, 0, len(names))
-	for _, name := range names {
-		if l, ok := b.byDevice[name]; ok {
-			delete(b.byDevice, name)
+	toClose := make([]*listener, 0, len(keys))
+	for _, key := range keys {
+		if l, ok := b.byDevice[key]; ok {
+			delete(b.byDevice, key)
 			toClose = append(toClose, l)
 		}
 	}
@@ -154,6 +226,15 @@ func (b *Broker) Revoke(runID string) {
 	for _, l := range toClose {
 		l.close()
 	}
+}
+
+func removeString(ss []string, s string) []string {
+	for i, v := range ss {
+		if v == s {
+			return append(ss[:i], ss[i+1:]...)
+		}
+	}
+	return ss
 }
 
 // Close shuts every listener and session down.

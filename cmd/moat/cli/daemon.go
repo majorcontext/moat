@@ -352,7 +352,14 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		}
 		auditMu.Unlock()
 	}
-	lc.SetOnCleanup(func(_, runID string) { cleanupStore(runID) })
+	// A reaped run must also release its serial device claims. The CLI that
+	// created them may be gone (kill -9, crash, a machine that rebooted
+	// mid-run); without this, the device stays "in use by run <dead-id>" until
+	// the daemon itself is restarted.
+	lc.SetOnCleanup(func(_, runID string) {
+		cleanupStore(runID)
+		serialBroker.Revoke(runID)
+	})
 	lc.SetOnEmpty(idleShutdown.Reset)
 
 	// Set up run persistence so the registry survives daemon restarts.
