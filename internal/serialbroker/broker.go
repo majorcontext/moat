@@ -25,6 +25,9 @@ type Approved struct {
 	Name   string           // config name, e.g. "esp32"
 	Device serialdev.Device // the resolved host device
 	Record string           // "events" (default) or "full"
+	// Baud is the initial line rate from moat.yaml's `baud:`. Zero means the
+	// client's SET-BAUDRATE governs from the first command.
+	Baud int
 }
 
 // Event describes something worth recording about a device session.

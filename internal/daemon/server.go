@@ -389,6 +389,7 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 					Interface: spec.Interface,
 				},
 				Record: spec.Record,
+				Baud:   spec.Baud,
 			}, bindAddr, port)
 		} else {
 			ref, addr, err = s.serial.Listen(rc.RunID, serialbroker.Approved{
@@ -402,6 +403,7 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 					Interface: spec.Interface,
 				},
 				Record: spec.Record,
+				Baud:   spec.Baud,
 			}, bindAddr)
 		}
 		if err != nil {

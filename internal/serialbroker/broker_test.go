@@ -1275,3 +1275,67 @@ func TestListenAtRefusesATakenPort(t *testing.T) {
 		t.Fatalf("device must be free after a failed pin: %v", err)
 	}
 }
+
+func TestConfiguredBaudIsAppliedOnConnect(t *testing.T) {
+	// moat.yaml's `baud:` is the line rate the session opens at — a client
+	// that never sends SET-BAUDRATE (a plain reader) still gets it.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{
+		Name: "esp32", Device: testDevice(), Baud: 115200,
+	}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	c := dial(t, addr)
+	_ = c
+	waitFor(t, "baud 115200 applied at open", func() bool { return fp.LastSettings().Baud == 115200 })
+}
+
+func TestClientSetBaudOverridesTheConfiguredBaud(t *testing.T) {
+	// Companion: the initial rate is a default, not a lock — a client that
+	// negotiates its own rate (esptool always does) still wins.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{
+		Name: "esp32", Device: testDevice(), Baud: 115200,
+	}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	c := dial(t, addr)
+	waitFor(t, "initial baud", func() bool { return fp.LastSettings().Baud == 115200 })
+
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdSetBaudRate, rfc2217.EncodeBaud(921600)); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	waitFor(t, "client baud 921600", func() bool { return fp.LastSettings().Baud == 921600 })
+}
+
+func TestZeroBaudLeavesThePortUnchanged(t *testing.T) {
+	// Companion: no `baud:` in moat.yaml must not force a rate on the port —
+	// tools that set their own would see a spurious initial SET-BAUDRATE.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	dial(t, addr)
+	time.Sleep(100 * time.Millisecond)
+	if got := fp.LastSettings().Baud; got != 0 {
+		t.Fatalf("LastSettings().Baud = %d, want 0 — no configured baud must leave the port alone", got)
+	}
+}

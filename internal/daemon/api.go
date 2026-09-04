@@ -114,16 +114,19 @@ type RegisterRequest struct {
 // by the CLI. The daemon does not re-resolve it: enumeration and pin checking
 // happen in pre-flight so a mismatch fails before the container is created.
 type SerialDeviceSpec struct {
-	Name     string `json:"name"`                // config name, e.g. "esp32"
-	Path     string `json:"path"`                // host device node
-	VID      string `json:"vid,omitempty"`       // for audit entries
-	PID      string `json:"pid,omitempty"`       // for audit entries
-	Serial   string `json:"serial,omitempty"`    // for audit entries
-	PortPath string `json:"port_path,omitempty"` // for audit entries
-	// Interface is the UART index on multi-interface bridges (FT2232H,
-	// CP2105) — the only attribute distinguishing their two ports.
+	Name      string `json:"name"`                // config name, e.g. "esp32"
+	Path      string `json:"path"`                // host device node
+	VID       string `json:"vid,omitempty"`       // for audit entries
+	PID       string `json:"pid,omitempty"`       // for audit entries
+	Serial    string `json:"serial,omitempty"`    // for audit entries
+	PortPath  string `json:"port_path,omitempty"` // for audit entries
 	Interface string `json:"interface,omitempty"` // for audit entries
 	Record    string `json:"record,omitempty"`    // "events" (default) or "full"
+	// Baud is the initial line rate from moat.yaml's `baud:`. Zero means the
+	// port opens at whatever rate the driver default is and the client's
+	// SET-BAUDRATE governs. Applied at session open; an RFC2217 client that
+	// sends its own SET-BAUDRATE overrides it.
+	Baud int `json:"baud,omitempty"`
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.

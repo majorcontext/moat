@@ -40,6 +40,13 @@ func (l *listener) serve() {
 // clients on one serial line would interleave bytes and corrupt both.
 func (l *listener) handle(conn net.Conn) {
 	s := &session{listener: l, conn: conn}
+	if l.approved.Baud > 0 {
+		// moat.yaml's `baud:` is the line rate the session opens at; a client
+		// that sends its own SET-BAUDRATE later overrides it. config validates
+		// baud as positive, and the practical range of UART rates is far below
+		// 2^31, so the conversion cannot overflow.
+		s.settings.Baud = uint32(l.approved.Baud) //nolint:gosec // G115: validated positive, bounded range
+	}
 
 	l.mu.Lock()
 	switch {
@@ -85,6 +92,14 @@ func (l *listener) handle(conn net.Conn) {
 	}
 	s.setPort(port)
 	defer port.Close()
+
+	// The configured initial line rate goes down before the first byte
+	// moves: a client that never sends SET-BAUDRATE (a plain reader) still
+	// gets the rate moat.yaml asked for. A client that does send one
+	// overrides it through the normal command path.
+	if l.approved.Baud > 0 {
+		s.applySettings()
+	}
 
 	// Payload capture is opt-in: serial carries firmware images and device
 	// credentials. A recorder that cannot be opened degrades to events only
@@ -149,7 +164,10 @@ type session struct {
 	mu       sync.Mutex
 	settings serialport.Settings
 	modem    serialport.Modem
-	recorder io.WriteCloser
+	// pendingReplies holds payloads queued by reply() while s.mu is held;
+	// handleCommand writes them after releasing the lock.
+	pendingReplies [][]byte
+	recorder       io.WriteCloser
 }
 
 // record writes captured payload bytes, if capture is enabled.
@@ -299,27 +317,41 @@ func (s *session) handleNegotiate(verb, option byte) {
 // driving an ESP32 into its bootloader is a specific sequence of DTR/RTS
 // transitions, so reordering or merging them leaves the final state correct and
 // the board unreset.
+//
+// The replies a command produces are written after the lock is released (see
+// reply), never under it — a client that stops reading would otherwise stall
+// every command handler and, because record() shares the mutex, the rx pump
+// too, losing device bytes.
 func (s *session) handleCommand(cmd byte, payload []byte) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.handleCommandLocked(cmd, payload)
+	pending := s.pendingReplies
+	s.pendingReplies = nil
+	s.mu.Unlock()
 
+	for _, r := range pending {
+		s.writeReply(cmd, r)
+	}
+}
+
+func (s *session) handleCommandLocked(cmd byte, payload []byte) {
 	switch cmd {
 	case rfc2217.CmdSetBaudRate:
 		baud := rfc2217.DecodeBaud(payload)
 		if baud == 0 {
-			s.reply(cmd, rfc2217.EncodeBaud(s.settings.Baud))
+			s.reply(rfc2217.EncodeBaud(s.settings.Baud))
 			return
 		}
 		s.settings.Baud = baud
 		s.applySettings()
-		s.reply(cmd, rfc2217.EncodeBaud(s.settings.Baud))
+		s.reply(rfc2217.EncodeBaud(s.settings.Baud))
 
 	case rfc2217.CmdSetDataSize:
 		if len(payload) == 1 && payload[0] >= 5 && payload[0] <= 8 {
 			s.settings.DataBits = payload[0]
 			s.applySettings()
 		}
-		s.reply(cmd, []byte{s.settings.DataBits})
+		s.reply([]byte{s.settings.DataBits})
 
 	case rfc2217.CmdSetParity:
 		if len(payload) == 1 {
@@ -328,20 +360,20 @@ func (s *session) handleCommand(cmd byte, payload []byte) {
 				s.applySettings()
 			}
 		}
-		s.reply(cmd, []byte{parityToWire(s.settings.Parity)})
+		s.reply([]byte{parityToWire(s.settings.Parity)})
 
 	case rfc2217.CmdSetStopSize:
 		if len(payload) == 1 && (payload[0] == 1 || payload[0] == 2) {
 			s.settings.StopBits = payload[0]
 			s.applySettings()
 		}
-		s.reply(cmd, []byte{s.settings.StopBits})
+		s.reply([]byte{s.settings.StopBits})
 
 	case rfc2217.CmdSetControl:
 		if len(payload) == 1 {
 			s.applyControl(payload[0])
 		}
-		s.reply(cmd, payload)
+		s.reply(payload)
 
 	case rfc2217.CmdPurgeData:
 		// pyserial issues PURGE from inside Serial.open() (reset_input_buffer
@@ -369,7 +401,7 @@ func (s *session) handleCommand(cmd byte, payload []byte) {
 				s.emit("purge", fmt.Sprintf("unknown value %d", payload[0]))
 			}
 		}
-		s.reply(cmd, payload)
+		s.reply(payload)
 	}
 }
 
@@ -428,11 +460,31 @@ func (s *session) applyModem(ctrl byte) {
 	s.emit("modem", rfc2217.ControlName(ctrl))
 }
 
-// reply echoes a command back to the client, which is how RFC2217 confirms a
-// setting was accepted. Clients block waiting for it.
-func (s *session) reply(cmd byte, payload []byte) {
+// reply queues the payload to echo back to the client, which is how RFC2217
+// confirms a setting was accepted. Clients block waiting for it.
+//
+// The write happens outside s.mu: a stalled client's TCP window would hold
+// the mutex across the write and stall every handler (and the rx pump, which
+// needs the same mutex for record()) — UART bytes would be lost while the
+// device is not drained.
+func (s *session) reply(payload []byte) {
+	s.pendingReplies = append(s.pendingReplies, payload)
+}
+
+// writeReply sends one queued reply. A deadline bounds the write so a client
+// that stopped reading cannot hold the session's read goroutine forever; the
+// connection is dropped on timeout — the device is released for the next
+// client.
+func (s *session) writeReply(cmd byte, payload []byte) {
+	if tc, ok := s.conn.(*net.TCPConn); ok {
+		_ = tc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	}
 	if err := rfc2217.WriteCommand(s.conn, cmd+100, payload); err != nil {
 		log.Debug("com-port reply failed", "device", s.listener.approved.Name, "err", err)
+		s.stop()
+	}
+	if tc, ok := s.conn.(*net.TCPConn); ok {
+		_ = tc.SetWriteDeadline(time.Time{})
 	}
 }
 
