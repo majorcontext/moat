@@ -752,6 +752,29 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		r.ProxyPort = regResp.ProxyPort
 		r.ProxyHost = hostAddr
 
+		// Serial listener ports become part of the firewall allowlist: the
+		// strict-policy firewall must not silently drop the device's RFC2217
+		// port. Also covers network.host entries and claude.base_url host
+		// ports the RunContext collected before registration.
+		for _, p := range runCtx.AllowedHostPorts {
+			if !slices.Contains(r.AllowedHostPorts, p) {
+				r.AllowedHostPorts = append(r.AllowedHostPorts, p)
+			}
+		}
+		for _, addr := range regResp.SerialAddrs {
+			_, portStr, perr := splitPort(addr)
+			if perr != nil {
+				continue
+			}
+			port, perr := strconv.Atoi(portStr)
+			if perr != nil {
+				continue
+			}
+			if !slices.Contains(r.AllowedHostPorts, port) {
+				r.AllowedHostPorts = append(r.AllowedHostPorts, port)
+			}
+		}
+
 		// Store proxy details for firewall setup (applied after container starts)
 		if needsProxyForFirewall {
 			r.FirewallEnabled = true

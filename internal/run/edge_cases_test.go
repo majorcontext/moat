@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,7 +28,7 @@ type flexibleRuntime struct {
 	startFn            func(ctx context.Context, id string) error
 	stopFn             func(ctx context.Context, id string) error
 	removeFn           func(ctx context.Context, id string) error
-	setupFirewallFn    func(ctx context.Context, id, host string, port int) error
+	setupFirewallFn    func(ctx context.Context, id, host string, port int, extraPorts []int) error
 	waitFn             func(ctx context.Context, id string) (int64, error)
 	containerLogsFn    func(ctx context.Context, id string) (io.ReadCloser, error)
 	containerLogsAllFn func(ctx context.Context, id string) ([]byte, error)
@@ -125,9 +126,9 @@ func (f *flexibleRuntime) SidecarManager() container.SidecarManager { return nil
 func (f *flexibleRuntime) BuildManager() container.BuildManager     { return nil }
 func (f *flexibleRuntime) ServiceManager() container.ServiceManager { return nil }
 func (f *flexibleRuntime) Close() error                             { return nil }
-func (f *flexibleRuntime) SetupFirewall(ctx context.Context, id, host string, port int) error {
+func (f *flexibleRuntime) SetupFirewall(ctx context.Context, id, host string, port int, extraPorts []int) error {
 	if f.setupFirewallFn != nil {
-		return f.setupFirewallFn(ctx, id, host, port)
+		return f.setupFirewallFn(ctx, id, host, port, extraPorts)
 	}
 	return nil
 }
@@ -191,7 +192,7 @@ func TestStartFirewallFailureStopsContainer(t *testing.T) {
 			containerStopped = true
 			return nil
 		},
-		setupFirewallFn: func(context.Context, string, string, int) error {
+		setupFirewallFn: func(context.Context, string, string, int, []int) error {
 			return firewallErr
 		},
 		waitFn: func(ctx context.Context, _ string) (int64, error) {
@@ -240,7 +241,7 @@ func TestStartFirewallFailureStopContainerAlsoFails(t *testing.T) {
 		stopFn: func(_ context.Context, _ string) error {
 			return errors.New("stop failed too")
 		},
-		setupFirewallFn: func(context.Context, string, string, int) error {
+		setupFirewallFn: func(context.Context, string, string, int, []int) error {
 			return errors.New("iptables error")
 		},
 		waitFn: func(ctx context.Context, _ string) (int64, error) {
@@ -285,7 +286,7 @@ func TestStartNoFirewallWhenNotEnabled(t *testing.T) {
 	firewallCalled := false
 	rt := &flexibleRuntime{
 		done: make(chan struct{}),
-		setupFirewallFn: func(context.Context, string, string, int) error {
+		setupFirewallFn: func(context.Context, string, string, int, []int) error {
 			firewallCalled = true
 			return nil
 		},
@@ -1458,5 +1459,86 @@ func TestCleanupRemovesContainerWhileMonitorBlocked(t *testing.T) {
 		// Unblock to clean up
 		close(rt.done)
 		<-closeDone
+	}
+}
+
+// TestSetupFirewallReceivesTheRunsAllowedHostPorts verifies the P0-2 plumbing:
+// a strict run's firewall must allow the run's allowed host ports — its
+// RFC2217 serial listeners above all — or the firewall the strict policy
+// installed silently drops the device.
+func TestSetupFirewallReceivesTheRunsAllowedHostPorts(t *testing.T) {
+	var gotPorts []int
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		setupFirewallFn: func(_ context.Context, _ string, _ string, _ int, extraPorts []int) error {
+			gotPorts = append([]int{}, extraPorts...)
+			return nil
+		},
+		waitFn: func(ctx context.Context, _ string) (int64, error) {
+			<-ctx.Done()
+			return 0, ctx.Err()
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:               "run_fw_ports",
+		Name:             "fw-ports",
+		ContainerID:      "ctr-fw-ports",
+		State:            StateCreated,
+		FirewallEnabled:  true,
+		ProxyPort:        8080,
+		ProxyHost:        "127.0.0.1",
+		AllowedHostPorts: []int{45678, 45679},
+		exitCh:           make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Start(context.Background(), r.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !slices.Contains(gotPorts, 45678) || !slices.Contains(gotPorts, 45679) {
+		t.Fatalf("firewall got ports %v, want the run's AllowedHostPorts [45678 45679]", gotPorts)
+	}
+}
+
+// TestStartWithNoFirewallSkipsPortPlumbing is the companion: a permissive run
+// never installs a firewall, so no port list is consulted at all.
+func TestStartWithNoFirewallSkipsPortPlumbing(t *testing.T) {
+	called := false
+	rt := &flexibleRuntime{
+		done: make(chan struct{}),
+		setupFirewallFn: func(context.Context, string, string, int, []int) error {
+			called = true
+			return nil
+		},
+		waitFn: func(ctx context.Context, _ string) (int64, error) {
+			<-ctx.Done()
+			return 0, ctx.Err()
+		},
+	}
+	m := newEdgeCaseManager(t, rt)
+
+	r := &Run{
+		ID:               "run_fw_none",
+		Name:             "fw-none",
+		ContainerID:      "ctr-fw-none",
+		State:            StateCreated,
+		FirewallEnabled:  false,
+		ProxyPort:        8080,
+		AllowedHostPorts: []int{45678},
+		exitCh:           make(chan struct{}),
+	}
+	m.mu.Lock()
+	m.runs[r.ID] = r
+	m.mu.Unlock()
+
+	if err := m.Start(context.Background(), r.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if called {
+		t.Fatal("permissive run must not install a firewall")
 	}
 }

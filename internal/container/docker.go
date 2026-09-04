@@ -774,6 +774,35 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 	return r.gvisorAvail
 }
 
+// acceptRulesFor renders the IPv4 accept rules for the run's allowed host
+// ports, as a shell snippet indented for the firewall script. Empty input
+// yields a no-op comment so the script stays syntactically valid either way.
+func acceptRulesFor(ports []int) string {
+	if len(ports) == 0 {
+		return ":"
+	}
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, "iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT\n", p)
+	}
+	return b.String()
+}
+
+// acceptArgsFor renders the IPv6 accept rules as argument-list fragments for
+// the `$IP6T -w 5` invocations in the firewall script — one chain-append per
+// port, or a no-op (`:`) when there are none. Each fragment must parse as a
+// full command after the `-w 5` prefix, hence the repeated `-A OUTPUT`.
+func acceptArgsFor(ports []int) string {
+	var b strings.Builder
+	if len(ports) == 0 {
+		return ":"
+	}
+	for _, p := range ports {
+		fmt.Fprintf(&b, "-A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   $IP6T -w 5", p)
+	}
+	return b.String()
+}
+
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic
 // except to the proxy, covering both IPv4 and IPv6.
 // The proxyHost parameter is accepted for interface consistency but not used in the
@@ -782,12 +811,20 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 // add complexity. The security model relies on the proxy port being unique (randomly
 // assigned per-run) rather than IP filtering. Combined with the proxy's authentication
 // for Apple containers, this provides sufficient protection.
+// extraPorts are host ports to allow in addition to the proxy port (serial
+// RFC2217 listeners, network.host entries, base_url host ports) — see the
+// Runtime interface doc.
 // If ip6tables is not available (minimal images), a warning is emitted to stderr
 // but the setup does not fail — the container may not have IPv6 connectivity.
-func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int) error {
 	// Validate port range
 	if proxyPort < 1 || proxyPort > 65535 {
 		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
+	}
+	for _, p := range extraPorts {
+		if p < 1 || p > 65535 {
+			return fmt.Errorf("invalid extra port %d: must be between 1 and 65535", p)
+		}
 	}
 
 	// iptables rules:
@@ -795,7 +832,8 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 	// 2. Allow established connections (for responses)
 	// 3. Allow DNS (needed to resolve hostnames before proxy can intercept)
 	// 4. Allow traffic to proxy port (any destination - see function comment)
-	// 5. Drop everything else
+	// 5. Allow traffic to the run's allowed host ports
+	// 6. Drop everything else
 
 	// We run these as a single script to minimize exec calls
 	// Use -w flag to wait for xtables lock (avoids exit code 4 from lock contention)
@@ -823,6 +861,10 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
 		iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
+		# Allow the run's allowed host ports (serial listeners, network.host,
+		# base_url endpoints). Omitted when empty.
+		%s
+
 		# Drop all other outbound traffic
 		iptables -w -A OUTPUT -j DROP
 
@@ -849,6 +891,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 			   $IP6T -w 5 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p udp --dport 53 -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&
+			   $IP6T -w 5 %s &&
 			   $IP6T -w 5 -A OUTPUT -j DROP; then
 				: # IPv6 firewall installed
 			else
@@ -858,7 +901,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, proxyPort)
+	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, acceptArgsFor(extraPorts))
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", script},

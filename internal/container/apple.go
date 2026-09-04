@@ -563,6 +563,34 @@ func (r *AppleRuntime) Close() error {
 	return nil
 }
 
+// appleAcceptRulesFor renders the IPv4 accept rules for the run's allowed
+// host ports as `$IPT`-prefixed shell lines (the Apple script routes through
+// $IPT to prefer iptables-legacy). Empty input yields a no-op `:`.
+func appleAcceptRulesFor(ports []int) string {
+	if len(ports) == 0 {
+		return ":"
+	}
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, "$IPT -w -A OUTPUT -p tcp --dport %d -j ACCEPT\n", p)
+	}
+	return b.String()
+}
+
+// appleAcceptArgsFor renders the IPv6 accept rules as argument-list fragments
+// for the `$IP6T -w 5` invocations in the Apple firewall script, or a no-op
+// `:` when there are none.
+func appleAcceptArgsFor(ports []int) string {
+	if len(ports) == 0 {
+		return ":"
+	}
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, "-A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   $IP6T -w 5", p)
+	}
+	return b.String()
+}
+
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic
 // except to the proxy, covering both IPv4 and IPv6.
 // The proxyHost parameter is accepted for interface consistency but not used in the
@@ -570,12 +598,20 @@ func (r *AppleRuntime) Close() error {
 // networks. The security model relies on per-run proxy authentication (cryptographic
 // token in HTTP_PROXY URL) rather than IP filtering. This is more robust than IP-based
 // filtering and prevents unauthorized access even if another service runs on the same port.
+// extraPorts are host ports to allow in addition to the proxy port (serial
+// RFC2217 listeners, network.host entries, base_url host ports) — see the
+// Runtime interface doc.
 // If ip6tables is not available (minimal images), a warning is emitted to stderr
 // but the setup does not fail — the container may not have IPv6 connectivity.
-func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int) error {
+func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int) error {
 	// Validate port range
 	if proxyPort < 1 || proxyPort > 65535 {
 		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
+	}
+	for _, p := range extraPorts {
+		if p < 1 || p > 65535 {
+			return fmt.Errorf("invalid extra port %d: must be between 1 and 65535", p)
+		}
 	}
 
 	// Apple containers run Linux VMs whose kernel may lack nf_tables modules.
@@ -608,6 +644,10 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
 		$IPT -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
+		# Allow the run's allowed host ports (serial listeners, network.host,
+		# base_url endpoints). Omitted when empty.
+		%s
+
 		# Drop all other outbound traffic
 		$IPT -w -A OUTPUT -j DROP
 
@@ -633,6 +673,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 			   $IP6T -w 5 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p udp --dport 53 -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&
+			   $IP6T -w 5 %s &&
 			   $IP6T -w 5 -A OUTPUT -j DROP; then
 				: # IPv6 firewall installed
 			else
@@ -642,7 +683,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, proxyPort)
+	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, appleAcceptArgsFor(extraPorts))
 
 	// Run as root since iptables requires root privileges
 	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)

@@ -737,3 +737,52 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestAcceptRulesForSerialAndHostPorts(t *testing.T) {
+	// Strict + devices is the point of the plumbing: the serial listener's
+	// OS-assigned port must appear in the allowlist or the firewall silently
+	// drops the device.
+	got := acceptRulesFor([]int{45678, 45679})
+	want := "iptables -w -A OUTPUT -p tcp --dport 45678 -j ACCEPT\n" +
+		"iptables -w -A OUTPUT -p tcp --dport 45679 -j ACCEPT\n"
+	if got != want {
+		t.Fatalf("acceptRulesFor = %q, want %q", got, want)
+	}
+	// Companion: no allowed ports must produce a no-op, not an empty command
+	// list (an empty %s would leave two blank lines — valid, but ":" states
+	// the intent and survives any future wrapper).
+	if got := acceptRulesFor(nil); got != ":" {
+		t.Fatalf("acceptRulesFor(nil) = %q, want \":\"", got)
+	}
+}
+
+func TestAcceptArgsForSerialAndHostPorts(t *testing.T) {
+	// The IPv6 fragment chains after "$IP6T -w 5", so each port's rule must
+	// parse as arguments and re-prefix the binary for the next &&-chained
+	// command.
+	got := acceptArgsFor([]int{45678, 45679})
+	want := "-A OUTPUT -p tcp --dport 45678 -j ACCEPT &&\n" +
+		"\t\t\t   $IP6T -w 5-A OUTPUT -p tcp --dport 45679 -j ACCEPT &&\n" +
+		"\t\t\t   $IP6T -w 5"
+	if got != want {
+		t.Fatalf("acceptArgsFor = %q, want %q", got, want)
+	}
+	if got := acceptArgsFor(nil); got != ":" {
+		t.Fatalf("acceptArgsFor(nil) = %q, want \":\"", got)
+	}
+}
+
+func TestSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
+	// A port outside 1..65535 in the allowlist must fail the firewall setup
+	// rather than emit an iptables command that errors or silently truncates.
+	r := &DockerRuntime{}
+	for _, p := range []int{0, -1, 65536} {
+		if err := r.SetupFirewall(context.Background(), "c", "h", 8080, []int{p}); err == nil {
+			t.Fatalf("SetupFirewall with extra port %d must fail", p)
+		}
+	}
+	// Companion: the proxy port keeps its own range check.
+	if err := r.SetupFirewall(context.Background(), "c", "h", 0, nil); err == nil {
+		t.Fatal("SetupFirewall with proxy port 0 must fail")
+	}
+}

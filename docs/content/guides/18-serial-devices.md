@@ -171,6 +171,15 @@ The claim is released when the run stops — including when the run dies without
 unregistering (a killed CLI, a crashed machine): the daemon's liveness checker reaps the
 dead container and releases its devices.
 
+## Interaction with `network.policy: strict`
+
+A device connection is raw TCP to the RFC2217 listener, not HTTP through the proxy, so
+under strict policy the device's port is added to the firewall allowlist automatically
+alongside the proxy port. A strict run with `devices:` works without further
+configuration — the ports are OS-assigned per device, so there is nothing to list in
+`network.host`. Entries you list there yourself (`network.host: [8080]`, say) open the same
+way they always did.
+
 ## Observability
 
 Attach, detach, line-setting changes, DTR/RTS transitions, and byte counters are recorded

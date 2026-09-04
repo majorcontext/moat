@@ -127,8 +127,13 @@ type Runtime interface {
 	// SetupFirewall configures iptables and ip6tables to only allow traffic to the proxy.
 	// proxyHost is the address the container uses to reach the proxy (e.g., "host.docker.internal").
 	// proxyPort is the proxy's port number.
+	// extraPorts are host ports the firewall must additionally allow — the
+	// run's RFC2217 serial listeners, network.host entries, and any host-port
+	// claude.base_url resolves to. Without them a strict run's own devices
+	// would be unreachable: the listener ports are OS-assigned, so no static
+	// rule can cover them.
 	// This blocks all other outbound IPv4 and IPv6 traffic, forcing everything through the proxy.
-	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error
+	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int, extraPorts []int) error
 
 	// ListImages returns all moat-managed images.
 	ListImages(ctx context.Context) ([]ImageInfo, error)
