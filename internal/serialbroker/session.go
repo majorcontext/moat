@@ -58,6 +58,16 @@ func (l *listener) handle(conn net.Conn) {
 	l.cur = s
 	l.mu.Unlock()
 
+	// Dead-peer detection without an idle timeout: a serial console can sit
+	// quiet for hours by design, so inactivity must not close it. TCP
+	// keepalives notice a peer that vanished without FIN (laptop lid, dead
+	// network) and free the device for the next client instead of wedging the
+	// one-session slot until the daemon restarts.
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.SetKeepAlive(true)
+		_ = tc.SetKeepAlivePeriod(2 * time.Minute)
+	}
+
 	defer func() {
 		l.mu.Lock()
 		if l.cur == s {
@@ -191,6 +201,14 @@ func (s *session) run() {
 		r := rfc2217.NewReader(s.conn)
 		r.OnCommand = s.handleCommand
 		r.OnNegotiate = s.handleNegotiate
+		// A subnegotiation past the reader's cap is broken or hostile — the
+		// largest real com-port command is 4 bytes of baud. Drop the
+		// connection rather than serving whatever follows; the device is
+		// released for the next client.
+		r.SetOnBadCommand(func() {
+			s.emitError("oversized com-port subnegotiation; connection dropped")
+			s.stop()
+		})
 		n, err := io.Copy(&recordingWriter{w: port, dir: "tx", s: s}, r)
 		s.rx.Add(n)
 		s.logPumpExit("container->device", err)

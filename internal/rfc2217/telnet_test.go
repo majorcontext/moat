@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"testing/iotest"
 )
 
 func TestEscapeIACDoublesFFBytes(t *testing.T) {
@@ -143,6 +144,119 @@ func TestReaderSurvivesTruncatedSubnegotiation(t *testing.T) {
 	if string(data) != "a" {
 		t.Fatalf("data = %q, want %q", data, "a")
 	}
+}
+
+func TestReaderRejectsOversizedSubnegotiation(t *testing.T) {
+	// The payload buffer grows with the stream until IAC SE arrives, so an
+	// unbounded "subnegotiation" is an allocation the peer chooses. The
+	// reader must cap it, and the bytes after the abort must not be eaten as
+	// command bytes — the next valid frame has to parse.
+	var wire []byte
+	wire = append(wire, 'a', iac, sb, OptionComPort, CmdSetControl)
+	for i := 0; i < MaxSubnegotiation+64; i++ {
+		wire = append(wire, 'X')
+	}
+	// End the runaway, then send a real command and real data: the reader
+	// must resynchronize rather than swallow the stream.
+	wire = append(wire, iac, se)
+	wire = append(wire, iac, sb, OptionComPort, CmdSetBaudRate, 0x00, 0x01, 0xC2, 0x00, iac, se)
+	wire = append(wire, 'b')
+
+	var gotCmd byte
+	aborted := false
+	r := NewReader(bytes.NewReader(wire))
+	r.OnCommand = func(cmd byte, payload []byte) { gotCmd = cmd }
+	r.SetOnBadCommand(func() { aborted = true })
+	data, err := io.ReadAll(r)
+	if err != nil && err != io.EOF {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !aborted {
+		t.Fatal("oversized subnegotiation must trip the abort callback")
+	}
+	if gotCmd != CmdSetBaudRate {
+		t.Fatalf("reader must resync on the next valid frame, got cmd %d", gotCmd)
+	}
+	if string(data) != "ab" {
+		t.Fatalf("data = %q, want %q", data, "ab")
+	}
+	// And the memory actually held stays bounded by the cap, not the stream.
+	if len(r.payload) > MaxSubnegotiation {
+		t.Fatalf("payload retained %d bytes, cap is %d", len(r.payload), MaxSubnegotiation)
+	}
+}
+
+func TestReaderAcceptsSubnegotiationAtTheCap(t *testing.T) {
+	// Companion: a payload at exactly the cap still parses. The cap guards
+	// against unbounded growth, not against large-but-bounded commands.
+	payload := bytes.Repeat([]byte{0x7F}, MaxSubnegotiation-1) // room for the escaped 0xFF below
+	wire := append([]byte{iac, sb, OptionComPort, CmdSetControl}, payload...)
+	wire = append(wire, iac, iac, iac, se) // ...payload 0xFF, IAC SE
+
+	var gotLen int
+	r := NewReader(bytes.NewReader(wire))
+	r.OnCommand = func(_ byte, payload []byte) { gotLen = len(payload) }
+	if _, err := io.ReadAll(r); err != nil && err != io.EOF {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if gotLen != MaxSubnegotiation {
+		t.Fatalf("payload length = %d, want %d", gotLen, MaxSubnegotiation)
+	}
+}
+
+func TestReaderSplitSubnegotiationAcrossReads(t *testing.T) {
+	// A legitimately sized command split across source reads must parse as
+	// one command — the cap cannot be allowed to break chunk-boundary state.
+	wire := []byte{'a', iac, sb, OptionComPort, CmdSetBaudRate, 0x00, 0x01, 0xC2, 0x00, iac, se, 'b'}
+	var gotCmd byte
+	var gotPayload []byte
+	r := NewReader(iotest.OneByteReader(bytes.NewReader(wire)))
+	r.OnCommand = func(cmd byte, payload []byte) { gotCmd, gotPayload = cmd, append([]byte(nil), payload...) }
+	data, err := io.ReadAll(r)
+	if err != nil && err != io.EOF {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if gotCmd != CmdSetBaudRate || !bytes.Equal(gotPayload, []byte{0x00, 0x01, 0xC2, 0x00}) {
+		t.Fatalf("split command parsed as (%d, % x)", gotCmd, gotPayload)
+	}
+	if string(data) != "ab" {
+		t.Fatalf("data = %q, want %q", data, "ab")
+	}
+}
+
+func TestReaderConsumesZeroNilReads(t *testing.T) {
+	// A source that returns (0, nil) — permitted by io.Reader for a
+	// non-blocking source — must not busy-spin the read loop.
+	src := &stallingReader{chunks: [][]byte{{'a', 'b'}, {'c'}}}
+	r := NewReader(src)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(data) != "abc" {
+		t.Fatalf("data = %q, want %q", data, "abc")
+	}
+}
+
+// stallingReader returns (0, nil) once between each chunk, like a source
+// whose fd is momentarily empty.
+type stallingReader struct {
+	chunks [][]byte
+	stall  bool
+}
+
+func (s *stallingReader) Read(p []byte) (int, error) {
+	if s.stall {
+		s.stall = false
+		return 0, nil
+	}
+	if len(s.chunks) == 0 {
+		return 0, io.EOF
+	}
+	s.stall = true
+	n := copy(p, s.chunks[0])
+	s.chunks = s.chunks[1:]
+	return n, nil
 }
 
 func TestWriteCommandFramesCorrectly(t *testing.T) {

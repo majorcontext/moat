@@ -1113,3 +1113,39 @@ func TestEventsCarryDeviceIdentity(t *testing.T) {
 		t.Fatalf("DevicePath = %q, want the host device node", e.DevicePath)
 	}
 }
+
+func TestOversizedSubnegotiationDropsTheSession(t *testing.T) {
+	// The session must not wedge on a hostile or broken client: the reader
+	// aborts a past-cap subnegotiation, the connection is dropped, and the
+	// device becomes usable again — a wedged client holding the only session
+	// slot is a denial of the hardware.
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	// One runaway subnegotiation: IAC SB COM-PORT <cmd> then payload past the cap.
+	wire := []byte{0xFF, 0xFA, 44, 0x05}
+	for i := 0; i < rfc2217.MaxSubnegotiation+256; i++ {
+		wire = append(wire, 'X')
+	}
+	if _, err := c.Write(wire); err != nil {
+		t.Fatal(err)
+	}
+
+	// The connection must close, not hang.
+	if err := c.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Read(make([]byte, 16)); err == nil {
+		t.Fatal("connection should be dropped after an oversized subnegotiation")
+	}
+
+	// And the device must accept a new session — the claim is per-listener,
+	// but a fresh client must not be refused as busy.
+	c2 := dial(t, addr)
+	if _, err := c2.Write([]byte("y")); err != nil {
+		t.Fatalf("device must accept a new session after the drop: %v", err)
+	}
+}

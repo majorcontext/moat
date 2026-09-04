@@ -67,7 +67,17 @@ const (
 	stSubOption  // expecting the option byte of a subnegotiation
 	stSubPayload
 	stSubIAC // inside a subnegotiation, saw IAC
+	stSync   // aborted subnegotiation, discarding until the next IAC
 )
+
+// MaxSubnegotiation is the largest subnegotiation payload the reader accepts.
+//
+// Real com-port subnegotiations carry at most a handful of bytes (baud is the
+// largest at 4). A generous cap bounds the memory a hostile or broken peer can
+// make the reader retain: the payload buffer grows with the stream until IAC
+// SE arrives, and nothing else in the protocol stops it. A payload past the
+// cap aborts the subnegotiation; the reader resynchronizes on the next frame.
+const MaxSubnegotiation = 4096
 
 // Reader un-escapes a telnet stream, yielding only the data bytes from Read and
 // dispatching com-port subnegotiations to OnCommand.
@@ -86,12 +96,25 @@ type Reader struct {
 	// options and gets no answer will stall, so servers must respond to these.
 	OnNegotiate func(verb, option byte)
 
+	// onBadCommand, when set, is called when a subnegotiation is aborted for
+	// exceeding MaxSubnegotiation. Servers can use it to drop the connection —
+	// a peer that oversized a com-port command is broken or hostile, and the
+	// data that follows the abort is not trustworthy.
+	onBadCommand func()
+
 	state   int
 	verb    byte
 	option  byte
 	payload []byte
 	out     bytes.Buffer
 	buf     []byte
+}
+
+// SetOnBadCommand registers the oversized-subnegotiation callback. It returns
+// the Reader so it can be chained off NewReader.
+func (r *Reader) SetOnBadCommand(fn func()) *Reader {
+	r.onBadCommand = fn
+	return r
 }
 
 // NewReader wraps src.
@@ -116,7 +139,9 @@ func (r *Reader) Read(p []byte) (int, error) {
 			return 0, err
 		}
 		// The chunk held nothing but command bytes; read more rather than
-		// returning (0, nil), which callers are entitled to treat as a stall.
+		// returning (0, nil). io.Reader's contract lets a caller treat (0, nil)
+		// as a stall, and a source that actually returns it would busy-spin
+		// this loop — so it is consumed here, not passed on.
 	}
 }
 
@@ -162,6 +187,19 @@ func (r *Reader) process(chunk []byte) {
 				r.state = stSubIAC
 				continue
 			}
+			if len(r.payload) >= MaxSubnegotiation {
+				// A payload past the cap is not a com-port command — the
+				// largest real one is 4 bytes of baud. Abort the
+				// subnegotiation and resynchronize on the next IAC SB, rather
+				// than retaining an attacker-chosen number of bytes or
+				// swallowing the rest of the stream as command bytes.
+				r.state = stSync
+				r.payload = r.payload[:0] // release the retained bytes
+				if r.onBadCommand != nil {
+					r.onBadCommand()
+				}
+				continue
+			}
 			r.payload = append(r.payload, b)
 
 		case stSubIAC:
@@ -176,6 +214,14 @@ func (r *Reader) process(chunk []byte) {
 				// Malformed: a peer that sends IAC <other> mid-subnegotiation.
 				// Drop the partial command rather than guessing at its meaning.
 				r.state = stData
+			}
+
+		case stSync:
+			// Aborted subnegotiation: discard bytes until the next IAC,
+			// which either ends the runaway (IAC SE) or starts the next
+			// command (IAC SB, IAC DO, ...).
+			if b == iac {
+				r.state = stIAC
 			}
 		}
 	}
