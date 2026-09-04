@@ -1660,9 +1660,8 @@ Pins whose device is not attached are listed separately.
 
 USB devices with no serial interface (SDR dongles like the RTL2832U, keyboards, storage)
 are listed in a separate section — they cannot go through `devices:`, which only brokers
-serial hardware. The section points at
-[examples/serial-sdr](https://github.com/majorcontext/moat/tree/main/examples/serial-sdr)
-for the network-based path such devices need.
+serial hardware. Such devices belong on the host, with the container reaching them over
+the network through an allowed `network: host:` port.
 
 ### moat device forget
 

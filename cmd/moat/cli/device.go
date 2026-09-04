@@ -159,7 +159,8 @@ func printUSBDevices(w io.Writer, usbDevices []serialdev.Device) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Serial-only tools cannot reach these. A dongle that streams over USB bulk")
 	fmt.Fprintln(w, "transfers (SDRs like the RTL2832U) belongs on the host, with the container")
-	fmt.Fprintln(w, "connecting over the network — see examples/serial-sdr in the moat repo.")
+	fmt.Fprintln(w, "connecting over the network — run a sample server on the host and allow")
+	fmt.Fprintln(w, "its port with network: host:.")
 	return nil
 }
 

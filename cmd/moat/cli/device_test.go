@@ -164,8 +164,10 @@ func TestDeviceListShowsNonSerialUSBDevices(t *testing.T) {
 	if !strings.Contains(out, "no serial interface") {
 		t.Fatalf("the section must say these cannot go through devices::\n%s", out)
 	}
-	if !strings.Contains(out, "examples/serial-sdr") {
-		t.Fatalf("the section must point at the SDR example:\n%s", out)
+	// The advice must be actionable without pointing at a file: name the
+	// host-side server pattern and the config knob that allows it.
+	if !strings.Contains(out, "network: host:") {
+		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
 	}
 	// The USB device must not be presented as usable by the serial broker.
 	if !strings.Contains(out, "cannot use devices:") {
@@ -187,8 +189,8 @@ func TestDeviceListUSBOnlyDoesNotClaimNothingIsAttached(t *testing.T) {
 	if !strings.Contains(out, "0bda:2838") {
 		t.Fatalf("the attached SDR must still be listed:\n%s", out)
 	}
-	if !strings.Contains(out, "examples/serial-sdr") {
-		t.Fatalf("the section must point at the SDR example:\n%s", out)
+	if !strings.Contains(out, "network: host:") {
+		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
 	}
 	// "Plug in a device and run this again" would be wrong here — the user
 	// already plugged something in.
