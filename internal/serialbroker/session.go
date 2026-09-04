@@ -124,6 +124,13 @@ func (l *listener) handle(conn net.Conn) {
 
 // emit reports an event carrying this device's identity.
 func (l *listener) emit(kind, detail string, tx, rx int64) {
+	record := l.approved.Record
+	if record == "" {
+		// Approved's documented default. Stamped here rather than trusting
+		// every caller to normalize: an empty Record reads downstream as
+		// "unknown" where the audit trail wants "events".
+		record = "events"
+	}
 	l.broker.emit(Event{
 		RunID:        l.runID,
 		Device:       l.approved.Name,
@@ -133,7 +140,7 @@ func (l *listener) emit(kind, detail string, tx, rx int64) {
 		VID:          l.approved.Device.VID,
 		PID:          l.approved.Device.PID,
 		DeviceSerial: l.approved.Device.Serial,
-		Record:       l.approved.Record,
+		Record:       record,
 		TxBytes:      tx,
 		RxBytes:      rx,
 	})

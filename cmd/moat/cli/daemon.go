@@ -161,11 +161,10 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	})
 
 	// Serial device broker. Listeners are opened per run when a run registers
-	// devices, and closed when it unregisters.
-	//
-	// Every event goes to the run's devices.jsonl. Session boundaries also go to
-	// the audit chain: attaching to hardware an agent can reflash is worth a
-	// tamper-evident record, while per-signal chatter is not.
+	// devices, and closed when it unregisters. Event routing lives in
+	// serialEventFanout (serial_events.go): every event goes to the run's
+	// devices.jsonl; session boundaries also go to the audit chain.
+	serialFanout := newSerialEventFanout(baseDir)
 	serialBroker := serialbroker.New(serialbroker.Options{
 		// Payload capture (record: full) writes to the run's directory beside
 		// its other artifacts. 0600 because the capture may contain firmware
@@ -180,71 +179,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 				os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600,
 			)
 		},
-		Log: func(e serialbroker.Event) {
-			log.Debug("serial device event", "run", e.RunID, "device", e.Device,
-				"kind", e.Kind, "detail", e.Detail, "tx", e.TxBytes, "rx", e.RxBytes)
-			if e.RunID == "" {
-				return
-			}
-
-			storeMu.Lock()
-			store, ok := stores[e.RunID]
-			if !ok {
-				var storeErr error
-				store, storeErr = storage.NewRunStore(baseDir, e.RunID)
-				if storeErr != nil {
-					storeMu.Unlock()
-					log.Warn("failed to open run store for device log",
-						"run_id", e.RunID, "error", storeErr)
-					return
-				}
-				stores[e.RunID] = store
-			}
-			storeMu.Unlock()
-
-			_ = store.WriteDeviceEvent(storage.DeviceEvent{
-				Timestamp: time.Now().UTC(),
-				Device:    e.Device,
-				Kind:      e.Kind,
-				Detail:    e.Detail,
-				TxBytes:   e.TxBytes,
-				RxBytes:   e.RxBytes,
-			})
-
-			switch e.Kind {
-			case "attach", "detach", "error", "conflict":
-			default:
-				return
-			}
-
-			auditMu.Lock()
-			as, ok := auditStores[e.RunID]
-			if !ok {
-				var openErr error
-				as, openErr = audit.OpenStore(filepath.Join(baseDir, e.RunID, "audit.db"))
-				if openErr != nil {
-					auditMu.Unlock()
-					log.Warn("failed to open audit store for device log",
-						"run_id", e.RunID, "error", openErr)
-					return
-				}
-				auditStores[e.RunID] = as
-			}
-			auditMu.Unlock()
-
-			_, _ = as.AppendDevice(audit.DeviceData{
-				Name:       e.Device,
-				Path:       e.DevicePath,
-				VID:        e.VID,
-				PID:        e.PID,
-				Serial:     e.DeviceSerial,
-				Action:     e.Kind,
-				Detail:     e.Detail,
-				TxBytes:    e.TxBytes,
-				RxBytes:    e.RxBytes,
-				RecordMode: e.Record,
-			})
-		},
+		Log: serialFanout.handle,
 	})
 	defer serialBroker.Close()
 	apiServer.SetSerialBroker(serialBroker)
