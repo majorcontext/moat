@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -60,8 +61,17 @@ func enumerateSysfsUSB(root string) ([]Device, error) {
 		}
 		// bDeviceClass 9 = hub: host infrastructure, not a plugged-in device
 		// anyone is looking for. Roothubs ("usbN") were already skipped by
-		// name; this drops downstream hubs.
-		if readAttr(dir, "bDeviceClass") == "9" {
+		// name; this drops downstream hubs. The attribute is hex ("09" on a
+		// real kernel — sysfs emits it with %02x), so parse rather than
+		// string-compare; an absent or unreadable class is per-interface
+		// (0), not a hub. Class-0 controller hubs — the same hardware the
+		// macOS walk filters by name — fall through to the hubByName
+		// backstop below.
+		if isHubClass(readAttr(dir, "bDeviceClass")) {
+			continue
+		}
+		description := readAttr(dir, "product")
+		if hubByName(description) {
 			continue
 		}
 		portPath := name
@@ -73,11 +83,21 @@ func enumerateSysfsUSB(root string) ([]Device, error) {
 			PID:         strings.ToLower(pid),
 			Serial:      readAttr(dir, "serial"),
 			PortPath:    portPath,
-			Description: readAttr(dir, "product"),
+			Description: description,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PortPath < out[j].PortPath })
 	return out, nil
+}
+
+// isHubClass reports whether a sysfs bDeviceClass value names a hub (USB class
+// 9). Kernels emit it as two hex digits ("09"), but tolerate the unpadded
+// form for hand-built trees. An empty or unparsable value is not a hub —
+// classless (per-interface) devices are the common case, and dropping them
+// on a read hiccup would hide real hardware.
+func isHubClass(s string) bool {
+	v, err := strconv.ParseUint(s, 16, 8)
+	return err == nil && v == 9
 }
 
 // serialPortPaths returns the USB port paths of every serial-backed device,

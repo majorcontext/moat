@@ -46,6 +46,20 @@ type Identity struct {
 	PortPath string
 }
 
+// hubByName reports whether a product string names a hub. Over-filtering is
+// acceptable here — hardware whose own name says "hub" is not something
+// anyone is matching in devices: — while under-filtering put two of the
+// host's controller hubs into the user-facing list (on macOS, confirmed;
+// on Linux, class-0 controller hubs exist behind the same ports).
+//
+// Both enumerators use it as the backstop for hubs that report no usable
+// class: macOS's internal 0424:7240/7260 hubs, and Linux's per-interface
+// (class-0) hubs that the bDeviceClass check in enumerate_linux_usb.go
+// cannot see.
+func hubByName(description string) bool {
+	return strings.Contains(strings.ToLower(description), "hub")
+}
+
 // Identity returns the device's approval identity.
 func (d Device) Identity() Identity {
 	return Identity{VID: d.VID, PID: d.PID, Serial: d.Serial, PortPath: d.PortPath}

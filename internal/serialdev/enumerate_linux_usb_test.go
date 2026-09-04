@@ -33,14 +33,17 @@ func fakeSysfsUSB(t *testing.T) string {
 	// bDeviceClass 0 = per-interface; anything other than 9 (hub) is fine.
 	write(sdr, "bDeviceClass", "0")
 
-	// A hub: identical shape, but class 9.
+	// A hub: identical shape, but class 9. Real kernels emit bDeviceClass as
+	// two hex digits — "09" — via sysfs's %02x; the fixture must match what
+	// /sys actually serves or the test would pass against a value the kernel
+	// cannot produce.
 	hub := filepath.Join(root, "devices", "pci0000:00", "usb1", "1-1")
 	if err := os.MkdirAll(filepath.Join(hub, "1-1:1.0"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	write(hub, "idVendor", "1d6b")
 	write(hub, "idProduct", "0002")
-	write(hub, "bDeviceClass", "9")
+	write(hub, "bDeviceClass", "09")
 	write(hub, "product", "USB 2.0 Hub")
 
 	// The USB walk reads /sys/bus/usb/devices, whose entries are symlinks
@@ -115,13 +118,76 @@ func TestEnumerateSysfsUSBSkipsHubsAndRootHubs(t *testing.T) {
 		t.Fatalf("enumerateSysfsUSB: %v", err)
 	}
 	if _, ok := findByPortPath(got, "1-1"); ok {
-		t.Fatal("a hub (bDeviceClass 9) must be skipped")
+		t.Fatal("a hub (bDeviceClass 09) must be skipped")
 	}
 	if _, ok := findByPortPath(got, "usb1"); ok {
 		t.Fatal("the roothub (usbN) must be skipped")
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d devices, want only the SDR: %+v", len(got), got)
+	}
+}
+
+func TestEnumerateSysfsUSBSkipsClasslessControllerHubsByName(t *testing.T) {
+	// Companion of the class-9 skip: a controller hub that reports
+	// per-interface class (bDeviceClass 00) — the Linux shape of the same
+	// hardware the macOS walk filters by name — is only caught by the
+	// hubByName backstop. Its product string comes from a real 0424:7240
+	// hub: "hub" in the name.
+	root := fakeSysfsUSB(t)
+	hub := filepath.Join(root, "devices", "pci0000:00", "usb1", "1-1")
+	for name, val := range map[string]string{
+		"bDeviceClass": "00",
+		"product":      "USB2 Controller Hub",
+	} {
+		if err := os.WriteFile(filepath.Join(hub, name), []byte(val+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := enumerateSysfsUSB(root)
+	if err != nil {
+		t.Fatalf("enumerateSysfsUSB: %v", err)
+	}
+	if _, ok := findByPortPath(got, "1-1"); ok {
+		t.Fatal("a class-0 controller hub must be skipped by product name")
+	}
+}
+
+func TestIsHubClassAcceptsKernelAndUnpaddedHex(t *testing.T) {
+	// The kernel emits "09" (sysfs %02x); hand-built trees sometimes write
+	// "9". Both name class 9, and both must classify.
+	for _, s := range []string{"09", "9"} {
+		if !isHubClass(s) {
+			t.Fatalf("isHubClass(%q) = false, want true", s)
+		}
+	}
+	// Companion: per-interface devices ("00"/"0"), a vendor class ("ff"),
+	// and an absent or malformed attribute are not hubs — dropping those
+	// would hide real hardware.
+	for _, s := range []string{"00", "0", "ff", "", "not-a-number"} {
+		if isHubClass(s) {
+			t.Fatalf("isHubClass(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestEnumerateSysfsUSBKeepsDevicesWithUnreadableDeviceClass(t *testing.T) {
+	// Companion of the hub-skip test: a real device whose bDeviceClass is
+	// missing or unparsable must be listed, not silently dropped — the
+	// common case is classless (per-interface) hardware.
+	root := fakeSysfsUSB(t) // 1-3 SDR (class 00), 1-1 hub (class 09)
+	// Rewrite the SDR's class to something unparsable, as a mid-walk read
+	// failure would produce.
+	if err := os.WriteFile(filepath.Join(root, "devices", "pci0000:00", "usb1", "1-3", "bDeviceClass"),
+		[]byte("??\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := enumerateSysfsUSB(root)
+	if err != nil {
+		t.Fatalf("enumerateSysfsUSB: %v", err)
+	}
+	if _, ok := findByPortPath(got, "1-3"); !ok {
+		t.Fatalf("device with unparsable bDeviceClass must be listed, got %+v", got)
 	}
 }
 
