@@ -50,6 +50,12 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 	if opts.HasSerialDevices {
 		hashInput += ",serial:devices"
 	}
+	// NOTE: NeedsProxy deliberately contributes no explicit suffix. Baking the
+	// moat-init entrypoint is what must move the tag, and the moat-init script
+	// hash below already mirrors needsInit() — which NeedsProxy joins — so a
+	// run gaining the entrypoint through NeedsProxy automatically gets a new
+	// tag while runs already baking it through another gate (SSH, init
+	// providers, firewall, …) keep theirs.
 	if opts.NeedsInitFiles {
 		hashInput += ",init-files"
 	}

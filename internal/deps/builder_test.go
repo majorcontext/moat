@@ -66,6 +66,37 @@ func TestImageTagWithSerialDevices(t *testing.T) {
 	}
 }
 
+// NeedsProxy bakes the moat-init entrypoint into images that would otherwise
+// lack it (grant-less runs registered for network.host, rules, MCP,
+// keep_policy, or base_url), and the entrypoint's presence must move the tag —
+// a cached entrypoint-less image would leave moat-proxy unresolvable on
+// Apple/Docker Desktop. The tag mechanism is the moat-init script hash, which
+// mirrors needsInit(), so the assertion here is on that behavior rather than
+// an explicit flag suffix. A run already baking the entrypoint through another
+// gate keeps its tag: grant runs must not churn.
+func TestImageTagWithNeedsProxy(t *testing.T) {
+	deps := []Dependency{{Name: "python"}}
+	// A grant-less proxy run gains the entrypoint, so its tag must differ
+	// from a plain run's.
+	tagPlain := ImageTag(deps, nil)
+	tagProxy := ImageTag(deps, &ImageSpec{NeedsProxy: true})
+	if tagPlain == tagProxy {
+		t.Error("NeedsProxy should affect tag — the run gains the moat-init entrypoint")
+	}
+	// Determinism: same spec, same tag.
+	if tagProxy != ImageTag(deps, &ImageSpec{NeedsProxy: true}) {
+		t.Error("NeedsProxy tag should be deterministic")
+	}
+
+	// A run already baking the entrypoint via NeedsSSH keeps its tag: adding
+	// NeedsProxy must not rebuild images whose init came from another gate.
+	tagSSH := ImageTag(deps, &ImageSpec{NeedsSSH: true})
+	tagSSHProxy := ImageTag(deps, &ImageSpec{NeedsSSH: true, NeedsProxy: true})
+	if tagSSH != tagSSHProxy {
+		t.Errorf("NeedsProxy should not change the tag when the moat-init entrypoint is already baked (NeedsSSH): %s vs %s", tagSSH, tagSSHProxy)
+	}
+}
+
 func TestImageTagWithHooks(t *testing.T) {
 	noHooks := ImageTag(nil, nil)
 	withHooks := ImageTag(nil, &ImageSpec{

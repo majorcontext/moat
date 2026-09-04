@@ -1224,12 +1224,19 @@ region = %s
 			"Add pi-cli to dependencies, or run with `moat pi`.")
 	}
 	imageSpec := &deps.ImageSpec{
-		BaseImage:          baseImage,
-		NeedsSSH:           hasSSHGrants,
-		SSHHosts:           sshGrants,
-		InitProviders:      imgNeeds.initProviders,
-		NeedsFirewall:      needsProxyForFirewall,
-		HasSerialDevices:   opts.Config != nil && len(opts.Config.Devices) > 0,
+		BaseImage:        baseImage,
+		NeedsSSH:         hasSSHGrants,
+		SSHHosts:         sshGrants,
+		InitProviders:    imgNeeds.initProviders,
+		NeedsFirewall:    needsProxyForFirewall,
+		HasSerialDevices: opts.Config != nil && len(opts.Config.Devices) > 0,
+		// Any daemon-registered run hands the container a proxy URL built on
+		// the synthetic hostname moat-proxy. On Apple containers and Docker
+		// Desktop that name only resolves via moat-init's MOAT_EXTRA_HOSTS
+		// write, so the entrypoint must be baked even for a grant-less run
+		// registered for network.host / rules / MCP / keep_policy / base_url.
+		// Same bug class as HasSerialDevices (see 8b2daed).
+		NeedsProxy:         needsProxyForGrants || needsProxyForFirewall || needsProxyForConfig,
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
 		NeedsClipboard:     needsClipboard,

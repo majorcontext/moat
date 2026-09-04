@@ -56,3 +56,32 @@ func TestHasSerialDevicesForcesCustomImageAndInit(t *testing.T) {
 		t.Error("empty spec should not need the init entrypoint")
 	}
 }
+
+// A proxy-registered run must get BOTH a custom image and the moat-init
+// entrypoint: its HTTP_PROXY points at the synthetic hostname moat-proxy,
+// which on Apple containers / Docker Desktop only resolves when moat-init.sh
+// writes it to /etc/hosts from MOAT_EXTRA_HOSTS. Grant-less runs registered
+// for network.host, network.rules, MCP, keep_policy, or claude.base_url hit
+// exactly this — no other gate bakes the entrypoint for them. The
+// Docker-on-Linux mask (--add-host) is why the gate is unconditional.
+func TestNeedsProxyForcesCustomImageAndInit(t *testing.T) {
+	// NeedsCustomImage: proxy registration forces true even with no deps (a
+	// grant-less network.host-only run).
+	if !(&ImageSpec{NeedsProxy: true}).NeedsCustomImage(false) {
+		t.Error("NeedsProxy should force NeedsCustomImage true")
+	}
+	// Companion: without the flag and without deps, no custom image.
+	if (&ImageSpec{}).NeedsCustomImage(false) {
+		t.Error("empty spec with no deps should not need a custom image")
+	}
+
+	// needsInit: proxy registration forces the moat-init entrypoint even with
+	// no docker mode and no other init trigger.
+	if !(&ImageSpec{NeedsProxy: true}).needsInit("") {
+		t.Error("NeedsProxy should force needsInit true")
+	}
+	// Companion: without the flag and no other trigger, no init entrypoint.
+	if (&ImageSpec{}).needsInit("") {
+		t.Error("empty spec should not need the init entrypoint")
+	}
+}
