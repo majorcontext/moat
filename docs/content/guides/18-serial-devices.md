@@ -80,7 +80,8 @@ because a pty has no modem control lines at all. A device path inside the contai
 enumerate correctly and then fail to flash, which looks like broken hardware rather than a
 missing feature.
 
-RFC2217 is the standard solution: it carries baud rate, DTR, RTS, and break over TCP.
+RFC2217 is the standard solution: it carries baud rate, DTR, RTS, and break over TCP, and
+reports the modem status lines (CTS, DSR, RI, CD) to a client that asks.
 Espressif [documents it](https://docs.espressif.com/projects/esptool/en/latest/esp32/esptool/remote-serial-ports.html)
 as supporting DTR/RTS auto-reset "the same as for a local serial port," and recommends it
 for remote serial. Any pyserial-based tool accepts an `rfc2217://` URL in place of a port.

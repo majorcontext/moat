@@ -42,6 +42,15 @@ type Modem struct {
 	RTS bool
 }
 
+// ModemStatus is the readable input control lines. USB-serial adapters report
+// a subset — a line the adapter does not wire reads as false.
+type ModemStatus struct {
+	CTS bool // Clear To Send
+	DSR bool // Data Set Ready
+	RI  bool // Ring Indicator
+	CD  bool // Carrier Detect
+}
+
 // Port is an open serial device.
 type Port interface {
 	io.ReadWriteCloser
@@ -52,6 +61,11 @@ type Port interface {
 
 	// SetModem drives the DTR and RTS output lines.
 	SetModem(Modem) error
+
+	// ModemStatus reads the CTS, DSR, RI, and CD input lines. It backs
+	// RFC2217 NOTIFY-MODEMSTATE, which pyserial-based tools read for flow
+	// control and carrier detection.
+	ModemStatus() (ModemStatus, error)
 
 	// SendBreak transmits a break condition.
 	SendBreak() error

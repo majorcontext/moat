@@ -31,6 +31,8 @@ type FakePort struct {
 	mu          sync.Mutex
 	settings    serialport.Settings
 	modem       serialport.Modem
+	status      serialport.ModemStatus
+	statusErr   error
 	breaks      int
 	purges      int
 	flushErr    error
@@ -141,6 +143,30 @@ func (p *FakePort) SetFlushError(err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.flushErr = err
+}
+
+// ModemStatus reports the scripted input lines (Status field). A pty cannot
+// express them, so the value is whatever the test set.
+func (p *FakePort) ModemStatus() (serialport.ModemStatus, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status, p.statusErr
+}
+
+// SetModemStatus scripts what ModemStatus reports.
+func (p *FakePort) SetModemStatus(s serialport.ModemStatus) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status = s
+}
+
+// SetModemStatusError makes subsequent ModemStatus calls fail, or clears it
+// with nil — for testing how callers handle a device that cannot report its
+// input lines.
+func (p *FakePort) SetModemStatusError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.statusErr = err
 }
 
 // LastSettings returns the most recently applied line settings.

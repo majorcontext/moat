@@ -371,8 +371,37 @@ func (s *session) handleCommandLocked(cmd byte, payload []byte) {
 
 	case rfc2217.CmdSetControl:
 		if len(payload) == 1 {
-			s.applyControl(payload[0])
+			if s.applyControl(payload[0]) {
+				// A query queued its own answer (the current setting); the
+				// echo below would send a second frame, and the client would
+				// read it as the answer to its next command.
+				break
+			}
 		}
+		s.reply(payload)
+
+	case rfc2217.CmdNotifyLineState:
+		// The client asks the server to report line state (break/framing/error
+		// bits). A tty in raw mode reports none of them — there is nothing to
+		// say — but the reply must exist, or an asking client stalls. Zero is
+		// the all-clear encoding.
+		s.reply([]byte{0})
+
+	case rfc2217.CmdNotifyModemState:
+		// A poll: the client wants the modem status byte now. pyserial sends
+		// this from .cts/.dsr/.ri/.cd reads when its `poll_modem` option is on
+		// (rfc2217://...?poll_modem=1), and raises "remote sends no
+		// NOTIFY_MODEMSTATE" if no answer ever arrives.
+		s.replyModemState()
+
+	case rfc2217.CmdSetLineStateMask, rfc2217.CmdSetModemStateMask:
+		// The client subscribes to changes in the line/modem bits the payload
+		// names. The broker does not push unsolicited notifications — change
+		// pushes would need a watcher thread per session, and nothing moat
+		// serves (esptool, miniterm) reads the lines that way; pyserial's
+		// default is exactly this polling mode. Acknowledge the mask so the
+		// client's wait completes; a client that then polls gets the answer
+		// from the case above.
 		s.reply(payload)
 
 	case rfc2217.CmdPurgeData:
@@ -405,10 +434,78 @@ func (s *session) handleCommandLocked(cmd byte, payload []byte) {
 	}
 }
 
+// replyModemState queues a NOTIFY-MODEMSTATE answer carrying the port's input
+// lines. Must be called with s.mu held (it reads s.port); the write happens in
+// handleCommand's drain loop like every other reply.
+func (s *session) replyModemState() {
+	p := s.port
+	if p == nil {
+		return
+	}
+	st, err := p.ModemStatus()
+	if err != nil {
+		// The device cannot report its lines (some adapters do not wire
+		// them). Answer with zero rather than silence: the client asked, and
+		// a missing answer reads as a dead port.
+		s.emitError("reading modem lines: " + err.Error())
+		s.reply([]byte{0})
+		return
+	}
+	var b byte
+	if st.CTS {
+		b |= rfc2217.ModemCTS
+	}
+	if st.DSR {
+		b |= rfc2217.ModemDSR
+	}
+	if st.RI {
+		b |= rfc2217.ModemRI
+	}
+	if st.CD {
+		b |= rfc2217.ModemCD
+	}
+	s.reply([]byte{b})
+}
+
 // applyControl handles SET-CONTROL, which carries both flow control and the
-// individual modem lines.
-func (s *session) applyControl(v byte) {
+// individual modem lines. It reports whether the value was a query whose
+// answer it queued itself; the caller must not echo the request byte in that
+// case, or the client reads the stray echo as the answer to its next command.
+func (s *session) applyControl(v byte) (answered bool) {
 	switch v {
+	case rfc2217.ControlQueryFlow:
+		// A query, not a change: answer with the current flow-control
+		// setting rather than applying anything.
+		var cur byte
+		switch s.settings.FlowControl {
+		case serialport.FlowRTSCTS:
+			cur = rfc2217.ControlFlowRTSCTS
+		case serialport.FlowXONXOFF:
+			cur = rfc2217.ControlFlowXONXOFF
+		default:
+			cur = rfc2217.ControlFlowNone
+		}
+		s.reply([]byte{cur})
+		return true
+	case rfc2217.ControlQueryBreak:
+		// Break is a timed pulse; it is off the moment the pulse ends.
+		s.reply([]byte{rfc2217.ControlBreakOff})
+		return true
+	case rfc2217.ControlQueryDTR:
+		if s.modem.DTR {
+			s.reply([]byte{rfc2217.ControlDTROn})
+		} else {
+			s.reply([]byte{rfc2217.ControlDTROff})
+		}
+		return true
+	case rfc2217.ControlQueryRTS:
+		if s.modem.RTS {
+			s.reply([]byte{rfc2217.ControlRTSOn})
+		} else {
+			s.reply([]byte{rfc2217.ControlRTSOff})
+		}
+		return true
+
 	case rfc2217.ControlFlowNone:
 		s.settings.FlowControl = serialport.FlowNone
 		s.applySettings()
@@ -435,13 +532,20 @@ func (s *session) applyControl(v byte) {
 	case rfc2217.ControlBreakOn:
 		if err := s.port.SendBreak(); err != nil {
 			s.emitError("sending break: " + err.Error())
-			return
+			return false
 		}
 		s.emit("break", rfc2217.ControlName(v))
 	case rfc2217.ControlBreakOff:
 		// Break is transmitted as a timed pulse by SendBreak, so the explicit
 		// clear has nothing left to do.
+	default:
+		// Inbound-flow and DCD/DTR/DSR flow-control variants. The broker
+		// serves raw ttys, not modem banks; these settings have nothing to
+		// act on, and SET-CONTROL's reply echoes the request byte anyway, so
+		// the client is not left waiting. The event records what was asked.
+		s.emit("control", rfc2217.ControlName(v))
 	}
+	return false
 }
 
 func (s *session) applySettings() {

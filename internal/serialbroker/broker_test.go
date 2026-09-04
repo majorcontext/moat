@@ -1339,3 +1339,146 @@ func TestZeroBaudLeavesThePortUnchanged(t *testing.T) {
 		t.Fatalf("LastSettings().Baud = %d, want 0 — no configured baud must leave the port alone", got)
 	}
 }
+
+// readCommand reads one complete com-port reply frame (IAC SB 44 cmd payload
+// IAC SE) and returns (cmd, payload).
+func readCommand(t *testing.T, c net.Conn) (byte, []byte) {
+	t.Helper()
+	frame := readN(t, c, 7) // 4 header/trailer + up to 3 payload; extended below if payload is longer
+	for frame[len(frame)-2] != iacByte || frame[len(frame)-1] != seByte {
+		frame = append(frame, readN(t, c, 1)...)
+		if len(frame) > 32 {
+			t.Fatalf("reply frame did not terminate: % x", frame)
+		}
+	}
+	return frame[3], frame[4 : len(frame)-2]
+}
+
+const (
+	iacByte = 0xFF
+	seByte  = 0xF0
+)
+
+func TestModemStatePollIsAnswered(t *testing.T) {
+	// pyserial with poll_modem=1 sends NOTIFY_MODEMSTATE from every .cts/.dsr/
+	// .ri/.cd read and raises "remote sends no NOTIFY_MODEMSTATE" if nothing
+	// comes back — the trap the review flagged: the poll is a client-to-server
+	// command (7), and the answer is the same value plus 100.
+	_, fp, addr := newBroker(t)
+	fp.SetModemStatus(serialport.ModemStatus{CTS: true, CD: true})
+
+	c := dial(t, addr)
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdNotifyModemState, nil); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.SrvNotifyModemState {
+		t.Fatalf("reply cmd = %d, want %d (NOTIFY-MODEMSTATE)", cmd, rfc2217.SrvNotifyModemState)
+	}
+	want := rfc2217.ModemCTS | rfc2217.ModemCD
+	if len(payload) != 1 || payload[0] != want {
+		t.Fatalf("modem state = % x, want [%02x]", payload, want)
+	}
+}
+
+func TestModemStatePollOnEmptyLinesIsAnsweredWithZero(t *testing.T) {
+	// Companion: an adapter that wires no input lines still gets an answer —
+	// zero, the all-clear encoding — because silence reads as a dead port.
+	_, fp, addr := newBroker(t)
+	fp.SetModemStatus(serialport.ModemStatus{})
+
+	c := dial(t, addr)
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdNotifyModemState, nil); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.SrvNotifyModemState {
+		t.Fatalf("reply cmd = %d, want %d", cmd, rfc2217.SrvNotifyModemState)
+	}
+	if len(payload) != 1 || payload[0] != 0 {
+		t.Fatalf("modem state = % x, want [00]", payload)
+	}
+}
+
+func TestModemStatePollAnswersZeroWhenTheDeviceCannotReport(t *testing.T) {
+	// A device whose TIOCMGET fails (some adapters do not wire the lines)
+	// must not stall the client: the answer is zero and an error event is
+	// recorded.
+	_, fp, addr := newBroker(t)
+	fp.SetModemStatusError(errors.New("TIOCMGET: inappropriate ioctl"))
+
+	c := dial(t, addr)
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdNotifyModemState, nil); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.SrvNotifyModemState {
+		t.Fatalf("reply cmd = %d, want %d", cmd, rfc2217.SrvNotifyModemState)
+	}
+	if len(payload) != 1 || payload[0] != 0 {
+		t.Fatalf("modem state = % x, want [00]", payload)
+	}
+}
+
+func TestSetControlQueriesAnswerWithTheCurrentValue(t *testing.T) {
+	// The zero-ish SET-CONTROL values are queries, not changes: a client that
+	// sends them expects the current setting back, not an echo of its own
+	// query byte. Assert DTR/RTS first so the "current" values are known.
+	_, fp, addr := newBroker(t)
+
+	c := dial(t, addr)
+	for _, ctrl := range []byte{rfc2217.ControlDTROff, rfc2217.ControlRTSOn} {
+		if err := rfc2217.WriteCommand(c, rfc2217.CmdSetControl, []byte{ctrl}); err != nil {
+			t.Fatalf("sending %s: %v", rfc2217.ControlName(ctrl), err)
+		}
+		readCommand(t, c)
+	}
+	if fp.LastModem().DTR || !fp.LastModem().RTS {
+		t.Fatalf("setup: modem = %+v, want DTR off, RTS on", fp.LastModem())
+	}
+
+	cases := []struct {
+		query byte
+		want  byte
+	}{
+		{rfc2217.ControlQueryDTR, rfc2217.ControlDTROff},
+		{rfc2217.ControlQueryRTS, rfc2217.ControlRTSOn},
+		{rfc2217.ControlQueryFlow, rfc2217.ControlFlowNone},
+		{rfc2217.ControlQueryBreak, rfc2217.ControlBreakOff},
+	}
+	for _, tc := range cases {
+		if err := rfc2217.WriteCommand(c, rfc2217.CmdSetControl, []byte{tc.query}); err != nil {
+			t.Fatalf("sending %s: %v", rfc2217.ControlName(tc.query), err)
+		}
+		cmd, payload := readCommand(t, c)
+		if cmd != rfc2217.SrvSetControl {
+			t.Fatalf("%s: reply cmd = %d, want %d", rfc2217.ControlName(tc.query), cmd, rfc2217.SrvSetControl)
+		}
+		if len(payload) != 1 || payload[0] != tc.want {
+			t.Fatalf("%s: reply = % x, want [%02x]", rfc2217.ControlName(tc.query), payload, tc.want)
+		}
+	}
+	// A query must not touch the lines.
+	if fp.LastModem().DTR || !fp.LastModem().RTS {
+		t.Fatalf("queries changed the modem lines: %+v", fp.LastModem())
+	}
+}
+
+func TestModemStateMaskIsAcknowledged(t *testing.T) {
+	// pyserial sends SET_MODEMSTATE_MASK to subscribe to change
+	// notifications. The broker answers polls instead of pushing changes,
+	// but the mask still needs its echo or the client's wait hangs — same
+	// class as the PURGE ack.
+	_, _, addr := newBroker(t)
+	c := dial(t, addr)
+	if err := rfc2217.WriteCommand(c, rfc2217.CmdSetModemStateMask, []byte{0x1F}); err != nil {
+		t.Fatalf("WriteCommand: %v", err)
+	}
+	cmd, payload := readCommand(t, c)
+	if cmd != rfc2217.SrvSetModemStateMask {
+		t.Fatalf("reply cmd = %d, want %d", cmd, rfc2217.SrvSetModemStateMask)
+	}
+	if len(payload) != 1 || payload[0] != 0x1F {
+		t.Fatalf("mask echo = % x, want [1f]", payload)
+	}
+}

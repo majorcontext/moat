@@ -125,6 +125,25 @@ func (t *tty) SetModem(m Modem) error {
 	return nil
 }
 
+// ModemStatus implements Port. TIOCMGET writes the modem bit set through the
+// ioctl argument pointer on both Linux and Darwin, and the TIOCM_* bit values
+// are identical on both, so one implementation serves both platforms.
+func (t *tty) ModemStatus() (ModemStatus, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	bits, err := unix.IoctlGetInt(int(t.f.Fd()), unix.TIOCMGET)
+	if err != nil {
+		return ModemStatus{}, fmt.Errorf("reading modem lines on %s: %w", t.path, err)
+	}
+	return ModemStatus{
+		CTS: bits&unix.TIOCM_CTS != 0,
+		DSR: bits&unix.TIOCM_DSR != 0,
+		RI:  bits&unix.TIOCM_RI != 0,
+		CD:  bits&unix.TIOCM_CD != 0,
+	}, nil
+}
+
 // SendBreak implements Port.
 func (t *tty) SendBreak() error {
 	t.mu.Lock()
