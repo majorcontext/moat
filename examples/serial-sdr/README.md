@@ -1,8 +1,8 @@
 # USB SDR radio — why it needs a different mechanism than serial
 
 This example documents what a USB SDR dongle (RTL2832U-based, e.g. RTL-SDR
-Blog V3/V4, NooElec) needs from moat, and why the `devices:` serial path in
-this branch does **not** cover it.
+Blog V3/V4, NooElec) needs from moat, and why the `devices:` serial path does
+**not** cover it.
 
 **Short version: an RTL-SDR is not a serial device.** It enumerates as a
 vendor-specific USB device (commonly `0bda:2838` or `0bda:2832`) with no CDC
@@ -78,6 +78,6 @@ still cannot carry the sample stream, which will be USB bulk or Ethernet.
 Check with:
 
 ```bash
-moat device list          # anything here → serial path applies
+moat device list          # main table → serial path applies
 ls /dev/ttyUSB* /dev/ttyACM*   # host check, for context
 ```
