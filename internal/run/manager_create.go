@@ -44,7 +44,6 @@ import (
 	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
-	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/snapshot"
 	"github.com/majorcontext/moat/internal/sshagent"
 	"github.com/majorcontext/moat/internal/storage"
@@ -708,12 +707,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if !slices.Contains(daemonCapabilities, daemon.CapSerialDevices) {
 				return nil, fmt.Errorf("proxy daemon is too old for serial devices (missing %q capability); run 'moat proxy restart' to upgrade", daemon.CapSerialDevices)
 			}
-			pins, pinErr := serialdev.OpenPinStore(serialdev.DefaultPinPath())
-			if pinErr != nil {
-				return nil, fmt.Errorf("opening device pins: %w", pinErr)
-			}
-			defer pins.Close() //nolint:errcheck // runs for the length of Create; close errors carry no signal
-			specs, devErr := ResolveDevices(ctx, opts.Config.Devices, serialdev.NewEnumerator(), pins)
+			specs, devErr := m.resolveDevicesForCreate(ctx, opts.Config.Devices)
 			if devErr != nil {
 				return nil, devErr
 			}

@@ -347,6 +347,29 @@ func ResolveDevices(
 	return specs, nil
 }
 
+// resolveDevicesForCreate backs the Create gate: it opens the pin store and
+// runs ResolveDevices against the manager's enumeration seams (the real USB
+// enumeration and DefaultPinPath unless tests injected fakes). Create calls it
+// before container creation so a missing or mismatched device fails the run
+// with the actionable multi-device message rather than surfacing one at a
+// time mid-flash.
+func (m *Manager) resolveDevicesForCreate(ctx context.Context, devs []config.DeviceEntry) ([]daemon.SerialDeviceSpec, error) {
+	enum := m.serialEnum
+	if enum == nil {
+		enum = serialdev.NewEnumerator()
+	}
+	pinPath := m.serialPinPath
+	if pinPath == "" {
+		pinPath = serialdev.DefaultPinPath()
+	}
+	pins, err := serialdev.OpenPinStore(pinPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening device pins: %w", err)
+	}
+	defer pins.Close() //nolint:errcheck // runs for the length of Create; close errors carry no signal
+	return ResolveDevices(ctx, devs, enum, pins)
+}
+
 // splitPort splits a host:port address.
 func splitPort(addr string) (string, string, error) {
 	return net.SplitHostPort(addr)

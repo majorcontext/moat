@@ -16,6 +16,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/storage"
 )
 
@@ -62,6 +63,13 @@ type Manager struct {
 	// monitorWg tracks active monitorContainerExit goroutines.
 	// Close() waits on this (with a timeout) after canceling monitorCtx.
 	monitorWg sync.WaitGroup
+
+	// serialEnum and serialPinPath back the Create gate's device resolution;
+	// nil / "" mean the real USB enumeration and the default pin store. Tests
+	// inject a fake enumerator and a temp pin path so the gate's failure
+	// paths run without hardware.
+	serialEnum    serialdev.Enumerator
+	serialPinPath string
 }
 
 // runtimeForRun returns the correct container runtime for an existing run.
@@ -94,6 +102,15 @@ type ManagerOptions struct {
 	// (`moat run`) or explicitly clean up (`moat clean`). Read-only commands
 	// leave it false to avoid the per-invocation cost of listing networks.
 	ReapOrphanNetworks bool
+
+	// serialEnumerator overrides device enumeration in the Create gate. nil
+	// means the real USB enumeration. Tests inject a fake so the gate's
+	// device-absent failure can be exercised without hardware.
+	serialEnumerator serialdev.Enumerator
+
+	// serialPinPath overrides where the Create gate opens the pin store. ""
+	// means serialdev.DefaultPinPath(). Tests point it at a temp file.
+	serialPinPath string
 }
 
 // NewManagerWithOptions creates a new run manager with the given options.
@@ -132,6 +149,8 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 		runs:           make(map[string]*Run),
 		routes:         lifecycle.Routes(),
 		proxyLifecycle: lifecycle,
+		serialEnum:     opts.serialEnumerator,
+		serialPinPath:  opts.serialPinPath,
 		ctx:            ctx,
 		cancel:         cancel,
 		monitorCtx:     monitorCtx,

@@ -459,3 +459,69 @@ func TestSerialPinsFromAddrsSkipsUnusableEntries(t *testing.T) {
 		t.Fatalf("got %v, want no pins from an unusable address", got)
 	}
 }
+
+// newSeamedManager returns a Manager whose serial seams are injected, the way
+// NewManagerWithOptions wires test fakes. The zero-value seams (nil enum, empty
+// pin path) are what production Create runs with.
+func newSeamedManager(enum serialdev.Enumerator, pinPath string) *Manager {
+	return &Manager{serialEnum: enum, serialPinPath: pinPath}
+}
+
+// TestCreateGateFailsOnAbsentDevice covers the Create gate's absent-device
+// path: resolveDevicesForCreate must return the same actionable error the
+// pre-flight detector produces, so the run fails before the container is
+// created. This is the gate half of the pre-flight ↔ gate pair; the detector
+// half lives in the DetectMissingDevices tests above.
+func TestCreateGateFailsOnAbsentDevice(t *testing.T) {
+	pinPath := filepath.Join(t.TempDir(), "devices.json")
+	m := newSeamedManager(serialtest.NewFakeEnumerator(), pinPath)
+
+	_, err := m.resolveDevicesForCreate(context.Background(), []config.DeviceEntry{esp32Entry()})
+	if err == nil {
+		t.Fatal("a run whose device is absent must fail before container creation")
+	}
+	// Same message the pre-flight shows, so the two never drift.
+	if !strings.Contains(err.Error(), "no attached device matches USB ID 303a:1001") {
+		t.Fatalf("error %q should name the missing device like the pre-flight does", err)
+	}
+	if !strings.Contains(err.Error(), "moat device list") {
+		t.Fatalf("error %q should point at `moat device list`", err)
+	}
+}
+
+// TestCreateGatePinsAndResolvesAnAttachedDevice is the companion: a device
+// that is attached resolves to a spec the daemon can serve, and the first-use
+// pin is recorded — the gate is where approval becomes durable.
+func TestCreateGatePinsAndResolvesAnAttachedDevice(t *testing.T) {
+	pinPath := filepath.Join(t.TempDir(), "devices.json")
+	m := newSeamedManager(serialtest.NewFakeEnumerator(esp32Device("AAA")), pinPath)
+
+	specs, err := m.resolveDevicesForCreate(context.Background(), []config.DeviceEntry{esp32Entry()})
+	if err != nil {
+		t.Fatalf("resolveDevicesForCreate: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1", len(specs))
+	}
+	if specs[0].Name != "esp32" || specs[0].VID != "303a" || specs[0].Serial != "AAA" {
+		t.Fatalf("spec = %+v, want the attached device's identity", specs[0])
+	}
+	if specs[0].Record != "events" {
+		t.Fatalf("record mode = %q, want the events default", specs[0].Record)
+	}
+
+	// The pin is recorded — a second gate pass must verify, not re-approve.
+	store, err := serialdev.OpenPinStore(pinPath)
+	if err != nil {
+		t.Fatalf("reopening the pin store: %v", err)
+	}
+	defer store.Close() //nolint:errcheck // test cleanup
+	if _, ok, err := store.Get("esp32"); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if !ok {
+		t.Fatal("the gate must record the first-use pin")
+	}
+	if _, err := m.resolveDevicesForCreate(context.Background(), []config.DeviceEntry{esp32Entry()}); err != nil {
+		t.Fatalf("second pass over the pinned device must verify: %v", err)
+	}
+}

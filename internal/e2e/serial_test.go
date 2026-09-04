@@ -150,7 +150,9 @@ func TestSerialDeviceEndToEnd(t *testing.T) {
 
 		// A prior pin on this name (from an earlier test run against a
 		// different board) would make resolution fail by design. This test
-		// running is the approval, so forget any stale pin first.
+		// running is the approval, so forget any stale pin first. MOAT_HOME
+		// is redirected below, so the store is the test's own, never the
+		// real user's devices.json.
 		pins, err := serialdev.OpenPinStore(serialdev.DefaultPinPath())
 		if err != nil {
 			t.Fatalf("OpenPinStore: %v", err)
@@ -158,6 +160,15 @@ func TestSerialDeviceEndToEnd(t *testing.T) {
 		if err := pins.Forget("dut"); err != nil {
 			t.Fatalf("forgetting stale pin: %v", err)
 		}
+
+		// Isolate the whole run: the Create gate resolves devices and records
+		// the first-use pin through DefaultPinPath() (MOAT_HOME-relative), and
+		// the daemon and run state live under GlobalConfigDir() — which the
+		// same override relocates. Without this, the hardware e2e would touch
+		// the developer's real ~/.moat, including deleting a real "dut" pin.
+		hostHome := t.TempDir()
+		t.Setenv("HOME", hostHome)
+		t.Setenv("MOAT_HOME", filepath.Join(hostHome, ".moat"))
 
 		mgr, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: boolPtr(true)})
 		if err != nil {
