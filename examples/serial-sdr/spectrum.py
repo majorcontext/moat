@@ -60,7 +60,22 @@ def read_spectrum(sock, seconds=2.0):
 
 def main():
     print(f"connecting to rtl_tcp at {RTL_TCP_HOST}:{RTL_TCP_PORT}")
-    sock = socket.create_connection((RTL_TCP_HOST, RTL_TCP_PORT), timeout=10)
+    try:
+        sock = socket.create_connection((RTL_TCP_HOST, RTL_TCP_PORT), timeout=10)
+    except ConnectionRefusedError:
+        # The one setup mistake this example makes easy: running the container
+        # before the host-side server. Nothing is listening on the port, so
+        # say what to start rather than letting the traceback stand in for
+        # documentation.
+        sys.exit(
+            f"connection refused — no rtl_tcp server on port {RTL_TCP_PORT}.\n"
+            "  Start it on the host first (from this directory's README):\n"
+            "    rtl_tcp -a 127.0.0.1 -p 1234\n"
+            "  If it exits immediately with 'No supported devices found',\n"
+            "  the dongle is not attached or another SDR app is holding it."
+        )
+    except socket.gaierror as err:
+        sys.exit(f"cannot resolve {RTL_TCP_HOST}: {err}")
 
     # rtl_tcp greets us with a 12-byte header: magic 'RTL0', tuner type, gain count.
     header = b""
