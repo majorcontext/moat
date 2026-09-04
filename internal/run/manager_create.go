@@ -732,9 +732,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		if regErr != nil {
 			return nil, fmt.Errorf("registering run with proxy daemon: %w", regErr)
 		}
-		if regResp.Error != "" {
-			return nil, fmt.Errorf("policy compilation failed: %s", regResp.Error)
-		}
+		// The daemon reports refusals (policy compilation, a serial device
+		// already claimed) as a non-2xx status with the reason in the body;
+		// the client surfaces that text in regErr above. A 2xx response never
+		// carries an Error field.
 
 		// Store proxy details from daemon response
 		r.ProxyAuthToken = regResp.AuthToken

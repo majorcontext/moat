@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +124,71 @@ func TestClient_UnregisterRunNotFound(t *testing.T) {
 	err := client.UnregisterRun(context.Background(), "nonexistent-token")
 	if err == nil {
 		t.Fatal("expected error for nonexistent token")
+	}
+}
+
+// A refused registration must surface the reason the daemon wrote in the
+// response body. The serial claim conflict ("already in use by run X") and the
+// broker-less-daemon hint ("restart it with `moat proxy restart`") both travel
+// as a non-2xx status plus an Error field; a client that discards the body
+// turns every one of them into "daemon returned 409".
+func TestClient_RegisterSurfacesDaemonErrorBody(t *testing.T) {
+	dir := testSockDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+	srv := newServerWithBroker(t)
+	// newServerWithBroker builds with an empty socket path; point it at ours.
+	srv.sockPath = sockPath
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop(context.Background())
+	// Register the device for one run so a second registration conflicts.
+	first := RegisterRequest{RunID: "run_a", SerialDevices: []SerialDeviceSpec{{
+		Name: "esp32", Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA",
+	}}}
+	if _, err := NewClient(sockPath).RegisterRun(context.Background(), first); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+
+	client := NewClient(sockPath)
+	_, err := client.RegisterRun(context.Background(), RegisterRequest{
+		RunID:         "run_b",
+		SerialDevices: first.SerialDevices,
+	})
+	if err == nil {
+		t.Fatal("registering a device held by another run must fail")
+	}
+	if !strings.Contains(err.Error(), "already in use by run run_a") {
+		t.Errorf("error should carry the daemon's reason, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "409") {
+		// The status stays in the message so an unexplained refusal is still
+		// diagnosable from the daemon's log.
+		t.Errorf("error should mention the status, got: %v", err)
+	}
+}
+
+// Companion: a non-2xx with an empty or unparseable body must still name the
+// status rather than failing with a JSON decode error.
+func TestClient_RegisterNon2xxEmptyBody(t *testing.T) {
+	// A handler that answers 409 with no body at all — what a daemon from a
+	// different version or a wedged proxy in front of the socket would do.
+	ln, err := net.Listen("unix", filepath.Join(testSockDir(t), "empty.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+
+	client := NewClient(ln.Addr().String())
+	_, err = client.RegisterRun(context.Background(), RegisterRequest{RunID: "run_x"})
+	if err == nil {
+		t.Fatal("409 with no body must fail")
+	}
+	if !strings.Contains(err.Error(), "409") {
+		t.Errorf("error should name the status, got: %v", err)
 	}
 }
 

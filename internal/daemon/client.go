@@ -67,12 +67,25 @@ func (c *Client) RegisterRun(ctx context.Context, regReq RegisterRequest) (*Regi
 		return nil, fmt.Errorf("connecting to daemon: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("daemon returned %d", resp.StatusCode)
-	}
 	var regResp RegisterResponse
 	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			// Non-2xx with an unparseable body (or none): the status code is
+			// all the daemon told us.
+			return nil, fmt.Errorf("daemon returned %d: %v", resp.StatusCode, err)
+		}
 		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		// The daemon reports refusals (a serial device already claimed, a
+		// broker-less daemon) as a non-2xx status with the reason in the
+		// response body. Decode it rather than discarding it, or the user
+		// sees "daemon returned 409" instead of the actionable message the
+		// daemon wrote.
+		if regResp.Error != "" {
+			return nil, fmt.Errorf("daemon returned %d: %s", resp.StatusCode, regResp.Error)
+		}
+		return nil, fmt.Errorf("daemon returned %d", resp.StatusCode)
 	}
 	return &regResp, nil
 }
