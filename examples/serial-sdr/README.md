@@ -12,9 +12,10 @@ the I/Q sample stream. There is no baud rate, no DTR/RTS, no line settings —
 nothing RFC2217 could carry even in principle. The moat serial broker's
 tty-only allowlist is doing its job by refusing it.
 
-Do not add an `0bda:2838` entry to `devices:` — `moat device list` will not
-show the dongle, and a run configured for it fails with "no attached device
-matches USB ID 0bda:2838".
+Do not add an `0bda:2838` entry to `devices:` — the run fails with "no
+attached device matches USB ID 0bda:2838". (`moat device list` shows the
+dongle in its "Other USB devices" section — listed, but not usable through
+`devices:`.)
 
 ## What receiving samples would take
 
@@ -56,13 +57,14 @@ network path concrete:
 rtl_tcp -a 127.0.0.1 -p 1234
 
 # In another terminal, from this directory:
-moat run -- python3 /workspace/spectrum.py
+moat run
 ```
 
-`moat.yaml` here allows host port 1234 and nothing else serial-shaped. The
-script connects to `rtl_tcp`, sets a center frequency, and prints a coarse
-power spectrum every few seconds — enough to see the dongle is alive and the
-path through the proxy works.
+`moat.yaml` here allows host port 1234 and runs `spectrum.py` — `moat run`
+with no arguments picks up the `command:` from the config. The script connects
+to `rtl_tcp`, sets a center frequency, and prints a coarse power spectrum every
+few seconds — enough to see the dongle is alive and the path through the proxy
+works.
 
 ## If your "SDR" is a different animal
 

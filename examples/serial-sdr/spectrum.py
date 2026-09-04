@@ -9,7 +9,7 @@ interface at all.
 Usage (from examples/serial-sdr, with `rtl_tcp -a 127.0.0.1 -p 1234` on the
 host):
 
-    moat run -- python3 /workspace/spectrum.py
+    moat run
 """
 
 import math
