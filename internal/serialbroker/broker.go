@@ -63,8 +63,11 @@ type Options struct {
 	// capture degrades to events only rather than failing the session.
 	OpenRecorder func(runID, device string) (io.WriteCloser, error)
 
-	// BindAddr is the address listeners bind to. Defaults to all interfaces so
-	// the container can reach it through the host gateway.
+	// BindAddr is the fallback address for listeners when ListenOpts carries
+	// none. Defaults to loopback — the only address safe to expose without
+	// authentication. The run manager knows the container's gateway and passes
+	// it per device; a broker configured for all interfaces is a deployment
+	// choice that must be made explicitly, not a default.
 	BindAddr string
 }
 
@@ -113,7 +116,7 @@ func New(opts Options) *Broker {
 		b.openPort = serialport.Open
 	}
 	if b.bindAddr == "" {
-		b.bindAddr = "0.0.0.0"
+		b.bindAddr = "127.0.0.1"
 	}
 	return b
 }
@@ -127,12 +130,20 @@ func New(opts Options) *Broker {
 // Re-listening a device this run already holds is idempotent and returns the
 // existing address: the run manager re-registers with the daemon after a
 // transient daemon failure, and a run must not conflict with its own claim.
-func (b *Broker) Listen(runID string, a Approved) (*ListenerRef, string, error) {
+//
+// bindAddr overrides the broker's fallback BindAddr for this listener. RFC2217
+// carries no authentication, so the address is the reachability control: the
+// run manager passes the container-facing address of the run's network, and an
+// empty value means the broker's configured default.
+func (b *Broker) Listen(runID string, a Approved, bindAddr string) (*ListenerRef, string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.closed {
 		return nil, "", fmt.Errorf("serial broker is closed")
+	}
+	if bindAddr == "" {
+		bindAddr = b.bindAddr
 	}
 	key := claimKey(a)
 	if existing, ok := b.byDevice[key]; ok {
@@ -143,7 +154,7 @@ func (b *Broker) Listen(runID string, a Approved) (*ListenerRef, string, error) 
 			a.Name, a.Device.Path, existing.runID)
 	}
 
-	ln, err := net.Listen("tcp", net.JoinHostPort(b.bindAddr, "0"))
+	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, "0"))
 	if err != nil {
 		return nil, "", fmt.Errorf("opening serial listener for %q: %w", a.Name, err)
 	}

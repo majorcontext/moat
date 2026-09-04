@@ -91,6 +91,15 @@ type RegisterRequest struct {
 	// SerialDevices are host serial devices this run may use. The daemon opens
 	// one RFC2217 listener per device and returns their addresses.
 	SerialDevices []SerialDeviceSpec `json:"serial_devices,omitempty"`
+
+	// SerialBindAddr is the address serial listeners bind to — the
+	// container-facing address of this run's network (loopback for host-net,
+	// the network gateway for bridge and Apple containers). RFC2217 has no
+	// authentication, so scoping the bind is the reachability control: a
+	// listener bound here is reachable from the container and from this
+	// machine, not from the network at large. Additive/optional: an older CLI
+	// omits it and the daemon falls back to the broker's configured BindAddr.
+	SerialBindAddr string `json:"serial_bind_addr,omitempty"`
 }
 
 // SerialDeviceSpec is one approved serial device, already resolved and pinned

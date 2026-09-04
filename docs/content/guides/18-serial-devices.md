@@ -149,10 +149,14 @@ Two further boundaries are worth stating plainly:
 - **Only ttys are exposed.** The broker refuses to open anything that is not a tty
   character device, so storage, HID, and smartcard devices cannot be reached through this
   mechanism at all.
-- **The RFC2217 port is reachable from the host.** The protocol has no authentication, so
-  access is scoped by reachability: each device gets its own port, and only the owning
-  run's container is permitted to reach it through moat's network policy. Other processes
-  running on your machine can still connect to it.
+- **The RFC2217 port is reachable only from this machine.** The protocol has no
+  authentication, so access is scoped by bind address: each device's listener binds the
+  host address the run's container uses (the default bridge gateway on Docker, the
+  default network gateway on Apple containers), not every interface. A connection from
+  another machine on the network is refused. Processes running on this machine — and any
+  container on it, not just the owning run — can still connect to it, and the broker
+  serves one connection at a time, so a competing local connection can hold the device but
+  cannot interleave bytes with the run's session.
 
 ## One run at a time
 

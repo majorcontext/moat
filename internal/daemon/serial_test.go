@@ -35,7 +35,7 @@ func TestListenSerialReturnsAnAddrPerDevice(t *testing.T) {
 	s := newServerWithBroker(t)
 	rc := NewRunContext("run-a")
 
-	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32"), serialSpec2("probe")})
+	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32"), serialSpec2("probe")}, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("listenSerial: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestListenSerialAllowsTheContainerToReachEachPort(t *testing.T) {
 	s := newServerWithBroker(t)
 	rc := NewRunContext("run-a")
 
-	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")})
+	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("listenSerial: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestListenSerialWithNoDevicesOpensNothing(t *testing.T) {
 	s := newServerWithBroker(t)
 	rc := NewRunContext("run-a")
 
-	addrs, err := s.listenSerial(rc, nil)
+	addrs, err := s.listenSerial(rc, nil, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("listenSerial: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestListenSerialWithoutABrokerIsAnActionableError(t *testing.T) {
 	// An older daemon has no broker. Failing loudly is the point: silently
 	// starting a run with no device access would look like broken hardware.
 	s := NewServer("", 0)
-	_, err := s.listenSerial(NewRunContext("run-a"), []SerialDeviceSpec{serialSpec("esp32")})
+	_, err := s.listenSerial(NewRunContext("run-a"), []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
 	if err == nil {
 		t.Fatal("a daemon with no serial broker must reject a run that needs devices")
 	}
@@ -117,19 +117,19 @@ func TestListenSerialRollsBackOnConflict(t *testing.T) {
 	// never starts.
 	s := newServerWithBroker(t)
 	first := NewRunContext("run-a")
-	if _, err := s.listenSerial(first, []SerialDeviceSpec{serialSpec("esp32")}); err != nil {
+	if _, err := s.listenSerial(first, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1"); err != nil {
 		t.Fatalf("first listenSerial: %v", err)
 	}
 
 	second := NewRunContext("run-b")
-	_, err := s.listenSerial(second, []SerialDeviceSpec{serialSpec2("probe"), serialSpec("esp32")})
+	_, err := s.listenSerial(second, []SerialDeviceSpec{serialSpec2("probe"), serialSpec("esp32")}, "127.0.0.1")
 	if err == nil {
 		t.Fatal("claiming a device held by another run must fail")
 	}
 
 	// "probe" was claimed before the conflict; it must have been released.
 	third := NewRunContext("run-c")
-	if _, err := s.listenSerial(third, []SerialDeviceSpec{serialSpec2("probe")}); err != nil {
+	if _, err := s.listenSerial(third, []SerialDeviceSpec{serialSpec2("probe")}, "127.0.0.1"); err != nil {
 		t.Fatalf("rolled-back device should be claimable again: %v", err)
 	}
 }
@@ -197,4 +197,49 @@ func roundTripRegisterRequest(t *testing.T, req RegisterRequest) RegisterRequest
 		t.Fatalf("unmarshal: %v", err)
 	}
 	return got
+}
+
+func TestListenSerialBindsTheRequestedAddress(t *testing.T) {
+	// RFC2217 has no authentication, so where the listener binds is the
+	// reachability control. The register request carries the container-facing
+	// address for exactly this reason; a daemon that ignored it and bound
+	// wildcard would expose every attached device to the network.
+	s := newServerWithBroker(t)
+	rc := NewRunContext("run-a")
+
+	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+	host, _, err := net.SplitHostPort(addrs["esp32"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("listener bound %q, want the requested loopback address", addrs["esp32"])
+	}
+	// Companion: an empty request field falls back to the broker's configured
+	// default — this broker is loopback, so the listener must still not be
+	// wildcard. An older CLI omits the field; the daemon must fail closed.
+	addrs2, err := s.listenSerial(NewRunContext("run-b"), []SerialDeviceSpec{serialSpec2("probe")}, "")
+	if err != nil {
+		t.Fatalf("listenSerial with empty bind: %v", err)
+	}
+	host2, _, err := net.SplitHostPort(addrs2["probe"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host2); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("empty bind fell back to %q, want the broker's loopback default", addrs2["probe"])
+	}
+}
+
+func TestRegisterRequestSerialBindAddrSurvivesJSON(t *testing.T) {
+	// The daemon API must stay wire-compatible; a bind address lost in transit
+	// would silently fall back to the broker default.
+	req := RegisterRequest{RunID: "run-a", SerialBindAddr: "172.17.0.1"}
+	got := roundTripRegisterRequest(t, req)
+	if got.SerialBindAddr != "172.17.0.1" {
+		t.Fatalf("round trip gave SerialBindAddr %q, want 172.17.0.1", got.SerialBindAddr)
+	}
 }

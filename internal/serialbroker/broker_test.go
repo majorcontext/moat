@@ -32,7 +32,7 @@ func newBroker(t *testing.T) (*serialbroker.Broker, *serialtest.FakePort, string
 	})
 	t.Cleanup(func() { b.Close() })
 
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestDeviceIsReusableAfterTheFirstClientDisconnects(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestRevokeOfAnUnknownRunIsHarmless(t *testing.T) {
 
 func TestListenTwiceForTheSameDeviceFails(t *testing.T) {
 	b, _, _ := newBroker(t)
-	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err == nil {
 		t.Fatal("a device already claimed by another run must not be listenable")
 	}
@@ -389,7 +389,7 @@ func TestReclaimingARevokedDeviceSucceeds(t *testing.T) {
 	// with its run must not hold the device hostage — the next run gets it.
 	b, _, addr := newBroker(t)
 	b.Revoke("run-a")
-	_, addr2, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr2, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("after the owning run is revoked the device must be claimable: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestSameRunRelistenIsIdempotent(t *testing.T) {
 	_, addr2, err := b.Listen("run-a", serialbroker.Approved{
 		Name:   "esp32-renamed", // a different config name for the same device
 		Device: testDevice(),
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("re-listening a device this run already holds must succeed: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestSameRunRelistenIsIdempotent(t *testing.T) {
 		c.Close()
 		t.Fatal("listener must be closed after the run's one and only claim is revoked")
 	}
-	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}); err != nil {
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, ""); err != nil {
 		t.Fatalf("device must be free after one revoke: %v", err)
 	}
 }
@@ -440,14 +440,14 @@ func TestTwoNamesForOneDeviceConflict(t *testing.T) {
 	_, _, err := b.Listen("run-a", serialbroker.Approved{
 		Name:   "monitor", // same run, different name, same device
 		Device: testDevice(),
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("same run re-listening its own device under a new name must be idempotent: %v", err)
 	}
 	_, _, err = b.Listen("run-b", serialbroker.Approved{
 		Name:   "flash", // different run, same device
 		Device: testDevice(),
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("a second run claiming the same physical device under a different name must fail")
 	}
@@ -467,10 +467,10 @@ func TestSameNameDifferentDevicesDoesNotConflict(t *testing.T) {
 	t.Cleanup(func() { b.Close() })
 	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
 	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "303a", PID: "1001", Serial: "BBB"}
-	if _, _, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: devA}); err != nil {
+	if _, _, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: devA}, ""); err != nil {
 		t.Fatalf("first listen: %v", err)
 	}
-	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: devB})
+	_, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: devB}, "")
 	if err != nil {
 		t.Fatalf("same name on a different physical device must not conflict: %v", err)
 	}
@@ -486,11 +486,11 @@ func TestCloseListenersReleasesOnlyTheGivenClaims(t *testing.T) {
 	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
 	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "1a86", PID: "7523", Serial: "BBB"}
 
-	refA, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA})
+	refA, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA}, "")
 	if err != nil {
 		t.Fatalf("listen a: %v", err)
 	}
-	_, addrB, err := b.Listen("run-a", serialbroker.Approved{Name: "b", Device: devB})
+	_, addrB, err := b.Listen("run-a", serialbroker.Approved{Name: "b", Device: devB}, "")
 	if err != nil {
 		t.Fatalf("listen b: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestCloseListenersReleasesOnlyTheGivenClaims(t *testing.T) {
 		t.Fatal("rolled-back listener must be closed")
 	}
 	// A must be released for other runs to claim.
-	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "a", Device: devA}); err != nil {
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "a", Device: devA}, ""); err != nil {
 		t.Fatalf("rolled-back claim must be free: %v", err)
 	}
 	// B's listener must still be alive and serving the same run.
@@ -523,11 +523,11 @@ func TestRevokeReleasesEveryClaimOfTheRun(t *testing.T) {
 	t.Cleanup(func() { b.Close() })
 	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
 	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "1a86", PID: "7523", Serial: "BBB"}
-	_, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA})
+	_, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA}, "")
 	if err != nil {
 		t.Fatalf("listen a: %v", err)
 	}
-	_, addrB, err := b.Listen("run-b", serialbroker.Approved{Name: "b", Device: devB})
+	_, addrB, err := b.Listen("run-b", serialbroker.Approved{Name: "b", Device: devB}, "")
 	if err != nil {
 		t.Fatalf("listen b: %v", err)
 	}
@@ -553,7 +553,7 @@ func TestListenReportsPortOpenFailureAtConnectTime(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestEventsRecordAttachAndDetach(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestPurgeOfEveryDefinedValueIsAnswered(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -974,7 +974,7 @@ func newRecordingBroker(t *testing.T, record string) (*serialtest.FakePort, *cap
 	t.Cleanup(func() { b.Close() })
 	_, addr, err := b.Listen("run-a", serialbroker.Approved{
 		Name: "esp32", Device: testDevice(), Record: record,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -1054,7 +1054,7 @@ func TestFullRecordModeWithoutARecorderStillRuns(t *testing.T) {
 	t.Cleanup(func() { b.Close() })
 	_, addr, err := b.Listen("run-a", serialbroker.Approved{
 		Name: "esp32", Device: testDevice(), Record: serialbroker.RecordFull,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestEventsCarryDeviceIdentity(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { b.Close() })
-	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()})
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -1147,5 +1147,50 @@ func TestOversizedSubnegotiationDropsTheSession(t *testing.T) {
 	c2 := dial(t, addr)
 	if _, err := c2.Write([]byte("y")); err != nil {
 		t.Fatalf("device must accept a new session after the drop: %v", err)
+	}
+}
+
+func TestListenBindsTheRequestedAddressNotWildcard(t *testing.T) {
+	// RFC2217 has no authentication, so where the listener binds is the
+	// reachability control. A listener that ignored the requested address and
+	// bound every interface would expose the device to the network.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+	})
+	t.Cleanup(func() { b.Close() })
+
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("listener bound %q — every other requested address must be refused, not widened to wildcard", addr)
+	}
+}
+
+func TestListenWithAnUnbindableAddressRefusesTheDevice(t *testing.T) {
+	// Companion of the happy path: an address that cannot be bound must fail
+	// the claim outright. Falling back to wildcard (or to the broker default)
+	// would silently expose the device on an interface nobody asked for.
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		// The broker default is deliberately unbindable here so a fallback
+		// to it produces the same refusal this test asserts.
+		BindAddr: "203.0.113.1", // TEST-NET-3: never assigned to this host
+	})
+	t.Cleanup(func() { b.Close() })
+
+	if _, _, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, ""); err == nil {
+		t.Fatal("a request for an unbindable address must refuse the device, not bind somewhere else")
+	}
+	// The failed claim must leave the device free for the next run.
+	if _, _, err := b.Listen("run-b", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "127.0.0.1"); err != nil {
+		t.Fatalf("device must be free after a failed bind: %v", err)
 	}
 }

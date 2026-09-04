@@ -283,7 +283,7 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// Open a listener per approved serial device. This happens before registry
 	// insertion so a device that cannot be claimed fails the registration
 	// outright rather than leaving a half-configured run.
-	serialAddrs, err := s.listenSerial(rc, req.SerialDevices)
+	serialAddrs, err := s.listenSerial(rc, req.SerialDevices, req.SerialBindAddr)
 	if err != nil {
 		rc.CancelRefresh()
 		writeJSON(w, http.StatusConflict, RegisterResponse{Error: err.Error()})
@@ -313,11 +313,16 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 // listenSerial opens one RFC2217 listener per approved device and allows the
 // container to reach each port.
 //
+// bindAddr scopes where those listeners are reachable from. RFC2217 has no
+// authentication, so the bind address is the reachability control: the caller
+// passes the container-facing address of the run's network, and an empty value
+// falls back to the broker's configured default.
+//
 // Any failure rolls back only the listeners this call opened, so a partial
 // failure never leaves a device claimed by a run that did not start — and a
 // re-registration of an already-running run never tears down the devices its
 // container is using.
-func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec) (map[string]string, error) {
+func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr string) (map[string]string, error) {
 	if len(specs) == 0 {
 		return nil, nil
 	}
@@ -343,7 +348,7 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec) (map[str
 				PortPath: spec.PortPath,
 			},
 			Record: spec.Record,
-		})
+		}, bindAddr)
 		if err != nil {
 			s.serial.CloseListeners(opened)
 			return nil, err

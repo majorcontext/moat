@@ -3,8 +3,12 @@ package run
 // This file holds container network-mode resolution used by Create.
 
 import (
+	"context"
+	"net"
 	goruntime "runtime"
+	"time"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/container"
 )
 
@@ -58,4 +62,72 @@ func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy bool, hostAddr str
 	synthHosts, _ := synthHostStrategy(m.defaultRuntime().Type(), goruntime.GOOS, hostAddr)
 	extraHosts = append(extraHosts, synthHosts...)
 	return networkMode, extraHosts
+}
+
+// serialBindAddr resolves the address serial listeners should bind to for a
+// run: the address of this machine as the run's container sees it. RFC2217 has
+// no authentication, so the bind address is the reachability control — a
+// listener bound here is reachable from the run's container and from this
+// machine, and refused from anywhere a packet would have to be routed to
+// reach. It returns "" when no devices are requested.
+//
+// By runtime:
+//
+//   - Docker on Linux — the default bridge's gateway (docker0, e.g.
+//     172.17.0.1). Measured: reachable from default-bridge containers, from
+//     per-run `services:` networks, from buildkit networks, and from the host;
+//     unreachable from the machine's other interfaces. Loopback would exclude
+//     bridge containers; a routable interface would expose the device to the
+//     LAN.
+//   - Docker on macOS/Windows (Docker Desktop) — "127.0.0.1". Desktop's VM
+//     forwards host loopback to containers via host.docker.internal, and the
+//     VM's bridge gateway is not a host address this CLI can bind.
+//   - Apple containers — the default network's gateway, the same address
+//     GetHostAddress returns.
+//
+// The serial URL advertised to the container carries this address literally,
+// not the synthetic moat-host name: on Docker Linux, a run with `services:`
+// rewrites moat-host to the per-run network's gateway after registration,
+// and the docker0 gateway that the listener actually binds stays reachable
+// from that network anyway.
+//
+// host-net Docker-Linux runs also use the docker0 gateway. The container
+// could additionally reach the device via its shared loopback, but the URL
+// names one address and the gateway is the one that works for every network
+// mode, so the URL and the bind stay consistent.
+func (m *Manager) serialBindAddr(ctx context.Context, cfg *config.Config) string {
+	if cfg == nil || len(cfg.Devices) == 0 {
+		return ""
+	}
+	rt := m.defaultRuntime()
+	switch {
+	case rt.Type() == container.RuntimeDocker && goruntime.GOOS == "linux":
+		return m.defaultBridgeGateway(ctx)
+	case rt.Type() == container.RuntimeDocker:
+		// Docker Desktop (macOS/Windows): containers reach host loopback via
+		// host.docker.internal, which forwards to 127.0.0.1 on this side.
+		return "127.0.0.1"
+	default:
+		// Apple containers: the default network's gateway is a host address
+		// the CLI can bind — GetHostAddress returns it for the same purpose.
+		return rt.GetHostAddress()
+	}
+}
+
+// defaultBridgeGateway returns the IPv4 gateway of Docker's default bridge
+// network ("bridge" / docker0). Serial listeners bind it because every
+// container network a run can use — default bridge, per-run services
+// networks, buildkit's — routes through it to reach the host.
+func (m *Manager) defaultBridgeGateway(ctx context.Context) string {
+	netMgr := m.defaultRuntime().NetworkManager()
+	if netMgr == nil {
+		return ""
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	gw := netMgr.NetworkGateway(probeCtx, "bridge")
+	if net.ParseIP(gw) == nil {
+		return ""
+	}
+	return gw
 }
