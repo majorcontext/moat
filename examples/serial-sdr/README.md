@@ -43,9 +43,11 @@ line-at-a-time serial traffic. The plausible shapes are:
 
 Option 1 is the one that works today, on every runtime, with no moat
 changes. It trades exact device control for stream consumption, which is the
-right trade for "listen to this frequency" tasks. Flashing *new firmware* to
-a device like this (if it had any) would be a different, serial-shaped
-problem.
+right trade for "listen to this frequency" tasks. The `rtl_tcp` command
+channel still lets the agent set frequency, sample rate, and gain — enough to
+tune — while firmware-level control (bias tee, reflashing) stays on the host.
+Flashing *new firmware* to a device like this (if it had any) would be a
+different, serial-shaped problem.
 
 ## What this directory contains
 
@@ -53,7 +55,8 @@ A minimal consumer you can point at a host-side `rtl_tcp` server, to make the
 network path concrete:
 
 ```bash
-# On the host, with the dongle attached and rtl-sdr tools installed:
+# On the host, with the dongle attached and rtl-sdr tools installed
+# (macOS: `brew install librtlsdr`):
 rtl_tcp -a 127.0.0.1 -p 1234
 
 # In another terminal, from this directory:
