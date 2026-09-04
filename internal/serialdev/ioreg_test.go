@@ -500,3 +500,142 @@ func TestParseIoregSingleUARTDeviceDoesNotSplit(t *testing.T) {
 		t.Fatalf("got %d devices, want the sample's 2: %+v", len(got), got)
 	}
 }
+
+// ioregNestedPortLocation is the ioreg shape that corrupted pins before the
+// own-property-block rule: a hub whose IOUSBHostDevice block is followed by
+// children (hub port nubs, an interface) carrying their own, different
+// locationID. The nubs sit below the device line, so a last-write-wins parser
+// attributes the child's locationID to the hub.
+const ioregNestedPortLocation = `
++-o USB2 Hub@08300000  <class IOUSBHostDevice, id 0x100000def, registered, matched, active, busy 0 (380 ms), retain 45>
+  | {
+  |   "idProduct" = 10531
+  |   "idVendor" = 1155
+  |   "bDeviceClass" = 9
+  |   "locationID" = 137363456
+  | }
+  |
+  +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100000e01, registered, matched, active, busy 0, retain 8>
+  | | {
+  | |   "idProduct" = 10531
+  | |   "idVendor" = 1155
+  | |   "locationID" = 137494528
+  | | }
+  | |
+  +-o Hub Port 2@08320000  <class AppleUSB20HubPort, id 0x100000e02, registered, matched, active, busy 0, retain 5>
+  |   {
+  |     "locationID" = 137494528
+  |     "idVendor" = 6790
+  |     "idProduct" = 29987
+  |   }
+  |
+`
+
+func TestParseIoregNestedChildrenDoNotOverwriteTheDevice(t *testing.T) {
+	// A nested child's locationID must not become the device's PortPath —
+	// it is the identity fallback for serial-less devices, so a corrupted
+	// value corrupts the pin. On the real dump that produced this shape, a
+	// hub parsed with a downstream port's locationID, masked only because
+	// the interface's block happened to print last.
+	all, err := parseIoregAll(strings.NewReader(ioregNestedPortLocation))
+	if err != nil {
+		t.Fatalf("parseIoregAll: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("got %d devices, want the hub alone: %+v", len(all), all)
+	}
+	if all[0].PortPath != "0x08300000" {
+		t.Fatalf("PortPath = %q, want the device's own locationID 0x08300000, not a child's", all[0].PortPath)
+	}
+	// The child's IDs must not leak either: the hub is 0483:2923 (decimal
+	// 1155:10531), the port nub below it 1a86:7523 (decimal 6790:29987).
+	if all[0].VID != "0483" {
+		t.Fatalf("VID = %q, want the hub's own 0483, not the child's 1a86", all[0].VID)
+	}
+}
+
+// ioregNoIdentity is an IOUSBHostDevice with a USB ID but neither a serial
+// number nor a locationID — no way to pin it. Such blocks come off the wire
+// when ioreg prints nothing after `=` for unparseable values.
+const ioregNoIdentity = `
++-o Mystery Device@01100000  <class IOUSBHostDevice, id 0x100000f11, registered, matched, active, busy 0 (0 ms), retain 5>
+  | {
+  |   "idProduct" = 29987
+  |   "idVendor" = 6790
+  | }
+  |
+`
+
+func TestParseIoregDropsDevicesWithNoIdentity(t *testing.T) {
+	// A device with neither serial number nor locationID cannot be pinned —
+	// a pin for it would approve any device with the same USB ID. It must be
+	// dropped from both lists rather than offered.
+	serial, err := parseIoreg(strings.NewReader(ioregNoIdentity))
+	if err != nil {
+		t.Fatalf("parseIoreg: %v", err)
+	}
+	usb, err := parseIoregUSB(strings.NewReader(ioregNoIdentity))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(serial) != 0 || len(usb) != 0 {
+		t.Fatalf("serial = %+v, usb = %+v, want both empty — the device cannot be pinned", serial, usb)
+	}
+}
+
+func TestParseIoregKeepsSerialLessDevicesWithALocation(t *testing.T) {
+	// Companion: the serial-less CH340 in the sample keeps its place — its
+	// locationID is its whole identity, and dropping it would make a working
+	// pinned device unreachable.
+	got := parseSample(t)
+	d, ok := findByPath(got, "/dev/cu.usbserial-14220")
+	if !ok {
+		t.Fatalf("CH340 not found in %+v", got)
+	}
+	if d.Serial == "" && d.PortPath == "" {
+		t.Fatalf("the CH340 must keep its locationID as identity")
+	}
+}
+
+func TestParseIoregKeepsDescriptionWhenProductStringIsBlank(t *testing.T) {
+	// ioreg prints nothing after `=` for non-ASCII strings (a RØDE NT-USB
+	// Mini on this host listed with a blank description because of it). The
+	// empty kUSBProductString must not clobber the sanitized USB Product
+	// Name that came before.
+	const sample = `
++-o RODE NT-USB Mini@01100000  <class IOUSBHostDevice, id 0x100000f11, registered, matched, active, busy 0 (0 ms), retain 5>
+  | {
+  |   "idProduct" = 29987
+  |   "idVendor" = 6790
+  |   "locationID" = 17825792
+  |   "USB Product Name" = "NT-USB Mini"
+  |   "kUSBProductString" = 
+  | }
+  |
+`
+	all, err := parseIoregAll(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseIoregAll: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("got %d devices, want 1: %+v", len(all), all)
+	}
+	if all[0].Description != "NT-USB Mini" {
+		t.Fatalf("Description = %q, want the sanitized name — the blank kUSBProductString must not clobber it", all[0].Description)
+	}
+}
+
+func TestDecimalToHexIDRejectsOutOfRangeValues(t *testing.T) {
+	// A decimal above 0xffff would format as 5+ hex digits that can never
+	// match moat.yaml's 4-digit form; treat it as unparseable so the device
+	// is dropped for a statable reason.
+	if got := decimalToHexID("70000"); got != "" {
+		t.Fatalf("decimalToHexID(70000) = %q, want empty", got)
+	}
+	if got := decimalToHexID("65535"); got != "ffff" {
+		t.Fatalf("decimalToHexID(65535) = %q, want ffff — the top of the range must still convert", got)
+	}
+	if got := decimalToHexID("12346"); got != "303a" {
+		t.Fatalf("decimalToHexID(12346) = %q, want 303a", got)
+	}
+}

@@ -86,6 +86,14 @@ func (p Pin) Verify(d Device) error {
 	}
 	// No serial to compare against: the physical port is the only identity the
 	// device has, so moving it to another port is indistinguishable from a swap.
+	// A pin with neither serial nor port pins nothing at all — it would approve
+	// any device with the right USB ID, so it fails closed instead.
+	if p.PortPath == "" {
+		return fmt.Errorf("%w: %q has neither a serial number nor a port to verify against — "+
+			"the pin is incomplete and cannot approve any device\n"+
+			"  Run: moat device forget %s, then run again to re-pin the device",
+			ErrPinMismatch, p.Name, p.Name)
+	}
 	if p.PortPath != d.PortPath {
 		return fmt.Errorf("%w: %q has no serial number, so it was pinned to port %s, "+
 			"but a matching device is now on port %s\n"+

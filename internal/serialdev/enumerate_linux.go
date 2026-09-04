@@ -48,11 +48,18 @@ func enumerateSysfs(root string) ([]Device, error) {
 			// offering it would only produce a confusing failure later.
 			continue
 		}
+		serial := readAttr(usbDir, "serial")
+		if serial == "" && portPath == "" {
+			// Neither identity: a pin for it would approve any device with
+			// the same USB ID. (portPath is always set on Linux in practice —
+			// usbParent returned ok — but the check is cheap insurance.)
+			continue
+		}
 		out = append(out, Device{
 			Path:        "/dev/" + name,
 			VID:         strings.ToLower(vid),
 			PID:         strings.ToLower(pid),
-			Serial:      readAttr(usbDir, "serial"),
+			Serial:      serial,
 			PortPath:    portPath,
 			Description: readAttr(usbDir, "product"),
 			// The tty's interface directory is "1-2:1.0" — port:config.iface.

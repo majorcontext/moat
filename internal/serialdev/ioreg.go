@@ -2,6 +2,7 @@ package serialdev
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -9,7 +10,8 @@ import (
 )
 
 // parseIoreg extracts serial devices from the output of
-// `ioreg -p IOUSB -l -w0`.
+// `ioreg -r -p IOService -l -w0 -c IOUSBHostDevice` (see
+// enumerate_darwin.go for why that invocation).
 //
 // That output is an indented tree. USB devices carry the identity attributes
 // (idVendor, idProduct, USB Serial Number, locationID) but not the device node;
@@ -104,6 +106,16 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	// A property block belongs to the most recent `+-o` line, so the
+	// device's own block is the one directly under its own `+-o` line.
+	// Deeper `+-o` lines (AppleUSBCDCCompositeDevice, AppleUSBACM,
+	// IOUSBHostInterface, user clients) open their own property blocks under
+	// the same tree prefix, and without this guard their properties write
+	// into the enclosing device, last-write-wins: a downstream port's
+	// locationID would corrupt the parent's PortPath, which is the identity
+	// fallback for serial-less devices. The one descendant value the parser
+	// does want — IOCalloutDevice, the tty path — is let through explicitly.
+	ownProps := false
 	for sc.Scan() {
 		line := sc.Text()
 		if idx := strings.Index(line, "+-o "); idx >= 0 {
@@ -117,8 +129,12 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 				}
 			}
 			flushTo(idx)
+			ownProps = false
 			if strings.Contains(line, "<class IOUSBHostDevice") {
 				stack = append(stack, frame{depth: idx, dev: &Device{}})
+				// This `+-o` line is the device itself, so the property block
+				// that follows is its own.
+				ownProps = true
 			}
 			continue
 		}
@@ -127,6 +143,12 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		}
 		key, val, ok := parseIoregProperty(line)
 		if !ok {
+			continue
+		}
+		// IOCalloutDevice only appears on IOSerialBSDClient descendants, so it
+		// is exempt from the own-block rule — the whole point of the parser
+		// is to attach the descendant's tty to the nearest enclosing device.
+		if key != "IOCalloutDevice" && !ownProps {
 			continue
 		}
 		f := &stack[len(stack)-1]
@@ -156,7 +178,13 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 				cur.Description = strings.Trim(val, `"`)
 			}
 		case "kUSBProductString":
-			cur.Description = strings.Trim(val, `"`)
+			// ioreg prints nothing after `=` when the string is non-ASCII
+			// (a RØDE NT-USB Mini lists with a blank description because of
+			// it). An empty value must not clobber the sanitized product
+			// name above — the `+-o` node name label is not read.
+			if s := strings.Trim(val, `"`); s != "" {
+				cur.Description = s
+			}
 		case "IOCalloutDevice":
 			// Attach to the nearest enclosing USB device, not the innermost
 			// stack frame, since IOSerialBSDClient is not itself a USB device.
@@ -180,14 +208,23 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("reading ioreg output: %w", err)
+		// A single oversized line (real ioreg output contains 300 KB lines)
+		// skips that line rather than failing the whole enumeration — "no
+		// devices at all" is the worst possible report for a long line the
+		// user cannot see. bufio's scanner already advanced past it.
+		if !errors.Is(err, bufio.ErrTooLong) {
+			return nil, fmt.Errorf("reading ioreg output: %w", err)
+		}
 	}
 	flushTo(0)
 
-	// Drop anything without a USB ID: it cannot be matched or pinned.
+	// Drop anything that cannot be pinned: no USB ID means it cannot be
+	// matched, and a serial-less device with no locationID has no identity
+	// at all — a pin for it would approve any device with the same USB ID
+	// (Verify fails closed on such a pin, so it must not be created).
 	kept := out[:0]
 	for _, d := range out {
-		if d.VID != "" && d.PID != "" {
+		if d.VID != "" && d.PID != "" && (d.Serial != "" || d.PortPath != "") {
 			kept = append(kept, d)
 		}
 	}
@@ -232,10 +269,14 @@ func parseIoregProperty(line string) (key, val string, ok bool) {
 }
 
 // decimalToHexID converts ioreg's decimal USB IDs to the 4-digit lowercase hex
-// form used everywhere else (moat.yaml, sysfs, lsusb).
+// form used everywhere else (moat.yaml, sysfs, lsusb). It returns "" for
+// values that are unparseable or out of the 16-bit USB ID range: `%04x` on a
+// larger value would emit 5+ digits that match no config, so the device is
+// dropped either way — but with the range check it is dropped for a reason the
+// caller can state.
 func decimalToHexID(s string) string {
 	n, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32)
-	if err != nil {
+	if err != nil || n > 0xffff {
 		return ""
 	}
 	return fmt.Sprintf("%04x", n)

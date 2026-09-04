@@ -228,3 +228,33 @@ func TestPinWithoutInterfaceStillVerifiesAnyInterface(t *testing.T) {
 		t.Fatalf("pre-discriminator pin must keep verifying: %v", err)
 	}
 }
+
+func TestPinWithoutSerialOrPortFailsClosed(t *testing.T) {
+	// A pin with neither identity approves any device with the right USB ID:
+	// the port comparison sees "" != "" as a match. Such a pin must fail
+	// verification instead — the device it was meant to name cannot be told
+	// apart from a swapped one, so no device is approved.
+	pin := Pin{Name: "board", VID: "1a86", PID: "7523"} // no Serial, no PortPath
+
+	sameModel := Device{VID: "1a86", PID: "7523", PortPath: "1-3"}
+	if err := pin.Verify(sameModel); !errors.Is(err, ErrPinMismatch) {
+		t.Fatalf("err = %v, want ErrPinMismatch — the pin pins nothing and must not pass", err)
+	}
+	otherPort := Device{VID: "1a86", PID: "7523", PortPath: "1-4"}
+	if err := pin.Verify(otherPort); !errors.Is(err, ErrPinMismatch) {
+		t.Fatalf("err = %v, want ErrPinMismatch", err)
+	}
+}
+
+func TestSerialLessPinWithPortStillVerifies(t *testing.T) {
+	// Companion: the port-pinned path itself must keep working — a clone
+	// with no serial number, pinned by port, verifies on that port and
+	// fails on another.
+	pin := PinFor("dongle", Device{VID: "1a86", PID: "7523", PortPath: "1-3"})
+	if err := pin.Verify(Device{VID: "1a86", PID: "7523", PortPath: "1-3"}); err != nil {
+		t.Fatalf("same port must verify: %v", err)
+	}
+	if err := pin.Verify(Device{VID: "1a86", PID: "7523", PortPath: "1-4"}); !errors.Is(err, ErrPinMismatch) {
+		t.Fatalf("different port must fail: %v", err)
+	}
+}
