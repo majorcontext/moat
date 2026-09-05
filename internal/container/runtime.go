@@ -6,8 +6,26 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
+
+// ipv6AcceptRules renders the IPv6 accept rules for a run's allowed host ports
+// as complete "$IP6T -w 5 -A OUTPUT ..." commands, each terminated with "&&"
+// and the firewall script's continuation indent so it slots into the
+// all-or-nothing IPv6 block ahead of the final DROP. Empty input yields the
+// empty string: the preceding rule's "&&" then flows straight to the DROP.
+// Shared by the Docker and Apple SetupFirewall scripts, which build an
+// identical IPv6 chain (only the IPv4 $IPT binary differs between them). A
+// prior version emitted bare argument fragments that concatenated into
+// "$IP6T -w 5-A OUTPUT" (no space) and broke the &&-chain, flushing the policy.
+func ipv6AcceptRules(ports []int) string {
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   ", p)
+	}
+	return b.String()
+}
 
 // DefaultDNS returns the default DNS servers if the provided list is empty.
 // Uses Google DNS (8.8.8.8, 8.8.4.4) as a reliable fallback since container

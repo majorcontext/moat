@@ -210,6 +210,8 @@ func (s *session) record(dir string, b []byte) {
 	if w == nil || len(b) == 0 {
 		return
 	}
+	// The capture recorder is an O_APPEND file, so each Fprintf's single write
+	// appends atomically and the two pumps' lines never interleave.
 	if _, err := fmt.Fprintf(w, "%s %s %x\n", time.Now().UTC().Format(time.RFC3339Nano), dir, b); err != nil {
 		log.Debug("serial payload capture write failed", "device", s.listener.approved.Name, "err", err)
 	}
@@ -273,13 +275,23 @@ func (s *session) run() {
 		for {
 			n, err := port.Read(buf)
 			if n > 0 {
-				s.record("rx", buf[:n])
 				escaped = rfc2217.EscapeIAC(escaped[:0], buf[:n])
+				// Bound the write like writeReply does: a client that stopped
+				// reading must not wedge this pump (and hold the exclusive
+				// device claim) forever. The deadline is set fresh per write —
+				// it is an absolute time, so it must be re-armed each time
+				// rather than once, or a long Read gap would expire it.
+				if tc, ok := s.conn.(*net.TCPConn); ok {
+					_ = tc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				}
 				if _, werr := s.conn.Write(escaped); werr != nil {
 					s.logPumpExit("device->container", werr)
 					return
 				}
 				s.tx.Add(int64(n))
+				// Capture after forwarding, so record: full never inserts its
+				// write ahead of the data the container is waiting for.
+				s.record("rx", buf[:n])
 			}
 			if err != nil {
 				s.logPumpExit("device->container", err)
@@ -299,8 +311,13 @@ type recordingWriter struct {
 }
 
 func (rw *recordingWriter) Write(p []byte) (int, error) {
-	rw.s.record(rw.dir, p)
-	return rw.w.Write(p)
+	// Write to the device first, then capture what was actually written, so
+	// record: full never delays the bytes headed to the device.
+	n, err := rw.w.Write(p)
+	if n > 0 {
+		rw.s.record(rw.dir, p[:n])
+	}
+	return n, err
 }
 
 // logPumpExit records why a pump stopped. A closed connection or port is the

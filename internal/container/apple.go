@@ -577,20 +577,6 @@ func appleAcceptRulesFor(ports []int) string {
 	return b.String()
 }
 
-// appleAccept6RulesFor renders the IPv6 accept rules for the run's allowed host
-// ports as complete `$IP6T -w 5 -A OUTPUT ...` commands, each terminated with
-// `&&` and the chain's continuation indent so it slots into the all-or-nothing
-// IPv6 block ahead of the final DROP. Empty input yields the empty string: the
-// preceding rule's `&&` then flows straight to the DROP. See accept6RulesFor in
-// docker.go for why bare argument fragments broke the chain.
-func appleAccept6RulesFor(ports []int) string {
-	var b strings.Builder
-	for _, p := range ports {
-		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   ", p)
-	}
-	return b.String()
-}
-
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic
 // except to the proxy, covering both IPv4 and IPv6.
 // The proxyHost parameter is accepted for interface consistency but not used in the
@@ -682,7 +668,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, appleAccept6RulesFor(extraPorts))
+	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, ipv6AcceptRules(extraPorts))
 
 	// Run as root since iptables requires root privileges
 	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)

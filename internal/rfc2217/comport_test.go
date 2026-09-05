@@ -91,3 +91,43 @@ func TestControlNameOnUnknownValueIsNotEmpty(t *testing.T) {
 		t.Fatal("unknown control values still need a printable label")
 	}
 }
+
+func TestComPortCommandConstantsHaveStableWireValues(t *testing.T) {
+	// Pin every com-port command constant to its RFC 2217 literal wire value,
+	// and assert each server reply is exactly its client command plus 100.
+	// Every other test compares a wire byte against the same symbolic constant
+	// under test, so without this a reintroduction of the client/server
+	// namespace-mixing bug — which once put a NOTIFY out as 207 on the wire —
+	// would pass the whole suite. settings_test.go pins parity the same way.
+	cmds := []struct {
+		name string
+		cmd  byte
+		want byte
+		srv  byte // server reply constant, or 0 when the command has none (Signature)
+	}{
+		{"Signature", CmdSignature, 0, 0},
+		{"SetBaudRate", CmdSetBaudRate, 1, SrvSetBaudRate},
+		{"SetDataSize", CmdSetDataSize, 2, SrvSetDataSize},
+		{"SetParity", CmdSetParity, 3, SrvSetParity},
+		{"SetStopSize", CmdSetStopSize, 4, SrvSetStopSize},
+		{"SetControl", CmdSetControl, 5, SrvSetControl},
+		{"NotifyLineState", CmdNotifyLineState, 6, SrvNotifyLineState},
+		{"NotifyModemState", CmdNotifyModemState, 7, SrvNotifyModemState},
+		{"FlowControlSuspend", CmdFlowControlSuspend, 8, SrvFlowControlSuspend},
+		{"FlowControlResume", CmdFlowControlResume, 9, SrvFlowControlResume},
+		{"SetLineStateMask", CmdSetLineStateMask, 10, SrvSetLineStateMask},
+		{"SetModemStateMask", CmdSetModemStateMask, 11, SrvSetModemStateMask},
+		{"PurgeData", CmdPurgeData, 12, SrvPurgeData},
+	}
+	for _, c := range cmds {
+		if c.cmd != c.want {
+			t.Errorf("Cmd%s = %d, want %d", c.name, c.cmd, c.want)
+		}
+		if c.name == "Signature" {
+			continue // no server-reply constant in this namespace
+		}
+		if c.srv != c.want+100 {
+			t.Errorf("Srv%s = %d, want Cmd%s(%d)+100 = %d", c.name, c.srv, c.name, c.cmd, c.want+100)
+		}
+	}
+}

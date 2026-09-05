@@ -788,23 +788,6 @@ func acceptRulesFor(ports []int) string {
 	return b.String()
 }
 
-// accept6RulesFor renders the IPv6 accept rules for the run's allowed host
-// ports as complete `$IP6T -w 5 -A OUTPUT ...` commands, each terminated with
-// `&&` and the chain's continuation indent so it slots into the all-or-nothing
-// IPv6 block ahead of the final DROP. Empty input yields the empty string: the
-// preceding rule's `&&` then flows straight to the DROP. That is why this
-// returns "" rather than the `:` no-op the standalone IPv4 block needs — an
-// earlier version emitted bare argument fragments that concatenated into
-// `$IP6T -w 5-A OUTPUT` (no space) and a dangling `$IP6T -w 5`, both of which
-// exit non-zero and made the `&&` chain flush the whole IPv6 policy.
-func accept6RulesFor(ports []int) string {
-	var b strings.Builder
-	for _, p := range ports {
-		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   ", p)
-	}
-	return b.String()
-}
-
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic
 // except to the proxy, covering both IPv4 and IPv6.
 // The proxyHost parameter is accepted for interface consistency but not used in the
@@ -902,7 +885,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, accept6RulesFor(extraPorts))
+	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, ipv6AcceptRules(extraPorts))
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", script},

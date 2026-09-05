@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type mockContainerChecker struct {
@@ -210,5 +211,50 @@ func TestLivenessChecker_RecoveryResetsCount(t *testing.T) {
 	lc.CheckOnce(context.Background())
 	if reg.Count() != 0 {
 		t.Fatalf("expected run to be removed after threshold reached again, got count %d", reg.Count())
+	}
+}
+
+func TestLivenessChecker_ReapsStaleUnstartedRun(t *testing.T) {
+	// A run that claimed its device at registration but whose CLI died before
+	// container-create has no ContainerID and no container to health-check.
+	// Once it is far older than any legitimate build it must be reaped so its
+	// onCleanup (which revokes the serial claim) fires, rather than leaking the
+	// claim until the daemon restarts.
+	reg := NewRegistry()
+	rc := NewRunContext("run_stuck")
+	// No ContainerID; registered well beyond the grace.
+	rc.RegisteredAt = time.Now().Add(-staleUnstartedGrace - time.Minute)
+	token := reg.Register(rc)
+
+	checker := &mockContainerChecker{alive: map[string]bool{}}
+	var cleanedUp string
+	lc := NewLivenessChecker(reg, checker)
+	lc.SetOnCleanup(func(tok, _ string) { cleanedUp = tok })
+
+	lc.CheckOnce(context.Background())
+
+	if reg.Count() != 0 {
+		t.Errorf("stale unstarted run should be reaped, still have %d", reg.Count())
+	}
+	if cleanedUp != token {
+		t.Errorf("onCleanup must fire for the reaped run so the device claim is revoked; got %q", cleanedUp)
+	}
+}
+
+func TestLivenessChecker_KeepsRecentUnstartedRun(t *testing.T) {
+	// Companion: a run still within the grace is mid-Create (e.g. building its
+	// image) and must NOT be reaped — doing so would drop its device claim and
+	// fail the in-flight Create.
+	reg := NewRegistry()
+	rc := NewRunContext("run_building")
+	rc.RegisteredAt = time.Now().Add(-time.Minute) // recent
+	reg.Register(rc)
+
+	checker := &mockContainerChecker{alive: map[string]bool{}}
+	lc := NewLivenessChecker(reg, checker)
+	lc.CheckOnce(context.Background())
+
+	if reg.Count() != 1 {
+		t.Error("a recently-registered unstarted run must not be reaped mid-Create")
 	}
 }
