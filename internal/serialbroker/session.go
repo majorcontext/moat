@@ -1,6 +1,7 @@
 package serialbroker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -200,6 +201,15 @@ type session struct {
 	// The audit trail stamps this onto session-boundary events as
 	// record_mode, so it must never claim capture that did not happen.
 	recordMode string
+
+	// connWriteMu serializes every write to conn and the write deadline that
+	// bounds it. Three writers share conn — the rx pump, com-port replies, and
+	// negotiation replies — and a net.Conn's write deadline is connection-wide,
+	// so without one owner a deadline armed by one goroutine could be observed
+	// or cleared by another (a stalled-client hang the deadline should prevent,
+	// or a spurious timeout on a healthy client). All conn writes go through
+	// writeConn.
+	connWriteMu sync.Mutex
 }
 
 // record writes captured payload bytes, if capture is enabled.
@@ -276,21 +286,18 @@ func (s *session) run() {
 			n, err := port.Read(buf)
 			if n > 0 {
 				escaped = rfc2217.EscapeIAC(escaped[:0], buf[:n])
-				// Bound the write like writeReply does: a client that stopped
-				// reading must not wedge this pump (and hold the exclusive
-				// device claim) forever. The deadline is set fresh per write —
-				// it is an absolute time, so it must be re-armed each time
-				// rather than once, or a long Read gap would expire it.
-				if tc, ok := s.conn.(*net.TCPConn); ok {
-					_ = tc.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				}
-				if _, werr := s.conn.Write(escaped); werr != nil {
+				// writeConn bounds the write with a deadline so a client that
+				// stopped reading cannot wedge this pump (and hold the exclusive
+				// device claim) forever.
+				if werr := s.writeConn(escaped); werr != nil {
 					s.logPumpExit("device->container", werr)
 					return
 				}
 				s.tx.Add(int64(n))
 				// Capture after forwarding, so record: full never inserts its
-				// write ahead of the data the container is waiting for.
+				// write ahead of the data the container is waiting for. On a
+				// forward failure the session is torn down, so record: full
+				// captures the bytes actually delivered, not this failed chunk.
 				s.record("rx", buf[:n])
 			}
 			if err != nil {
@@ -355,7 +362,12 @@ func (s *session) handleNegotiate(verb, option byte) {
 		// WONT/DONT need no answer; answering would loop.
 		return
 	}
-	if err := rfc2217.WriteNegotiate(s.conn, reply, option); err != nil {
+	var buf bytes.Buffer
+	if err := rfc2217.WriteNegotiate(&buf, reply, option); err != nil {
+		log.Debug("telnet negotiation encode failed", "device", s.listener.approved.Name, "err", err)
+		return
+	}
+	if err := s.writeConn(buf.Bytes()); err != nil {
 		log.Debug("telnet negotiation reply failed", "device", s.listener.approved.Name, "err", err)
 	}
 }
@@ -624,20 +636,34 @@ func (s *session) reply(payload []byte) {
 	s.pendingReplies = append(s.pendingReplies, payload)
 }
 
-// writeReply sends one queued reply. A deadline bounds the write so a client
-// that stopped reading cannot hold the session's read goroutine forever; the
-// connection is dropped on timeout — the device is released for the next
-// client.
-func (s *session) writeReply(cmd byte, payload []byte) {
+// writeConn writes b to the client connection under connWriteMu, with a 10s
+// write deadline armed and cleared around the write. It is the single owner of
+// conn writes and of the connection-wide write deadline: a client that stopped
+// reading cannot hold a writer forever (the write fails on timeout, and the
+// caller drops the session), and no writer ever observes a deadline armed by
+// another goroutine.
+func (s *session) writeConn(b []byte) error {
+	s.connWriteMu.Lock()
+	defer s.connWriteMu.Unlock()
 	if tc, ok := s.conn.(*net.TCPConn); ok {
 		_ = tc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		defer func() { _ = tc.SetWriteDeadline(time.Time{}) }()
 	}
-	if err := rfc2217.WriteCommand(s.conn, cmd+100, payload); err != nil {
+	_, err := s.conn.Write(b)
+	return err
+}
+
+// writeReply sends one queued com-port reply through writeConn; the connection
+// is dropped on failure so the device is released for the next client.
+func (s *session) writeReply(cmd byte, payload []byte) {
+	var buf bytes.Buffer
+	if err := rfc2217.WriteCommand(&buf, cmd+100, payload); err != nil {
+		log.Debug("com-port reply encode failed", "device", s.listener.approved.Name, "err", err)
+		return
+	}
+	if err := s.writeConn(buf.Bytes()); err != nil {
 		log.Debug("com-port reply failed", "device", s.listener.approved.Name, "err", err)
 		s.stop()
-	}
-	if tc, ok := s.conn.(*net.TCPConn); ok {
-		_ = tc.SetWriteDeadline(time.Time{})
 	}
 }
 

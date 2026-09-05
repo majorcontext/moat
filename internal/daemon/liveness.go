@@ -19,15 +19,16 @@ type ContainerChecker interface {
 // failure will no longer cause immediate cleanup.
 const defaultMaxFailures = 3
 
-// staleUnstartedGrace is how long a run may stay registered without a
-// container before the liveness checker reaps it. A run claims its serial
-// device at registration but only sets its ContainerID after the image build
-// and container create, so this window must comfortably exceed the slowest
-// legitimate build — reaping a still-building run would release its device
-// claim and fail the Create, which is worse than a slow recovery. The reap
-// exists for crash recovery: a CLI that dies before container-create otherwise
-// leaks its device claim until the daemon restarts. Fast cleanup is not the
-// goal, so the window is deliberately generous.
+// staleUnstartedGrace is how long a serial-device run may stay registered
+// without a container before the liveness checker reaps it. A run claims its
+// serial device at registration but only sets its ContainerID after the image
+// build and container create, so this window must comfortably exceed the
+// slowest legitimate build — reaping a still-building run would release its
+// device claim and fail the Create, which is worse than a slow recovery. The
+// reap exists only for crash recovery of a leaked device claim: a CLI that
+// dies before container-create otherwise leaks the claim until the daemon
+// restarts. It applies only to device-holding runs (see CheckOnce). Fast
+// cleanup is not the goal, so the window is deliberately generous.
 const staleUnstartedGrace = 30 * time.Minute
 
 // LivenessChecker periodically checks container liveness and cleans up dead runs.
@@ -74,15 +75,19 @@ func (lc *LivenessChecker) CheckOnce(ctx context.Context) {
 	for _, rc := range lc.registry.List() {
 		// A run that registered but never set a ContainerID has no container to
 		// health-check. Normally it is mid-Create (building the image), so it
-		// is skipped. But if it has been stuck far longer than any legitimate
-		// build, its CLI likely died before container-create — reap it so any
-		// serial device claim it holds is released (via onCleanup -> Revoke)
-		// instead of leaking until the daemon restarts. RegisteredAt zero means
-		// the age is unknown; do not reap on a missing timestamp.
+		// is skipped. Reap it only when it holds a serial device claim AND has
+		// been stuck far longer than any legitimate build: its CLI likely died
+		// before container-create, and the claim would otherwise leak until the
+		// daemon restarts. Scoping to device-holding runs keeps a slow but
+		// alive non-serial Create (a long image build) from being reaped — a
+		// non-serial stuck run holds nothing worth crash-recovering, and
+		// reaping it would only turn a slow success into a silent failure.
+		// RegisteredAt zero means the age is unknown; do not reap then.
 		containerID := rc.GetContainerID()
 		if containerID == "" {
-			if !rc.RegisteredAt.IsZero() && time.Since(rc.RegisteredAt) > staleUnstartedGrace {
-				log.Warn("run registered but never started a container; reaping so its resources are released",
+			if len(rc.SerialDevices) > 0 && !rc.RegisteredAt.IsZero() &&
+				time.Since(rc.RegisteredAt) > staleUnstartedGrace {
+				log.Warn("serial run registered but never started a container; reaping so its device claim is released",
 					"run_id", rc.RunID,
 					"registered_at", rc.RegisteredAt,
 					"grace", staleUnstartedGrace)

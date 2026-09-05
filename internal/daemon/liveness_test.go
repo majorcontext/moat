@@ -222,7 +222,8 @@ func TestLivenessChecker_ReapsStaleUnstartedRun(t *testing.T) {
 	// claim until the daemon restarts.
 	reg := NewRegistry()
 	rc := NewRunContext("run_stuck")
-	// No ContainerID; registered well beyond the grace.
+	// Holds a serial claim, no ContainerID, registered well beyond the grace.
+	rc.SerialDevices = []SerialDeviceSpec{{Name: "esp32", Path: "/dev/ttyUSB0"}}
 	rc.RegisteredAt = time.Now().Add(-staleUnstartedGrace - time.Minute)
 	token := reg.Register(rc)
 
@@ -256,5 +257,24 @@ func TestLivenessChecker_KeepsRecentUnstartedRun(t *testing.T) {
 
 	if reg.Count() != 1 {
 		t.Error("a recently-registered unstarted run must not be reaped mid-Create")
+	}
+}
+
+func TestLivenessChecker_KeepsStaleUnstartedNonSerialRun(t *testing.T) {
+	// Companion to the reap: a run with NO serial claim that is stuck without a
+	// container (a slow image build) must NOT be reaped, however old — reaping
+	// it would turn a slow-but-alive Create into a silent failure, and there is
+	// no device claim to recover.
+	reg := NewRegistry()
+	rc := NewRunContext("run_slow_build")
+	rc.RegisteredAt = time.Now().Add(-staleUnstartedGrace - time.Hour) // very old
+	reg.Register(rc)
+
+	checker := &mockContainerChecker{alive: map[string]bool{}}
+	lc := NewLivenessChecker(reg, checker)
+	lc.CheckOnce(context.Background())
+
+	if reg.Count() != 1 {
+		t.Error("a stale non-serial unstarted run must not be reaped")
 	}
 }
