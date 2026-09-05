@@ -515,6 +515,49 @@ func TestCloseListenersReleasesOnlyTheGivenClaims(t *testing.T) {
 	}
 }
 
+func TestCloseListenersSkipsAPreexistingClaim(t *testing.T) {
+	// A re-registration batch may re-Listen a device the run already holds
+	// (idempotent) alongside a new one, then fail on a later device and roll the
+	// batch back. Rolling back must not tear down the live listener the run
+	// already had — only what this batch actually opened. Regression: the
+	// idempotent path handed back an owning ref, so CloseListeners closed the
+	// live device out from under the container.
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return serialtest.NewFakePort(t), nil },
+	})
+	t.Cleanup(func() { b.Close() })
+	devA := serialdev.Device{Path: "/dev/ttyUSB0", VID: "303a", PID: "1001", Serial: "AAA"}
+	devB := serialdev.Device{Path: "/dev/ttyUSB1", VID: "1a86", PID: "7523", Serial: "BBB"}
+
+	// run-a already holds A (a live container's device).
+	_, addrA, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA}, "")
+	if err != nil {
+		t.Fatalf("initial listen a: %v", err)
+	}
+	// The batch: re-Listen A (idempotent, preexisting) and open a new B.
+	refAPre, _, err := b.Listen("run-a", serialbroker.Approved{Name: "a", Device: devA}, "")
+	if err != nil {
+		t.Fatalf("re-listen a: %v", err)
+	}
+	refB, addrB, err := b.Listen("run-a", serialbroker.Approved{Name: "b", Device: devB}, "")
+	if err != nil {
+		t.Fatalf("listen b: %v", err)
+	}
+	// The batch fails on a later device and rolls back everything it collected.
+	b.CloseListeners([]*serialbroker.ListenerRef{refAPre, refB})
+
+	// A was not opened by this batch — it must survive.
+	c := dial(t, addrA)
+	if _, err := c.Write([]byte("x")); err != nil {
+		t.Fatalf("device the batch only re-listed must survive rollback: %v", err)
+	}
+	// B was opened by the batch — it must be closed.
+	if conn, err := net.DialTimeout("tcp", addrB, 500*time.Millisecond); err == nil {
+		conn.Close()
+		t.Fatal("the device this batch opened must be rolled back")
+	}
+}
+
 func TestRevokeReleasesEveryClaimOfTheRun(t *testing.T) {
 	// Revoke remains the full-run teardown (used by unregister and the
 	// liveness reaper); every claim of the run goes, others' stay.

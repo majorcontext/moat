@@ -167,7 +167,10 @@ func (b *Broker) listen(runID string, a Approved, bindAddr string, port int) (*L
 	key := claimKey(a)
 	if existing, ok := b.byDevice[key]; ok {
 		if existing.runID == runID {
-			return &ListenerRef{broker: b, l: existing}, existing.ln.Addr().String(), nil
+			// The run already holds this claim; hand back a ref marked
+			// preexisting so a scoped rollback of *this* call does not close a
+			// listener it did not open.
+			return &ListenerRef{broker: b, l: existing, preexisting: true}, existing.ln.Addr().String(), nil
 		}
 		return nil, "", fmt.Errorf("serial device %q (%s) is already in use by run %s",
 			a.Name, a.Device.Path, existing.runID)
@@ -199,6 +202,10 @@ func (b *Broker) listen(runID string, a Approved, bindAddr string, port int) (*L
 type ListenerRef struct {
 	broker *Broker
 	l      *listener
+	// preexisting marks a ref returned for a claim the run already held (an
+	// idempotent re-Listen). CloseListeners skips it: rolling back the call
+	// that received it must not tear down a listener it did not open.
+	preexisting bool
 }
 
 // CloseListeners releases exactly the listeners the given refs point at.
@@ -215,7 +222,7 @@ func (b *Broker) CloseListeners(refs []*ListenerRef) {
 	ls := make([]*listener, 0, len(refs))
 	seen := map[*listener]bool{}
 	for _, r := range refs {
-		if r != nil && r.broker == b && !seen[r.l] {
+		if r != nil && r.broker == b && !r.preexisting && !seen[r.l] {
 			seen[r.l] = true
 			ls = append(ls, r.l)
 		}
