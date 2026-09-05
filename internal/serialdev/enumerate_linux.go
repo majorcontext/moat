@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -62,9 +63,10 @@ func enumerateSysfs(root string) ([]Device, error) {
 			Serial:      serial,
 			PortPath:    portPath,
 			Description: readAttr(usbDir, "product"),
-			// The tty's interface directory is "1-2:1.0" — port:config.iface.
-			// The trailing number distinguishes the UARTs of a multi-interface
-			// bridge (FT2232H, CP2105), which share every other attribute.
+			// The interface number distinguishes the UARTs of a multi-interface
+			// bridge (FT2232H, CP2105), which share every other attribute. It is
+			// read from the tty's enclosing interface directory — see
+			// interfaceNumber for why that is not always `target` itself.
 			Interface: interfaceNumber(target),
 		})
 	}
@@ -86,16 +88,36 @@ func usbParent(dir string) (string, string, bool) {
 	return "", "", false
 }
 
-// interfaceNumber extracts the USB interface number from a tty's sysfs
-// directory, whose name is "<port>:<config>.<interface>" — "1-2:1.0" is port
-// 1-2, configuration 1, interface 0. Dual-UART bridges (FT2232H, CP2105)
-// expose "1-2:1.0" and "1-2:1.1" for their two ttys; the trailing number is
-// the only attribute that tells them apart.
-func interfaceNumber(ifaceDir string) string {
-	name := filepath.Base(ifaceDir)
-	if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
-		if n, err := strconv.Atoi(name[i+1:]); err == nil {
-			return strconv.Itoa(n)
+// interfaceDirRe matches a USB interface directory name,
+// "<port>:<config>.<interface>" — e.g. "1-2:1.0", "1-2.3:1.1", "3-1.4.2:2.0".
+var interfaceDirRe = regexp.MustCompile(`^\d+-\d+(?:\.\d+)*:\d+\.\d+$`)
+
+// interfaceNumber extracts the USB interface number for a tty, given the
+// resolved target of its sysfs "device" symlink. The number distinguishes the
+// UARTs of a dual-interface bridge (FT2232H, CP2105), which share VID/PID and
+// serial. It cannot simply parse `target`, because the two USB serial drivers
+// arrange sysfs differently:
+//
+//   - cdc_acm ttys (ttyACM*) link straight to the interface directory,
+//     ".../1-2/1-2:1.0".
+//   - usb-serial ttys (ttyUSB*, i.e. FTDI, CP210x) link to a usb_serial_port
+//     device nested one level below it, ".../1-2/1-2:1.0/ttyUSB0".
+//
+// An earlier version read filepath.Base(target) and so returned "" for every
+// ttyUSB device — leaving the two ports of an FT2232H indistinguishable, which
+// is exactly the hardware the discriminator exists for. Walk up to the first
+// ancestor that is an interface directory instead, and take the number after
+// its final dot. Empty when there is no such ancestor.
+func interfaceNumber(target string) string {
+	for d := target; d != "/" && d != "."; d = filepath.Dir(d) {
+		base := filepath.Base(d)
+		if !interfaceDirRe.MatchString(base) {
+			continue
+		}
+		if i := strings.LastIndex(base, "."); i >= 0 && i+1 < len(base) {
+			if n, err := strconv.Atoi(base[i+1:]); err == nil {
+				return strconv.Itoa(n)
+			}
 		}
 	}
 	return ""

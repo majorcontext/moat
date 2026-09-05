@@ -103,6 +103,60 @@ func TestEnumerateSysfsSeparatesDualInterfaceBridges(t *testing.T) {
 	}
 }
 
+func TestEnumerateSysfsReadsInterfaceForNestedUSBSerialPorts(t *testing.T) {
+	// The real usb-serial (FTDI/CP210x) layout the previous code got wrong: the
+	// tty's `device` link points at a usb_serial_port device nested one level
+	// below the interface directory (".../1-2:1.0/ttyUSB0"), not at the
+	// interface directory itself the way cdc_acm does. Reading filepath.Base of
+	// the target yielded "ttyUSB0" → interface "" → both ports of an FT2232H
+	// indistinguishable. Build that exact shape for a dual-UART bridge and
+	// assert each port carries its interface number.
+	root := t.TempDir()
+	usbDev := filepath.Join(root, "devices", "pci0000:00", "usb1", "1-2")
+	if err := os.MkdirAll(usbDev, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, val := range map[string]string{"idVendor": "0403", "idProduct": "6010", "serial": "FT7ABCDE", "product": "Dual RS232-HS"} {
+		if err := os.WriteFile(filepath.Join(usbDev, name), []byte(val+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []struct{ iface, tty string }{{"1-2:1.0", "ttyUSB0"}, {"1-2:1.1", "ttyUSB1"}} {
+		portDir := filepath.Join(usbDev, p.iface, p.tty) // the nested usb_serial_port device
+		if err := os.MkdirAll(portDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ttyDir := filepath.Join(root, "class", "tty", p.tty)
+		if err := os.MkdirAll(ttyDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(portDir, filepath.Join(ttyDir, "device")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := enumerateSysfs(root)
+	if err != nil {
+		t.Fatalf("enumerateSysfs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d devices, want one per tty: %+v", len(got), got)
+	}
+	ifaces := map[string]string{}
+	for _, d := range got {
+		ifaces[d.Path] = d.Interface
+		if d.PortPath != "1-2" {
+			t.Fatalf("%s PortPath = %q, want 1-2 (the USB device, not the nested port dir)", d.Path, d.PortPath)
+		}
+	}
+	if ifaces["/dev/ttyUSB0"] != "0" || ifaces["/dev/ttyUSB1"] != "1" {
+		t.Fatalf("path->interface = %v, want ttyUSB0->0 ttyUSB1->1", ifaces)
+	}
+	if got[0].Identity() == got[1].Identity() {
+		t.Fatalf("both ttys share identity %+v; the nested-layout interface read is broken", got[0].Identity())
+	}
+}
+
 func TestEnumerateSysfsSerialLessDeviceStillEnumerates(t *testing.T) {
 	got, err := enumerateSysfs(fakeSysfs(t, ""))
 	if err != nil {

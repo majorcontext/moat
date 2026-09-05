@@ -111,7 +111,13 @@ func Match(devs []Device, m Matcher) ([]Device, error) {
 		if strings.ToLower(d.VID) != vid || strings.ToLower(d.PID) != pid {
 			continue
 		}
-		if m.Interface != "" && normalizeInterface(d.Interface) != normalizeInterface(m.Interface) {
+		// An interface selector narrows to one UART of a multi-interface
+		// bridge. A device whose interface the platform could not determine
+		// ("") must not satisfy a specific selector: treating unknown as
+		// interface 0 (as pin verification does for pins that predate the
+		// field) would let the selector land on the wrong port, or on a device
+		// that never exposed interfaces at all.
+		if m.Interface != "" && d.Interface != m.Interface {
 			continue
 		}
 		out = append(out, d)
