@@ -147,8 +147,8 @@ Cheap CH340 and CP2102 clones often ship without a serial number. Those are pinn
 physical USB port instead, and `moat device list` says so:
 
 ```
-DEVICE        USB ID     SERIAL NUMBER         PIN  DESCRIPTION
-/dev/ttyUSB0  1a86:7523  - (pins by port 1-3)  -    USB Serial
+DEVICE        USB ID     IFACE  SERIAL NUMBER         PIN  DESCRIPTION
+/dev/ttyUSB0  1a86:7523  -      - (pins by port 1-3)  -    USB Serial
 ```
 
 A port pin approves *whatever is plugged into that port*, so moving the device to another
@@ -208,8 +208,10 @@ Two further boundaries are worth stating plainly:
   mechanism at all.
 - **The RFC2217 port is reachable only from this machine.** The protocol has no
   authentication, so access is scoped by bind address: each device's listener binds the
-  host address the run's container uses (the default bridge gateway on Docker, the
-  default network gateway on Apple containers), not every interface. A connection from
+  host address the run's container uses (the default bridge gateway on Docker on Linux,
+  host loopback on Docker Desktop for macOS/Windows — where the container's URL names
+  `host.docker.internal`, which forwards to that loopback — and the default network
+  gateway on Apple containers), not every interface. A connection from
   another machine on the network is refused. Processes running on this machine — and any
   container on it, not just the owning run — can still connect to it, and the broker
   serves one connection at a time, so a competing local connection can hold the device but
@@ -251,8 +253,8 @@ way they always did.
 ## Observability
 
 Attach, detach, line-setting changes, DTR/RTS transitions, and byte counters are recorded
-for every session in the run's `devices.jsonl`, with attach/detach/error also in the
-tamper-evident audit chain (`moat audit <run-id>`). Set `record: full` to capture the
+for every session in the run's `devices.jsonl`, with attach/detach/error/conflict also in
+the tamper-evident audit chain (`moat audit <run-id>`). Set `record: full` to capture the
 payload bytes too, in `serial-<name>.capture` beside the other run artifacts:
 
 ```yaml

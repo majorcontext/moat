@@ -21,8 +21,8 @@ For example, a LilyGO T-Display S3 (the board this example was verified on)
 shows up on its native USB:
 
 ```
-DEVICE                  USB ID     SERIAL NUMBER      PIN  DESCRIPTION
-/dev/cu.usbmodem83201   303a:1001  E0:72:A1:A2:32:48  -    USB JTAG/serial debug unit
+DEVICE                  USB ID     IFACE  SERIAL NUMBER      PIN  DESCRIPTION
+/dev/cu.usbmodem83201   303a:1001  -      E0:72:A1:A2:32:48  -    USB JTAG/serial debug unit
 ```
 
 The value in `moat.yaml`'s `match:` is the only board-specific part of this
@@ -132,8 +132,9 @@ moat audit <run-id>         # attach/detach are in the tamper-evident chain
 
 Every event — including the per-signal chatter — also lands in the run's
 `devices.jsonl` (`~/.moat/runs/<run-id>/devices.jsonl`), and `record: full`
-payload bytes in `serial-<name>.capture` beside it. Both are JSONL; `jq` reads
-them directly:
+payload bytes in `serial-<name>.capture` beside it. `devices.jsonl` is JSONL,
+so `jq` reads it directly; the capture file is plain text (one line per chunk:
+timestamp, `tx`/`rx` direction, bytes in hex):
 
 ```bash
 jq -r '.kind + " " + .detail' ~/.moat/runs/<run-id>/devices.jsonl

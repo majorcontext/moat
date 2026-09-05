@@ -164,7 +164,7 @@ export MOAT_SERIAL_TEST_DEVICE=/dev/cu.usbmodem-14201
 go test -tags=e2e ./internal/e2e/ -run TestSerialDeviceEndToEnd
 ```
 
-Set `MOAT_SERIAL_TEST_ECHO=1` too when the board runs firmware that echoes what it receives; the tests then also assert the data path. Both variables are read by the tests, never by `moat` itself.
+The variable is read by the tests, never by `moat` itself.
 
 ### AWS credentials
 
@@ -247,8 +247,9 @@ echo $MOAT_RUN_ID
 
 ### MOAT_SERIAL_DEVICES
 
-Names of the serial devices available to the run, comma-separated. One variable
-per `devices` entry in moat.yaml.
+Names of the serial devices available to the run, comma-separated. A single
+variable listing every `devices` entry in moat.yaml (the per-device variable is
+`MOAT_SERIAL_<NAME>_URL`).
 
 ```bash
 # Inside container:
@@ -266,14 +267,17 @@ cannot.
 ```bash
 # Inside container:
 echo $MOAT_SERIAL_BOARD_URL
-# rfc2217://192.168.65.2:45231
+# rfc2217://172.17.0.1:45231
 
 esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id
 ```
 
 The name is uppercased with non-alphanumerics folded to underscores:
-`esp32-s3` becomes `MOAT_SERIAL_ESP32_S3_URL`. The URL is fixed when the
-container is created and stays valid across proxy daemon restarts.
+`esp32-s3` becomes `MOAT_SERIAL_ESP32_S3_URL`. The host part depends on the
+runtime: the default bridge gateway on Docker on Linux (as above),
+`host.docker.internal` on Docker Desktop (macOS/Windows), and the default
+network gateway on Apple containers. The URL is fixed when the container is
+created and stays valid across proxy daemon restarts.
 
 ### MOAT_RUN_NAME
 

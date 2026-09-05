@@ -1648,9 +1648,12 @@ moat device list
 ```
 
 ```
-DEVICE                   USB ID     SERIAL NUMBER      PIN    DESCRIPTION
-/dev/cu.usbserial-14220  10c4:ea60  0001              esp32  CP2102 USB to UART Bridge
+DEVICE                   USB ID     IFACE  SERIAL NUMBER  PIN    DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  -      0001           esp32  CP2102 USB to UART Bridge
 ```
+
+The `IFACE` column shows the USB interface number for a port of a multi-UART bridge —
+the value for `match.interface` in moat.yaml — and `-` for single-UART devices.
 
 The `PIN` column shows the device name a device is approved under, `-` if it is not
 pinned, or `MISMATCH (<name>)` when a device of the same model as a pin is attached but is
