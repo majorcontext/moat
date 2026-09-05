@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/majorcontext/moat/internal/audit"
@@ -16,24 +14,20 @@ import (
 // conflict) also go to the audit chain — attaching to hardware an agent can
 // reflash is worth a tamper-evident record, while per-signal chatter is not.
 //
-// Sinks are opened lazily and cached, because the daemon outlives the runs and
-// cannot know at startup which runs will use devices.
+// The per-run stores are supplied by the daemon rather than opened here, so a
+// run has exactly one *storage.RunStore and one *audit.Store shared with the
+// network and policy loggers. A second audit.Store on the same audit.db would
+// collide on the chain's seq primary key and silently drop device entries.
 type serialEventFanout struct {
-	baseDir string
-
-	storeMu sync.Mutex
-	stores  map[string]*storage.RunStore
-
-	auditMu     sync.Mutex
-	auditStores map[string]*audit.Store
+	runStore   func(runID string) *storage.RunStore
+	auditStore func(runID string) *audit.Store
 }
 
-func newSerialEventFanout(baseDir string) *serialEventFanout {
-	return &serialEventFanout{
-		baseDir:     baseDir,
-		stores:      make(map[string]*storage.RunStore),
-		auditStores: make(map[string]*audit.Store),
-	}
+func newSerialEventFanout(
+	runStore func(runID string) *storage.RunStore,
+	auditStore func(runID string) *audit.Store,
+) *serialEventFanout {
+	return &serialEventFanout{runStore: runStore, auditStore: auditStore}
 }
 
 // handle is the serialbroker.Options.Log callback.
@@ -75,41 +69,4 @@ func (f *serialEventFanout) handle(e serialbroker.Event) {
 			RecordMode: e.Record,
 		})
 	}
-}
-
-// runStore returns the run's storage, opening and caching it on first use.
-func (f *serialEventFanout) runStore(runID string) *storage.RunStore {
-	f.storeMu.Lock()
-	defer f.storeMu.Unlock()
-	store, ok := f.stores[runID]
-	if !ok {
-		var err error
-		store, err = storage.NewRunStore(f.baseDir, runID)
-		if err != nil {
-			log.Warn("failed to open run store for device log",
-				"run_id", runID, "error", err)
-			return nil
-		}
-		f.stores[runID] = store
-	}
-	return store
-}
-
-// auditStore returns the run's audit store, opening and caching it on first
-// use.
-func (f *serialEventFanout) auditStore(runID string) *audit.Store {
-	f.auditMu.Lock()
-	defer f.auditMu.Unlock()
-	as, ok := f.auditStores[runID]
-	if !ok {
-		var err error
-		as, err = audit.OpenStore(filepath.Join(f.baseDir, runID, "audit.db"))
-		if err != nil {
-			log.Warn("failed to open audit store for device log",
-				"run_id", runID, "error", err)
-			return nil
-		}
-		f.auditStores[runID] = as
-	}
-	return as
 }

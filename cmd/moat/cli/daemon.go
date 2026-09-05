@@ -88,32 +88,58 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		return rc.ToProxyContextData(), true
 	})
 
-	// Wire network request logging. The proxy is shared across runs, so
-	// the logger routes to per-run storage using the RunID from request context.
+	// Per-run stores are shared across every sink that writes for a run: the
+	// network logger, the policy logger, and the serial event fanout. Sharing
+	// the *audit.Store is a correctness requirement, not just an economy —
+	// audit.Store caches the chain's last sequence in memory, so two handles on
+	// one audit.db collide on the seq primary key and silently drop entries.
 	var storeMu sync.Mutex
 	stores := make(map[string]*storage.RunStore)
 	baseDir := storage.DefaultBaseDir()
+	getRunStore := func(runID string) *storage.RunStore {
+		storeMu.Lock()
+		defer storeMu.Unlock()
+		store, ok := stores[runID]
+		if !ok {
+			var storeErr error
+			store, storeErr = storage.NewRunStore(baseDir, runID)
+			if storeErr != nil {
+				log.Warn("failed to open run store", "run_id", runID, "error", storeErr)
+				return nil
+			}
+			stores[runID] = store
+		}
+		return store
+	}
 
+	var auditMu sync.Mutex
+	auditStores := make(map[string]*audit.Store)
+	getAuditStore := func(runID string) *audit.Store {
+		auditMu.Lock()
+		defer auditMu.Unlock()
+		as, ok := auditStores[runID]
+		if !ok {
+			var openErr error
+			as, openErr = audit.OpenStore(filepath.Join(baseDir, runID, "audit.db"))
+			if openErr != nil {
+				log.Warn("failed to open audit store", "run_id", runID, "error", openErr)
+				return nil
+			}
+			auditStores[runID] = as
+		}
+		return as
+	}
+
+	// Wire network request logging. The proxy is shared across runs, so the
+	// logger routes to per-run storage using the RunID from request context.
 	p.SetLogger(func(data proxy.RequestLogData) {
 		if data.RunID == "" {
 			return
 		}
-
-		storeMu.Lock()
-		store, ok := stores[data.RunID]
-		if !ok {
-			var storeErr error
-			store, storeErr = storage.NewRunStore(baseDir, data.RunID)
-			if storeErr != nil {
-				storeMu.Unlock()
-				log.Warn("failed to open run store for network log",
-					"run_id", data.RunID, "error", storeErr)
-				return
-			}
-			stores[data.RunID] = store
+		store := getRunStore(data.RunID)
+		if store == nil {
+			return
 		}
-		storeMu.Unlock()
-
 		var errStr string
 		if data.Err != nil {
 			errStr = data.Err.Error()
@@ -133,38 +159,21 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		})
 	})
 
-	// Wire policy decision logging. Routes to per-run audit stores.
-	var auditMu sync.Mutex
-	auditStores := make(map[string]*audit.Store)
+	// Wire policy decision logging. Routes to the same per-run audit stores.
 	p.SetPolicyLogger(func(data proxy.PolicyLogData) {
 		if data.RunID == "" {
 			return
 		}
-
-		auditMu.Lock()
-		as, ok := auditStores[data.RunID]
-		if !ok {
-			runDir := filepath.Join(baseDir, data.RunID)
-			var openErr error
-			as, openErr = audit.OpenStore(filepath.Join(runDir, "audit.db"))
-			if openErr != nil {
-				auditMu.Unlock()
-				log.Warn("failed to open audit store for policy log",
-					"run_id", data.RunID, "error", openErr)
-				return
-			}
-			auditStores[data.RunID] = as
+		if as := getAuditStore(data.RunID); as != nil {
+			_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 		}
-		auditMu.Unlock()
-
-		_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 	})
 
 	// Serial device broker. Listeners are opened per run when a run registers
 	// devices, and closed when it unregisters. Event routing lives in
 	// serialEventFanout (serial_events.go): every event goes to the run's
 	// devices.jsonl; session boundaries also go to the audit chain.
-	serialFanout := newSerialEventFanout(baseDir)
+	serialFanout := newSerialEventFanout(getRunStore, getAuditStore)
 	serialBroker := serialbroker.New(serialbroker.Options{
 		// Payload capture (record: full) writes to the run's directory beside
 		// its other artifacts. 0600 because the capture may contain firmware

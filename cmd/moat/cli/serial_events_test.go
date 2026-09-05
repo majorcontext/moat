@@ -18,7 +18,7 @@ import (
 
 func TestSerialFanoutWritesEveryEventToDevicesJSONL(t *testing.T) {
 	baseDir := t.TempDir()
-	f := newSerialEventFanout(baseDir)
+	f := newSerialEventFanout(cachingStores(t, baseDir))
 
 	f.handle(serialbroker.Event{
 		RunID: "run_aabbccdd", Device: "esp32", Kind: "modem",
@@ -50,7 +50,7 @@ func TestSerialFanoutWritesEveryEventToDevicesJSONL(t *testing.T) {
 
 func TestSerialFanoutAuditsSessionBoundariesOnly(t *testing.T) {
 	baseDir := t.TempDir()
-	f := newSerialEventFanout(baseDir)
+	f := newSerialEventFanout(cachingStores(t, baseDir))
 
 	// Chatter: recorded in devices.jsonl (asserted above) but never audited.
 	f.handle(serialbroker.Event{RunID: "run_aabbccdd", Device: "esp32", Kind: "modem", Detail: "rts-on"})
@@ -105,7 +105,7 @@ func TestSerialFanoutAuditsSessionBoundariesOnly(t *testing.T) {
 // directory.
 func TestSerialFanoutIgnoresEventsWithoutARun(t *testing.T) {
 	baseDir := t.TempDir()
-	f := newSerialEventFanout(baseDir)
+	f := newSerialEventFanout(cachingStores(t, baseDir))
 
 	f.handle(serialbroker.Event{RunID: "", Device: "esp32", Kind: "attach"})
 
@@ -115,6 +115,85 @@ func TestSerialFanoutIgnoresEventsWithoutARun(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("an event with no run id created %d entries under the base dir", len(entries))
+	}
+}
+
+// cachingStores builds the per-run accessors the daemon supplies to the
+// fanout: one *storage.RunStore and one *audit.Store per run, cached so
+// repeated events reuse the same handle. Reusing the audit.Store is the point —
+// a fresh handle per event would reset the chain's in-memory sequence and
+// collide on the seq primary key.
+func cachingStores(t *testing.T, baseDir string) (func(string) *storage.RunStore, func(string) *audit.Store) {
+	t.Helper()
+	runStores := map[string]*storage.RunStore{}
+	auditStores := map[string]*audit.Store{}
+	t.Cleanup(func() {
+		for _, as := range auditStores {
+			as.Close() //nolint:errcheck // test cleanup
+		}
+	})
+	getRun := func(runID string) *storage.RunStore {
+		if s, ok := runStores[runID]; ok {
+			return s
+		}
+		s, err := storage.NewRunStore(baseDir, runID)
+		if err != nil {
+			t.Fatalf("NewRunStore: %v", err)
+		}
+		runStores[runID] = s
+		return s
+	}
+	getAudit := func(runID string) *audit.Store {
+		if as, ok := auditStores[runID]; ok {
+			return as
+		}
+		// In the daemon the run directory already exists (run creation, the
+		// network logger, the recorder); create it here so the audit accessor
+		// works even when a test supplies no run store.
+		if err := os.MkdirAll(filepath.Join(baseDir, runID), 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		as, err := audit.OpenStore(filepath.Join(baseDir, runID, "audit.db"))
+		if err != nil {
+			t.Fatalf("OpenStore: %v", err)
+		}
+		auditStores[runID] = as
+		return as
+	}
+	return getRun, getAudit
+}
+
+func TestSerialFanoutSharesAuditStoreWithoutSeqCollision(t *testing.T) {
+	// Regression: the fanout must append through the same *audit.Store the rest
+	// of the daemon uses. Two handles on one audit.db each cache their own
+	// last-sequence, so the second to write collides on the seq primary key and
+	// its entry is silently dropped. Interleave policy-style appends with device
+	// boundaries through one shared accessor and assert every entry lands and
+	// the chain still verifies.
+	baseDir := t.TempDir()
+	_, getAudit := cachingStores(t, baseDir)
+	f := newSerialEventFanout(func(string) *storage.RunStore { return nil }, getAudit)
+
+	as := getAudit("run_aabbccdd") // the daemon's policy logger shares this handle
+	if err := as.AppendPolicyEntry("network", "connect", "deny", "rule", "blocked"); err != nil {
+		t.Fatalf("policy append: %v", err)
+	}
+	f.handle(serialbroker.Event{RunID: "run_aabbccdd", Device: "esp32", Kind: "attach", Record: "events"})
+	if err := as.AppendPolicyEntry("network", "connect", "deny", "rule", "blocked again"); err != nil {
+		t.Fatalf("second policy append (would fail on a colliding seq): %v", err)
+	}
+	f.handle(serialbroker.Event{RunID: "run_aabbccdd", Device: "esp32", Kind: "detach"})
+
+	entries := readAuditEntries(t, filepath.Join(baseDir, "run_aabbccdd", "audit.db"))
+	if len(entries) != 4 {
+		t.Fatalf("got %d audit entries, want 4 (2 policy + attach + detach); a seq collision drops some", len(entries))
+	}
+	res, err := as.VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain: %v", err)
+	}
+	if !res.Valid {
+		t.Fatal("audit chain invalid after interleaved fanout and policy writes")
 	}
 }
 
