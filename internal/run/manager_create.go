@@ -703,6 +703,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// created — rather than part-way through a flash.
 		var serialSpecs []daemon.SerialDeviceSpec
 		serialBind := ""
+		serialAdvertise := ""
 		if opts.Config != nil && len(opts.Config.Devices) > 0 {
 			if !slices.Contains(daemonCapabilities, daemon.CapSerialDevices) {
 				return nil, fmt.Errorf("proxy daemon is too old for serial devices (missing %q capability); run 'moat proxy restart' to upgrade", daemon.CapSerialDevices)
@@ -720,6 +721,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if serialBind == "" {
 				return nil, fmt.Errorf("cannot resolve where to expose serial devices for %s containers — device access requires a host address the container can reach; check that the runtime's default network has a gateway", m.defaultRuntime().Type())
 			}
+			// The address the listener binds and the address the container
+			// dials differ on Docker Desktop (bind loopback, dial
+			// host.docker.internal); see serialAdvertiseHost.
+			serialAdvertise = m.serialAdvertiseHost(serialBind)
 		}
 
 		// Build RegisterRequest from the RunContext
@@ -794,12 +799,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// no pty representation, so the URL — not a device path — is what tools
 		// that need DTR/RTS must use.
 		//
-		// The URL carries the literal address the daemon bound, not moat-host:
-		// a run with `services:` rewrites moat-host to the per-run network's
-		// gateway after this point, and that address is not where the listener
-		// is (the docker0 gateway is, and it is reachable from that network
-		// too — see serialBindAddr).
-		proxyEnv = append(proxyEnv, SerialEnv(serialBind, regResp.SerialAddrs)...)
+		// The URL carries the container-facing host, not moat-host: a run with
+		// `services:` rewrites moat-host to the per-run network's gateway after
+		// this point, which is not where the listener is. On Docker Linux and
+		// Apple that host is the bound address (the gateway is reachable from
+		// every network mode); on Docker Desktop the listener binds host
+		// loopback but the container reaches it via host.docker.internal, so
+		// bind and advertised host differ — see serialAdvertiseHost.
+		proxyEnv = append(proxyEnv, SerialEnv(serialAdvertise, regResp.SerialAddrs)...)
 		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
 		// Docker-on-Linux resolves the synthetic hostnames via --add-host (set

@@ -114,6 +114,39 @@ func (m *Manager) serialBindAddr(ctx context.Context, cfg *config.Config) string
 	}
 }
 
+// serialAdvertiseHost returns the host a container dials to reach the serial
+// listener, given the address the listener binds (from serialBindAddr). They
+// coincide everywhere except Docker Desktop: there the listener binds host
+// loopback (127.0.0.1), but a container reaches host loopback only through
+// host.docker.internal — which is what GetHostAddress returns on Docker
+// Desktop. Advertising the bind address 127.0.0.1 there would name the
+// container's own loopback and leave the device unreachable.
+//
+// On Docker Linux and Apple the bind address is itself a host address the
+// container can reach (the docker0 gateway, the network gateway), so it is
+// advertised verbatim — deliberately not moat-host, whose /etc/hosts entry a
+// `services:` run rewrites to the per-run network's gateway, which is not where
+// the listener binds.
+func (m *Manager) serialAdvertiseHost(bind string) string {
+	rt := m.defaultRuntime()
+	return serialAdvertiseFor(bind, rt.Type(), rt.GetHostAddress(), goruntime.GOOS == "linux")
+}
+
+// serialAdvertiseFor is the pure core of serialAdvertiseHost, split out so the
+// per-platform choice can be tested without a real runtime or a particular
+// GOOS. On Docker Desktop (Docker runtime, not Linux) the container-facing host
+// is hostAddr (host.docker.internal), which forwards to the host loopback the
+// listener bound; everywhere else the bind address is itself reachable.
+func serialAdvertiseFor(bind string, rtType container.RuntimeType, hostAddr string, linux bool) string {
+	if bind == "" {
+		return ""
+	}
+	if rtType == container.RuntimeDocker && !linux {
+		return hostAddr
+	}
+	return bind
+}
+
 // defaultBridgeGateway returns the IPv4 gateway of Docker's default bridge
 // network ("bridge" / docker0). Serial listeners bind it because every
 // container network a run can use — default bridge, per-run services

@@ -169,6 +169,34 @@ func TestSerialBindAddrRefusesWhenGatewayUnresolvable(t *testing.T) {
 	}
 }
 
+func TestSerialAdvertiseForPerPlatform(t *testing.T) {
+	// The advertised host coincides with the bind address everywhere except
+	// Docker Desktop, where the listener binds host loopback but the container
+	// reaches it only via host.docker.internal. Advertising the bind address
+	// 127.0.0.1 there names the container's own loopback and the device is
+	// unreachable — the regression this guards.
+	for _, tc := range []struct {
+		name     string
+		bind     string
+		rtType   container.RuntimeType
+		hostAddr string
+		linux    bool
+		want     string
+	}{
+		{"docker desktop advertises host.docker.internal", "127.0.0.1", container.RuntimeDocker, "host.docker.internal", false, "host.docker.internal"},
+		{"docker linux advertises the bound gateway", "172.17.0.1", container.RuntimeDocker, "127.0.0.1", true, "172.17.0.1"},
+		{"apple advertises the bound gateway", "192.168.64.1", container.RuntimeApple, "192.168.64.1", false, "192.168.64.1"},
+		{"no devices stays empty", "", container.RuntimeDocker, "host.docker.internal", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serialAdvertiseFor(tc.bind, tc.rtType, tc.hostAddr, tc.linux); got != tc.want {
+				t.Fatalf("serialAdvertiseFor(%q, %v, %q, linux=%v) = %q, want %q",
+					tc.bind, tc.rtType, tc.hostAddr, tc.linux, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSerialBindAddrAppleIsTheDefaultNetworkGateway(t *testing.T) {
 	// Apple containers: the default network's gateway is the host-facing
 	// address, the same one GetHostAddress returns.
