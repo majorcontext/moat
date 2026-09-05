@@ -237,7 +237,7 @@ func ambiguousFix(entry config.DeviceEntry, candidates []serialdev.Device) strin
 	return fmt.Sprintf("  These look like ports of one multi-interface bridge. "+
 		"Declare each as its own device with an interface selector:\n"+
 		"    devices:\n"+
-		"      %s:\n"+
+		"      - name: %s\n"+
 		"        match:\n"+
 		"          usb: \"%s:%s\"\n"+
 		"          interface: \"0\"   # or \"1\", per `moat device list`",

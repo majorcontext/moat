@@ -1470,10 +1470,9 @@ func TestCleanupRemovesContainerWhileMonitorBlocked(t *testing.T) {
 	}
 }
 
-// TestSetupFirewallReceivesTheRunsAllowedHostPorts verifies the P0-2 plumbing:
-// a strict run's firewall must allow the run's allowed host ports — its
-// RFC2217 serial listeners above all — or the firewall the strict policy
-// installed silently drops the device.
+// TestSetupFirewallReceivesTheRunsAllowedHostPorts: a strict run's firewall
+// must allow the run's allowed host ports — its RFC2217 serial listeners above
+// all — or the firewall the strict policy installed silently drops the device.
 func TestSetupFirewallReceivesTheRunsAllowedHostPorts(t *testing.T) {
 	var gotPorts []int
 	rt := &flexibleRuntime{

@@ -327,11 +327,10 @@ func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr
 }
 
 // ListenSerialPinned re-opens a restored run's serial listeners on the exact
-// ports the container's frozen MOAT_SERIAL_*_URLs point at. It is the restore
-// half of P0-9: a daemon restart must not move a device, because the
-// container cannot learn the new address. A port that cannot be re-bound
-// fails with a named error naming the device, rather than silently leaving
-// the device dead or rebinding it elsewhere.
+// ports the container's frozen MOAT_SERIAL_*_URLs point at. A daemon restart
+// must not move a device, because the container cannot learn the new address.
+// A port that cannot be re-bound fails with an error naming the device, rather
+// than silently leaving the device dead or rebinding it elsewhere.
 func (s *Server) ListenSerialPinned(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pinned map[string]string) (map[string]string, error) {
 	pins := make(map[string]int, len(pinned))
 	for name, addr := range pinned {

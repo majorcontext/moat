@@ -10,6 +10,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/serialtest"
+	"gopkg.in/yaml.v3"
 )
 
 func esp32Entry() config.DeviceEntry {
@@ -523,5 +524,45 @@ func TestCreateGatePinsAndResolvesAnAttachedDevice(t *testing.T) {
 	}
 	if _, err := m.resolveDevicesForCreate(context.Background(), []config.DeviceEntry{esp32Entry()}); err != nil {
 		t.Fatalf("second pass over the pinned device must verify: %v", err)
+	}
+}
+
+func TestAmbiguousFixEmitsParseableDevicesYAML(t *testing.T) {
+	// A dual-UART bridge gets the interface-selector suggestion, and the
+	// devices block it prints must parse as real moat.yaml. It used to emit map
+	// form ("jtag:") instead of a list entry ("- name: jtag"), so a user who
+	// copied the suggestion got a parse error.
+	entry := config.DeviceEntry{Name: "jtag", Match: config.DeviceMatch{USB: "0403:6010"}}
+	bridge := []serialdev.Device{
+		{VID: "0403", PID: "6010", Serial: "FT7", PortPath: "1-2", Interface: "0", Path: "/dev/ttyUSB0"},
+		{VID: "0403", PID: "6010", Serial: "FT7", PortPath: "1-2", Interface: "1", Path: "/dev/ttyUSB1"},
+	}
+	msg := ambiguousFix(entry, bridge)
+	i := strings.Index(msg, "devices:")
+	if i < 0 {
+		t.Fatalf("bridge ambiguity should suggest an interface selector, got: %s", msg)
+	}
+	// Dedent the block (printed indented four spaces under the prose).
+	var b strings.Builder
+	for _, ln := range strings.Split(msg[i:], "\n") {
+		b.WriteString(strings.TrimPrefix(ln, "    "))
+		b.WriteByte('\n')
+	}
+	var cfg config.Config
+	if err := yaml.Unmarshal([]byte(b.String()), &cfg); err != nil {
+		t.Fatalf("suggested devices YAML does not parse: %v\n%s", err, b.String())
+	}
+	if len(cfg.Devices) != 1 || cfg.Devices[0].Name != "jtag" || cfg.Devices[0].Match.Interface != "0" {
+		t.Fatalf("parsed %+v, want one entry name=jtag interface=0", cfg.Devices)
+	}
+
+	// Companion: a non-bridge ambiguity gets the physical-unplug guidance and
+	// prints no YAML to copy.
+	nonBridge := []serialdev.Device{
+		{VID: "1a86", PID: "7523", Path: "/dev/ttyUSB0"},
+		{VID: "1a86", PID: "7523", Path: "/dev/ttyUSB1"},
+	}
+	if got := ambiguousFix(entry, nonBridge); !strings.Contains(got, "Unplug all but one") {
+		t.Fatalf("non-bridge ambiguity should suggest unplugging, got: %s", got)
 	}
 }

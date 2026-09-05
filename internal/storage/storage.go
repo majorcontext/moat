@@ -534,7 +534,7 @@ func (s *RunStore) ReadDockerfile() (string, error) {
 type DeviceEvent struct {
 	Timestamp time.Time `json:"ts"`
 	Device    string    `json:"device"`           // config name, e.g. "esp32"
-	Kind      string    `json:"kind"`             // attach, detach, settings, modem, break, purge, error, conflict
+	Kind      string    `json:"kind"`             // attach, detach, settings, modem, control, break, purge, error, conflict
 	Detail    string    `json:"detail,omitempty"` // e.g. "dtr-on", "921600 8N1", the device path
 	TxBytes   int64     `json:"tx_bytes,omitempty"`
 	RxBytes   int64     `json:"rx_bytes,omitempty"`
