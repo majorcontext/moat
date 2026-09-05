@@ -176,6 +176,13 @@ func TestSerialDeviceEndToEnd(t *testing.T) {
 		}
 		defer mgr.Close()
 
+		// Forward the echo opt-in into the container: the pyserial script reads
+		// MOAT_SERIAL_TEST_ECHO there, and container env comes from opts.Env, not
+		// the host environment.
+		var extraEnv []string
+		if os.Getenv("MOAT_SERIAL_TEST_ECHO") == "1" {
+			extraEnv = append(extraEnv, "MOAT_SERIAL_TEST_ECHO=1")
+		}
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-serial-" + dev.VID,
 			Workspace: createSerialTestWorkspace(t, dev.VID, dev.PID),
@@ -185,6 +192,7 @@ func TestSerialDeviceEndToEnd(t *testing.T) {
 				Devices:      []config.DeviceEntry{{Name: "dut", Match: config.DeviceMatch{USB: dev.VID + ":" + dev.PID}}},
 				Network:      config.NetworkConfig{Policy: "permissive"},
 			},
+			Env: extraEnv,
 			Cmd: []string{"sh", "-c", serialTestScript},
 		})
 		if err != nil {
