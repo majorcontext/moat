@@ -187,17 +187,7 @@ func (r *Reader) process(chunk []byte) {
 				r.state = stSubIAC
 				continue
 			}
-			if len(r.payload) >= MaxSubnegotiation {
-				// A payload past the cap is not a com-port command — the
-				// largest real one is 4 bytes of baud. Abort the
-				// subnegotiation and resynchronize on the next IAC SB, rather
-				// than retaining an attacker-chosen number of bytes or
-				// swallowing the rest of the stream as command bytes.
-				r.state = stSync
-				r.payload = r.payload[:0] // release the retained bytes
-				if r.onBadCommand != nil {
-					r.onBadCommand()
-				}
+			if r.capExceeded() {
 				continue
 			}
 			r.payload = append(r.payload, b)
@@ -205,6 +195,13 @@ func (r *Reader) process(chunk []byte) {
 		case stSubIAC:
 			switch b {
 			case iac:
+				// A doubled IAC is one literal 0xFF of payload, so it counts
+				// against the cap exactly like an ordinary byte — otherwise a
+				// stream of FF FF pairs grows the buffer without bound, never
+				// passing through the stSubPayload guard.
+				if r.capExceeded() {
+					continue
+				}
 				r.payload = append(r.payload, iac)
 				r.state = stSubPayload
 			case se:
@@ -225,6 +222,24 @@ func (r *Reader) process(chunk []byte) {
 			}
 		}
 	}
+}
+
+// capExceeded reports whether the subnegotiation payload has reached
+// MaxSubnegotiation. When it has, it aborts the subnegotiation as a side
+// effect: it releases the retained bytes, switches to stSync so the reader
+// resynchronizes on the next IAC SB rather than swallowing the rest of the
+// stream, and notifies onBadCommand so a server can drop a peer that oversized
+// a com-port command (the largest real one is 4 bytes of baud).
+func (r *Reader) capExceeded() bool {
+	if len(r.payload) < MaxSubnegotiation {
+		return false
+	}
+	r.state = stSync
+	r.payload = r.payload[:0]
+	if r.onBadCommand != nil {
+		r.onBadCommand()
+	}
+	return true
 }
 
 func (r *Reader) dispatch() {

@@ -187,20 +187,57 @@ func TestReaderRejectsOversizedSubnegotiation(t *testing.T) {
 }
 
 func TestReaderAcceptsSubnegotiationAtTheCap(t *testing.T) {
-	// Companion: a payload at exactly the cap still parses. The cap guards
-	// against unbounded growth, not against large-but-bounded commands.
-	payload := bytes.Repeat([]byte{0x7F}, MaxSubnegotiation-1) // room for the escaped 0xFF below
-	wire := append([]byte{iac, sb, OptionComPort, CmdSetControl}, payload...)
-	wire = append(wire, iac, iac, iac, se) // ...payload 0xFF, IAC SE
+	// Companion: a payload of exactly MaxSubnegotiation bytes still parses,
+	// including an escaped 0xFF — which counts against the cap like any other
+	// byte. The cap guards against unbounded growth, not large-but-bounded
+	// commands.
+	plain := bytes.Repeat([]byte{0x7F}, MaxSubnegotiation-2) // cmd + plain + escaped 0xFF == cap
+	wire := append([]byte{iac, sb, OptionComPort, CmdSetControl}, plain...)
+	wire = append(wire, iac, iac, iac, se) // ...escaped 0xFF, then IAC SE
 
 	var gotLen int
+	dispatched := false
 	r := NewReader(bytes.NewReader(wire))
-	r.OnCommand = func(_ byte, payload []byte) { gotLen = len(payload) }
+	r.OnCommand = func(_ byte, payload []byte) { dispatched = true; gotLen = len(payload) }
+	r.SetOnBadCommand(func() { t.Fatal("a payload at exactly the cap must not abort") })
 	if _, err := io.ReadAll(r); err != nil && err != io.EOF {
 		t.Fatalf("ReadAll: %v", err)
 	}
-	if gotLen != MaxSubnegotiation {
-		t.Fatalf("payload length = %d, want %d", gotLen, MaxSubnegotiation)
+	if !dispatched {
+		t.Fatal("a payload at the cap must dispatch, not abort")
+	}
+	// dispatch strips the command byte, so the value is one below the cap.
+	if gotLen != MaxSubnegotiation-1 {
+		t.Fatalf("payload length = %d, want %d", gotLen, MaxSubnegotiation-1)
+	}
+}
+
+func TestReaderRejectsOversizedEscapedSubnegotiation(t *testing.T) {
+	// The escaped-IAC path (a run of doubled 0xFF inside a subnegotiation) must
+	// honour the same cap as ordinary payload bytes. Without it, a stream of
+	// FF FF pairs grows the buffer without bound and never trips the
+	// stSubPayload guard — an unauthenticated OOM of the shared daemon. The
+	// abort is the security property; a peer that oversizes a command gets its
+	// connection dropped (onBadCommand), so unlike the plain-payload case there
+	// is no expectation of resynchronizing on a following frame.
+	var wire []byte
+	wire = append(wire, iac, sb, OptionComPort, CmdSetControl)
+	for i := 0; i < MaxSubnegotiation+64; i++ {
+		wire = append(wire, iac, iac) // doubled IAC == one 0xFF of payload
+	}
+	wire = append(wire, iac, se)
+
+	aborted := false
+	r := NewReader(bytes.NewReader(wire))
+	r.SetOnBadCommand(func() { aborted = true })
+	if _, err := io.ReadAll(r); err != nil && err != io.EOF {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !aborted {
+		t.Fatal("an oversized escaped subnegotiation must trip the abort callback")
+	}
+	if len(r.payload) > MaxSubnegotiation {
+		t.Fatalf("payload retained %d bytes, cap is %d", len(r.payload), MaxSubnegotiation)
 	}
 }
 
