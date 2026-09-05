@@ -577,16 +577,16 @@ func appleAcceptRulesFor(ports []int) string {
 	return b.String()
 }
 
-// appleAcceptArgsFor renders the IPv6 accept rules as argument-list fragments
-// for the `$IP6T -w 5` invocations in the Apple firewall script, or a no-op
-// `:` when there are none.
-func appleAcceptArgsFor(ports []int) string {
-	if len(ports) == 0 {
-		return ":"
-	}
+// appleAccept6RulesFor renders the IPv6 accept rules for the run's allowed host
+// ports as complete `$IP6T -w 5 -A OUTPUT ...` commands, each terminated with
+// `&&` and the chain's continuation indent so it slots into the all-or-nothing
+// IPv6 block ahead of the final DROP. Empty input yields the empty string: the
+// preceding rule's `&&` then flows straight to the DROP. See accept6RulesFor in
+// docker.go for why bare argument fragments broke the chain.
+func appleAccept6RulesFor(ports []int) string {
 	var b strings.Builder
 	for _, p := range ports {
-		fmt.Fprintf(&b, "-A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   $IP6T -w 5", p)
+		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   ", p)
 	}
 	return b.String()
 }
@@ -673,8 +673,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 			   $IP6T -w 5 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p udp --dport 53 -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&
-			   $IP6T -w 5 %s &&
-			   $IP6T -w 5 -A OUTPUT -j DROP; then
+			   %s$IP6T -w 5 -A OUTPUT -j DROP; then
 				: # IPv6 firewall installed
 			else
 				# Flush partial rules so the container isn't left with an
@@ -683,7 +682,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, appleAcceptArgsFor(extraPorts))
+	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, appleAccept6RulesFor(extraPorts))
 
 	// Run as root since iptables requires root privileges
 	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)

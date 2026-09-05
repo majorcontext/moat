@@ -788,17 +788,19 @@ func acceptRulesFor(ports []int) string {
 	return b.String()
 }
 
-// acceptArgsFor renders the IPv6 accept rules as argument-list fragments for
-// the `$IP6T -w 5` invocations in the firewall script — one chain-append per
-// port, or a no-op (`:`) when there are none. Each fragment must parse as a
-// full command after the `-w 5` prefix, hence the repeated `-A OUTPUT`.
-func acceptArgsFor(ports []int) string {
+// accept6RulesFor renders the IPv6 accept rules for the run's allowed host
+// ports as complete `$IP6T -w 5 -A OUTPUT ...` commands, each terminated with
+// `&&` and the chain's continuation indent so it slots into the all-or-nothing
+// IPv6 block ahead of the final DROP. Empty input yields the empty string: the
+// preceding rule's `&&` then flows straight to the DROP. That is why this
+// returns "" rather than the `:` no-op the standalone IPv4 block needs — an
+// earlier version emitted bare argument fragments that concatenated into
+// `$IP6T -w 5-A OUTPUT` (no space) and a dangling `$IP6T -w 5`, both of which
+// exit non-zero and made the `&&` chain flush the whole IPv6 policy.
+func accept6RulesFor(ports []int) string {
 	var b strings.Builder
-	if len(ports) == 0 {
-		return ":"
-	}
 	for _, p := range ports {
-		fmt.Fprintf(&b, "-A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   $IP6T -w 5", p)
+		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&\n\t\t\t   ", p)
 	}
 	return b.String()
 }
@@ -891,8 +893,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 			   $IP6T -w 5 -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p udp --dport 53 -j ACCEPT &&
 			   $IP6T -w 5 -A OUTPUT -p tcp --dport %d -j ACCEPT &&
-			   $IP6T -w 5 %s &&
-			   $IP6T -w 5 -A OUTPUT -j DROP; then
+			   %s$IP6T -w 5 -A OUTPUT -j DROP; then
 				: # IPv6 firewall installed
 			else
 				# Flush partial rules so the container isn't left with an
@@ -901,7 +902,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, acceptArgsFor(extraPorts))
+	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, accept6RulesFor(extraPorts))
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", script},

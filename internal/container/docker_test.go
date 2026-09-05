@@ -756,19 +756,51 @@ func TestAcceptRulesForSerialAndHostPorts(t *testing.T) {
 	}
 }
 
-func TestAcceptArgsForSerialAndHostPorts(t *testing.T) {
-	// The IPv6 fragment chains after "$IP6T -w 5", so each port's rule must
-	// parse as arguments and re-prefix the binary for the next &&-chained
-	// command.
-	got := acceptArgsFor([]int{45678, 45679})
-	want := "-A OUTPUT -p tcp --dport 45678 -j ACCEPT &&\n" +
-		"\t\t\t   $IP6T -w 5-A OUTPUT -p tcp --dport 45679 -j ACCEPT &&\n" +
-		"\t\t\t   $IP6T -w 5"
+func TestAccept6RulesForSerialAndHostPorts(t *testing.T) {
+	// Each IPv6 accept rule must be a complete "$IP6T -w 5 -A OUTPUT ..."
+	// command terminated with "&&" so it chains into the all-or-nothing IPv6
+	// block ahead of the final DROP. A prior version emitted bare argument
+	// fragments that concatenated into "$IP6T -w 5-A OUTPUT" (no space) and a
+	// dangling "$IP6T -w 5"; ip6tables rejects both with a non-zero exit, so
+	// the "&&" chain failed and the else-branch flushed the whole IPv6 policy
+	// on every strict run — serial or not.
+	got := accept6RulesFor([]int{45678, 45679})
+	want := "$IP6T -w 5 -A OUTPUT -p tcp --dport 45678 -j ACCEPT &&\n\t\t\t   " +
+		"$IP6T -w 5 -A OUTPUT -p tcp --dport 45679 -j ACCEPT &&\n\t\t\t   "
 	if got != want {
-		t.Fatalf("acceptArgsFor = %q, want %q", got, want)
+		t.Fatalf("accept6RulesFor = %q, want %q", got, want)
 	}
-	if got := acceptArgsFor(nil); got != ":" {
-		t.Fatalf("acceptArgsFor(nil) = %q, want \":\"", got)
+	// Regression guards on the exact malformations the old fragment produced.
+	if strings.Contains(got, "$IP6T -w 5-A") {
+		t.Fatalf("accept6RulesFor emits a spaceless \"$IP6T -w 5-A\": %q", got)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(got), "&&") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "$IP6T -w 5 -A OUTPUT ") {
+			t.Fatalf("accept6RulesFor produced a non-command fragment %q in %q", line, got)
+		}
+	}
+	// Companion: no allowed ports emits nothing, so the proxy rule's "&&"
+	// flows straight to the final DROP (unlike the standalone IPv4 block,
+	// whose empty case needs a ":" no-op).
+	if got := accept6RulesFor(nil); got != "" {
+		t.Fatalf("accept6RulesFor(nil) = %q, want empty", got)
+	}
+}
+
+func TestAppleAccept6RulesForSerialAndHostPorts(t *testing.T) {
+	// Same contract as accept6RulesFor: complete "$IP6T -w 5 -A OUTPUT ..."
+	// commands, empty when there are no ports.
+	got := appleAccept6RulesFor([]int{45678})
+	want := "$IP6T -w 5 -A OUTPUT -p tcp --dport 45678 -j ACCEPT &&\n\t\t\t   "
+	if got != want {
+		t.Fatalf("appleAccept6RulesFor = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "$IP6T -w 5-A") {
+		t.Fatalf("appleAccept6RulesFor emits a spaceless \"$IP6T -w 5-A\": %q", got)
+	}
+	if got := appleAccept6RulesFor(nil); got != "" {
+		t.Fatalf("appleAccept6RulesFor(nil) = %q, want empty", got)
 	}
 }
 
