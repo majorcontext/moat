@@ -91,7 +91,9 @@ func sendBreak(fd int) error {
 
 // currentBaud reports the rate stored in a termios.
 func currentBaud(tio *unix.Termios) uint32 {
-	return uint32(tio.Ospeed)
+	// Ospeed is uint64 on Darwin, but it holds a baud rate — always well within
+	// uint32 (the fastest standard rate is 4 Mbaud).
+	return uint32(tio.Ospeed) //nolint:gosec // G115: a baud rate fits in uint32
 }
 
 // flushBuffers implements Port.FlushBuffers.
