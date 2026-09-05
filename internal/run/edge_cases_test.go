@@ -168,14 +168,22 @@ func newEdgeCaseManager(t *testing.T, rt container.Runtime) *Manager {
 		t.Fatal(err)
 	}
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
-	t.Cleanup(func() { monitorCancel() })
-	return &Manager{
+	m := &Manager{
 		runtimePool:   container.NewRuntimePoolWithDefault(rt),
 		runs:          make(map[string]*Run),
 		routes:        routes,
 		monitorCtx:    monitorCtx,
 		monitorCancel: monitorCancel,
 	}
+	// Cancel the monitors and wait for them to exit before t.TempDir removes
+	// routeDir. A monitor handling container exit writes into routes/, and
+	// RemoveAll otherwise races that write ("directory not empty"). t.TempDir
+	// registered its cleanup first, so this LIFO cleanup runs before it.
+	t.Cleanup(func() {
+		monitorCancel()
+		m.monitorWg.Wait()
+	})
+	return m
 }
 
 // --- Firewall setup failure tests ---
