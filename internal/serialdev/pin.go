@@ -303,10 +303,19 @@ func (s *PinStore) flushLocked() error {
 	}
 	// Write-then-rename so a crash cannot leave a half-written pin file, which
 	// would fail to parse on the next run and block every device.
-	// O_EXCL plus noFollow (unix): a pre-symlinked .tmp must not be followed
-	// to its victim (os.WriteFile would), and a stale .tmp from a crashed run
-	// must not be silently reused.
+	//
+	// Remove any leftover .tmp first, then create it exclusively. os.Remove
+	// unlinks the name without following it, so a symlink planted at the .tmp
+	// path is discarded rather than followed to a victim, and a hardlink is
+	// detached rather than truncated; O_EXCL|noFollow then refuses to reuse or
+	// follow anything that reappears. Without the remove, a .tmp left behind by
+	// a crash between create and rename would wedge every future write — and
+	// with it `moat device forget`, the documented fix for a pin mismatch. We
+	// hold the cross-process flock here, so no other moat writer races this.
 	tmp := s.path + ".tmp"
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clearing stale device-pin temp file %s: %w", tmp, err)
+	}
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|noFollow, 0o600)
 	if err != nil {
 		return fmt.Errorf("writing device pins: %w", err)

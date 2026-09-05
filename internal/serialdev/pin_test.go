@@ -354,30 +354,58 @@ func TestPinStoreTempFileIsNotASymlinkAndKeepsItsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close() //nolint:errcheck
-	err = s.Put(PinFor("board", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"}))
-	if err == nil {
-		t.Log("put succeeded — symlink may have been replaced")
+	// The planted symlink is discarded (os.Remove unlinks it without
+	// following), so the write succeeds against a fresh regular file.
+	if err := s.Put(PinFor("board", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"})); err != nil {
+		t.Fatalf("Put over a symlinked temp file: %v", err)
 	}
 
-	// Whatever happened to the Put, the victim must be untouched.
+	// The victim must be untouched — the symlink was never followed.
 	got, rerr := os.ReadFile(victim)
 	if rerr != nil || string(got) != "do not touch" {
 		t.Fatalf("victim file was overwritten through the symlink: %q", got)
 	}
 
-	// If the Put succeeded, the pin file exists with mode 0600.
-	if err == nil {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat pins: %v", err)
-		}
-		if perm := info.Mode().Perm(); perm != 0o600 {
-			t.Fatalf("pin file mode = %o, want 600", perm)
-		}
-	} else {
-		// The symlinked .tmp blocking the write is also an acceptable
-		// outcome (O_EXCL fails on the existing link) — as long as it did
-		// not write through it.
-		t.Logf("Put refused the symlinked temp file: %v", err)
+	// devices.json is a real 0600 file, and the pin round-trips.
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat pins: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("pin file is a symlink")
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("pin file mode = %o, want 600", perm)
+	}
+	if _, ok, gerr := s.Get("board"); gerr != nil || !ok {
+		t.Fatalf("pin was not recorded: ok=%v err=%v", ok, gerr)
+	}
+}
+
+func TestPinStoreRecoversFromStaleTempFile(t *testing.T) {
+	// A .tmp left behind by a crash between create and rename must not wedge
+	// every future write. Before the fix, O_EXCL turned the leftover into a
+	// permanent "file exists" failure for Put — and for Forget, the command a
+	// pin mismatch tells the user to run.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "devices.json")
+	if err := os.WriteFile(path+".tmp", []byte("junk from a crashed run"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close() //nolint:errcheck
+	if err := s.Put(PinFor("board", Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"})); err != nil {
+		t.Fatalf("Put with a stale temp file present: %v", err)
+	}
+	if _, ok, gerr := s.Get("board"); gerr != nil || !ok {
+		t.Fatalf("pin missing after recovering from a stale temp file: ok=%v err=%v", ok, gerr)
+	}
+	// Companion: Forget — the documented remedy — must work too.
+	if err := s.Forget("board"); err != nil {
+		t.Fatalf("Forget with a stale temp file present: %v", err)
 	}
 }
