@@ -214,7 +214,7 @@ func TestReaderAcceptsSubnegotiationAtTheCap(t *testing.T) {
 
 func TestReaderRejectsOversizedEscapedSubnegotiation(t *testing.T) {
 	// The escaped-IAC path (a run of doubled 0xFF inside a subnegotiation) must
-	// honour the same cap as ordinary payload bytes. Without it, a stream of
+	// honor the same cap as ordinary payload bytes. Without it, a stream of
 	// FF FF pairs grows the buffer without bound and never trips the
 	// stSubPayload guard — an unauthenticated OOM of the shared daemon. The
 	// abort is the security property; a peer that oversizes a command gets its

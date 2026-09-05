@@ -313,8 +313,8 @@ func (s *PinStore) flushLocked() error {
 	// with it `moat device forget`, the documented fix for a pin mismatch. We
 	// hold the cross-process flock here, so no other moat writer races this.
 	tmp := s.path + ".tmp"
-	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("clearing stale device-pin temp file %s: %w", tmp, err)
+	if rmErr := os.Remove(tmp); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return fmt.Errorf("clearing stale device-pin temp file %s: %w", tmp, rmErr)
 	}
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|noFollow, 0o600)
 	if err != nil {
