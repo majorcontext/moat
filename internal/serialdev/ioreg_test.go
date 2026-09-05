@@ -353,6 +353,31 @@ func TestParseIoregAndUSBPartitionTheSample(t *testing.T) {
 	}
 }
 
+func TestParseIoregToleratesAnOversizedLine(t *testing.T) {
+	// A property line longer than any scanner buffer (real ioreg output already
+	// carries 300 KB IOReportLegend blobs) must not truncate enumeration:
+	// bufio.Scanner stopped permanently on such a line and silently dropped
+	// every device after it. Put a 5 MB line between two devices and confirm the
+	// one after it is still found.
+	huge := `  |   "IOReportLegend" = "` + strings.Repeat("A", 5*1024*1024) + `"`
+	combined := ioregSample + "\n" + huge + "\n" + ioregSDRSample
+
+	serial, err := parseIoreg(strings.NewReader(combined))
+	if err != nil {
+		t.Fatalf("parseIoreg: %v", err)
+	}
+	if len(serial) != 2 {
+		t.Fatalf("serial = %d, want 2 — the oversized line must not drop the earlier devices", len(serial))
+	}
+	usb, err := parseIoregUSB(strings.NewReader(combined))
+	if err != nil {
+		t.Fatalf("parseIoregUSB: %v", err)
+	}
+	if len(usb) != 1 {
+		t.Fatalf("usb = %d, want 1 — the device after the oversized line was dropped", len(usb))
+	}
+}
+
 // Real-hardware regression: Macs carry internal hub controllers (e.g.
 // Microchip 0424:7240 "USB2 Controller Hub") whose ioreg blocks report no
 // class-9 bDeviceClass. The class filter alone let them into the USB section

@@ -104,8 +104,12 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 		}
 	}
 
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	// Read via bufio.Reader, not bufio.Scanner: ioreg output can carry very long
+	// property lines (IOReportLegend blobs run to hundreds of KB), and a Scanner
+	// stops permanently once a token exceeds its buffer — silently dropping
+	// every device after it. ReadString has no line cap, and ioreg output is the
+	// host's own, so an unbounded line is not a memory risk.
+	br := bufio.NewReader(r)
 	// A property block belongs to the most recent `+-o` line, so the
 	// device's own block is the one directly under its own `+-o` line.
 	// Deeper `+-o` lines (AppleUSBCDCCompositeDevice, AppleUSBACM,
@@ -116,8 +120,18 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 	// fallback for serial-less devices. The one descendant value the parser
 	// does want — IOCalloutDevice, the tty path — is let through explicitly.
 	ownProps := false
-	for sc.Scan() {
-		line := sc.Text()
+	for {
+		line, readErr := br.ReadString('\n')
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if readErr != nil {
+				if !errors.Is(readErr, io.EOF) {
+					return nil, fmt.Errorf("reading ioreg output: %w", readErr)
+				}
+				break
+			}
+			continue
+		}
 		if idx := strings.Index(line, "+-o "); idx >= 0 {
 			// A nested IOUSBHostInterface@N under the open USB device names the
 			// interface the serial clients below it belong to. It is the only
@@ -206,14 +220,13 @@ func parseIoregAll(r io.Reader) ([]Device, error) {
 			}
 			f.extra = append(f.extra, clone)
 		}
-	}
-	if err := sc.Err(); err != nil {
-		// A single oversized line (real ioreg output contains 300 KB lines)
-		// skips that line rather than failing the whole enumeration — "no
-		// devices at all" is the worst possible report for a long line the
-		// user cannot see. bufio's scanner already advanced past it.
-		if !errors.Is(err, bufio.ErrTooLong) {
-			return nil, fmt.Errorf("reading ioreg output: %w", err)
+		// Break only after processing the line: ReadString returns the final
+		// line together with io.EOF.
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return nil, fmt.Errorf("reading ioreg output: %w", readErr)
+			}
+			break
 		}
 	}
 	flushTo(0)
